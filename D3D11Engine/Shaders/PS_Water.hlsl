@@ -102,13 +102,13 @@ float4 PSMain( PS_INPUT Input ) : SV_TARGET
 	
 	// Scene color
 	float3 scene = TX_Scene.Sample(SS_Linear, distUV).rgb;
-	float3 sceneClean = TX_Scene.Sample(SS_Linear, lerp(distUV, screenUV, pow(1-shallowDepth, 20.0f))).rgb;
+	float3 sceneClean = TX_Scene.Sample(SS_Linear, lerp(distUV, screenUV, pow(1.0f-shallowDepth, 4.0f))).rgb;
 	
 	// Fresnel from waves
 	float fresnel = min(0.5f, saturate(pow(1.0f - saturate(dot(-viewDirection, wavesFres)), 10.0f)));
 	
 	// Reflection
-	float3 reflect_vec = reflect(-viewDirection, wavesFres);	
+	float3 reflect_vec = reflect(viewDirection, wavesFres);	
 	
 	// sample reflection cube
 	float3 reflection = TX_ReflectionCube.Sample(SS_Linear, reflect_vec).xyz;
@@ -145,7 +145,20 @@ float4 PSMain( PS_INPUT Input ) : SV_TARGET
             float depthDiff = rayZ - sampleZ;
             
             // Intersection condition (behind surface, but not too far behind)
-            if (depthDiff > 0.0f && depthDiff < 150.0f) {
+            if (depthDiff > 0.0f && depthDiff < 300.0f) {
+                // Refine step
+                rayPos -= rayDir * (stepSize / 2.0f);
+                float4 projPosRefine = mul(float4(rayPos, 1.0f), RI_ViewProj);
+                projPosRefine.xyz /= projPosRefine.w;
+                float2 uvRefine = projPosRefine.xy * float2(0.5f, -0.5f) + 0.5f;
+                float depthSampleRefine = TX_Depth.SampleLevel(SS_Linear, uvRefine, 0).r;
+                float sampleZRefine = RI_Projection._43 / (depthSampleRefine - RI_Projection._33);
+                float rayZRefine = projPosRefine.w;
+                
+                if (rayZRefine - sampleZRefine > 0.0f) {
+                    uv = uvRefine;
+                }
+                
                 // Hit! Sample scene texture
                 float3 ssrColor = TX_Scene.SampleLevel(SS_Linear, uv, 0).xyz;
                 // Fade out near screen edges
