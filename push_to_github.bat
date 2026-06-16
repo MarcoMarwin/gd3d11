@@ -69,8 +69,8 @@ if errorlevel 1 (
 )
 
 :: Git Benutzername/E-Mail konfigurieren [wird fuer Commits benoetigt]
-git config --global user.name "Gothic Developer"
-git config --global user.email "gothic@localhost"
+git config --global user.name "Marco Marwin"
+git config --global user.email "marco.marwin@localhost"
 
 :: Zweig-Namen abrufen [Master oder Main]
 for /f "tokens=*" %%i in ('git branch --show-current') do set "BRANCH=%%i"
