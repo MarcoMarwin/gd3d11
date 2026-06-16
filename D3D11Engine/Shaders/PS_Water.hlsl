@@ -105,13 +105,15 @@ float4 PSMain( PS_INPUT Input ) : SV_TARGET
 	float3 sceneClean = TX_Scene.Sample(SS_Linear, lerp(distUV, screenUV, pow(1.0f-shallowDepth, 20.0f))).rgb;
 	
 	// Fresnel from waves
-	float fresnel = min(0.7f, saturate(pow(1.0f - saturate(dot(-viewDirection, wavesFres)), 6.0f)));
+	float fresnel = min(0.5f, saturate(pow(1.0f - saturate(dot(-viewDirection, wavesFres)), 10.0f)));
 	
 	// Reflection
 	float3 reflect_vec = reflect(-viewDirection, wavesFres);	
 	
 	// sample reflection cube
-	float3 reflection = TX_ReflectionCube.Sample(SS_Linear, reflect_vec).xyz;
+	float3 reflectionCube = TX_ReflectionCube.Sample(SS_Linear, reflect_vec).xyz;
+	float3 reflectionSSR = float3(0.0f, 0.0f, 0.0f);
+	float ssrWeight = 0.0f;
 
     // --- Screen Space Reflections (SSR) ---
     if (AC_EnableSSR > 0.5f) {
@@ -172,12 +174,10 @@ float4 PSMain( PS_INPUT Input ) : SV_TARGET
                 uv = projFinal.xy * float2(0.5f, -0.5f) + 0.5f;
                 
                 // Hit! Sample scene texture
-                float3 ssrColor = TX_Scene.SampleLevel(SS_Linear, uv, 0).xyz;
+                reflectionSSR = TX_Scene.SampleLevel(SS_Linear, uv, 0).xyz;
                 // Fade out near screen edges
                 float2 edgeFade = saturate(abs(uv - 0.5f) * 2.0f);
-                float fade = saturate(pow(1.0f - max(edgeFade.x, edgeFade.y), 2.0f));
-                
-                reflection = lerp(reflection, ssrColor, fade);
+                ssrWeight = saturate(pow(1.0f - max(edgeFade.x, edgeFade.y), 2.0f));
                 break;
             }
         }
@@ -199,8 +199,10 @@ float4 PSMain( PS_INPUT Input ) : SV_TARGET
 	scene = lerp(sceneAbsorbed, scene, isWaterfall);
 	
 	float pxDistance = Input.vTexcoord2.y;
-	scene = lerp(scene, diffuse, 0.35f * max(pow(fresnel,8.0f), 0.5f));
-	scene.rgb += reflection * 1.8f * fresnel;
+	scene = lerp(scene, diffuse, 0.73f * max(pow(fresnel,8.0f), 0.5f));
+	scene.rgb += reflectionCube * (1.0f - ssrWeight) * fresnel * lerp(1.0f, diffuse, 0.6f);
+	float ssrFresnel = min(0.8f, saturate(pow(1.0f - saturate(dot(-viewDirection, wavesFres)), 4.0f)));
+	scene.rgb += reflectionSSR * ssrWeight * ssrFresnel * 1.8f;
 	float3 color = lerp(scene, sceneClean, pow(saturate(pxDistance / 35000.0f), 4.0f));
 	
 	color.rgb = ApplyAtmosphericScatteringGround(Input.vWorldPosition, color.rgb);
