@@ -17,4 +17,4 @@
 	process = git-lfs filter-process
 	required = true
 [credential]
-	helper = helper-selector
+	helper = !\"C:/Users/winkler.WS/Documents/Antigravity/agitated-mendel/GD3D11/GD3D11-17.9.7/PortableGit/mingw64/bin/git-credential-manager.exe\"
