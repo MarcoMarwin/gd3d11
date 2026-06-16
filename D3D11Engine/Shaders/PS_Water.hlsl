@@ -110,8 +110,8 @@ float4 PSMain( PS_INPUT Input ) : SV_TARGET
 	// Reflection
 	float3 reflect_vec = reflect(-viewDirection, wavesFres);	
 	
-	// sample reflection cube
-	float3 reflectionCube = TX_ReflectionCube.Sample(SS_Linear, reflect_vec).xyz;
+	// sample reflection cube (disabled as it was deactivated/unwanted in original renderer)
+	float3 reflectionCube = float3(0.0f, 0.0f, 0.0f);
 	float3 reflectionSSR = float3(0.0f, 0.0f, 0.0f);
 	float ssrWeight = 0.0f;
 
@@ -201,8 +201,8 @@ float4 PSMain( PS_INPUT Input ) : SV_TARGET
 	float pxDistance = Input.vTexcoord2.y;
 	scene = lerp(scene, diffuse, 0.73f * max(pow(fresnel,8.0f), 0.5f));
 	scene.rgb += reflectionCube * (1.0f - ssrWeight) * fresnel * lerp(1.0f, diffuse, 0.6f);
-	float ssrFresnel = min(0.8f, saturate(pow(1.0f - saturate(dot(-viewDirection, wavesFres)), 4.0f)));
-	scene.rgb += reflectionSSR * ssrWeight * ssrFresnel * 1.8f;
+	float ssrFresnel = lerp(0.5f, 1.0f, saturate(pow(1.0f - saturate(dot(-viewDirection, wavesFres)), 1.5f)));
+	scene.rgb += reflectionSSR * ssrWeight * ssrFresnel * 2.4f;
 	float3 color = lerp(scene, sceneClean, pow(saturate(pxDistance / 35000.0f), 4.0f));
 	
 	color.rgb = ApplyAtmosphericScatteringGround(Input.vWorldPosition, color.rgb);
