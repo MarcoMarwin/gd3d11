@@ -172,17 +172,18 @@ float4 PSMain( PS_INPUT Input ) : SV_TARGET
 	
 	// Darken the scene, to make a wet surface
 	float f = 1-saturate(pow(1-shallowDepth, 8.0f) + clamp(pow(distortionSmall.y, 2), 0.5f, 1.0f));
+	float nightAmount = saturate((-AC_LightPos.y + 0.12f) * 2.2f);
 
-	float3 sceneWet = lerp(sceneClean, sceneClean * 0.01f, f); // Darken border-scene
+	float3 sceneWet = lerp(sceneClean, sceneClean * lerp(0.01f, 0.38f, nightAmount), f); // Darken border-scene
 	scene = lerp(scene, scene * float3(4, 0.2f, 0.1f) * 0.05f, f); // Darken distorted scene
 	
 	float pxDistance = Input.vTexcoord2.y;
 	scene = lerp(scene, diffuse, 0.73f * max(pow(fresnel,8.0f), 0.5f));
-	float cubeWeight = (AC_EnableSSR > 0.5f) ? 0.0f : 1.0f;
-	scene.rgb += reflection * cubeWeight * (1.0f - ssrWeight) * fresnel * lerp(1.0f, diffuse, 0.6f);
+	float cubeWeight = (AC_EnableSSR > 0.5f) ? lerp(0.42f, 0.82f, nightAmount) : 1.0f;
+	scene.rgb += reflection * cubeWeight * (1.0f - ssrWeight * 0.65f) * fresnel * lerp(1.0f, diffuse, 0.6f);
 	float ssrFresnel = lerp(0.20f, 0.75f, saturate(pow(1.0f - saturate(dot(-viewDirection, wavesFres)), 2.0f)));
 	float3 reflectionSSRClamped = min(reflectionSSR, float3(1.25f, 1.25f, 1.25f));
-	scene.rgb += reflectionSSRClamped * ssrWeight * ssrFresnel * max(0.0f, AC_SSRStrength);
+	scene.rgb += reflectionSSRClamped * ssrWeight * ssrFresnel * max(0.0f, AC_SSRStrength) * lerp(0.90f, 1.45f, nightAmount);
 	float3 color = lerp(scene, sceneClean, pow(saturate(pxDistance / 35000.0f), 4.0f));
 	color = lerp(color, sceneWet, (1-shallowDepth));
 
@@ -212,6 +213,7 @@ float4 PSMain( PS_INPUT Input ) : SV_TARGET
 	//darken / lighten water based on the day / night cycle
 	float darknessFactor = 2.0f;
 	darknessFactor -= AC_LightPos.y;
+	darknessFactor = lerp(darknessFactor, max(1.45f, darknessFactor * 0.72f), nightAmount);
 
 	return float4(color / darknessFactor, 1);
 }

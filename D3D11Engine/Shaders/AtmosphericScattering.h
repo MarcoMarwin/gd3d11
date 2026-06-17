@@ -140,14 +140,17 @@ float3 ApplyAtmosphericScatteringGround(float3 worldPosition, float3 in_color, b
 	float3 c1 = v3Attenuate;
 	
 	float3 dayColor = c0 + in_color * c1;
-	float3 nightColor = float3(0.20,0.20,0.4) * NIGHT_BRIGHTNESS;
+	float3 nightColor = float3(0.13,0.15,0.32) * NIGHT_BRIGHTNESS;
 	nightColor = lerp(nightColor, float3(0.24,0.24,0.24) * NIGHT_BRIGHTNESS * 0.6f, AC_SceneWettness); // Grey fog when raining
+	float moonWeight = saturate((-AC_LightPos.y - 0.04f) * 2.4f) * (1.0f - AC_SceneWettness * 0.5f);
+	float midtone = saturate(dot(in_color, float3(0.299f, 0.587f, 0.114f)) * 1.4f + 0.12f);
+	float3 moonColor = float3(0.035f, 0.048f, 0.085f) * moonWeight * midtone;
 	float3 outColor;
 
 	if(applyNightshade)
-		outColor = dayColor + in_color * nightColor * nightWeight;
+		outColor = dayColor + in_color * nightColor * nightWeight + moonColor;
 	else
-		outColor = dayColor + nightColor * nightWeight;
+		outColor = dayColor + nightColor * nightWeight + moonColor;
 		
 	return outColor;
 }
