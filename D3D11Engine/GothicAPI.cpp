@@ -5204,7 +5204,7 @@ XRESULT GothicAPI::LoadMenuSettings( const std::string& file ) {
         s.LimitLightIntesity = GetPrivateProfileBoolA( "Display", "LimitLightIntesity", false, ini );
         s.WindQuality = GetPrivateProfileIntA( "Display", "WindQuality", 0, ini.c_str() );
         s.GlobalWindStrength = GetPrivateProfileFloatA( "Display", "WindStrength", 1.0f, ini );
-        s.EnableWaterAnimation = GetPrivateProfileBoolA( "Display", "WaterWaveAnimation", true, ini );
+        s.EnableWaterAnimation = GetPrivateProfileBoolA( "Display", "WaterWaveAnimation", defaultRendererSettings.EnableWaterAnimation, ini );
         s.HeroAffectsObjects = GetPrivateProfileBoolA( "Display", "HeroAffectsObjects", true, ini );
         
         if ( GetPrivateProfileBoolA( "SMAA", "Enabled", false, ini ) ) {

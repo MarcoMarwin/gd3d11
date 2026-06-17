@@ -3644,7 +3644,9 @@ void D3D11GraphicsEngine::DrawWaterSurfaces() {
     SetupVS_ExMeshDrawCall();
     SetupVS_ExConstantBuffer();
 
-    float totalTime = Engine::GAPI->GetTotalTime();
+    float totalTime = Engine::GAPI->GetRendererState().RendererSettings.EnableWaterAnimation
+        ? Engine::GAPI->GetTotalTime()
+        : 0.0f;
     ActiveVS->GetConstantBuffer()[1]->UpdateBuffer( &totalTime, 4 );
     ActiveVS->GetConstantBuffer()[1]->BindToVertexShader( 1 );
 
