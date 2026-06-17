@@ -187,23 +187,25 @@ float4 PSMain( PS_INPUT Input ) : SV_TARGET
 	// Darken the scene, to make a wet surface
 	float f = 1-saturate(pow(1-shallowDepth, 8.0f) + clamp(pow(distortionSmall.y, 2), 0.5f, 1.0f));
 
-	float3 sceneWet = lerp(sceneClean, sceneClean * 0.01f, f); // Darken border-scene
+	float nightAmount = saturate((0.35f - AC_LightPos.y) * 1.2f);
+	float3 sceneWet = lerp(sceneClean, sceneClean * lerp(0.01f, 0.22f, nightAmount), f); // Darken border-scene
 	scene = lerp(scene, scene * float3(4, 0.2f, 0.1f) * 0.05f, f); // Darken distorted scene
 	
 	float pxDistance = Input.vTexcoord2.y;
-	scene = lerp(scene, diffuse, 0.73f * max(pow(fresnel,8.0f), 0.5f));
-	float cubeWeight = (AC_EnableSSR > 0.5f) ? 0.0f : 1.0f;
-	scene.rgb += reflection * cubeWeight * (1.0f - ssrWeight) * fresnel * lerp(1.0f, diffuse, 0.6f);
 	float ssrFresnel = lerp(0.20f, 0.75f, saturate(pow(1.0f - saturate(dot(-viewDirection, wavesFres)), 2.0f)));
 	float3 waterTint = lerp(diffuse, float3(0.45f, 0.60f, 0.68f), 0.45f);
+	float diffuseMix = lerp(0.73f, 0.48f, nightAmount);
+	scene = lerp(scene, diffuse, diffuseMix * max(pow(fresnel,8.0f), 0.5f));
+	float3 cubeReflection = reflection * lerp(float3(1.0f, 1.0f, 1.0f), waterTint, 0.25f);
+	scene.rgb += cubeReflection * (1.0f - ssrWeight) * fresnel * lerp(1.0f, diffuse, 0.6f);
 	float3 reflectionSSRClamped = min(reflectionSSR, float3(0.95f, 1.00f, 1.05f));
 	reflectionSSRClamped *= lerp(waterTint, float3(1.0f, 1.0f, 1.0f), 0.35f);
 	scene.rgb += reflectionSSRClamped * ssrWeight * ssrFresnel * max(0.0f, AC_SSRStrength) * 0.82f;
 
+	float3 waterLightReflection = 0.0f;
 	if (WR_EnableLightReflections > 0.5f) {
-		float3 waterLight = 0.0f;
 		float3 reflectedView = normalize(reflect(-viewDirection, wavesFres));
-		float nightWeight = lerp(0.35f, 1.0f, saturate((0.55f - AC_LightPos.y) * 2.0f));
+		float nightWeight = lerp(0.45f, 1.25f, nightAmount);
 
 		[unroll]
 		for (int l = 0; l < 8; l++) {
@@ -225,16 +227,14 @@ float4 PSMain( PS_INPUT Input ) : SV_TARGET
 				lightUV = lightUV * float2(0.5f, -0.5f) + 0.5f;
 				float2 delta = screenUV - lightUV;
 				float belowLight = smoothstep(0.0f, 0.04f, delta.y);
-				float verticalFalloff = exp(-max(delta.y, 0.0f) * 4.0f);
-				float horizontalFalloff = exp(-abs(delta.x + distortionSmall.x * 0.025f) * 85.0f);
+				float verticalFalloff = saturate(1.0f - max(delta.y, 0.0f) * 1.7f);
+				float horizontalFalloff = saturate(1.0f - abs(delta.x + distortionSmall.x * 0.025f) * 18.0f);
 				screenStreak = belowLight * verticalFalloff * horizontalFalloff * attenuation;
 			}
 
 			float ripple = 0.70f + 0.30f * saturate(distortionSmall.y * 0.5f + 0.5f);
-			waterLight += WR_LightColorIntensity[l].rgb * (specGlint * 1.4f + screenStreak * 0.42f) * ripple * activeLight;
+			waterLightReflection += WR_LightColorIntensity[l].rgb * (specGlint * 1.8f + screenStreak * 0.85f) * ripple * nightWeight * activeLight;
 		}
-
-		scene.rgb += waterLight * nightWeight * WR_LightReflectionStrength * ssrFresnel * saturate(shallowDepth + 0.35f);
 	}
 
 	float3 color = lerp(scene, sceneClean, pow(saturate(pxDistance / 35000.0f), 4.0f));
@@ -242,12 +242,16 @@ float4 PSMain( PS_INPUT Input ) : SV_TARGET
 
 	if (WR_EnableShoreBlend > 0.5f) {
 		float shore = 1.0f - shallowDepth;
-		float shoreMask = smoothstep(0.05f, 0.95f, shore) * saturate(WR_ShoreBlendStrength);
+		float shoreMask = smoothstep(0.02f, 0.85f, shore) * saturate(WR_ShoreBlendStrength);
 		float shoreRipple = smoothstep(0.55f, 0.95f, shore) * (0.5f + 0.5f * saturate(distortionSmall.y * 0.5f + 0.5f));
-		float3 shoreTint = lerp(color, sceneClean * lerp(float3(0.78f, 0.90f, 0.88f), waterTint, 0.35f), 0.45f);
-		color = lerp(color, shoreTint, shoreMask * 0.35f);
+		float3 shoreTint = lerp(sceneClean, color, 0.45f);
+		color = lerp(color, shoreTint, shoreMask * lerp(0.45f, 0.65f, nightAmount));
 		color += shoreRipple * shoreMask * float3(0.035f, 0.045f, 0.040f);
 	}
+
+	float transparencyLift = nightAmount * (1.0f - shallowDepth) * 0.45f;
+	color = lerp(color, max(color, sceneClean * 0.65f + diffuse * 0.05f), transparencyLift);
+	color.rgb += waterLightReflection * WR_LightReflectionStrength * ssrFresnel * saturate(shallowDepth + 0.45f);
 	
 	color.rgb = ApplyAtmosphericScatteringGround(Input.vWorldPosition, color.rgb);
 	
@@ -262,8 +266,7 @@ float4 PSMain( PS_INPUT Input ) : SV_TARGET
 	color.rgb += lerp(sunColor * sun_spot, float3(0.0f, 0.0f, 0.0f), step(step(0.0f, AC_LightPos.y) * Input.vDiffuse.y, 0.5f));
 
 	//darken / lighten water based on the day / night cycle
-	float darknessFactor = 2.0f;
-	darknessFactor -= AC_LightPos.y;
+	float darknessFactor = lerp(2.0f - AC_LightPos.y, 1.45f, nightAmount * 0.45f);
 
 	return float4(color / darknessFactor, 1);
 }
