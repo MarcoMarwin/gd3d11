@@ -328,6 +328,7 @@ struct AtmosphereConstantBuffer {
     float AC_EnableWetSurfaceReflections;
     float AC_AtmospherePad2;
     float AC_AtmospherePad3;
+    float AC_AtmospherePad4;
 };
 
 struct CASConstantBuffer {

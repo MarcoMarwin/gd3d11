@@ -40,6 +40,7 @@ cbuffer Atmosphere : register( b1 )
 	float AC_EnableWetSurfaceReflections;
 	float AC_AtmospherePad2;
 	float AC_AtmospherePad3;
+	float AC_AtmospherePad4;
 };
 
 // The scale equation calculated by Vernier's Graphical Analysis
