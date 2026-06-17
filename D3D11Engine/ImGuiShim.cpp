@@ -1281,6 +1281,18 @@ void RenderAdvancedColumn4( GothicRendererSettings& settings, GothicAPI* gapi ) 
             ImGui::PopID();
         }
 
+        ImGui::SeparatorText( "Water Reflections" );
+        {
+            ImGui::PushID( "WaterReflectionSettings" );
+            ImGui::Checkbox( "Enable", &settings.EnableSSR );
+            ImGui::BeginDisabled( !settings.EnableSSR );
+            {
+                ImGui::DragFloat( "Strength", &settings.SSRStrength, 0.01f, 0.0f, 2.0f, "%.2f", ImGuiSliderFlags_::ImGuiSliderFlags_AlwaysClamp );
+                ImGui::EndDisabled();
+            }
+            ImGui::PopID();
+        }
+
         ImGui::SeparatorText( "Anti Aliasing" );
         {
             ImGui::PushID( "AntiAliasingSettings" );
