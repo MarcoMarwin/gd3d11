@@ -73,24 +73,22 @@ float4 PSMain( PS_INPUT Input ) : SV_TARGET
 		
 	// Camera direction
 	float3 viewDirection = normalize(Input.vWorldPosition - RI_CameraPosition);
-	float waterWavesEnabled = step(0.5f, AC_EnableSSR);
-	float waterTime = RI_Time * waterWavesEnabled;
+	float enhancedWater = step(0.5f, AC_EnableSSR);
 		
 	// Calculate distortion vectors
 	float2 worldTexCoord = Input.vWorldPosition.xz / 1000.0f;
-	float3 distortionSmall = TX_Distortion.Sample(SS_Linear, worldTexCoord * DIST_SMALL_SCALE + waterTime * DIST_SMALL_SPEED).xyz * 2 - 1;
-	distortionSmall += TX_Distortion.Sample(SS_Linear, worldTexCoord * float2(-1,0.7) * DIST_SMALL_SCALE + waterTime * DIST_SMALL_SPEED * 2).xyz * 2 - 1;
+	float3 distortionSmall = TX_Distortion.Sample(SS_Linear, worldTexCoord * DIST_SMALL_SCALE + RI_Time * DIST_SMALL_SPEED).xyz * 2 - 1;
+	distortionSmall += TX_Distortion.Sample(SS_Linear, worldTexCoord * float2(-1,0.7) * DIST_SMALL_SCALE + RI_Time * DIST_SMALL_SPEED * 2).xyz * 2 - 1;
 	distortionSmall *= 0.5f;
 	
-	float3 distortionBig = TX_Distortion.Sample(SS_Linear, worldTexCoord * DIST_BIG_SCALE + waterTime * DIST_BIG_SPEED).xyz * 2 - 1;
-	distortionBig += TX_Distortion.Sample(SS_Linear, worldTexCoord * float2(-1,0.7) * DIST_BIG_SCALE + waterTime * DIST_BIG_SPEED * 1.2).xyz * 2 - 1;
+	float3 distortionBig = TX_Distortion.Sample(SS_Linear, worldTexCoord * DIST_BIG_SCALE + RI_Time * DIST_BIG_SPEED).xyz * 2 - 1;
+	distortionBig += TX_Distortion.Sample(SS_Linear, worldTexCoord * float2(-1,0.7) * DIST_BIG_SCALE + RI_Time * DIST_BIG_SPEED * 1.2).xyz * 2 - 1;
 	distortionBig *= 0.5f;
 	
-	float distortionAmount = DIST_SMALL_AMOUNT * waterWavesEnabled;
-	float2 distUV = screenUV + distortionSmall.xy * distortionAmount + distortionBig.xy * distortionAmount;
+	float2 distUV = screenUV + distortionSmall.xy * DIST_SMALL_AMOUNT + distortionBig.xy * DIST_SMALL_AMOUNT;
 	
 	// Distorted diffuse
-	float3 diffuse = TX_Diffuse.Sample(SS_Linear, Input.vTexcoord + distortionSmall.xy * distortionAmount * 0.5f).rgb;
+	float3 diffuse = TX_Diffuse.Sample(SS_Linear, Input.vTexcoord + distortionSmall.xy * DIST_SMALL_AMOUNT * 0.5f).rgb;
 	
 	// Refracted depth
 	float depthRefracted = TX_Depth.Sample(SS_Linear, distUV).r;
@@ -100,8 +98,8 @@ float4 PSMain( PS_INPUT Input ) : SV_TARGET
 	distUV = saturate(distUV);
 	
 	// Wave vector
-	float3 wavesDist = normalize(lerp(float3(0.0f, 1.0f, 0.0f), distortionSmall.xzy * float3(1,100,1), waterWavesEnabled));
-	float3 wavesFres = normalize(lerp(float3(0.0f, 1.0f, 0.0f), distortionBig.xzy * float3(1,10,1), waterWavesEnabled));
+	float3 wavesDist = normalize(distortionSmall.xzy * float3(1,100,1));
+	float3 wavesFres = normalize(distortionBig.xzy * float3(1,10,1));
 	
 	// Scene color
 	float3 scene = TX_Scene.Sample(SS_Linear, distUV).rgb;
@@ -177,7 +175,7 @@ float4 PSMain( PS_INPUT Input ) : SV_TARGET
 	float f = 1-saturate(pow(1-shallowDepth, 8.0f) + clamp(pow(distortionSmall.y, 2), 0.5f, 1.0f));
 	float nightAmount = saturate((-AC_LightPos.y + 0.12f) * 2.2f);
 
-	float3 sceneWet = lerp(sceneClean, sceneClean * lerp(0.01f, 0.38f, nightAmount), f); // Darken border-scene
+	float3 sceneWet = lerp(sceneClean, sceneClean * lerp(0.01f, 0.38f, nightAmount * enhancedWater), f); // Darken border-scene
 	scene = lerp(scene, scene * float3(4, 0.2f, 0.1f) * 0.05f, f); // Darken distorted scene
 	
 	float pxDistance = Input.vTexcoord2.y;
@@ -216,7 +214,7 @@ float4 PSMain( PS_INPUT Input ) : SV_TARGET
 	//darken / lighten water based on the day / night cycle
 	float darknessFactor = 2.0f;
 	darknessFactor -= AC_LightPos.y;
-	darknessFactor = lerp(darknessFactor, max(1.22f, darknessFactor * 0.58f), nightAmount);
+	darknessFactor = lerp(darknessFactor, max(1.22f, darknessFactor * 0.58f), nightAmount * enhancedWater);
 
 	return float4(color / darknessFactor, 1);
 }
