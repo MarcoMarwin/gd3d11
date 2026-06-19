@@ -725,8 +725,8 @@ struct GothicRendererSettings {
         SSSIntensity = 1.5f;
         EnableDistanceBlur = true;
         DistanceBlurStrength = 0.50f;
-        NightDarkeningStart = 3000.0f;
-        NightDarkeningMax = 0.955f;
+        NightDarkeningStart = 0.0f;
+        NightDarkeningMax = 0.95f;
 
         WindQuality = WIND_QUALITY_ADVANCED;
         HeroAffectsObjects = true;

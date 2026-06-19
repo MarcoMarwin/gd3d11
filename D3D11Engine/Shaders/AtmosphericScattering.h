@@ -163,10 +163,13 @@ float3 ApplyAtmosphericScatteringGround(float3 worldPosition, float3 in_color, b
 	float depthAtmosphere = saturate(AC_EnableDepthAtmosphere);
 
 	float nightFadeStart = max(0.0f, AC_NightDarkeningStart);
-	float nightFadeEnd = max(nightFadeStart + 1000.0f, 30000.0f);
+	float nightFadeEnd = nightFadeStart + 30000.0f;
 	float nightDistanceFade = smoothstep(nightFadeStart, nightFadeEnd, cameraDistance) * nightWeight * depthAtmosphere;
 	float3 farNightColor = float3(0.0012f, 0.0016f, 0.0035f);
-	outColor = lerp(outColor, farNightColor, nightDistanceFade * saturate(AC_NightDarkeningMax));
+	float baseNightDarkening = saturate(AC_NightDarkeningMax);
+	float extraNightDarkening = saturate(AC_NightDarkeningMax - 1.0f);
+	outColor = lerp(outColor, farNightColor, nightDistanceFade * baseNightDarkening);
+	outColor = lerp(outColor, float3(0.0f, 0.0f, 0.0f), nightDistanceFade * extraNightDarkening);
 		
 	return outColor;
 }

@@ -5316,8 +5316,8 @@ XRESULT GothicAPI::LoadMenuSettings( const std::string& file ) {
         s.EnableDistanceBlur = GetPrivateProfileBoolA( "General", "EnableDepthAtmosphere",
             GetPrivateProfileBoolA( "General", "EnableDistanceBlur", ds.EnableDistanceBlur, ini ), ini );
         s.DistanceBlurStrength = std::clamp( GetPrivateProfileFloatA( "General", "DepthAtmosphereBlurStrengthV2", ds.DistanceBlurStrength, ini.c_str() ), 0.0f, 1.0f );
-        s.NightDarkeningStart = std::clamp( GetPrivateProfileFloatA( "General", "NightDarkeningStart", ds.NightDarkeningStart, ini.c_str() ), 0.0f, 30000.0f );
-        s.NightDarkeningMax = std::clamp( GetPrivateProfileFloatA( "General", "NightDarkeningMax", ds.NightDarkeningMax, ini.c_str() ), 0.0f, 1.0f );
+        s.NightDarkeningStart = std::clamp( GetPrivateProfileFloatA( "General", "NightDarkeningStart", ds.NightDarkeningStart, ini.c_str() ), 0.0f, 50000.0f );
+        s.NightDarkeningMax = std::clamp( GetPrivateProfileFloatA( "General", "NightDarkeningMax", ds.NightDarkeningMax, ini.c_str() ), 0.0f, 2.0f );
 
         /*
         * Draw-distance is Loaded on a per World basis using LoadRendererWorldSettings
