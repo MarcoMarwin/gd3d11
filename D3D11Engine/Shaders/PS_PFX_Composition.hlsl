@@ -81,6 +81,11 @@ float ComputeVolumetricFog( float3 cameraToWorldPos, float3 posOriginal )
     return exp( -HF_GlobalDensity * w * fogInt );
 }
 
+float FogDither(float2 pixelPosition)
+{
+    return frac(52.9829189f * frac(dot(pixelPosition, float2(0.06711056f, 0.00583715f)))) - 0.5f;
+}
+
 float4 ComputeHeightFog( float2 texcoord )
 {
     float expDepth = TX_Depth.Sample( SS_Linear, texcoord ).r;
@@ -92,7 +97,7 @@ float4 ComputeHeightFog( float2 texcoord )
 
     float fog = 1.0f - ComputeVolumetricFog( position, posOriginal );
     float3 color = ApplyAtmosphericScatteringGround( posOriginal, HF_FogColorMod, true, false );
-	float nightTimeBlend = saturate(-AC_LightPos.y * 4.0f);
+	float nightTimeBlend = smoothstep(0.0f, 1.0f, saturate(-AC_LightPos.y * 4.0f));
 	float nightFogBrightness = lerp(1.0f, max(0.0f, AC_NightFogBrightness), saturate(AC_EnableNightAtmosphere));
 	float3 nightFogColor = float3(0.12f, 0.18f, 0.27f) * nightFogBrightness;
 	color = lerp(color, nightFogColor, nightTimeBlend);
@@ -136,6 +141,7 @@ float4 PSMain( PS_INPUT Input ) : SV_TARGET
 #if COMPOSE_HEIGHTFOG
     float4 fog = ComputeHeightFog( Input.vTexcoord );
     color.rgb = lerp( color.rgb, fog.rgb, fog.a );
+    color.rgb = saturate(color.rgb + FogDither(Input.vPosition.xy) * (fog.a / 255.0f));
 #endif
 
 #if COMPOSE_GODRAYS

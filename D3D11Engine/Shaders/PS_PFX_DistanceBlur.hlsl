@@ -44,34 +44,38 @@ float LoadDepthPoint(float2 uv, uint2 dimensions)
 	return TX_Depth.Load(int3(pixel, 0)).r;
 }
 
-float4 DepthAwareBlur(float2 pixelStep, float2 texCoord, float centerDistance, uint2 depthDimensions)
+static const int DISTANCE_BLUR_SAMPLE_COUNT = 48;
+
+float2 GetSpiralSample(int index)
 {
-	float4 colorSum = 0.0f;
-	float weightSum = 0.0f;
+	float radius = sqrt((float(index) + 0.5f) / float(DISTANCE_BLUR_SAMPLE_COUNT));
+	float angle = float(index) * 2.39996323f;
+	return float2(radius * cos(angle), radius * sin(angle));
+}
+
+float4 DepthAwareBlur(float2 blurRadius, float2 texCoord, float centerDistance, uint2 depthDimensions)
+{
+	float4 centerColor = TX_Texture0.Sample(SS_Linear, texCoord);
+	float4 colorSum = centerColor;
+	float weightSum = 1.0f;
 	float depthTolerance = max(120.0f, centerDistance * 0.02f);
-	float3 centerColor = TX_Texture0.Sample(SS_Linear, texCoord).rgb;
 
 	[unroll]
-	for (int x = -3; x <= 3; x++)
+	for (int i = 0; i < DISTANCE_BLUR_SAMPLE_COUNT; i++)
 	{
-		[unroll]
-		for (int y = -3; y <= 3; y++)
-		{
-			float2 offset = float2(x, y);
-			float2 uv = saturate(texCoord + offset * pixelStep);
-			float sampleDepth = LoadDepthPoint(uv, depthDimensions);
-			float sampleDistance = length(VSPositionFromDepth(sampleDepth, uv));
-			float depthDelta = abs(sampleDistance - centerDistance);
-			float depthWeight = 1.0f - smoothstep(depthTolerance, depthTolerance * 2.0f, depthDelta);
-			float4 sampleColor = TX_Texture0.Sample(SS_Linear, uv);
-			float colorDelta = length(sampleColor.rgb - centerColor);
-			float silhouetteWeight = 1.0f - smoothstep(0.10f, 0.32f, colorDelta);
-			float spatialWeight = rcp(1.0f + dot(offset, offset) * 0.22f);
-			float weight = depthWeight * silhouetteWeight * spatialWeight;
+		float2 offset = GetSpiralSample(i);
+		float2 uv = saturate(texCoord + offset * blurRadius);
+		float sampleDepth = LoadDepthPoint(uv, depthDimensions);
+		float sampleDistance = length(VSPositionFromDepth(sampleDepth, uv));
+		float depthDelta = abs(sampleDistance - centerDistance);
+		float depthWeight = 1.0f - smoothstep(depthTolerance, depthTolerance * 2.0f, depthDelta);
 
-			colorSum += sampleColor * weight;
-			weightSum += weight;
-		}
+		float4 sampleColor = TX_Texture0.Sample(SS_Linear, uv);
+		float spatialWeight = exp(-dot(offset, offset) * 2.0f);
+		float weight = depthWeight * spatialWeight;
+
+		colorSum += sampleColor * weight;
+		weightSum += weight;
 	}
 
 	return colorSum / max(weightSum, 0.0001f);
@@ -88,9 +92,28 @@ float4 PSMain( PS_INPUT Input ) : SV_TARGET
 	uint2 depthDimensions = uint2(depthWidth, depthHeight);
 	float depth = LoadDepthPoint(Input.vTexcoord, depthDimensions);
 	float viewDistance = length(VSPositionFromDepth(depth, Input.vTexcoord));
-	float blurMask = saturate(smoothstep(B_Threshold, B_ColorMod.y, viewDistance) * B_ColorMod.x);
 
-	float2 ps = B_PixelSize * B_BlurSize * blurMask;
+	// Erode the blur mask by one pixel at depth discontinuities. This keeps
+	// thin foreground silhouettes such as leaves and fences sharp.
+	float blurDistance = viewDistance;
+	static const float2 neighborOffsets[4] = {
+		float2(-1.0f, 0.0f), float2(1.0f, 0.0f),
+		float2(0.0f, -1.0f), float2(0.0f, 1.0f)
+	};
+	[unroll]
+	for (int i = 0; i < 4; i++)
+	{
+		float2 neighborUV = saturate(Input.vTexcoord + neighborOffsets[i] * B_PixelSize);
+		float neighborDepth = LoadDepthPoint(neighborUV, depthDimensions);
+		blurDistance = min(blurDistance, length(VSPositionFromDepth(neighborDepth, neighborUV)));
+	}
+
+	float dialogFocus = saturate(B_ColorMod.z);
+	float blurStart = lerp(B_Threshold, 600.0f, dialogFocus);
+	float blurEnd = lerp(B_ColorMod.y, 3200.0f, dialogFocus);
+	float blurMask = saturate(smoothstep(blurStart, blurEnd, blurDistance) * B_ColorMod.x);
+
+	float2 ps = B_PixelSize * B_BlurSize * blurMask * lerp(3.0f, 4.25f, dialogFocus);
 	float4 blur = DepthAwareBlur(ps, Input.vTexcoord, viewDistance, depthDimensions);
 	
 	float4 scene = TX_Texture0.Sample(SS_Linear, Input.vTexcoord);

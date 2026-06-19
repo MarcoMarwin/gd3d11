@@ -10,6 +10,7 @@
 #include "D3D11ConstantBuffer.h"
 #include "ConstantBufferStructs.h"
 #include "GothicAPI.h"
+#include <cmath>
 
 D3D11PFX_DistanceBlur::D3D11PFX_DistanceBlur( D3D11PfxRenderer* rnd ) : D3D11PFX_Effect( rnd ) {}
 
@@ -47,11 +48,20 @@ XRESULT D3D11PFX_DistanceBlur::Render( ID3D11ShaderResourceView* diffuse ) {
 	// Blur/Copy
 	// The normalized 1.0 setting represents four times the former 0.5 default.
 	const float blurStrength = std::clamp( Engine::GAPI->GetRendererState().RendererSettings.DistanceBlurStrength * 2.0f, 0.0f, 4.0f );
+
+	// Bring the focus smoothly into conversational range, then let it drift
+	// back to the landscape after the dialog camera has finished.
+	static float dialogFocusBlend = 0.0f;
+	const bool inDialog = Engine::GAPI->DialogFinished() == 0;
+	const float deltaTime = std::clamp( Engine::GAPI->GetFrameTimeSec(), 0.0f, 0.1f );
+	const float focusResponse = inDialog ? 5.0f : 2.0f;
+	dialogFocusBlend += ((inDialog ? 1.0f : 0.0f) - dialogFocusBlend)
+		* (1.0f - std::exp(-focusResponse * deltaTime));
 	BlurConstantBuffer bcb = {};
 	bcb.B_PixelSize = float2( 1.0f / Engine::GraphicsEngine->GetResolution().x, 1.0f / Engine::GraphicsEngine->GetResolution().y );
 	bcb.B_BlurSize = 1.20f + blurStrength * 2.05f;
 	bcb.B_Threshold = 6500.0f;
-	bcb.B_ColorMod = float4( blurStrength * 0.74f, 26000.0f, 0, 0 );
+	bcb.B_ColorMod = float4( blurStrength * 0.74f, 26000.0f, dialogFocusBlend, 0 );
 	XMStoreFloat4x4( &bcb.B_InvProj, XMMatrixInverse( nullptr, XMLoadFloat4x4( &Engine::GAPI->GetProjectionMatrix() ) ) );
 	ps->GetBuffer( "B_BlurSettings" ).Update( &bcb ).Bind();
 	ps->Apply();

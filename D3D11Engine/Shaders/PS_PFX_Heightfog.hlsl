@@ -59,6 +59,11 @@ float ComputeVolumetricFog(float3 cameraToWorldPos, float3 posOriginal)
 	return exp( -HF_GlobalDensity * w * fogInt );
 }
 
+float FogDither(float2 pixelPosition)
+{
+	return frac(52.9829189f * frac(dot(pixelPosition, float2(0.06711056f, 0.00583715f)))) - 0.5f;
+}
+
 //--------------------------------------------------------------------------------------
 // Input / Output structures
 //--------------------------------------------------------------------------------------
@@ -89,7 +94,7 @@ float4 PSMain( PS_INPUT Input ) : SV_TARGET
 	float fog = 1.0f - ComputeVolumetricFog(position, posOriginal);
 		
 	float3 color = ApplyAtmosphericScatteringGround(posOriginal, HF_FogColorMod, true, false);
-	float nightTimeBlend = saturate(-AC_LightPos.y * 4.0f);
+	float nightTimeBlend = smoothstep(0.0f, 1.0f, saturate(-AC_LightPos.y * 4.0f));
 	float nightFogBrightness = lerp(1.0f, max(0.0f, AC_NightFogBrightness), saturate(AC_EnableNightAtmosphere));
 	float3 nightFogColor = float3(0.12f, 0.18f, 0.27f) * nightFogBrightness;
 	color = lerp(color, nightFogColor, nightTimeBlend);
@@ -103,6 +108,7 @@ float4 PSMain( PS_INPUT Input ) : SV_TARGET
 	// Never let the fog become a 100% solid wall of color.
 	float maxFogOpacity = 0.85f;
 
-	return float4(saturate(color / darknessFactor), saturate(fog) * maxFogOpacity);
+	float3 ditheredFogColor = color / darknessFactor + FogDither(Input.vPosition.xy) / 255.0f;
+	return float4(saturate(ditheredFogColor), saturate(fog) * maxFogOpacity);
 }
 
