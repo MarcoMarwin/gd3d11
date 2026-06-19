@@ -662,7 +662,10 @@ void ImGuiShim::RenderSettingsWindow()
                     {"SAO", AOMode::AO_SAO, nullptr},
                     {"ASSAO", AOMode::AO_ASSAO, "Intel ASSAO (Adaptive Screen Space Ambient Occlusion)"},
             };
-            if ( ImComboBoxCT( "AO Mode", aoModes, &settings.AoMode, [] {
+            ImGui::TextUnformatted( "AO Mode" );
+            ImGui::SameLine( 150.0f );
+            ImGui::SetNextItemWidth( 250.0f );
+            if ( ImComboBoxCT( "##AOMode", aoModes, &settings.AoMode, [] {
                 Engine::GraphicsEngine->ReloadShaders( ShaderCategory::Other );
                 } ) ) {
                 ImGui::EndCombo();
@@ -699,7 +702,10 @@ void ImGuiShim::RenderSettingsWindow()
                 if ( selectedMode == GothicRendererSettings::E_AntiAliasingMode::AA_FSR && settings.Upscaler == GothicRendererSettings::E_Upscaler::UPSCALER_FSR_3 ) {
                     selectedMode = GothicRendererSettings::E_AntiAliasingMode::AA_FSR3;
                 }
-                if ( ImComboBoxCT( "Anti Aliasing", antiAliasing, &selectedMode, [&selectedMode, &settings] {
+                ImGui::TextUnformatted( "Anti Aliasing" );
+                ImGui::SameLine( 150.0f );
+                ImGui::SetNextItemWidth( 250.0f );
+                if ( ImComboBoxCT( "##AntiAliasing", antiAliasing, &selectedMode, [&selectedMode, &settings] {
                     if ( selectedMode == GothicRendererSettings::E_AntiAliasingMode::AA_FSR3 ) {
                         selectedMode = GothicRendererSettings::E_AntiAliasingMode::AA_FSR;
                         settings.Upscaler = GothicRendererSettings::E_Upscaler::UPSCALER_FSR_3;
@@ -723,16 +729,17 @@ void ImGuiShim::RenderSettingsWindow()
                     {"Simple", GothicRendererSettings::E_ShadowFilterMode::SHADOW_FILTER_SIMPLE},
                     {"PCSS", GothicRendererSettings::E_ShadowFilterMode::SHADOW_FILTER_PCSS},
                 };
-                if ( ImComboBoxC( "Shadow filtering", shadowFilterModes, &settings.ShadowFilterMode, [&shadersToReload]() {
+                ImGui::TextUnformatted( "Shadow Filtering" );
+                ImGui::SameLine( 150.0f );
+                ImGui::SetNextItemWidth( 250.0f );
+                if ( ImComboBoxC( "##ShadowFiltering", shadowFilterModes, &settings.ShadowFilterMode, [&shadersToReload]() {
                     shadersToReload |= ShaderCategory::LightsAndShadows;
                     } ) ) {
                     ImGui::EndCombo();
                 }
             }
 
-            if ( ImGui::Checkbox( "Compress Backbuffer", &settings.CompressBackBuffer ) ) {
-                Engine::GAPI->UpdateCompressBackBuffer();
-            }
+
             ImGui::Checkbox( "Animate Static Vobs", &settings.AnimateStaticVobs );
 
 #if defined(BUILD_GOTHIC_2_6_fix) || (defined(BUILD_GOTHIC_1_08k) && !defined(BUILD_1_12F))
@@ -765,11 +772,6 @@ void ImGuiShim::RenderSettingsWindow()
             ImGui::Checkbox( "Enable Rain", &settings.EnableRain );
             ImGui::Checkbox( "Enable Rain Effects", &settings.EnableRainEffects );
             ImGui::Checkbox( "Limit Light Intensity", &settings.LimitLightIntesity );
-            ImGui::Checkbox( "Draw World Section Intersections", &settings.DrawSectionIntersections );
-            ImGui::SetItemTooltip( "This option draws every world chunk that intersect with GD3D11 world draw distance." );
-
-            ImGui::Checkbox( "Occlusion Culling", &settings.EnableOcclusionCulling );
-            ImGui::SetItemTooltip( "Hides objects that are not visible by camera. Doesn't work properly, turn off if you don't play on potato." );
 
             ImGui::EndGroup();
         }
@@ -1212,7 +1214,14 @@ void ImGuiShim::RenderAdvancedColumn2( GothicRendererSettings& settings, GothicA
             ImGui::SetItemTooltip("Perform a lightweight Z Prepass.\nMIGHT improve performance on low bandwidth devices.");
         }
         ImGui::Checkbox( "VSync", &settings.EnableVSync );
+        if ( ImGui::Checkbox( "Compress Backbuffer", &settings.CompressBackBuffer ) ) {
+            Engine::GAPI->UpdateCompressBackBuffer();
+        }
+        ImGui::SetItemTooltip( "Uses a lower-precision HDR backbuffer to reduce memory bandwidth." );
+        ImGui::Checkbox( "Draw World Section Intersections", &settings.DrawSectionIntersections );
+        ImGui::SetItemTooltip( "Includes world sections whose bounding boxes intersect the draw distance." );
         ImGui::Checkbox( "OcclusionCulling", &settings.EnableOcclusionCulling );
+        ImGui::SetItemTooltip( "Experimental previous-frame occlusion culling; may cause delayed object visibility." );
         ImGui::Checkbox( "Sort RenderQueue", &settings.SortRenderQueue );
         ImGui::Checkbox( "Draw Threaded", &settings.DrawThreaded );
         ImGui::Checkbox( "AtmosphericScattering", &settings.AtmosphericScattering );
