@@ -1108,6 +1108,10 @@ XRESULT D3D11GraphicsEngine::RecreateBuffers() {
         m_scaledResolution = bbres;
     }
 
+    LogInfo() << "Resolution state: backbuffer=" << bbres.toString()
+        << ", render=" << m_scaledResolution.toString()
+        << ", scale=" << resolutionScalePct << "%";
+
     auto roundedTextureResolution = GetResolution( );
     if ( lastRoundedTextureResolution == roundedTextureResolution ) {
         // same resolution, just adjusting the viewport

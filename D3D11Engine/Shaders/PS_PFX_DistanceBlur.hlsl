@@ -74,6 +74,11 @@ float4 DepthAwareBlur(float2 blurRadius, float2 texCoord, float centerDistance, 
 		float colorDelta = length(sampleColor.rgb - centerColor.rgb);
 		float colorEdgeWeight = 1.0f - smoothstep(0.10f, 0.32f, colorDelta);
 		float skyProtection = smoothstep(50000.0f, 150000.0f, centerDistance) * (1.0f - saturate(B_ColorMod.z));
+		// Preserve nearby silhouettes, but let distant terrain blend across its
+		// depth edge so mountain contours soften along with their textures.
+		float farContourBlend = smoothstep(9000.0f, 22000.0f, centerDistance)
+			* (1.0f - skyProtection);
+		depthWeight = lerp(depthWeight, 1.0f, farContourBlend);
 		float silhouetteWeight = lerp(1.0f, colorEdgeWeight, skyProtection);
 		float spatialWeight = exp(-dot(offset, offset) * 2.0f);
 		float weight = depthWeight * silhouetteWeight * spatialWeight;

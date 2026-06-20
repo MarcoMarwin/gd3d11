@@ -751,7 +751,7 @@ struct GothicRendererSettings {
 
         RainRadiusRange = 5000.0f;
         RainHeightRange = 1000.0f;
-        RainNumParticles = 50000;
+        RainNumParticles = 45000;
         RainMoveParticles = true;
         RainGlobalVelocity = XMFLOAT3( 250, -1000, 0 );
         RainUseInitialSet = false;

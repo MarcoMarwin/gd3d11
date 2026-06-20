@@ -158,7 +158,7 @@ XRESULT D3D11Effect::DrawRain() {
     }
 
     // Update constantbuffer for the advance-VS
-    AdvanceRainConstantBuffer acb;
+    AdvanceRainConstantBuffer acb = {};
     XMFLOAT3 LightPosition_XMFloat3;
     XMStoreFloat3( &LightPosition_XMFloat3, XMLoadFloat3( &Engine::GAPI->GetSky()->GetAtmoshpereSettings().LightDirection ) * Engine::GAPI->GetSky()->GetAtmoshpereSettings().OuterRadius + Engine::GAPI->GetCameraPositionXM() );
     acb.AR_LightPosition = LightPosition_XMFloat3;
@@ -168,6 +168,7 @@ XRESULT D3D11Effect::DrawRain() {
     acb.AR_CameraPosition = Engine::GAPI->GetCameraPosition();
     acb.AR_GlobalVelocity = velocity;
     acb.AR_MoveRainParticles = state.RendererSettings.RainMoveParticles ? 1 : 0;
+    acb.AR_Pad1.x = state.RendererSettings.EnableRainEffects ? 1.0f : 0.0f;
     auto advRainBuf = particleAdvanceVS->GetBuffer( "AdvanceRainConstantBuffer" );
     advRainBuf.Update( &acb ).Bind();
     advRainBuf.GetRawBuffer()->BindToPixelShader( 1 );
@@ -342,7 +343,7 @@ XRESULT D3D11Effect::DrawRain_CS() {
     }
 
     // Update constantbuffer for the advance-CS
-    AdvanceRainConstantBuffer acb;
+    AdvanceRainConstantBuffer acb = {};
     XMFLOAT3 LightPosition_XMFloat3;
     XMStoreFloat3( &LightPosition_XMFloat3, XMLoadFloat3( &Engine::GAPI->GetSky()->GetAtmoshpereSettings().LightDirection ) * Engine::GAPI->GetSky()->GetAtmoshpereSettings().OuterRadius + Engine::GAPI->GetCameraPositionXM() );
     acb.AR_LightPosition = LightPosition_XMFloat3;
@@ -352,6 +353,7 @@ XRESULT D3D11Effect::DrawRain_CS() {
     acb.AR_CameraPosition = Engine::GAPI->GetCameraPosition();
     acb.AR_GlobalVelocity = velocity;
     acb.AR_MoveRainParticles = numParticles;
+    acb.AR_Pad1.x = state.RendererSettings.EnableRainEffects ? 1.0f : 0.0f;
 
     advanceRainCS->GetBuffer( "AdvanceRainConstantBuffer" ).Update( &acb );
     advanceRainCS->GetBuffer( "AdvanceRainConstantBuffer" ).GetRawBuffer()->BindToPixelShader( 1 );

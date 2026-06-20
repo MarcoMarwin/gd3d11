@@ -210,10 +210,17 @@ void rainResponse(PS_INPUT input, float3 lightVector, float lightIntensity, floa
 		const float v2MaxFactor = 0.010f; 
 		
         // Sample opacity from the textures
-        float col1 = TX_RainTextureArray.Sample(SS_Anisotropic, tex1).r * min(g_rainfactors[texIndicesV1.x], v2MaxFactor);
-        float col2 = TX_RainTextureArray.Sample(SS_Anisotropic, tex2).r * min(g_rainfactors[texIndicesV1.y], v2MaxFactor);
-        float col3 = TX_RainTextureArray.Sample(SS_Anisotropic, tex3).r * min(g_rainfactors[texIndicesV2.x], v2MaxFactor);
-        float col4 = TX_RainTextureArray.Sample(SS_Anisotropic, tex4).r * min(g_rainfactors[texIndicesV2.y], v2MaxFactor);
+        float rainBlurBias = 0.0f;
+#ifndef SNOW_FEATURE
+        rainBlurBias = (1.0f - smoothstep(250.0f, 1200.0f, length(eyeVector)))
+            * 1.5f * saturate(AR_Pad1.x);
+#endif
+
+        // Sample opacity from the textures
+        float col1 = TX_RainTextureArray.SampleBias(SS_Anisotropic, tex1, rainBlurBias).r * min(g_rainfactors[texIndicesV1.x], v2MaxFactor);
+        float col2 = TX_RainTextureArray.SampleBias(SS_Anisotropic, tex2, rainBlurBias).r * min(g_rainfactors[texIndicesV1.y], v2MaxFactor);
+        float col3 = TX_RainTextureArray.SampleBias(SS_Anisotropic, tex3, rainBlurBias).r * min(g_rainfactors[texIndicesV2.x], v2MaxFactor);
+        float col4 = TX_RainTextureArray.SampleBias(SS_Anisotropic, tex4, rainBlurBias).r * min(g_rainfactors[texIndicesV2.y], v2MaxFactor);
 
 		//s = saturate(s) * 0.6f;
 		
