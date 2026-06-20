@@ -940,6 +940,34 @@ XRESULT D3D11ShadowMap::DrawPointlightShadows( std::vector<VobLightInfo*>& light
     bool partialShadowUpdate = settings.PartialDynamicShadowUpdates;
     const bool staticOnlyMode = settings.EnablePointlightShadows == GothicRendererSettings::PLS_STATIC_ONLY;
 
+    // Indoor ambient lights are marked static by Gothic. Only a small set of nearby
+    // non-static lamp lights may cast soft character shadows.
+    std::vector<std::pair<float, VobLightInfo*>> indoorShadowCandidates;
+    indoorShadowCandidates.reserve( 8 );
+    for ( auto* light : lights ) {
+        if ( !light || !light->Vob || !light->IsIndoorVob || light->Vob->IsStatic()
+            || light->IsPFXVobLight || !light->Vob->IsEnabled() || !light->VisibleInFrame ) {
+            continue;
+        }
+
+        float distanceSq = XMVectorGetX( XMVector3LengthSq(
+            light->Vob->GetPositionWorldXM() - cameraPositionXm ) );
+        float shadowDistance = std::min( light->Vob->GetLightRange() * 2.5f, 5000.0f );
+        if ( distanceSq <= shadowDistance * shadowDistance ) {
+            indoorShadowCandidates.emplace_back( distanceSq, light );
+        }
+    }
+    std::sort( indoorShadowCandidates.begin(), indoorShadowCandidates.end(),
+        []( const auto& left, const auto& right ) { return left.first < right.first; } );
+    if ( indoorShadowCandidates.size() > 4 ) {
+        indoorShadowCandidates.resize( 4 );
+    }
+    auto allowIndoorShadow = [&indoorShadowCandidates]( VobLightInfo* light ) {
+        if ( !light->IsIndoorVob ) return true;
+        return std::find_if( indoorShadowCandidates.begin(), indoorShadowCandidates.end(),
+            [light]( const auto& candidate ) { return candidate.second == light; } ) != indoorShadowCandidates.end();
+    };
+
     // Draw pointlight shadows
     std::list<VobLightInfo*> importantUpdates;
 
@@ -949,6 +977,14 @@ XRESULT D3D11ShadowMap::DrawPointlightShadows( std::vector<VobLightInfo*>& light
     const int requiredShadowMapKind = isTiledShadingEnabled ? 1 : 0;
     for ( auto const& light : lights ) {
         if ( !light->Vob->IsEnabled() || !light->VisibleInFrame ) {
+            continue;
+        }
+        if ( !allowIndoorShadow( light ) ) {
+            light->UpdateShadows = false;
+            if ( D3D11PointLight* pl = dynamic_cast<D3D11PointLight*>(light->LightShadowBuffers.get()) ) {
+                pl->ClearTiledSlot();
+                pl->ReleaseShadowMap();
+            }
             continue;
         }
         // Create shadowmap in case we should have one but haven't got it yet

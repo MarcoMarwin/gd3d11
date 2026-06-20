@@ -10,6 +10,8 @@ struct TiledPointLight {
     float4 Color;
     float3 PositionWorld;
     int ShadowCubeIndex; // -1 = no shadow, else index into TextureCubeArray
+    float ShadowStrength;
+    float3 Padding;
 };
 
 struct LightGrid {
@@ -102,7 +104,7 @@ void CSMain( uint3 groupID : SV_GroupID, uint3 threadID : SV_GroupThreadID, uint
         // Apply shadow if this light has a shadow cubemap and contribution is non-negligible
         if ( light.ShadowCubeIndex >= 0 && any( lighting > 0.001f ) ) {
             float shadow = PLS_SampleShadowCubeArray( TX_ShadowCubeArray, SS_Comp, wsPosition, wsNormal, light.PositionWorld, light.Range, light.ShadowCubeIndex );
-            lighting *= shadow;
+            lighting *= lerp(1.0f, shadow, saturate(light.ShadowStrength));
         }
 
         lighting = saturate( lighting );

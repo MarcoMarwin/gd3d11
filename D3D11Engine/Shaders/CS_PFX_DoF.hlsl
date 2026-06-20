@@ -37,6 +37,11 @@ float ComputeCoC( float linearDepth, float focusDepth )
     return saturate( ( linearDepth - focusDepth ) / DoF_FocusRange );
 }
 
+bool IsSkyDepth( float depth )
+{
+    return depth <= 1e-7f;
+}
+
 static const int SAMPLE_COUNT = 48;
 
 float2 GetSpiralSample( int index, int count )
@@ -65,10 +70,15 @@ void CSMain( uint3 DTid : SV_DispatchThreadID )
     float focusDepth = TX_Focus.SampleLevel( SS_Linear, float2( 0.5, 0.5 ), 0 ).r;
 
     float centerDepth = TX_Depth.SampleLevel( SS_Linear, texcoord, 0 ).r;
+    float3 centerColor = TX_Scene.SampleLevel( SS_Linear, texcoord, 0 ).rgb;
+    if ( IsSkyDepth( centerDepth ) )
+    {
+        OutputBlur[DTid.xy] = float4( centerColor, 0.0f );
+        return;
+    }
+
     float centerLinear = LinearizeDepth( centerDepth );
     float centerCoC = ComputeCoC( centerLinear, focusDepth );
-
-    float3 centerColor = TX_Scene.SampleLevel( SS_Linear, texcoord, 0 ).rgb;
 
     // Early out: pass through sharp pixel
     if ( centerCoC < 0.01 )
@@ -86,8 +96,8 @@ void CSMain( uint3 DTid : SV_DispatchThreadID )
     // foreground rejection — just a smooth, uniform blur.
     static const int GAUSS_SAMPLE_COUNT = 16;
 
-    float3 colorAccum = 0.0;
-    float weightAccum = 0.0;
+    float3 colorAccum = centerColor;
+    float weightAccum = 1.0f;
 
     [unroll]
     for ( int i = 0; i < GAUSS_SAMPLE_COUNT; i++ )
@@ -96,9 +106,10 @@ void CSMain( uint3 DTid : SV_DispatchThreadID )
         float2 sampleUV = texcoord + offset * blurRadius * texelSize;
 
         float3 sampleColor = TX_Scene.SampleLevel( SS_Linear, sampleUV, 0 ).rgb;
+        float sampleDepth = TX_Depth.SampleLevel( SS_Linear, sampleUV, 0 ).r;
 
         float r2 = dot( offset, offset );
-        float weight = exp( -r2 * 3.0 );
+        float weight = IsSkyDepth( sampleDepth ) ? 0.0f : exp( -r2 * 3.0f );
 
         colorAccum += sampleColor * weight;
         weightAccum += weight;
@@ -122,6 +133,9 @@ void CSMain( uint3 DTid : SV_DispatchThreadID )
 
         float3 sampleColor = TX_Scene.SampleLevel( SS_Linear, sampleUV, 0 ).rgb;
         float sampleDepth = TX_Depth.SampleLevel( SS_Linear, sampleUV, 0 ).r;
+        if ( IsSkyDepth( sampleDepth ) )
+            continue;
+
         float sampleLinear = LinearizeDepth( sampleDepth );
         float sampleCoC = ComputeCoC( sampleLinear, focusDepth );
 

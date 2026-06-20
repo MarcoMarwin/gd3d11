@@ -22,7 +22,11 @@ struct TiledPointLight {
     DirectX::XMFLOAT4 Color;
     DirectX::XMFLOAT3 PositionWorld;
     int32_t ShadowCubeIndex; // -1 = no shadow, else index into TextureCubeArray
+    float ShadowStrength;
+    DirectX::XMFLOAT3 Padding;
 };
+
+static_assert( sizeof(TiledPointLight) == 64, "TiledPointLight must match the HLSL StructuredBuffer layout" );
 
 struct LightGrid {
     uint32_t Offset;

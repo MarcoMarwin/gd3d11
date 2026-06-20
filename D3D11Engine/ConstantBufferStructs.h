@@ -170,7 +170,7 @@ struct DS_PointLightConstantBuffer {
     XMFLOAT4X4 PL_InvView;
 
     float3 PL_LightScreenPos;
-    float PL_Pad3;
+    float PL_ShadowStrength;
 };
 
 constexpr int MAX_CSM_CASCADES = 4;
@@ -343,6 +343,22 @@ struct RefractionInfoConstantBuffer {
 
     XMFLOAT4X4 RI_ViewProj;
 };
+
+struct WetGroundSSRConstantBuffer {
+    float4 WG_ProjParams;
+    XMFLOAT4X4 WG_InvView;
+    XMFLOAT4X4 WG_ViewProj;
+    XMFLOAT4X4 WG_RainViewProj;
+
+    float3 WG_CameraPosition;
+    float WG_Wetness;
+
+    float2 WG_InvResolution;
+    float WG_Strength;
+    float WG_Time;
+};
+
+static_assert( sizeof(WetGroundSSRConstantBuffer) % 16 == 0, "WetGroundSSRConstantBuffer must be 16-byte aligned" );
 
 struct AtmosphereConstantBuffer {
     float AC_Kr4PI;

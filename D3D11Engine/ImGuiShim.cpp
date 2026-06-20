@@ -682,14 +682,12 @@ void ImGuiShim::RenderSettingsWindow()
             ImGui::SetItemTooltip( "Changing this will reload shaders." );
 
             bool enhancedWater = settings.EnableSSR;
-            if ( ImGui::Checkbox( "Enhanced Water", &enhancedWater ) ) {
+            if ( ImGui::Checkbox( "Enhanced Water Effects", &enhancedWater ) ) {
                 settings.EnableSSR = enhancedWater;
                 settings.EnableWaterAnimation = enhancedWater;
                 shadersToReload |= ShaderCategory::Water;
             }
-            ImGui::SetItemTooltip( "Enables water reflections and animated water waves." );
-            ImGui::Checkbox( "Enhanced Night", &settings.EnableNightAtmosphere );
-            ImGui::SetItemTooltip( "Enables configurable near lighting, distance darkening, and night fog." );
+            ImGui::SetItemTooltip( "Enables water reflections, animated waves, and reflections on rain-wet ground." );
             ImGui::Checkbox( "Backlit Vegetation", &settings.EnableSSS );
             ImGui::SetItemTooltip( "Adds soft light transmission to grass, leaves, and alpha-tested vegetation." );
             ImGui::Checkbox( "Depth of Field", &settings.EnableDoF );
@@ -775,7 +773,6 @@ void ImGuiShim::RenderSettingsWindow()
 #endif //BUILD_GOTHIC_2_6_fix
 
             ImGui::Checkbox( "Enable Rain", &settings.EnableRain );
-            ImGui::Checkbox( "Enable Rain Effects", &settings.EnableRainEffects );
             ImGui::Checkbox( "Limit Light Intensity", &settings.LimitLightIntesity );
 
             ImGui::EndGroup();
@@ -1639,9 +1636,9 @@ void RenderAdvancedColumn4( GothicRendererSettings& settings, GothicAPI* gapi ) 
                 ImGui::PopID();
             }
 
-        ImGui::SeparatorText( "Enhanced Water" );
+        ImGui::SeparatorText( "Enhanced Water Effects" );
         {
-            ImGui::PushID( "EnhancedWaterSettings" );
+            ImGui::PushID( "EnhancedWaterEffectsSettings" );
             bool enhancedWater = settings.EnableSSR;
             if ( ImGui::Checkbox( "Enable", &enhancedWater ) ) {
                 settings.EnableSSR = enhancedWater;
@@ -1651,22 +1648,6 @@ void RenderAdvancedColumn4( GothicRendererSettings& settings, GothicAPI* gapi ) 
             ImGui::BeginDisabled( !settings.EnableSSR );
             {
                 ImGui::SliderFloat( "Reflection Strength", &settings.SSRStrength, 0.0f, 2.0f, "%.2f", ImGuiSliderFlags_AlwaysClamp );
-                ImGui::EndDisabled();
-            }
-            ImGui::PopID();
-        }
-
-        ImGui::SeparatorText( "Enhanced Night" );
-        {
-            ImGui::PushID( "EnhancedNightSettings" );
-            ImGui::Checkbox( "Enable", &settings.EnableNightAtmosphere );
-            ImGui::BeginDisabled( !settings.EnableNightAtmosphere );
-            {
-                ImGui::SliderFloat( "Near Night Brightness", &settings.NearNightBrightness, 0.0f, 2.0f, "%.2f", ImGuiSliderFlags_AlwaysClamp );
-                ImGui::SliderFloat( "Night Fade Start", &settings.NightDarkeningStart, 0.0f, 30000.0f, "%.0f", ImGuiSliderFlags_AlwaysClamp );
-                ImGui::SliderFloat( "Night Fade Range", &settings.NightDarkeningRange, 1000.0f, 30000.0f, "%.0f", ImGuiSliderFlags_AlwaysClamp );
-                ImGui::SliderFloat( "Night Max Darkness", &settings.NightDarkeningMax, 0.0f, 2.0f, "%.2f", ImGuiSliderFlags_AlwaysClamp );
-                ImGui::SliderFloat( "Night Fog Brightness", &settings.NightFogBrightness, 0.0f, 2.0f, "%.2f", ImGuiSliderFlags_AlwaysClamp );
                 ImGui::EndDisabled();
             }
             ImGui::PopID();

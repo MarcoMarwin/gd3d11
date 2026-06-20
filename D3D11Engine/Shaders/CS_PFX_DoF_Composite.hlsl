@@ -46,39 +46,44 @@ float ComputeCoCFromDepth( float d, float focusDepth )
     return saturate( ( LinearizeDepth( d ) - focusDepth ) / DoF_FocusRange );
 }
 
-void AccumulateSkyEdgeSample(float2 sampleUV, float focusDepth, float falloff, inout float3 colorAccum, inout float weightAccum)
+static const int SKY_EDGE_SAMPLE_COUNT = 24;
+
+float2 GetSkyEdgeSpiralSample(int index)
 {
-    float depth = TX_Depth.SampleLevel( SS_Linear, sampleUV, 0 ).r;
-    float coc = ComputeCoCFromDepth( depth, focusDepth );
-    float4 blur = TX_Blur.SampleLevel( SS_Linear, sampleUV, 0 );
-    float weight = smoothstep(0.18f, 0.65f, coc) * smoothstep(0.05f, 0.60f, blur.a) * falloff;
-    colorAccum += blur.rgb * weight;
-    weightAccum += weight;
+    float radius = sqrt((float(index) + 0.5f) / float(SKY_EDGE_SAMPLE_COUNT));
+    float angle = float(index) * 2.39996323f;
+    return float2(cos(angle), sin(angle)) * radius;
 }
 
 float4 GetSkyEdgeBlurSample(float2 texcoord, float2 dtexel, float focusDepth)
 {
     float3 colorAccum = 0.0f;
-    float weightAccum = 0.0f;
+    float coverageAccum = 0.0f;
+    float kernelAccum = 0.0f;
+    float edgeRadius = clamp(max(DoF_BokehRadius, DoF_MaxBlur) * 0.22f, 2.0f, 10.0f);
 
-    AccumulateSkyEdgeSample(texcoord + float2(-dtexel.x, 0), focusDepth, 1.0f, colorAccum, weightAccum);
-    AccumulateSkyEdgeSample(texcoord + float2( dtexel.x, 0), focusDepth, 1.0f, colorAccum, weightAccum);
-    AccumulateSkyEdgeSample(texcoord + float2(0, -dtexel.y), focusDepth, 1.0f, colorAccum, weightAccum);
-    AccumulateSkyEdgeSample(texcoord + float2(0,  dtexel.y), focusDepth, 1.0f, colorAccum, weightAccum);
+    [unroll]
+    for (int i = 0; i < SKY_EDGE_SAMPLE_COUNT; ++i)
+    {
+        float2 offset = GetSkyEdgeSpiralSample(i);
+        float2 sampleUV = texcoord + offset * edgeRadius * dtexel;
+        float depth = TX_Depth.SampleLevel(SS_Linear, sampleUV, 0).r;
+        float coc = ComputeCoCFromDepth(depth, focusDepth);
+        float4 blur = TX_Blur.SampleLevel(SS_Linear, sampleUV, 0);
+        float radialWeight = exp(-dot(offset, offset) * 2.4f);
+        float geometryWeight = IsSkyDepth(depth) ? 0.0f : smoothstep(0.12f, 0.65f, coc);
+        float sampleWeight = radialWeight * geometryWeight;
 
-    AccumulateSkyEdgeSample(texcoord + float2(-dtexel.x, -dtexel.y) * 2.0f, focusDepth, 0.85f, colorAccum, weightAccum);
-    AccumulateSkyEdgeSample(texcoord + float2( dtexel.x, -dtexel.y) * 2.0f, focusDepth, 0.85f, colorAccum, weightAccum);
-    AccumulateSkyEdgeSample(texcoord + float2(-dtexel.x,  dtexel.y) * 2.0f, focusDepth, 0.85f, colorAccum, weightAccum);
-    AccumulateSkyEdgeSample(texcoord + float2( dtexel.x,  dtexel.y) * 2.0f, focusDepth, 0.85f, colorAccum, weightAccum);
+        colorAccum += blur.rgb * sampleWeight;
+        coverageAccum += sampleWeight;
+        kernelAccum += radialWeight;
+    }
 
-    AccumulateSkyEdgeSample(texcoord + float2(-dtexel.x, 0) * 5.0f, focusDepth, 0.55f, colorAccum, weightAccum);
-    AccumulateSkyEdgeSample(texcoord + float2( dtexel.x, 0) * 5.0f, focusDepth, 0.55f, colorAccum, weightAccum);
-    AccumulateSkyEdgeSample(texcoord + float2(0, -dtexel.y) * 5.0f, focusDepth, 0.55f, colorAccum, weightAccum);
-    AccumulateSkyEdgeSample(texcoord + float2(0,  dtexel.y) * 5.0f, focusDepth, 0.55f, colorAccum, weightAccum);
-
-    float blend = smoothstep(0.04f, 0.35f, weightAccum);
-    return float4(colorAccum / max(weightAccum, 0.001f), blend);
+    float coverage = saturate(coverageAccum / max(kernelAccum, 0.001f) * 2.2f);
+    float blend = smoothstep(0.02f, 0.85f, coverage);
+    return float4(colorAccum / max(coverageAccum, 0.001f), blend);
 }
+
 [numthreads(8, 8, 1)]
 void CSMain( uint3 DTid : SV_DispatchThreadID )
 {

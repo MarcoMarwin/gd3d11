@@ -230,6 +230,9 @@ XRESULT D3D11ShaderManager::Init() {
     Shaders.push_back( ShaderInfo::make<PShaderID::PS_Water>( "PS_Water.hlsl" )
         .with_category( ShaderCategory::Water )  );
 
+    Shaders.push_back( ShaderInfo::make<PShaderID::PS_PFX_WetGroundSSR>( "PS_PFX_WetGroundSSR.hlsl" )
+        .with_category( ShaderCategory::Water ) );
+
     Shaders.push_back( ShaderInfo::make<PShaderID::PS_ParticleDistortion>( "PS_ParticleDistortion.hlsl" )  );
 
     Shaders.push_back( ShaderInfo::make<PShaderID::PS_PFX_ApplyParticleDistortion>( "PS_PFX_ApplyParticleDistortion.hlsl" ) );

@@ -355,28 +355,28 @@ struct VobLightInfo {
     ~VobLightInfo() = default;
 
     /** Vob the data came from */
-    zCVobLight* Vob;
+    zCVobLight* Vob = nullptr;
 
     /** Flag to see if this vob was drawn in the current render pass. Used to collect the same vob only once. Cleared immediately. */
     std::atomic<size_t> VisibleInRenderPass{};
-    bool IsPFXVobLight;
+    bool IsPFXVobLight = false;
 
     /** True if this is an indoor-vob */
-    bool IsIndoorVob;
+    bool IsIndoorVob = false;
 
     /** BSP-Node this is stored in */
     std::vector<BspInfo*> ParentBSPNodes{};
 
     /** Buffers for doing shadows on this light */
     std::unique_ptr<BaseShadowedPointLight> LightShadowBuffers;
-    bool DynamicShadows; // Whether this light should be able to have dynamic shadows
-    bool UpdateShadows; // Whether to update this lights shadows on the next occasion
+    bool DynamicShadows = false; // Whether this light should be able to have dynamic shadows
+    bool UpdateShadows = false; // Whether to update this lights shadows on the next occasion
 
     /** Position where we were rendered the last time */
     XMFLOAT3 LastRenderedPosition;
     
     /** Flag that is set on every "seen" light in this frame, reset in ResetVobFrameStats */
-    bool VisibleInFrame;
+    bool VisibleInFrame = false;
 };
 
 static auto g_MatIdentity = XMFLOAT4X4(

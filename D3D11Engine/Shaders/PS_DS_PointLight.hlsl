@@ -22,7 +22,7 @@ cbuffer DS_PointLightConstantBuffer : register( b0 )
 	matrix PL_InvView; // Optimize out!
 	
 	float3 PL_LightScreenPos;
-	float PL_Pad3;
+	float PL_ShadowStrength;
 };
 
 //--------------------------------------------------------------------------------------

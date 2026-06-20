@@ -437,7 +437,7 @@ void D3D11PointLight::RenderFullCubemap() {
             CopyStaticAsideToActiveTarget();
         }
 
-        if ( LightInfo->IsIndoorVob ) {
+        if ( LightInfo->IsIndoorVob && LightInfo->Vob->IsStatic() ) {
             return;
         }
 

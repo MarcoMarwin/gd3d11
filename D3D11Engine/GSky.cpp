@@ -291,7 +291,7 @@ XRESULT GSky::RenderSky() {
     AtmosphereCB.AC_g = Atmosphere.G;
     AtmosphereCB.AC_Wavelength = Atmosphere.WaveLengths;
     AtmosphereCB.AC_SpherePosition = sp;
-    if ( !Engine::GAPI->GetRendererState().RendererSettings.EnableRainEffects ) {
+    if ( !Engine::GAPI->GetRendererState().RendererSettings.EnableRain ) {
         AtmosphereCB.AC_SceneWettness = 0.f;
     } else {
         AtmosphereCB.AC_SceneWettness = Engine::GAPI->GetSceneWetness();
@@ -302,12 +302,12 @@ XRESULT GSky::RenderSky() {
     AtmosphereCB.AC_SSRStrength = Engine::GAPI->GetRendererState().RendererSettings.SSRStrength;
     AtmosphereCB.AC_SSSIntensity = Engine::GAPI->GetRendererState().RendererSettings.SSSIntensity;
     AtmosphereCB.AC_AtmospherePad1 = 0.0f;
-    AtmosphereCB.AC_EnableNightAtmosphere = Engine::GAPI->GetRendererState().RendererSettings.EnableNightAtmosphere ? 1.0f : 0.0f;
-    AtmosphereCB.AC_NearNightBrightness = Engine::GAPI->GetRendererState().RendererSettings.NearNightBrightness;
-    AtmosphereCB.AC_NightFogBrightness = Engine::GAPI->GetRendererState().RendererSettings.NightFogBrightness;
-    AtmosphereCB.AC_NightDarkeningStart = Engine::GAPI->GetRendererState().RendererSettings.NightDarkeningStart;
-    AtmosphereCB.AC_NightDarkeningRange = Engine::GAPI->GetRendererState().RendererSettings.NightDarkeningRange;
-    AtmosphereCB.AC_NightDarkeningMax = Engine::GAPI->GetRendererState().RendererSettings.NightDarkeningMax;
+    AtmosphereCB.AC_EnableNightAtmosphere = 1.0f;
+    AtmosphereCB.AC_NearNightBrightness = 1.0f;
+    AtmosphereCB.AC_NightFogBrightness = 1.0f;
+    AtmosphereCB.AC_NightDarkeningStart = 3000.0f;
+    AtmosphereCB.AC_NightDarkeningRange = 12000.0f;
+    AtmosphereCB.AC_NightDarkeningMax = 2.0f;
     AtmosphereCB.AC_WorldCameraPos = camPos;
 
     //Engine::GraphicsEngine->DrawSky();

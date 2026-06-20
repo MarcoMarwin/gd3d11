@@ -729,12 +729,6 @@ struct GothicRendererSettings {
         DoFFocusRange = 8000.0f;
         DoFBokehRadius = 8.0f;
         DoFMaxBlur = 12.0f;
-        EnableNightAtmosphere = true;
-        NearNightBrightness = 1.0f;
-        NightDarkeningStart = 3000.0f;
-        NightDarkeningRange = 12000.0f;
-        NightDarkeningMax = 2.0f;
-        NightFogBrightness = 1.0f;
 
         WindQuality = WIND_QUALITY_ADVANCED;
         HeroAffectsObjects = true;
@@ -765,7 +759,6 @@ struct GothicRendererSettings {
         RainFogDensity = 0.00050f;
 
         EnableRain = true;
-        EnableRainEffects = true;
 
         GodRayDecay = 0.97f;
         GodRayWeight = 0.85f;
@@ -938,12 +931,6 @@ struct GothicRendererSettings {
     float DoFFocusRange;
     float DoFBokehRadius;
     float DoFMaxBlur;
-    bool EnableNightAtmosphere;
-    float NearNightBrightness;
-    float NightDarkeningStart;
-    float NightDarkeningRange;
-    float NightDarkeningMax;
-    float NightFogBrightness;
     bool EnableOcclusionCulling;
     bool SortRenderQueue;
     bool DrawThreaded;
@@ -1025,7 +1012,6 @@ struct GothicRendererSettings {
     float RainFogDensity;
 
     bool EnableRain;
-    bool EnableRainEffects;
 
     bool LimitLightIntesity;
     bool AllowNormalmaps;

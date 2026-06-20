@@ -125,6 +125,7 @@ public:
     // Bind the shadowmap sampler to the given slot
     void BindSampler( ID3D11DeviceContext1* context, UINT slot );
     void BindSamplerToCS( ID3D11DeviceContext1* context, UINT slot );
+    ID3D11SamplerState* GetShadowmapSampler() const { return m_shadowmapSampler.Get(); }
 
     XRESULT PrepareRender();
 

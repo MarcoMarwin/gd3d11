@@ -22,7 +22,7 @@ cbuffer DS_PointLightConstantBuffer : register( b0 )
 	matrix PL_InvView; // Optimize out!
 	
 	float3 PL_LightScreenPos;
-	float PL_Pad3;
+	float PL_ShadowStrength;
 };
 
 //--------------------------------------------------------------------------------------
@@ -113,7 +113,7 @@ float4 PSMain( PS_INPUT Input ) : SV_TARGET
 	float specMod = PLS_ComputeSpecMod(diffuse.rgb);
 	float3 lighting = PLS_ComputePointLightLighting(diffuse.rgb, PL_Color.rgb, ndl, falloff, spec, specIntensity, specPower, specMod);
 	
-	lighting *= shadow;
+	lighting *= lerp(1.0f, shadow, saturate(PL_ShadowStrength));
 	
 	//lighting = GetShadow(uv);
 	

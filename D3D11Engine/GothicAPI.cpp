@@ -4053,7 +4053,7 @@ void GothicAPI::CollectVisibleVobs(
                 vi->VisibleInFrame = true;
 
                 // Update the lights shadows if: Light is dynamic or full shadow-updates are set
-                if ( !vi->IsPFXVobLight ) {
+                if ( !vi->IsPFXVobLight && (!vi->IsIndoorVob || !vi->Vob->IsStatic()) ) {
                     if ( RendererState.RendererSettings.EnablePointlightShadows >= GothicRendererSettings::PLS_FULL
                         || (RendererState.RendererSettings.EnablePointlightShadows >= GothicRendererSettings::PLS_UPDATE_DYNAMIC && !vi->Vob->IsStatic()) ) {
                         // Now check for distances, etc
@@ -4590,17 +4590,17 @@ void GothicAPI::BuildBspVobMapCacheHelper( zCBspBase* base ) {
                 vi->Vob = vob;
                 VobLightMap[vob] = vi;
 
+                vi->IsIndoorVob = vob->IsIndoorVob();
+
                 float minDynamicUpdateLightRange = Engine::GAPI->GetRendererState().RendererSettings.MinLightShadowUpdateRange;
-                if ( RendererState.RendererSettings.EnablePointlightShadows >= GothicRendererSettings::PLS_STATIC_ONLY
+                bool allowShadow = !vi->IsIndoorVob || !vi->Vob->IsStatic();
+                if ( allowShadow
+                    && RendererState.RendererSettings.EnablePointlightShadows >= GothicRendererSettings::PLS_STATIC_ONLY
                     && vi->Vob->GetLightRange() > minDynamicUpdateLightRange ) {
                     // Create shadowcubemap, if wanted
                     BaseShadowedPointLight* bpl;
                     Engine::GraphicsEngine->CreateShadowedPointLight( &bpl, vi );
                     vi->LightShadowBuffers.reset(bpl);
-                }
-
-                if ( vob->IsIndoorVob() ) {
-                    vi->IsIndoorVob = true;
                 }
             }
         }
@@ -5191,12 +5191,6 @@ XRESULT GothicAPI::SaveMenuSettings( const std::string& file ) {
     WritePrivateProfileStringA( "General", "DoFFocusRange", float_to_string( s.DoFFocusRange, 1 ).c_str(), ini.c_str() );
     WritePrivateProfileStringA( "General", "DoFBokehRadius", float_to_string( s.DoFBokehRadius, 1 ).c_str(), ini.c_str() );
     WritePrivateProfileStringA( "General", "DoFMaxBlur", float_to_string( s.DoFMaxBlur, 1 ).c_str(), ini.c_str() );
-    WritePrivateProfileStringA( "General", "EnableNightAtmosphere", std::to_string( s.EnableNightAtmosphere ? TRUE : FALSE ).c_str(), ini.c_str() );
-    WritePrivateProfileStringA( "General", "NearNightBrightness", std::to_string( s.NearNightBrightness ).c_str(), ini.c_str() );
-    WritePrivateProfileStringA( "General", "NightDarkeningStart", std::to_string( s.NightDarkeningStart ).c_str(), ini.c_str() );
-    WritePrivateProfileStringA( "General", "NightDarkeningRange", std::to_string( s.NightDarkeningRange ).c_str(), ini.c_str() );
-    WritePrivateProfileStringA( "General", "NightDarkeningMax", std::to_string( s.NightDarkeningMax ).c_str(), ini.c_str() );
-    WritePrivateProfileStringA( "General", "NightFogBrightness", std::to_string( s.NightFogBrightness ).c_str(), ini.c_str() );
 
     /*
     * Draw-distance is saved on a per World basis using SaveRendererWorldSettings
@@ -5224,7 +5218,6 @@ XRESULT GothicAPI::SaveMenuSettings( const std::string& file ) {
     WritePrivateProfileStringA( "Display", "StretchWindow", std::to_string( s.StretchWindow ? TRUE : FALSE ).c_str(), ini.c_str() );
     WritePrivateProfileStringA( "Display", "UIScale", std::to_string( s.GothicUIScale ).c_str(), ini.c_str() );
     WritePrivateProfileStringA( "Display", "Rain", std::to_string( s.EnableRain ? TRUE : FALSE ).c_str(), ini.c_str() );
-    WritePrivateProfileStringA( "Display", "RainEffects", std::to_string( s.EnableRainEffects ? TRUE : FALSE ).c_str(), ini.c_str() );
     WritePrivateProfileStringA( "Display", "LimitLightIntesity", std::to_string( s.LimitLightIntesity ? TRUE : FALSE ).c_str(), ini.c_str() );
     WritePrivateProfileStringA( "Display", "TiledLighting", std::to_string( s.EnableTiledLighting ? TRUE : FALSE ).c_str(), ini.c_str() );
     WritePrivateProfileStringA( "Display", "RendererMode", std::to_string( static_cast<int>(s.RendererMode) ).c_str(), ini.c_str() );
@@ -5326,12 +5319,6 @@ XRESULT GothicAPI::LoadMenuSettings( const std::string& file ) {
         s.DoFFocusRange = ds.DoFFocusRange;
         s.DoFBokehRadius = std::clamp( GetPrivateProfileFloatA( "General", "DoFBokehRadius", ds.DoFBokehRadius, ini.c_str() ), 1.0f, 32.0f );
         s.DoFMaxBlur = ds.DoFMaxBlur;
-        s.EnableNightAtmosphere = GetPrivateProfileBoolA( "General", "EnableNightAtmosphere", ds.EnableNightAtmosphere, ini );
-        s.NearNightBrightness = std::clamp( GetPrivateProfileFloatA( "General", "NearNightBrightness", ds.NearNightBrightness, ini.c_str() ), 0.0f, 2.0f );
-        s.NightDarkeningStart = std::clamp( GetPrivateProfileFloatA( "General", "NightDarkeningStart", ds.NightDarkeningStart, ini.c_str() ), 0.0f, 30000.0f );
-        s.NightDarkeningRange = std::clamp( GetPrivateProfileFloatA( "General", "NightDarkeningRange", ds.NightDarkeningRange, ini.c_str() ), 1000.0f, 30000.0f );
-        s.NightDarkeningMax = std::clamp( GetPrivateProfileFloatA( "General", "NightDarkeningMax", ds.NightDarkeningMax, ini.c_str() ), 0.0f, 2.0f );
-        s.NightFogBrightness = std::clamp( GetPrivateProfileFloatA( "General", "NightFogBrightness", ds.NightFogBrightness, ini.c_str() ), 0.0f, 2.0f );
 
         /*
         * Draw-distance is Loaded on a per World basis using LoadRendererWorldSettings
@@ -5387,7 +5374,6 @@ XRESULT GothicAPI::LoadMenuSettings( const std::string& file ) {
         s.StretchWindow = GetPrivateProfileBoolA( "Display", "StretchWindow", ds.StretchWindow, ini );
         s.GothicUIScale = GetPrivateProfileFloatA( "Display", "UIScale", 1.0f, ini );
         s.EnableRain = GetPrivateProfileBoolA( "Display", "Rain", ds.EnableRain, ini );
-        s.EnableRainEffects = GetPrivateProfileBoolA( "Display", "RainEffects", ds.EnableRainEffects, ini );
         s.LimitLightIntesity = GetPrivateProfileBoolA( "Display", "LimitLightIntesity", ds.LimitLightIntesity, ini );
 
         // s.EnableTiledLighting = GetPrivateProfileBoolA( "Display", "TiledLighting", s.EnableTiledLighting, ini );
@@ -6146,11 +6132,13 @@ static void CollectLeafVobs(
                     VobLightInfo* vi = new VobLightInfo;
                     vi->Vob = vob;
                     vi->IsPFXVobLight = PFXVobLight;
-                    vi->UpdateShadows = !PFXVobLight;
+                    vi->IsIndoorVob = vob->IsIndoorVob();
+                    vi->UpdateShadows = !PFXVobLight && (!vi->IsIndoorVob || !vob->IsStatic());
                     vit = VobLightMap.emplace( vob, vi ).first;
 
                     // Create shadow-buffers for these lights since it was dynamically added to the world
-                    if ( !vi->IsPFXVobLight && rendererSettings.EnablePointlightShadows >= GothicRendererSettings::PLS_STATIC_ONLY ) {
+                    if ( !vi->IsPFXVobLight && (!vi->IsIndoorVob || !vob->IsStatic())
+                        && rendererSettings.EnablePointlightShadows >= GothicRendererSettings::PLS_STATIC_ONLY ) {
                         BaseShadowedPointLight* bpl;
                         Engine::GraphicsEngine->CreateShadowedPointLight( &bpl, vi, true ); // Also flag as dynamic
                         vi->LightShadowBuffers.reset(bpl);

@@ -105,16 +105,14 @@ float4 ComputeHeightFog( float2 texcoord )
 	float3 nightFogColor = float3(0.12f, 0.18f, 0.27f) * nightFogBrightness;
 	color = lerp(color, nightFogColor, nightTimeBlend);
 
-	// Starts darker (2.5) and doesn't drop as much at noon.
-	float darknessFactor = 2.5f; 
-	if (AC_LightPos.y > 0.0f) { 
-		darknessFactor -= (AC_LightPos.y * 0.8f); 
-	}
-	
-	// Never let the fog become a 100% solid wall of color.
-	float maxFogOpacity = 0.85f;
+	// Restore the stable 17.9.7 blue daytime distance fog while keeping the
+	// enhanced-night fog response unchanged.
+	float dayDarknessFactor = max(1.0f, 2.0f - max(0.0f, AC_LightPos.y));
+	float darknessFactor = lerp(dayDarknessFactor, 2.5f, nightTimeBlend);
+	float maxFogOpacity = lerp(1.0f, 0.85f, nightTimeBlend);
 
-	return float4(saturate(color / darknessFactor), saturate(fog) * maxFogOpacity);}
+	return float4(saturate(color / darknessFactor), saturate(fog) * maxFogOpacity);
+}
 #endif
 
 //--------------------------------------------------------------------------------------

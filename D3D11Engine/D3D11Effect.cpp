@@ -163,7 +163,7 @@ XRESULT D3D11Effect::DrawRain() {
     acb.AR_CameraPosition = Engine::GAPI->GetCameraPosition();
     acb.AR_GlobalVelocity = velocity;
     acb.AR_MoveRainParticles = state.RendererSettings.RainMoveParticles ? 1 : 0;
-    acb.AR_Pad1.x = state.RendererSettings.EnableRainEffects ? 1.0f : 0.0f;
+    acb.AR_Pad1.x = state.RendererSettings.EnableRain ? 1.0f : 0.0f;
     auto advRainBuf = particleAdvanceVS->GetBuffer( "AdvanceRainConstantBuffer" );
     advRainBuf.Update( &acb ).Bind();
     advRainBuf.GetRawBuffer()->BindToPixelShader( 1 );
@@ -348,7 +348,7 @@ XRESULT D3D11Effect::DrawRain_CS() {
     acb.AR_CameraPosition = Engine::GAPI->GetCameraPosition();
     acb.AR_GlobalVelocity = velocity;
     acb.AR_MoveRainParticles = numParticles;
-    acb.AR_Pad1.x = state.RendererSettings.EnableRainEffects ? 1.0f : 0.0f;
+    acb.AR_Pad1.x = state.RendererSettings.EnableRain ? 1.0f : 0.0f;
 
     advanceRainCS->GetBuffer( "AdvanceRainConstantBuffer" ).Update( &acb );
     advanceRainCS->GetBuffer( "AdvanceRainConstantBuffer" ).GetRawBuffer()->BindToPixelShader( 1 );

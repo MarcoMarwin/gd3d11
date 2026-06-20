@@ -22,6 +22,8 @@
 #include "D3D11PFX_FSR3.h"
 #include "D3D11PFX_SAO.h"
 #include "D3D11PFX_ASSAO.h"
+#include "D3D11Effect.h"
+#include "D3D11ShadowMap.h"
 #include "D3D11ConstantBuffer.h"
 #include "ConstantBufferStructs.h"
 #include "GothicAPI.h"
@@ -86,6 +88,77 @@ XRESULT D3D11PfxRenderer::RenderGodRays(ID3D11ShaderResourceView* backbuffer, ID
 /** Renders the depth-of-field effect */
 XRESULT D3D11PfxRenderer::RenderDepthOfField( ID3D11ShaderResourceView* backbuffer ) {
     return FX_DepthOfField->Render( backbuffer );
+}
+
+XRESULT D3D11PfxRenderer::RenderWetGroundSSR(
+    ID3D11RenderTargetView* outputRTV,
+    ID3D11ShaderResourceView* sceneSRV,
+    ID3D11ShaderResourceView* depthSRV,
+    ID3D11ShaderResourceView* normalsSRV ) {
+    auto* engine = reinterpret_cast<D3D11GraphicsEngine*>(Engine::GraphicsEngine);
+    auto& context = engine->GetContext();
+    auto* rainShadow = engine->Effects ? engine->Effects->GetRainShadowmap() : nullptr;
+    auto* shadowMaps = engine->GetShadowMaps();
+    if ( !outputRTV || !sceneSRV || !depthSRV || !normalsSRV || !rainShadow || !shadowMaps ) {
+        return XR_FAILED;
+    }
+
+    auto ps = engine->GetShaderManager().GetPShader( PShaderID::PS_PFX_WetGroundSSR );
+    auto vs = engine->GetShaderManager().GetVShader( VShaderID::VS_PFX );
+    ps->Apply();
+    vs->Apply();
+
+    WetGroundSSRConstantBuffer cb = {};
+    auto& projection = Engine::GAPI->GetProjectionMatrix();
+    cb.WG_ProjParams = float4( 1.0f / projection._11, 1.0f / projection._22, projection._43, projection._33 );
+    XMMATRIX view = Engine::GAPI->GetViewMatrixXM();
+    XMStoreFloat4x4( &cb.WG_InvView, XMMatrixInverse( nullptr, view ) );
+    XMStoreFloat4x4( &cb.WG_ViewProj, XMLoadFloat4x4( &projection ) * view );
+
+    auto& rainCamera = engine->Effects->GetRainShadowmapCameraRepl();
+    XMStoreFloat4x4( &cb.WG_RainViewProj,
+        XMLoadFloat4x4( &rainCamera.ProjectionReplacement ) *
+        XMLoadFloat4x4( &rainCamera.ViewReplacement ) );
+
+    cb.WG_CameraPosition = Engine::GAPI->GetCameraPosition();
+    cb.WG_Wetness = Engine::GAPI->GetSceneWetness();
+    const INT2 resolution = engine->GetResolution();
+    cb.WG_InvResolution = float2( 1.0f / std::max( resolution.x, 1 ), 1.0f / std::max( resolution.y, 1 ) );
+    cb.WG_Strength = Engine::GAPI->GetRendererState().RendererSettings.SSRStrength;
+    cb.WG_Time = Engine::GAPI->GetTimeSeconds();
+    ps->GetBuffer( "WetGroundSSRConstantBuffer" ).Update( &cb ).Bind();
+
+    context->OMSetRenderTargets( 1, &outputRTV, nullptr );
+    ID3D11ShaderResourceView* resources[4] = {
+        sceneSRV,
+        depthSRV,
+        normalsSRV,
+        rainShadow->GetShaderResView().Get()
+    };
+    context->PSSetShaderResources( 0, 4, resources );
+    engine->GetDistortionTexture()->BindToPixelShader( 4 );
+
+    ID3D11SamplerState* samplers[2] = {
+        engine->GetClampSamplerState(),
+        shadowMaps->GetShadowmapSampler()
+    };
+    context->PSSetSamplers( 0, 2, samplers );
+
+    engine->SetDefaultStates();
+    Engine::GAPI->GetRendererState().BlendState.SetDefault();
+    Engine::GAPI->GetRendererState().BlendState.SetDirty();
+    Engine::GAPI->GetRendererState().DepthState.DepthBufferCompareFunc = GothicDepthBufferStateInfo::CF_COMPARISON_ALWAYS;
+    Engine::GAPI->GetRendererState().DepthState.DepthWriteEnabled = false;
+    Engine::GAPI->GetRendererState().DepthState.SetDirty();
+    Engine::GAPI->GetRendererState().RasterizerState.CullMode = GothicRasterizerStateInfo::CM_CULL_NONE;
+    Engine::GAPI->GetRendererState().RasterizerState.SetDirty();
+    engine->SetViewport( ViewportInfo( 0, 0, resolution ) );
+
+    DrawFullScreenQuad();
+
+    ID3D11ShaderResourceView* nullResources[5] = {};
+    context->PSSetShaderResources( 0, 5, nullResources );
+    return XR_SUCCESS;
 }
 
 /** Renders the HDR-Effect */
