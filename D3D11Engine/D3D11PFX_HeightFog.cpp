@@ -115,7 +115,6 @@ XRESULT D3D11PFX_HeightFog::Render( RenderToTextureBuffer* fxbuffer ) {
 
 	hfPS->GetBuffer( "PFXBuffer" ).Update( &cb ).Bind();
 
-	GSky* sky = Engine::GAPI->GetSky();
 	hfPS->GetBuffer( "Atmosphere" ).Update( &sky->GetAtmosphereCB() ).Bind();
 
 	engine->GetContext()->OMSetRenderTargets( 1, oldRTV.GetAddressOf(), nullptr );
