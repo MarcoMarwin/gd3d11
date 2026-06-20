@@ -258,7 +258,14 @@ float4 PSMain( PS_INPUT Input ) : SV_TARGET
 		1.0-(1.0/250.0),
 		1.0-(1.0/250.0),
 		directionalLight.w);
-#endif	
+#endif
+#ifndef SNOW_FEATURE
+	// Fade the billboard at both ends so shortened drops taper naturally
+	// instead of looking like clipped rectangular streaks.
+	float endFade = smoothstep(0.0f, 0.22f, Input.vTexcoord.y)
+		* smoothstep(0.0f, 0.22f, 1.0f - Input.vTexcoord.y);
+	directionalLight.w *= endFade;
+#endif
 	return directionalLight;
 }
 
