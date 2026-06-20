@@ -681,15 +681,27 @@ void ImGuiShim::RenderSettingsWindow()
             }
             ImGui::SetItemTooltip( "Changing this will reload shaders." );
 
-            bool enhancedWater = settings.EnableSSR;
-            if ( ImGui::Checkbox( "Enhanced Water Effects", &enhancedWater ) ) {
-                settings.EnableSSR = enhancedWater;
-                settings.EnableWaterAnimation = enhancedWater;
+            static std::vector<std::tuple<const char*, int, const char*>> waterReflections = {
+                {"Off", 0, "Disables screen-space water and wet-ground reflections."},
+                {"Water", 1, "Enables water reflections."},
+                {"Water + Rain", 2, "Adds reflections on rain-wet ground."},
+            };
+            ImGui::TextUnformatted( "Water Reflections" );
+            ImGui::SameLine( standardComboStart );
+            ImGui::SetNextItemWidth( standardComboWidth );
+            if ( ImComboBoxCT( "##WaterReflections", waterReflections, &settings.WaterReflectionsMode, [&settings, &shadersToReload] {
+                settings.EnableSSR = settings.WaterReflectionsMode > 0;
                 shadersToReload |= ShaderCategory::Water;
+            } ) ) {
+                ImGui::EndCombo();
             }
-            ImGui::SetItemTooltip( "Enables water reflections, animated waves, and reflections on rain-wet ground." );
+            ImGui::SetItemTooltip( "Controls screen-space reflections on water and optional rain-wet ground." );
             ImGui::Checkbox( "Backlit Vegetation", &settings.EnableSSS );
             ImGui::SetItemTooltip( "Adds soft light transmission to grass, leaves, and alpha-tested vegetation." );
+            if ( ImGui::Checkbox( "Water Effects", &settings.EnableWaterAnimation ) ) {
+                shadersToReload |= ShaderCategory::Water;
+            }
+            ImGui::SetItemTooltip( "Enables animated water waves and character ripple effects." );
             ImGui::Checkbox( "Depth of Field", &settings.EnableDoF );
             ImGui::SetItemTooltip( "Keeps the subject sharp while softly blurring distant scenery and dialog backgrounds." );
             static std::vector<std::tuple<const char*, GothicRendererSettings::E_AntiAliasingMode, const char*>> antiAliasing = {
@@ -1636,16 +1648,21 @@ void RenderAdvancedColumn4( GothicRendererSettings& settings, GothicAPI* gapi ) 
                 ImGui::PopID();
             }
 
-        ImGui::SeparatorText( "Enhanced Water Effects" );
+        ImGui::SeparatorText( "Water Reflections" );
         {
-            ImGui::PushID( "EnhancedWaterEffectsSettings" );
-            bool enhancedWater = settings.EnableSSR;
-            if ( ImGui::Checkbox( "Enable", &enhancedWater ) ) {
-                settings.EnableSSR = enhancedWater;
-                settings.EnableWaterAnimation = enhancedWater;
+            ImGui::PushID( "WaterReflectionsSettings" );
+            static std::vector<std::tuple<const char*, int, const char*>> waterReflections = {
+                {"Off", 0, "Disables screen-space water and wet-ground reflections."},
+                {"Water", 1, "Enables water reflections."},
+                {"Water + Rain", 2, "Adds reflections on rain-wet ground."},
+            };
+            if ( ImComboBoxCT( "Mode", waterReflections, &settings.WaterReflectionsMode, [&settings] {
+                settings.EnableSSR = settings.WaterReflectionsMode > 0;
                 Engine::GraphicsEngine->ReloadShaders( ShaderCategory::Water );
+            } ) ) {
+                ImGui::EndCombo();
             }
-            ImGui::BeginDisabled( !settings.EnableSSR );
+            ImGui::BeginDisabled( settings.WaterReflectionsMode == 0 );
             {
                 ImGui::SliderFloat( "Reflection Strength", &settings.SSRStrength, 0.0f, 2.0f, "%.2f", ImGuiSliderFlags_AlwaysClamp );
                 ImGui::EndDisabled();
@@ -1665,13 +1682,23 @@ void RenderAdvancedColumn4( GothicRendererSettings& settings, GothicAPI* gapi ) 
             ImGui::PopID();
         }
 
+        ImGui::SeparatorText( "Enhanced Night" );
+        {
+            ImGui::PushID( "EnhancedNightSettings" );
+            ImGui::SliderFloat( "Near Brightness", &settings.NightNearBrightness, 0.0f, 2.0f, "%.2f", ImGuiSliderFlags_AlwaysClamp );
+            ImGui::SliderFloat( "Darkening Start", &settings.NightDarkeningStart, 0.0f, 30000.0f, "%.0f", ImGuiSliderFlags_AlwaysClamp );
+            ImGui::SliderFloat( "Darkening Range", &settings.NightDarkeningRange, 1000.0f, 50000.0f, "%.0f", ImGuiSliderFlags_AlwaysClamp );
+            ImGui::SliderFloat( "Max Darkness", &settings.NightMaxDarkness, 0.0f, 2.5f, "%.2f", ImGuiSliderFlags_AlwaysClamp );
+            ImGui::SliderFloat( "Fog Brightness", &settings.NightFogBrightness, 0.0f, 2.0f, "%.2f", ImGuiSliderFlags_AlwaysClamp );
+            ImGui::PopID();
+        }
         ImGui::SeparatorText( "Depth of Field" );
         {
             ImGui::PushID( "DepthOfFieldSettings" );
             ImGui::Checkbox( "Enable", &settings.EnableDoF );
             ImGui::BeginDisabled( !settings.EnableDoF );
             {
-                ImGui::SliderFloat( "Blur Distance", &settings.DoFFocusDistance, 500.0f, 50000.0f, "%.0f", ImGuiSliderFlags_AlwaysClamp );
+                ImGui::SliderFloat( "Blur Distance", &settings.DoFFocusDistance, 500.0f, 30000.0f, "%.0f", ImGuiSliderFlags_AlwaysClamp );
                 ImGui::SliderFloat( "Blur Strength", &settings.DoFBokehRadius, 1.0f, 32.0f, "%.1f", ImGuiSliderFlags_AlwaysClamp );
                 ImGui::EndDisabled();
             }
