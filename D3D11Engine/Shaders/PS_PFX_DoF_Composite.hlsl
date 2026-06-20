@@ -106,10 +106,14 @@ float4 PSMain( PS_INPUT Input ) : SV_TARGET
     }
 
     float cocC = ComputeCoCFromDepth( depthC, focusDepth );
-    float cocL = ComputeCoCFromDepth( TX_Depth.Sample( SS_Linear, Input.vTexcoord + float2( -dtexel.x, 0 ) ).r, focusDepth );
-    float cocR = ComputeCoCFromDepth( TX_Depth.Sample( SS_Linear, Input.vTexcoord + float2(  dtexel.x, 0 ) ).r, focusDepth );
-    float cocU = ComputeCoCFromDepth( TX_Depth.Sample( SS_Linear, Input.vTexcoord + float2( 0, -dtexel.y ) ).r, focusDepth );
-    float cocD = ComputeCoCFromDepth( TX_Depth.Sample( SS_Linear, Input.vTexcoord + float2( 0,  dtexel.y ) ).r, focusDepth );
+    float depthL = TX_Depth.Sample( SS_Linear, Input.vTexcoord + float2( -dtexel.x, 0 ) ).r;
+    float depthR = TX_Depth.Sample( SS_Linear, Input.vTexcoord + float2(  dtexel.x, 0 ) ).r;
+    float depthU = TX_Depth.Sample( SS_Linear, Input.vTexcoord + float2( 0, -dtexel.y ) ).r;
+    float depthD = TX_Depth.Sample( SS_Linear, Input.vTexcoord + float2( 0,  dtexel.y ) ).r;
+    float cocL = IsSkyDepth( depthL ) ? cocC : ComputeCoCFromDepth( depthL, focusDepth );
+    float cocR = IsSkyDepth( depthR ) ? cocC : ComputeCoCFromDepth( depthR, focusDepth );
+    float cocU = IsSkyDepth( depthU ) ? cocC : ComputeCoCFromDepth( depthU, focusDepth );
+    float cocD = IsSkyDepth( depthD ) ? cocC : ComputeCoCFromDepth( depthD, focusDepth );
 
     float minCoC = min( min( cocC, cocL ), min( cocR, min( cocU, cocD ) ) );
 
