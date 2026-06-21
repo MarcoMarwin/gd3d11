@@ -90,12 +90,12 @@ static ID3D11ShaderResourceView* GetParallaxDisplacementSRV( MyDirectDrawSurface
     return surface->GetDisplacementmap()->GetShaderResourceView().Get();
 }
 
-static ID3D11ShaderResourceView* GetWetNormalFallbackSRV( MyDirectDrawSurface7* surface ) {
-    if ( !surface || surface->GetNormalmap() || Engine::GAPI->GetSceneWetness() <= 1e-6f ) {
+static ID3D11ShaderResourceView* GetWetNormalFallbackSRV( MyDirectDrawSurface7* surface, D3D11Texture* distortionTexture ) {
+    if ( !surface || !distortionTexture || surface->GetNormalmap() || Engine::GAPI->GetSceneWetness() <= 1e-6f ) {
         return nullptr;
     }
 
-    return Engine::GraphicsEngine->GetDistortionTexture()->GetShaderResourceView().Get();
+    return distortionTexture->GetShaderResourceView().Get();
 }
 
 static void UpdateRefractionViewProjection( RefractionInfoConstantBuffer& buffer ) {
@@ -2360,7 +2360,7 @@ bool D3D11GraphicsEngine::BindTextureNRFX( zCTexture* tex, bool bindShader, bool
     // stay without a fallback texture.
     if ( D3D11Texture* nrm = tex->GetSurface()->GetNormalmap() ) {
         srvs[1] = nrm->GetShaderResourceView().Get();
-    } else if ( ID3D11ShaderResourceView* wetFallback = GetWetNormalFallbackSRV( tex->GetSurface() ) ) {
+    } else if ( ID3D11ShaderResourceView* wetFallback = GetWetNormalFallbackSRV( tex->GetSurface(), DistortionTexture.get() ) ) {
         if ( info &&
             info->buffer.NormalmapStrength != DEFAULT_NORMALMAP_STRENGTH ) {
             info->buffer.NormalmapStrength = DEFAULT_NORMALMAP_STRENGTH;
@@ -4757,7 +4757,7 @@ XRESULT D3D11GraphicsEngine::DrawMeshInfoListAlphablended(
                 : nullptr;
             srv[3] = GetParallaxDisplacementSRV( surface );
             if ( !srv[1] ) {
-                srv[1] = GetWetNormalFallbackSRV( surface );
+                srv[1] = GetWetNormalFallbackSRV( surface, DistortionTexture.get() );
             }
 
             int alphaFunc = meshKey.Material->GetAlphaFunc();
@@ -5173,7 +5173,7 @@ XRESULT D3D11GraphicsEngine::DrawWorldMesh( bool noTextures ) {
                     : nullptr;
                 srv[3] = GetParallaxDisplacementSRV( surface );
                 if ( !srv[1] ) {
-                    srv[1] = GetWetNormalFallbackSRV( surface );
+                    srv[1] = GetWetNormalFallbackSRV( surface, DistortionTexture.get() );
                 }
 
                 // Bind diffuse/normal/fx like 026; POM displacement uses t13.
@@ -7353,7 +7353,7 @@ XRESULT D3D11GraphicsEngine::DrawVOBsInstanced() {
                             : nullptr;
                         srv[3] = GetParallaxDisplacementSRV( surface );
                         if ( !srv[1] && ( wantShader && !isZPrepass ) ) {
-                            if ( ID3D11ShaderResourceView* wetFallback = GetWetNormalFallbackSRV( surface ) ) {
+                            if ( ID3D11ShaderResourceView* wetFallback = GetWetNormalFallbackSRV( surface, DistortionTexture.get() ) ) {
                                 if ( info && info->buffer.NormalmapStrength != DEFAULT_NORMALMAP_STRENGTH ) {
                                     info->buffer.NormalmapStrength = DEFAULT_NORMALMAP_STRENGTH;
                                     lastMatInfo = info;
@@ -7598,7 +7598,7 @@ XRESULT D3D11GraphicsEngine::DrawFrameAlphaMeshes()
                 : nullptr;
             srv[3] = GetParallaxDisplacementSRV( surface );
             if ( !srv[1] ) {
-                srv[1] = GetWetNormalFallbackSRV( surface );
+                srv[1] = GetWetNormalFallbackSRV( surface, DistortionTexture.get() );
             }
 
             // Bind diffuse/normal/fx like 026; POM displacement uses t13.
@@ -7735,7 +7735,7 @@ XRESULT D3D11GraphicsEngine::DrawPolyStrips( bool noTextures ) {
             srv[2] = surface->GetFxMap() ? surface->GetFxMap()->GetShaderResourceView().Get() : NULL;
             srv[3] = GetParallaxDisplacementSRV( surface );
             if ( !srv[1] ) {
-                srv[1] = GetWetNormalFallbackSRV( surface );
+                srv[1] = GetWetNormalFallbackSRV( surface, DistortionTexture.get() );
             }
 
             // Bind diffuse/normal/fx like 026; POM displacement uses t13.
