@@ -663,8 +663,10 @@ HRESULT LoadTextureArray( Microsoft::WRL::ComPtr<ID3D11Device1> pd3dDevice, Micr
                 ppSRV
             );
             if ( SUCCEEDED( hr ) ) {
-                hr = pRes.As( ppTex2D );
+                Microsoft::WRL::ComPtr<ID3D11Texture2D> pTexture;
+                hr = pRes.As( &pTexture );
                 if ( SUCCEEDED( hr ) ) {
+                    *ppTex2D = pTexture.Detach();
                     LogInfo() << "Successfully loaded texture array from single VDFS file: " << singleFilePath;
                     return S_OK;
                 }
