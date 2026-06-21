@@ -38,7 +38,7 @@ cbuffer Atmosphere : register( b1 )
 	float AC_SSRStrength;
 	float AC_SSSIntensity;
 
-	float AC_AtmospherePad1;
+	float AC_DayFadeDistance;
 	float AC_EnableNightAtmosphere;
 	float AC_NearNightBrightness;
 	float AC_NightFogBrightness;
@@ -115,6 +115,15 @@ float3 ApplyNightDistanceDarkening(float3 worldPosition, float3 color)
 	return lerp(color, float3(0.0f, 0.0f, 0.0f), nightDistanceFade * extraNightDarkening);
 }
 
+float GetDayDistanceFade(float3 worldPosition)
+{
+	float fadeEnd = max(1000.0f, AC_DayFadeDistance * 0.98f);
+	float fadeStart = fadeEnd * 0.82f;
+	float cameraDistance = length(worldPosition - AC_WorldCameraPos);
+	return smoothstep(fadeStart, fadeEnd, cameraDistance)
+		* smoothstep(-0.05f, 0.15f, AC_LightPos.y);
+}
+
 float3 ApplyAtmosphericScatteringGround(float3 worldPosition, float3 in_color, bool applyNightshade=true, bool applyDistanceDarkening=true)
 {
 	float3 camPos = AC_CameraPos;
@@ -185,7 +194,13 @@ float3 ApplyAtmosphericScatteringGround(float3 worldPosition, float3 in_color, b
 	else
 		outColor = dayColor + nightColor * nightWeight + moonColor;
 
-	return applyDistanceDarkening ? ApplyNightDistanceDarkening(worldPosition, outColor) : outColor;
+	if (!applyDistanceDarkening)
+		return outColor;
+
+	// Fade daytime geometry into its atmospheric scattering color before
+	// the far clipping plane can become visible.
+	outColor = lerp(outColor, c0, GetDayDistanceFade(worldPosition));
+	return ApplyNightDistanceDarkening(worldPosition, outColor);
 }
 
 float3 ApplyAtmosphericScatteringSky(float3 worldPosition)

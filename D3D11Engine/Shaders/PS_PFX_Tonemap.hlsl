@@ -30,6 +30,13 @@ struct PS_INPUT
 //--------------------------------------------------------------------------------------
 // Pixel Shader
 //--------------------------------------------------------------------------------------
+float TonemapDither(float2 pixelPosition)
+{
+	float n1 = frac(52.9829189f * frac(dot(pixelPosition, float2(0.06711056f, 0.00583715f))));
+	float n2 = frac(52.9829189f * frac(dot(pixelPosition + 19.19f, float2(0.00583715f, 0.06711056f))));
+	return n1 + n2 - 1.0f;
+}
+
 float4 PSMain( PS_INPUT Input ) : SV_TARGET
 {
 	float4 sample = TX_Scene.Sample(SS_Linear, Input.vTexcoord);
@@ -55,6 +62,12 @@ float4 PSMain( PS_INPUT Input ) : SV_TARGET
 	
 	toneMapped -= HDR_Threshold;
 	toneMapped = max(float3(0,0,0), toneMapped);
+
+	// Final-output dithering survives tone mapping and suppresses visible bands
+	// in dark fog without adding another render pass.
+	float outputLuma = dot(toneMapped, float3(0.2126f, 0.7152f, 0.0722f));
+	float darkDitherWeight = 1.0f - smoothstep(0.02f, 0.25f, outputLuma);
+	toneMapped = saturate(toneMapped + TonemapDither(Input.vPosition.xy) * darkDitherWeight * (1.5f / 255.0f));
 	
 	// Map the resulting value into the 0 to 1 range. Higher values for
 	// BRIGHT_PASS_OFFSET will isolate lights from illuminated scene 

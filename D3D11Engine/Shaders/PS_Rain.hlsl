@@ -248,7 +248,13 @@ void rainResponse(PS_INPUT input, float3 lightVector, float lightIntensity, floa
 //--------------------------------------------------------------------------------------
 // Pixel Shader
 //--------------------------------------------------------------------------------------
-float4 PSMain( PS_INPUT Input ) : SV_TARGET
+struct RAIN_PS_OUTPUT
+{
+	float4 color : SV_TARGET0;
+	float4 reactiveMask : SV_TARGET1;
+};
+
+RAIN_PS_OUTPUT PSMain( PS_INPUT Input )
 {
 	//float4 color = pow(TX_Texture0.Sample(SS_Linear, Input.vTexcoord), 1.0f);
 	float4 color = float4(1,1,1, 0.2f);
@@ -278,7 +284,11 @@ float4 PSMain( PS_INPUT Input ) : SV_TARGET
 		* smoothstep(0.0f, 0.22f, 1.0f - Input.vTexcoord.y);
 	directionalLight.w *= endFade * 0.82f;
 #endif
-	return directionalLight;
+	RAIN_PS_OUTPUT output;
+	output.color = directionalLight;
+	float reactive = saturate(directionalLight.a * 4.0f);
+	output.reactiveMask = float4(1.0f, 1.0f, 1.0f, reactive);
+	return output;
 }
 
 

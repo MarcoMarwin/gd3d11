@@ -4179,9 +4179,16 @@ XRESULT D3D11GraphicsEngine::OnStartWorldRendering() {
             graph.AddPass( RG_PASS_NAME("Draw Rain"), [&]( RGBuilder& builder, RenderPass& pass ) {
                 builder.Read( backBufferHandle );
                 builder.Write( backBufferHandle );
+                builder.Write( reactiveMaskResource );
 
-                pass.m_executeCallback = [this](const RenderGraph&) {
+                pass.m_executeCallback = [this, backBufferHandle, reactiveMaskResource](const RenderGraph& graph) {
                     TracyD3D11ZoneCGX( "D3D11GraphicsEngine::Draw Rain" );
+                    auto backBuffer = graph.GetPhysicalTexture( backBufferHandle );
+                    auto reactiveMask = graph.GetPhysicalTexture( reactiveMaskResource );
+                    ID3D11RenderTargetView* rtvs[2] = {
+                        backBuffer->GetRenderTargetView().Get(), reactiveMask->GetRenderTargetView().Get()
+                    };
+                    GetContext()->OMSetRenderTargets( 2, rtvs, DepthStencilBuffer->GetDepthStencilView().Get() );
                     Effects->DrawRain();
                 };
             });
@@ -4189,9 +4196,16 @@ XRESULT D3D11GraphicsEngine::OnStartWorldRendering() {
             graph.AddPass( RG_PASS_NAME("Draw Rain CS"), [&]( RGBuilder& builder, RenderPass& pass ) {
                 builder.Read( backBufferHandle );
                 builder.Write( backBufferHandle );
+                builder.Write( reactiveMaskResource );
 
-                pass.m_executeCallback = [this](const RenderGraph&) {
+                pass.m_executeCallback = [this, backBufferHandle, reactiveMaskResource](const RenderGraph& graph) {
                     TracyD3D11ZoneCGX( "D3D11GraphicsEngine::Draw Rain (CS)" );
+                    auto backBuffer = graph.GetPhysicalTexture( backBufferHandle );
+                    auto reactiveMask = graph.GetPhysicalTexture( reactiveMaskResource );
+                    ID3D11RenderTargetView* rtvs[2] = {
+                        backBuffer->GetRenderTargetView().Get(), reactiveMask->GetRenderTargetView().Get()
+                    };
+                    GetContext()->OMSetRenderTargets( 2, rtvs, DepthStencilBuffer->GetDepthStencilView().Get() );
                     Effects->DrawRain_CS();
                 };
             });

@@ -393,7 +393,7 @@ struct AtmosphereConstantBuffer {
     float AC_SSRStrength;
     float AC_SSSIntensity;
 
-    float AC_AtmospherePad1;
+    float AC_DayFadeDistance;
     float AC_EnableNightAtmosphere;
     float AC_NearNightBrightness;
     float AC_NightFogBrightness;

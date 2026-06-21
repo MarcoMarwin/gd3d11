@@ -943,7 +943,7 @@ XRESULT D3D11ShadowMap::DrawPointlightShadows( std::vector<VobLightInfo*>& light
     // Indoor ambient lights are static. Prioritize nearby non-static lamp lights
     // for full dynamic point-light shadows.
     std::vector<std::pair<float, VobLightInfo*>> indoorShadowCandidates;
-    indoorShadowCandidates.reserve( 8 );
+    indoorShadowCandidates.reserve( 4 );
     for ( auto* light : lights ) {
         if ( !light || !light->Vob || !light->IsIndoorVob || light->Vob->IsStatic()
             || light->IsPFXVobLight || !light->Vob->IsEnabled() || !light->VisibleInFrame ) {
@@ -959,8 +959,8 @@ XRESULT D3D11ShadowMap::DrawPointlightShadows( std::vector<VobLightInfo*>& light
     }
     std::sort( indoorShadowCandidates.begin(), indoorShadowCandidates.end(),
         []( const auto& left, const auto& right ) { return left.first < right.first; } );
-    if ( indoorShadowCandidates.size() > 8 ) {
-        indoorShadowCandidates.resize( 8 );
+    if ( indoorShadowCandidates.size() > 4 ) {
+        indoorShadowCandidates.resize( 4 );
     }
     auto allowIndoorShadow = [&indoorShadowCandidates]( VobLightInfo* light ) {
         if ( !light->IsIndoorVob ) return true;
