@@ -92,7 +92,7 @@ struct PFXVS_ConstantBuffer {
 };
 
 struct HeightfogConstantBuffer {
-    float4 HF_ProjParams; // x = 1/P._11, y = 1/P._22, z = P._43, w = P._33
+    XMFLOAT4X4 InvProj;
     XMFLOAT4X4 InvView;
     float3 CameraPosition;
     float HF_FogHeight;

@@ -364,10 +364,7 @@ XRESULT D3D11PfxRenderer::RenderPostFXComposition(
     auto& settings = Engine::GAPI->GetRendererState().RendererSettings;
     if ( settings.DrawFog ) {
         HeightfogConstantBuffer cb;
-        {
-            auto& proj = Engine::GAPI->GetProjectionMatrix();
-            cb.HF_ProjParams = float4( 1.0f / proj._11, 1.0f / proj._22, proj._43, proj._33 );
-        }
+        XMStoreFloat4x4( &cb.InvProj, XMMatrixInverse( nullptr, XMLoadFloat4x4( &Engine::GAPI->GetProjectionMatrix() ) ) );
         XMStoreFloat4x4( &cb.InvView, XMMatrixInverse( nullptr, Engine::GAPI->GetViewMatrixXM() ) );
         cb.CameraPosition = Engine::GAPI->GetCameraPosition();
         cb.HF_GlobalDensity = settings.FogGlobalDensity;

@@ -490,7 +490,7 @@ void ApplyGraphicsPresets( GothicRendererSettings& s ) {
         s.IndoorVobDrawRadius = 15'000;
 
         s.WindQuality = GothicRendererSettings::EWindQuality::WIND_QUALITY_NONE;
-        s.HeroAffectsObjects = 1;
+        s.HeroAffectsObjects = 0;
 
         s.EnableGodRays = true;
     }
@@ -526,7 +526,7 @@ void ApplyGraphicsPresets( GothicRendererSettings& s ) {
         s.IndoorVobDrawRadius = 20'000;
 
         s.WindQuality = GothicRendererSettings::EWindQuality::WIND_QUALITY_ADVANCED;
-        s.HeroAffectsObjects = 1;
+        s.HeroAffectsObjects = 0;
 
         s.EnableGodRays = true;
     }
@@ -562,7 +562,7 @@ void ApplyGraphicsPresets( GothicRendererSettings& s ) {
         s.IndoorVobDrawRadius = 20'000;
 
         s.WindQuality = GothicRendererSettings::EWindQuality::WIND_QUALITY_ADVANCED;
-        s.HeroAffectsObjects = 1;
+        s.HeroAffectsObjects = 0;
 
         s.EnableGodRays = true;
     }
@@ -1677,7 +1677,7 @@ void RenderAdvancedColumn4( GothicRendererSettings& settings, GothicAPI* gapi ) 
             ImGui::Checkbox( "Enable", &settings.EnableDoF );
             ImGui::BeginDisabled( !settings.EnableDoF );
             {
-                ImGui::SliderFloat( "Blur Distance", &settings.DoFFocusDistance, 500.0f, 50000.0f, "%.0f", ImGuiSliderFlags_AlwaysClamp );
+                ImGui::SliderFloat( "Blur Distance", &settings.DoFFocusDistance, 0.0f, 30000.0f, "%.0f", ImGuiSliderFlags_AlwaysClamp );
                 ImGui::SliderFloat( "Blur Strength", &settings.DoFBokehRadius, 1.0f, 32.0f, "%.1f", ImGuiSliderFlags_AlwaysClamp );
                 ImGui::EndDisabled();
             }

@@ -5566,9 +5566,9 @@ XRESULT GothicAPI::LoadMenuSettings( const std::string& file ) {
         s.EnableGodRays = GetPrivateProfileBoolA( "General", "EnableGodRays", ds.EnableGodRays, ini );
         s.EnableDoF = GetPrivateProfileBoolA( "General", "EnableDoF", ds.EnableDoF, ini );
         s.DoFGaussBlur = GetPrivateProfileBoolA( "General", "DoFGaussBlur", ds.DoFGaussBlur, ini );
-        s.DoFFocusDistance = GetPrivateProfileFloatA( "General", "DoFFocusDistance", ds.DoFFocusDistance, ini );
+        s.DoFFocusDistance = std::clamp( GetPrivateProfileFloatA( "General", "DoFFocusDistance", ds.DoFFocusDistance, ini ), 0.0f, 30000.0f );
         s.DoFFocusRange = GetPrivateProfileFloatA( "General", "DoFFocusRange", ds.DoFFocusRange, ini );
-        s.DoFBokehRadius = GetPrivateProfileFloatA( "General", "DoFBokehRadius", ds.DoFBokehRadius, ini );
+        s.DoFBokehRadius = std::clamp( GetPrivateProfileFloatA( "General", "DoFBokehRadius", ds.DoFBokehRadius, ini ), 1.0f, 32.0f );
         s.DoFMaxBlur = GetPrivateProfileFloatA( "General", "DoFMaxBlur", ds.DoFMaxBlur, ini );
         s.AllowNormalmaps = GetPrivateProfileBoolA( "General", "AllowNormalmaps", ds.AllowNormalmaps, ini );
         s.EnableParallaxOcclusionMapping = GetPrivateProfileBoolA( "General", "EnableParallaxOcclusionMapping", ds.EnableParallaxOcclusionMapping, ini );

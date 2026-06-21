@@ -3,11 +3,10 @@
 //--------------------------------------------------------------------------------------
 
 #include <AtmosphericScattering.h>
-#include "DepthReconstruction.h"
 
 cbuffer PFXBuffer : register( b0 )
 {
-	float4 HF_ProjParams; // x = 1/P._11, y = 1/P._22, z = P._43, w = P._33
+	matrix HF_InvProj;
 	matrix HF_InvView;
 	float3 HF_CameraPosition;
 	float HF_FogHeight;
@@ -34,7 +33,9 @@ Texture2D	TX_Depth : register( t1 );
 
 float3 VSPositionFromDepth(float depth, float2 vTexCoord)
 {
-	return ReconstructVSPositionFromDepthReverseZInfinite( depth, vTexCoord, HF_ProjParams.xy ) * HF_ProjParams.z;
+	float4 vProjectedPos = float4(vTexCoord * float2(2.0f, -2.0f) + float2(-1.0f, 1.0f), depth, 1.0f);
+	float4 vPositionVS = mul(vProjectedPos, HF_InvProj);
+	return vPositionVS.xyz / vPositionVS.www;
 }
 
 float ComputeVolumetricFog(float3 cameraToWorldPos, float3 posOriginal)

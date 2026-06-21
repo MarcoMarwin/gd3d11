@@ -144,6 +144,8 @@ bool D3D11DeferredRenderer::BindShaderForTexture( D3D11ShaderManager& shaderMana
     bool blendBlend = zMatAlphaFunc == zMAT_ALPHA_FUNC_BLEND;
     bool linZ = (Engine::GAPI->GetRendererState().GraphicsState.FF_GSwitches & GSWITCH_LINEAR_DEPTH) != 0;
     const bool hasNormalmap = texture->GetSurface()->GetNormalmap() != nullptr;
+    const bool useWetNormalFallback = !hasNormalmap && Engine::GAPI->GetSceneWetness() > 1e-6f;
+    const bool useNormalmapShader = hasNormalmap || useWetNormalFallback;
     const bool hasFxMap = hasNormalmap && texture->GetSurface()->GetFxMap();
 
     if ( materialType == MaterialInfo::MT_Portal ) {
@@ -157,7 +159,7 @@ bool D3D11DeferredRenderer::BindShaderForTexture( D3D11ShaderManager& shaderMana
     } else if ( texture->HasAlphaChannel() || forceAlphaTest ) {
         if ( hasFxMap ) {
             newShader = shaderManager.GetPShader( resolvedDiffuseNormalmappedAlphatestFxMap );
-        } else if ( hasNormalmap ) {
+        } else if ( useNormalmapShader ) {
             newShader = shaderManager.GetPShader( resolvedDiffuseNormalmappedAlphatest ); 
         } else {
             newShader = shaderManager.GetPShader( PShaderID::PS_DiffuseAlphaTest );
@@ -165,7 +167,7 @@ bool D3D11DeferredRenderer::BindShaderForTexture( D3D11ShaderManager& shaderMana
     } else {
         if ( hasFxMap ) {
             newShader = shaderManager.GetPShader( resolvedDiffuseNormalmappedFxMap );
-        } else if ( hasNormalmap ) {
+        } else if ( useNormalmapShader ) {
             newShader = shaderManager.GetPShader( resolvedDiffuseNormalmapped );
         } else {
             newShader = shaderManager.GetPShader( PShaderID::PS_Diffuse );
