@@ -2,12 +2,14 @@
 #include "WorldObjects.h"
 #include "GraphicsEventRecord.h"
 #include "ShaderCategory.h"
+#include "ShaderIDs.h"
 
 class BaseLineRenderer;
 class BaseShadowedPointLight;
 class D3D11ConstantBuffer;
 class D3D11Texture;
 class D3D11VertexBuffer;
+struct RenderToTextureBuffer;
 class zCTexture;
 class zCVob;
 struct SkeletalMeshVisualInfo;
@@ -15,17 +17,19 @@ struct VobInfo;
 struct VobLightInfo;
 class zFont;
 
+struct GraphicsEventName {
+    const wchar_t* wide;
+    const char* narrow;
+};
+
+#define GE_NAME(nameLiteral) GraphicsEventName{ L##nameLiteral, nameLiteral }
+
 struct DisplayModeInfo {
-    DisplayModeInfo() {}
+    DisplayModeInfo(): DisplayModeInfo(0,0) {}
     DisplayModeInfo( int w, int h ) : Width(static_cast<DWORD>(w)), Height(static_cast<DWORD>(h)) {}
 
     DWORD Height;
     DWORD Width;
-};
-
-enum RenderStage {
-    STAGE_DRAW_WORLD = 0,
-    STAGE_DRAW_SKELETAL = 1,
 };
 
 enum WindowModes {
@@ -36,20 +40,31 @@ enum WindowModes {
 };
 
 struct ViewportInfo {
-    ViewportInfo() {}
+    ViewportInfo()
+    : ViewportInfo(0, 0, 0, 0)
+    {}
+
     ViewportInfo( unsigned int topleftX,
         unsigned int topleftY,
         unsigned int width,
         unsigned int height,
         float minZ = 0.0f,
-        float maxZ = 1.0f ) {
-        TopLeftX = topleftX;
-        TopLeftY = topleftY;
-        Width = width;
-        Height = height;
-        MinZ = minZ;
-        MaxZ = maxZ;
-    }
+        float maxZ = 1.0f ) : 
+        TopLeftX(topleftX),
+        TopLeftY(topleftY),
+        Width(width),
+        Height(height),
+        MinZ(minZ),
+        MaxZ(maxZ)
+    { }
+
+    ViewportInfo( unsigned int topleftX,
+        unsigned int topleftY,
+        INT2 wh,
+        float minZ = 0.0f,
+        float maxZ = 1.0f )
+    : ViewportInfo(topleftX, topleftY, wh.x, wh.y, minZ, maxZ)
+    { }
 
     unsigned int TopLeftX;
     unsigned int TopLeftY;
@@ -69,69 +84,65 @@ public:
         UI_ToggleAdvancedSettings,
     };
 
-    BaseGraphicsEngine() { };
-    virtual ~BaseGraphicsEngine() { }
+    BaseGraphicsEngine() = default;
+    virtual ~BaseGraphicsEngine() = default;
     
     /* Trigger resize on next frame */
-    virtual XRESULT TriggerResize(INT2 resolution) = 0;
+    virtual XRESULT TriggerResize(INT2 resolution) PURE;
 
     /** Called after the fake-DDraw-Device got created */
-    virtual XRESULT Init() = 0;
+    virtual XRESULT Init() PURE;
 
     /** Called when the game created its window */
-    virtual XRESULT SetWindow( HWND hWnd ) = 0;
+    virtual XRESULT SetWindow( HWND hWnd ) PURE;
 
     /** Called on window resize/resolution change */
-    virtual XRESULT OnResize( INT2 newSize ) = 0;
+    virtual XRESULT OnResize( INT2 newSize ) PURE;
 
     /** Called when the game wants to render a new frame */
-    virtual XRESULT OnBeginFrame() = 0;
+    virtual XRESULT OnBeginFrame() PURE;
 
     /** Called when the game ended it's frame */
-    virtual XRESULT OnEndFrame() = 0;
+    virtual XRESULT OnEndFrame() PURE;
 
     /** Called to set the current viewport */
-    virtual XRESULT SetViewport( const ViewportInfo& viewportInfo ) = 0;
+    virtual XRESULT SetViewport( const ViewportInfo& viewportInfo ) PURE;
 
     /** Called when the game wants to clear the bound rendertarget */
-    virtual XRESULT Clear( const float4& color ) = 0;
+    virtual XRESULT Clear( const float4& color ) PURE;
 
     /** Creates a vertexbuffer object (Not registered inside) */
-    virtual XRESULT CreateVertexBuffer( D3D11VertexBuffer** outBuffer ) = 0;
+    virtual XRESULT CreateVertexBuffer( D3D11VertexBuffer** outBuffer ) PURE;
 
     /** Creates a texture object (Not registered inside) */
-    virtual XRESULT CreateTexture( D3D11Texture** outTexture ) = 0;
+    virtual XRESULT CreateTexture( D3D11Texture** outTexture ) PURE;
 
     /** Creates a constantbuffer object (Not registered inside) */
-    virtual XRESULT CreateConstantBuffer( D3D11ConstantBuffer** outCB, void* data, int size ) = 0;
+    virtual XRESULT CreateConstantBuffer( D3D11ConstantBuffer** outCB, void* data, int size ) PURE;
 
     /** Creates a bufferobject for a shadowed point light */
     virtual XRESULT CreateShadowedPointLight( BaseShadowedPointLight** outPL, VobLightInfo* lightInfo, bool dynamic = false ) { return XR_SUCCESS; }
 
     /** Returns a list of available display modes */
-    virtual XRESULT GetDisplayModeList( std::vector<DisplayModeInfo>* modeList, bool includeSuperSampling = false ) = 0;
+    virtual XRESULT GetDisplayModeList( std::vector<DisplayModeInfo>* modeList, bool includeSuperSampling = false ) PURE;
 
     /** Presents the current frame to the screen */
-    virtual XRESULT Present() = 0;
+    virtual XRESULT Present() PURE;
 
     /** Called when we started to render the world */
-    virtual XRESULT OnStartWorldRendering() = 0;
+    virtual XRESULT OnStartWorldRendering() PURE;
 
     /** Returns the line renderer object */
-    virtual BaseLineRenderer* GetLineRenderer() = 0;
+    virtual BaseLineRenderer* GetLineRenderer() PURE;
 
     /** Returns the graphics-device this is running on */
-    virtual std::string GetGraphicsDeviceName() = 0;
+    virtual const std::string& GetGraphicsDeviceName() PURE;
 
     /** Draws a screen fade effects */
     virtual XRESULT DrawScreenFade( void* camera ) { return XR_SUCCESS; };
 
     /** Draws a vertexarray, used for rendering gothics UI */
-    virtual XRESULT DrawVertexArray( ExVertexStruct* vertices, unsigned int numVertices, unsigned int startVertex = 0, unsigned int stride = sizeof( ExVertexStruct ) ) = 0;
-    virtual XRESULT DrawVertexArrayMM( ExVertexStruct* vertices, unsigned int numVertices, unsigned int startVertex = 0, unsigned int stride = sizeof( ExVertexStruct ) ) = 0;
-
-    /** Puts the current world matrix into a CB and binds it to the given slot */
-    virtual void SetupPerInstanceConstantBuffer( int slot = 1 ) {};
+    virtual XRESULT DrawVertexArray( ExVertexStruct* vertices, unsigned int numVertices, unsigned int startVertex PURE, unsigned int stride = sizeof( ExVertexStruct ) ) PURE;
 
     /** Draws a vertexbuffer, non-indexed */
     virtual XRESULT DrawVertexBuffer( D3D11VertexBuffer* vb, unsigned int numVertices, unsigned int stride = sizeof( ExVertexStruct ) ) { return XR_SUCCESS; };
@@ -142,33 +153,33 @@ public:
     /** Draws a vertexbuffer, non-indexed */
     virtual XRESULT DrawVertexBufferIndexed( D3D11VertexBuffer* vb, D3D11VertexBuffer* ib, unsigned int numIndices, unsigned int indexOffset = 0 ) { return XR_SUCCESS; };
     virtual XRESULT DrawVertexBufferIndexedUINT( D3D11VertexBuffer* vb, D3D11VertexBuffer* ib, unsigned int numIndices, unsigned int indexOffset ) { return XR_SUCCESS; };
+    
+    virtual XRESULT DrawDynamicVertexBufferIndexed( std::vector<ExVertexStruct>& vertices, D3D11VertexBuffer* ib, unsigned int numIndices, unsigned int indexOffset = 0 ) { return XR_SUCCESS; };
 
     /** Draws a skeletal mesh */
-    virtual XRESULT DrawSkeletalMesh( SkeletalVobInfo* vi, const std::vector<XMFLOAT4X4>& transforms, float4 color, float fatness = 1.0f ) { return XR_SUCCESS; };
+    virtual XRESULT DrawSkeletalMesh( SkeletalVobInfo* vi, const std::span<XMFLOAT4X4> transforms, float4 color, const XMFLOAT4X4& world, float fatness = 1.0f ) { return XR_SUCCESS; };
 
     /** Draws a vertexarray, non-indexed */
     virtual XRESULT DrawIndexedVertexArray( ExVertexStruct* vertices, unsigned int numVertices, D3D11VertexBuffer* ib, unsigned int numIndices, unsigned int stride = sizeof( ExVertexStruct ) ) { return XR_SUCCESS; };
 
     /** Draws a batch of instanced geometry */
-    virtual XRESULT DrawInstanced( D3D11VertexBuffer* vb, D3D11VertexBuffer* ib, unsigned int numIndices, void* instanceData, unsigned int instanceDataStride, unsigned int numInstances, unsigned int vertexStride = sizeof( ExVertexStruct ) ) { return XR_SUCCESS; };
     virtual XRESULT DrawInstanced( D3D11VertexBuffer* vb, D3D11VertexBuffer* ib, unsigned int numIndices, D3D11VertexBuffer* instanceData, unsigned int instanceDataStride, unsigned int numInstances, unsigned int vertexStride = sizeof( ExVertexStruct ), unsigned int startInstanceNum = 0, unsigned int indexOffset = 0 ) { return XR_SUCCESS; };
 
     /** Sets the active pixel shader object */
-    virtual XRESULT SetActivePixelShader( const std::string& shader ) { return XR_SUCCESS; };
-    virtual XRESULT SetActiveVertexShader( const std::string& shader ) { return XR_SUCCESS; };
+    virtual XRESULT SetActivePixelShader( PShaderID shader ) { return XR_SUCCESS; };
+    virtual XRESULT SetActiveVertexShader( VShaderID shader ) { return XR_SUCCESS; };
 
     /** Binds the active PixelShader */
     virtual XRESULT BindActivePixelShader() { return XR_SUCCESS; };
     virtual XRESULT BindActiveVertexShader() { return XR_SUCCESS; };
 
     /** Binds viewport information to the given constantbuffer slot */
-    virtual XRESULT BindViewportInformation( const std::string& shader, int slot ) { return XR_SUCCESS; };
+    virtual XRESULT BindViewportInformation( VShaderID vshader, int slot ) { return XR_SUCCESS; };
 
     /** Unbinds the texture at the given slot */
     virtual XRESULT UnbindTexture( int slot ) { return XR_SUCCESS; };
 
     /** Draws the world mesh */
-    virtual XRESULT DrawWorldMesh_Indirect( bool noTextures = false ) { return XR_SUCCESS; };
     virtual XRESULT DrawWorldMesh( bool noTextures = false ) { return XR_SUCCESS; };
 
     /** Draws the static VOBs */
@@ -215,11 +226,14 @@ public:
     virtual void DrawFrameParticleMeshes( std::unordered_map<zCVob*, MeshVisualInfo*>& progMeshes ) {}
 
     /** Draws particle effects */
-    virtual void DrawFrameParticles( std::map<zCTexture*, std::vector<ParticleInstanceInfo>>& particles, std::map<zCTexture*, ParticleRenderInfo>& info ) {}
+    virtual void DrawFrameParticles(std::map<zCTexture*, std::vector<ParticleInstanceInfo>>& particles,
+        std::map<zCTexture*, ParticleRenderInfo>& info,
+        RenderToTextureBuffer* bufferParticleColor,
+        RenderToTextureBuffer* bufferParticleDistortion) {}
 
     virtual void DrawString( const std::string& str, float x, float y, const zFont* font, zColor& fontColor ) {};
     
     virtual XRESULT UpdateRenderStates() { return XR_SUCCESS; };
 
-    virtual std::unique_ptr<GraphicsEventRecord> RecordGraphicsEvent( LPCWSTR region ) { return std::make_unique<GraphicsEventRecord>(); }
+    virtual std::unique_ptr<GraphicsEventRecord> RecordGraphicsEvent( GraphicsEventName region ) { return std::make_unique<GraphicsEventRecord>(); }
 };

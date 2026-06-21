@@ -3,8 +3,8 @@
 #pragma warning( disable : 26495 )
 
 #include "pch.h"
-#include "BasicTimer.h"
 #include "BasePipelineStates.h"
+#include <ASSAO/ASSAO.h>
 
 /** Struct handling all the graphical states set by the game. Can be used as Constantbuffer */
 const int GSWITCH_FOG = 1;
@@ -12,6 +12,18 @@ const int GSWITCH_ALPHAREF = 2;
 const int GSWITCH_LIGHING = 4;
 const int GSWITCH_REFLECTIONS = 8;
 const int GSWITCH_LINEAR_DEPTH = 16;
+
+enum RenderStage {
+    STAGE_DRAW_UNKNOWN = 0,
+    _STAGE_DRAW_DX11_START,
+    STAGE_DRAW_WORLD,
+    STAGE_DRAW_SKELETAL,
+    STAGE_DRAW_SKY,
+    _STAGE_DRAW_DX11_END,
+    STAGE_DRAW_HUD,
+    STAGE_DRAW_SHADOWS,
+    STAGE_DRAW_PRESENT = 0xFFFF,
+};
 
 /** A single fixed function stage */
 struct FixedFunctionStage {
@@ -61,7 +73,7 @@ struct GothicGraphicsState {
         FF_AmbientLighting = float3( 1.0f, 1.0f, 1.0f );
         FF_TextureFactor = float4( 1.0f, 1.0f, 1.0f, 1.0f );
 
-        FF_AlphaRef = 0.5f;
+        FF_AlphaRef = 170.0f / 255.0f;
 
         FF_GSwitches = 0;
 
@@ -95,7 +107,10 @@ struct GothicGraphicsState {
     /** Texture factor section */
     float4 FF_TextureFactor;
 
-    /** Alpha ref section */
+    /** Alpha ref section
+        G2: zRnd_D3D uses 0xb0 = 170 as default alpha ref
+            and combines this with calculated per-vob distance-calculated alpha values.
+    */
     float FF_AlphaRef;
 
     /** Graphical Switches (Takes GSWITCH_*) */
@@ -165,7 +180,7 @@ class BaseDepthBufferState;
 struct GothicDepthBufferStateInfo : public GothicPipelineState {
     GothicDepthBufferStateInfo() {
         StructSize = sizeof( GothicDepthBufferStateInfo );
-        Padding[0] = Padding[1] = false;
+        Padding0 = Padding1 = false;
     }
 
     /** Layed out for D3D11 */
@@ -187,12 +202,15 @@ struct GothicDepthBufferStateInfo : public GothicPipelineState {
         DepthBufferEnabled = true;
         DepthWriteEnabled = true;
         DepthBufferCompareFunc = DEFAULT_DEPTH_COMP_STATE;
+        Padding0 = false;
+        Padding1 = false;
     }
 
     /** Depthbuffer settings */
     bool DepthBufferEnabled;
     bool DepthWriteEnabled;
-    bool Padding[2];
+    bool Padding0;
+    bool Padding1;
     ECompareFunc DepthBufferCompareFunc;
 
     /** Deletes all cached states */
@@ -466,6 +484,7 @@ struct GothicTransformInfo {
 
     /** Projectionmatrix */
     XMFLOAT4X4 TransformProj;
+    XMFLOAT4X4 TransformProjUnjittered;
 };
 
 struct HBAOSettings {
@@ -494,6 +513,29 @@ struct HBAOSettings {
     bool EnableBlur;
     int SsaoBlurRadius;
     int SsaoStepCount;
+};
+
+enum class AOMode : int {
+    AO_NONE = 0,
+    AO_HBAO = 1,
+    AO_SAO = 2,
+    AO_ASSAO = 3,
+};
+
+struct SAOSettings {
+    SAOSettings() {
+        Radius = 1.5f;
+        Bias = 0.02f;
+        Intensity = 3.0f;
+        NumSamples = 16;
+        BlurSharpness = 1.0f;
+    }
+
+    float Radius;
+    float Bias;
+    float Intensity;
+    int NumSamples;
+    float BlurSharpness;
 };
 
 struct GothicRendererSettings {
@@ -528,6 +570,7 @@ struct GothicRendererSettings {
         AA_SMAA = 1,
         AA_TAA = 2,
         AA_FSR = 3,
+        AA_FSR3 = 4, // Dummy value! only used for settings!
         _AA_NUM_MODES
     };
 
@@ -551,7 +594,20 @@ struct GothicRendererSettings {
     enum E_Upscaler {
         UPSCALER_DEFAULT = 0,
         UPSCALER_FSR_1 = 1,
+        UPSCALER_FSR_2 = 2,
+        UPSCALER_FSR_3 = 3,
         _UPSCALER_NUM_MODES
+    };
+
+    enum E_ShadowFilterMode {
+        SHADOW_FILTER_DISABLED = 0,
+        SHADOW_FILTER_SIMPLE = 1,
+        SHADOW_FILTER_PCSS = 2,
+    };
+
+    enum E_RendererMode {
+        RM_Deferred = 0,
+        RM_ForwardPlus = 1,
     };
 
     /** Sets the default values for this struct */
@@ -569,7 +625,7 @@ struct GothicRendererSettings {
 
         DrawSky = true;
         DrawFog = true;
-        FogRange = 0;
+        FogRange = SWITCH_ENGINE12(1.0f, 3.0f);
         EnableHDR = false;
         HDRToneMap = E_HDRToneMap::ToneMap_Simple;
         ReplaceSunDirection = false;
@@ -637,7 +693,7 @@ struct GothicRendererSettings {
         textureMaxSize = 16384;
         ShadowMapSize = 2048;
         WorldShadowRangeScale = 1.0f;
-        NumShadowCascades = 4; // looks OK and performance friendly
+        NumShadowCascades = 3; // looks OK and performance friendly
         ShadowCascadePCFLimit = 1;
         ShadowFrustumCullingMode = E_ShadowFrustumCulling::SHD_FRUSTUM_CULLING_CONSERVATIVE;
 
@@ -645,6 +701,7 @@ struct GothicRendererSettings {
         ShadowAOStrength = 0.50f;
         WorldAOStrength = 0.50f;
         ShadowSoftness = 1.0f; // 1.0 = default softness, higher = softer shadows
+        PCSSLightSize = 0.140f; // Shadow-UV light radius used by PCSS blocker search
 
         BloomStrength = 1.0f;
         GlobalWindStrength = 1.0f;
@@ -654,22 +711,32 @@ struct GothicRendererSettings {
         GammaValue = 1.0f;
 
         EnableOcclusionCulling = false;
-        EnableSoftShadows = true;
+        ShadowFilterMode = E_ShadowFilterMode::SHADOW_FILTER_SIMPLE;
 
         EnableShadows = true;
-        EnableVSync = false;
-        DoZPrepass = true;
-        SortRenderQueue = true;
-        DrawThreaded = true;
-        
+        ThreadedShadowCulling = false;
+        EnableVSync = true;
+        DoZPrepass = false;
+        SortRenderQueue = false;
+        DrawThreaded = false;
         EnableSSR = true;
+        SSRStrength = 1.0f;
         EnableSSS = true;
+        SSSIntensity = 1.0f;
+        EnableDoF = true;
+        DoFGaussBlur = false;
+        DoFFocusDistance = 5000.0f;
+        DoFFocusRange = 8000.0f;
+        DoFBokehRadius = 8.0f;
+        DoFMaxBlur = 12.0f;
 
         WindQuality = WIND_QUALITY_ADVANCED;
         HeroAffectsObjects = true;
         EnablePointlightShadows = PLS_UPDATE_DYNAMIC;
         MinLightShadowUpdateRange = 300.0f;
         PartialDynamicShadowUpdates = true;
+        EnableTiledLighting = false;
+        RendererMode = RM_Deferred;
         DrawSectionIntersections = true;
 
         EnableGodRays = true;
@@ -682,7 +749,7 @@ struct GothicRendererSettings {
 
         RainRadiusRange = 5000.0f;
         RainHeightRange = 1000.0f;
-        RainNumParticles = 50000;
+        RainNumParticles = 45000;
         RainMoveParticles = true;
         RainGlobalVelocity = XMFLOAT3( 250, -1000, 0 );
         RainUseInitialSet = false;
@@ -692,12 +759,13 @@ struct GothicRendererSettings {
         RainFogDensity = 0.00050f;
 
         EnableRain = true;
-        EnableRainEffects = true;
 
         GodRayDecay = 0.97f;
         GodRayWeight = 0.85f;
         GodRayDensity = 0.70f;
         GodRayColorMod = float3( 1.0f, 0.8f, 0.6f );
+
+        AoMode = AOMode::AO_HBAO;
 
         RECT desktopRect;
         GetClientRect( GetDesktopWindow(), &desktopRect );
@@ -713,7 +781,7 @@ struct GothicRendererSettings {
 
         LimitLightIntesity = false;
         AllowNormalmaps = false;
-        AllowDisplacement = false;
+        EnableParallaxOcclusionMapping = false;
 
         AllowNumpadKeys = false;
         EnableDebugLog = true;
@@ -721,7 +789,7 @@ struct GothicRendererSettings {
 
         ForceFOV = false;
 
-        ChangeWindowPreset = 0;
+        ChangeWindowPreset = 2; // WINDOW_MODE_FULLSCREEN_BORDERLESS;
         StretchWindow = true;
         SmoothShadowCameraUpdate = true;
         SmoothShadowFrequency = 500.0f;
@@ -734,9 +802,59 @@ struct GothicRendererSettings {
         AnimateStaticVobs = true;
         RunInSpacerNet = false;
         BinkVideoRunning = false;
-        EnableWaterAnimation = false;
+        EnableWaterAnimation = true;
 
         GraphicsPreset = E_GraphicsPreset::GRAPHICS_CUSTOM;
+        ApplyAssaoPreset(1);
+
+        ResetDebugSettings();
+    }
+
+    void ApplyAssaoPreset( int preset ) {
+        AssaoSettings = ASSAO_Settings();
+        // personal taste.
+        AssaoSettings.ShadowPower = 1.0f; // i feel defaults are too dark
+        AssaoSettings.HorizonAngleThreshold = 0.2f; // way too harsh shadowing otherwise
+
+        if ( preset <= 0 ) {
+            // default
+        } else if ( preset == 1 ) {
+            // higher quality but still default look
+            AssaoSettings.QualityLevel = 3;
+            AssaoSettings.AdaptiveQualityLimit = 0.6f;
+        } else if ( preset == 2 ) {
+            // Fake HBAO+ look, dark punchy shadowing
+            AssaoSettings.Radius = 1.0f;
+            AssaoSettings.ShadowMultiplier = 1.3f;
+            AssaoSettings.ShadowPower = 1.5f;
+            AssaoSettings.ShadowClamp = 1.0f;
+            AssaoSettings.HorizonAngleThreshold = 0.200f;
+            AssaoSettings.QualityLevel = 3;
+            AssaoSettings.AdaptiveQualityLimit = 0.6f;
+
+            AssaoSettings.BlurPassCount = 4;
+            AssaoSettings.Sharpness = 1.0f;
+            AssaoSettings.DetailShadowStrength = 0.5f;
+        } else if ( preset >= 3 ) {
+            // Fake GTAO look, broader radius, more details
+            AssaoSettings.Radius = 1.6f;
+            AssaoSettings.ShadowPower = 1.3f;
+            AssaoSettings.ShadowClamp = 0.95f;
+            AssaoSettings.HorizonAngleThreshold = 0.150f;
+            AssaoSettings.QualityLevel = 3;
+            AssaoSettings.AdaptiveQualityLimit = 0.6f;
+            AssaoSettings.DetailShadowStrength = 2.5f;
+        }
+    }
+    
+    void ResetDebugSettings() {
+        DebugSettings = {};
+        DebugSettings.Culling.CullBspSections = true;
+        DebugSettings.Culling.CullVobs = true;
+        DebugSettings.ShadowCascades.LazyCascadeUpdate = true;
+        DebugSettings.FeatureSet.EnableDriverExtensions = true;
+        DebugSettings.FeatureSet.UseWorldSectionBVH = true;
+        DebugSettings.FeatureSet.UseScreenSpaceShadowMask = false;
     }
 
     void SetupOldWorldSpecificValues() {
@@ -789,8 +907,9 @@ struct GothicRendererSettings {
     bool EnableDynamicLighting;
     bool WireframeWorld;
     bool WireframeVobs;
-    bool EnableSoftShadows;
+    E_ShadowFilterMode ShadowFilterMode;
     bool EnableShadows;
+    bool ThreadedShadowCulling;
     int ShadowCascadePCFLimit;
     E_ShadowFrustumCulling ShadowFrustumCullingMode;
     bool DrawShadowGeometry;
@@ -799,16 +918,28 @@ struct GothicRendererSettings {
     bool DisableRendering;
     bool DisableDrawcalls;
     bool EnableEditorPanel;
+    // deferred render pass geometry Z-Prepass.
+    // doesn't help much if at all.
     bool DoZPrepass;
     bool EnableAutoupdates;
     bool EnableSSR;
+    float SSRStrength;
     bool EnableSSS;
+    float SSSIntensity;
+    bool EnableDoF;
+    bool DoFGaussBlur;
+    float DoFFocusDistance;
+    float DoFFocusRange;
+    float DoFBokehRadius;
+    float DoFMaxBlur;
     bool EnableOcclusionCulling;
     bool SortRenderQueue;
     bool DrawThreaded;
     EPointLightShadowMode EnablePointlightShadows;
     float MinLightShadowUpdateRange;
     bool PartialDynamicShadowUpdates;
+    bool EnableTiledLighting;
+    E_RendererMode RendererMode;
     bool DrawSectionIntersections;
 
     int MaxNumFaces;
@@ -854,6 +985,7 @@ struct GothicRendererSettings {
     float ShadowAOStrength;
     float WorldAOStrength;
     float ShadowSoftness;
+    float PCSSLightSize;
 
     float GodRayDecay;
     float GodRayWeight;
@@ -862,6 +994,9 @@ struct GothicRendererSettings {
     bool EnableGodRays;
 
     HBAOSettings HbaoSettings;
+    SAOSettings SaoSettings;
+    ASSAO_Settings AssaoSettings;
+    AOMode AoMode;
 
     bool FixViewFrustum;
 
@@ -878,11 +1013,10 @@ struct GothicRendererSettings {
     float RainFogDensity;
 
     bool EnableRain;
-    bool EnableRainEffects;
 
     bool LimitLightIntesity;
     bool AllowNormalmaps;
-    bool AllowDisplacement;
+    bool EnableParallaxOcclusionMapping;
 
     bool AllowNumpadKeys;
     bool EnableDebugLog;
@@ -906,48 +1040,40 @@ struct GothicRendererSettings {
     E_AntiAliasingMode AntiAliasingMode;
     E_SharpeningMode SharpeningMode;
     E_GraphicsPreset GraphicsPreset;
-};
+    
+    struct {
+        struct {
+            bool DepthMotionVectors;
+            bool DisplayVelocity;
+        } TAA;
+        struct {
+            bool LazyCascadeUpdate;
+            float ExtendBack;
+            float ExtendFront;
+            float ExtendSide;
+            float Lambda;
+            float Bias;
+        } ShadowCascades;
+        struct {
+            bool CullVobs;
+            bool CullBspSections;
+        } Culling;
+        struct {
+            bool EnableDriverExtensions;
+            bool UseWorldSectionBVH;
+            bool UseMDI;
+            bool UseLayeredRendering;
+            bool UseShadowAtlas;
+            bool UseScreenSpaceShadowMask;
+            bool ForceFeatureLevel10;
+        } FeatureSet;
+    } DebugSettings;
 
-struct GothicRendererTiming {
-
-    void StartTotal() {
-        _totalTimer.Update();
+    bool GetIsTAAEnabled() const {
+        return AntiAliasingMode == E_AntiAliasingMode::AA_TAA
+            || AntiAliasingMode == E_AntiAliasingMode::AA_FSR
+            || AntiAliasingMode == E_AntiAliasingMode::AA_FSR3;
     }
-
-    void StopTotal() {
-        _totalTimer.Update();
-        TotalMS = _totalTimer.GetDelta() * 1000.0f;
-    }
-
-    void Reset() {
-        frameRecordings.clear();
-        TotalMS = 0.0f;
-    }
-
-    float TotalMS;
-    std::vector<std::pair<const char*, float>> frameRecordings;
-
-private:
-    BasicTimer _timer;
-    BasicTimer _totalTimer;
-};
-
-class TimerScope {
-public:
-    TimerScope( const char* label, std::vector<std::pair<const char*, float>>* collection )
-        : _timer( {} ),
-        _type( label ),
-        _collection(collection) {
-        _timer.Update();
-    }
-    ~TimerScope() {
-        _timer.Update();
-        _collection->push_back( std::make_pair( _type, _timer.GetDelta() * 1000.0f ) );
-    }
-private:
-    BasicTimer _timer;
-    std::vector<std::pair<const char*, float>>* _collection;
-    const char* _type;
 };
 
 struct GothicRendererInfo {
@@ -971,8 +1097,8 @@ struct GothicRendererInfo {
         FramePipelineStates = 0;
 
         StateChanges = 0;
-        IsRenderingWorld = false;
         memset( StateChangesByState, 0, sizeof( StateChangesByState ) );
+        RenderStage = STAGE_DRAW_UNKNOWN;
     }
 
     enum EStateChange {
@@ -1008,11 +1134,13 @@ struct GothicRendererInfo {
     int FrameDrawnLights;
     int WorldMeshDrawCalls;
 
-    GothicRendererTiming Timing;
-
     unsigned int VOBVerticesDataSize;
     unsigned int SkeletalVerticesDataSize;
-    bool IsRenderingWorld;
+    RenderStage RenderStage;
+    
+    bool IsRenderStageDx11() const {
+        return RenderStage > _STAGE_DRAW_DX11_START && RenderStage < _STAGE_DRAW_DX11_END;
+    }
 };
 
 /** This handles more device specific settings */

@@ -5,19 +5,10 @@
 #include "Engine.h"
 #include "GothicAPI.h"
 #include "zCTexture.h"
+#include "zTypes.h"
 
 const int zMAT_GROUP_WATER = 5;
 const int zMAT_GROUP_SNOW = 6;
-
-const int zMAT_ALPHA_FUNC_MAT_DEFAULT = 0;
-const int zMAT_ALPHA_FUNC_NONE = 1;
-const int zMAT_ALPHA_FUNC_BLEND = 2;
-const int zMAT_ALPHA_FUNC_ADD = 3;
-const int zMAT_ALPHA_FUNC_SUB = 4;
-const int zMAT_ALPHA_FUNC_MUL = 5;
-const int zMAT_ALPHA_FUNC_MUL2 = 6;
-const int zMAT_ALPHA_FUNC_TEST = 7;
-const int zMAT_ALPHA_FUNC_BLEND_TEST = 8;
 
 class zCTexAniCtrl {
 private:
@@ -32,9 +23,9 @@ class zCMaterial {
 public:
     /** Hooks the functions of this Class */
     static void Hook() {
-        DetourAttach( &reinterpret_cast<PVOID&>(HookedFunctions::OriginalFunctions.original_zCMaterialDestructor), Hooked_Destructor );
-        //DetourAttach( &reinterpret_cast<PVOID&>(HookedFunctions::OriginalFunctions.original_zCMaterialConstruktor), Hooked_Constructor );
-        DetourAttach( &reinterpret_cast<PVOID&>(HookedFunctions::OriginalFunctions.original_zCMaterialInitValues), Hooked_InitValues );
+        DetourAttachTyped( &HookedFunctions::OriginalFunctions.original_zCMaterialDestructor, Hooked_Destructor  );
+        //DetourAttachTyped( &HookedFunctions::OriginalFunctions.original_zCMaterialConstruktor, Hooked_Constructor  );
+        DetourAttachTyped( &HookedFunctions::OriginalFunctions.original_zCMaterialInitValues, Hooked_InitValues  );
 
     }
 
@@ -90,12 +81,12 @@ public:
     }
 
     /** Returns the color-mod of this material */
-    DWORD GetColor() {
+    DWORD GetColor() const {
         return *reinterpret_cast<DWORD*>(THISPTR_OFFSET( GothicMemoryLocations::zCMaterial::Offset_Color ));
     }
 
     /** Returns single texture, because not all seem to be animated and returned by GetAniTexture? */
-    zCTexture* GetTextureSingle() {
+    zCTexture* GetTextureSingle() const {
         return *reinterpret_cast<zCTexture**>(THISPTR_OFFSET( GothicMemoryLocations::zCMaterial::Offset_Texture ));
     }
 
@@ -146,11 +137,44 @@ public:
         }
     }
 
-    int GetAlphaFunc() {
-        return static_cast<int>(*reinterpret_cast<unsigned char*>(THISPTR_OFFSET( GothicMemoryLocations::zCMaterial::Offset_AlphaFunc )));
+    struct MaterialFlags {
+        uint8_t smooth : 1;
+        uint8_t dontUseLightmaps : 1;
+        uint8_t texAniMap : 1;
+        uint8_t lodDontCollapse : 1;
+        uint8_t noCollDet : 1;
+        uint8_t forceOccluder : 1;
+        uint8_t m_bEnvironmentalMapping : 1;
+        uint8_t polyListNeedsSort : 1;
+        uint8_t matUsage : 8;
+        uint8_t libFlag : 8;
+        zTRnd_AlphaBlendFunc rndAlphaBlendFunc : 8;
+        uint8_t	 m_bIgnoreSun : 1;
+
+        bool operator ==( const MaterialFlags& other ) const {
+            auto thisFirst4Bytes = reinterpret_cast<const uint32_t*>(this);
+            auto otherFirst4Bytes = reinterpret_cast<const uint32_t*>(&other);
+
+            // compare first 4 bytes using memory alias
+            if (*thisFirst4Bytes != *otherFirst4Bytes) {
+                return false;
+            }
+
+            // final bit flag compared manually. Why zEngine, why make this 33 bits ...
+            return m_bIgnoreSun == other.m_bIgnoreSun;
+        }
+    };
+
+    __forceinline MaterialFlags& GetFlags() {
+        return *reinterpret_cast<MaterialFlags*>(THISPTR_OFFSET( GothicMemoryLocations::zCMaterial::Offset_Flags ));
     }
 
-    void SetAlphaFunc( int func ) {
+    zTRnd_AlphaBlendFunc GetAlphaFunc() {
+        MaterialFlags& flags = GetFlags();
+        return flags.rndAlphaBlendFunc;
+    }
+
+    void SetAlphaFunc( zTRnd_AlphaBlendFunc func ) {
         *reinterpret_cast<unsigned char*>(THISPTR_OFFSET( GothicMemoryLocations::zCMaterial::Offset_AlphaFunc )) = static_cast<unsigned char>(func);
     }
 
@@ -159,19 +183,35 @@ public:
     }
 
     bool HasAlphaTest() {
-        int f = GetAlphaFunc();
+        const zTRnd_AlphaBlendFunc f = GetAlphaFunc();
         return f == zMAT_ALPHA_FUNC_TEST || f == zMAT_ALPHA_FUNC_BLEND_TEST;
     }
 
-    bool HasTexAniMap() {
+    bool HasTexAniMap() const {
         return *reinterpret_cast<unsigned char*>(THISPTR_OFFSET( GothicMemoryLocations::zCMaterial::Offset_Flags )) & GothicMemoryLocations::zCMaterial::Mask_FlagTexAniMap;
     }
 
-    XMFLOAT2 GetTexAniMapDelta() {
+    bool GetEnvMapEnabled() const {
+#if defined(BUILD_GOTHIC_1_08k)
+        return false;
+#else
+        return *reinterpret_cast<unsigned char*>(THISPTR_OFFSET( GothicMemoryLocations::zCMaterial::Offset_Flags )) & GothicMemoryLocations::zCMaterial::Mask_FlagEnvMapEnabled;
+#endif
+    }
+
+    float GetEnvMapStrength() const {
+#if defined(BUILD_GOTHIC_1_08k)
+        return 0.0f;
+#else
+        return *reinterpret_cast<float*>(THISPTR_OFFSET( GothicMemoryLocations::zCMaterial::Offset_EnvMapStrength ));
+#endif
+    }
+
+    XMFLOAT2 GetTexAniMapDelta() const {
         return *reinterpret_cast<XMFLOAT2*>(THISPTR_OFFSET( GothicMemoryLocations::zCMaterial::Offset_TexAniMapDelta ));
     }
 
-    zTMat_WaveMode GetWaveMode() {
+    zTMat_WaveMode GetWaveMode() const {
 #ifdef BUILD_GOTHIC_1_08k
         return zTMode_NONE;
 #else
@@ -199,6 +239,10 @@ public:
 #else
         return *reinterpret_cast<float*>(THISPTR_OFFSET( GothicMemoryLocations::zCMaterial::Offset_WaveMaxAmplitude ));
 #endif
+    }
+    
+    const zSTRING& __GetName() const {
+        return reinterpret_cast<zSTRING&(__fastcall*)( const zCMaterial* )>( GothicMemoryLocations::zCObject::GetObjectName )( this );
     }
 };
 

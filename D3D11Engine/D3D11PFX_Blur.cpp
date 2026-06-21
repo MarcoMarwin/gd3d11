@@ -15,7 +15,7 @@ D3D11PFX_Blur::D3D11PFX_Blur( D3D11PfxRenderer* rnd ) : D3D11PFX_Effect( rnd ) {
 D3D11PFX_Blur::~D3D11PFX_Blur() {}
 
 /** Draws this effect to the given buffer */
-XRESULT D3D11PFX_Blur::RenderBlur( RenderToTextureBuffer* fxbuffer, bool leaveResultInD4_2, float threshold, float scale, const XMFLOAT4& colorMod, const std::string& finalCopyShader ) {
+XRESULT D3D11PFX_Blur::RenderBlur( RenderToTextureBuffer* fxbuffer, bool leaveResultInD4_2, float threshold, float scale, const XMFLOAT4& colorMod, PShaderID finalCopyShader ) {
 	D3D11GraphicsEngine* engine = reinterpret_cast<D3D11GraphicsEngine*>(Engine::GraphicsEngine);
 
 	// Save old rendertargets
@@ -27,8 +27,8 @@ XRESULT D3D11PFX_Blur::RenderBlur( RenderToTextureBuffer* fxbuffer, bool leaveRe
 
 	/** Pass 1: Downscale/Blur-H */
 	// Apply PFX-VS
-	engine->GetShaderManager().GetVShader( "VS_PFX" )->Apply();
-	auto gaussPS = engine->GetShaderManager().GetPShader( "PS_PFX_GaussBlur" );
+	engine->GetShaderManager().GetVShader( VShaderID::VS_PFX )->Apply();
+	auto gaussPS = engine->GetShaderManager().GetPShader( PShaderID::PS_PFX_GaussBlur );
 	auto simplePS = engine->GetShaderManager().GetPShader( finalCopyShader );
 
 	// Apply blur-H shader
@@ -43,8 +43,7 @@ XRESULT D3D11PFX_Blur::RenderBlur( RenderToTextureBuffer* fxbuffer, bool leaveRe
 	bcb.B_PixelSize = float2( 1.0f / tempBuffer->GetSizeX(), 0.0f );
     bcb.B_Threshold = threshold;
     bcb.B_ColorMod = colorMod;
-    gaussPS->GetConstantBuffer()[0]->UpdateBuffer( &bcb );
-    gaussPS->GetConstantBuffer()[0]->BindToPixelShader( 0 );
+    gaussPS->GetBuffer( "B_BlurSettings" ).Update( &bcb ).Bind();
 
     // Bind depthbuffer
     //engine->GetDepthBuffer()->BindToPixelShader(engine->GetContext().Get(), 1);
@@ -58,8 +57,7 @@ XRESULT D3D11PFX_Blur::RenderBlur( RenderToTextureBuffer* fxbuffer, bool leaveRe
     bcb.B_BlurSize = scale;
     bcb.B_PixelSize = float2( 0.0f, 1.0f / tempBuffer->GetSizeY() );
     bcb.B_Threshold = 0.0f;
-    gaussPS->GetConstantBuffer()[0]->UpdateBuffer( &bcb );
-    gaussPS->GetConstantBuffer()[0]->BindToPixelShader( 0 );
+    gaussPS->GetBuffer( "B_BlurSettings" ).Update( &bcb ).Bind();
 
     // Copy
     FxRenderer->CopyTextureToRTV( tempBuffer->GetShaderResView(), tempBuffer2->GetRenderTargetView(), dsRes, true );

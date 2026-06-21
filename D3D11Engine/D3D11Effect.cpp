@@ -17,12 +17,13 @@
 // TODO: Remove this!
 #include "D3D11GraphicsEngine.h"
 #include "oCGame.h"
+#include "zFILE_VDFS.h"
 
 constexpr float snowSpeedFactor = 0.15f;
 
 namespace {
     const float2 snowScale( 3.0f, 3.0f );
-    const float2 rainScale( 30.0f / 10.0f, 30.0f / 2.0f );
+    const float2 rainScale( 30.0f / 10.0f, 30.0f / 8.0f );
 }
 
 D3D11Effect::D3D11Effect() {
@@ -40,7 +41,7 @@ D3D11Effect::~D3D11Effect() {
 }
 
 /** Loads a texturearray. Use like the following: Put path and prefix as parameter. The files must then be called name_xxxx.dds */
-HRESULT LoadTextureArray( Microsoft::WRL::ComPtr<ID3D11Device1> pd3dDevice, Microsoft::WRL::ComPtr<ID3D11DeviceContext1> context, char* sTexturePrefix, int iNumTextures, ID3D11Texture2D** ppTex2D, ID3D11ShaderResourceView** ppSRV );
+HRESULT LoadTextureArray( Microsoft::WRL::ComPtr<ID3D11Device1> pd3dDevice, Microsoft::WRL::ComPtr<ID3D11DeviceContext1> context, const char* sTexturePrefix, int iNumTextures, ID3D11Texture2D** ppTex2D, ID3D11ShaderResourceView** ppSRV );
 
 /** Fills vectors of random raindrop data, split into mutable and immutable parts */
 void D3D11Effect::FillRandomRaindropData( std::vector<RainParticleDynamic>& dynamicData, std::vector<RainParticleStatic>& staticData ) {
@@ -50,19 +51,14 @@ void D3D11Effect::FillRandomRaindropData( std::vector<RainParticleDynamic>& dyna
     float height = Engine::GAPI->GetRendererState().RendererSettings.RainHeightRange;
 
     for ( size_t i = 0; i < dynamicData.size(); i++ ) {
-        //use rejection sampling to generate random points inside a circle of radius 1 centered at 0, 0
-        float SeedX;
-        float SeedZ;
-        bool pointIsInside = false;
-        while ( !pointIsInside ) {
-            SeedX = Toolbox::frand() - 0.5f;
-            SeedZ = Toolbox::frand() - 0.5f;
-            if ( sqrt( SeedX * SeedX + SeedZ * SeedZ ) <= 0.5f )
-                pointIsInside = true;
-        }
-        //save these random locations for reinitializing rain particles that have fallen out of bounds
-        SeedX *= radius;
-        SeedZ *= radius;
+        // Vogel-disc distribution avoids conspicuous pairs while retaining a
+        // subtle angular jitter so the rain does not form a visible pattern.
+        const float normalizedRadius = sqrt( (static_cast<float>(i) + 0.5f)
+            / static_cast<float>(dynamicData.size()) );
+        const float angle = static_cast<float>(i) * 2.39996323f
+            + (Toolbox::frand() - 0.5f) * 0.12f;
+        const float SeedX = cos( angle ) * normalizedRadius * radius * 0.5f;
+        const float SeedZ = sin( angle ) * normalizedRadius * radius * 0.5f;
         float SeedY = Toolbox::frand() * height;
 
         //add some random speed to the particles, to prevent all the particles from following exactly the same trajectory
@@ -94,16 +90,16 @@ XRESULT D3D11Effect::DrawRain() {
     GothicRendererState& state = Engine::GAPI->GetRendererState();
 
     // Get shaders
-    auto streamOutGS = e->GetShaderManager().GetGShader( "GS_ParticleStreamOut" );
-    auto particleAdvanceVS = e->GetShaderManager().GetVShader( "VS_AdvanceRain" );
-    auto particleVS = e->GetShaderManager().GetVShader( "VS_ParticlePointShaded" );
+    auto streamOutGS = e->GetShaderManager().GetGShader( GShaderID::GS_ParticleStreamOut );
+    auto particleAdvanceVS = e->GetShaderManager().GetVShader( VShaderID::VS_AdvanceRain );
+    auto particleVS = e->GetShaderManager().GetVShader( VShaderID::VS_ParticlePointShaded );
     
     bool isSnow = oCGame::GetGame()
         && oCGame::GetGame()->_zCSession_world
         && oCGame::GetGame()->_zCSession_world->GetSkyControllerOutdoor()
         && oCGame::GetGame()->_zCSession_world->GetSkyControllerOutdoor()->GetWeatherType() == zTWEATHER_SNOW;
 
-    auto rainPS = e->GetShaderManager().GetPShader( isSnow ? "PS_Rain_Snow" : "PS_Rain" );
+    auto rainPS = e->GetShaderManager().GetPShader( isSnow ? PShaderID::PS_Rain_Snow : PShaderID::PS_Rain );
 
     // artificially increase the number of particles for snow, to make it look better.
     // Snowflakes are bigger and slower than raindrops, so we can get away with less particles for rain, but for snow we need more to make it look good.
@@ -157,7 +153,7 @@ XRESULT D3D11Effect::DrawRain() {
     }
 
     // Update constantbuffer for the advance-VS
-    AdvanceRainConstantBuffer acb;
+    AdvanceRainConstantBuffer acb = {};
     XMFLOAT3 LightPosition_XMFloat3;
     XMStoreFloat3( &LightPosition_XMFloat3, XMLoadFloat3( &Engine::GAPI->GetSky()->GetAtmoshpereSettings().LightDirection ) * Engine::GAPI->GetSky()->GetAtmoshpereSettings().OuterRadius + Engine::GAPI->GetCameraPositionXM() );
     acb.AR_LightPosition = LightPosition_XMFloat3;
@@ -167,9 +163,10 @@ XRESULT D3D11Effect::DrawRain() {
     acb.AR_CameraPosition = Engine::GAPI->GetCameraPosition();
     acb.AR_GlobalVelocity = velocity;
     acb.AR_MoveRainParticles = state.RendererSettings.RainMoveParticles ? 1 : 0;
-    particleAdvanceVS->GetConstantBuffer()[0]->UpdateBuffer( &acb );
-    particleAdvanceVS->GetConstantBuffer()[0]->BindToVertexShader( 1 );
-    particleAdvanceVS->GetConstantBuffer()[0]->BindToPixelShader( 1 );
+    acb.AR_Pad1.x = state.RendererSettings.EnableRain ? 1.0f : 0.0f;
+    auto advRainBuf = particleAdvanceVS->GetBuffer( "AdvanceRainConstantBuffer" );
+    advRainBuf.Update( &acb ).Bind();
+    advRainBuf.GetRawBuffer()->BindToPixelShader( 1 );
 
     if ( firstFrame || (state.RendererSettings.RainMoveParticles && !Engine::GAPI->IsGamePaused()) ) {
         D3D11VertexBuffer* b = nullptr;
@@ -245,14 +242,12 @@ XRESULT D3D11Effect::DrawRain() {
     gcb.PGS_RainHeight = state.RendererSettings.RainHeightRange;
     gcb.PGS_RainScale = isSnow ? snowScale : rainScale;
 
-    particleVS->GetConstantBuffer()[2]->UpdateBuffer( &gcb );
-    particleVS->GetConstantBuffer()[2]->BindToVertexShader( 2 );
+    particleVS->GetBuffer( "ParticleGSInfo" ).Update( &gcb ).Bind();
 
     ParticlePointShadingConstantBuffer scb = {};
     scb.View = GetRainShadowmapCameraRepl().ViewReplacement;
     scb.Projection = GetRainShadowmapCameraRepl().ProjectionReplacement;
-    particleVS->GetConstantBuffer()[1]->UpdateBuffer( &scb );
-    particleVS->GetConstantBuffer()[1]->BindToVertexShader( 1 );
+    particleVS->GetBuffer( "ParticlePointShadingConstantBuffer" ).Update( &scb ).Bind();
 
     RainShadowmap->BindToVertexShader( e->GetContext().Get(), 0 );
 
@@ -289,15 +284,15 @@ XRESULT D3D11Effect::DrawRain_CS() {
     GothicRendererState& state = Engine::GAPI->GetRendererState();
 
     // Get shaders
-    auto advanceRainCS = e->GetShaderManager().GetCShader( "CS_AdvanceRain" );
-    auto particleVS = e->GetShaderManager().GetVShader( "VS_ParticlePointShaded" );
+    auto advanceRainCS = e->GetShaderManager().GetCShader( CShaderID::CS_AdvanceRain );
+    auto particleVS = e->GetShaderManager().GetVShader( VShaderID::VS_ParticlePointShaded );
 
     bool isSnow = oCGame::GetGame()
         && oCGame::GetGame()->_zCSession_world
         && oCGame::GetGame()->_zCSession_world->GetSkyControllerOutdoor()
         && oCGame::GetGame()->_zCSession_world->GetSkyControllerOutdoor()->GetWeatherType() == zTWEATHER_SNOW;
     
-    auto rainPS = e->GetShaderManager().GetPShader( isSnow ? "PS_Rain_Snow" : "PS_Rain" );
+    auto rainPS = e->GetShaderManager().GetPShader( isSnow ? PShaderID::PS_Rain_Snow : PShaderID::PS_Rain );
 
     // artificially increase the number of particles for snow, to make it look better.
     // Snowflakes are bigger and slower than raindrops, so we can get away with less particles for rain, but for snow we need more to make it look good.
@@ -343,7 +338,7 @@ XRESULT D3D11Effect::DrawRain_CS() {
     }
 
     // Update constantbuffer for the advance-CS
-    AdvanceRainConstantBuffer acb;
+    AdvanceRainConstantBuffer acb = {};
     XMFLOAT3 LightPosition_XMFloat3;
     XMStoreFloat3( &LightPosition_XMFloat3, XMLoadFloat3( &Engine::GAPI->GetSky()->GetAtmoshpereSettings().LightDirection ) * Engine::GAPI->GetSky()->GetAtmoshpereSettings().OuterRadius + Engine::GAPI->GetCameraPositionXM() );
     acb.AR_LightPosition = LightPosition_XMFloat3;
@@ -353,12 +348,13 @@ XRESULT D3D11Effect::DrawRain_CS() {
     acb.AR_CameraPosition = Engine::GAPI->GetCameraPosition();
     acb.AR_GlobalVelocity = velocity;
     acb.AR_MoveRainParticles = numParticles;
+    acb.AR_Pad1.x = state.RendererSettings.EnableRain ? 1.0f : 0.0f;
 
-    advanceRainCS->GetConstantBuffer()[0]->UpdateBuffer( &acb );
-    advanceRainCS->GetConstantBuffer()[0]->BindToPixelShader( 1 );
+    advanceRainCS->GetBuffer( "AdvanceRainConstantBuffer" ).Update( &acb );
+    advanceRainCS->GetBuffer( "AdvanceRainConstantBuffer" ).GetRawBuffer()->BindToPixelShader( 1 );
     if ( state.RendererSettings.RainMoveParticles && !Engine::GAPI->IsGamePaused() ) {
         advanceRainCS->Apply();
-        advanceRainCS->GetConstantBuffer()[0]->BindToComputeShader( 0 );
+        advanceRainCS->GetBuffer( "AdvanceRainConstantBuffer" ).Bind();
 
         e->GetContext()->CSSetShaderResources( 0, 1, RainBufferStatic->GetShaderResourceView().GetAddressOf() );
         e->GetContext()->CSSetUnorderedAccessViews( 0, 1, RainBufferDrawFrom->GetUnorderedAccessView().GetAddressOf(), nullptr );
@@ -403,14 +399,12 @@ XRESULT D3D11Effect::DrawRain_CS() {
     gcb.PGS_RainHeight = state.RendererSettings.RainHeightRange;
     gcb.PGS_RainScale = isSnow ? snowScale : rainScale;
 
-    particleVS->GetConstantBuffer()[2]->UpdateBuffer( &gcb );
-    particleVS->GetConstantBuffer()[2]->BindToVertexShader( 2 );
+    particleVS->GetBuffer( "ParticleGSInfo" ).Update( &gcb ).Bind();
 
     ParticlePointShadingConstantBuffer scb = {};
     scb.View = GetRainShadowmapCameraRepl().ViewReplacement;
     scb.Projection = GetRainShadowmapCameraRepl().ProjectionReplacement;
-    particleVS->GetConstantBuffer()[1]->UpdateBuffer( &scb );
-    particleVS->GetConstantBuffer()[1]->BindToVertexShader( 1 );
+    particleVS->GetBuffer( "ParticlePointShadingConstantBuffer" ).Update( &scb ).Bind();
 
     RainShadowmap->BindToVertexShader( e->GetContext().Get(), 0 );
 
@@ -445,24 +439,33 @@ XRESULT D3D11Effect::LoadRainResources()
 {
     D3D11GraphicsEngineBase* e = reinterpret_cast<D3D11GraphicsEngineBase*>(Engine::GraphicsEngine);
 
+    std::string path;
+    path.resize( MAX_PATH );
+    path.resize(GetModuleFileNameA( nullptr, path.data(), path.size()-1 ));
+
+    std::filesystem::path basePath = std::filesystem::path( path ).parent_path() / "GD3D11" / "Textures";
+    
     if ( !RainTextureArray.Get() ) {
         HRESULT hr = S_OK;
         // Load textures...
         LogInfo() << "Loading rain-drop textures";
-        BASIC_TIMING( t );
-        LE( LoadTextureArray( e->GetDevice().Get(), e->GetContext().Get(), "system\\GD3D11\\Textures\\Raindrops\\cv0_vPositive_", 370, &RainTextureArray, &RainTextureArraySRV ) );
-        t.Update();
-        LogInfo() << "Loading rain drops took " << static_cast<int>(t.GetDelta() * 1000.0f) << "ms";
+        ZoneScopedN( "LoadRainTextures" );
+        LE( LoadTextureArray( e->GetDevice().Get(), e->GetContext().Get(), "\\_work\\Data\\Textures\\GD3D11\\Raindrops\\cv0_vPositive_", 370, &RainTextureArray, &RainTextureArraySRV ) );
+        if (!SUCCEEDED(hr)) {
+            // try old file paths
+            LE( LoadTextureArray( e->GetDevice().Get(), e->GetContext().Get(), (basePath / "Raindrops"/"cv0_vPositive_").string().c_str(), 370, &RainTextureArray, &RainTextureArraySRV ) );
+        }
     }
 
     if ( !SnowTextureArray.Get() ) {
         HRESULT hr = S_OK;
         // Load textures...
         LogInfo() << "Loading snow flake textures";
-        BASIC_TIMING( t );
-        LE( LoadTextureArray( e->GetDevice().Get(), e->GetContext().Get(), "system\\GD3D11\\Textures\\Snowflakes\\Snow_", 256, &SnowTextureArray, &SnowTextureArraySRV ) );
-        t.Update();
-        LogInfo() << "Loading snow flakes took " << static_cast<int>(t.GetDelta() * 1000.0f) << "ms";
+        ZoneScopedN( "LoadSnowTextures" );
+        LE( LoadTextureArray( e->GetDevice().Get(), e->GetContext().Get(), "\\_work\\Data\\Textures\\GD3D11\\Snowflakes\\Snow_", 256, &SnowTextureArray, &SnowTextureArraySRV ) );
+        if (!SUCCEEDED(hr)) {
+            LE( LoadTextureArray( e->GetDevice().Get(), e->GetContext().Get(), (basePath / "Snowflakes"/"Snow_").string().c_str(), 256, &SnowTextureArray, &SnowTextureArraySRV ) );
+        }
     }
 
     if ( !RainShadowmap.get() ) {
@@ -496,26 +499,45 @@ XRESULT D3D11Effect::LoadRainResources()
 
 /** Renders the rain-shadowmap */
 XRESULT D3D11Effect::DrawRainShadowmap() {
-    if ( !RainShadowmap.get() )
-        return XR_SUCCESS;
-
     D3D11GraphicsEngine* e = reinterpret_cast<D3D11GraphicsEngine*>(Engine::GraphicsEngine); // TODO: This has to be a cast to D3D11GraphicsEngineBase!
     //D3D11GraphicsEngineBase* e = (D3D11GraphicsEngineBase*)Engine::GraphicsEngine; //RenderShadowmaps to be moved then to D3D11GraphicsEngineBase
-    GothicRendererState& state = Engine::GAPI->GetRendererState();
+
+    if ( !RainShadowmap ) {
+        const int s = 2048;
+        RainShadowmap = std::make_unique<RenderToDepthStencilBuffer>( e->GetDevice().Get(), s, s,
+            DXGI_FORMAT_R16_TYPELESS, nullptr, DXGI_FORMAT_D16_UNORM, DXGI_FORMAT_R16_UNORM );
+        SetDebugName( RainShadowmap->GetDepthStencilView().Get(), "RainShadowmap->DepthStencilView" );
+        SetDebugName( RainShadowmap->GetShaderResView().Get(), "RainShadowmap->ShaderResView" );
+        SetDebugName( RainShadowmap->GetTexture().Get(), "RainShadowmap->Texture" );
+    }
+
+    if ( !RainShadowmap ) {
+        return XR_SUCCESS;
+    }
 
     CameraReplacement& cr = RainShadowmapCameraRepl;
 
     // Get the section we are currently in
     XMVECTOR p = Engine::GAPI->GetCameraPositionXM();
-    FXMVECTOR dir = XMVector3Normalize( XMLoadFloat3( &Engine::GAPI->GetRendererState().RendererSettings.RainGlobalVelocity ) * -1 ); //check was previous XMVector3NormalizeEst
+    XMVECTOR rainVelocity = XMLoadFloat3( &Engine::GAPI->GetRendererState().RendererSettings.RainGlobalVelocity );
+    if ( XMVectorGetX( XMVector3LengthSq( rainVelocity ) ) < 0.0001f ) {
+        rainVelocity = XMVectorSet( 0, -1, 0, 0 );
+    }
+    XMVECTOR dir = XMVector3Normalize( rainVelocity * -1.0f );
+
     // Set the camera height to the highest point in this section
-    //p.y = 0;
     p += dir * 6000.0f;
 
-    FXMVECTOR lookAt = p - dir;
+    XMVECTOR lookAt = p - dir;
+
+    XMVECTOR forward = XMVector3Normalize( lookAt - p );
+    XMVECTOR up = XMVectorSet( 0, 1, 0, 0 );
+    if ( fabsf( XMVectorGetX( XMVector3Dot( forward, up ) ) ) > 0.95f ) {
+        up = XMVectorSet( 0, 0, 1, 0 );
+    }
 
     // Create shadowmap view-matrix
-    XMMATRIX crViewReplacement = XMMatrixLookAtLH( p, lookAt, XMVectorSet( 0, 1, 0, 0 ) );
+    XMMATRIX crViewReplacement = XMMatrixLookAtLH( p, lookAt, up );
 
     const auto size = RainShadowmap->GetSizeX();
     const auto legacySingleShadowMapScaleFactor = Toolbox::GetRecommendedWorldShadowRangeScaleForSize( size );
@@ -531,6 +553,28 @@ XRESULT D3D11Effect::DrawRainShadowmap() {
     XMStoreFloat4x4( &cr.ProjectionReplacement, XMMatrixTranspose( crProjectionReplacement ) );
     XMStoreFloat3( &cr.PositionReplacement, p );
     XMStoreFloat3( &cr.LookAtReplacement, lookAt );
+    
+    cr.frustum.BuildOrthographic( crViewReplacement,
+        size * legacySingleShadowMapScaleFactor,
+        size * legacySingleShadowMapScaleFactor,
+        1.0f,
+        20000.f );
+
+    if ( !cr.frustum.IsValid() ) {
+        // Keep rain occlusion alive even if a custom rain direction produced a degenerate camera basis.
+        XMVECTOR fallbackUp = XMVectorSet( 1, 0, 0, 0 );
+        crViewReplacement = XMMatrixLookAtLH( p, lookAt, fallbackUp );
+        XMStoreFloat4x4( &cr.ViewReplacement, XMMatrixTranspose( crViewReplacement ) );
+        cr.frustum.BuildOrthographic( crViewReplacement,
+            size * legacySingleShadowMapScaleFactor,
+            size * legacySingleShadowMapScaleFactor,
+            1.0f,
+            20000.f );
+    }
+
+    if ( !cr.frustum.IsValid() ) {
+        return XR_SUCCESS;
+    }
 
     // Replace gothics camera
     Engine::GAPI->SetCameraReplacementPtr( &cr );
@@ -542,10 +586,9 @@ XRESULT D3D11Effect::DrawRainShadowmap() {
     Engine::GAPI->GetRendererState().GraphicsState.FF_AlphaRef = -1.0f;
 
     // Bind the FF-Info to the first PS slot
-    auto PS_Diffuse = e->GetShaderManager().GetPShader( "PS_Diffuse" );
+    auto PS_Diffuse = e->GetShaderManager().GetPShader( PShaderID::PS_Diffuse );
     if ( PS_Diffuse ) {
-        PS_Diffuse->GetConstantBuffer()[0]->UpdateBuffer( &Engine::GAPI->GetRendererState().GraphicsState );
-        PS_Diffuse->GetConstantBuffer()[0]->BindToPixelShader( 0 );
+        PS_Diffuse->GetBuffer( "FFPipelineConstantBuffer" ).Update( &Engine::GAPI->GetRendererState().GraphicsState ).Bind();
     }
 
     // Disable stuff like NPCs and usable things as they don't need to cast rain-shadows
@@ -566,7 +609,7 @@ XRESULT D3D11Effect::DrawRainShadowmap() {
     Engine::GAPI->GetRendererState().RendererSettings.DrawSkeletalMeshes = oldDrawSkel;
     Engine::GAPI->GetRendererState().GraphicsState.FF_AlphaRef = oldAlphaRef;
     if ( PS_Diffuse ) {
-        PS_Diffuse->GetConstantBuffer()[0]->UpdateBuffer( &Engine::GAPI->GetRendererState().GraphicsState );
+        PS_Diffuse->GetBuffer( "FFPipelineConstantBuffer" ).Update( &Engine::GAPI->GetRendererState().GraphicsState );
     }
 
     e->SetDefaultStates();
@@ -581,23 +624,84 @@ XRESULT D3D11Effect::DrawRainShadowmap() {
 // LoadTextureArray loads a texture array and associated view from a series
 // of textures on disk.
 //--------------------------------------------------------------------------------------
-HRESULT LoadTextureArray( Microsoft::WRL::ComPtr<ID3D11Device1> pd3dDevice, Microsoft::WRL::ComPtr<ID3D11DeviceContext1> context, char* sTexturePrefix, int iNumTextures, ID3D11Texture2D** ppTex2D, ID3D11ShaderResourceView** ppSRV ) {
+HRESULT LoadTextureArray( Microsoft::WRL::ComPtr<ID3D11Device1> pd3dDevice, Microsoft::WRL::ComPtr<ID3D11DeviceContext1> context, const char* sTexturePrefix, int iNumTextures, ID3D11Texture2D** ppTex2D, ID3D11ShaderResourceView** ppSRV ) {
     if ( !ppTex2D ) {
         LogError() << "invalid argument: ppTex2D. should not be null";
         return E_FAIL;
     }
 
     HRESULT hr = S_OK;
+    
+    // First, try to load from the single packed DDS file via VDFS
+    std::string singleFilePath = "";
+    if ( strstr( sTexturePrefix, "Raindrops" ) ) {
+        singleFilePath = R"(\system\GD3D11\Textures\raindrops.dds)";
+    } else if ( strstr( sTexturePrefix, "Snowflakes" ) ) {
+        singleFilePath = R"(\system\GD3D11\Textures\snowflakes.dds)";
+    }
+    
+    if ( !singleFilePath.empty() ) {
+        auto file = zFILE_VDFS::Create( singleFilePath.c_str() );
+        if ( file->Exists() && file->Open( false ) == 0 ) {
+            auto size = file->Size();
+            std::vector<uint8_t> storage( size );
+            file->Read( storage.data(), size );
+            file->Close();
+            
+            Microsoft::WRL::ComPtr<ID3D11Resource> pRes;
+            hr = CreateDDSTextureFromMemoryEx(
+                pd3dDevice.Get(),
+                storage.data(),
+                size,
+                0,
+                D3D11_USAGE_DEFAULT,
+                D3D11_BIND_SHADER_RESOURCE,
+                0,
+                0,
+                DDS_LOADER_DEFAULT,
+                pRes.GetAddressOf(),
+                ppSRV
+            );
+            if ( SUCCEEDED( hr ) ) {
+                hr = pRes.As( ppTex2D );
+                if ( SUCCEEDED( hr ) ) {
+                    LogInfo() << "Successfully loaded texture array from single VDFS file: " << singleFilePath;
+                    return S_OK;
+                }
+            }
+            LogWarn() << "Failed to load single packed DDS file from VDFS memory: " << singleFilePath << ", falling back to individual files...";
+        }
+    }
+
+    // Fallback: load individual files
     D3D11_TEXTURE2D_DESC desc = {};
     DXGI_FORMAT texFormat = DXGI_FORMAT_UNKNOWN;
-
-    //	CHAR szTextureName[MAX_PATH];
     CHAR str[MAX_PATH];
+
+    std::vector<uint8_t> storage{};
     for ( int i = 0; i < iNumTextures; i++ ) {
         sprintf( str, "%s%.4d.dds", sTexturePrefix, i );
 
+        auto file = zFILE_VDFS::Create( str );
+        if ( !file->Exists() ) {
+            LogError() << "File does not exist: " << str;
+            return E_FAIL;
+        }
+        auto retOpen = file->Open( false );
+        if ( retOpen != 0 ) {
+            LogError() << "Failed to open filepath: " << str;
+            return E_FAIL;
+        }
+        auto size = file->Size();
+
+        if ( storage.size() < size ) {
+            storage.resize( size*2 );
+        }
+        auto numRead = file->Read( storage.data(), size );
+        auto retClose = file->Close();
+
         Microsoft::WRL::ComPtr<ID3D11Resource> pRes;
-        LE( CreateDDSTextureFromFileEx( pd3dDevice.Get(), Toolbox::ToWideChar( str ).c_str(), 0, D3D11_USAGE_STAGING, 0, D3D11_CPU_ACCESS_WRITE, 0, DDS_LOADER_DEFAULT, pRes.GetAddressOf(), nullptr ) );
+        LE( CreateDDSTextureFromMemoryEx( pd3dDevice.Get(), storage.data(), size, 0, D3D11_USAGE_STAGING, 0, D3D11_CPU_ACCESS_WRITE, 0, DDS_LOADER_DEFAULT, pRes.GetAddressOf(), nullptr));
         if ( pRes.Get() ) {
             Microsoft::WRL::ComPtr<ID3D11Texture2D> pTemp;
             pRes.As( &pTemp );

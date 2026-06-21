@@ -236,6 +236,8 @@ struct GothicMemoryLocations {
     struct zCSkyController {
         static const unsigned int VTBL_RenderSkyPre = 27; //0x6C / 4
         static const unsigned int VTBL_RenderSkyPost = 28;
+        static const unsigned int static_skyEffectsEnabled = 0x8A5DB0; // int*
+        static const unsigned int ClearBackground = 0x005df930;
     };
 
     struct zCParticleEmitter {
@@ -567,9 +569,11 @@ struct GothicMemoryLocations {
         static const unsigned int Offset_MatGroup = 0x40;
         static const unsigned int Offset_TexAniCtrl = 0x4C;
 
+        static const unsigned int Offset_EnvMapStrength = 0x6C;
         static const unsigned int Offset_Flags = 0x70;
         static const unsigned int Offset_TexAniMapDelta = 0x94;
         static const unsigned int Mask_FlagTexAniMap = 0x4;
+        static const unsigned int Mask_FlagEnvMapEnabled = 0x40;
 
         static const unsigned int Offset_WaveMode = 0x7C;
         static const unsigned int Offset_WaveSpeed = 0x80;
@@ -714,5 +718,30 @@ struct GothicMemoryLocations {
             VobLight = 0x839A74;
     protected:
         VobTypes() {}
+    };
+
+
+    struct zFILE_VDFS
+    {
+        static const unsigned int StructSize = 0x2a24;
+
+        static const unsigned int Constructor2 = 0x00448e20;
+        static const unsigned int Destructor = 0x00448ed0;
+        static const unsigned int Exists = 0x00449020;
+        static const unsigned int Open = 0x00449120;
+        static const unsigned int Close = 0x004493a0;
+        static const unsigned int Read = 0x0044abf0;
+        static const unsigned int Size = 0x00449410;
+        static const unsigned int SetPath = 0x004455d0;
+        static const unsigned int zCObjectFactory__CreateZFile = 0x005ab940;
+    };
+
+#define zALLOCATOR_SUPPORTED
+    struct zAllocator
+    {
+        // pointer to shw32 shi_malloc func
+        static const unsigned int Malloc = 0x0082e30c;
+        // pointer to shw32 shi_delete func
+        static const unsigned int Free = 0x0082e308;
     };
 };

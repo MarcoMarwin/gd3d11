@@ -21,6 +21,7 @@ public:
     }
 
     bool IsStatic() {
+        // Bit 0 is the Spacer II zCVobLight property "lightStatic".
         int flags = *reinterpret_cast<int*>(THISPTR_OFFSET( GothicMemoryLocations::zCVobLight::Offset_LightInfo ));
         return (flags & 1) != 0;
     }

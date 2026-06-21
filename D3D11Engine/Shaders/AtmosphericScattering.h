@@ -35,8 +35,21 @@ cbuffer Atmosphere : register( b1 )
 
 	float AC_EnableSSR;
 	float AC_EnableSSS;
+	float AC_SSRStrength;
+	float AC_SSSIntensity;
+
 	float AC_AtmospherePad1;
+	float AC_EnableNightAtmosphere;
+	float AC_NearNightBrightness;
+	float AC_NightFogBrightness;
+
+	float AC_NightDarkeningStart;
+	float AC_NightDarkeningMax;
+	float AC_NightDarkeningRange;
 	float AC_AtmospherePad2;
+
+	float3 AC_WorldCameraPos;
+	float AC_AtmospherePad3;
 };
 
 // The scale equation calculated by Vernier's Graphical Analysis
@@ -78,15 +91,37 @@ float3 GetAtmosphericSunTerm(float3 normal)
 	return saturate(dot(normal, AC_LightPos));
 }
 
+float GetNightWeight()
+{
+	return saturate(((-AC_LightPos.y) + 0.2f) * 10.0f);
+}
 
+float GetNightDistanceFade(float3 worldPosition)
+{
+	float cameraDistance = length(worldPosition - AC_WorldCameraPos);
+	float nightFadeStart = max(0.0f, AC_NightDarkeningStart);
+	float nightFadeEnd = nightFadeStart + max(1000.0f, AC_NightDarkeningRange);
+	return smoothstep(nightFadeStart, nightFadeEnd, cameraDistance)
+		* GetNightWeight() * saturate(AC_EnableNightAtmosphere);
+}
 
-float3 ApplyAtmosphericScatteringGround(float3 worldPosition, float3 in_color, bool applyNightshade=true)
+float3 ApplyNightDistanceDarkening(float3 worldPosition, float3 color)
+{
+	float nightDistanceFade = GetNightDistanceFade(worldPosition);
+	float3 farNightColor = float3(0.0012f, 0.0016f, 0.0035f);
+	float baseNightDarkening = saturate(AC_NightDarkeningMax);
+	float extraNightDarkening = saturate(AC_NightDarkeningMax - 1.0f);
+	color = lerp(color, farNightColor, nightDistanceFade * baseNightDarkening);
+	return lerp(color, float3(0.0f, 0.0f, 0.0f), nightDistanceFade * extraNightDarkening);
+}
+
+float3 ApplyAtmosphericScatteringGround(float3 worldPosition, float3 in_color, bool applyNightshade=true, bool applyDistanceDarkening=true)
 {
 	float3 camPos = AC_CameraPos;
 	float3 v3Pos = worldPosition - AC_SpherePosition;
 	float3 v3Ray = v3Pos - camPos;
 
-	float nightWeight = saturate(((-AC_LightPos.y) + 0.2f) * 10.0f);
+	float nightWeight = GetNightWeight();
 		
 	float innerRadius = AC_InnerRadius;
 				
@@ -130,9 +165,7 @@ float3 ApplyAtmosphericScatteringGround(float3 worldPosition, float3 in_color, b
 		v3FrontColor += v3Attenuate * (fDepth * fScaledLength);
 		v3SamplePoint += v3SampleRay;
 	}
-	
-	// Shut off blue tint of geometry when raining
-	v3FrontColor =  lerp(v3FrontColor, 0.0f, AC_SceneWettness);
+	// Rain wetness is handled by surface shaders; keep atmospheric night color stable.
 	
 	// Finally, scale the Mie and Rayleigh colors and set up the varying variables for the pixel shader
 	float3 c0 = v3FrontColor * (vInvWavelength * AC_KrESun + AC_KmESun);
@@ -140,16 +173,19 @@ float3 ApplyAtmosphericScatteringGround(float3 worldPosition, float3 in_color, b
 	float3 c1 = v3Attenuate;
 	
 	float3 dayColor = c0 + in_color * c1;
-	float3 nightColor = float3(0.20,0.20,0.4) * NIGHT_BRIGHTNESS;
-	nightColor = lerp(nightColor, float3(0.24,0.24,0.24) * NIGHT_BRIGHTNESS * 0.6f, AC_SceneWettness); // Grey fog when raining
+	float nearNightBrightness = lerp(1.0f, max(0.0f, AC_NearNightBrightness), saturate(AC_EnableNightAtmosphere));
+	float3 nightColor = float3(0.095f,0.115f,0.255f) * NIGHT_BRIGHTNESS * nearNightBrightness;
+	float moonWeight = saturate((-AC_LightPos.y - 0.08f) * 1.7f);
+	float midtone = saturate(dot(in_color, float3(0.299f, 0.587f, 0.114f)) * 0.95f + 0.04f);
+	float3 moonColor = float3(0.018f, 0.026f, 0.052f) * moonWeight * midtone * nearNightBrightness;
 	float3 outColor;
 
 	if(applyNightshade)
-		outColor = dayColor + in_color * nightColor * nightWeight;
+		outColor = dayColor + in_color * nightColor * nightWeight + moonColor;
 	else
-		outColor = dayColor + nightColor * nightWeight;
-		
-	return outColor;
+		outColor = dayColor + nightColor * nightWeight + moonColor;
+
+	return applyDistanceDarkening ? ApplyNightDistanceDarkening(worldPosition, outColor) : outColor;
 }
 
 float3 ApplyAtmosphericScatteringSky(float3 worldPosition)

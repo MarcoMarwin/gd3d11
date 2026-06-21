@@ -17,10 +17,14 @@ on:
 
   workflow_dispatch:
 
+permissions:
+  contents: write
+  actions: read
+
 jobs:
   build:
     name: build (${{ matrix.configuration }})
-    runs-on: windows-latest
+    runs-on: windows-2025-vs2026
     strategy:
       matrix:
         include:
@@ -91,11 +95,9 @@ jobs:
         uses: ./.github/actions/package-artifacts
 
   create-release:
-    if: github.event_name == 'push' && (github.ref_name == 'master' || github.ref_type == 'tag')
+    if: github.event_name == 'push' && (github.ref_name == 'master' || github.ref_name == 'codex/nightly-ssr-sss-features' || github.ref_type == 'tag')
     needs: package-artifacts
     runs-on: ubuntu-latest
-    permissions:
-      contents: write
 
     steps:
       - name: Checkout only composite actions

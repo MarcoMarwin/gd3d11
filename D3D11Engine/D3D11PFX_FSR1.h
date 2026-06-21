@@ -24,7 +24,7 @@ public:
      */
     XRESULT ApplyEASU( 
         const Microsoft::WRL::ComPtr<ID3D11ShaderResourceView>& input,
-        const Microsoft::WRL::ComPtr<ID3D11RenderTargetView>& output,
+        ID3D11RenderTargetView* output,
         const INT2& inputSize,
         const INT2& outputSize );
 
@@ -35,7 +35,7 @@ public:
      */
     XRESULT ApplyRCAS(
         const Microsoft::WRL::ComPtr<ID3D11ShaderResourceView>& input,
-        const Microsoft::WRL::ComPtr<ID3D11RenderTargetView>& output,
+        ID3D11RenderTargetView* output,
         float sharpness = 0.2f );
 
     /** Applies full FSR1 pipeline (EASU + optional RCAS)
@@ -48,7 +48,7 @@ public:
      */
     XRESULT Apply(
         const Microsoft::WRL::ComPtr<ID3D11ShaderResourceView>& input,
-        const Microsoft::WRL::ComPtr<ID3D11RenderTargetView>& output,
+        ID3D11RenderTargetView* output,
         const INT2& inputSize,
         const INT2& outputSize,
         bool enableRCAS = true,
@@ -56,6 +56,8 @@ public:
 
     /** Sets the RCAS sharpness value (0.0 = maximum sharpness, higher values = less sharp) */
     void SetSharpness( float sharpness );
+
+    void ReleaseResources();
 
 private:
     D3D11PfxRenderer* Renderer;

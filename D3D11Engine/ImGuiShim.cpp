@@ -1,11 +1,26 @@
 #include "ImGuiShim.h"
 #include "GSky.h"
 #include <VersionHelpers.h>
-#include <ShellScalingAPI.h>
+#include <ShellScalingApi.h>
 
 #include "ImGuiEditorView.h"
 #include "zCParser.h"
 #include <sstream>
+#include <map>
+#include <vector>
+#include <algorithm>
+#include <chrono>
+#include <numeric>
+#include <codecvt>
+
+namespace ImGui {
+    void TextUnformatted( const wchar_t* text ) {
+        char dest[64];
+        auto len = WideCharToMultiByte(CP_UTF8, 0, text, -1, dest, sizeof(dest), NULL, NULL);
+        dest[std::min(static_cast<size_t>(len), sizeof(dest) - 1)] = '\0';
+        ImGui::TextUnformatted( dest );
+    }
+}
 
 #if defined(BUILD_GOTHIC_1_08k) && !defined(BUILD_1_12F)
 extern bool haveWindAnimations;
@@ -58,12 +73,14 @@ int GetDpi( HWND hWnd )
     return ydpi;
 }
 
+void ApplyFeatureLevel10Downgrades(GothicRendererSettings& s);
+
 void ImGuiShim::Init(
     HWND Window,
     const Microsoft::WRL::ComPtr<ID3D11Device1>& device,
     const Microsoft::WRL::ComPtr<ID3D11DeviceContext1>& context
 )
-{
+{ 
     IMGUI_CHECKVERSION();
     ImGui::CreateContext();
     ImGuiIO& io = ImGui::GetIO();
@@ -126,13 +143,15 @@ void ImGuiShim::RenderLoop()
 
     ImGui::GetIO().MouseDrawCursor = GetIsActive() && INT2( ImGui::GetMainViewport()->Size.x, ImGui::GetMainViewport()->Size.y ) != Engine::GraphicsEngine->GetResolution();
 
-    static int beginFrameFn = zCParser::GetParser()->GetIndex( "GDX_IMGUI_BEGINFRAME" );
-    static int endFrameFn = zCParser::GetParser()->GetIndex( "GDX_IMGUI_ENDFRAME" );
+    static zSTRING GDX_IMGUI_BEGINFRAME = "GDX_IMGUI_BEGINFRAME";
+    static zSTRING GDX_IMGUI_ENDFRAME = "GDX_IMGUI_ENDFRAME";
+    static int beginFrameFn = zCParser::GetParser()->GetIndex( GDX_IMGUI_BEGINFRAME );
+    static int endFrameFn = zCParser::GetParser()->GetIndex( GDX_IMGUI_ENDFRAME );
 
     static int retryFindFuncs = 0;
     if ( retryFindFuncs > 120 ) {
-        if ( beginFrameFn == -1 ) { beginFrameFn = zCParser::GetParser()->GetIndex( "GDX_IMGUI_BEGINFRAME" ); }
-        if ( endFrameFn == -1 ) { endFrameFn = zCParser::GetParser()->GetIndex( "GDX_IMGUI_ENDFRAME" ); }
+        if ( beginFrameFn == -1 ) { beginFrameFn = zCParser::GetParser()->GetIndex( GDX_IMGUI_BEGINFRAME ); }
+        if ( endFrameFn == -1 ) { endFrameFn = zCParser::GetParser()->GetIndex( GDX_IMGUI_ENDFRAME ); }
         retryFindFuncs = 0;
     }
 
@@ -147,8 +166,7 @@ void ImGuiShim::RenderLoop()
     auto oldSettings = Engine::GAPI->GetRendererState().RendererSettings;
     if ( SettingsVisible ) {
         RenderSettingsWindow();
-    }
-    if ( AdvancedSettingsVisible ) {
+    } else if ( AdvancedSettingsVisible ) {
         RenderAdvancedSettingsWindow();
     }
 
@@ -160,6 +178,9 @@ void ImGuiShim::RenderLoop()
     if ( memcmp( &oldSettings, &Engine::GAPI->GetRendererState().RendererSettings, sizeof( GothicRendererSettings ) ) != 0 ) {
         if ( oldSettings.GraphicsPreset == Engine::GAPI->GetRendererState().RendererSettings.GraphicsPreset ) {
             Engine::GAPI->GetRendererState().RendererSettings.GraphicsPreset = GothicRendererSettings::E_GraphicsPreset::GRAPHICS_CUSTOM;
+        }
+        if ( FeatureLevel10Compatibility ) {
+            ApplyFeatureLevel10Downgrades( Engine::GAPI->GetRendererState().RendererSettings );
         }
     }
     //if ( DemoVisible )
@@ -278,7 +299,7 @@ bool ImComboBoxCT( const char* id, const std::vector<std::tuple<const char*, T, 
                 selected();
             }
             if ( std::get<2>(items[i]) ) {
-                ImGui::SetItemTooltip( std::get<2>( items[i] ) );
+                ImGui::SetItemTooltip( "%s", std::get<2>( items[i] ) );
             }
 
             if ( isSelected ) {
@@ -387,24 +408,42 @@ bool ImGuizmoDirectionEdit( const char* label, XMFLOAT3& direction, float widget
     return modified;
 }
 
+void ApplyFeatureLevel10Downgrades(GothicRendererSettings& s) {
+    // one 4k texture, 1/2 2k textures max.
+    s.NumShadowCascades = std::min(s.NumShadowCascades, MAX_CSM_CASCADES);
+
+    if (s.NumShadowCascades >= 2) {
+        s.DebugSettings.ShadowCascades.Lambda = D3D11ShadowMap::lambdaBiasTable[s.NumShadowCascades].lambda;
+        s.DebugSettings.ShadowCascades.Bias = D3D11ShadowMap::lambdaBiasTable[s.NumShadowCascades].bias;
+    }
+}
+
 void ApplyGraphicsPresets( GothicRendererSettings& s ) {
-    switch ( s.GraphicsPreset ) {
+    const auto preset = s.GraphicsPreset;
+    if ( preset == GothicRendererSettings::E_GraphicsPreset::GRAPHICS_CUSTOM ) {
+        return;
+    }
+
+    switch ( preset ) {
     case GothicRendererSettings::GRAPHICS_LOW:
     {
         s.ChangeWindowPreset = WINDOW_MODE_FULLSCREEN_BORDERLESS;
 
+        s.CompressBackBuffer = true;
         s.WorldShadowRangeScale = 1.0f;
         s.NumShadowCascades = 2;
+        s.DebugSettings.FeatureSet.UseShadowAtlas = true;
         s.ShadowMapSize = 1024;
         s.ShadowFrustumCullingMode = GothicRendererSettings::E_ShadowFrustumCulling::SHD_FRUSTUM_CULLING_AGGRESSIVE;
         s.ShadowSoftness = 0.85f;
         s.SmoothShadowCameraUpdate = true;
         s.SmoothShadowFrequency = 500;
+        s.ShadowFilterMode = GothicRendererSettings::E_ShadowFilterMode::SHADOW_FILTER_DISABLED;
 
         s.EnableDynamicLighting = false;
         s.EnablePointlightShadows = GothicRendererSettings::EPointLightShadowMode::PLS_DISABLED;
 
-        s.HbaoSettings.Enabled = false;
+        s.AoMode = AOMode::AO_NONE;
 
         s.textureMaxSize = static_cast<int>(TX_QUALITY::Medium);
 
@@ -417,8 +456,6 @@ void ApplyGraphicsPresets( GothicRendererSettings& s ) {
         
         s.WindQuality = GothicRendererSettings::EWindQuality::WIND_QUALITY_NONE;
         s.HeroAffectsObjects = 0;
-        s.EnableSSR = false;
-        s.EnableSSS = false;
 
         s.EnableGodRays = false;
     }
@@ -427,18 +464,21 @@ void ApplyGraphicsPresets( GothicRendererSettings& s ) {
     {
         s.ChangeWindowPreset = WINDOW_MODE_FULLSCREEN_BORDERLESS;
 
+        s.CompressBackBuffer = true;
         s.WorldShadowRangeScale = 1.0f;
         s.NumShadowCascades = 3;
+        s.DebugSettings.FeatureSet.UseShadowAtlas = true;
         s.ShadowMapSize = 2048;
         s.ShadowFrustumCullingMode = GothicRendererSettings::E_ShadowFrustumCulling::SHD_FRUSTUM_CULLING_CONSERVATIVE;
         s.ShadowSoftness = 0.85f;
         s.SmoothShadowCameraUpdate = true;
         s.SmoothShadowFrequency = 1000;
-
+        s.ShadowFilterMode = GothicRendererSettings::E_ShadowFilterMode::SHADOW_FILTER_SIMPLE;
+            
         s.EnableDynamicLighting = true;
         s.EnablePointlightShadows = GothicRendererSettings::EPointLightShadowMode::PLS_STATIC_ONLY;
 
-        s.HbaoSettings.Enabled = false;
+        s.AoMode = AOMode::AO_NONE;
 
         s.textureMaxSize = static_cast<int>(TX_QUALITY::Medium);
 
@@ -459,18 +499,20 @@ void ApplyGraphicsPresets( GothicRendererSettings& s ) {
     {
         s.ChangeWindowPreset = WINDOW_MODE_FULLSCREEN_BORDERLESS;
 
+        s.CompressBackBuffer = false;
         s.WorldShadowRangeScale = 1.0f;
         s.NumShadowCascades = 3;
         s.ShadowMapSize = 4096;
         s.ShadowFrustumCullingMode = GothicRendererSettings::E_ShadowFrustumCulling::SHD_FRUSTUM_CULLING_CONSERVATIVE;
         s.ShadowSoftness = 1.0f;
         s.SmoothShadowCameraUpdate = false;
-        s.SmoothShadowFrequency = 20000;
+        s.SmoothShadowFrequency = 1000;
+        s.ShadowFilterMode = GothicRendererSettings::E_ShadowFilterMode::SHADOW_FILTER_SIMPLE;
 
         s.EnableDynamicLighting = true;
         s.EnablePointlightShadows = GothicRendererSettings::EPointLightShadowMode::PLS_UPDATE_DYNAMIC;
 
-        s.HbaoSettings.Enabled = true;
+        s.AoMode = AOMode::AO_HBAO;
         s.HbaoSettings.SsaoStepCount = 4;
         s.HbaoSettings.SsaoBlurRadius = 4;
 
@@ -479,8 +521,8 @@ void ApplyGraphicsPresets( GothicRendererSettings& s ) {
         s.AntiAliasingMode = GothicRendererSettings::E_AntiAliasingMode::AA_SMAA;
         s.SectionDrawRadius = 4;
         s.VisualFXDrawRadius = 8'000;
-        s.OutdoorVobDrawRadius = 50'000;
-        s.OutdoorSmallVobDrawRadius = 30'000;
+        s.OutdoorVobDrawRadius = 40'000;
+        s.OutdoorSmallVobDrawRadius = 25'000;
         s.IndoorVobDrawRadius = 20'000;
 
         s.WindQuality = GothicRendererSettings::EWindQuality::WIND_QUALITY_ADVANCED;
@@ -493,18 +535,20 @@ void ApplyGraphicsPresets( GothicRendererSettings& s ) {
     {
         s.ChangeWindowPreset = WINDOW_MODE_FULLSCREEN_BORDERLESS;
 
+        s.CompressBackBuffer = false;
         s.WorldShadowRangeScale = 1.0f;
         s.NumShadowCascades = 4;
         s.ShadowMapSize = 4096;
         s.ShadowFrustumCullingMode = GothicRendererSettings::E_ShadowFrustumCulling::SHD_FRUSTUM_CULLING_CONSERVATIVE;
         s.ShadowSoftness = 1.0f;
         s.SmoothShadowCameraUpdate = false;
-        s.SmoothShadowFrequency = 20000;
+        s.SmoothShadowFrequency = 1000;
+        s.ShadowFilterMode = GothicRendererSettings::E_ShadowFilterMode::SHADOW_FILTER_PCSS;
 
         s.EnableDynamicLighting = true;
-        s.EnablePointlightShadows = GothicRendererSettings::EPointLightShadowMode::PLS_FULL;
+        s.EnablePointlightShadows = GothicRendererSettings::EPointLightShadowMode::PLS_UPDATE_DYNAMIC;
 
-        s.HbaoSettings.Enabled = true;
+        s.AoMode = AOMode::AO_HBAO;
         s.HbaoSettings.SsaoStepCount = 8;
         s.HbaoSettings.SsaoBlurRadius = 4;
 
@@ -513,9 +557,9 @@ void ApplyGraphicsPresets( GothicRendererSettings& s ) {
         s.AntiAliasingMode = GothicRendererSettings::E_AntiAliasingMode::AA_SMAA;
         s.SectionDrawRadius = 5;
         s.VisualFXDrawRadius = 10'000;
-        s.OutdoorVobDrawRadius = 50'000;
-        s.OutdoorSmallVobDrawRadius = 35'000;
-        s.IndoorVobDrawRadius = 25'000;
+        s.OutdoorVobDrawRadius = 40'000;
+        s.OutdoorSmallVobDrawRadius = 25'000;
+        s.IndoorVobDrawRadius = 20'000;
 
         s.WindQuality = GothicRendererSettings::EWindQuality::WIND_QUALITY_ADVANCED;
         s.HeroAffectsObjects = 1;
@@ -527,8 +571,37 @@ void ApplyGraphicsPresets( GothicRendererSettings& s ) {
         return;
     }
 
+    if (FeatureLevel10Compatibility) {
+        ApplyFeatureLevel10Downgrades(s);
+    }
+    
     Engine::GAPI->UpdateTextureMaxSize();
     Engine::GraphicsEngine->ReloadShaders();
+    Engine::GAPI->UpdateCompressBackBuffer();
+}
+
+namespace
+{
+    bool IsFSRUpscaler( GothicRendererSettings::E_Upscaler v ) {
+        return v == GothicRendererSettings::E_Upscaler::UPSCALER_FSR_3
+            || v == GothicRendererSettings::E_Upscaler::UPSCALER_FSR_2;
+    }
+    void FixupSettings(GothicRendererSettings& s) {
+        if (s.AntiAliasingMode == GothicRendererSettings::E_AntiAliasingMode::AA_FSR) {
+            if ( !IsFSRUpscaler( s.Upscaler ) ) {
+                s.Upscaler = GothicRendererSettings::E_Upscaler::UPSCALER_FSR_3;
+            }
+        }
+        if (s.AntiAliasingMode == GothicRendererSettings::E_AntiAliasingMode::AA_TAA
+            && (s.Upscaler == GothicRendererSettings::E_Upscaler::UPSCALER_FSR_2 || s.Upscaler == GothicRendererSettings::E_Upscaler::UPSCALER_FSR_3)) {
+            // don't allow TAA and FSR2 at the same time.
+            s.Upscaler = GothicRendererSettings::E_Upscaler::UPSCALER_FSR_1;
+        }
+        if (s.ResolutionScalePercent > 100 && s.AntiAliasingMode == GothicRendererSettings::E_AntiAliasingMode::AA_FSR) {
+            // switch to regular TAA if upsampled
+            s.AntiAliasingMode = GothicRendererSettings::AA_TAA;
+        }
+    }
 }
 
 void ImGuiShim::RenderSettingsWindow()
@@ -544,12 +617,19 @@ void ImGuiShim::RenderSettingsWindow()
     ImVec2 buttonWidth( 275, 0 );
     auto& style = ImGui::GetStyle();
 
+#ifdef IS_DEV_BUILD
+    static const char* settingsLabel = "GD3D11 " VERSION_NUMBER " - (" BUILD_DATE ")";
+#else
     static const char* settingsLabel = "GD3D11 " VERSION_NUMBER;
+#endif
+
+    ShaderCategory shadersToReload = ShaderCategory::None;
 
     ImGui::SetNextWindowPos( ImVec2( windowSize.x / 2, windowSize.y / 2 ), ImGuiCond_Appearing, ImVec2( 0.5f, 0.5f ) );
     if ( ImGui::Begin( settingsLabel, nullptr, ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoResize ) ) {
         GothicRendererSettings& settings = Engine::GAPI->GetRendererState().RendererSettings;
-        
+        FixupSettings(settings);
+
         static std::vector<std::pair<const char*, int>> graphicsPresets = {
             {"Custom", GothicRendererSettings::E_GraphicsPreset::GRAPHICS_CUSTOM},
             {"Low", GothicRendererSettings::E_GraphicsPreset::GRAPHICS_LOW},
@@ -568,6 +648,10 @@ void ImGuiShim::RenderSettingsWindow()
         }
         ImGui::PopItemWidth();
         ImGui::Separator();
+
+        const float standardComboWidth = 250.0f;
+        const float standardComboStart = std::max( 180.0f,
+            ImGui::GetWindowWidth() * 0.5f - standardComboWidth - ImGui::GetStyle().WindowPadding.x );
         
         {
             ImGui::BeginGroup();
@@ -575,37 +659,97 @@ void ImGuiShim::RenderSettingsWindow()
             if ( ImGui::Checkbox( "NormalMaps", &settings.AllowNormalmaps ) ) {
                 Engine::GAPI->UpdateTextureMaxSize();
             }
-            if ( ImGui::Checkbox( "Displacement", &settings.AllowDisplacement ) ) {
+            ImGui::BeginDisabled( !settings.AllowNormalmaps );
+            if ( ImGui::Checkbox( "Parallax Occlusion Mapping", &settings.EnableParallaxOcclusionMapping ) ) {
                 Engine::GAPI->UpdateTextureMaxSize();
             }
+            ImGui::SetItemTooltip( "Uses *_disp.dds height maps from Displacementmaps_* folders. Only loaded while enabled." );
+            ImGui::EndDisabled();
 
-            ImGui::Checkbox( "HBAO+", &settings.HbaoSettings.Enabled );
-            ImGui::SetItemTooltip( "Enable Screen-Space ambient occlusion." );
-
-            ImGui::Checkbox( "Godrays", &settings.EnableGodRays );
-            ImGui::Checkbox( "Screen Space Reflections (SSR)", &settings.EnableSSR );
-            ImGui::SetItemTooltip( "Enable reflections of the scene on water surfaces." );
-            ImGui::Checkbox( "Subsurface Scattering (SSS)", &settings.EnableSSS );
-            ImGui::SetItemTooltip( "Enable translucency for vegetation (leaves, grass)." );
-            static std::vector<std::pair<const char*, GothicRendererSettings::E_AntiAliasingMode>> antiAliasing = {
-                {"Disabled", GothicRendererSettings::E_AntiAliasingMode::AA_NONE},
-                {"SMAA", GothicRendererSettings::E_AntiAliasingMode::AA_SMAA},
-                {"TAA", GothicRendererSettings::E_AntiAliasingMode::AA_TAA},
+            static std::vector<std::tuple<const char*, AOMode, const char*>> aoModes = {
+                    {"Disabled", AOMode::AO_NONE, nullptr},
+                    {"HBAO+", AOMode::AO_HBAO, "NVIDIA HBAO+ (Horizon-Based Ambient Occlusion Plus)"},
+                    {"SAO", AOMode::AO_SAO, nullptr},
+                    {"ASSAO", AOMode::AO_ASSAO, "Intel ASSAO (Adaptive Screen Space Ambient Occlusion)"},
             };
-            if ( ImComboBox( "Anti Aliasing", antiAliasing, &settings.AntiAliasingMode ) ) {
+            ImGui::TextUnformatted( "AO Mode" );
+            ImGui::SameLine( standardComboStart );
+            ImGui::SetNextItemWidth( standardComboWidth );
+            if ( ImComboBoxCT( "##AOMode", aoModes, &settings.AoMode, [] {
+                Engine::GraphicsEngine->ReloadShaders( ShaderCategory::Other );
+                } ) ) {
                 ImGui::EndCombo();
+            }
+            ImGui::SetItemTooltip( "Screen-Space ambient occlusion mode.\nChanging this will reload shaders." );
+
+            if ( ImGui::Checkbox( "Godrays", &settings.EnableGodRays ) ) {
+                Engine::GraphicsEngine->ReloadShaders( ShaderCategory::Other );
+            }
+            ImGui::SetItemTooltip( "Changing this will reload shaders." );
+
+            bool enhancedWater = settings.EnableSSR;
+            if ( ImGui::Checkbox( "Water Effects", &enhancedWater ) ) {
+                settings.EnableSSR = enhancedWater;
+                settings.EnableWaterAnimation = enhancedWater;
+                shadersToReload |= ShaderCategory::Water;
+            }
+            ImGui::SetItemTooltip( "Enables water reflections, animated waves, and reflections on rain-wet ground." );
+            ImGui::Checkbox( "Backlit Vegetation", &settings.EnableSSS );
+            ImGui::SetItemTooltip( "Adds soft light transmission to grass, leaves, and alpha-tested vegetation." );
+            ImGui::Checkbox( "Depth of Field", &settings.EnableDoF );
+            ImGui::SetItemTooltip( "Keeps the subject sharp while softly blurring distant scenery and dialog backgrounds." );
+            static std::vector<std::tuple<const char*, GothicRendererSettings::E_AntiAliasingMode, const char*>> antiAliasing = {
+                {"Disabled", GothicRendererSettings::E_AntiAliasingMode::AA_NONE, nullptr },
+                {"SMAA", GothicRendererSettings::E_AntiAliasingMode::AA_SMAA, nullptr },
+                {"TAA", GothicRendererSettings::E_AntiAliasingMode::AA_TAA, "Temporal Anti-Aliasing" },
+                {"FSR 2", GothicRendererSettings::E_AntiAliasingMode::AA_FSR, "FidelityFX Super Resolution 2" },
+                {"FSR 3", GothicRendererSettings::E_AntiAliasingMode::AA_FSR3, "FidelityFX Super Resolution 3"},
+
+            };
+            {
+                ImGui::PushID( "AntiAliasingSettings" );
+                auto selectedMode = settings.AntiAliasingMode;
+                if ( selectedMode == GothicRendererSettings::E_AntiAliasingMode::AA_FSR && settings.Upscaler == GothicRendererSettings::E_Upscaler::UPSCALER_FSR_3 ) {
+                    selectedMode = GothicRendererSettings::E_AntiAliasingMode::AA_FSR3;
+                }
+                ImGui::TextUnformatted( "Anti Aliasing" );
+                ImGui::SameLine( standardComboStart );
+                ImGui::SetNextItemWidth( standardComboWidth );
+                if ( ImComboBoxCT( "##AntiAliasing", antiAliasing, &selectedMode, [&selectedMode, &settings] {
+                    if ( selectedMode == GothicRendererSettings::E_AntiAliasingMode::AA_FSR3 ) {
+                        selectedMode = GothicRendererSettings::E_AntiAliasingMode::AA_FSR;
+                        settings.Upscaler = GothicRendererSettings::E_Upscaler::UPSCALER_FSR_3;
+                    } else if ( selectedMode == GothicRendererSettings::E_AntiAliasingMode::AA_FSR ) {
+                        settings.Upscaler = GothicRendererSettings::E_Upscaler::UPSCALER_FSR_2;
+                    }
+                    settings.AntiAliasingMode = selectedMode;
+                    } ) ) {
+                    ImGui::EndCombo();
+                }
+                ImGui::PopID();
             }
 
             ImGui::Checkbox( "HDR", &settings.EnableHDR );
             if ( ImGui::Checkbox( "Shadows", &settings.EnableShadows ) ) {
-                Engine::GraphicsEngine->ReloadShaders( ShaderCategory::LightsAndShadows );
+                shadersToReload |= ShaderCategory::LightsAndShadows;
             }
-            if ( ImGui::Checkbox( "Shadow filtering", &settings.EnableSoftShadows ) ) {
-                Engine::GraphicsEngine->ReloadShaders( ShaderCategory::LightsAndShadows );
+            {
+                static std::vector<std::pair<const char*, GothicRendererSettings::E_ShadowFilterMode>> shadowFilterModes = {
+                    {"Disabled", GothicRendererSettings::E_ShadowFilterMode::SHADOW_FILTER_DISABLED},
+                    {"Simple", GothicRendererSettings::E_ShadowFilterMode::SHADOW_FILTER_SIMPLE},
+                    {"PCSS", GothicRendererSettings::E_ShadowFilterMode::SHADOW_FILTER_PCSS},
+                };
+                ImGui::TextUnformatted( "Shadow Filtering" );
+                ImGui::SameLine( standardComboStart );
+                ImGui::SetNextItemWidth( standardComboWidth );
+                if ( ImComboBoxC( "##ShadowFiltering", shadowFilterModes, &settings.ShadowFilterMode, [&shadersToReload]() {
+                    shadersToReload |= ShaderCategory::LightsAndShadows;
+                    } ) ) {
+                    ImGui::EndCombo();
+                }
             }
 
-            ImGui::Checkbox( "Compress Backbuffer", &settings.CompressBackBuffer );
-            ImGui::Checkbox( "Animate Static Vobs", &settings.AnimateStaticVobs );
+
 
 #if defined(BUILD_GOTHIC_2_6_fix) || (defined(BUILD_GOTHIC_1_08k) && !defined(BUILD_1_12F))
 #if defined(BUILD_GOTHIC_1_08k) && !defined(BUILD_1_12F)
@@ -617,7 +761,7 @@ void ImGuiShim::RenderSettingsWindow()
                     settings.WindQuality = windEffect
                         ? GothicRendererSettings::EWindQuality::WIND_QUALITY_ADVANCED
                         : GothicRendererSettings::EWindQuality::WIND_QUALITY_NONE;
-                    Engine::GraphicsEngine->ReloadShaders( ShaderCategory::Other );
+                    shadersToReload |= ShaderCategory::Other;
                 }
                 ImGui::SetItemTooltip( "Enables trees, grass and wheats to wave with the wind" );
 
@@ -629,22 +773,13 @@ void ImGuiShim::RenderSettingsWindow()
             }
 
             if ( ImGui::Checkbox( "Hero affects objects", &settings.HeroAffectsObjects ) ) {
-                Engine::GraphicsEngine->ReloadShaders( ShaderCategory::Other );
+                shadersToReload |= ShaderCategory::Other;
             }
             ImGui::SetItemTooltip( "Grass and wheats may move when the player runs through it." );
 #endif //BUILD_GOTHIC_2_6_fix
 
             ImGui::Checkbox( "Enable Rain", &settings.EnableRain );
-            ImGui::Checkbox( "Enable Rain Effects", &settings.EnableRainEffects );
-            if ( ImGui::Checkbox( "Enable Water waves", &settings.EnableWaterAnimation ) ) {
-                Engine::GraphicsEngine->ReloadShaders( ShaderCategory::Water );
-            }
             ImGui::Checkbox( "Limit Light Intensity", &settings.LimitLightIntesity );
-            ImGui::Checkbox( "Draw World Section Intersections", &settings.DrawSectionIntersections );
-            ImGui::SetItemTooltip( "This option draws every world chunk that intersect with GD3D11 world draw distance." );
-
-            ImGui::Checkbox( "Occlusion Culling", &settings.EnableOcclusionCulling );
-            ImGui::SetItemTooltip( "Hides objects that are not visible by camera. Doesn't work properly, turn off if you don't play on potato." );
 
             ImGui::EndGroup();
         }
@@ -655,7 +790,7 @@ void ImGuiShim::RenderSettingsWindow()
             ImGui::BeginGroup();
             ImGui::PushItemWidth( 250 );
 
-            for (int i = 0; i < Resolutions.size(); ++i){
+            for (size_t i = 0; i < Resolutions.size(); ++i){
                 if (Resolutions[i].first == CurrentResolution) {
                     ResolutionState = i;
                     break;
@@ -690,26 +825,48 @@ void ImGuiShim::RenderSettingsWindow()
             }
 
             ImText( "Resolution Scale", buttonWidth ); ImGui::SameLine();
-            static float previousResolutionScale = static_cast<float>(settings.ResolutionScalePercent);
-            if ( ImGui::SliderFloat( "##ResolutionScalePercent", &previousResolutionScale, 25.0f, 200.0f, "%.0f%%" ) ) {
-                previousResolutionScale = std::clamp( previousResolutionScale, 25.0f, 200.0f );
-                settings.ResolutionScalePercent = static_cast<int>(previousResolutionScale);
-            }
-            ImGui::SetItemTooltip("Effective resolution: %d x %d",
-                CurrentResolution.x * settings.ResolutionScalePercent / 100,
-                CurrentResolution.y * settings.ResolutionScalePercent / 100
-            );
-
-            ImGui::BeginDisabled( settings.ResolutionScalePercent >= 100 );
-            {
-                ImText( "Upscaler", buttonWidth ); ImGui::SameLine();
-                static std::vector<std::pair<const char*, GothicRendererSettings::E_Upscaler>> upscalers = {
-                    { "Simple", GothicRendererSettings::E_Upscaler::UPSCALER_DEFAULT },
-                    { "FSR 1", GothicRendererSettings::E_Upscaler::UPSCALER_FSR_1 },
+            if ( settings.Upscaler == GothicRendererSettings::UPSCALER_FSR_2 || settings.Upscaler == GothicRendererSettings::UPSCALER_FSR_3 ) {
+                settings.ResolutionScalePercent = std::clamp( settings.ResolutionScalePercent, 33, 100 );
+                // Display "levels" as typical for FSR
+                static std::vector<std::pair<const char*, int>> fsrLevels = {
+                    { "Native AA", 100 },
+                    { "High Quality", 83 },
+                    { "Quality", 75 },
+                    { "Balanced", 66 },
+                    { "Performance", 50 },
+                    { "Ultra Performance", 33 },
                 };
-                if ( ImComboBox( "##Upscaler", upscalers, &settings.Upscaler ) ) {
+                if (ImComboBox( "##ResolutionScalePercent", fsrLevels, &settings.ResolutionScalePercent ) ) {
                     ImGui::EndCombo();
                 }
+                ImGui::SetItemTooltip("Effective resolution: %d x %d",
+                    CurrentResolution.x * settings.ResolutionScalePercent / 100,
+                    CurrentResolution.y * settings.ResolutionScalePercent / 100
+                );
+            } else {
+                static float previousResolutionScale = static_cast<float>(settings.ResolutionScalePercent);
+                if ( ImGui::SliderFloat( "##ResolutionScalePercent", &previousResolutionScale, 25.0f, 200.0f, "%.0f%%" ) ) {
+                    previousResolutionScale = std::clamp( previousResolutionScale, 25.0f, 200.0f );
+                    settings.ResolutionScalePercent = static_cast<int>(previousResolutionScale);
+                }
+                ImGui::SetItemTooltip("Effective resolution: %d x %d",
+                    CurrentResolution.x * settings.ResolutionScalePercent / 100,
+                    CurrentResolution.y * settings.ResolutionScalePercent / 100
+                );
+            }
+
+            ImText( "Upscaler", buttonWidth ); ImGui::SameLine();
+            static std::vector<std::pair<const char*, GothicRendererSettings::E_Upscaler>> upscalers = {
+                { "Simple", GothicRendererSettings::E_Upscaler::UPSCALER_DEFAULT },
+                { "FSR 1", GothicRendererSettings::E_Upscaler::UPSCALER_FSR_1 },
+                { "FSR 2", GothicRendererSettings::E_Upscaler::UPSCALER_FSR_2 },
+                { "FSR 3", GothicRendererSettings::E_Upscaler::UPSCALER_FSR_3 },
+            };
+            if ( ImComboBox( "##Upscaler", upscalers, &settings.Upscaler ) ) {
+                ImGui::EndCombo();
+            }
+            ImGui::BeginDisabled( settings.ResolutionScalePercent >= 100 );
+            {
                 if ( settings.Upscaler ) {
                     ImText( "Upscaler sharpening", buttonWidth ); ImGui::SameLine();
                     if ( ImGui::SliderFloat( "##Upscale sharpening", &settings.SharpenFactor, 0.0f, 1.0f, "%.3f%" ) ) {
@@ -787,23 +944,22 @@ void ImGuiShim::RenderSettingsWindow()
                 ? shadowMapSizesDxFeature10
                 : shadowMapSizesMax;
 
-            if ( ImComboBoxC( "##ShadowQuality", shadowMapSizes, &settings.ShadowMapSize, []{
-                Engine::GraphicsEngine->ReloadShaders( ShaderCategory::LightsAndShadows );
+            if ( ImComboBoxC( "##ShadowQuality", shadowMapSizes, &settings.ShadowMapSize, [&shadersToReload]{
+                shadersToReload |= ShaderCategory::LightsAndShadows;
             } ) ) {
                 ImGui::EndCombo();
             }
 
             ImText( "Dynamic Shadows", buttonWidth ); ImGui::SameLine();
             
-            const static std::vector<std::pair<const char*, int>> dynamicShadowValues = {
-                { "Off", GothicRendererSettings::EPointLightShadowMode::PLS_DISABLED },
-                { "Static", GothicRendererSettings::EPointLightShadowMode::PLS_STATIC_ONLY },
-                { "Dynamic Update", GothicRendererSettings::EPointLightShadowMode::PLS_UPDATE_DYNAMIC },
-                { "Full", GothicRendererSettings::EPointLightShadowMode::PLS_FULL },
+            const static std::vector<std::tuple<const char*, GothicRendererSettings::EPointLightShadowMode, const char*>> dynamicShadowValues = {
+                { "Off", GothicRendererSettings::EPointLightShadowMode::PLS_DISABLED, nullptr },
+                { "Static", GothicRendererSettings::EPointLightShadowMode::PLS_STATIC_ONLY, nullptr },
+                { "Dynamic Update", GothicRendererSettings::EPointLightShadowMode::PLS_UPDATE_DYNAMIC, nullptr },
+                { "Full", GothicRendererSettings::EPointLightShadowMode::PLS_FULL, "Very expensive. Don't use unless you encounter visual bugs." },
             };
-            
-            static_assert(sizeof(settings.EnablePointlightShadows) == sizeof(int), "can't reinterpret cast enum to int");
-            if ( ImComboBox( "##DynamicShadows", dynamicShadowValues, reinterpret_cast<int*>(&settings.EnablePointlightShadows) ) ) {
+
+            if ( ImComboBoxCT( "##DynamicShadows", dynamicShadowValues, &settings.EnablePointlightShadows, [] {} ) ) {
                 ImGui::EndCombo();
             }
 
@@ -845,10 +1001,10 @@ void ImGuiShim::RenderSettingsWindow()
             ImGui::SliderInt( "##SectionDrawRadius", &settings.SectionDrawRadius, 1, 20, "%d", ImGuiSliderFlags_::ImGuiSliderFlags_ClampOnInput );
 
             ImText( "Contrast", buttonWidth ); ImGui::SameLine();
-            ImGui::SliderFloat( "##Contrast", &settings.GammaValue, 0.1f, 2.0f, "%.1f", ImGuiSliderFlags_::ImGuiSliderFlags_ClampOnInput );
+            ImGui::SliderFloat( "##Contrast", &settings.GammaValue, 0.20f, 2.0f, "%.2f", ImGuiSliderFlags_::ImGuiSliderFlags_ClampOnInput );
 
             ImText( "Brightness", buttonWidth ); ImGui::SameLine();
-            ImGui::SliderFloat( "##Brightness", &settings.BrightnessValue, 0.1f, 3.0f, "%.1f", ImGuiSliderFlags_::ImGuiSliderFlags_ClampOnInput );
+            ImGui::SliderFloat( "##Brightness", &settings.BrightnessValue, 0.10f, 3.0f, "%.2f", ImGuiSliderFlags_::ImGuiSliderFlags_ClampOnInput );
             ImGui::PopItemWidth();
 
 
@@ -861,15 +1017,32 @@ void ImGuiShim::RenderSettingsWindow()
 
             ImGui::EndGroup();
         }
-
-        if ( ImGui::Button( "Save Settings", ImVec2( ImGui::GetContentRegionAvail().x, 30.f ) ) ) {
+        
+        auto saved = ImGui::Button( "Save Settings", ImVec2( ImGui::GetContentRegionAvail().x, 30.f ) );
+        auto worldSettingsPath = Engine::GAPI->GetLoadedWorldSettingsPath(false);
+        const bool isInWorld = !worldSettingsPath.empty();
+        const bool hasWorldSettings = Toolbox::FileExists( worldSettingsPath );
+        if ( ( ImGui::GetIO().KeyCtrl || hasWorldSettings ) && isInWorld ) {
+            ImGui::SetItemTooltip("Save settings to \"%s\"", worldSettingsPath.c_str());
+        } else {
+            ImGui::SetItemTooltip("Save settings.\nCTRL+Click to save just for the current world.");
+        }
+        
+        if ( saved ) {
             Engine::GraphicsEngine->OnUIEvent( BaseGraphicsEngine::UI_ClosedSettings );
-            Engine::GAPI->SaveRendererWorldSettings( settings );
+            if ( (ImGui::GetIO().KeyCtrl || hasWorldSettings) && isInWorld ) {
+                Engine::GAPI->SaveRendererWorldSettings( settings );
+            } else {
+                Engine::GAPI->SaveRendererWorldSettings( settings, MENU_SETTINGS_FILE);
+            }
             Engine::GAPI->SaveMenuSettings( MENU_SETTINGS_FILE );
         }
     }
     ImGui::End();
 
+    if ( shadersToReload != ShaderCategory::None ) {
+        Engine::GraphicsEngine->ReloadShaders( shadersToReload );
+    }
 }
 
 void RenderAdvancedColumn1( GothicRendererSettings& settings, GothicAPI* gapi ) {
@@ -878,7 +1051,10 @@ void RenderAdvancedColumn1( GothicRendererSettings& settings, GothicAPI* gapi ) 
         ImGui::SeparatorText( "GodRays" );
         {
             ImGui::PushID( "GodRaysSettings" );
-            ImGui::Checkbox( "GodRays", &settings.EnableGodRays );
+            if ( ImGui::Checkbox( "GodRays", &settings.EnableGodRays ) ) {
+                Engine::GraphicsEngine->ReloadShaders( ShaderCategory::Other );
+            }
+            ImGui::SetItemTooltip( "Changing this will reload shaders." );
             ImGui::DragFloat( "GodRayDecay", &settings.GodRayDecay, 0.01f );
             ImGui::DragFloat( "GodRayWeight", &settings.GodRayWeight, 0.01f );
             ImGui::ColorEdit3( "GodRayColorMod", &settings.GodRayColorMod.x );
@@ -929,23 +1105,42 @@ void RenderAdvancedColumn1( GothicRendererSettings& settings, GothicAPI* gapi ) 
 }
 
 
-void RenderAdvancedColumn2( GothicRendererSettings& settings, GothicAPI* gapi ) {
+void ImGuiShim::RenderAdvancedColumn2( GothicRendererSettings& settings, GothicAPI* gapi ) {
     if ( ImGui::Begin( "General", nullptr, ImGuiWindowFlags_NoCollapse ) ) {
 
-        ImGui::Text( "Version: " );
-        ImGui::SameLine();
-        ImGui::Text( VERSION_NUMBER );
-
+#ifdef IS_DEV_BUILD
+        ImGui::Text( "Version: %s", VERSION_NUMBER " - (" BUILD_DATE ")" );
+#else
+        ImGui::Text( "Version: %s", VERSION_NUMBER );
+#endif
+        
         ImGui::Checkbox( "Enable DebugLog", &settings.EnableDebugLog );
+        ImGui::Checkbox( "Toggle frame stats", &m_FrameStatisticsVisible );
         if ( ImGui::Button( "Save ZEN-Resources", ImVec2( ImGui::GetContentRegionAvail().x, 30.f ) ) ) {
             gapi->SaveCustomZENResources();
         }
         if ( ImGui::Button( "Load ZEN-Resources", ImVec2( ImGui::GetContentRegionAvail().x, 30.f ) ) ) {
             gapi->LoadCustomZENResources();
         }
+        auto worldSettingsPath = Engine::GAPI->GetLoadedWorldSettingsPath(false);
+        if (!worldSettingsPath.empty() && Toolbox::FileExists( worldSettingsPath ) ) {
+            const bool shouldDelete = ImGui::Button( "Delete World-Settings", ImVec2( ImGui::GetContentRegionAvail().x, 30.f ) );
+            ImGui::SetItemTooltip("Delete the world-settings file for the current world.\nThe current values will be saved into the global settings file.");
+            if ( shouldDelete ) {
+                std::error_code ec;
+                std::filesystem::remove(worldSettingsPath, ec);
+                Engine::GAPI->SaveRendererWorldSettings(settings, MENU_SETTINGS_FILE);
+            }
+        }
+        if ( ImGui::Button( "Reset Settings", ImVec2( ImGui::GetContentRegionAvail().x, 30.f ) ) ) {
+            settings.SetDefault();
+            Engine::GraphicsEngine->ReloadShaders( ShaderCategory::All );
+        }
+        ImGui::SetItemTooltip( "Reset all settings to their default values." );
         if ( ImGui::Button( "Reload all Shaders", ImVec2( ImGui::GetContentRegionAvail().x, 30.f ) ) ) {
             Engine::GraphicsEngine->ReloadShaders( ShaderCategory::All );
         }
+
         ImGui::Separator();
         ImGui::Checkbox( "DisableRendering", &settings.DisableRendering );
         ImGui::SliderInt( "SectionDrawRadius", &settings.SectionDrawRadius, 0, 20, "%d", ImGuiSliderFlags_::ImGuiSliderFlags_ClampOnInput );
@@ -972,7 +1167,11 @@ void RenderAdvancedColumn2( GothicRendererSettings& settings, GothicAPI* gapi ) 
         ImGui::EndDisabled();
 
         // ImGui::Checkbox( "Draw Sky", &settings.DrawSky );
-        ImGui::Checkbox( "Draw Fog", &settings.DrawFog );
+        if ( ImGui::Checkbox( "Draw Fog", &settings.DrawFog ) ) {
+            Engine::GraphicsEngine->ReloadShaders( ShaderCategory::Other );
+        }
+        ImGui::SetItemTooltip( "Changing this will reload shaders." );
+
         ImGui::BeginDisabled( !settings.DrawFog );
         {
             // caution, FogRange is reduced by 0.5f (secScale - 0.5f) in D3D11PFX_HeightFog
@@ -992,7 +1191,10 @@ void RenderAdvancedColumn2( GothicRendererSettings& settings, GothicAPI* gapi ) 
         };
 
         ImGui::BeginDisabled( !settings.EnableHDR );
-        if ( ImComboBox( "HDR ToneMap", hdrToneMapValues, (int*)(&settings.HDRToneMap) ) ) {
+        if ( ImComboBoxC( "HDR ToneMap", hdrToneMapValues, reinterpret_cast<int*>(&settings.HDRToneMap), []
+        {
+            Engine::GraphicsEngine->ReloadShaders( ShaderCategory::Tonemapping );
+        } ) ) {
             ImGui::EndCombo();
         }
         ImGui::EndDisabled();
@@ -1000,22 +1202,36 @@ void RenderAdvancedColumn2( GothicRendererSettings& settings, GothicAPI* gapi ) 
         ImGui::Checkbox( "DynamicLighting", &settings.EnableDynamicLighting );
         ImGui::BeginDisabled( !settings.EnableDynamicLighting );
         {
-            static std::vector<std::pair<const char*, int>> pointlightShadows = {
-               {"Disabled", 0},
-               {"Static", 1},
-               {"Update Dynamic", 2},
-               {"Full", 3},
+            const static std::vector<std::tuple<const char*, GothicRendererSettings::EPointLightShadowMode, const char*>> dynamicShadowValues = {
+                { "Off", GothicRendererSettings::EPointLightShadowMode::PLS_DISABLED, nullptr },
+                { "Static", GothicRendererSettings::EPointLightShadowMode::PLS_STATIC_ONLY, nullptr },
+                { "Dynamic Update", GothicRendererSettings::EPointLightShadowMode::PLS_UPDATE_DYNAMIC, nullptr },
+                { "Full", GothicRendererSettings::EPointLightShadowMode::PLS_FULL, "Very expensive. Don't use unless you encounter visual bugs." },
             };
-            if ( ImComboBox( "PointlightShadows", pointlightShadows, (int*)(&settings.EnablePointlightShadows) ) ) {
+
+            if ( ImComboBoxCT( "##DynamicShadows", dynamicShadowValues, &settings.EnablePointlightShadows, [] {} ) ) {
                 ImGui::EndCombo();
             }
+
             ImGui::EndDisabled();
         }
         // ImGui::Checkbox("FastShadows", &settings.FastShadows );	
         ImGui::Checkbox( "DrawShadowGeometry", &settings.DrawShadowGeometry );
-        ImGui::Checkbox( "DoZPrepass", &settings.DoZPrepass );
+        if ( settings.RendererMode != GothicRendererSettings::RM_ForwardPlus) {
+            ImGui::Checkbox( "DoZPrepass", &settings.DoZPrepass );
+            ImGui::SetItemTooltip("Perform a lightweight Z Prepass.\nMIGHT improve performance on low bandwidth devices.");
+        }
         ImGui::Checkbox( "VSync", &settings.EnableVSync );
+        ImGui::Checkbox( "Animate Static Vobs", &settings.AnimateStaticVobs );
+        ImGui::SetItemTooltip( "Updates morph-mesh animations on otherwise static world objects." );
+        if ( ImGui::Checkbox( "Compress Backbuffer", &settings.CompressBackBuffer ) ) {
+            Engine::GAPI->UpdateCompressBackBuffer();
+        }
+        ImGui::SetItemTooltip( "Uses a lower-precision HDR backbuffer to reduce memory bandwidth." );
+        ImGui::Checkbox( "Draw World Section Intersections", &settings.DrawSectionIntersections );
+        ImGui::SetItemTooltip( "Includes world sections whose bounding boxes intersect the draw distance." );
         ImGui::Checkbox( "OcclusionCulling", &settings.EnableOcclusionCulling );
+        ImGui::SetItemTooltip( "Experimental previous-frame occlusion culling; may cause delayed object visibility." );
         ImGui::Checkbox( "Sort RenderQueue", &settings.SortRenderQueue );
         ImGui::Checkbox( "Draw Threaded", &settings.DrawThreaded );
         ImGui::Checkbox( "AtmosphericScattering", &settings.AtmosphericScattering );
@@ -1043,23 +1259,37 @@ void RenderAdvancedColumn2( GothicRendererSettings& settings, GothicAPI* gapi ) 
 
         ImGui::Checkbox( "Enable Shadows", &settings.EnableShadows );
         ImGui::BeginDisabled( !settings.EnableShadows );
-        {
+        { 
             ImGui::Checkbox( "Fast Shadows", &settings.FastShadows );
             ImGui::SetItemTooltip( "Renders only static world meshes" );
-            ImGui::Checkbox( "Smooth shadow update", &settings.SmoothShadowCameraUpdate );
-            ImGui::DragFloat( "Smooth shadow frequency", &settings.SmoothShadowFrequency, 200.0f, 1, 20000.f, "%.0f", ImGuiSliderFlags_::ImGuiSliderFlags_ClampOnInput );
-            ImGui::SetItemTooltip( "Higher values mean more frequent shadow position updates" );
+            ImGui::Checkbox( "Fixed shadow update", &settings.SmoothShadowCameraUpdate );
+            ImGui::SetItemTooltip( "on: Higher values mean more frequent shadow position updates.\noff: real-time shadow updates." );
+            ImGui::DragFloat( "Fixed shadow frequency", &settings.SmoothShadowFrequency, 200.0f, 1, 20000.f, "%.0f", ImGuiSliderFlags_::ImGuiSliderFlags_ClampOnInput );
+            ImGui::SetItemTooltip( "on: Higher values mean more frequent shadow position updates.\noff: real-time shadow updates." );
 
             if ( ImComboBoxC( "ShadowmapSize", shadowMapSizes, (int*)(&settings.ShadowMapSize), []() { Engine::GraphicsEngine->ReloadShaders( ShaderCategory::LightsAndShadows ); } ) ) {
                 ImGui::EndCombo();
             }
-            ImGui::DragFloat( "WorldShadowRangeScale", &settings.WorldShadowRangeScale, 0.01f, 0.00f, 10.0f, "%.2f" );
-            
-            settings.NumShadowCascades = std::clamp( settings.NumShadowCascades, 1, MAX_CSM_CASCADES );
-            if ( ImGui::SliderInt( "Shadow Cascade count", &settings.NumShadowCascades, 1, MAX_CSM_CASCADES, "%d", ImGuiSliderFlags_::ImGuiSliderFlags_ClampOnInput) ) {
-                settings.NumShadowCascades = std::clamp( settings.NumShadowCascades, 1, MAX_CSM_CASCADES );
+            ImGui::SetItemTooltip( "Changing this will reload shaders." );
+
+            ImGui::DragFloat( "Shadow Distance", &settings.WorldShadowRangeScale, 0.01f, 0.00f, 10.0f, "%.2f" );
+            ImGui::SetItemTooltip( "Larger values produce less detailed shadows\nEffective Distance: %.0f", 12000 * settings.WorldShadowRangeScale );
+
+            constexpr int max_cascaded_supported = MAX_CSM_CASCADES;
+
+            settings.NumShadowCascades = std::clamp( settings.NumShadowCascades, 1, max_cascaded_supported );
+            if ( settings.DebugSettings.ShadowCascades.Lambda < 0.00001f ) {
+                settings.DebugSettings.ShadowCascades.Lambda = D3D11ShadowMap::lambdaBiasTable[settings.NumShadowCascades].lambda;
+                settings.DebugSettings.ShadowCascades.Bias = D3D11ShadowMap::lambdaBiasTable[settings.NumShadowCascades].bias;
+            }
+            if ( ImGui::SliderInt( "Shadow Cascade count", &settings.NumShadowCascades, 1, max_cascaded_supported, "%d", ImGuiSliderFlags_::ImGuiSliderFlags_ClampOnInput) ) {
+                settings.NumShadowCascades = std::clamp( settings.NumShadowCascades, 1, max_cascaded_supported );
+                settings.DebugSettings.ShadowCascades.Lambda = D3D11ShadowMap::lambdaBiasTable[settings.NumShadowCascades].lambda;
+                settings.DebugSettings.ShadowCascades.Bias = D3D11ShadowMap::lambdaBiasTable[settings.NumShadowCascades].bias;
+                ApplyFeatureLevel10Downgrades(settings);
                 Engine::GraphicsEngine->ReloadShaders( ShaderCategory::LightsAndShadows );
             }
+            ImGui::SetItemTooltip( "Changing this will reload shaders." );
 
             ImGui::BeginDisabled( settings.NumShadowCascades <= 1 );
             {
@@ -1075,31 +1305,42 @@ void RenderAdvancedColumn2( GothicRendererSettings& settings, GothicAPI* gapi ) 
                 ImGui::EndDisabled();
             }
 
-            if ( ImGui::Checkbox( "Shadow filtering", &settings.EnableSoftShadows ) ) {
-                Engine::GraphicsEngine->ReloadShaders( ShaderCategory::LightsAndShadows );
+            {
+                static std::vector<std::pair<const char*, GothicRendererSettings::E_ShadowFilterMode>> shadowFilterModes = {
+                    {"Disabled", GothicRendererSettings::E_ShadowFilterMode::SHADOW_FILTER_DISABLED},
+                    {"Simple", GothicRendererSettings::E_ShadowFilterMode::SHADOW_FILTER_SIMPLE},
+                    {"PCSS", GothicRendererSettings::E_ShadowFilterMode::SHADOW_FILTER_PCSS},
+                };
+                if ( ImComboBoxC( "Shadow filtering", shadowFilterModes, &settings.ShadowFilterMode, []() {
+                    Engine::GraphicsEngine->ReloadShaders( ShaderCategory::LightsAndShadows );
+                    } ) ) {
+                    ImGui::EndCombo();
+                }
+                ImGui::SetItemTooltip( "Changing this will reload shaders." );
             }
-
-            ImGui::SetItemTooltip( "Higher values can produce better shadows (Impact: High)" );
             settings.ShadowCascadePCFLimit = std::clamp( settings.ShadowCascadePCFLimit, 1, settings.NumShadowCascades );
             if ( ImGui::SliderInt( "Soft shadow limit", &settings.ShadowCascadePCFLimit, 1, settings.NumShadowCascades, "%d", ImGuiSliderFlags_::ImGuiSliderFlags_ClampOnInput ) ) {
                 settings.ShadowCascadePCFLimit = std::clamp( settings.ShadowCascadePCFLimit, 1, settings.NumShadowCascades );
                 Engine::GraphicsEngine->ReloadShaders( ShaderCategory::LightsAndShadows );
             }
-            ImGui::SetItemTooltip( "Which shadow cascades should be filtered using '16xPCF'" );
-
+            ImGui::SetItemTooltip( "Which shadow cascades should be filtered using '16xPCF'.\nChanging this will reload shaders." );
+            
             ImGui::DragFloat( "ShadowStrength", &settings.ShadowStrength, 0.01f, 0.01f, 5.0f, "%.2f" );
-            ImGui::DragFloat( "ShadowSoftness", &settings.ShadowSoftness, 0.05f, 0.2f, 4.0f, "%.2f" );
+            ImGui::DragFloat( "ShadowSoftness", &settings.ShadowSoftness, 0.05f, 0.2f, 8.0f, "%.2f" );
             ImGui::SetItemTooltip( "PCF kernel scale (1.0=sharp default, <1.0=sharper, >1.0=softer)" );
+            ImGui::DragFloat( "PCSSLightSize", &settings.PCSSLightSize, 0.002f, 0.005f, 0.5f, "%.3f" );
+            ImGui::SetItemTooltip( "PCSS light radius in shadow UV space. Higher values increase contact hardening and penumbra growth." );
             ImGui::DragFloat( "ShadowAOStrength", &settings.ShadowAOStrength, 0.01f, -5.0f, 2.0f, "%.2f" );
             ImGui::DragFloat( "WorldAOStrength", &settings.WorldAOStrength, 0.01f, -5.0f, 2.0f, "%.2f" );
-
             ImGui::EndDisabled();
         }
+        ImGui::Separator();
 
         ImGui::Checkbox( "WireframeWorld", &settings.WireframeWorld );
         ImGui::Checkbox( "WireframeVobs", &settings.WireframeVobs );
         // ImGui::Checkbox("Grass AlphaToCoverage", &settings.VegetationAlphaToCoverage );	
 
+        ImGui::SeparatorText("Rain Settings##AdvancedRainSettings");
         ImGui::DragFloat( "RainRadius", &settings.RainRadiusRange, 1.0f, 0.0f, 0.0f, "%.0f" );
         ImGui::DragFloat( "RainHeight", &settings.RainHeightRange, 1.0f, 0.0f, 0.0f, "%.0f" );
         ImGui::DragInt( "NumRainParticles", (int*)&settings.RainNumParticles, 1.0f, 0, 200000 );
@@ -1110,12 +1351,16 @@ void RenderAdvancedColumn2( GothicRendererSettings& settings, GothicAPI* gapi ) 
         ImGui::DragFloat( "RainSunLightStrength", &settings.RainSunLightStrength, 0.01f, 0.0f, 0.0f, "%.2f" );
         ImGui::DragFloat( "RainFogDensity", &settings.RainFogDensity, 0.001f );
         ImGui::ColorEdit3( "RainFogColor", &settings.RainFogColor.x );
+        ImGui::Separator();
         // TwAddVarRW("SmallVobSize", TW_TYPE_FLOAT, &settings.SmallVobSize );
         // ImGui::Checkbox("AtmosphericScattering", &settings.AtmosphericScattering );
+        ImGui::SeparatorText("Fog Settings##AdvancedFogSettings");
         ImGui::DragFloat( "FogGlobalDensity", &settings.FogGlobalDensity, 0.00001f, 0, 1.0f, "%.5f" );
         ImGui::DragFloat( "FogHeightFalloff", &settings.FogHeightFalloff, 0.00001f, 0, 1.0f, "%.5f" );
         ImGui::DragFloat( "FogHeight", &settings.FogHeight, 1.0f, 0.0f, 0.0f, "%.0f" );
         ImGui::ColorEdit3( "FogColorMod", &settings.FogColorMod.x );
+        ImGui::Separator();
+
         ImGui::DragFloat( "HDRLumWhite", &settings.HDRLumWhite, 0.01f, 0.0f, 0.0f, "%.2f" );
         ImGui::DragFloat( "HDRMiddleGray", &settings.HDRMiddleGray, 0.01f, 0.0f, 0.0f, "%.2f" );
         ImGui::DragFloat( "BloomThreshold", &settings.BloomThreshold, 0.01f, 0.0f, 0.0f, "%.2f" );
@@ -1139,6 +1384,82 @@ void RenderAdvancedColumn2( GothicRendererSettings& settings, GothicAPI* gapi ) 
         ImGui::Checkbox( "DrawForestPortals", &settings.DrawG1ForestPortals );
 #endif
 
+        ImGui::SeparatorText("Debugging");
+
+        if (ImGui::Button("Reset##ResetDebugValues", ImVec2( 100.0f, 30.f ) )) {
+            settings.ResetDebugSettings();
+        }
+
+        if (ImGui::BeginTabBar("#DebugTabs")) {
+            if (ImGui::BeginTabItem("TAA Debug", nullptr, ImGuiTabItemFlags_::ImGuiTabItemFlags_NoReorder)) {
+                ImGui::Checkbox("Use Depth based Velocity", &settings.DebugSettings.TAA.DepthMotionVectors);
+                ImGui::SetItemTooltip("Instead of per-Object");
+                ImGui::Checkbox("Display Velocity", &settings.DebugSettings.TAA.DisplayVelocity);
+                ImGui::EndTabItem();
+            }
+
+            if (ImGui::BeginTabItem("Shadows", nullptr, ImGuiTabItemFlags_::ImGuiTabItemFlags_NoReorder)) {
+                ImGui::Checkbox("Lazy update", &settings.DebugSettings.ShadowCascades.LazyCascadeUpdate );
+                ImGui::SetItemTooltip("Update last cascades less frequently to improve performance, may cause uneven frametimes");
+
+                ImGui::Checkbox("Threaded Culling", &settings.ThreadedShadowCulling );
+                ImGui::SetItemTooltip("Perform shadow frustum culling in a separate thread to improve performance");
+
+                ImGui::SliderFloat("Extend Back", &settings.DebugSettings.ShadowCascades.ExtendBack, -10000, 50000, "%.0f");
+                ImGui::SliderFloat("Extend Front", &settings.DebugSettings.ShadowCascades.ExtendFront, -10000, 50000, "%.0f");
+                ImGui::SliderFloat("Extend Side", &settings.DebugSettings.ShadowCascades.ExtendSide, -10000, 20000, "%.0f");
+                ImGui::SliderFloat("Split Lambda", &settings.DebugSettings.ShadowCascades.Lambda, 0.0f, 1.00f, "%.2f");
+                ImGui::SliderFloat("Split Bias", &settings.DebugSettings.ShadowCascades.Bias, 0.0f, 10.0f, "%.1f");
+                ImGui::EndTabItem();
+            }
+            
+            if (ImGui::BeginTabItem("Culling", nullptr, ImGuiTabItemFlags_::ImGuiTabItemFlags_NoReorder)) {
+                ImGui::Checkbox("BSP Nodes", &settings.DebugSettings.Culling.CullBspSections );
+                ImGui::Checkbox("Vobs", &settings.DebugSettings.Culling.CullVobs );
+                ImGui::EndTabItem();
+            }
+            
+            if (ImGui::BeginTabItem("Featureset", nullptr, ImGuiTabItemFlags_::ImGuiTabItemFlags_NoReorder)) {
+                ImGui::Checkbox("Enable GPU Driver Extensions", &settings.DebugSettings.FeatureSet.EnableDriverExtensions );
+                ImGui::SetItemTooltip("Allow Driver Extensions (AMD, Nvidia, Intel).\nRequires restart.");
+
+                {
+                    static const std::vector<std::pair<const char*, GothicRendererSettings::E_RendererMode>> rendererModes = {
+                        { "Deferred",   GothicRendererSettings::RM_Deferred },
+                        { "Forward+",   GothicRendererSettings::RM_ForwardPlus },
+                    };
+                    if ( ImComboBox( "Renderer Mode", rendererModes, &settings.RendererMode ) ) {
+                        ImGui::EndCombo();
+                    }
+                    ImGui::SetItemTooltip( "Deferred: GBuffer + tiled deferred lighting.  Forward+: depth prepass + per-pixel lit geometry pass." );
+                }
+                if (!FeatureLevel10Compatibility){
+                    ImGui::Checkbox("Use MDI", &settings.DebugSettings.FeatureSet.UseMDI );
+                    ImGui::SetItemTooltip("Support for MultiDrawInstancedIndirect via Driver Extensions (AMD, Nvidia, Intel).");
+
+                    ImGui::Checkbox("Use Layered Drawing", &settings.DebugSettings.FeatureSet.UseLayeredRendering );
+                    ImGui::Checkbox("Use Tiled Lighting", &settings.EnableTiledLighting );
+                    ImGui::SetItemTooltip( "Uses compute shader light culling for point lights. Reduces draw calls and overdraw." );
+                }
+                if ( ImGui::Checkbox( "Use Shadow Atlas", &settings.DebugSettings.FeatureSet.UseShadowAtlas ) ) {
+                    ApplyFeatureLevel10Downgrades( settings );
+                }
+                ImGui::SetItemTooltip("Enables a less intensive but lower quality shadow solution.");
+                if ( ImGui::Checkbox( "Use Screen-Space Shadow Mask", &settings.DebugSettings.FeatureSet.UseScreenSpaceShadowMask ) ) {
+                    Engine::GraphicsEngine->ReloadShaders( ShaderCategory::LightsAndShadows );
+                }
+                ImGui::SetItemTooltip( "Forward+ debug option: precompute sun shadows in a separate screen-space pass. Changing this reloads light/shadow shaders." );
+
+                ImGui::Checkbox("Use World Section BVH", &settings.DebugSettings.FeatureSet.UseWorldSectionBVH );
+                ImGui::SetItemTooltip("Use Bounding Volume Hierarchy for world sections. Improves culling performance.");
+
+                ImGui::Checkbox("Force Feature Level 10", &settings.DebugSettings.FeatureSet.ForceFeatureLevel10 );
+                ImGui::SetItemTooltip("Force DirectX 10 era feature support. Requires restart.");
+                ImGui::EndTabItem();
+            }
+ 
+            ImGui::EndTabBar();
+        }
     }
     ImGui::End();
 }
@@ -1158,11 +1479,6 @@ void RenderAdvancedColumn3( GothicRendererSettings& settings, GothicAPI* gapi ) 
                 ImGui::TableSetColumnIndex( 0 );
                 ImGui::TextUnformatted( label );
                 ImGui::TableSetColumnIndex( 1 );
-                };
-
-            static auto addRowText = []( const char* label, const char* text ) {
-                addRowLabel( label );
-                ImGui::TextUnformatted( text );
                 };
 
             static auto addRowInt = []( const char* label, int value ) {
@@ -1191,13 +1507,6 @@ void RenderAdvancedColumn3( GothicRendererSettings& settings, GothicAPI* gapi ) 
             addRowFloat( "FarPlane", rendererInfo.FarPlane, "%.0f" );
             addRowFloat( "NearPlane", rendererInfo.NearPlane, "%.0f" );
 
-            for ( auto& record : rendererInfo.Timing.frameRecordings ) {
-                addRowFloat( record.first, record.second, "%05.3f" );
-            }
-
-            rendererInfo.Timing.StopTotal();
-            addRowFloat( "TotalMS", rendererInfo.Timing.TotalMS, "%05.3f" );
-
             addRowInt( "SC_PipelineStates", rendererInfo.FramePipelineStates );
             addRowInt( "SC_Textures", rendererInfo.StateChangesByState[GothicRendererInfo::SC_TX] );
             addRowInt( "SC_ConstantBuffer", rendererInfo.StateChangesByState[GothicRendererInfo::SC_CB] );
@@ -1225,33 +1534,152 @@ void RenderAdvancedColumn3( GothicRendererSettings& settings, GothicAPI* gapi ) 
 
 void RenderAdvancedColumn4( GothicRendererSettings& settings, GothicAPI* gapi ) {
     if ( ImGui::Begin( "Post Processing Effects", nullptr, ImGuiWindowFlags_NoCollapse ) ) {
-        ImGui::SeparatorText( "HBAO+ Settings" );
+            ImGui::SeparatorText( "Ambient Occlusion" );
+            {
+                ImGui::PushID( "AOSettings" );
+                static std::vector<std::tuple<const char*, AOMode, const char*>> aoModes = {
+                    {"Disabled", AOMode::AO_NONE, nullptr},
+                    {"HBAO+", AOMode::AO_HBAO, "NVIDIA HBAO+ (Horizon-Based Ambient Occlusion Plus)"},
+                    {"SAO", AOMode::AO_SAO, nullptr},
+                    {"ASSAO", AOMode::AO_ASSAO, "Intel ASSAO (Adaptive Screen Space Ambient Occlusion)"},
+                };
+                if ( ImComboBoxCT( "AO Mode", aoModes, &settings.AoMode, [] {
+                        Engine::GraphicsEngine->ReloadShaders( ShaderCategory::Other );
+                    } ) ) {
+                    ImGui::EndCombo();
+                }
+                ImGui::SetItemTooltip( "Changing this will reload shaders." );
+
+                if ( settings.AoMode == AOMode::AO_HBAO ) {
+                    ImGui::SeparatorText( "HBAO+ Settings" );
+                    ImGui::DragFloat( "Radius", &settings.HbaoSettings.Radius, 0.01f );
+                    ImGui::DragFloat( "MetersToViewSpaceUnits", &settings.HbaoSettings.MetersToViewSpaceUnits, 0.01f );
+                    if ( ImGui::DragFloat( "PowerExponent", &settings.HbaoSettings.PowerExponent, 0.01f ) ) {
+                        settings.HbaoSettings.PowerExponent = std::clamp( settings.HbaoSettings.PowerExponent, 1.0f, 4.0f );
+                    }
+                    if ( ImGui::DragFloat( "Bias", &settings.HbaoSettings.Bias, 0.01f ) ) {
+                        settings.HbaoSettings.Bias = std::clamp( settings.HbaoSettings.Bias, 0.0f, 0.5f );
+                    }
+
+                    ImGui::Checkbox( "Enable Blur", &settings.HbaoSettings.EnableBlur );
+                    static std::vector<std::pair<const char*, int>> ssaoRadi = { {"2", 0}, {"4", 1} };
+                    if ( ImComboBox( "SSAO radius", ssaoRadi, &settings.HbaoSettings.SsaoBlurRadius ) ) {
+                        ImGui::EndCombo();
+                    }
+                    ImGui::DragFloat( "BlurSharpness", &settings.HbaoSettings.BlurSharpness, 0.01f );
+                    static std::vector<std::pair<const char*, int>> blendMode = { {"Replace", 0}, {"Multiply", 1} };
+                    if ( ImComboBox( "BlendMode", blendMode, &settings.HbaoSettings.BlendMode ) ) {
+                        ImGui::EndCombo();
+                    }
+
+                    static std::vector<std::pair<const char*, int>> stepCount = { {"4", 0}, {"8", 1} };
+                    if ( ImComboBox( "SSAO steps", stepCount, &settings.HbaoSettings.SsaoStepCount ) ) {
+                        ImGui::EndCombo();
+                    }
+                } else if ( settings.AoMode == AOMode::AO_SAO ) {
+                    ImGui::SeparatorText( "SAO Settings" );
+                    ImGui::DragFloat( "Radius", &settings.SaoSettings.Radius, 0.01f, 0.1f, 10.0f );
+                    ImGui::DragFloat( "Bias", &settings.SaoSettings.Bias, 0.001f, 0.0f, 0.1f );
+                    ImGui::DragFloat( "Intensity", &settings.SaoSettings.Intensity, 0.01f, 0.0f, 10.0f );
+                    ImGui::SliderInt( "Samples", &settings.SaoSettings.NumSamples, 4, 64 );
+                    ImGui::DragFloat( "Blur Sharpness", &settings.SaoSettings.BlurSharpness, 0.01f, 0.0f, 16.0f );
+                } else if ( settings.AoMode == AOMode::AO_ASSAO ) {
+                    ImGui::SeparatorText( "ASSAO Settings" );
+
+                    ImGui::TextUnformatted( "Preset" ); ImGui::SameLine();
+                    if ( ImGui::Button( "Low" ) ) {
+                        settings.ApplyAssaoPreset(0);
+                    }
+                    ImGui::SameLine();
+                    if ( ImGui::Button( "High" ) ) {
+                        settings.ApplyAssaoPreset( 1 );
+                    }
+                    ImGui::SameLine();
+
+                    if ( ImGui::Button( "Dark" ) ) {
+                        settings.ApplyAssaoPreset( 2 );
+                    }
+                    ImGui::SetItemTooltip( "Mimics HBAO+" );
+                    ImGui::SameLine();
+
+                    if ( ImGui::Button( "Soft" ) ) {
+                        settings.ApplyAssaoPreset( 3 );
+                    }
+                    ImGui::SetItemTooltip("Mimics GTAO");
+
+                    ImGui::DragFloat( "Radius", &settings.AssaoSettings.Radius, 0.01f, 0.0f, 0.0f, "%.2f" );
+                    ImGui::SetItemTooltip( "[0.0, ~] World (view) space size of the occlusion sphere." );
+                    ImGui::DragFloat( "Shadow Multiplier", &settings.AssaoSettings.ShadowMultiplier, 0.01f, 0.0f, 5.0f, "%.2f", ImGuiSliderFlags_ClampOnInput );
+                    ImGui::SetItemTooltip( "[0.0, 5.0] Effect strength linear multiplier." );
+                    ImGui::DragFloat( "Shadow Power", &settings.AssaoSettings.ShadowPower, 0.01f, 0.5f, 5.0f, "%.2f", ImGuiSliderFlags_ClampOnInput );
+                    ImGui::SetItemTooltip( "[0.5, 5.0] Effect strength pow modifier." );
+                    ImGui::DragFloat( "Shadow Clamp", &settings.AssaoSettings.ShadowClamp, 0.01f, 0.0f, 1.0f, "%.2f", ImGuiSliderFlags_ClampOnInput );
+                    ImGui::SetItemTooltip( "[0.0, 1.0] Effect max limit." );
+                    ImGui::DragFloat( "Horizon Angle Threshold", &settings.AssaoSettings.HorizonAngleThreshold, 0.001f, 0.0f, 0.2f, "%.3f", ImGuiSliderFlags_ClampOnInput );
+                    ImGui::SetItemTooltip( "[0.0, 0.2] Limits self-shadowing." );
+                    ImGui::DragFloat( "Fade Out From", &settings.AssaoSettings.FadeOutFrom, 1.0f, 0.0f, 0.0f, "%.0f" );
+                    ImGui::SetItemTooltip( "[0.0, ~] Distance to start fading out the effect." );
+                    ImGui::DragFloat( "Fade Out To", &settings.AssaoSettings.FadeOutTo, 1.0f, 0.0f, 0.0f, "%.0f" );
+                    ImGui::SetItemTooltip( "[0.0, ~] Distance at which the effect is fully faded out." );
+                    static std::vector<std::pair<const char*, int>> assaoQuality = {
+                        {"Lowest (-1)", -1}, {"Low (0)", 0}, {"Medium (1)", 1}, {"High (2)", 2}, {"Very High/Adaptive (3)", 3}
+                    };
+                    if ( ImComboBox( "Quality Level", assaoQuality, &settings.AssaoSettings.QualityLevel ) ) {
+                        ImGui::EndCombo();
+                    }
+                    ImGui::SetItemTooltip( "[-1, 3] Effect quality. Each level is ~2x more costly than the previous." );
+                    ImGui::BeginDisabled( settings.AssaoSettings.QualityLevel != 3 );
+                    ImGui::DragFloat( "Adaptive Quality Limit", &settings.AssaoSettings.AdaptiveQualityLimit, 0.01f, 0.0f, 1.0f, "%.2f", ImGuiSliderFlags_ClampOnInput );
+                    ImGui::SetItemTooltip( "[0.0, 1.0] Only for Quality Level 3." );
+                    ImGui::EndDisabled();
+                    ImGui::SliderInt( "Blur Pass Count", &settings.AssaoSettings.BlurPassCount, 0, 6 );
+                    ImGui::SetItemTooltip( "[0, 6] Number of edge-sensitive smart blur passes." );
+                    ImGui::DragFloat( "Sharpness", &settings.AssaoSettings.Sharpness, 0.01f, 0.0f, 1.0f, "%.2f", ImGuiSliderFlags_ClampOnInput );
+                    ImGui::SetItemTooltip( "[0.0, 1.0] How much to bleed over edges." );
+                    ImGui::DragFloat( "Detail Shadow Strength", &settings.AssaoSettings.DetailShadowStrength, 0.01f, 0.0f, 5.0f, "%.2f", ImGuiSliderFlags_ClampOnInput );
+                    ImGui::SetItemTooltip( "[0.0, 5.0] High-res detail AO; adds detail but reduces temporal stability." );
+                }
+                ImGui::PopID();
+            }
+
+        ImGui::SeparatorText( "Water Effects" );
         {
-            ImGui::PushID( "HBAOSettings" );
-            ImGui::Checkbox( "Enable HBAO+", &settings.HbaoSettings.Enabled );
-            ImGui::DragFloat( "Radius", &settings.HbaoSettings.Radius, 0.01f );
-            ImGui::DragFloat( "MetersToViewSpaceUnits", &settings.HbaoSettings.MetersToViewSpaceUnits, 0.01f );
-            if ( ImGui::DragFloat( "PowerExponent", &settings.HbaoSettings.PowerExponent, 0.01f ) ) {
-                settings.HbaoSettings.PowerExponent = std::clamp( settings.HbaoSettings.PowerExponent, 1.0f, 4.0f );
+            ImGui::PushID( "EnhancedWaterEffectsSettings" );
+            bool enhancedWater = settings.EnableSSR;
+            if ( ImGui::Checkbox( "Enable", &enhancedWater ) ) {
+                settings.EnableSSR = enhancedWater;
+                settings.EnableWaterAnimation = enhancedWater;
+                Engine::GraphicsEngine->ReloadShaders( ShaderCategory::Water );
             }
-            if ( ImGui::DragFloat( "Bias", &settings.HbaoSettings.Bias, 0.01f ) ) {
-                settings.HbaoSettings.Bias = std::clamp( settings.HbaoSettings.Bias, 0.0f, 0.5f );
+            ImGui::BeginDisabled( !settings.EnableSSR );
+            {
+                ImGui::SliderFloat( "Reflection Strength", &settings.SSRStrength, 0.0f, 2.0f, "%.2f", ImGuiSliderFlags_AlwaysClamp );
+                ImGui::EndDisabled();
             }
+            ImGui::PopID();
+        }
 
-            ImGui::Checkbox( "Enable Blur", &settings.HbaoSettings.EnableBlur );
-            static std::vector<std::pair<const char*, int>> ssaoRadi = { {"2", 0}, {"4", 1} };
-            if ( ImComboBox( "SSAO radius", ssaoRadi, &settings.HbaoSettings.SsaoBlurRadius ) ) {
-                ImGui::EndCombo();
+        ImGui::SeparatorText( "Backlit Vegetation" );
+        {
+            ImGui::PushID( "BacklitVegetationSettings" );
+            ImGui::Checkbox( "Enable", &settings.EnableSSS );
+            ImGui::BeginDisabled( !settings.EnableSSS );
+            {
+                ImGui::SliderFloat( "Intensity", &settings.SSSIntensity, 0.0f, 2.0f, "%.2f", ImGuiSliderFlags_AlwaysClamp );
+                ImGui::EndDisabled();
             }
-            ImGui::DragFloat( "BlurSharpness", &settings.HbaoSettings.BlurSharpness, 0.01f );
-            static std::vector<std::pair<const char*, int>> blendMode = { {"Replace", 0}, {"Multiply", 1} };
-            if ( ImComboBox( "BlendMode", blendMode, &settings.HbaoSettings.BlendMode ) ) {
-                ImGui::EndCombo();
-            }
+            ImGui::PopID();
+        }
 
-            static std::vector<std::pair<const char*, int>> stepCount = { {"4", 0}, {"8", 1} };
-            if ( ImComboBox( "SSAO steps", stepCount, &settings.HbaoSettings.SsaoStepCount ) ) {
-                ImGui::EndCombo();
+        ImGui::SeparatorText( "Depth of Field" );
+        {
+            ImGui::PushID( "DepthOfFieldSettings" );
+            ImGui::Checkbox( "Enable", &settings.EnableDoF );
+            ImGui::BeginDisabled( !settings.EnableDoF );
+            {
+                ImGui::SliderFloat( "Blur Distance", &settings.DoFFocusDistance, 500.0f, 50000.0f, "%.0f", ImGuiSliderFlags_AlwaysClamp );
+                ImGui::SliderFloat( "Blur Strength", &settings.DoFBokehRadius, 1.0f, 32.0f, "%.1f", ImGuiSliderFlags_AlwaysClamp );
+                ImGui::EndDisabled();
             }
             ImGui::PopID();
         }
@@ -1263,8 +1691,22 @@ void RenderAdvancedColumn4( GothicRendererSettings& settings, GothicAPI* gapi ) 
                 {"Disabled", GothicRendererSettings::E_AntiAliasingMode::AA_NONE},
                 {"SMAA", GothicRendererSettings::E_AntiAliasingMode::AA_SMAA},
                 {"TAA", GothicRendererSettings::E_AntiAliasingMode::AA_TAA},
+                {"FSR 2", GothicRendererSettings::E_AntiAliasingMode::AA_FSR},
+                {"FSR 3", GothicRendererSettings::E_AntiAliasingMode::AA_FSR3},
             };
-            if ( ImComboBox( "Anti Aliasing", antiAliasing, &settings.AntiAliasingMode ) ) {
+            auto selectedMode = settings.AntiAliasingMode;
+            if ( selectedMode == GothicRendererSettings::E_AntiAliasingMode::AA_FSR && settings.Upscaler == GothicRendererSettings::E_Upscaler::UPSCALER_FSR_3 ) {
+                selectedMode = GothicRendererSettings::E_AntiAliasingMode::AA_FSR3;
+            }
+            if ( ImComboBoxC( "Anti Aliasing", antiAliasing, &selectedMode, [&selectedMode, &settings] {
+                if ( selectedMode == GothicRendererSettings::E_AntiAliasingMode::AA_FSR3 ) {
+                    selectedMode = GothicRendererSettings::E_AntiAliasingMode::AA_FSR;
+                    settings.Upscaler = GothicRendererSettings::E_Upscaler::UPSCALER_FSR_3;
+                } else if ( selectedMode == GothicRendererSettings::E_AntiAliasingMode::AA_FSR ) {
+                    settings.Upscaler = GothicRendererSettings::E_Upscaler::UPSCALER_FSR_2;
+                }
+                settings.AntiAliasingMode = selectedMode;
+                } ) ) {
                 ImGui::EndCombo();
             }
             ImGui::PopID();
@@ -1300,29 +1742,43 @@ void ImGuiShim::RenderAdvancedSettingsWindow()
     IMGUI_CHECKVERSION();
 
     auto windowSize = CurrentResolution;
-    auto columnWidth = windowSize.x / 4;
+    
+    int numCols = m_FrameStatisticsVisible ? 4 : 3;
+    auto columnWidth = static_cast<float>(windowSize.x) / numCols;
     auto columnOffset = 0.0f;
-    auto columnHeight = std::max( 400.0f, windowSize.y / 2.f );
+    auto columnHeight = std::max( 400.0f, static_cast<float>(windowSize.y) / 2.f );
 
     GothicRendererSettings& settings = Engine::GAPI->GetRendererState().RendererSettings;
+    FixupSettings(settings);
 
-    ImGui::SetNextWindowPos( ImVec2( columnOffset, 0.0f ), ImGuiCond_Appearing, ImVec2( 0, 0 ) );
-    ImGui::SetNextWindowSize( ImVec2( windowSize.x / 4, columnHeight ), ImGuiCond_Appearing );
+    static bool lastStatisticsVisible = m_FrameStatisticsVisible;
+    bool forceReappear = false;
+    if ( m_FrameStatisticsVisible != lastStatisticsVisible ) {
+        lastStatisticsVisible = m_FrameStatisticsVisible;
+        forceReappear = true;
+    }
+    int ImGuiCond_Appearing_Or_ForceReappear = forceReappear ? ImGuiCond_Always : ImGuiCond_Appearing;
+    
+    ImGui::SetNextWindowPos( ImVec2( columnOffset, 0.0f ), ImGuiCond_Appearing_Or_ForceReappear, ImVec2( 0, 0 ) );
+    ImGui::SetNextWindowSize( ImVec2( columnWidth, columnHeight ), ImGuiCond_Appearing_Or_ForceReappear );
     RenderAdvancedColumn1( settings, Engine::GAPI );
     columnOffset += columnWidth;
 
-    ImGui::SetNextWindowPos( ImVec2( columnOffset, 0.0f ), ImGuiCond_Appearing, ImVec2( 0, 0 ) );
-    ImGui::SetNextWindowSize( ImVec2( windowSize.x / 4, columnHeight ), ImGuiCond_Appearing );
+    ImGui::SetNextWindowPos( ImVec2( columnOffset, 0.0f ), ImGuiCond_Appearing_Or_ForceReappear, ImVec2( 0, 0 ) );
+    ImGui::SetNextWindowSize( ImVec2( columnWidth, columnHeight ), ImGuiCond_Appearing_Or_ForceReappear );
     RenderAdvancedColumn2( settings, Engine::GAPI );
     columnOffset += columnWidth;
 
-    ImGui::SetNextWindowPos( ImVec2( columnOffset, 0.0f ), ImGuiCond_Appearing, ImVec2( 0, 0 ) );
-    ImGui::SetNextWindowSize( ImVec2( windowSize.x / 4, columnHeight ), ImGuiCond_Appearing );
-    RenderAdvancedColumn3( settings, Engine::GAPI );
-    columnOffset += columnWidth;
+    if (m_FrameStatisticsVisible)
+    {
+        ImGui::SetNextWindowPos( ImVec2( columnOffset, 0.0f ), ImGuiCond_Appearing_Or_ForceReappear, ImVec2( 0, 0 ) );
+        ImGui::SetNextWindowSize( ImVec2( columnWidth, columnHeight ), ImGuiCond_Appearing_Or_ForceReappear );
+        RenderAdvancedColumn3( settings, Engine::GAPI );
+        columnOffset += columnWidth;
+    }
 
-    ImGui::SetNextWindowPos( ImVec2( columnOffset, 0.0f ), ImGuiCond_Appearing, ImVec2( 0, 0 ) );
-    ImGui::SetNextWindowSize( ImVec2( windowSize.x / 4, columnHeight ), ImGuiCond_Appearing );
+    ImGui::SetNextWindowPos( ImVec2( columnOffset, 0.0f ), ImGuiCond_Appearing_Or_ForceReappear, ImVec2( 0, 0 ) );
+    ImGui::SetNextWindowSize( ImVec2( columnWidth, columnHeight ), ImGuiCond_Appearing_Or_ForceReappear );
     RenderAdvancedColumn4( settings, Engine::GAPI );
 
 }

@@ -1,12 +1,16 @@
 #pragma once
+
 #include "pch.h"
+#include "AlignedAllocator.h"
+#include "Frustum.h"
 #include "GothicGraphicsState.h"
 #include "WorldConverter.h"
 #include "zCTree.h"
 #include "zCPolyStrip.h"
 #include "zTypes.h"
-
-#define START_TIMING(x) TimerScope( x, &Engine::GAPI->GetRendererState().RendererInfo.Timing.frameRecordings )
+#include "RenderQueue.h"
+#include "RenderToTextureBuffer.h"
+#include "ShaderIDs.h"
 
 static const char* MENU_SETTINGS_FILE = "system\\GD3D11\\UserSettings.ini";
 const float INDOOR_LIGHT_DISTANCE_SCALE_FACTOR = 0.5f;
@@ -16,6 +20,66 @@ class zCBspBase;
 class zCModelPrototype;
 struct ScreenSpaceLine;
 struct LineVertex;
+
+struct RndCullContext {
+    RndCullContext():
+    frustum({}),
+    cameraPosition({0,0,0}),
+    stage(RenderStage::STAGE_DRAW_UNKNOWN),
+    queue(nullptr),
+    drawDistances({}),
+    drawDistancesSq({}),
+    drawFlags({})
+    {
+    }
+    
+    Frustum frustum;
+    XMFLOAT3 cameraPosition;
+    RenderStage stage;
+
+    RenderQueue* queue;
+    
+    struct
+    {
+        float OutdoorVobs;
+        float OutdoorVobsSmall;
+        float IndoorVobs;
+        float VisualFX;
+    } drawDistances;
+
+    struct
+    {
+        float OutdoorVobs;
+        float OutdoorVobsSmall;
+        float IndoorVobs;
+        float VisualFX;
+    } drawDistancesSq;
+
+    struct
+    {
+        bool DrawVOBs;
+        bool DrawMobs;
+        bool EnableDynamicLighting;
+        bool EnableOcclusionCulling;
+        bool CullVobs;
+        bool CollectIndoorVobs;
+        bool CollectMobs;
+        bool CollectLights;
+    } drawFlags;
+};
+
+enum EBspTreeCollectFlags : unsigned int {
+    COLLECT_VOBS = 1 << 0,
+    COLLECT_LIGHTS = 1 << 1,
+    COLLECT_MOBS = 1 << 2,
+    COLLECT_INDOOR_VOBS = 1 << 3,
+
+    COLLECT_ALL_VOBS = COLLECT_VOBS | COLLECT_INDOOR_VOBS,
+    
+    COLLECT_MUTATE = 1 << 30,
+    COLLECT_ALL_MUTATE = 0xFFFFFFFF,
+    COLLECT_ALL_NO_MUTATE = COLLECT_ALL_MUTATE & ~COLLECT_MUTATE,
+};
 
 struct BspInfo {
     BspInfo() {
@@ -32,6 +96,25 @@ struct BspInfo {
 
         OcclusionInfo.NodeMesh = nullptr;
     }
+
+    BspInfo( BspInfo&& other ) noexcept {
+        Vobs = std::move( other.Vobs );
+        IndoorVobs = std::move( other.IndoorVobs );
+        SmallVobs = std::move( other.SmallVobs );
+        Lights = std::move( other.Lights );
+        IndoorLights = std::move( other.IndoorLights );
+        Mobs = std::move( other.Mobs );
+        NodePolygons = std::move( other.NodePolygons );
+        NumStaticLights = other.NumStaticLights;
+        
+        OcclusionInfo.NodeMesh = std::move(other.OcclusionInfo.NodeMesh);
+        OriginalNode = other.OriginalNode;
+        Front = other.Front;
+        Back = other.Back;
+    }
+
+    BspInfo( const BspInfo& ) = delete;
+    BspInfo& operator=( const BspInfo& ) = delete;
 
     ~BspInfo() {
         delete OcclusionInfo.NodeMesh;
@@ -69,12 +152,27 @@ struct BspInfo {
     BspInfo* Back;
 };
 
+/** Pre-built linear cache of all BSP leaf bounding boxes for SIMD-accelerated frustum culling.
+ *  Stores Min/Max extents in Structure-of-Arrays layout, 32-byte aligned for AVX2 batch processing.
+ *  Padded to a multiple of 8 entries with sentinel values that always fail culling tests. */
+struct BspLeafLinearCache {
+    VectorA32<float> MinX, MinY, MinZ;
+    VectorA32<float> MaxX, MaxY, MaxZ;
+    std::vector<BspInfo*> Leaves;
+    uint32_t Count = 0;
+
+    void Build( BspInfo* root );
+    void Clear();
+};
+
 
 struct CameraReplacement {
     XMFLOAT4X4 ViewReplacement;
     XMFLOAT4X4 ProjectionReplacement;
     XMFLOAT3 PositionReplacement;
     XMFLOAT3 LookAtReplacement;
+    
+    Frustum frustum;
 };
 
 /** Version of this struct */
@@ -86,53 +184,61 @@ struct MaterialInfo {
         MT_Water,
         MT_Ocean,
         MT_Portal,
-        MT_WaterfallFoam
+        MT_WaterfallFoam,
+        MT_FullAlpha, // why does this exist "NW_MISC_FULLALPHA_01" ?? This is just a block of nothing
     };
 
-    MaterialInfo() {
-        buffer.SpecularIntensity = 0.0f;
+    MaterialInfo() :
+        PixelShader(static_cast<PShaderID>(0)),
+        MaterialType(MT_None)
+    {
+        buffer.SpecularIntensity = 0.1f;
         buffer.SpecularPower = 60.0f;
         buffer.NormalmapStrength = 1.0f;
         buffer.DisplacementFactor = 1.0f;
         buffer.Color = 0xFFFFFFFF;
-
-        Constantbuffer = nullptr;
-
-        MaterialType = MT_None;
-
-        VertexShader = "";
-        PixelShader = "";
     }
 
-    ~MaterialInfo() {
-        delete Constantbuffer;
-    }
+    ~MaterialInfo() = default;
+
+    MaterialInfo( MaterialInfo&& other ) = default;
+    MaterialInfo& operator=( MaterialInfo&& ) = default;
+
+    MaterialInfo(const MaterialInfo&) = delete;
+    MaterialInfo& operator=( const MaterialInfo& ) = delete;
 
     /** Writes this info to a file */
     void WriteToFile( const std::string& name );
 
     /** Loads this info from a file */
-    void LoadFromFile( const std::string& name );
+    void LoadFromFile( const std::string_view name );
 
     struct Buffer {
         float SpecularIntensity;
         float SpecularPower;
         float NormalmapStrength;
         float DisplacementFactor;
-
         float4 Color;
+
+        bool operator==( const Buffer& other ) const noexcept {
+            return SpecularIntensity == other.SpecularIntensity &&
+                SpecularPower == other.SpecularPower &&
+                NormalmapStrength == other.NormalmapStrength &&
+                DisplacementFactor == other.DisplacementFactor &&
+                Color == other.Color;
+        }
     };
 
-    /** creates/updates the constantbuffer */
-    void UpdateConstantbuffer();
-
-    D3D11ConstantBuffer* Constantbuffer;
-
-    std::string VertexShader;
-    std::string TesselationShaderPair;
-    std::string PixelShader;
+    PShaderID PixelShader;
     EMaterialType MaterialType;
     Buffer buffer;
+
+    bool IsSame( MaterialInfo* other ) {
+        if ( other == nullptr ) return false;
+        return PixelShader == other->PixelShader
+            && MaterialType == other->MaterialType
+            && buffer == other->buffer;
+    }
 };
 
 struct ParticleFrameData {
@@ -163,22 +269,8 @@ class GVegetationBox;
 class zCMorphMesh;
 class zCDecal;
 
-struct TransparencyVobInfo {
-    TransparencyVobInfo( float distance, float alpha, SkeletalVobInfo* skeletalVob, VobInfo* normalVob ) :
-        distance( distance ), alpha( alpha ), skeletalVob( skeletalVob ), normalVob( normalVob ) {}
-
-    float distance;
-    float alpha;
-    SkeletalVobInfo* skeletalVob;
-    VobInfo* normalVob;
-};
-
 class GothicAPI {
-    friend static void ProcessVobAnimation( zCVob* vob, zTAnimationMode aniMode, VobInstanceInfo& vobInstance );
-    friend void CVVH_AddNotDrawnVobToList( std::vector<VobInfo*>& target, std::vector<VobInfo*>& source, float dist );
-    friend void CVVH_AddNotDrawnVobToList( std::vector<VobLightInfo*>& target, std::vector<VobLightInfo*>& source, float dist );
-    friend void CVVH_AddNotDrawnVobToList( std::vector<SkeletalVobInfo*>& target, std::vector<SkeletalVobInfo*>& source, float dist );
-
+    friend struct MaterialInfo;
 public:
     GothicAPI();
     ~GothicAPI();
@@ -188,8 +280,8 @@ public:
     /** Call to OnRemoveVob(player) and OnAddVob(player) in case of invisibility */
     void ReloadPlayerVob();
 
-    inline std::string GetGameName() { return m_gameName; }
-    inline void SetGameName( std::string value ) { m_gameName = value; }
+    inline const std::string& GetGameName() const { return m_gameName; }
+    inline void SetGameName( std::string value ) { m_gameName = std::move(value); }
 
     /** Called when the game starts */
     void OnGameStart();
@@ -214,9 +306,11 @@ public:
 
     /** Sets the per mod & per world renderersettings which can be persisted */
     void LoadRendererWorldSettings( GothicRendererSettings& s );
+    void LoadRendererWorldSettings( GothicRendererSettings& s, const char* iniFile );
 
     /** Persists the per mod & per world renderersettings */
     void SaveRendererWorldSettings( const GothicRendererSettings& s );
+    void SaveRendererWorldSettings( const GothicRendererSettings& s, const char* iniFile );
 
     /** Called to update the multi thread resource manager state */
     void UpdateMTResourceManager();
@@ -273,8 +367,6 @@ public:
     void DrawSkeletalMeshVob( SkeletalVobInfo* vi, float distance, bool updateState = true );
 
     void DrawSkeletalMeshVob_Layered( SkeletalVobInfo* vi, float distance, bool updateState = true );
-
-    void DrawSkeletalMeshVobs( const std::vector<SkeletalVobInfo*>& vis, bool updateState, bool drawAttachments );
 
     void DrawTransparencyVobs();
     void DrawSkeletalVN();
@@ -379,12 +471,15 @@ public:
     MeshInfo* GetWrappedWorldMesh();
 
     /** Returns the loaded skeletal mesh vobs */
-    std::list<SkeletalVobInfo*>& GetSkeletalMeshVobs();
-    std::list<SkeletalVobInfo*>& GetAnimatedSkeletalMeshVobs();
+    std::vector<SkeletalVobInfo*>& GetSkeletalMeshVobs();
+    std::vector<SkeletalVobInfo*>& GetAnimatedSkeletalMeshVobs();
+    std::vector<VobInfo*>& GetDynamicallyAddedVobs();
 
     /** Returns the current cameraposition */
     XMFLOAT3 GetCameraPosition();
     FXMVECTOR XM_CALLCONV GetCameraPositionXM();
+    zTCam_ClipType GetCameraBBox3DInFrustum(const zTBBox3D& box, int clipFlags = EGothicCullFlags::CullAll);
+    zTCam_ClipType GetCameraBBox3DInFrustum(const zCVob* vob, int clipFlags, bool isLocalCamera);
 
     /** Returns the view matrix */
     void GetViewMatrix( XMFLOAT4X4* view );
@@ -436,6 +531,30 @@ public:
     /** Returns the midpoint of the current world */
     WorldInfo* GetLoadedWorldInfo() { return LoadedWorldInfo.get(); }
 
+    [[nodiscard]] std::string GetLoadedWorldSettingsPath(bool createPath = false) const {
+        if ( !LoadedWorldInfo || LoadedWorldInfo->WorldName.empty() ) {
+            return "";
+        }
+        auto gameName = GetGameName();
+        std::string zenFolder;
+        if ( gameName == "Original" ) {
+            zenFolder = "system\\GD3D11\\ZENResources\\";
+        } else {
+            zenFolder = "system\\GD3D11\\ZENResources\\" + gameName + "\\";
+        }
+        if ( !Toolbox::FolderExists( zenFolder ) ) {
+            if (createPath) {
+                if ( !Toolbox::CreateDirectoryRecursive( zenFolder ) ) {
+                    LogError() << "Could not save custom ZEN-Resources. Could not create directory: " << zenFolder;
+                    return "";
+                }
+            }
+        }
+
+        auto const ini = zenFolder + LoadedWorldInfo->WorldName + ".INI";
+        return ini;
+    }
+
     /** Returns wether the camera is indoor or not */
     bool IsCameraIndoor();
 
@@ -473,7 +592,9 @@ public:
     void DebugDrawTreeNode( zCBspBase* base, zTBBox3D boxCell, int clipFlags = 63 );
 
     /** Draws particles, in a simple way */
-    void DrawParticlesSimple();
+    void DrawParticlesSimple(
+        RenderToTextureBuffer* bufferParticleColor,
+        RenderToTextureBuffer* bufferParticleDistortion);
 
     /** Prepares poly strips for feeding into renderer (weapon and effect trails) */
     void CalcPolyStripMeshes();
@@ -486,10 +607,22 @@ public:
     std::vector<VobInfo*>::iterator MoveVobFromBspToDynamic( VobInfo* vob, std::vector<VobInfo*>* source );
 
     /** Collects vobs using gothics BSP-Tree */
-    void CollectVisibleVobs( std::vector<VobInfo*>& vobs, std::vector<VobLightInfo*>& lights, std::vector<SkeletalVobInfo*>& mobs );
+    void CollectVisibleVobs(
+        std::vector<VobInfo*>& vobs,
+        std::vector<VobLightInfo*>& lights,
+        std::vector<SkeletalVobInfo*>& mobs,
+        EGothicCullFlags cullFlags = EGothicCullFlags::CullAll,
+        EBspTreeCollectFlags collectFlags = EBspTreeCollectFlags::COLLECT_ALL_MUTATE);
+
+    void CollectVisibleVobs( const RndCullContext& ctx );
 
     /** Collects visible sections from the current camera perspective */
-    void CollectVisibleSections( std::vector<WorldMeshSectionInfo*>& sections );
+    void CollectVisibleSections( std::vector<WorldMeshSectionInfo*>& sections,
+        const Frustum* queryFrustum = nullptr,
+        bool useSectionRadiusFilter = true );
+
+    /** Returns whether a world mesh intersects the given frustum (true when no bounds are available). */
+    bool IsWorldMeshVisibleInFrustum( const WorldMeshInfo* mesh, const Frustum& frustum ) const;
 
     /** Builds our BspTreeVobMap */
     void BuildBspVobMapCache();
@@ -542,6 +675,7 @@ public:
 
     /** Sets the CameraReplacementPtr */
     void SetCameraReplacementPtr( CameraReplacement* ptr ) { CameraReplacementPtr = ptr; }
+    CameraReplacement* GetCameraReplacementPtr() const { return CameraReplacementPtr; }
 
     /** Lets Gothic draw its sky */
     void DrawSkyGothicOriginal();
@@ -551,7 +685,7 @@ public:
 
     /** Returns the material info associated with the given material */
     MaterialInfo* GetMaterialInfoFrom( zCTexture* tex );
-    MaterialInfo* GetMaterialInfoFrom( zCTexture* tex, const std::string& textureName );
+    MaterialInfo* GetMaterialInfoFrom( zCTexture* tex, const std::string_view textureName );
 
     /** Adds a surface */
     void AddSurface( const std::string& name, MyDirectDrawSurface7* surface );
@@ -566,7 +700,7 @@ public:
     zCTexture* GetTextureBySurface( MyDirectDrawSurface7* surface );
 
     /** Resets all vob-stats drawn this frame */
-    void ResetVobFrameStats( std::list<VobInfo*>& vobs );
+    void ResetVobFrameStats();
 
     /** Sets the currently bound texture */
     void SetBoundTexture( int idx, zCTexture* tex );
@@ -594,7 +728,7 @@ public:
     zCVob* GetPlayerVob();
 
     /** Returns the map of static mesh visuals */
-    const std::unordered_map<zCProgMeshProto*, MeshVisualInfo*>& GetStaticMeshVisuals() { return StaticMeshVisuals; }
+    const gtl::flat_hash_map<zCProgMeshProto*, MeshVisualInfo*>& GetStaticMeshVisuals() { return StaticMeshVisuals; }
 
     /** Returns the collection of PolyStrip meshes infos */
     const std::map<zCTexture*, PolyStripInfo>& GetPolyStripInfos() { return PolyStripInfos; };
@@ -703,8 +837,27 @@ public:
 
     /** Get sky timescale variable */
     float GetSkyTimeScale();
+    
+    static void ProcessVobAnimation( zCVob* vob, zTAnimationMode aniMode, VobInstanceInfo& vobInstance );
 
 private:
+    struct WorldSectionBVHNode {
+        DirectX::BoundingBox Bounds = {};
+        uint32_t LeftChild = 0;
+        uint32_t RightChild = 0;
+        uint32_t LeafStart = 0;
+        uint32_t LeafCount = 0;
+
+        bool IsLeaf() const { return LeafCount > 0; }
+    };
+
+    void BuildWorldSectionBVH();
+    void ClearWorldSectionBVH();
+    void QueryWorldSectionBVH( const Frustum& frustum,
+        std::vector<WorldMeshSectionInfo*>& sections,
+        bool useSectionRadiusFilter ) const;
+    bool UseWorldSectionBVH() const;
+
     /** Collects polygons in the given AABB */
     void CollectPolygonsInAABBRec( BspInfo* base, const zTBBox3D& bbox, std::vector<zCPolygon*>& list );
 
@@ -713,9 +866,7 @@ private:
 
     /** Helper function for going through the bsp-tree */
     void BuildBspVobMapCacheHelper( zCBspBase* base );
-
-    /** Recursive helper function to draw collect the vobs */
-    void CollectVisibleVobsHelper( BspInfo* base, zTBBox3D boxCell, int clipFlags, std::vector<VobInfo*>& vobs, std::vector<VobLightInfo*>& lights, std::vector<SkeletalVobInfo*>& mobs );
+    void BuildBspLeafLinearCache();
 
     /** Applys the suppressed textures */
     void ApplySuppressedSectionTextures();
@@ -747,11 +898,14 @@ private:
 
     /** Loaded game sections */
     std::map<int, std::map<int, WorldMeshSectionInfo>> WorldSections;
+    std::vector<WorldSectionBVHNode> WorldSectionBVHNodes;
+    std::vector<WorldMeshSectionInfo*> WorldSectionBVHSections;
+    bool WorldSectionBVHValid = false;
     MeshInfo* WrappedWorldMesh;
 
     /** List of vobs with skeletal meshes (Having a zCModel-Visual) */
-    std::list<SkeletalVobInfo*> SkeletalMeshVobs;
-    std::list<SkeletalVobInfo*> AnimatedSkeletalVobs;
+    std::vector<SkeletalVobInfo*> SkeletalMeshVobs;
+    std::vector<SkeletalVobInfo*> AnimatedSkeletalVobs;
     std::vector<TransparencyVobInfo> TransparencyVobs;
     std::vector<SkeletalVobInfo*> VNSkeletalVobs;
 
@@ -777,37 +931,47 @@ private:
     std::set<MeshVisualInfo*> FrameMeshInstances;
 
     /** Map for static mesh visuals */
-    std::unordered_map<zCProgMeshProto*, MeshVisualInfo*> StaticMeshVisuals;
+    gtl::flat_hash_map<zCProgMeshProto*, MeshVisualInfo*> StaticMeshVisuals;
 
     /** Collection of poly strip infos (includes mesh and material data) */
     std::map<zCTexture*, PolyStripInfo> PolyStripInfos;
 
     /** Map for skeletal mesh visuals */
-    std::unordered_map<std::string, SkeletalMeshVisualInfo*> SkeletalMeshVisuals;
-    std::unordered_map<oCNPC*, SkeletalMeshVisualInfo*> SkeletalMeshNpcs;
+    gtl::flat_hash_map<std::string, SkeletalMeshVisualInfo*> SkeletalMeshVisuals;
+    gtl::flat_hash_map<oCNPC*, SkeletalMeshVisualInfo*> SkeletalMeshNpcs;
 
     /** Set of all vobs we registered by now */
-    std::unordered_set<zCVob*> RegisteredVobs;
+    gtl::flat_hash_set<zCVob*> RegisteredVobs;
 
     /** List of dynamically added vobs */
-    std::list<VobInfo*> DynamicallyAddedVobs;
+    std::vector<VobInfo*> DynamicallyAddedVobs;
 
     /** Map of vobs and VobIndfos */
-    std::unordered_map<zCVob*, VobInfo*> VobMap;
-    std::unordered_map<zCVobLight*, VobLightInfo*> VobLightMap;
-    std::unordered_map<zCVob*, SkeletalVobInfo*> SkeletalVobMap;
+    gtl::flat_hash_map<zCVob*, VobInfo*> VobMap;
+public:
+    // temporarily, to allow CollectVisibleVobsHelper to be templated for inlining optimizations
+    gtl::flat_hash_map<zCVobLight*, VobLightInfo*> VobLightMap;
+    // Exposed for CollectLeafVobs/CollectVisibleVobsWithLeafCache (file-static helpers)
+    BspLeafLinearCache LeafLinearCache;
+private:
+    gtl::flat_hash_map<zCVob*, SkeletalVobInfo*> SkeletalVobMap;
 
     /** Map of VobInfo-Lists for zCBspLeafs */
     std::unordered_map<zCBspBase*, BspInfo> BspLeafVobLists;
 
     /** Map for the material infos */
-    std::unordered_map<zCTexture*, MaterialInfo> MaterialInfos;
+    gtl::flat_hash_map<zCTexture*, std::unique_ptr<MaterialInfo>> MaterialInfos;
+
+    /** In-memory database of all materials loaded from materials.bin */
+    gtl::flat_hash_map<std::string, MaterialInfo::Buffer> MaterialDatabase;
+    void LoadMaterialDatabase();
+    void SaveMaterialDatabase();
 
     /** Maps visuals to vobs */
-    std::unordered_map<zCVisual*, std::list<BaseVobInfo*>> VobsByVisual;
+    gtl::flat_hash_map<zCVisual*, std::vector<BaseVobInfo*>> VobsByVisual;
 
     /** Map of textures */
-    std::unordered_map<std::string, MyDirectDrawSurface7*> SurfacesByName;
+    gtl::flat_hash_map<std::string, MyDirectDrawSurface7*> SurfacesByName;
 
     /** Directory we started in */
     std::string StartDirectory;

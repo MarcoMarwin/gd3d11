@@ -1,4 +1,4 @@
-﻿<?xml version="1.0" encoding="utf-8"?>
+<?xml version="1.0" encoding="utf-8"?>
 <Project ToolsVersion="16.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
   <ItemGroup>
     <Filter Include="Engine">
@@ -84,6 +84,12 @@
     </Filter>
     <Filter Include="Engine\Shaders">
       <UniqueIdentifier>{7b924380-794f-4471-9819-06c3fca71231}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Engine\Graph">
+      <UniqueIdentifier>{e7532fd2-04b8-499d-a2a9-5b64abda0850}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Librarys\Tracy">
+      <UniqueIdentifier>{7b69a12f-dac5-490c-825b-b1e5382d377c}</UniqueIdentifier>
     </Filter>
   </ItemGroup>
   <ItemGroup>
@@ -262,15 +268,6 @@
     <ClInclude Include="GInventory.h">
       <Filter>Engine\GAPI\Objects</Filter>
     </ClInclude>
-    <ClInclude Include="BaseAntTweakBar.h">
-      <Filter>Engine</Filter>
-    </ClInclude>
-    <ClInclude Include="D3D11AntTweakBar.h">
-      <Filter>Engine\D3D11</Filter>
-    </ClInclude>
-    <ClInclude Include="AntTweakBar.h">
-      <Filter>Librarys</Filter>
-    </ClInclude>
     <ClInclude Include="zCInput.h">
       <Filter>ZenGin\Classes</Filter>
     </ClInclude>
@@ -379,18 +376,14 @@
     <ClInclude Include="zCParser.h">
       <Filter>ZenGin\Classes</Filter>
     </ClInclude>
-    <ClInclude Include="XUnzip.h">
-      <Filter>Librarys</Filter>
-    </ClInclude>
-    <ClInclude Include="ZipArchive.h">
-      <Filter>Engine\GAPI</Filter>
-    </ClInclude>
     <ClInclude Include="zCPolyStrip.h">
       <Filter>ZenGin\Classes</Filter>
     </ClInclude>
     <ClInclude Include="BasePipelineStates.h" />
-    <ClInclude Include="D3D11PipelineStates.h" />
     <ClInclude Include="D3D11PFX_GodRays.h">
+      <Filter>Engine\D3D11\PFX\Effects</Filter>
+    </ClInclude>
+    <ClInclude Include="D3D11PFX_DepthOfField.h">
       <Filter>Engine\D3D11\PFX\Effects</Filter>
     </ClInclude>
     <ClInclude Include="D3D11OcclusionQuerry.h">
@@ -657,7 +650,6 @@
     <ClInclude Include="zViewTypes.h">
       <Filter>ZenGin\Classes</Filter>
     </ClInclude>
-    <ClInclude Include="zFont.h" />
     <ClInclude Include="D3D11GraphicsEngine.h">
       <Filter>Engine\D3D11\Engine</Filter>
     </ClInclude>
@@ -740,28 +732,12 @@
     <ClInclude Include="SMAA\D3D11SMAA.h">
       <Filter>Engine\D3D11\PFX</Filter>
     </ClInclude>
-    <ClInclude Include="include\ImGuizmo\GraphEditor.h">
-      <Filter>Librarys\ImGuizmo</Filter>
-    </ClInclude>
-    <ClInclude Include="include\ImGuizmo\ImCurveEdit.h">
-      <Filter>Librarys\ImGuizmo</Filter>
-    </ClInclude>
-    <ClInclude Include="include\ImGuizmo\ImGradient.h">
-      <Filter>Librarys\ImGuizmo</Filter>
-    </ClInclude>
-    <ClInclude Include="include\ImGuizmo\ImGuizmo.h">
-      <Filter>Librarys\ImGuizmo</Filter>
-    </ClInclude>
-    <ClInclude Include="include\ImGuizmo\ImSequencer.h">
-      <Filter>Librarys\ImGuizmo</Filter>
-    </ClInclude>
-    <ClInclude Include="include\ImGuizmo\ImZoomSlider.h">
-      <Filter>Librarys\ImGuizmo</Filter>
-    </ClInclude>
     <ClInclude Include="D3D11CascadedShadowMapBuffer.h">
       <Filter>Engine\D3D11</Filter>
     </ClInclude>
-    <ClInclude Include="D3D11ShadowMap.h" />
+    <ClInclude Include="D3D11ShadowAtlas.h">
+      <Filter>Engine\D3D11</Filter>
+    </ClInclude>
     <ClInclude Include="D3DGraphicsEventRecord.h">
       <Filter>Engine\D3D11</Filter>
     </ClInclude>
@@ -784,11 +760,96 @@
     </ClInclude>
     <ClInclude Include="Frustum.h" />
     <ClInclude Include="ImGuiEditorView.h" />
-    <ClInclude Include="zCSoundSystem.h" />
     <ClInclude Include="D3D11PFX_FSR1.h">
       <Filter>Engine\D3D11\PFX\Effects</Filter>
     </ClInclude>
     <ClInclude Include="TexturePool.h" />
+    <ClInclude Include="RenderQueue.h" />
+    <ClInclude Include="RGTextureDesc.h">
+      <Filter>Engine\Graph</Filter>
+    </ClInclude>
+    <ClInclude Include="RenderPass.h">
+      <Filter>Engine\Graph</Filter>
+    </ClInclude>
+    <ClInclude Include="RenderGraph.h">
+      <Filter>Engine\Graph</Filter>
+    </ClInclude>
+    <ClInclude Include="D3D11RenderQueue.h" />
+    <ClInclude Include="D3D11PFX_FSR3.h">
+      <Filter>Engine\D3D11\PFX\Effects</Filter>
+    </ClInclude>
+    <ClInclude Include="D3D11PFX_FSR2.h">
+      <Filter>Engine\D3D11\PFX\Effects</Filter>
+    </ClInclude>
+    <ClInclude Include="D3D11ShadowMap.h">
+      <Filter>Engine\D3D11</Filter>
+    </ClInclude>
+    <ClInclude Include="D3D11TiledDeferredShading.h">
+      <Filter>Engine\D3D11</Filter>
+    </ClInclude>
+    <ClInclude Include="D3D11DeferredRenderer.h">
+      <Filter>Engine\D3D11</Filter>
+    </ClInclude>
+    <ClInclude Include="D3D11ForwardPlusRenderer.h">
+      <Filter>Engine\D3D11</Filter>
+    </ClInclude>
+    <ClInclude Include="ISceneRenderer.h">
+      <Filter>Engine\D3D11</Filter>
+    </ClInclude>
+    <ClInclude Include="D3D11LegacyDeferredShading.h">
+      <Filter>Engine\D3D11</Filter>
+    </ClInclude>
+    <ClInclude Include="D3D11PipelineStates.h">
+      <Filter>Engine\D3D11</Filter>
+    </ClInclude>
+    <ClInclude Include="D3D11RenderQueue.h">
+      <Filter>Engine\D3D11</Filter>
+    </ClInclude>
+    <ClInclude Include="GraphicsShader.h">
+      <Filter>Engine</Filter>
+    </ClInclude>
+    <ClInclude Include="D3D11GraphicsShader.h">
+      <Filter>Engine\D3D11</Filter>
+    </ClInclude>
+    <ClInclude Include="MeshManager.h">
+      <Filter>Engine\GAPI</Filter>
+    </ClInclude>
+    <ClInclude Include="StringID.h" />
+    <ClInclude Include="zSndMss.h">
+      <Filter>ZenGin\Classes</Filter>
+    </ClInclude>
+    <ClInclude Include="zSound.h">
+      <Filter>ZenGin\Classes</Filter>
+    </ClInclude>
+    <ClInclude Include="zFont.h">
+      <Filter>ZenGin\Classes</Filter>
+    </ClInclude>
+    <ClInclude Include="zCSoundSystem.h">
+      <Filter>ZenGin\Classes</Filter>
+    </ClInclude>
+    <ClInclude Include="D3D11Upscaling.h">
+      <Filter>Engine\D3D11</Filter>
+    </ClInclude>
+    <ClInclude Include="D3D11PFX_SAO.h" />
+    <ClInclude Include="D3D11PFX_ASSAO.h">
+      <Filter>Engine\D3D11\PFX\Effects</Filter>
+    </ClInclude>
+    <ClInclude Include="D3D11FileRelativeInclude.h" />
+    <ClInclude Include="D3D11TracyDebug.h">
+      <Filter>Engine\D3D11</Filter>
+    </ClInclude>
+    <ClInclude Include="include\ImGuizmo\src\GraphEditor.h" />
+    <ClInclude Include="include\ImGuizmo\src\ImCurveEdit.h" />
+    <ClInclude Include="include\ImGuizmo\src\ImGradient.h" />
+    <ClInclude Include="include\ImGuizmo\src\ImGuizmo.h" />
+    <ClInclude Include="include\ImGuizmo\src\ImSequencer.h" />
+    <ClInclude Include="include\ImGuizmo\src\ImZoomSlider.h" />
+    <ClInclude Include="zFILE_VDFS.h">
+      <Filter>Engine\GAPI</Filter>
+    </ClInclude>
+    <ClInclude Include="zAllocator.h">
+      <Filter>Engine\GAPI</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="pch.cpp" />
@@ -849,15 +910,6 @@
     <ClCompile Include="GInventory.cpp">
       <Filter>Engine\GAPI\Objects</Filter>
     </ClCompile>
-    <ClCompile Include="BaseAntTweakBar.cpp">
-      <Filter>Engine</Filter>
-    </ClCompile>
-    <ClCompile Include="D3D11AntTweakBar.cpp">
-      <Filter>Engine\D3D11</Filter>
-    </ClCompile>
-    <ClCompile Include="D3D11PFX_Effect.cpp">
-      <Filter>Engine\D3D11\PFX\Effects</Filter>
-    </ClCompile>
     <ClCompile Include="GSpriteCloud.cpp">
       <Filter>Engine\GAPI\Objects</Filter>
     </ClCompile>
@@ -903,13 +955,10 @@
     <ClCompile Include="IkarusBindings.cpp">
       <Filter>Engine</Filter>
     </ClCompile>
-    <ClCompile Include="XUnzip.cpp">
-      <Filter>Librarys</Filter>
-    </ClCompile>
-    <ClCompile Include="ZipArchive.cpp">
-      <Filter>Engine\GAPI</Filter>
-    </ClCompile>
     <ClCompile Include="D3D11PFX_GodRays.cpp">
+      <Filter>Engine\D3D11\PFX\Effects</Filter>
+    </ClCompile>
+    <ClCompile Include="D3D11PFX_DepthOfField.cpp">
       <Filter>Engine\D3D11\PFX\Effects</Filter>
     </ClCompile>
     <ClCompile Include="D3D11OcclusionQuerry.cpp">
@@ -1023,25 +1072,12 @@
     <ClCompile Include="SMAA\D3D11SMAA.cpp">
       <Filter>Engine\D3D11\PFX</Filter>
     </ClCompile>
-    <ClCompile Include="include\ImGuizmo\GraphEditor.cpp">
-      <Filter>Librarys\ImGuizmo</Filter>
-    </ClCompile>
-    <ClCompile Include="include\ImGuizmo\ImCurveEdit.cpp">
-      <Filter>Librarys\ImGuizmo</Filter>
-    </ClCompile>
-    <ClCompile Include="include\ImGuizmo\ImGradient.cpp">
-      <Filter>Librarys\ImGuizmo</Filter>
-    </ClCompile>
-    <ClCompile Include="include\ImGuizmo\ImGuizmo.cpp">
-      <Filter>Librarys\ImGuizmo</Filter>
-    </ClCompile>
-    <ClCompile Include="include\ImGuizmo\ImSequencer.cpp">
-      <Filter>Librarys\ImGuizmo</Filter>
-    </ClCompile>
     <ClCompile Include="D3D11CascadedShadowMapBuffer.cpp">
       <Filter>Engine\D3D11</Filter>
     </ClCompile>
-    <ClCompile Include="D3D11ShadowMap.cpp" />
+    <ClCompile Include="D3D11ShadowAtlas.cpp">
+      <Filter>Engine\D3D11</Filter>
+    </ClCompile>
     <ClCompile Include="GothicExternals.cpp" />
     <ClCompile Include="D3D11PFX_CAS.cpp">
       <Filter>Engine\D3D11\PFX\Effects</Filter>
@@ -1056,6 +1092,70 @@
     <ClCompile Include="D3D11PFX_FSR1.cpp">
       <Filter>Engine\D3D11\PFX\Effects</Filter>
     </ClCompile>
+    <ClCompile Include="RenderPass.cpp">
+      <Filter>Engine\Graph</Filter>
+    </ClCompile>
+    <ClCompile Include="RenderGraph.cpp">
+      <Filter>Engine\Graph</Filter>
+    </ClCompile>
+    <ClCompile Include="D3D11PFX_FSR3.cpp">
+      <Filter>Engine\D3D11\PFX\Effects</Filter>
+    </ClCompile>
+    <ClCompile Include="D3D11PFX_FSR2.cpp">
+      <Filter>Engine\D3D11\PFX\Effects</Filter>
+    </ClCompile>
+    <ClCompile Include="D3D11ShadowMap.cpp">
+      <Filter>Engine\D3D11</Filter>
+    </ClCompile>
+    <ClCompile Include="D3D11TiledDeferredShading.cpp">
+      <Filter>Engine\D3D11</Filter>
+    </ClCompile>
+    <ClCompile Include="D3D11DeferredRenderer.cpp">
+      <Filter>Engine\D3D11</Filter>
+    </ClCompile>
+    <ClCompile Include="D3D11ForwardPlusRenderer.cpp">
+      <Filter>Engine\D3D11</Filter>
+    </ClCompile>
+    <ClCompile Include="D3D11LegacyDeferredShading.cpp">
+      <Filter>Engine\D3D11</Filter>
+    </ClCompile>
+    <ClCompile Include="D3D11RenderQueue.cpp">
+      <Filter>Engine\D3D11</Filter>
+    </ClCompile>
+    <ClCompile Include="GraphicsShader.cpp">
+      <Filter>Engine</Filter>
+    </ClCompile>
+    <ClCompile Include="D3D11GraphicsShader.cpp">
+      <Filter>Engine\D3D11</Filter>
+    </ClCompile>
+    <ClCompile Include="MeshManager.cpp">
+      <Filter>Engine\GAPI</Filter>
+    </ClCompile>
+    <ClCompile Include="zSndMss.cpp">
+      <Filter>ZenGin\Classes</Filter>
+    </ClCompile>
+    <ClCompile Include="D3D11Upscaling.cpp">
+      <Filter>Engine\D3D11</Filter>
+    </ClCompile>
+    <ClCompile Include="D3D11PFX_SAO.cpp" />
+    <ClCompile Include="D3D11PFX_ASSAO.cpp">
+      <Filter>Engine\D3D11\PFX\Effects</Filter>
+    </ClCompile>
+    <ClCompile Include="D3D11FileRelativeInclude.cpp" />
+    <ClCompile Include="include\tracy\public\TracyClient.cpp">
+      <Filter>Librarys\Tracy</Filter>
+    </ClCompile>
+    <ClCompile Include="include\meshoptimizer\src\allocator.cpp" />
+    <ClCompile Include="include\meshoptimizer\src\indexgenerator.cpp" />
+    <ClCompile Include="include\meshoptimizer\src\overdrawoptimizer.cpp" />
+    <ClCompile Include="include\meshoptimizer\src\quantization.cpp" />
+    <ClCompile Include="include\meshoptimizer\src\vcacheoptimizer.cpp" />
+    <ClCompile Include="include\meshoptimizer\src\vfetchoptimizer.cpp" />
+    <ClCompile Include="include\ImGuizmo\src\GraphEditor.cpp" />
+    <ClCompile Include="include\ImGuizmo\src\ImCurveEdit.cpp" />
+    <ClCompile Include="include\ImGuizmo\src\ImGradient.cpp" />
+    <ClCompile Include="include\ImGuizmo\src\ImGuizmo.cpp" />
+    <ClCompile Include="include\ImGuizmo\src\ImSequencer.cpp" />
   </ItemGroup>
   <ItemGroup>
     <None Include="ddraw.def">
@@ -1089,9 +1189,6 @@
     <None Include="include\assimp\.editorconfig">
       <Filter>Librarys\Assimp</Filter>
     </None>
-    <None Include="Shaders\PS_DS_AtmosphericScattering.hlsl">
-      <Filter>Engine\D3D11</Filter>
-    </None>
     <None Include="Shaders\PS_PFX_TAA.hlsl">
       <Filter>Engine\Shaders</Filter>
     </None>
@@ -1104,5 +1201,31 @@
     <None Include="Shaders\PS_PFX_Velocity.hlsl">
       <Filter>Engine\Shaders</Filter>
     </None>
+    <None Include="Shaders\VS_GrassInstanced.hlsl">
+      <Filter>Engine\Shaders</Filter>
+    </None>
+    <None Include="Shaders\VS_DecalInstanced.hlsl">
+      <Filter>Engine\Shaders</Filter>
+    </None>
+    <None Include="Shaders\PS_Grass.hlsl">
+      <Filter>Engine\Shaders</Filter>
+    </None>
+    <None Include="Shaders\PS_PFX_VelocityDebug.hlsl">
+      <Filter>Engine\Shaders</Filter>
+    </None>
+    <None Include="Shaders\PS_DS_AtmosphericScattering.hlsl">
+      <Filter>Engine\Shaders</Filter>
+    </None>
+    <None Include="Shaders\PS_DS_PointLight.hlsl">
+      <Filter>Engine\Shaders</Filter>
+    </None>
+    <None Include="Shaders\PS_DS_PointLightDynShadow.hlsl">
+      <Filter>Engine\Shaders</Filter>
+    </None>
+  </ItemGroup>
+  <ItemGroup>
+    <Natvis Include="include\gtl\debug_vis\gtl.natvis">
+      <Filter>Librarys</Filter>
+    </Natvis>
   </ItemGroup>
 </Project>

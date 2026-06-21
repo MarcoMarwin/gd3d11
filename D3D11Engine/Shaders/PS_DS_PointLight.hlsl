@@ -2,6 +2,8 @@
 // World/VOB-Pixelshader for G2D3D11 by Degenerated
 //--------------------------------------------------------------------------------------
 #include <DS_Defines.h>
+#include "DepthReconstruction.h"
+#include "include/PointLightShadows.h"
 
 cbuffer DS_PointLightConstantBuffer : register( b0 )
 {
@@ -16,11 +18,11 @@ cbuffer DS_PointLightConstantBuffer : register( b0 )
 	float2 PL_ViewportSize;
 	float2 PL_Pad2;
 	
-	matrix PL_InvProj; // Optimize out!
+	float4 PL_ProjParams; // x = 1/P._11, y = 1/P._22, z = P._43, w = P._33
 	matrix PL_InvView; // Optimize out!
 	
 	float3 PL_LightScreenPos;
-	float PL_Pad3;
+	float PL_ShadowStrength;
 };
 
 //--------------------------------------------------------------------------------------
@@ -43,14 +45,7 @@ struct PS_INPUT
 
 float3 VSPositionFromDepth(float depth, float2 vTexCoord)
 {
-	// Get NDC clip-space position
-	float4 vProjectedPos = float4(vTexCoord * float2(2.0f, -2.0f) + float2(-1.0f, 1.0f), depth, 1.0f);
-
-	// Transform by the inverse projection matrix
-	float4 vPositionVS = mul(vProjectedPos, PL_InvProj); //invViewProj == invProjection here
-
-	// Divide by w to get the view-space position
-	return vPositionVS.xyz / vPositionVS.www;
+	return ReconstructVSPositionFromDepthReverseZInfinite( depth, vTexCoord, PL_ProjParams.xy );
 }
 
 //--------------------------------------------------------------------------------------
@@ -104,15 +99,15 @@ float4 PSMain( PS_INPUT Input ) : SV_TARGET
 	float4 diffuse = TX_Diffuse.Sample(SS_Linear, uv);
 	
 	// Get the second GBuffer
-	float4 gb2 = TX_Nrm.Sample(SS_Linear, uv);
+	float2 gb2 = TX_Nrm.Sample(SS_Linear, uv).xy;
 	
-	// Decode the view-space normal back
-	float3 normal = normalize(gb2.xyz);
+	// Decode the view-space normal from octahedral R16G16_SNORM
+	float3 normal = DecodeNormalGBuffer(gb2);
 	
 	// Get specular parameters
 	float4 gb3 = TX_SI_SP.Sample(SS_Linear, uv);
 	float specIntensity = gb3.x;
-	float specPower = gb3.y;
+	float specPower = gb3.y < 0.0f ? max(-gb3.y - 1.0f, 1.0f) : gb3.y;
 	
 	// Reconstruct VS World Position from depth
 	float expDepth = TX_Depth.Sample(SS_Linear, uv).r;
@@ -127,23 +122,17 @@ float4 PSMain( PS_INPUT Input ) : SV_TARGET
 	float ndl = max(0, dot(lightDir, normal));
 	
 	// Compute range falloff
-	float falloff = pow(saturate(1.0f - (distance / PL_Range)), 1.2f);
+	float falloff = PLS_ComputeRangeFalloff(distance, PL_Range);
 	//float falloff = saturate(1.0f / (pow(distance / PL_Range * 2, 2)));
 	
 	// Compute specular lighting
-	float3 V = normalize(-Pl_PositionView);
+	float3 V = normalize(-vsPosition);
 	float3 H = normalize(lightDir + V);
-	float spec = CalcBlinnPhongLighting(normal, H);
-	float specMod = pow(dot(float3(0.333f,0.333f,0.333f), diffuse.rgb), 2);
-	float3 specBare = pow(spec, specPower * 1.5f) * (specIntensity * 0.5f) * PL_Color.rgb * falloff * saturate(ndl * 5.0f);
-	float3 specColored = lerp(specBare, specBare * diffuse.rgb, specMod);
+	float spec = PLS_CalcBlinnPhongLighting(normal, H);
+	float specMod = PLS_ComputeSpecMod(diffuse.rgb);
 	
-	float3 color = falloff * ndl * PL_Color.rgb;
-	color = saturate(color);
-	
-	// Blend this with the lights color and the worlds diffuse color
-	// Also apply specular lighting
-	float3 lighting = color * diffuse.rgb + specColored;
+	// Blend this with the light color, world diffuse and specular term.
+	float3 lighting = PLS_ComputePointLightLighting(diffuse.rgb, PL_Color.rgb, ndl, falloff, spec, specIntensity, specPower, specMod);
 	
 	return float4(saturate(lighting),1);
 }

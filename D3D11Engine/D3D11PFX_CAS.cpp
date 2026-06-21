@@ -35,13 +35,16 @@ XRESULT D3D11PFX_CAS::Apply( const Microsoft::WRL::ComPtr<ID3D11ShaderResourceVi
     Microsoft::WRL::ComPtr<ID3D11DepthStencilView> oldDSV;
     context->OMGetRenderTargets( 1, oldRTV.GetAddressOf(), oldDSV.GetAddressOf() );
 
+    ID3D11RenderTargetView* nullRTVs[6] { nullptr, nullptr, nullptr, nullptr, nullptr, nullptr };
+    context->OMSetRenderTargets( 6, nullRTVs, nullptr );
+
     RenderToTextureBuffer& tempBuffer = intermediateBuffer;
 
     // update the temp buffer with the latest backbuffer data
     Renderer->CopyTextureToRTV( inputTexture, tempBuffer.GetRenderTargetView(), outputSize );
 
     // Get shader
-    auto casPS = engine->GetShaderManager().GetPShader( "PS_PFX_CAS" );
+    auto casPS = engine->GetShaderManager().GetPShader( PShaderID::PS_PFX_CAS );
     if ( !casPS ) {
         return XR_FAILED;
     }
@@ -63,8 +66,7 @@ XRESULT D3D11PFX_CAS::Apply( const Microsoft::WRL::ComPtr<ID3D11ShaderResourceVi
     );
 
     // Update constant buffer
-    casPS->GetConstantBuffer()[0]->UpdateBuffer( &cb );
-    casPS->GetConstantBuffer()[0]->BindToPixelShader( 0 );
+    casPS->GetBuffer( "CASConstants" ).Update( &cb ).Bind();
 
     D3D11_VIEWPORT oldVP;
     UINT n = 1;

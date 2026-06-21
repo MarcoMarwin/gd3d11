@@ -1,11 +1,11 @@
 #define TRI_SAMPLE_LEVEL 0
 #include <Triplanar.h>
 
+#include "Globals_VS_ExConstants.h"
+
 cbuffer Matrices_PerFrame : register( b0 )
 {
-	matrix M_View;
-	matrix M_Proj;
-	matrix M_ViewProj;	
+	VS_ExConstantBuffer_PerFrame frame;
 };
 
 cbuffer OceanSettings : register( b1 )
@@ -48,9 +48,9 @@ struct VS_OUTPUT
 	float2 vTexcoord		: TEXCOORD0;
 	float2 vTexcoord2		: TEXCOORD1;
 	float4 vDiffuse			: TEXCOORD2;
-	float3 vNormalWS		: TEXCOORD4;
+	float3 vNormalWS		: TEXCOORD3;
+	float3 vNormalVS		: TEXCOORD4;
 	float3 vWorldPosition	: TEXCOORD5;
-	float4 vPosition		: SV_POSITION;
 };
 
 struct PS_INPUT
@@ -58,7 +58,8 @@ struct PS_INPUT
 	float2 vTexcoord		: TEXCOORD0;
 	float2 vTexcoord2		: TEXCOORD1;
 	float4 vDiffuse			: TEXCOORD2;
-	float3 vNormalWS		: TEXCOORD4;
+	float3 vNormalWS		: TEXCOORD3;
+	float3 vNormalVS		: TEXCOORD4;
 	float3 vWorldPosition	: TEXCOORD5;
 	float4 vPosition		: SV_POSITION;
 };
@@ -72,53 +73,13 @@ struct ConstantOutputType
 Texture2D TX_Texture0 : register( t0 );  
 SamplerState SS_Linear : register( s0 );
 
-float3 CalculateGerstnerWave(float2 dir, float steepness, float wavelength, float3 p, float time) {
-    float k = 2 * 3.14159 / wavelength;
-    float c = sqrt(9.8 / k);
-    float2 d = normalize(dir);
-    float f = k * (dot(d, p.xz) - c * time);
-    float a = steepness / k;
-    return float3(d.x * (a * cos(f)), a * sin(f), d.y * (a * cos(f)));
-}
-
-struct HS_ConstantOutput 
-{ 
-    float fTessFactor[3]        : SV_TessFactor; 
-    float fInsideTessFactor[1]  : SV_InsideTessFactor; 
-}; 
-
-HS_ConstantOutput HS_Constant( InputPatch<VS_OUTPUT, 3> I ) 
-{ 
-    HS_ConstantOutput O = (HS_ConstantOutput)0; 
-	
-	// Distance-based tessellation factor
-	float3 avgPos = (I[0].vWorldPosition + I[1].vWorldPosition + I[2].vWorldPosition) / 3.0f;
-	float distance = length(avgPos - OS_CameraPosition);
-	float tessFactor = clamp(6400.0f / max(distance, 1.0f), 1.0f, 16.0f);
-	
-    O.fTessFactor[0] = tessFactor; 
-    O.fTessFactor[1] = tessFactor; 
-    O.fTessFactor[2] = tessFactor; 
-    O.fInsideTessFactor[0] = tessFactor; 
-    return O; 
-} 
-
-[domain("tri")] 
-[partitioning("fractional_odd")] 
-[outputtopology("triangle_cw")] 
-[patchconstantfunc("HS_Constant")] 
-[outputcontrolpoints(3)] 
-VS_OUTPUT HSMain( InputPatch<VS_OUTPUT, 3> I, uint uCPID : SV_OutputControlPointID ) 
-{ 
-	return I[uCPID];
-}
-
 [domain("tri")]
-PS_INPUT DSMain(HS_ConstantOutput input, float3 uvwCoord : SV_DomainLocation, const OutputPatch<VS_OUTPUT, 3> patch)
+PS_INPUT DSMain(ConstantOutputType input, float3 uvwCoord : SV_DomainLocation, const OutputPatch<VS_OUTPUT, 3> patch)
 {
     float4 vertexPosition;
     float2 texCoord;
 	float2 texCoord2;
+    float3 normalVS;
 	float3 normalWS;
 	float4 diffuse;
     PS_INPUT output;
@@ -126,20 +87,25 @@ PS_INPUT DSMain(HS_ConstantOutput input, float3 uvwCoord : SV_DomainLocation, co
 	float3 worldPosition;
   
     diffuse = uvwCoord.x * patch[0].vDiffuse + uvwCoord.y * patch[1].vDiffuse + uvwCoord.z * patch[2].vDiffuse;
+	//vertexPosition = uvwCoord.x * patch[0].vPosition + uvwCoord.y * patch[1].vPosition + uvwCoord.z * patch[2].vPosition;
+	//viewPosition = uvwCoord.x * patch[0].vViewPosition + uvwCoord.y * patch[1].vViewPosition + uvwCoord.z * patch[2].vViewPosition;
 	worldPosition = uvwCoord.x * patch[0].vWorldPosition + uvwCoord.y * patch[1].vWorldPosition + uvwCoord.z * patch[2].vWorldPosition;
     texCoord = uvwCoord.x * patch[0].vTexcoord + uvwCoord.y * patch[1].vTexcoord + uvwCoord.z * patch[2].vTexcoord;
 	texCoord2 = uvwCoord.x * patch[0].vTexcoord2 + uvwCoord.y * patch[1].vTexcoord2 + uvwCoord.z * patch[2].vTexcoord2;
+	normalVS = uvwCoord.x * patch[0].vNormalVS + uvwCoord.y * patch[1].vNormalVS + uvwCoord.z * patch[2].vNormalVS;
 	normalWS = uvwCoord.x * patch[0].vNormalWS + uvwCoord.y * patch[1].vNormalWS + uvwCoord.z * patch[2].vNormalWS;
 	
-	// Use OS_UVOffset as a time variable
-	float time = OS_UVOffset * 50.0f; 
+	float3 localPos = (worldPosition - OPP_PatchPosition) / 2048;
+	float distance = length(OPP_LocalEye - localPos) * 0.0001f;
+	float dispMod = saturate((distance - 2000) * 0.0001f);
 	
-	// Gerstner Waves
-	float3 waveDisp = CalculateGerstnerWave(float2(1.0, 0.7), 0.35, 1000.0, worldPosition, time);
-	waveDisp += CalculateGerstnerWave(float2(0.8, 1.0), 0.25, 500.0, worldPosition, time * 1.2);
-	waveDisp += CalculateGerstnerWave(float2(-0.2, 1.0), 0.15, 250.0, worldPosition, time * 1.5);
+	//float scale = 1/(2000.0f);
+	texCoord = (worldPosition.xz / 2048) + OS_UVOffset;
+	float3 displacementFFT = TX_Texture0.SampleLevel(SS_Linear, texCoord, 0).xzy;
+	float3 displacementRandom = TX_Texture0.SampleLevel(SS_Linear, 3 * texCoord + displacementFFT + (worldPosition.xz / 2048 * 0.666f), 0).xzy;
 
-	float3 displacement = waveDisp * 0.5f;
+	float3 displacement = lerp(displacementFFT, displacementRandom, dispMod);
+
 						
 	float3 vHeight = 1.0f * displacement;
 	worldPosition += vHeight;
@@ -157,11 +123,14 @@ PS_INPUT DSMain(HS_ConstantOutput input, float3 uvwCoord : SV_DomainLocation, co
 	output.vNormalWS = normalWS;
 	output.vNormalVS = normalVS;*/
 		
-	output.vPosition = mul( float4(worldPosition,1), M_ViewProj);
+	//Output.vPosition = float4(Input.vPosition, 1);
+	output.vPosition = mul( float4(worldPosition,1), frame.M_ViewProj);
 	output.vTexcoord2 = texCoord2;
 	output.vTexcoord = texCoord;
-	output.vDiffuse  = diffuse;
+	output.vDiffuse  = float4(worldPosition,1);
 	output.vNormalWS = normalWS;
+	output.vNormalVS = normalVS;
+	//output.vViewPosition = mul(float4(worldPosition,1), frame.M_View).xyz;
 	output.vWorldPosition = worldPosition;
 	
     return output;

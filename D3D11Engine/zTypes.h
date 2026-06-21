@@ -1,5 +1,5 @@
 #pragma once
-#include "pch.h"
+#include "Types.h"
 
 enum zTCam_ClipType {
     ZTCAM_CLIPTYPE_IN,
@@ -40,8 +40,8 @@ enum zTMat_WaveSpeed
 
 #pragma pack (push, 1)	
 struct zTBBox3D {
-    XMFLOAT3	Min;
-    XMFLOAT3	Max;
+    DirectX::XMFLOAT3	Min;
+    DirectX::XMFLOAT3	Max;
 
     enum zTPlaneClass {
         zPLANE_INFRONT,
@@ -61,7 +61,7 @@ struct zTBBox3D {
 
 struct zTPlane {
     float Distance;
-    XMFLOAT3 Normal;
+    DirectX::XMFLOAT3 Normal;
 };
 #pragma pack (pop)
 
@@ -81,13 +81,13 @@ struct zTRenderContext {
 
 struct zCRenderLight {
     int	LightType;
-    XMFLOAT3	ColorDiffuse;
-    XMFLOAT3	Position;
-    XMFLOAT3	Direction;
+    DirectX::XMFLOAT3	ColorDiffuse;
+    DirectX::XMFLOAT3	Position;
+    DirectX::XMFLOAT3	Direction;
     float Range;
     float RangeInv;
-    XMFLOAT3 PositionLS;
-    XMFLOAT3 DirectionLS;
+    DirectX::XMFLOAT3 PositionLS;
+    DirectX::XMFLOAT3 DirectionLS;
     float Dir_approxFalloff;
 };
 
@@ -99,7 +99,7 @@ private:
     int	DoPrelight;
     int	DoSmoothPrelit;
     float PreLightDist;
-    XMFLOAT4X4 MatObjToCam;
+    DirectX::XMFLOAT4X4 MatObjToCam;
 };
 
 enum zTRnd_AlphaBlendFunc {
@@ -111,7 +111,18 @@ enum zTRnd_AlphaBlendFunc {
     zRND_ALPHA_FUNC_MUL = 5,
     zRND_ALPHA_FUNC_MUL2 = 6,
     zRND_ALPHA_FUNC_TEST = 7,
-    zRND_ALPHA_FUNC_BLEND_TEST = 8
+    zRND_ALPHA_FUNC_BLEND_TEST = 8,
+
+    // aliases for material use
+    zMAT_ALPHA_FUNC_MAT_DEFAULT = 0,
+    zMAT_ALPHA_FUNC_NONE = 1,
+    zMAT_ALPHA_FUNC_BLEND = 2,
+    zMAT_ALPHA_FUNC_ADD = 3,
+    zMAT_ALPHA_FUNC_SUB = 4,
+    zMAT_ALPHA_FUNC_MUL = 5,
+    zMAT_ALPHA_FUNC_MUL2 = 6,
+    zMAT_ALPHA_FUNC_TEST = 7,
+    zMAT_ALPHA_FUNC_BLEND_TEST = 8,
 };
 
 struct float4;

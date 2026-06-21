@@ -2,6 +2,10 @@
 #include "pch.h"
 
 /** Helper structs for quickly creating render-to-texture buffers */
+// DXGI_FORMAT_R8G8B8A8_UNORM
+// 
+const DXGI_FORMAT DXGI_FORMAT_ENGINE_SWAPCHAIN = DXGI_FORMAT_B8G8R8A8_UNORM;
+const DXGI_FORMAT DXGI_FORMAT_ENGINE_DEFAULT = DXGI_FORMAT_B8G8R8A8_UNORM;
 
 /** Struct for a texture that can be used as shader resource AND rendertarget */
 struct RenderToTextureBuffer {
@@ -9,20 +13,34 @@ struct RenderToTextureBuffer {
     }
 
     /** Creates the render-to-texture buffers */
-    RenderToTextureBuffer( const Microsoft::WRL::ComPtr<ID3D11Device1>& device, UINT SizeX, UINT SizeY, DXGI_FORMAT Format, HRESULT* Result = nullptr, DXGI_FORMAT RTVFormat = DXGI_FORMAT_UNKNOWN, DXGI_FORMAT SRVFormat = DXGI_FORMAT_UNKNOWN, int MipLevels = 1, UINT arraySize = 1 ) {
+    RenderToTextureBuffer( ID3D11Device* device,
+        UINT SizeX, 
+        UINT SizeY,
+        DXGI_FORMAT Format, 
+        HRESULT* Result = nullptr, 
+        DXGI_FORMAT RTVFormat = DXGI_FORMAT_UNKNOWN, 
+        DXGI_FORMAT SRVFormat = DXGI_FORMAT_UNKNOWN, 
+        int MipLevels = 1, 
+        UINT arraySize = 1,
+        uint32_t bindFlags = D3D11_BIND_RENDER_TARGET | D3D11_BIND_SHADER_RESOURCE) {
         HRESULT hr = S_OK;
 
         ZeroMemory( CubeMapRTVs, sizeof( CubeMapRTVs ) );
 
         if ( SizeX == 0 || SizeY == 0 ) {
-            LogError() << L"SizeX or SizeY can't be 0";
+            LogError() << "SizeX or SizeY can't be 0";
+        }
+        
+        if (bindFlags == 0) {
+            // default to RTV and SRV
+            bindFlags = D3D11_BIND_RENDER_TARGET | D3D11_BIND_SHADER_RESOURCE;
         }
 
         this->SizeX = SizeX;
         this->SizeY = SizeY;
 
         if ( Format == 0 ) {
-            LogError() << L"DXGI_FORMAT_UNKNOWN (0) isn't a valid texture format";
+            LogError() << "DXGI_FORMAT_UNKNOWN (0) isn't a valid texture format";
         }
 
         //Create a new render target texture
@@ -32,7 +50,7 @@ struct RenderToTextureBuffer {
             SizeY,
             arraySize,
             MipLevels,
-            D3D11_BIND_RENDER_TARGET | D3D11_BIND_SHADER_RESOURCE );
+            (D3D11_BIND_FLAG)bindFlags );
 
         if ( arraySize > 1 )
             Desc.MiscFlags |= D3D11_RESOURCE_MISC_TEXTURECUBE;
@@ -40,68 +58,91 @@ struct RenderToTextureBuffer {
         if ( MipLevels != 1 )
             Desc.MiscFlags = D3D11_RESOURCE_MISC_GENERATE_MIPS;
 
-        LE( device->CreateTexture2D( &Desc, nullptr, Texture.GetAddressOf() ) );
+        LE( device->CreateTexture2D( &Desc, nullptr, Texture.ReleaseAndGetAddressOf() ) );
 
         // Can't do further work if texture is null.
         if ( !Texture.Get() ) return;
 
         //Create a render target view
-        D3D11_RENDER_TARGET_VIEW_DESC DescRT = CD3D11_RENDER_TARGET_VIEW_DESC();
-        DescRT.Format = (RTVFormat != DXGI_FORMAT_UNKNOWN ? RTVFormat : Desc.Format);
-        DescRT.Texture2D.MipSlice = 0;
-        DescRT.Texture2DArray.ArraySize = arraySize;
+        if ( Desc.BindFlags & D3D11_BIND_RENDER_TARGET ) {
+            D3D11_RENDER_TARGET_VIEW_DESC DescRT = CD3D11_RENDER_TARGET_VIEW_DESC();
+            DescRT.Format = (RTVFormat != DXGI_FORMAT_UNKNOWN ? RTVFormat : Desc.Format);
+            DescRT.Texture2D.MipSlice = 0;
+            DescRT.Texture2DArray.ArraySize = arraySize;
 
-        if ( arraySize == 1 )
-            DescRT.ViewDimension = D3D11_RTV_DIMENSION_TEXTURE2D;
-        else {
-            DescRT.ViewDimension = D3D11_RTV_DIMENSION_TEXTURE2DARRAY;
-            DescRT.Texture2DArray.FirstArraySlice = 0;
-        }
+            if ( arraySize == 1 )
+                DescRT.ViewDimension = D3D11_RTV_DIMENSION_TEXTURE2D;
+            else {
+                DescRT.ViewDimension = D3D11_RTV_DIMENSION_TEXTURE2DARRAY;
+                DescRT.Texture2DArray.FirstArraySlice = 0;
+            }
 
-        LE( device->CreateRenderTargetView( Texture.Get(), &DescRT, RenderTargetView.GetAddressOf() ) );
+            LE( device->CreateRenderTargetView( Texture.Get(), &DescRT, RenderTargetView.ReleaseAndGetAddressOf() ) );
 
-        if ( arraySize > 1 ) {
-            // Create the one-face render target views
-            DescRT.Texture2DArray.ArraySize = 1;
-            for ( int i = 0; i < 6; ++i ) {
-                DescRT.Texture2DArray.FirstArraySlice = i;
-                LE( device->CreateRenderTargetView( Texture.Get(), &DescRT, CubeMapRTVs[i].GetAddressOf() ) );
+            if ( arraySize > 1 ) {
+                // Create the one-face render target views
+                DescRT.Texture2DArray.ArraySize = 1;
+                for ( int i = 0; i < 6; ++i ) {
+                    DescRT.Texture2DArray.FirstArraySlice = i;
+                    LE( device->CreateRenderTargetView( Texture.Get(), &DescRT, CubeMapRTVs[i].GetAddressOf() ) );
+                }
             }
         }
 
         // Create the resource view
-        D3D11_SHADER_RESOURCE_VIEW_DESC DescRV = CD3D11_SHADER_RESOURCE_VIEW_DESC();
-        DescRV.Format = (SRVFormat != DXGI_FORMAT_UNKNOWN ? SRVFormat : Desc.Format);
+        if ( Desc.BindFlags & D3D11_BIND_SHADER_RESOURCE ) {
+            D3D11_SHADER_RESOURCE_VIEW_DESC DescRV = CD3D11_SHADER_RESOURCE_VIEW_DESC();
+            DescRV.Format = (SRVFormat != DXGI_FORMAT_UNKNOWN ? SRVFormat : Desc.Format);
 
-        if ( arraySize > 1 )
-            DescRV.ViewDimension = D3D11_SRV_DIMENSION_TEXTURECUBE;
-        else
-            DescRV.ViewDimension = D3D11_SRV_DIMENSION_TEXTURE2D;
+            if ( DescRV.Format == DXGI_FORMAT_R32_TYPELESS ) {
+                DescRV.Format = DXGI_FORMAT_R32_FLOAT;
+            }
 
-        DescRV.Texture2D.MipLevels = MipLevels;
-        DescRV.Texture2D.MostDetailedMip = 0;
+            if ( arraySize > 1 )
+                DescRV.ViewDimension = D3D11_SRV_DIMENSION_TEXTURECUBE;
+            else
+                DescRV.ViewDimension = D3D11_SRV_DIMENSION_TEXTURE2D;
 
-        LE( device->CreateShaderResourceView( Texture.Get(), &DescRV, ShaderResView.GetAddressOf() ) );
+            DescRV.Texture2D.MipLevels = MipLevels;
+            DescRV.Texture2D.MostDetailedMip = 0;
 
-        if ( FAILED( hr ) ) {
-            LogError() << L"Coould not create ID3D11Texture2D, ID3D11ShaderResourceView, or ID3D11RenderTargetView. Killing created resources (If any).";
-            ReleaseAll();
-            if ( Result )*Result = hr;
-            return;
+            LE( device->CreateShaderResourceView( Texture.Get(), &DescRV, ShaderResView.ReleaseAndGetAddressOf() ) );
+
+            if ( FAILED( hr ) ) {
+                LogError() << "Coould not create ID3D11Texture2D, ID3D11ShaderResourceView, or ID3D11RenderTargetView. Killing created resources (If any).";
+                ReleaseAll();
+                if ( Result )*Result = hr;
+                return;
+            } 
         }
 
-        //LogInfo() << L"Successfully created ID3D11Texture2D, ID3D11ShaderResourceView, and ID3D11RenderTargetView.";
+        if ( arraySize <= 1 && (Desc.BindFlags & D3D11_BIND_UNORDERED_ACCESS) ) {
+            D3D11_UNORDERED_ACCESS_VIEW_DESC DescUAV = CD3D11_UNORDERED_ACCESS_VIEW_DESC();
+            DescUAV.Format = Desc.Format;
+            if ( DescUAV.Format == DXGI_FORMAT_R32_TYPELESS ) {
+                DescUAV.Format = DXGI_FORMAT_R32_FLOAT;
+            }
+            DescUAV.ViewDimension = D3D11_UAV_DIMENSION_TEXTURE2D;
+            DescUAV.Texture2D.MipSlice = 0;
+
+            auto oldHR = hr;
+            LE( device->CreateUnorderedAccessView( Texture.Get(), &DescUAV, UnorderedAccessView.ReleaseAndGetAddressOf() ) );
+            hr = oldHR;
+        }
+
+        //LogInfo() << "Successfully created ID3D11Texture2D, ID3D11ShaderResourceView, and ID3D11RenderTargetView.";
         if ( Result )*Result = hr;
     }
 
     /** Binds the texture to the pixel shader */
-    void BindToPixelShader( const Microsoft::WRL::ComPtr<ID3D11DeviceContext1>& context, int slot ) {
+    void BindToPixelShader( ID3D11DeviceContext* context, int slot ) {
         context->PSSetShaderResources( slot, 1, ShaderResView.GetAddressOf() );
     };
 
     const Microsoft::WRL::ComPtr<ID3D11Texture2D>& GetTexture() { return Texture; }
     const Microsoft::WRL::ComPtr<ID3D11ShaderResourceView>& GetShaderResView() { return ShaderResView; }
     const Microsoft::WRL::ComPtr<ID3D11RenderTargetView>& GetRenderTargetView() { return RenderTargetView; }
+    const Microsoft::WRL::ComPtr<ID3D11UnorderedAccessView>& GetUnorderedAccessView() { return UnorderedAccessView; }
 
     //void SetTexture( ID3D11Texture2D* tx ) { Texture = tx; }
     //void SetShaderResView( Microsoft::WRL::ComPtr<ID3D11ShaderResourceView> srv ) { ShaderResView = srv.Get(); }
@@ -119,6 +160,7 @@ private:
     /** Shader and rendertarget resource views */
     Microsoft::WRL::ComPtr<ID3D11ShaderResourceView> ShaderResView;
     Microsoft::WRL::ComPtr<ID3D11RenderTargetView> RenderTargetView;
+    Microsoft::WRL::ComPtr<ID3D11UnorderedAccessView> UnorderedAccessView;
 
     // Rendertargets for the cubemap-faces, if this is a cubemap
     Microsoft::WRL::ComPtr<ID3D11RenderTargetView> CubeMapRTVs[6];
@@ -129,6 +171,7 @@ private:
     void ReleaseAll() {
         Texture.Reset();
         ShaderResView.Reset();
+        UnorderedAccessView.Reset();
         RenderTargetView.Reset();
     }
 };
@@ -138,8 +181,18 @@ struct RenderToDepthStencilBuffer {
     ~RenderToDepthStencilBuffer() {
     }
 
+    /** Wraps pre-existing resources without allocating — used for views into a shared TextureCubeArray */
+    RenderToDepthStencilBuffer(
+        Microsoft::WRL::ComPtr<ID3D11Texture2D> texture,
+        Microsoft::WRL::ComPtr<ID3D11DepthStencilView> dsv,
+        Microsoft::WRL::ComPtr<ID3D11ShaderResourceView> srv,
+        UINT SizeX, UINT SizeY )
+        : Texture( std::move( texture ) ), DepthStencilView( std::move( dsv ) ),
+          ShaderResView( std::move( srv ) ), SizeX( SizeX ), SizeY( SizeY ) {
+    }
+
     /** Creates the render-to-texture buffers */
-    RenderToDepthStencilBuffer( const Microsoft::WRL::ComPtr<ID3D11Device1>& device, UINT SizeX, UINT SizeY, DXGI_FORMAT Format, HRESULT* Result = nullptr, DXGI_FORMAT DSVFormat = DXGI_FORMAT_UNKNOWN, DXGI_FORMAT SRVFormat = DXGI_FORMAT_UNKNOWN, UINT arraySize = 1 )
+    RenderToDepthStencilBuffer( ID3D11Device* device, UINT SizeX, UINT SizeY, DXGI_FORMAT Format, HRESULT* Result = nullptr, DXGI_FORMAT DSVFormat = DXGI_FORMAT_UNKNOWN, DXGI_FORMAT SRVFormat = DXGI_FORMAT_UNKNOWN, UINT arraySize = 1 )
         :SizeX(SizeX),
         SizeY( SizeY )
     {
@@ -151,11 +204,11 @@ struct RenderToDepthStencilBuffer {
         }
 
         if ( SizeX == 0 || SizeY == 0 ) {
-            LogError() << L"SizeX or SizeY can't be 0";
+            LogError() << "SizeX or SizeY can't be 0";
         }
 
         if ( Format == 0 ) {
-            LogError() << L"DXGI_FORMAT_UNKNOWN (0) isn't a valid texture format";
+            LogError() << "DXGI_FORMAT_UNKNOWN (0) isn't a valid texture format";
         }
 
         //Create a new render target texture
@@ -165,7 +218,7 @@ struct RenderToDepthStencilBuffer {
             SizeY,
             arraySize,
             1,
-            D3D11_BIND_DEPTH_STENCIL | D3D11_BIND_SHADER_RESOURCE );
+            D3D11_BIND_DEPTH_STENCIL | D3D11_BIND_SHADER_RESOURCE);
 
         if ( arraySize > 1 )
             Desc.MiscFlags |= D3D11_RESOURCE_MISC_TEXTURECUBE;
@@ -218,13 +271,13 @@ struct RenderToDepthStencilBuffer {
         LE( device->CreateShaderResourceView( Texture.Get(), &DescRV, ShaderResView.GetAddressOf() ) );
 
         if ( FAILED( hr ) ) {
-            LogError() << L"Could not create ID3D11Texture2D, ID3D11ShaderResourceView, or ID3D11DepthStencilView. Killing created resources (If any).";
+            LogError() << "Could not create ID3D11Texture2D, ID3D11ShaderResourceView, or ID3D11DepthStencilView. Killing created resources (If any).";
             if ( Result )*Result = hr;
             return;
         }
 
 
-        //LogInfo() << L"RenderToDepthStencilStruct: Successfully created ID3D11Texture2D, ID3D11ShaderResourceView, and ID3D11DepthStencilView.";
+        //LogInfo() << "RenderToDepthStencilStruct: Successfully created ID3D11Texture2D, ID3D11ShaderResourceView, and ID3D11DepthStencilView.";
         if ( Result )*Result = hr;
     }
 

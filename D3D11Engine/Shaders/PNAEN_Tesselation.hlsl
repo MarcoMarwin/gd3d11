@@ -8,26 +8,28 @@
  
 #define FAST_PROJECTION_XFORM 1 
  
-cbuffer Matrices_PerFrame : register( b0 )
-{
-	matrix M_View;
-	matrix M_Proj;
-	matrix M_ViewProj;	
-};
-static const float4x4 M_Projection = M_Proj;
-static const bool4 g_clipping = bool4(false, false, false, false);
+// Constant buffer 
+cbuffer cbPNTriangles : register( b0 ) 
+{ 
+    float4x4    g_f4x4Projection;           // Projection matrix 
+    float4      g_f4Eye;                    // Eye 
+    float4      g_f4TessFactors;            // Tessellation factors 
+                                            // x=Edge  
+    float4      g_f4ViewportScale;          // The X and Y half  
+                                            // resolution, 0, 0 
+    bool4       g_adaptive;                 // Should use adaptive  
+                                            // tessellation 
+    bool4       g_clipping;                 // Should run clipping  
+                                            // tests. 
+} 
 
-cbuffer MI_MaterialInfo : register( b2 )
-{
-	float MI_SpecularIntensity;
-	float MI_SpecularPower;
-	float MI_NormalmapStrength;
-	float MI_DisplacementFactor;
-	float4 MI_Color;
+cbuffer cbObjectTessSettings : register( b1 ) 
+{ 
+	float VT_TesselationFactor;
+	float VT_Roundness;
+	float VT_DisplacementStrength;
+	float VT_Pad1;
 }
-
-static const float4 g_f4ViewportScale = float4(960.0f, 540.0f, 0.0f, 0.0f);
-static const float4 g_f4TessFactors = float4(1.0f, 1.0f, 16.0f, 1.0f);
 
 // Some global lighting constants 
 static float4 g_f4MaterialDiffuseColor  = float4( 1.0f, 1.0f, 1.0f, 
@@ -39,7 +41,7 @@ static float4 g_f4MaterialAmbientColor  = float4( 0.2f, 0.2f, 0.2f,
  
  
 // Textures 
-Texture2D g_txDisplace        : register( t3 ); 
+Texture2D g_txDisplace        : register( t0 ); 
  
 // Samplers 
 SamplerState        g_SampleLinear  : register( s0 ); 
@@ -54,12 +56,12 @@ struct VS_RenderSceneInput
  
 struct HS_RenderSceneInput 
 { 
-	float2 f2TexCoord		: TEXCOORD0;
-	float2 f2TexCoord2		: TEXCOORD1;
-	float4 f4Diffuse		: TEXCOORD2;
-	float3 f3ViewNormal		: TEXCOORD4;
-	float3 f3ViewPosition	: TEXCOORD5;
-	float4 vPosition		: SV_POSITION;
+    float3 f3ViewPosition   : TEXCOORD0;  
+    float3 f3WorldNormal    : TEXCOORD1;
+    float3 f3ViewNormal     : TEXCOORD2;    
+    float2 f2TexCoord       : TEXCOORD3;
+	float2 f2TexCoord2      : TEXCOORD4;
+	float4 f4Diffuse		: TEXCOORD5;
 }; 
  
 struct HS_ConstantOutput 
@@ -93,6 +95,8 @@ struct DS_Output
 	float4 vDiffuse			: TEXCOORD2;
 	float3 vNormalVS		: TEXCOORD4;
 	float3 vViewPosition	: TEXCOORD5;
+	float4 vCurrClipPos     : TEXCOORD6;
+	float4 vPrevClipPos     : TEXCOORD7;
 	float4 vPosition		: SV_POSITION;
 }; 
  
@@ -186,7 +190,7 @@ float ComputeEdgeLOD(float4x4 projMatrix,
  
 float GetDisplacement(float2 texcoord)
 {
-	return g_txDisplace.SampleLevel(g_SampleLinear, texcoord, 0).r * 2 - 1;
+	return g_txDisplace.SampleLevel(g_SampleLinear, texcoord, 0).a * 2 - 1;
 }
 
 
@@ -266,7 +270,7 @@ HS_ControlPointOutput HSMain(
     // projection space twice. Probably better to be explicit,  
     // but this is a bit clearer. 
     if (g_clipping.x) { 
-        O.fClipped = ComputeClipping(M_Projection, 
+        O.fClipped = ComputeClipping(g_f4x4Projection, 
                                      O.f3ViewPosition[0],  
                                      O.f3ViewPosition[1],  
                                      O.f3ViewPosition[2]); 
@@ -275,19 +279,19 @@ HS_ControlPointOutput HSMain(
     } 
      
     // Perform Adaptive Tessellation step here. 
-    float edgeDist = (O.f3ViewPosition[0].z + I[NextCPID].f3ViewPosition.z) * 0.5f;
-      float maxDist = 2000.0f;
-      float minDist = 200.0f;
-      float maxTess = 16.0f;
-      
-      if (edgeDist < minDist) {
-          O.fOppositeEdgeLOD = maxTess;
-      } else if (edgeDist > maxDist) {
-          O.fOppositeEdgeLOD = 1.0f;
-      } else {
-          float factor = 1.0f - ((edgeDist - minDist) / (maxDist - minDist));
-          O.fOppositeEdgeLOD = max(1.0f, factor * maxTess);
-      }     
+    if (g_adaptive.x) { 
+        O.fOppositeEdgeLOD = max(1, ComputeEdgeLOD(g_f4x4Projection,  
+                                            O.f3ViewPosition[0], 
+                                            O.f3ViewPosition[1], 
+                                            O.f3ViewPosition[2], 
+                                           I[NextCPID].f3ViewPosition)); 
+										  
+    } else { 
+		//float maxZ = max(O.f3ViewPosition[0].z, I[NextCPID].f3ViewPosition.z);
+        //O.fOppositeEdgeLOD = maxZ < g_f4TessFactors.z ? g_f4TessFactors.x : 1; 
+		
+		O.fOppositeEdgeLOD = g_f4TessFactors.x;
+    }     
      
 	//O.fOppositeEdgeLOD *= O.f2TexCoord2.x; // Borders are stored here. Don't tesselate at borders!
 	 
@@ -362,7 +366,7 @@ HS_ConstantOutput HS_Constant(
      
     // Determine whether the center control point is visible or not. 
     float fB111Clipped =  
-            IsClipped(ApplyProjection(M_Projection, O.f3ViewB111)); 
+            IsClipped(ApplyProjection(g_f4x4Projection, O.f3ViewB111)); 
  
     if (I[0].fClipped && I[1].fClipped  
         && I[2].fClipped && fB111Clipped) { 
@@ -418,7 +422,7 @@ DS_Output DSMain( HS_ConstantOutput cdata,
 	// Apply roundness setting
 	f3EyePosition = lerp(f3BaseEyePosition, 
 						 f3EyePosition,
-						 0.0f);
+						 VT_Roundness);
  
 	// In the canonical PN implementation, quadratic normals are 
     // computed. However, this introduces high frequency lighting noise 
@@ -473,14 +477,14 @@ DS_Output DSMain( HS_ConstantOutput cdata,
 	//O.vTexCoord2 = displaceCoord;
 	O.vTexCoord2.y = 0;
 	
-	float dispFactor = 1.0f - pow(O.vTexCoord2.x, 16.0f);
-	dispFactor = dispFactor > 0.5f ? 1.0f : 0.0f;
+	float dispFactor = 1-pow(O.vTexCoord2.x, 16);
+    dispFactor = dispFactor > 0.5f ? 1.0f : 0.0f;
     
 	O.vTexCoord2.x = dispFactor;
 	//O.vTexCoord2 = displaceCoord;
 	
 	f3EyePosition = lerp(f3BaseEyePosition, 
-						 f3EyePosition + f3Normal * GetDisplacement(displaceCoord) * 30.0f * MI_DisplacementFactor,
+						 f3EyePosition + f3Normal * GetDisplacement(displaceCoord) * 30.0f * VT_DisplacementStrength,
 						 dispFactor);
   
 	
@@ -493,7 +497,7 @@ DS_Output DSMain( HS_ConstantOutput cdata,
     // think of the bottom of the Domain Shader as being equivalent  
     // to the bottom of the Vertex Shader when tessellation is  
     // disabled. 
-    float4 f4ClipPosition = ApplyProjection(M_Projection,  
+    float4 f4ClipPosition = ApplyProjection(g_f4x4Projection,  
                                             f3EyePosition); 
  
     
@@ -520,4 +524,3 @@ DS_Output DSMain( HS_ConstantOutput cdata,
 	O.vDiffuse = f4Diffuse;
     return O; 
 } 
-

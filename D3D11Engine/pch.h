@@ -1,5 +1,9 @@
 #pragma once
 
+#ifndef __FUNCSIG__
+#define __FUNCSIG__ __builtin_FUNCSIG()
+#endif
+
 #pragma warning(disable: 4731) // Change of ebp from inline assembly
 #pragma warning(disable: 4244) // Loss of data during conversion
 
@@ -7,18 +11,24 @@
 #define DEBUG_D3D11
 // assume SSE3 is available when compiling in debug mode for SSE2
 #if _M_IX86_FP == 2 // SSE2
-#define _XM_SSE3_INTRINSICS_
+// #define _XM_SSE3_INTRINSICS_
 #endif
 #endif
 
+#include <tracy/public/tracy/Tracy.hpp>
+#include <tracy/public/client/TracyCallstack.hpp>
+#include <tracy/public/tracy/TracyD3D11.hpp>
+#include "MemoryTracker.h"
 #include <Windows.h>
 #include <wrl/client.h>
 #include <chrono>
+#include <magic_enum/magic_enum.hpp>
 #include <d3d11_4.h>
 #include <DirectXMath.h>
 #include <future>
 #include <list>
 #include <map>
+#include <span>
 #include <array>
 #include <mmsystem.h>
 #include <set>
@@ -26,6 +36,7 @@
 #include <unordered_map>
 #include <unordered_set>
 #include <filesystem>
+#include <gtl/phmap.hpp>
 
 #include "Logger.h"
 #include "Types.h"
@@ -34,7 +45,8 @@
 using namespace DirectX;
 
 #ifndef VERSION_NUMBER
-#define VERSION_NUMBER "17.8-rev'SK9"
+#define VERSION_NUMBER "17.10-dev"
+#define IS_DEV_BUILD
 #endif
 #ifndef BUILD_DATE
 #define BUILD_DATE __DATE__
@@ -79,3 +91,15 @@ extern ZQuantizeHalfFloat_X4 QuantizeHalfFloat_X4;
 extern ZUnquantizeHalfFloat UnquantizeHalfFloat;
 extern ZUnquantizeHalfFloat_X4 UnquantizeHalfFloat_X4;
 extern ZUnquantizeHalfFloat_X4 UnquantizeHalfFloat_X8;
+
+#ifdef BUILD_GOTHIC_2_6_fix
+#define SWITCH_ENGINE(G1, G1A, G2A, OTHER) G2A
+#elif defined(BUILD_GOTHIC_1_08k) && !defined(BUILD_1_12F)
+#define SWITCH_ENGINE(G1, G1A, G2A, OTHER) G1
+#elif defined(BUILD_GOTHIC_1_08k) && defined(BUILD_1_12F)
+#define SWITCH_ENGINE(G1, G1A, G2A, OTHER) G1A
+#else
+#define SWITCH_ENGINE(G1, G1A, G2A, OTHER) OTHER
+#endif
+
+#define SWITCH_ENGINE12(G1, G2) SWITCH_ENGINE(G1, G1, G2, G2)

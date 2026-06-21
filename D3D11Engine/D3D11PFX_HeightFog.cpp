@@ -12,10 +12,6 @@
 #include "GothicAPI.h"
 #include "GSky.h"
 
-D3D11PFX_HeightFog::D3D11PFX_HeightFog( D3D11PfxRenderer* rnd ) : D3D11PFX_Effect( rnd ) {}
-
-D3D11PFX_HeightFog::~D3D11PFX_HeightFog() {}
-
 /** Draws this effect to the given buffer */
 XRESULT D3D11PFX_HeightFog::Render( RenderToTextureBuffer* fxbuffer ) {
 	D3D11GraphicsEngine* engine = reinterpret_cast<D3D11GraphicsEngine*>(Engine::GraphicsEngine);
@@ -25,20 +21,21 @@ XRESULT D3D11PFX_HeightFog::Render( RenderToTextureBuffer* fxbuffer ) {
 	Microsoft::WRL::ComPtr<ID3D11DepthStencilView> oldDSV;
 	engine->GetContext()->OMGetRenderTargets( 1, oldRTV.GetAddressOf(), oldDSV.GetAddressOf() );
 
-	auto vs = engine->GetShaderManager().GetVShader( "VS_PFX" );
-	auto hfPS = engine->GetShaderManager().GetPShader( "PS_PFX_Heightfog" );
+	auto vs = engine->GetShaderManager().GetVShader( VShaderID::VS_PFX );
+	auto hfPS = engine->GetShaderManager().GetPShader( PShaderID::PS_PFX_Heightfog );
 
 	hfPS->Apply();
 	vs->Apply();
 
 	HeightfogConstantBuffer cb;
-	XMStoreFloat4x4( &cb.InvProj, XMMatrixInverse( nullptr, XMLoadFloat4x4(&Engine::GAPI->GetProjectionMatrix()) ) );
+	{
+		auto& proj = Engine::GAPI->GetProjectionMatrix();
+		cb.HF_ProjParams = float4( 1.0f / proj._11, 1.0f / proj._22, proj._43, proj._33 );
+	}
 
 	XMStoreFloat4x4( &cb.InvView, XMMatrixInverse( nullptr, Engine::GAPI->GetViewMatrixXM() ) );
 
 	cb.CameraPosition = Engine::GAPI->GetCameraPosition();
-	float NearPlane = Engine::GAPI->GetRendererState().RendererInfo.NearPlane;
-	float FarPlane = Engine::GAPI->GetRendererState().RendererInfo.FarPlane;
 
 	cb.HF_GlobalDensity = Engine::GAPI->GetRendererState().RendererSettings.FogGlobalDensity;
 	cb.HF_HeightFalloff = Engine::GAPI->GetRendererState().RendererSettings.FogHeightFalloff;
@@ -84,7 +81,6 @@ XRESULT D3D11PFX_HeightFog::Render( RenderToTextureBuffer* fxbuffer ) {
 
 #if !defined(BUILD_GOTHIC_1_08k) && !defined(BUILD_1_12F)
 		// Use other fog-values for fog-zones
-		float distNear = WORLD_SECTION_SIZE * ((ffar - fnear) / ffar);
 		cb.HF_WeightZNear = Toolbox::lerp( cb.HF_WeightZNear, WORLD_SECTION_SIZE * 0.09f, Engine::GAPI->GetFogOverride() );
 		cb.HF_WeightZFar = Toolbox::lerp( cb.HF_WeightZFar, WORLD_SECTION_SIZE * 0.8, Engine::GAPI->GetFogOverride() );
 #endif
@@ -98,23 +94,28 @@ XRESULT D3D11PFX_HeightFog::Render( RenderToTextureBuffer* fxbuffer ) {
 	cb.HF_ProjAB = float2( Engine::GAPI->GetProjectionMatrix()._33, Engine::GAPI->GetProjectionMatrix()._34 );
 
 
+	GSky* sky = Engine::GAPI->GetSky();
+
 	// Modify fog when raining
 	float rain = Engine::GAPI->GetRainFXWeight();
+	float rainFogColorWeight = std::min( 1.0f, rain * 2.0f );
+	if ( sky ) {
+		float daylightRainFog = std::max( 0.0f, std::min( 1.0f, (sky->GetAtmosphereCB().AC_LightPos.y + 0.05f) * 4.0f ) );
+		daylightRainFog = daylightRainFog * daylightRainFog * (3.0f - 2.0f * daylightRainFog);
+		rainFogColorWeight *= daylightRainFog;
+	}
 
 	// Color
 	XMFLOAT3 FogColorMod;
-	XMStoreFloat3( &FogColorMod, XMVectorLerpV( color, XMLoadFloat3( &Engine::GAPI->GetRendererState().RendererSettings.RainFogColor ), XMVectorSet( std::min( 1.0f, rain * 2.0f ), std::min( 1.0f, rain * 2.0f ), std::min( 1.0f, rain * 2.0f ), 0 ) ) ); // Scale color faster here, so it looks better on light rain
+	XMStoreFloat3( &FogColorMod, XMVectorLerpV( color, XMLoadFloat3( &Engine::GAPI->GetRendererState().RendererSettings.RainFogColor ), XMVectorSet( rainFogColorWeight, rainFogColorWeight, rainFogColorWeight, 0 ) ) ); // Scale color faster here, so it looks better on light rain
 	cb.HF_FogColorMod = FogColorMod;
 	// Raining Density, only when not in fogzone
 	cb.HF_GlobalDensity = Toolbox::lerp( cb.HF_GlobalDensity, Engine::GAPI->GetRendererState().RendererSettings.RainFogDensity, rain * fogDensityFactorRain );
 
 
-	hfPS->GetConstantBuffer()[0]->UpdateBuffer( &cb );
-	hfPS->GetConstantBuffer()[0]->BindToPixelShader( 0 );
+	hfPS->GetBuffer( "PFXBuffer" ).Update( &cb ).Bind();
 
-	GSky* sky = Engine::GAPI->GetSky();
-	hfPS->GetConstantBuffer()[1]->UpdateBuffer( &sky->GetAtmosphereCB() );
-	hfPS->GetConstantBuffer()[1]->BindToPixelShader( 1 );
+	hfPS->GetBuffer( "Atmosphere" ).Update( &sky->GetAtmosphereCB() ).Bind();
 
 	engine->GetContext()->OMSetRenderTargets( 1, oldRTV.GetAddressOf(), nullptr );
 

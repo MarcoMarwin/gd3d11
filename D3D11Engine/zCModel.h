@@ -119,8 +119,8 @@ class zCModelPrototype {
 public:
     /** Hooks the functions of this Class */
     static void Hook() {
-        //DetourAttach( &reinterpret_cast<PVOID&>(HookedFunctions::OriginalFunctions.original_zCModelPrototypeLoadModelASC), Hooked_LoadModelASC );
-        //DetourAttach( &reinterpret_cast<PVOID&>(HookedFunctions::OriginalFunctions.original_zCModelPrototypeReadMeshAndTreeMSB), Hooked_ReadMeshAndTreeMSB );
+        //DetourAttachTyped( &HookedFunctions::OriginalFunctions.original_zCModelPrototypeLoadModelASC, Hooked_LoadModelASC  );
+        //DetourAttachTyped( &HookedFunctions::OriginalFunctions.original_zCModelPrototypeReadMeshAndTreeMSB, Hooked_ReadMeshAndTreeMSB  );
     }
 
     /** This is called on load time for models */
@@ -187,8 +187,8 @@ public:
         #endif*/
 
 #ifdef BUILD_GOTHIC_2_6_fix
-        DetourAttach( &reinterpret_cast<PVOID&>(HookedFunctions::OriginalFunctions.original_zCModelGetLowestLODNumPolys), Hooked_zCModelGetLowestLODNumPolys );
-        DetourAttach( &reinterpret_cast<PVOID&>(HookedFunctions::OriginalFunctions.original_zCModelGetLowestLODPoly), Hooked_zCModelGetLowestLODPoly );
+        DetourAttachTyped( &HookedFunctions::OriginalFunctions.original_zCModelGetLowestLODNumPolys, Hooked_zCModelGetLowestLODNumPolys  );
+        DetourAttachTyped( &HookedFunctions::OriginalFunctions.original_zCModelGetLowestLODPoly, Hooked_zCModelGetLowestLODPoly  );
 #endif
     }
 
@@ -230,7 +230,7 @@ public:
     }
 
     /** Updates stuff like blinking eyes, etc */
-    void zCModel::UpdateMeshLibTexAniState() {
+    void UpdateMeshLibTexAniState() {
         for ( int i = 0; i < GetMeshLibList()->NumInArray; i++ )
             GetMeshLibList()->Array[i]->TexAniState.UpdateTexList();
     }
@@ -319,14 +319,18 @@ public:
         if ( !nodeList )
             return;
 
-        transforms->reserve( nodeList->NumInArray );
-        for ( int i = 0; i < nodeList->NumInArray; i++ ) {
-            zCModelNodeInst* node = nodeList->Array[i];
-            zCModelNodeInst* parent = node->ParentNode;
+        const auto num = nodeList->NumInArray;
+        const auto array = nodeList->Array;
+
+        transforms->reserve( transforms->size() + num );
+
+        for ( int i = 0; i < num; i++ ) {
+            zCModelNodeInst* node = array[i];
+            const zCModelNodeInst* parent = node->ParentNode;
 
             // Calculate transform for this node
             if ( parent ) {
-                XMStoreFloat4x4( &node->TrafoObjToCam, XMLoadFloat4x4( &parent->TrafoObjToCam ) * XMLoadFloat4x4( &node->Trafo ) );
+                XMStoreFloat4x4( &node->TrafoObjToCam, XMMatrixMultiply(XMLoadFloat4x4( &parent->TrafoObjToCam ) , XMLoadFloat4x4( &node->Trafo ) ) );
             } else {
                 node->TrafoObjToCam = node->Trafo;
             }

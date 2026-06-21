@@ -210,10 +210,17 @@ void rainResponse(PS_INPUT input, float3 lightVector, float lightIntensity, floa
 		const float v2MaxFactor = 0.010f; 
 		
         // Sample opacity from the textures
-        float col1 = TX_RainTextureArray.Sample(SS_Anisotropic, tex1).r * min(g_rainfactors[texIndicesV1.x], v2MaxFactor);
-        float col2 = TX_RainTextureArray.Sample(SS_Anisotropic, tex2).r * min(g_rainfactors[texIndicesV1.y], v2MaxFactor);
-        float col3 = TX_RainTextureArray.Sample(SS_Anisotropic, tex3).r * min(g_rainfactors[texIndicesV2.x], v2MaxFactor);
-        float col4 = TX_RainTextureArray.Sample(SS_Anisotropic, tex4).r * min(g_rainfactors[texIndicesV2.y], v2MaxFactor);
+        float rainBlurBias = 0.0f;
+#ifndef SNOW_FEATURE
+        rainBlurBias = (1.0f - smoothstep(150.0f, 1600.0f, length(eyeVector)))
+            * 3.0f * saturate(AR_Pad1.x);
+#endif
+
+        // Sample opacity from the textures
+        float col1 = TX_RainTextureArray.SampleBias(SS_Anisotropic, tex1, rainBlurBias).r * min(g_rainfactors[texIndicesV1.x], v2MaxFactor);
+        float col2 = TX_RainTextureArray.SampleBias(SS_Anisotropic, tex2, rainBlurBias).r * min(g_rainfactors[texIndicesV1.y], v2MaxFactor);
+        float col3 = TX_RainTextureArray.SampleBias(SS_Anisotropic, tex3, rainBlurBias).r * min(g_rainfactors[texIndicesV2.x], v2MaxFactor);
+        float col4 = TX_RainTextureArray.SampleBias(SS_Anisotropic, tex4, rainBlurBias).r * min(g_rainfactors[texIndicesV2.y], v2MaxFactor);
 
 		//s = saturate(s) * 0.6f;
 		
@@ -225,6 +232,11 @@ void rainResponse(PS_INPUT input, float3 lightVector, float lightIntensity, floa
         opacity = lerp(hOpacity1,hOpacity2,t);
         opacity = pow(opacity,0.7); // inverse gamma correction (expand dynamic range)
         opacity = 4*lightIntensity * opacity * fallOff;
+#ifndef SNOW_FEATURE
+        float nearCameraFade = lerp(1.0f, 0.35f,
+            (1.0f - smoothstep(120.0f, 1400.0f, length(eyeVector))) * saturate(AR_Pad1.x));
+        opacity *= nearCameraFade;
+#endif
 		
 		opacity = opacity;
     }
@@ -258,7 +270,14 @@ float4 PSMain( PS_INPUT Input ) : SV_TARGET
 		1.0-(1.0/250.0),
 		1.0-(1.0/250.0),
 		directionalLight.w);
-#endif	
+#endif
+#ifndef SNOW_FEATURE
+	// Fade the billboard at both ends so shortened drops taper naturally
+	// instead of looking like clipped rectangular streaks.
+	float endFade = smoothstep(0.0f, 0.22f, Input.vTexcoord.y)
+		* smoothstep(0.0f, 0.22f, 1.0f - Input.vTexcoord.y);
+	directionalLight.w *= endFade * 0.82f;
+#endif
 	return directionalLight;
 }
 

@@ -8,20 +8,20 @@
 #include "D3D7\MyDirectDrawSurface7.h"
 
 namespace zCTextureCacheHack {
-    __declspec(selectany) unsigned int NumNotCachedTexturesInFrame;
-    const int MAX_NOT_CACHED_TEXTURES_IN_FRAME = 40;
+    inline __declspec(selectany) unsigned int NumNotCachedTexturesInFrame;
+    constexpr int MAX_NOT_CACHED_TEXTURES_IN_FRAME = 40;
 
     /** If true, this will force all calls to CacheIn to have -1 as parameter, which makes them an immediate cache in!
         Be very careful with this as the game will lag everytime a texture is being loaded!*/
-    __declspec(selectany) bool ForceCacheIn;
+    inline __declspec(selectany) bool ForceCacheIn;
 };
 
 class zCTexture {
 public:
     /** Hooks the functions of this Class */
     static void Hook() {
-        //DetourAttach( &reinterpret_cast<PVOID&>(HookedFunctions::OriginalFunctions.original_zCTex_D3DXTEX_BuildSurfaces), hooked_XTEX_BuildSurfaces );
-        DetourAttach( &reinterpret_cast<PVOID&>(HookedFunctions::OriginalFunctions.ofiginal_zCTextureLoadResourceData), hooked_LoadResourceData );
+        //DetourAttachTyped( &HookedFunctions::OriginalFunctions.original_zCTex_D3DXTEX_BuildSurfaces, hooked_XTEX_BuildSurfaces  );
+        DetourAttachTyped( &HookedFunctions::OriginalFunctions.ofiginal_zCTextureLoadResourceData, hooked_LoadResourceData  );
 
         zCTextureCacheHack::NumNotCachedTexturesInFrame = 0;
         zCTextureCacheHack::ForceCacheIn = false;
@@ -46,18 +46,35 @@ public:
     }
     */
 
-    std::string GetName() {
+    std::string GetName() const {
         const zSTRING& str = __GetName();
         return std::string( str.ToChar(), static_cast<size_t>( str.Length() ) );
     }
 
-    std::string GetNameWithoutExt() {
+    std::string GetNameWithoutExt() const {
         std::string n = GetName();
 
-        int p = n.find_last_of( '.' );
+        auto p = n.find_last_of( '.' );
 
         if ( p != std::string::npos )
             n.resize( p );
+
+        return n;
+    }
+
+    std::string_view GetNameView() const {
+        const zSTRING& str = __GetName();
+        std::string_view n = std::string_view( str.ToChar(), str.Length() );
+        return n;
+    }
+
+    std::string_view GetNameWithoutExtView() const {
+        std::string_view n = GetNameView();
+
+        auto p = n.find_last_of( '.' );
+
+        if ( p != std::string::npos )
+            return n.substr( 0, p );
 
         return n;
     }
@@ -138,9 +155,8 @@ public:
         return (flags & GothicMemoryLocations::zCTexture::Mask_FlagHasAlpha) != 0;
     }
 
-private:
-    const zSTRING& __GetName() {
-        return reinterpret_cast<zSTRING&(__fastcall*)( zCTexture* )>( GothicMemoryLocations::zCObject::GetObjectName )( this );
+    const zSTRING& __GetName() const {
+        return reinterpret_cast<zSTRING&(__fastcall*)( const zCTexture* )>( GothicMemoryLocations::zCObject::GetObjectName )( this );
     }
 };
 

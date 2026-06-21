@@ -30,14 +30,13 @@ float4 PSMain( PS_INPUT Input ) : SV_TARGET
 
 	float2 ps = float2(1.0f / 1920.0f, 1.0f / 1080.0f);
 	ps = lerp(float2(0,0), ps, pow(abs((float)depth), 300));
-	
+
 	float4 blur = DoBlurPassSingle(ps, Input.vTexcoord, TX_Texture0, TX_Depth, SS_Linear, 1.0f);
-	
+
 	float4 scene = TX_Texture0.Sample(SS_Linear, Input.vTexcoord);
-	
+
 	blur.a = 1.0f;
 	scene.a = 1.0f;
 
 	return blur;
 }
-

@@ -105,7 +105,7 @@ private:
 
             // Calling __cpuid with 0x0 as the function_id argument
             // gets the number of the highest valid function ID.
-            __cpuid( cpui.data(), 0 );
+            __cpuidex( cpui.data(), 0, 0 );
             nIds_ = cpui[0];
 
             for ( int i = 0; i <= nIds_; ++i ) {
@@ -140,7 +140,7 @@ private:
 
             // Calling __cpuid with 0x80000000 as the function_id argument
             // gets the number of the highest valid extended ID.
-            __cpuid( cpui.data(), 0x80000000 );
+            __cpuidex( cpui.data(), 0x80000000, 0 );
             nExIds_ = cpui[0];
 
             char brand[0x40];
@@ -188,9 +188,7 @@ const InstructionSet::InstructionSet_Internal InstructionSet::CPU_Rep;
 
 // Print out supported instruction set extensions
 void LogInstructionSet() {
-    auto& outstream = std::cout;
-
-    auto support_message = [&outstream]( std::string isa_feature, bool is_supported ) {
+    auto support_message = []( std::string isa_feature, bool is_supported ) {
         LogInfo() << isa_feature << (is_supported ? " supported" : " not supported");
     };
 

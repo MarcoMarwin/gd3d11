@@ -8,11 +8,26 @@
 /** Actual instance data for a vob */
 struct VobInstanceInfo {
     XMFLOAT4X4 world;
+    XMFLOAT4X4 prevWorld;  // Previous frame's world matrix for motion vectors
     DWORD color;
     float windStrenth;
     float canBeAffectedByPlayer;
-    // General purpose slot
+    // General purpose slot. Used by instanced VOB rendering to store an index
+    // into optional per-visual metadata buffers.
     DWORD GP_Slot;
+};
+
+struct VobWindMetadata {
+    float MinHeight;
+    float MaxHeight;
+    float2 Padding;
+};
+
+/** Per-instance data for instanced node attachment rendering */
+struct NodeAttachmentInstanceData {
+    XMFLOAT4X4 World;
+    XMFLOAT4X4 PrevWorld;
+    float4 Color;
 };
 
 /** Remap-index for the static vobs */
@@ -54,17 +69,30 @@ struct BlurConstantBuffer {
     float4 B_ColorMod;
 };
 
+struct DepthOfFieldConstantBuffer {
+    float DoF_FocusDistance;
+    float DoF_FocusRange;
+    float DoF_BokehRadius;
+    float DoF_MaxBlur;
+
+    float4 DoF_ProjParams;
+    float DoF_NearPlane;
+    float DoF_FarPlane;
+    float DoF_Pad;
+    float DoF_Pad2;
+};
+
 struct PerObjectState {
     float3 OS_AmbientColor;
     float OS_Pad;
 };
 
 struct PFXVS_ConstantBuffer {
-    XMFLOAT4X4 PFXVS_InvProj;
+    float4 PFXVS_ProjParams; // x = 1/P._11, y = 1/P._22, z = P._43, w = P._33
 };
 
 struct HeightfogConstantBuffer {
-    XMFLOAT4X4 InvProj;
+    float4 HF_ProjParams; // x = 1/P._11, y = 1/P._22, z = P._43, w = P._33
     XMFLOAT4X4 InvView;
     float3 CameraPosition;
     float HF_FogHeight;
@@ -95,6 +123,25 @@ struct GodRayZoomConstantBuffer {
     float3 GR_ColorMod;
 };
 
+struct SAOConstantBuffer {
+    float4 SAO_ProjParams;    // x = 1/P._11, y = 1/P._22, z = P._34, w = P._33
+    float  SAO_Radius;        // World-space AO radius
+    float  SAO_Bias;          // Normal bias to reduce self-occlusion
+    float  SAO_Intensity;     // Darkening strength
+    int    SAO_NumSamples;    // Spiral sample count (16-48)
+    float2 SAO_InvResolution; // 1/width, 1/height
+    float  SAO_BlurSharpness; // Bilateral blur edge preservation
+    float  SAO_Pad;
+};
+
+struct SAOBlurConstantBuffer {
+    float2 SAO_Blur_InvResolution;
+    float2 SAO_Blur_Direction;
+    float  SAO_Blur_Sharpness;
+    float3 SAO_Blur_Pad;
+    float4 SAO_Blur_ProjParams;
+};
+
 struct HDRSettingsConstantBuffer {
     float HDR_MiddleGray;
     float HDR_LumWhite;
@@ -119,17 +166,17 @@ struct DS_PointLightConstantBuffer {
     float2 PL_ViewportSize;
     float2 PL_Pad2;
 
-    XMFLOAT4X4 PL_InvProj; // Optimize out!
+    float4 PL_ProjParams; // x = 1/P._11, y = 1/P._22, z = P._43, w = P._33
     XMFLOAT4X4 PL_InvView;
 
     float3 PL_LightScreenPos;
-    float PL_Pad3;
+    float PL_ShadowStrength;
 };
 
-#define MAX_CSM_CASCADES 4
+constexpr int MAX_CSM_CASCADES = 4;
 
 struct DS_ScreenQuadConstantBuffer {
-    XMFLOAT4X4 SQ_InvProj; // Optimize out!
+    float4 SQ_ProjParams; // x = 1/P._11, y = 1/P._22, z = P._43, w = P._33
     XMFLOAT4X4 SQ_InvView;
     XMFLOAT4X4 SQ_View;
 
@@ -140,17 +187,20 @@ struct DS_ScreenQuadConstantBuffer {
 
     float4 SQ_LightColor;
     
-    // CSM: Cascade 0 (für Kompatibilität mit bestehenden Shadern)
-    XMFLOAT4X4 SQ_ShadowView[MAX_CSM_CASCADES];
-    XMFLOAT4X4 SQ_ShadowProj[MAX_CSM_CASCADES];
-
-    XMFLOAT4X4 SQ_RainView;
-    XMFLOAT4X4 SQ_RainProj;
+    // CSM: Cascade 0 (f�r Kompatibilit�t mit bestehenden Shadern)
+    XMFLOAT4X4 SQ_ShadowViewProj[MAX_CSM_CASCADES];
 
     float SQ_ShadowStrength;
     float SQ_ShadowAOStrength;
     float SQ_WorldAOStrength;
     float SQ_ShadowSoftness;
+    uint32_t SQ_FrameIndex;
+    float SQ_LightSize;
+    float2 SQ_Pad;
+
+    // Shadow atlas: per-cascade UV rect (xy = offset, zw = scale)
+    // Used when SHADOW_ATLAS is enabled (Feature Level 10 path)
+    float4 SQ_CascadeAtlasRect[MAX_CSM_CASCADES];
 };
 
 struct CloudConstantBuffer {
@@ -178,7 +228,9 @@ struct AdvanceRainConstantBuffer {
 struct VS_ExConstantBuffer_PerFrame {
     XMFLOAT4X4 View;
     XMFLOAT4X4 Projection;
-    XMFLOAT4X4 ViewProj;
+    XMFLOAT4X4 ViewProj;           // Jittered for rendering
+    XMFLOAT4X4 PrevViewProj;       // Previous frame's unjittered view-projection for motion vectors
+    XMFLOAT4X4 UnjitteredViewProj; // Current frame's unjittered view-projection for motion vectors
 };
 
 struct VS_ExConstantBuffer_Wind {
@@ -205,6 +257,7 @@ struct VS_ExConstantBuffer_PerInstance {
 
 struct VS_ExConstantBuffer_PerInstanceNode {
     XMFLOAT4X4 World;
+    XMFLOAT4X4 PrevWorld; // Added for motion vectors
     float4 Color;
     float Fatness;
     float Scaling;
@@ -213,9 +266,17 @@ struct VS_ExConstantBuffer_PerInstanceNode {
 
 struct VS_ExConstantBuffer_PerInstanceSkeletal {
     XMFLOAT4X4 World;
+    XMFLOAT4X4 PrevWorld; // Added for motion vectors
     float4 PI_ModelColor;
     float PI_ModelFatness;
     float3 PI_Pad1;
+};
+
+struct VS_ExConstantBuffer_SkeletalBoneRange {
+    unsigned int BoneOffset;
+    unsigned int PrevBoneOffset;
+    unsigned int BoneCount;
+    unsigned int UseStructuredBones;
 };
 
 struct ScreenFadeConstantBuffer {
@@ -283,6 +344,22 @@ struct RefractionInfoConstantBuffer {
     XMFLOAT4X4 RI_ViewProj;
 };
 
+struct WetGroundSSRConstantBuffer {
+    float4 WG_ProjParams;
+    XMFLOAT4X4 WG_InvView;
+    XMFLOAT4X4 WG_ViewProj;
+    XMFLOAT4X4 WG_RainViewProj;
+
+    float3 WG_CameraPosition;
+    float WG_Wetness;
+
+    float2 WG_InvResolution;
+    float WG_Strength;
+    float WG_Time;
+};
+
+static_assert( sizeof(WetGroundSSRConstantBuffer) % 16 == 0, "WetGroundSSRConstantBuffer must be 16-byte aligned" );
+
 struct AtmosphereConstantBuffer {
     float AC_Kr4PI;
     float AC_Km4PI;
@@ -313,8 +390,21 @@ struct AtmosphereConstantBuffer {
 
     float AC_EnableSSR;
     float AC_EnableSSS;
+    float AC_SSRStrength;
+    float AC_SSSIntensity;
+
     float AC_AtmospherePad1;
+    float AC_EnableNightAtmosphere;
+    float AC_NearNightBrightness;
+    float AC_NightFogBrightness;
+
+    float AC_NightDarkeningStart;
+    float AC_NightDarkeningMax;
+    float AC_NightDarkeningRange;
     float AC_AtmospherePad2;
+
+    float3 AC_WorldCameraPos;
+    float AC_AtmospherePad3;
 };
 
 struct CASConstantBuffer {
@@ -332,7 +422,44 @@ struct FSR1EASUConstantBuffer {
 struct FSR1RCASConstantBuffer {
     uint32_t RCASConst[4];  // FsrRcasCon output (only first element used)
 };
+
+struct VelocityDebugConstantBuffer {
+    float Amplification;    // Multiplier for velocity values (e.g., 10-100)
+    float ShowMagnitude;    // 0 = show direction as RG, 1 = show magnitude as grayscale
+    float AbsoluteMode;     // 0 = signed (-1 to 1), 1 = absolute values
+    float Padding;
+};
+
+#define TILE_SIZE 16
+// 64 Tiles seemed enough to fix issues in G1 old camp
+#define MAX_LIGHTS_PER_TILE 64
+
+struct LightCullingConstantBuffer {
+    XMFLOAT4X4 Proj;
+    uint32_t ScreenWidth;
+    uint32_t ScreenHeight;
+    uint32_t TotalLights;
+    uint32_t MaxBufferIndices;
+};
+
+struct TiledShadingConstantBuffer {
+    float2 ViewportSize;
+    float2 Pad0;
+    float4 ProjParams; // x = 1/P._11, y = 1/P._22, z = P._43, w = P._33
+    uint32_t LimitLightIntensity;
+    uint32_t NumTilesX;
+    float2 Pad1;
+    XMFLOAT4X4 InvView; // For world-space reconstruction (shadow sampling)
+};
+
+struct ForwardPlusTileConstantBuffer {
+    float2 ViewportSize;
+    uint32_t NumTilesX;
+    uint32_t LimitLightIntensity;
+};
+
+struct PsSimpleFFdata {
+    float4 textureFactor;
+};
+
 #pragma pack (pop)
-
-
-

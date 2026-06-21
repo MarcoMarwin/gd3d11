@@ -1,18 +1,22 @@
 #pragma once
 #include <string>
 
-#include <D3D11_4.h>
+#include <d3d11_4.h>
+#include <vector>
 
 #include "VertexTypes.h"
 
 #include <wrl/client.h>
 
-enum XRESULT;
+enum XRESULT : int;
 
 class D3D11VertexBuffer {
 public:
-    D3D11VertexBuffer();
-    ~D3D11VertexBuffer();
+    D3D11VertexBuffer()
+        : SizeInBytes( 0 )
+    {}
+
+    ~D3D11VertexBuffer() = default;
 
     /** Layed out for D3D11*/
     enum ECPUAccessFlags {
@@ -58,7 +62,7 @@ public:
     XRESULT Unmap();
 
     /** Optimizes the given set of vertices */
-    XRESULT OptimizeVertices( VERTEX_INDEX* indices, byte* vertices, unsigned int numIndices, unsigned int numVertices, unsigned int stride );
+    XRESULT OptimizeVertices( VERTEX_INDEX* indices, byte* vertices, unsigned int numIndices, unsigned int numVertices, unsigned int stride, std::vector<VERTEX_INDEX>* outShadowIndices = nullptr );
 
     /** Optimizes the given set of vertices */
     XRESULT OptimizeFaces( VERTEX_INDEX* indices, byte* vertices, unsigned int numIndices, unsigned int numVertices, unsigned int stride );

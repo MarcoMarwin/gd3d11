@@ -6,19 +6,18 @@
 #include "zCVob.h"
 #include "zCMaterial.h"
 #include "zCTexture.h"
-
-const int WORLDMESHINFO_VERSION = 5;
-const int VISUALINFO_VERSION = 5;
+#include "D3D11_Helpers.h"
 
 /** Updates the vobs constantbuffer */
-void VobInfo::UpdateVobConstantBuffer() {
-    VS_ExConstantBuffer_PerInstance cb;
-    XMStoreFloat4x4( &cb.World, Vob->GetWorldMatrixXM() );
+void VobInfo::UpdateVobConstantBuffer(VS_ExConstantBuffer_PerInstance& cb) {
+    UpdateState();
+    cb.World = WorldMatrix;
+    cb.Color = {0.0f, 0.0f, 0.0f, 1.0f};
+}
 
-    VobConstantBuffer->UpdateBuffer( &cb );
-
-    XMStoreFloat3( &LastRenderPosition, Vob->GetPositionWorldXM() );
-    WorldMatrix = cb.World;
+void VobInfo::UpdateState() {
+    WorldMatrix = *Vob->GetWorldMatrixPtr();
+    LastRenderPosition = Vob->GetPositionWorld();
 
     // Colorize the vob according to the underlaying polygon
     if ( IsIndoorVob ) {
@@ -28,27 +27,21 @@ void VobInfo::UpdateVobConstantBuffer() {
         // Get the color of the first found feature of the ground poly
         GroundColor = Vob->GetGroundPoly() ? Vob->GetGroundPoly()->getFeatures()[0]->lightStatic : 0xFFFFFFFF;
     }
-
-    //&WorldMatrix = XMMatrixTranspose(XMLoadFloat4x4(&cb.World));
 }
 
 /** Updates the vobs constantbuffer */
-void SkeletalVobInfo::UpdateVobConstantBuffer() {
-    VS_ExConstantBuffer_PerInstance cb;
-    XMStoreFloat4x4( &cb.World, Vob->GetWorldMatrixXM() );
+void SkeletalVobInfo::UpdateVobConstantBuffer(VS_ExConstantBuffer_PerInstance& cb) {
+    UpdateState();
+    cb.World = WorldMatrix;
+    cb.Color = {0.0f, 0.0f, 0.0f, 1.0f};
+}
 
-    WorldMatrix = cb.World;
-
-    if ( !VobConstantBuffer )
-        Engine::GraphicsEngine->CreateConstantBuffer( &VobConstantBuffer, &cb, sizeof( cb ) );
-    else
-        VobConstantBuffer->UpdateBuffer( &cb );
+void SkeletalVobInfo::UpdateState() {
+    WorldMatrix = *Vob->GetWorldMatrixPtr();
 }
 
 SectionInstanceCache::~SectionInstanceCache() {
-    for ( auto& [mvi, vertexBuffer] : InstanceCache ) {
-        delete vertexBuffer;
-    }
+    InstanceCache.clear();
 }
 
 MeshInfo::~MeshInfo() {
@@ -57,6 +50,7 @@ MeshInfo::~MeshInfo() {
 
     delete MeshVertexBuffer;
     delete MeshIndexBuffer;
+    delete MeshShadowIndexBuffer;
 }
 
 SkeletalMeshInfo::~SkeletalMeshInfo() {
@@ -70,9 +64,7 @@ SkeletalMeshInfo::~SkeletalMeshInfo() {
 /** Clears the cache for the given progmesh */
 void SectionInstanceCache::ClearCacheForStatic( MeshVisualInfo* pm ) {
     if ( InstanceCache.find( pm ) != InstanceCache.end() ) {
-        D3D11VertexBuffer* vb = InstanceCache[pm];
-        delete vb;
-        InstanceCache[pm] = nullptr;
+        InstanceCache[pm].reset();
         InstanceCacheData[pm].clear();
     }
 }

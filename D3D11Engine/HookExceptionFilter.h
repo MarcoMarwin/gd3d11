@@ -1,6 +1,6 @@
 #pragma once
 #if _MSC_VER >= 1300
-#include <Tlhelp32.h>
+#include <TlHelp32.h>
 #endif
 
 #include "pch.h"
@@ -10,9 +10,11 @@
 // Simple implementation of an additional output to the console:
 class MyStackWalker : public StackWalker {
 public:
-    MyStackWalker() : StackWalker() { LoadModules(); }
+    MyStackWalker() : StackWalker() { 
+        // LoadModules();
+    }
     MyStackWalker( DWORD dwProcessId, HANDLE hProcess ) : StackWalker( dwProcessId, hProcess ) {}
-    virtual void OnOutput( LPCSTR szText ) { Log( "STACK", __FILE__, __LINE__, __FUNCSIG__ ) << szText; StackWalker::OnOutput( szText ); }
+    void OnOutput( LPCSTR szText ) override { Log( "STACK", __FILE__, __LINE__, __FUNCSIG__ ) << szText; StackWalker::OnOutput( szText ); }
 
     static MyStackWalker& GetSingleton() { static MyStackWalker singleton; return singleton; }
 };

@@ -3,10 +3,11 @@
 //--------------------------------------------------------------------------------------
 
 #include <AtmosphericScattering.h>
+#include "DepthReconstruction.h"
 
 cbuffer PFXBuffer : register( b0 )
 {
-	matrix HF_InvProj;
+	float4 HF_ProjParams; // x = 1/P._11, y = 1/P._22, z = P._43, w = P._33
 	matrix HF_InvView;
 	float3 HF_CameraPosition;
 	float HF_FogHeight;
@@ -33,14 +34,7 @@ Texture2D	TX_Depth : register( t1 );
 
 float3 VSPositionFromDepth(float depth, float2 vTexCoord)
 {
-	// Get NDC clip-space position
-	float4 vProjectedPos = float4(vTexCoord * float2(2.0f, -2.0f) + float2(-1.0f, 1.0f), depth, 1.0f);
-
-	// Transform by the inverse projection matrix
-	float4 vPositionVS = mul(vProjectedPos, HF_InvProj); //invViewProj == invProjection here
-
-	// Divide by w to get the view-space position
-	return vPositionVS.xyz / vPositionVS.www;
+	return ReconstructVSPositionFromDepthReverseZInfinite( depth, vTexCoord, HF_ProjParams.xy );
 }
 
 float ComputeVolumetricFog(float3 cameraToWorldPos, float3 posOriginal)
@@ -63,6 +57,13 @@ float ComputeVolumetricFog(float3 cameraToWorldPos, float3 posOriginal)
 	
 	
 	return exp( -HF_GlobalDensity * w * fogInt );
+}
+
+float FogDither(float2 pixelPosition)
+{
+	float n1 = frac(52.9829189f * frac(dot(pixelPosition, float2(0.06711056f, 0.00583715f))));
+	float n2 = frac(52.9829189f * frac(dot(pixelPosition + 37.17f, float2(0.00583715f, 0.06711056f))));
+	return n1 + n2 - 1.0f;
 }
 
 //--------------------------------------------------------------------------------------
@@ -93,14 +94,27 @@ float4 PSMain( PS_INPUT Input ) : SV_TARGET
 	position.y -= HF_FogHeight;
 	
 	float fog = 1.0f - ComputeVolumetricFog(position, posOriginal);
+	float dayBlend = smoothstep(-0.05f, 0.15f, AC_LightPos.y);
+	float fogDistance = length(posOriginal - HF_CameraPosition);
+	float stableFadeEnd = max(HF_WeightZFar, 1000.0f);
+	float stableFadeStart = max(HF_WeightZNear, stableFadeEnd * 0.82f);
+	float stableWorldFade = smoothstep(stableFadeStart, stableFadeEnd, fogDistance);
+	fog = max(fog, stableWorldFade * dayBlend);
 		
-	float3 color = ApplyAtmosphericScatteringGround(position, HF_FogColorMod, true);
+	float3 color = ApplyAtmosphericScatteringGround(position, HF_FogColorMod, true, false);
+	float nightTimeBlend = smoothstep(0.0f, 1.0f, saturate(-AC_LightPos.y * 4.0f));
+	nightTimeBlend *= saturate(AC_EnableNightAtmosphere);
+	float nightFogBrightness = lerp(1.0f, max(0.0f, AC_NightFogBrightness), saturate(AC_EnableNightAtmosphere));
+	float3 nightFogColor = float3(0.12f, 0.18f, 0.27f) * nightFogBrightness;
+	color = lerp(color, nightFogColor, nightTimeBlend);
 
-	//darken / lighten fog based on the day / night cycle
-	float darknessFactor = 2.0f;
-	if (AC_LightPos.y < 0.0f) { darknessFactor -= AC_LightPos.y * 3.0f; }
-	else if (AC_LightPos.y > 0.0f) { darknessFactor -= AC_LightPos.y; }
+	// Restore the stable 17.9.7 blue daytime distance fog while keeping the
+	// enhanced-night fog response unchanged.
+	float dayDarknessFactor = max(1.0f, 2.0f - max(0.0f, AC_LightPos.y));
+	float darknessFactor = lerp(dayDarknessFactor, 2.0f, nightTimeBlend);
+	float maxFogOpacity = lerp(1.0f, 0.85f, nightTimeBlend);
 
-	return float4(saturate(color / darknessFactor), saturate(fog));
+	float ditherStrength = lerp(1.5f, 2.0f, nightTimeBlend) / 255.0f;
+	float3 ditheredFogColor = color / darknessFactor + FogDither(Input.vPosition.xy) * ditherStrength;
+	return float4(saturate(ditheredFogColor), saturate(fog) * maxFogOpacity);
 }
-

@@ -176,6 +176,8 @@ struct GothicMemoryLocations {
     struct zCSkyController {
         static const unsigned int VTBL_RenderSkyPre = 20; //0x50 / 4
         static const unsigned int VTBL_RenderSkyPost = 21;
+        static const unsigned int static_skyEffectsEnabled = 0x8422A0; // int*
+        static const unsigned int ClearBackground = 0x005ba2f0;
     };
 
     struct zCParticleEmitter {
@@ -656,5 +658,22 @@ struct GothicMemoryLocations {
             VobLight = 0x7DB534;
     protected:
         VobTypes() {}
+    };
+    
+    
+    struct zFILE_VDFS
+    {
+        static const unsigned int StructSize = 0x2a24;
+
+        static const unsigned int Constructor2 = 0x00444d90;
+        static const unsigned int Destructor = 0x00444e40;
+        static const unsigned int zCObjectFactory__CreateZFile = 0x0058bd60;
+    };
+    
+#define zALLOCATOR_SUPPORTED
+    struct zAllocator
+    {
+        static const unsigned int Malloc = 0x007d02f8;
+        static const unsigned int Free = 0x007d02ec;
     };
 };

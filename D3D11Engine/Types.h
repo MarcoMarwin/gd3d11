@@ -2,7 +2,6 @@
 #include <string>
 #include <sstream>
 #include <Windows.h>
-
 #include <DirectXMath.h>
 
 using namespace DirectX;
@@ -10,7 +9,7 @@ using namespace DirectX;
 /** Defines types used for the project */
 
 /** Errorcodes */
-enum XRESULT {
+enum XRESULT : int {
     XR_SUCCESS,
     XR_FAILED,
     XR_INVALID_ARG,
@@ -43,8 +42,8 @@ struct INT2 {
         return "(" + std::to_string( x ) + ", " + std::to_string( y ) + ")";
     }
 
-    bool operator==( const INT2& rhs ) { return x == rhs.x && y == rhs.y; }
-    bool operator!=( const INT2& rhs ) { return !(x == rhs.x && y == rhs.y); }
+    bool operator==( const INT2& rhs ) const { return x == rhs.x && y == rhs.y; }
+    bool operator!=( const INT2& rhs ) const { return !(x == rhs.x && y == rhs.y); }
 
     int x;
     int y;
@@ -139,10 +138,10 @@ struct float3 {
 
 struct float4 {
     float4( const DWORD& color ) {
-        x = ((color >> 16) & 0xFF) / 255.0f;
-        y = ((color >> 8) & 0xFF) / 255.0f;
-        z = (color & 0xFF) / 255.0f;
-        w = (color >> 24) / 255.0f;
+        x = static_cast<float>((color >> 16) & 0xFF) / 255.0f;
+        y = static_cast<float>((color >> 8) & 0xFF) / 255.0f;
+        z = static_cast<float>(color & 0xFF) / 255.0f;
+        w = static_cast<float>(color >> 24) / 255.0f;
     }
 
     float4( float x, float y, float z, float w ) {
@@ -198,6 +197,13 @@ struct float4 {
         BYTE g = static_cast<BYTE>(y * 255.0f);
         BYTE b = static_cast<BYTE>(z * 255.0f);
         return static_cast<DWORD>((a << 24) | (r << 16) | (g << 8) | b);
+    }
+
+    bool operator==( const float4& b ) const noexcept {
+        return x == b.x 
+            && y == b.y
+            && z == b.z
+            && w == b.w;
     }
 
     float x, y, z, w;

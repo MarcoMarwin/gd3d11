@@ -4,6 +4,7 @@
 #include "GothicMemoryLocations.h"
 #include "zTypes.h"
 #include "HookExceptionFilter.h"
+#include <cstring>
 
 /** This file stores the original versions of the hooked functions and the function declerations */
 
@@ -97,7 +98,28 @@ typedef void( __cdecl* oCItemContainer__Container_Draw )();
 typedef void( __thiscall* zCCamera__Activate )(void*);
 typedef void( __thiscall* zCCamera__UpdateViewport )(void*);
 
+typedef void( __thiscall* zCSkyControler_ClearBackground )(void*, zColor);
+
 struct zTRndSurfaceDesc;
+
+template <typename TOriginal, typename THook>
+inline LONG DetourAttachTyped( TOriginal* originalFunction, THook hookFunction ) {
+    static_assert( sizeof( TOriginal ) == sizeof( PVOID ), "Unexpected original function pointer size" );
+    static_assert( sizeof( THook ) == sizeof( PVOID ), "Unexpected hook function pointer size" );
+
+    PVOID* ppOriginal = reinterpret_cast<PVOID*>(originalFunction);
+
+    // 2. Cast the hook function safely.
+    // Standard C++ forbids reinterpret_cast from a function pointer to a void pointer.
+    union {
+        THook func;
+        PVOID ptr;
+    } hookCast;
+    hookCast.func = hookFunction;
+
+    return DetourAttach( ppOriginal, hookCast.ptr );
+}
+
 struct HookedFunctionInfo {
 
     /** Init all hooks here */
@@ -182,6 +204,7 @@ struct HookedFunctionInfo {
     zCModelGetLowestLODPoly original_zCModelGetLowestLODPoly = reinterpret_cast<zCModelGetLowestLODPoly>(GothicMemoryLocations::zCModel::GetLowestLODPoly);
 #endif
     zCInput_Win32__GetKey original_zCInput_Win32__GetKey = reinterpret_cast<zCInput_Win32__GetKey>(GothicMemoryLocations::zCInput_Win32::GetKey);
+    zCSkyControler_ClearBackground original_zCSkyControler_ClearBackground = reinterpret_cast<zCSkyControler_ClearBackground>(GothicMemoryLocations::zCSkyController::ClearBackground);
     //zCModelPrototypeLoadModelASC original_zCModelPrototypeLoadModelASC = reinterpret_cast<zCModelPrototypeLoadModelASC>(GothicMemoryLocations::zCModelPrototype::LoadModelASC);
     //zCModelPrototypeReadMeshAndTreeMSB original_zCModelPrototypeReadMeshAndTreeMSB = reinterpret_cast<zCModelPrototypeReadMeshAndTreeMSB>(GothicMemoryLocations::zCModelPrototype::ReadMeshAndTreeMSB);
 

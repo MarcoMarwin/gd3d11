@@ -35,7 +35,8 @@ runs:
         allowUpdates: true
         artifactErrorsFailBuild: true
         artifacts: "${{ steps.download-artifact.outputs.download-path }}/*.zip"
-        generateReleaseNotes: true
+        body: "Automated nightly build."
+        generateReleaseNotes: false
         name: Nightly
         prerelease: true
         removeArtifacts: true

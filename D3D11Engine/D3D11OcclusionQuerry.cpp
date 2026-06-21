@@ -32,6 +32,7 @@ unsigned int D3D11OcclusionQuerry::AddPredicationObject() {
     qd.Query = D3D11_QUERY_OCCLUSION_PREDICATE;
     qd.MiscFlags = 0;
     LE( g->GetDevice()->CreatePredicate( &qd, p.GetAddressOf() ) );
+    SetDebugName(p.Get(), "OcclusionPredicate");
 
     // Add to the end of the list and return its ID
     Predicates.push_back( p.Detach() );
@@ -55,8 +56,8 @@ void D3D11OcclusionQuerry::DoOcclusionForBSP( BspInfo* root ) {
     }
 
     // Check last frustum-culling state
-    int clipFlags = 63;
-    int fstate = zCCamera::GetCamera()->BBox3DInFrustum( root->OriginalNode->BBox3D, clipFlags );
+    int fstate = Engine::GAPI->GetCameraBBox3DInFrustum( root->OriginalNode->BBox3D,
+        EGothicCullFlags::CullAll );
 
     // If this node wasn't inside the frustum last frame, but got inside it this frame, just draw it
     // to reduce the popping in dialogs where the camera switches heavily between targets

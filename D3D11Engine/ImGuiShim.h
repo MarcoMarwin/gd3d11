@@ -8,7 +8,7 @@
 #include <imgui.h>
 #include <imgui_impl_win32.h>
 #include <imgui_impl_dx11.h>
-#include <ImGuizmo/ImGuizmo.h>
+#include <ImGuizmo/src/ImGuizmo.h>
 
 #include "ImGuiEditorView.h"
 
@@ -30,7 +30,7 @@ public:
     //bool DemoVisible = false;
     HWND OutputWindow = HWND( 0 );
     INT2 CurrentResolution = INT2( 800, 600 );
-    int ResolutionState = 0;
+    size_t ResolutionState = 0;
     std::vector<std::pair<INT2,std::string>> Resolutions;
 
     bool GetIsActive();
@@ -68,6 +68,8 @@ public:
 private:
     void RenderSettingsWindow();
     void RenderAdvancedSettingsWindow();
+    void RenderAdvancedColumn2(GothicRendererSettings& settings, GothicAPI* gapi);
     bool m_lastFrameBlockGameInput = false;
+    bool m_FrameStatisticsVisible = false;
     std::unique_ptr<ImGuiEditorView> m_EditorView;
 };

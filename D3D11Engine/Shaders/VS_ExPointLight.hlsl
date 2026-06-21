@@ -2,11 +2,11 @@
 // Simple vertex shader
 //--------------------------------------------------------------------------------------
 
+#include "Globals_VS_ExConstants.h"
+
 cbuffer Matrices_PerFrame : register( b0 )
 {
-	matrix M_View;
-	matrix M_Proj;
-	matrix M_ViewProj;	
+	VS_ExConstantBuffer_PerFrame frame;
 };
 
 cbuffer DS_PointLightConstantBuffer : register( b1 )
@@ -19,7 +19,7 @@ cbuffer DS_PointLightConstantBuffer : register( b1 )
 	float PL_Pad1;
 	float3 PL_PositionView;
 
-	matrix PL_InvProj; // Optimize out!
+	float4 PL_ProjParams; // x = 1/P._11, y = 1/P._22, z = P._43, w = P._33
 };
 
 
@@ -49,7 +49,7 @@ VS_OUTPUT VSMain( VS_INPUT Input )
 	
 	float3 positionWorld = (Input.vPosition * PL_Range) + PL_PositionWorld;
 	
-	Output.vPosition = mul( float4(positionWorld,1), M_ViewProj);	
+	Output.vPosition = mul( float4(positionWorld,1), frame.M_ViewProj);	
 	return Output;
 }
 

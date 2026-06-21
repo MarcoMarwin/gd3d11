@@ -12,39 +12,50 @@
 class zCSkyController_Outdoor;
 class zCSkyController;
 
+enum zTWorldLoadMode
+{
+    zWLD_LOAD_GAME_STARTUP,
+    zWLD_LOAD_GAME_SAVED_DYN,
+    zWLD_LOAD_GAME_SAVED_STAT,
+    zWLD_LOAD_EDITOR_COMPILED,
+    zWLD_LOAD_EDITOR_UNCOMPILED,
+    zWLD_LOAD_MERGE
+};
+
 class zCWorld {
 public:
     /** Hooks the functions of this Class */
     static void Hook() {
 
         if ( HookedFunctions::OriginalFunctions.original_ContainerDraw ) {
-            DetourAttach( &reinterpret_cast<PVOID&>(HookedFunctions::OriginalFunctions.original_ContainerDraw), hooked_ContainerDraw );
+            DetourAttachTyped( &HookedFunctions::OriginalFunctions.original_ContainerDraw, hooked_ContainerDraw  );
         }
 
-        DetourAttach( &reinterpret_cast<PVOID&>(HookedFunctions::OriginalFunctions.original_zCWorldRender), hooked_Render );
-        DetourAttach( &reinterpret_cast<PVOID&>(HookedFunctions::OriginalFunctions.original_zCWorldVobAddedToWorld), hooked_VobAddedToWorld );
+        DetourAttachTyped( &HookedFunctions::OriginalFunctions.original_zCWorldRender, hooked_Render  );
+        DetourAttachTyped( &HookedFunctions::OriginalFunctions.original_zCWorldVobAddedToWorld, hooked_VobAddedToWorld  );
 
-        DetourAttach( &reinterpret_cast<PVOID&>(HookedFunctions::OriginalFunctions.original_zCWorldLoadWorld), hooked_LoadWorld );
-        DetourAttach( &reinterpret_cast<PVOID&>(HookedFunctions::OriginalFunctions.original_zCWorldVobRemovedFromWorld), hooked_zCWorldVobRemovedFromWorld );
-        //DetourAttach( &reinterpret_cast<PVOID&>(HookedFunctions::OriginalFunctions.original_zCWorldDisposeWorld), hooked_zCWorldDisposeWorld );
-        DetourAttach( &reinterpret_cast<PVOID&>(HookedFunctions::OriginalFunctions.original_zCWorldDisposeVobs), hooked_zCWorldDisposeVobs );
+        DetourAttachTyped( &HookedFunctions::OriginalFunctions.original_zCWorldLoadWorld, hooked_LoadWorld  );
+        DetourAttachTyped( &HookedFunctions::OriginalFunctions.original_zCWorldVobRemovedFromWorld, hooked_zCWorldVobRemovedFromWorld  );
+        //DetourAttachTyped( &HookedFunctions::OriginalFunctions.original_zCWorldDisposeWorld, hooked_zCWorldDisposeWorld  );
+        DetourAttachTyped( &HookedFunctions::OriginalFunctions.original_zCWorldDisposeVobs, hooked_zCWorldDisposeVobs  );
 
-        DetourAttach( &reinterpret_cast<PVOID&>(HookedFunctions::OriginalFunctions.original_oCWorldRemoveFromLists), hooked_oCWorldRemoveFromLists );
-        DetourAttach( &reinterpret_cast<PVOID&>(HookedFunctions::OriginalFunctions.original_oCWorldEnableVob), hooked_oCWorldEnableVob );
-        DetourAttach( &reinterpret_cast<PVOID&>(HookedFunctions::OriginalFunctions.original_oCWorldDisableVob), hooked_oCWorldDisableVob );
-        DetourAttach( &reinterpret_cast<PVOID&>(HookedFunctions::OriginalFunctions.original_oCWorldRemoveVob), hooked_oCWorldRemoveVob );
+        DetourAttachTyped( &HookedFunctions::OriginalFunctions.original_oCWorldRemoveFromLists, hooked_oCWorldRemoveFromLists  );
+        DetourAttachTyped( &HookedFunctions::OriginalFunctions.original_oCWorldEnableVob, hooked_oCWorldEnableVob  );
+        DetourAttachTyped( &HookedFunctions::OriginalFunctions.original_oCWorldDisableVob, hooked_oCWorldDisableVob  );
+        DetourAttachTyped( &HookedFunctions::OriginalFunctions.original_oCWorldRemoveVob, hooked_oCWorldRemoveVob  );
 
 #ifdef BUILD_SPACER_NET
-        DetourAttach( &reinterpret_cast<PVOID&>(HookedFunctions::OriginalFunctions.original_zCWorldCompileWorld), hooked_zCWorldCompileWorld );
-        DetourAttach( &reinterpret_cast<PVOID&>(HookedFunctions::OriginalFunctions.original_zCWorldGenerateStaticWorldLighting), hooked_zCWorldGenerateStaticWorldLighting );
+        DetourAttachTyped( &HookedFunctions::OriginalFunctions.original_zCWorldCompileWorld, hooked_zCWorldCompileWorld  );
+        DetourAttachTyped( &HookedFunctions::OriginalFunctions.original_zCWorldGenerateStaticWorldLighting, hooked_zCWorldGenerateStaticWorldLighting  );
 #endif
     }
 
     inline static bool isDrawingContainers = false;
     static void __cdecl hooked_ContainerDraw() {
+        ZoneScoped;
         isDrawingContainers = true;
 
-        auto _ = Engine::GraphicsEngine->RecordGraphicsEvent( L"Draw Inventory World" );
+        auto _ = Engine::GraphicsEngine->RecordGraphicsEvent( GE_NAME( "Draw Inventory World" ) );
 
         HookedFunctions::OriginalFunctions.original_ContainerDraw();
 
@@ -98,6 +109,7 @@ public:
     */
 
     static void __fastcall hooked_zCWorldDisposeVobs( zCWorld* thisptr, void* unknwn, zCTree<zCVob>* tree ) {
+        ZoneScoped;
         // Reset only if this is the main world, inventory worlds are handled differently
         if ( thisptr == Engine::GAPI->GetLoadedWorldInfo()->MainWorld )
             Engine::GAPI->ResetVobs();
@@ -117,6 +129,7 @@ public:
     }
 
     static void __fastcall hooked_LoadWorld( zCWorld* thisptr, void* unknwn, const zSTRING& fileName, const int loadMode ) {
+        ZoneScoped;
         Engine::GAPI->OnLoadWorld( fileName.ToChar(), loadMode );
 
         HookedFunctions::OriginalFunctions.original_zCWorldLoadWorld( thisptr, fileName, loadMode );
@@ -187,7 +200,7 @@ public:
         hook_outfunc
 
         if ( thisptr == Engine::GAPI->GetLoadedWorldInfo()->MainWorld ) {
-            Engine::GAPI->GetRendererState().RendererInfo.IsRenderingWorld = true;
+            Engine::GAPI->GetRendererState().RendererInfo.RenderStage = STAGE_DRAW_UNKNOWN;
             if ( Engine::GAPI->GetRendererState().RendererSettings.AtmosphericScattering ) {
                 HookedFunctions::OriginalFunctions.original_zCWorldRender( thisptr, camera );
             } else {

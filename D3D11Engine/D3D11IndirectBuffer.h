@@ -1,11 +1,11 @@
 #pragma once
 #include <string>
 
-#include <D3D11_4.h>
+#include <d3d11_4.h>
 
 #include <wrl/client.h>
 
-enum XRESULT;
+enum XRESULT : int;
 
 class D3D11IndirectBuffer {
 public:

@@ -46,6 +46,8 @@ struct PS_INPUT
 	float4 vDiffuse			: TEXCOORD2;
 	float3 vNormalVS		: TEXCOORD4;
 	float3 vViewPosition	: TEXCOORD5;
+	float4 vCurrClipPos     : TEXCOORD6;
+	float4 vPrevClipPos     : TEXCOORD7;
 	float4 vPosition		: SV_POSITION;
 };
 
@@ -81,8 +83,7 @@ DEFERRED_PS_OUTPUT PSMain( PS_INPUT Input ) : SV_TARGET
 	DEFERRED_PS_OUTPUT output;
 	output.vDiffuse = float4(color.rgb, Input.vDiffuse.y);
 	
-	output.vNrm.xyz = nrm;
-	output.vNrm.w = 1.0f;
+	output.vNrm = EncodeNormalGBuffer(nrm);
 	
 	output.vSI_SP.x = MI_SpecularIntensity;
 	output.vSI_SP.y = MI_SpecularPower;

@@ -71,9 +71,13 @@ void D3D11PFX_FSR1::SetSharpness( float sharpness ) {
     Sharpness = std::max( 0.0f, sharpness );
 }
 
+void D3D11PFX_FSR1::ReleaseResources() {
+    PointSampler.Reset();
+}
+
 XRESULT D3D11PFX_FSR1::ApplyEASU(
     const Microsoft::WRL::ComPtr<ID3D11ShaderResourceView>& input,
-    const Microsoft::WRL::ComPtr<ID3D11RenderTargetView>& output,
+    ID3D11RenderTargetView* output,
     const INT2& inputSize,
     const INT2& outputSize ) {
     
@@ -88,7 +92,7 @@ XRESULT D3D11PFX_FSR1::ApplyEASU(
     engine->UpdateRenderStates();
 
     // Get EASU shader
-    auto easuPS = engine->GetShaderManager().GetPShader( "PS_PFX_FSR1_EASU" );
+    auto easuPS = engine->GetShaderManager().GetPShader( PShaderID::PS_PFX_FSR1_EASU );
     if ( !easuPS ) {
         LogError() << "FSR1 EASU shader not found";
         return XR_FAILED;
@@ -111,8 +115,7 @@ XRESULT D3D11PFX_FSR1::ApplyEASU(
     );
 
     // Update constant buffer
-    easuPS->GetConstantBuffer()[0]->UpdateBuffer( &cb );
-    easuPS->GetConstantBuffer()[0]->BindToPixelShader( 0 );
+    easuPS->GetBuffer( "FSR1Constants" ).Update( &cb ).Bind();
 
     // Save old render targets
     Microsoft::WRL::ComPtr<ID3D11RenderTargetView> oldRTV;
@@ -120,7 +123,7 @@ XRESULT D3D11PFX_FSR1::ApplyEASU(
     context->OMGetRenderTargets( 1, oldRTV.GetAddressOf(), oldDSV.GetAddressOf() );
 
     // Set output render target
-    context->OMSetRenderTargets( 1, output.GetAddressOf(), nullptr );
+    context->OMSetRenderTargets( 1, &output, nullptr );
 
     // Set viewport to output size
     D3D11_VIEWPORT vp = {};
@@ -152,7 +155,7 @@ XRESULT D3D11PFX_FSR1::ApplyEASU(
 
 XRESULT D3D11PFX_FSR1::ApplyRCAS(
     const Microsoft::WRL::ComPtr<ID3D11ShaderResourceView>& input,
-    const Microsoft::WRL::ComPtr<ID3D11RenderTargetView>& output,
+    ID3D11RenderTargetView* output,
     float sharpness ) {
     
     if ( !Initialized && !Init() ) {
@@ -166,7 +169,7 @@ XRESULT D3D11PFX_FSR1::ApplyRCAS(
     engine->UpdateRenderStates();
 
     // Get RCAS shader
-    auto rcasPS = engine->GetShaderManager().GetPShader( "PS_PFX_FSR1_RCAS" );
+    auto rcasPS = engine->GetShaderManager().GetPShader( PShaderID::PS_PFX_FSR1_RCAS );
     if ( !rcasPS ) {
         LogError() << "FSR1 RCAS shader not found";
         return XR_FAILED;
@@ -178,8 +181,7 @@ XRESULT D3D11PFX_FSR1::ApplyRCAS(
     FsrRcasCon( cb.RCASConst, sharpness );
 
     // Update constant buffer
-    rcasPS->GetConstantBuffer()[0]->UpdateBuffer( &cb );
-    rcasPS->GetConstantBuffer()[0]->BindToPixelShader( 0 );
+    rcasPS->GetBuffer( "FSR1RCASConstants" ).Update( &cb ).Bind();
 
     // Save old render targets
     Microsoft::WRL::ComPtr<ID3D11RenderTargetView> oldRTV;
@@ -187,7 +189,7 @@ XRESULT D3D11PFX_FSR1::ApplyRCAS(
     context->OMGetRenderTargets( 1, oldRTV.GetAddressOf(), oldDSV.GetAddressOf() );
 
     // Set output render target
-    context->OMSetRenderTargets( 1, output.GetAddressOf(), nullptr );
+    context->OMSetRenderTargets( 1, &output, nullptr );
 
     // Bind input texture and point sampler
     context->PSSetShaderResources( 0, 1, input.GetAddressOf() );
@@ -211,7 +213,7 @@ XRESULT D3D11PFX_FSR1::ApplyRCAS(
 
 XRESULT D3D11PFX_FSR1::Apply(
     const Microsoft::WRL::ComPtr<ID3D11ShaderResourceView>& input,
-    const Microsoft::WRL::ComPtr<ID3D11RenderTargetView>& output,
+    ID3D11RenderTargetView* output,
     const INT2& inputSize,
     const INT2& outputSize,
     bool enableRCAS,
@@ -229,7 +231,7 @@ XRESULT D3D11PFX_FSR1::Apply(
         auto tempBuffer = Renderer->GetBackbufferTempBuffer();
 
         // Two-pass: EASU to intermediate buffer, then RCAS to final output
-        XRESULT result = ApplyEASU( input, tempBuffer->GetRenderTargetView(), inputSize, outputSize );
+        XRESULT result = ApplyEASU( input, tempBuffer->GetRenderTargetView().Get(), inputSize, outputSize);
         if ( result != XR_SUCCESS ) {
             return result;
         }

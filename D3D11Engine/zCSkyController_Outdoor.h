@@ -71,6 +71,18 @@ public:
         zCSkyControllerRenderSkyPost fn = reinterpret_cast<zCSkyControllerRenderSkyPost>(vtbl[GothicMemoryLocations::zCSkyController::VTBL_RenderSkyPost]);
         fn( this, 1 );
     }
+    
+#if defined(BUILD_GOTHIC_1_08k) || defined(BUILD_GOTHIC_2_6_fix)
+#define OPT_MANAGE_SKY_EFFECTS_SUPPORTED
+
+    static void	SetSkyEffectsEnabled(const int enabled) {
+        *reinterpret_cast<int*>(GothicMemoryLocations::zCSkyController::static_skyEffectsEnabled) = enabled;
+    }
+    
+    static int GetSkyEffectsEnabled() {
+        return *reinterpret_cast<int*>(GothicMemoryLocations::zCSkyController::static_skyEffectsEnabled);
+    }
+#endif
 
     DWORD* PolyLightCLUTPtr;
     float cloudShadowScale;
@@ -125,6 +137,19 @@ public:
         PatchAddr( 0x006BB643, "\x90" );
         PatchCall( 0x006BB644, reinterpret_cast<DWORD>(&zCSkyController_Outdoor::RenderThunderPolyStrip) );
 #endif
+
+        if ( HookedFunctions::OriginalFunctions.original_zCSkyControler_ClearBackground )
+            DetourAttachTyped( &HookedFunctions::OriginalFunctions.original_zCSkyControler_ClearBackground, &zCSkyController_Outdoor::hooked_zCSkyControler_ClearBackground  );
+    }
+
+    static void __fastcall hooked_zCSkyControler_ClearBackground( void* thisPtr, void* vtbl, zColor color ) {
+        // Prevent the skycontroller from clearing the backbuffer/depth buffer.
+        // We do this anyway, and this here causes issues with upscaling, as the code for "clearing" explicitly only clears if the viewport == window size.
+        // But keep the original code from working if we don't upscale, in case there are any more issues with it.
+        if (Engine::GAPI->GetRendererState().RendererSettings.ResolutionScalePercent < 100) {
+            return;
+        }
+        HookedFunctions::OriginalFunctions.original_zCSkyControler_ClearBackground( thisPtr, color );
     }
 
     /** Updates the rain-weight and sound-effects */
@@ -292,7 +317,8 @@ public:
 
         XMFLOAT3 pos;
         //XMVector3NormalizeEst leads to jumping shadows dueto reduced accuracy in combination with XMStoreFloat3( &LightDir, XMVector3NormalizeEst( XMLoadFloat3( &LightDir ) ) ); but setting this mentioned code line in this comment to non Est does not influence if this active code line before the comment is Est or not
-        MatrixVector3Multiply( pos, XMVector3Normalize( sunPos ), XMLoadFloat4x4( &(HookedFunctions::OriginalFunctions.original_Alg_Rotation3DNRad( rotAxis, -angle )) ) );
+        const XMFLOAT4X4 sunRotation = HookedFunctions::OriginalFunctions.original_Alg_Rotation3DNRad( rotAxis, -angle );
+        MatrixVector3Multiply( pos, XMVector3Normalize( sunPos ), XMLoadFloat4x4( &sunRotation ) );
 
         return pos;
     }

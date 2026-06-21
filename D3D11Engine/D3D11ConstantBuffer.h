@@ -3,19 +3,19 @@
 class D3D11ConstantBuffer {
 public:
     D3D11ConstantBuffer( int size, void* data );
-    ~D3D11ConstantBuffer();
+    ~D3D11ConstantBuffer() = default;
 
     /** Updates the buffer */
-    void UpdateBuffer( const void* data );
-    void UpdateBuffer( const void* data, UINT size );
+    D3D11ConstantBuffer* UpdateBuffer( const void* data );
+    D3D11ConstantBuffer* UpdateBuffer( const void* data, UINT size );
 
     /** Binds the buffer */
-    void BindToVertexShader( int slot );
-    void BindToPixelShader( int slot );
-    void BindToDomainShader( int slot );
-    void BindToHullShader( int slot );
-    void BindToGeometryShader( int slot );
-    void BindToComputeShader( int slot );
+    D3D11ConstantBuffer* BindToVertexShader( int slot );
+    D3D11ConstantBuffer* BindToPixelShader( int slot );
+    D3D11ConstantBuffer* BindToDomainShader( int slot );
+    D3D11ConstantBuffer* BindToHullShader( int slot );
+    D3D11ConstantBuffer* BindToGeometryShader( int slot );
+    D3D11ConstantBuffer* BindToComputeShader( int slot );
 
     /** Binds the constantbuffer */
     Microsoft::WRL::ComPtr<ID3D11Buffer>& Get() { return Buffer; }
