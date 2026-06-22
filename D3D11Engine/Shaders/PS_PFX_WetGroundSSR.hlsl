@@ -94,6 +94,7 @@ float4 PSMain(PS_INPUT input) : SV_TARGET
     float2 wetUV = wsPosition.xz / wetDistortionScale;
     float2 distortion = TX_Distortion.SampleLevel(SS_Linear, wetUV + WG_Time * float2(0.013f, -0.009f), 0).xy * 2.0f - 1.0f;
     distortion += (TX_Distortion.SampleLevel(SS_Linear, wetUV * 0.63f + WG_Time * float2(-0.007f, 0.011f), 0).xy * 2.0f - 1.0f) * 0.5f;
+    distortion += float2(sin(WG_Time * 1.70f + wetUV.y * 18.0f), cos(WG_Time * 1.31f + wetUV.x * 16.0f)) * 0.12f;
     float3 wetNormal = normalize(wsNormal + float3(distortion.x, 0.0f, distortion.y) * 0.10f);
 
     float3 viewRay = normalize(wsPosition - WG_CameraPosition);

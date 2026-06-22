@@ -42,12 +42,16 @@ Texture2D	TX_Scene : register( t5 );
 
 float3 SampleWaterSSRReflection(float2 uv, float2 invResolution, float roughness)
 {
-	float2 spread = invResolution * lerp(1.5f, 5.0f, saturate(roughness));
-	float3 color = TX_Scene.SampleLevel(SS_Linear, uv, 0).rgb * 0.44f;
-	color += TX_Scene.SampleLevel(SS_Linear, saturate(uv + float2(spread.x, 0.0f)), 0).rgb * 0.14f;
-	color += TX_Scene.SampleLevel(SS_Linear, saturate(uv - float2(spread.x, 0.0f)), 0).rgb * 0.14f;
-	color += TX_Scene.SampleLevel(SS_Linear, saturate(uv + float2(0.0f, spread.y)), 0).rgb * 0.14f;
-	color += TX_Scene.SampleLevel(SS_Linear, saturate(uv - float2(0.0f, spread.y)), 0).rgb * 0.14f;
+	float2 spread = invResolution * lerp(2.0f, 22.0f, saturate(roughness));
+	float3 color = TX_Scene.SampleLevel(SS_Linear, uv, 0).rgb * 0.28f;
+	color += TX_Scene.SampleLevel(SS_Linear, saturate(uv + float2(spread.x, 0.0f)), 0).rgb * 0.12f;
+	color += TX_Scene.SampleLevel(SS_Linear, saturate(uv - float2(spread.x, 0.0f)), 0).rgb * 0.12f;
+	color += TX_Scene.SampleLevel(SS_Linear, saturate(uv + float2(0.0f, spread.y)), 0).rgb * 0.12f;
+	color += TX_Scene.SampleLevel(SS_Linear, saturate(uv - float2(0.0f, spread.y)), 0).rgb * 0.12f;
+	color += TX_Scene.SampleLevel(SS_Linear, saturate(uv + spread), 0).rgb * 0.06f;
+	color += TX_Scene.SampleLevel(SS_Linear, saturate(uv - spread), 0).rgb * 0.06f;
+	color += TX_Scene.SampleLevel(SS_Linear, saturate(uv + float2(spread.x, -spread.y)), 0).rgb * 0.06f;
+	color += TX_Scene.SampleLevel(SS_Linear, saturate(uv + float2(-spread.x, spread.y)), 0).rgb * 0.06f;
 	return color;
 }
 
@@ -203,7 +207,7 @@ PS_OUTPUT PSMain( PS_INPUT Input )
 					float edgeTolerance = clamp(abs(finalSceneZ) * 0.012f, 18.0f, 120.0f);
 
 					if (abs(projFinal.w - finalSceneZ) <= hitTolerance && depthEdge <= edgeTolerance) {
-						float ssrRoughness = saturate(abs(Input.vTexcoord2.y) / 18000.0f + length(distortionSmall.xz) * 0.35f);
+						float ssrRoughness = saturate(abs(Input.vTexcoord2.y) / 8500.0f + length(distortionSmall.xz) * 0.65f);
 						reflectionSSR = SampleWaterSSRReflection(uv, rcp(max(RI_ViewportSize, float2(1.0f, 1.0f))), ssrRoughness);
 						float2 edgeFade = saturate(abs(uv - 0.5f) * 2.0f);
 						float edgeDistance = max(edgeFade.x, edgeFade.y);
@@ -219,7 +223,8 @@ PS_OUTPUT PSMain( PS_INPUT Input )
 	float ssrShallowFade = smoothstep(0.12f, 0.55f, shallowDepth);
 	float ssrContactFade = smoothstep(35.0f, 180.0f, waterContactGap);
 	float ssrNearFade = smoothstep(100.0f, 450.0f, abs(Input.vTexcoord2.y));
-	ssrWeight *= ssrShallowFade * ssrContactFade * ssrNearFade;
+	float ssrFarFade = lerp(1.0f, 0.38f, smoothstep(9000.0f, 26000.0f, abs(Input.vTexcoord2.y)));
+	ssrWeight *= ssrShallowFade * ssrContactFade * ssrNearFade * ssrFarFade;
 	// Darken the scene, to make a wet surface
 	float f = 1-saturate(pow(1-shallowDepth, 8.0f) + clamp(pow(distortionSmall.y, 2), 0.5f, 1.0f));
 	float nightAmount = saturate((-AC_LightPos.y + 0.12f) * 2.2f);
