@@ -1658,7 +1658,7 @@ void RenderAdvancedColumn4( GothicRendererSettings& settings, GothicAPI* gapi ) 
             }
             ImGui::BeginDisabled( !settings.EnableSSR );
             {
-                ImGui::SliderFloat( "SSR Strength", &settings.SSRStrength, 0.0f, 2.0f, "%.2f", ImGuiSliderFlags_AlwaysClamp );
+                ImGui::SliderFloat( "Dynamic Reflection Strength", &settings.SSRStrength, 0.0f, 2.0f, "%.2f", ImGuiSliderFlags_AlwaysClamp );
 
                 ImGui::EndDisabled();
             }

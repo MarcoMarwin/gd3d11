@@ -12,13 +12,22 @@ runs:
       id: calc-path
       shell: pwsh
       run: |
+        $buildPrefix = ""
+        $buildNumberPath = ".github/nightly-build-number.txt"
+        if (Test-Path $buildNumberPath) {
+          $buildNumber = (Get-Content $buildNumberPath -Raw).Trim()
+          if ($buildNumber) {
+            $buildPrefix = "build-$buildNumber-"
+          }
+        }
+
         if ($env:GITHUB_REF_TYPE -eq "tag") {
           $tagOrGitShortHash = $env:GITHUB_REF_NAME
         } else {
           $shortHash = $env:GITHUB_SHA.Substring(0, 9)
           $tagOrGitShortHash = "git-$shortHash"
         }
-        $dirName = "GD3D11-$tagOrGitShortHash"
+        $dirName = "GD3D11-$buildPrefix$tagOrGitShortHash"
 
         "release-dir=$dirName" >> $env:GITHUB_OUTPUT
         "download-dir=downloaded-artifacts" >> $env:GITHUB_OUTPUT

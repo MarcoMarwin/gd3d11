@@ -53,15 +53,12 @@ float GetRainExposure(float3 wsPosition)
 
 float3 SampleRoughReflection(float2 uv, float2 distortion)
 {
-    // Keep the rain ripple movement visible in the final screen-space reflection sample.
-    // Without this offset the reflection can look geometrically correct but frozen.
-    float2 rippleUV = saturate(uv + distortion * (WG_InvResolution * 5.0f + 0.0020f));
-    float2 spread = WG_InvResolution * 2.0f + abs(distortion) * 0.0020f;
-    float3 color = TX_Scene.SampleLevel(SS_Linear, rippleUV, 0).rgb * 0.40f;
-    color += TX_Scene.SampleLevel(SS_Linear, rippleUV + float2(spread.x, 0), 0).rgb * 0.15f;
-    color += TX_Scene.SampleLevel(SS_Linear, rippleUV - float2(spread.x, 0), 0).rgb * 0.15f;
-    color += TX_Scene.SampleLevel(SS_Linear, rippleUV + float2(0, spread.y), 0).rgb * 0.15f;
-    color += TX_Scene.SampleLevel(SS_Linear, rippleUV - float2(0, spread.y), 0).rgb * 0.15f;
+    float2 spread = WG_InvResolution * 2.0f + abs(distortion) * 0.0015f;
+    float3 color = TX_Scene.SampleLevel(SS_Linear, uv, 0).rgb * 0.40f;
+    color += TX_Scene.SampleLevel(SS_Linear, uv + float2(spread.x, 0), 0).rgb * 0.15f;
+    color += TX_Scene.SampleLevel(SS_Linear, uv - float2(spread.x, 0), 0).rgb * 0.15f;
+    color += TX_Scene.SampleLevel(SS_Linear, uv + float2(0, spread.y), 0).rgb * 0.15f;
+    color += TX_Scene.SampleLevel(SS_Linear, uv - float2(0, spread.y), 0).rgb * 0.15f;
     return color;
 }
 
@@ -90,8 +87,7 @@ float4 PSMain(PS_INPUT input) : SV_TARGET
     if (wetMask <= 0.01f)
         return float4(sceneColor, 1.0f);
 
-    float wetDistortionScale = 1100.0f;
-    float2 wetUV = wsPosition.xz / wetDistortionScale;
+    float2 wetUV = wsPosition.xz / 1100.0f;
     float2 distortion = TX_Distortion.SampleLevel(SS_Linear, wetUV + WG_Time * float2(0.013f, -0.009f), 0).xy * 2.0f - 1.0f;
     distortion += (TX_Distortion.SampleLevel(SS_Linear, wetUV * 0.63f + WG_Time * float2(-0.007f, 0.011f), 0).xy * 2.0f - 1.0f) * 0.5f;
     float3 wetNormal = normalize(wsNormal + float3(distortion.x, 0.0f, distortion.y) * 0.10f);
