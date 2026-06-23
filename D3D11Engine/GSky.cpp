@@ -308,7 +308,15 @@ XRESULT GSky::RenderSky() {
     AtmosphereCB.AC_NightDarkeningStart = 3000.0f;
     AtmosphereCB.AC_NightDarkeningRange = 12000.0f;
     AtmosphereCB.AC_NightDarkeningMax = 1.0f;
+    AtmosphereCB.AC_EnableVolumetricLightShafts = Engine::GAPI->GetRendererState().RendererSettings.EnableVolumetricLightShafts ? 1.0f : 0.0f;
     AtmosphereCB.AC_WorldCameraPos = camPos;
+    AtmosphereCB.AC_EnableContactShadows = Engine::GAPI->GetRendererState().RendererSettings.EnableContactShadows ? 1.0f : 0.0f;
+    AtmosphereCB.AC_EnableScreenSpaceGI = Engine::GAPI->GetRendererState().RendererSettings.EnableScreenSpaceGI ? 1.0f : 0.0f;
+    AtmosphereCB.AC_VolumetricLightShaftStrength = Engine::GAPI->GetRendererState().RendererSettings.VolumetricLightShaftStrength;
+    AtmosphereCB.AC_ContactShadowStrength = Engine::GAPI->GetRendererState().RendererSettings.ContactShadowStrength;
+    AtmosphereCB.AC_ScreenSpaceGIStrength = Engine::GAPI->GetRendererState().RendererSettings.ScreenSpaceGIStrength;
+    AtmosphereCB.AC_EnableParticleLighting = Engine::GAPI->GetRendererState().RendererSettings.EnableParticleLighting ? 1.0f : 0.0f;
+    AtmosphereCB.AC_ParticleLightingStrength = Engine::GAPI->GetRendererState().RendererSettings.ParticleLightingStrength;
 
     //Engine::GraphicsEngine->DrawSky();
 

@@ -1665,6 +1665,35 @@ void RenderAdvancedColumn4( GothicRendererSettings& settings, GothicAPI* gapi ) 
             ImGui::PopID();
         }
 
+        ImGui::SeparatorText( "Screen-Space Lighting" );
+        {
+            ImGui::PushID( "ScreenSpaceLightingSettings" );
+            if ( ImGui::Checkbox( "Volumetric Light Shafts", &settings.EnableVolumetricLightShafts ) ) Engine::GraphicsEngine->ReloadShaders( ShaderCategory::Other );
+            ImGui::BeginDisabled( !settings.EnableVolumetricLightShafts );
+            ImGui::SliderFloat( "Light Shaft Strength", &settings.VolumetricLightShaftStrength, 0.0f, 2.0f, "%.2f", ImGuiSliderFlags_AlwaysClamp );
+            ImGui::EndDisabled();
+
+            if ( ImGui::Checkbox( "Contact Shadows", &settings.EnableContactShadows ) ) Engine::GraphicsEngine->ReloadShaders( ShaderCategory::Other );
+            ImGui::BeginDisabled( !settings.EnableContactShadows );
+            ImGui::SliderFloat( "Contact Shadow Strength", &settings.ContactShadowStrength, 0.0f, 2.0f, "%.2f", ImGuiSliderFlags_AlwaysClamp );
+            ImGui::EndDisabled();
+
+            if ( ImGui::Checkbox( "Screen-Space GI Light", &settings.EnableScreenSpaceGI ) ) Engine::GraphicsEngine->ReloadShaders( ShaderCategory::Other );
+            ImGui::BeginDisabled( !settings.EnableScreenSpaceGI );
+            ImGui::SliderFloat( "GI Strength", &settings.ScreenSpaceGIStrength, 0.0f, 1.0f, "%.2f", ImGuiSliderFlags_AlwaysClamp );
+            ImGui::EndDisabled();
+            ImGui::PopID();
+        }
+
+        ImGui::SeparatorText( "Particles" );
+        {
+            ImGui::PushID( "ParticleLightingSettings" );
+            ImGui::Checkbox( "Adapt to Scene Lighting", &settings.EnableParticleLighting );
+            ImGui::BeginDisabled( !settings.EnableParticleLighting );
+            ImGui::SliderFloat( "Lighting Adaptation", &settings.ParticleLightingStrength, 0.0f, 2.0f, "%.2f", ImGuiSliderFlags_AlwaysClamp );
+            ImGui::EndDisabled();
+            ImGui::PopID();
+        }
         ImGui::SeparatorText( "Backlit Vegetation" );
         {
             ImGui::PushID( "BacklitVegetationSettings" );

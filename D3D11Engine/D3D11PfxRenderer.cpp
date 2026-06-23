@@ -360,8 +360,10 @@ XRESULT D3D11PfxRenderer::RenderPostFXComposition(
     auto compositionPS = engine->GetShaderManager().GetPShader( PShaderID::PS_PFX_Composition );
     compositionPS->Apply();
 
-    // Update constant buffers for inline heightfog if active
+    // Update constant buffers for inline heightfog and lightweight screen-space atmosphere effects.
     auto& settings = Engine::GAPI->GetRendererState().RendererSettings;
+    GSky* sky = Engine::GAPI->GetSky();
+    const bool needsAtmosphere = settings.DrawFog || settings.EnableVolumetricLightShafts || settings.EnableContactShadows || settings.EnableScreenSpaceGI;
     if ( settings.DrawFog ) {
         HeightfogConstantBuffer cb;
         {
@@ -412,7 +414,6 @@ XRESULT D3D11PfxRenderer::RenderPostFXComposition(
         cb.HF_FogHeight = height;
         cb.HF_ProjAB = float2( Engine::GAPI->GetProjectionMatrix()._33, Engine::GAPI->GetProjectionMatrix()._34 );
 
-        GSky* sky = Engine::GAPI->GetSky();
         float rain = Engine::GAPI->GetRainFXWeight();
         float rainFogColorWeight = std::min( 1.0f, rain * 2.0f );
         if ( sky ) {
@@ -426,7 +427,8 @@ XRESULT D3D11PfxRenderer::RenderPostFXComposition(
         cb.HF_GlobalDensity = Toolbox::lerp( cb.HF_GlobalDensity, settings.RainFogDensity, rain * fogDensityFactorRain );
 
         compositionPS->GetBuffer( "PFXBuffer" ).Update( &cb ).Bind();
-
+    }
+    if ( needsAtmosphere && sky ) {
         compositionPS->GetBuffer( "Atmosphere" ).Update( &sky->GetAtmosphereCB() ).Bind();
     }
 

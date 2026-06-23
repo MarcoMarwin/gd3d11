@@ -117,12 +117,10 @@ float4 PSMain( PS_INPUT Input ) : SV_TARGET
 	
 	//lighting = GetShadow(uv);
 	
-	// If this is an indoor-light, and this pixel already gets light from the sun, don't light it here.
-	//float indoor = 1.0f - PL_Outdoor;
-	//float indoorPixel = diffuse.a < 0.5f ? 1.0f : 0.0f;
-	//lighting *= saturate(PL_Outdoor + indoor * indoorPixel);
-	//lighting = indoorPixel;
-	
+	// Keep indoor point lights from leaking onto outdoor pixels.
+	float indoor = 1.0f - PL_Outdoor;
+	float indoorPixel = diffuse.a < 0.5f ? 1.0f : 0.0f;
+	lighting *= saturate(PL_Outdoor + indoor * indoorPixel);
 	//return float4(0.2f,0.2f,0.2f,1);
 	//return float4(ndl.rrr,1);
 	return float4(saturate(lighting),1);

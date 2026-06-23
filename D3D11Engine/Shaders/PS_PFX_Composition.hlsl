@@ -4,8 +4,10 @@
 // Permutation macros: COMPOSE_SAO, COMPOSE_HEIGHTFOG, COMPOSE_GODRAYS
 //--------------------------------------------------------------------------------------
 
-#if COMPOSE_HEIGHTFOG
+#if COMPOSE_HEIGHTFOG || COMPOSE_LIGHTSHAFTS || COMPOSE_CONTACT_SHADOWS || COMPOSE_SSGI
 #include <AtmosphericScattering.h>
+#endif
+#if COMPOSE_HEIGHTFOG
 #include "DepthReconstruction.h"
 #endif
 
@@ -48,7 +50,7 @@ Texture2D TX_SAO : register( t1 );
 Texture2D TX_GodRays : register( t2 );
 #endif
 
-#if COMPOSE_HEIGHTFOG
+#if COMPOSE_HEIGHTFOG || COMPOSE_LIGHTSHAFTS || COMPOSE_CONTACT_SHADOWS || COMPOSE_SSGI
 Texture2D TX_Depth : register( t3 );
 #endif
 
@@ -129,6 +131,97 @@ struct PS_INPUT
     float4 vPosition  : SV_POSITION;
 };
 
+
+#if COMPOSE_LIGHTSHAFTS || COMPOSE_CONTACT_SHADOWS || COMPOSE_SSGI
+float GetDepthRaw(float2 uv)
+{
+    return TX_Depth.SampleLevel(SS_Linear, saturate(uv), 0).r;
+}
+
+float IsGeometryPixel(float depth)
+{
+    return step(0.000001f, depth);
+}
+#endif
+
+#if COMPOSE_CONTACT_SHADOWS
+float ComputeContactShadow(float2 uv)
+{
+    float center = GetDepthRaw(uv);
+    float geom = IsGeometryPixel(center);
+    float2 px = max(abs(ddx(uv)) + abs(ddy(uv)), float2(1.0f / 3840.0f, 1.0f / 2160.0f));
+    float maxDelta = 0.0f;
+    [unroll]
+    for (int i = 1; i <= 3; ++i)
+    {
+        float2 o = px * (float)i * 2.0f;
+        float d0 = abs(GetDepthRaw(uv + float2( o.x, 0.0f)) - center);
+        float d1 = abs(GetDepthRaw(uv + float2(-o.x, 0.0f)) - center);
+        float d2 = abs(GetDepthRaw(uv + float2(0.0f,  o.y)) - center);
+        float d3 = abs(GetDepthRaw(uv + float2(0.0f, -o.y)) - center);
+        maxDelta = max(maxDelta, max(max(d0, d1), max(d2, d3)) / (float)i);
+    }
+    float contact = smoothstep(0.00003f, 0.00120f, maxDelta) * geom;
+    return 1.0f - contact * saturate(AC_ContactShadowStrength) * 0.22f;
+}
+#endif
+
+#if COMPOSE_SSGI
+float3 ComputeScreenSpaceGILight(float2 uv, float centerDepth)
+{
+    float geom = IsGeometryPixel(centerDepth);
+    float2 px = max(abs(ddx(uv)) + abs(ddy(uv)), float2(1.0f / 3840.0f, 1.0f / 2160.0f));
+    float3 bounce = 0.0f;
+    float weightSum = 0.0001f;
+    const float2 dirs[6] = {
+        float2( 1.0f,  0.0f), float2(-1.0f,  0.0f),
+        float2( 0.0f,  1.0f), float2( 0.0f, -1.0f),
+        float2( 0.7f,  0.7f), float2(-0.7f, -0.7f)
+    };
+    [unroll]
+    for (int i = 0; i < 6; ++i)
+    {
+        float2 suv = saturate(uv + dirs[i] * px * 9.0f);
+        float sd = GetDepthRaw(suv);
+        float w = saturate(1.0f - abs(sd - centerDepth) * 900.0f) * IsGeometryPixel(sd);
+        float3 sampleColor = TX_Backbuffer.SampleLevel(SS_Linear, suv, 0).rgb;
+        bounce += sampleColor * w;
+        weightSum += w;
+    }
+    bounce /= weightSum;
+    float luma = dot(bounce, float3(0.2126f, 0.7152f, 0.0722f));
+    return bounce * saturate(luma * 0.65f) * saturate(AC_ScreenSpaceGIStrength) * geom * 0.18f;
+}
+#endif
+
+#if COMPOSE_LIGHTSHAFTS
+float3 ComputeVolumetricLightShafts(float2 uv, float depth)
+{
+    float day = saturate(AC_LightPos.y * 2.0f + 0.15f);
+    float night = saturate((-AC_LightPos.y + 0.05f) * 1.5f);
+    float weather = max(saturate(AC_RainFXWeight), saturate(AC_SceneWettness));
+    float atmosphereWeight = saturate(day + night * 0.35f + weather * 0.45f);
+    float2 lightCenter = saturate(float2(0.5f, 0.48f) + AC_LightPos.xz * float2(0.38f, -0.24f));
+    float2 dir = lightCenter - uv;
+    float distToLight = length(dir);
+    dir /= max(distToLight, 0.0001f);
+    float visibility = 0.0f;
+    [unroll]
+    for (int i = 1; i <= 6; ++i)
+    {
+        float2 suv = saturate(uv + dir * (float)i * 0.018f);
+        float sd = GetDepthRaw(suv);
+        visibility += 1.0f - IsGeometryPixel(sd);
+    }
+    visibility /= 6.0f;
+    float geometryMist = lerp(0.35f, 1.0f, 1.0f - IsGeometryPixel(depth));
+    float shaft = visibility * geometryMist * atmosphereWeight * (1.0f - smoothstep(0.15f, 1.05f, distToLight));
+    float3 dayColor = float3(1.0f, 0.82f, 0.55f);
+    float3 nightColor = float3(0.22f, 0.32f, 0.62f);
+    float3 shaftColor = lerp(dayColor, nightColor, night);
+    return shaftColor * shaft * saturate(AC_VolumetricLightShaftStrength) * 0.10f;
+}
+#endif
 //--------------------------------------------------------------------------------------
 // Pixel Shader
 //--------------------------------------------------------------------------------------
@@ -143,6 +236,18 @@ float4 PSMain( PS_INPUT Input ) : SV_TARGET
     color.rgb *= ao;
 #endif
 
+#if COMPOSE_CONTACT_SHADOWS || COMPOSE_SSGI || COMPOSE_LIGHTSHAFTS
+    float compositionDepth = GetDepthRaw(Input.vTexcoord);
+#endif
+
+#if COMPOSE_CONTACT_SHADOWS
+    color.rgb *= ComputeContactShadow(Input.vTexcoord);
+#endif
+
+#if COMPOSE_SSGI
+    color.rgb += ComputeScreenSpaceGILight(Input.vTexcoord, compositionDepth);
+#endif
+
 #if COMPOSE_HEIGHTFOG
     float4 fog = ComputeHeightFog( Input.vTexcoord );
     color.rgb = lerp( color.rgb, fog.rgb, fog.a );
@@ -154,6 +259,10 @@ float4 PSMain( PS_INPUT Input ) : SV_TARGET
 #if COMPOSE_GODRAYS
     float3 godrays = TX_GodRays.Sample( SS_Linear, Input.vTexcoord ).rgb;
     color.rgb += godrays;
+#endif
+
+#if COMPOSE_LIGHTSHAFTS
+    color.rgb += ComputeVolumetricLightShafts(Input.vTexcoord, compositionDepth);
 #endif
 
     return color;

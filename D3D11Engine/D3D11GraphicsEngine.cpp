@@ -4004,7 +4004,11 @@ XRESULT D3D11GraphicsEngine::OnStartWorldRendering() {
     bool compositionSAO = (rendererState.RendererSettings.AoMode == AOMode::AO_SAO);
     bool compositionGodRays = (rendererState.RendererSettings.EnableGodRays && isOutdoor);
     bool compositionHeightFog = (rendererState.RendererSettings.DrawFog && isOutdoor);
-    bool compositionActive = compositionSAO || compositionGodRays || compositionHeightFog;
+    bool compositionLightShafts = (rendererState.RendererSettings.EnableVolumetricLightShafts && isOutdoor);
+    bool compositionContactShadows = rendererState.RendererSettings.EnableContactShadows;
+    bool compositionSSGI = rendererState.RendererSettings.EnableScreenSpaceGI;
+    bool compositionNeedsDepth = compositionHeightFog || compositionLightShafts || compositionContactShadows || compositionSSGI;
+    bool compositionActive = compositionSAO || compositionGodRays || compositionNeedsDepth;
 
     if ( rendererState.RendererSettings.AoMode == AOMode::AO_HBAO ) {
         graph.AddPass( RG_PASS_NAME("HBAO+"), [&]( RGBuilder& builder, RenderPass& pass ) {
@@ -4328,7 +4332,7 @@ XRESULT D3D11GraphicsEngine::OnStartWorldRendering() {
             builder.Read( backBufferHandle );
             builder.Write( backBufferHandle );
 
-            pass.m_executeCallback = [this, backBufferHandle, compositionSAO, compositionHeightFog,
+            pass.m_executeCallback = [this, backBufferHandle, compositionSAO, compositionNeedsDepth,
                                       &compositionGodRaysSRV](const RenderGraph& graph) {
                 TracyD3D11ZoneCGX( "D3D11GraphicsEngine::PostFX Composition" );
 
@@ -4340,7 +4344,7 @@ XRESULT D3D11GraphicsEngine::OnStartWorldRendering() {
 
                 // Gather SRVs for composition
                 ID3D11ShaderResourceView* saoSRV = compositionSAO ? PfxRenderer->GetSAOResultSRV() : nullptr;
-                ID3D11ShaderResourceView* depthSRV = compositionHeightFog ? GetDepthBuffer()->GetShaderResView().Get() : nullptr;
+                ID3D11ShaderResourceView* depthSRV = compositionNeedsDepth ? GetDepthBuffer()->GetShaderResView().Get() : nullptr;
 
                 PfxRenderer->RenderPostFXComposition(
                     backBuffer->GetRenderTargetView().Get(),
@@ -8949,6 +8953,9 @@ void D3D11GraphicsEngine::DrawFrameParticles(
     SetActivePixelShader( PShaderID::PS_ParticleDistortion );
     ActivePS->Apply();
     ActivePS->GetBuffer("RefractionInfo").Update(&ricb).Bind();
+    if ( auto sky = Engine::GAPI->GetSky() ) {
+        ActivePS->GetBuffer( "Atmosphere" ).Update( &sky->GetAtmosphereCB() ).Bind();
+    }
 
     GothicRendererState& state = Engine::GAPI->GetRendererState();
 

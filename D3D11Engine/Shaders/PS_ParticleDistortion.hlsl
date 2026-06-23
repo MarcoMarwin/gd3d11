@@ -1,6 +1,7 @@
 //--------------------------------------------------------------------------------------
 // World/VOB-Pixelshader for G2D3D11 by Degenerated
 //--------------------------------------------------------------------------------------
+#include <AtmosphericScattering.h>
 
 cbuffer RefractionInfo : register( b0 )
 {
@@ -47,6 +48,16 @@ PS_OUTPUT PSMain( PS_INPUT Input )
 {
 	float4 color = TX_Texture0.Sample(SS_Linear, Input.vTexcoord);
 	color *= Input.vDiffuse;
+
+	float particleLuma = dot(color.rgb, float3(0.2126f, 0.7152f, 0.0722f));
+	float warmEmission = saturate((color.r - max(color.g, color.b)) * 3.0f);
+	float emissiveGuess = saturate((particleLuma - 0.62f) * 2.0f + warmEmission * 0.75f);
+	float nightParticle = saturate((-AC_LightPos.y + 0.08f) * 2.5f);
+	float rainParticle = max(saturate(AC_RainFXWeight), saturate(AC_SceneWettness));
+	float nonEmissiveDim = lerp(1.0f, 0.28f, nightParticle) * lerp(1.0f, 0.78f, rainParticle);
+	float emissiveDim = lerp(1.0f, 0.72f, nightParticle * rainParticle);
+	float particleLighting = lerp(nonEmissiveDim, emissiveDim, emissiveGuess);
+	color.rgb *= lerp(1.0f, particleLighting, saturate(AC_EnableParticleLighting * AC_ParticleLightingStrength));
 	
 	PS_OUTPUT o;
 	// Store particle color

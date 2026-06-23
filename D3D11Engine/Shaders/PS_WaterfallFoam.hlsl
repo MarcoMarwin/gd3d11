@@ -29,14 +29,13 @@ float4 PSMain(PS_INPUT Input) : SV_TARGET
 {
 	float4 colour = TX_Texture0.Sample(SS_Linear, Input.vTexcoord);
 
-	//darken / lighten foam based on the day / night cycle
-	float colourRGB = clamp(AC_LightPos.y+0.2f, 0.1f, 0.6f);
-	if (AC_LightPos.y <= 0.08f) {
-		colour *= float4(colourRGB, colourRGB, colourRGB+0.1f, 0.80f); //add blue tint at night
-	}
-	else if (AC_LightPos.y > 0.08f) {
-		colour *= float4(colourRGB, colourRGB, colourRGB, 0.80f);
-	}	
-
+	// Waterfall foam is not emissive: keep it readable, but let night and rain darken it with the scene.
+	float night = saturate((-AC_LightPos.y + 0.08f) * 2.5f);
+	float rain = max(saturate(AC_RainFXWeight), saturate(AC_SceneWettness));
+	float daylight = saturate(AC_LightPos.y * 1.25f + 0.25f);
+	float foamLight = lerp(max(0.18f, daylight * 0.75f), 0.16f, night);
+	foamLight *= lerp(1.0f, 0.72f, rain);
+	float3 foamTint = lerp(float3(1.0f, 1.0f, 1.0f), float3(0.55f, 0.66f, 0.86f), night);
+	colour *= float4(foamTint * foamLight, 0.80f);
 	return colour;
 }

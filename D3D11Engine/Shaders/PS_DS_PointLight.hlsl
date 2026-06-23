@@ -134,6 +134,10 @@ float4 PSMain( PS_INPUT Input ) : SV_TARGET
 	// Blend this with the light color, world diffuse and specular term.
 	float3 lighting = PLS_ComputePointLightLighting(diffuse.rgb, PL_Color.rgb, ndl, falloff, spec, specIntensity, specPower, specMod);
 	
+	// Keep indoor point lights from leaking onto outdoor pixels.
+	float indoor = 1.0f - PL_Outdoor;
+	float indoorPixel = diffuse.a < 0.5f ? 1.0f : 0.0f;
+	lighting *= saturate(PL_Outdoor + indoor * indoorPixel);
 	return float4(saturate(lighting),1);
 }
 

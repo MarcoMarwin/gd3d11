@@ -122,6 +122,7 @@ PS_OUTPUT PSMain( PS_INPUT Input )
 	float3 reflection = TX_ReflectionCube.Sample(SS_Linear, reflect_vec).xyz;
 	float3 reflectionSSR = float3(0.0f, 0.0f, 0.0f);
 	float ssrWeight = 0.0f;
+	float ssrHitQuality = 0.0f;
 
 	if (AC_EnableSSR > 0.5f) {
 		float3 rayPos = Input.vWorldPosition;
@@ -170,10 +171,21 @@ PS_OUTPUT PSMain( PS_INPUT Input )
 				projFinal.xyz /= projFinal.w;
 				uv = projFinal.xy * float2(0.5f, -0.5f) + 0.5f;
 
+				float2 px = 1.0f / RI_ViewportSize;
+				float zL = RI_Projection._43 / (TX_Depth.SampleLevel(SS_Linear, saturate(uv + float2(-2.0f, 0.0f) * px), 0).r - RI_Projection._33);
+				float zR = RI_Projection._43 / (TX_Depth.SampleLevel(SS_Linear, saturate(uv + float2( 2.0f, 0.0f) * px), 0).r - RI_Projection._33);
+				float zU = RI_Projection._43 / (TX_Depth.SampleLevel(SS_Linear, saturate(uv + float2(0.0f, -2.0f) * px), 0).r - RI_Projection._33);
+				float zD = RI_Projection._43 / (TX_Depth.SampleLevel(SS_Linear, saturate(uv + float2(0.0f,  2.0f) * px), 0).r - RI_Projection._33);
+				float hitEdge = max(abs(zL - zR), abs(zU - zD));
+				float edgeTolerance = max(60.0f, abs(sampleZ) * 0.018f);
+				float edgeQuality = 1.0f - smoothstep(edgeTolerance, edgeTolerance * 4.0f, hitEdge);
+				float nearHitQuality = smoothstep(700.0f, 2200.0f, abs(sampleZ));
+
 				reflectionSSR = TX_Scene.SampleLevel(SS_Linear, uv, 0).xyz;
 				float2 edgeFade = saturate(abs(uv - 0.5f) * 2.0f);
 				float edgeDistance = max(edgeFade.x, edgeFade.y);
 				ssrWeight = 1.0f - smoothstep(0.78f, 1.0f, edgeDistance);
+				ssrHitQuality = edgeQuality * nearHitQuality;
 				break;
 			}
 		}
@@ -183,7 +195,7 @@ PS_OUTPUT PSMain( PS_INPUT Input )
 	// The old base water reflection remains visible there, avoiding hard reflection-free outlines.
 	float ssrNearFade = smoothstep(100.0f, 450.0f, abs(Input.vTexcoord2.y));
 	float ssrContactFade = smoothstep(0.04f, 0.22f, shallowDepth);
-	ssrWeight *= ssrNearFade * ssrContactFade;
+	ssrWeight *= ssrNearFade * ssrContactFade * ssrHitQuality;
 	// Darken the scene, to make a wet surface
 	float f = 1-saturate(pow(1-shallowDepth, 8.0f) + clamp(pow(distortionSmall.y, 2), 0.5f, 1.0f));
 	float nightAmount = saturate((-AC_LightPos.y + 0.12f) * 2.2f);

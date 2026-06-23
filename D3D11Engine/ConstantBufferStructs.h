@@ -401,10 +401,19 @@ struct AtmosphereConstantBuffer {
     float AC_NightDarkeningStart;
     float AC_NightDarkeningMax;
     float AC_NightDarkeningRange;
-    float AC_AtmospherePad2;
+    float AC_EnableVolumetricLightShafts;
 
     float3 AC_WorldCameraPos;
-    float AC_AtmospherePad3;
+    float AC_EnableContactShadows;
+
+    float AC_EnableScreenSpaceGI;
+    float AC_VolumetricLightShaftStrength;
+    float AC_ContactShadowStrength;
+    float AC_ScreenSpaceGIStrength;
+
+    float AC_EnableParticleLighting;
+    float AC_ParticleLightingStrength;
+    float2 AC_AtmospherePad3;
 };
 
 struct CASConstantBuffer {
