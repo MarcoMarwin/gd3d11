@@ -6,6 +6,15 @@
 SamplerState SS_Linear : register( s0 );
 Texture2D TX_Texture0 : register( t0 );
 
+#ifdef USE_FFDATA
+struct FFData {
+    float4 textureFactor;
+};
+cbuffer cbFFData : register( b0 ) {
+    FFData cbFFData;
+};
+#endif
+
 struct PS_INPUT
 {
     float2 vTexcoord        : TEXCOORD0;
@@ -35,6 +44,9 @@ float4 PSMain( PS_INPUT Input ) : SV_TARGET
 {
     float4 color = TX_Texture0.Sample(SS_Linear, Input.vTexcoord);
     color *= Input.vDiffuse;
+#ifdef USE_FFDATA
+    color *= cbFFData.textureFactor;
+#endif
     color.rgb = AdaptParticleLighting(color.rgb);
     return color;
 }

@@ -85,7 +85,7 @@ DEFERRED_PS_OUTPUT PSMain( PS_INPUT Input ) : SV_TARGET
 	DoAlphaTest(color.a);
 	
 	DEFERRED_PS_OUTPUT output;
-	output.vDiffuse = float4(color.rgb, Input.vDiffuse.y);
+	output.vDiffuse = float4(color.rgb, Input.vDiffuse.a);
 	
 	output.vNrm = EncodeNormalGBuffer(normalize(Input.vNormalVS));
 

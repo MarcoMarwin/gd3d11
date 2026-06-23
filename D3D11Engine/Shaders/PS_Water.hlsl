@@ -121,9 +121,10 @@ PS_OUTPUT PSMain( PS_INPUT Input )
 	// sample reflection cube
 	float3 reflection = TX_ReflectionCube.Sample(SS_Linear, reflect_vec).xyz;
 	float3 reflectionSSR = float3(0.0f, 0.0f, 0.0f);
+	float ssrRawWeight = 0.0f;
 	float ssrWeight = 0.0f;
 	float ssrHitQuality = 0.0f;
-	bool waterSSRActive = AC_EnableSSR > 0.5f && AC_SSRStrength > 0.001f;
+	bool waterSSRActive = AC_EnableSSR > 0.5f;
 
 	if (waterSSRActive) {
 		float3 rayPos = Input.vWorldPosition;
@@ -185,18 +186,19 @@ PS_OUTPUT PSMain( PS_INPUT Input )
 				reflectionSSR = TX_Scene.SampleLevel(SS_Linear, uv, 0).xyz;
 				float2 edgeFade = saturate(abs(uv - 0.5f) * 2.0f);
 				float edgeDistance = max(edgeFade.x, edgeFade.y);
-				ssrWeight = 1.0f - smoothstep(0.78f, 1.0f, edgeDistance);
+				ssrRawWeight = 1.0f - smoothstep(0.78f, 1.0f, edgeDistance);
 				ssrHitQuality = edgeQuality * nearHitQuality;
 				break;
 			}
 		}
 	}
 
-	// Suppress only the dynamic SSR layer near water/object contact edges.
-	// The old base water reflection remains visible there, avoiding hard reflection-free outlines.
+	// Keep the old screen-space water reflection as the base layer, even where dynamic SSR must fade out.
+	// Dynamic HDR/light reflections are still suppressed near contact edges to avoid player/NPC artifacts.
 	float ssrNearFade = smoothstep(100.0f, 450.0f, abs(Input.vTexcoord2.y));
 	float ssrContactFade = smoothstep(0.04f, 0.22f, shallowDepth);
-	ssrWeight *= ssrNearFade * ssrContactFade * ssrHitQuality;
+	float ssrBaseWeight = ssrRawWeight * lerp(0.45f, 1.0f, ssrNearFade) * lerp(0.55f, 1.0f, ssrContactFade) * ssrHitQuality;
+	ssrWeight = ssrRawWeight * ssrNearFade * ssrContactFade * ssrHitQuality;
 	// Darken the scene, to make a wet surface
 	float f = 1-saturate(pow(1-shallowDepth, 8.0f) + clamp(pow(distortionSmall.y, 2), 0.5f, 1.0f));
 	float nightAmount = saturate((-AC_LightPos.y + 0.12f) * 2.2f);
@@ -206,15 +208,17 @@ PS_OUTPUT PSMain( PS_INPUT Input )
 
 	float pxDistance = Input.vTexcoord2.y;
 	scene = lerp(scene, diffuse, 0.73f * max(pow(fresnel,8.0f), 0.5f));
-	float cubeWeight = waterSSRActive ? lerp(0.45f, 0.95f, nightAmount) : 1.0f;
+	float cubeWeight = waterSSRActive ? 0.0f : 1.0f;
 	float ssrFresnel = lerp(0.55f, 0.80f, saturate(pow(1.0f - saturate(dot(-viewDirection, wavesFres)), 2.0f)));
 	float3 reflectionSSRColor = max(reflectionSSR, float3(0.0f, 0.0f, 0.0f));
 	float reflectionLuma = dot(reflectionSSRColor, float3(0.2126f, 0.7152f, 0.0722f));
-	// Preserve HDR light-source reflections; only tame extreme outliers.
+	float3 reflectionBaseColor = reflectionSSRColor * rcp(1.0f + max(0.0f, reflectionLuma - 1.25f) * 0.65f);
+	// Preserve HDR light-source reflections; only tame extreme outliers on the dynamic layer.
 	reflectionSSRColor *= rcp(1.0f + max(0.0f, reflectionLuma - 6.0f) * 0.12f);
-	float dynamicReflectionCoverage = saturate(ssrWeight * max(0.0f, AC_SSRStrength));
-	float fakeReflectionMask = 1.0f - dynamicReflectionCoverage;
-	scene.rgb += reflection * cubeWeight * fakeReflectionMask * fresnel * lerp(1.0f, diffuse, 0.6f);
+	// Cubemap is only the fallback when Water Effects are disabled. With Water Effects enabled,
+	// the base fallback is the old screen-space water reflection without the strong HDR/light layer.
+	scene.rgb += reflection * cubeWeight * fresnel * lerp(1.0f, diffuse, 0.6f);
+	float baseSSRBlend = waterSSRActive ? saturate(ssrBaseWeight * ssrFresnel * 0.62f * lerp(0.85f, 1.05f, nightAmount)) : 0.0f;
 	float ssrBlend = saturate(ssrWeight * ssrFresnel * max(0.0f, AC_SSRStrength) * 0.78f * lerp(0.85f, 1.10f, nightAmount));
 	float3 color = lerp(scene, sceneClean, pow(saturate(pxDistance / 35000.0f), 4.0f));
 	color = lerp(color, sceneWet, (1-shallowDepth));
@@ -239,6 +243,7 @@ PS_OUTPUT PSMain( PS_INPUT Input )
 	// TX_Scene already contains the fully lit and atmospherically shaded scene.
 	// Blend SSR last so shallow-water coloring and water darkening cannot erase light reflections.
 	float3 finalColor = color / darknessFactor;
+	finalColor = lerp(finalColor, reflectionBaseColor, baseSSRBlend);
 	finalColor = lerp(finalColor, reflectionSSRColor, ssrBlend);
 	output.color = float4(finalColor, 1);
 	output.waterMask = 1.0f;

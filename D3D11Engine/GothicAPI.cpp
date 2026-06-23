@@ -4868,9 +4868,7 @@ void GothicAPI::BuildBspVobMapCacheHelper( zCBspBase* base ) {
                     vi->LightShadowBuffers.reset(bpl);
                 }
 
-                if ( vob->IsIndoorVob() ) {
-                    vi->IsIndoorVob = true;
-                }
+                vi->IsIndoorVob = vob->IsIndoorVob();
             }
         }
 
@@ -6426,6 +6424,7 @@ static void CollectLeafVobs(
                     }
                 }
                 VobLightInfo* vi = vit->second;
+                vi->IsIndoorVob = vob->IsIndoorVob();
                 if ( !visitor->Visit( vi ) ) continue;
                 ctx.queue->PushLightVob( vi );
             }

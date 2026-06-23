@@ -167,7 +167,7 @@ FORWARD_PLUS_PS_OUTPUT PSMain( PS_INPUT Input )
 	// Point lights, only when close enough
 	if (pixelDistZ < 6000.0f) 
 	{
-		litPixel += FP_ComputePointLighting(wsPosition, vsPosition, nrm, float4(color.rgb, Input.vDiffuse.y), specIntensity, specPower, Input.vPosition.xy);
+		litPixel += FP_ComputePointLighting(wsPosition, vsPosition, nrm, float4(color.rgb, Input.vDiffuse.a), specIntensity, specPower, Input.vPosition.xy);
 	}
 
 	output.vColor = float4(litPixel, 1);
@@ -234,7 +234,7 @@ DEFERRED_PS_OUTPUT PSMain( PS_INPUT Input ) : SV_TARGET
 	fx = 1.0f;
 #endif
 	
-	output.vDiffuse = float4(color.rgb, Input.vDiffuse.y);
+	output.vDiffuse = float4(color.rgb, Input.vDiffuse.a);
 	//output.vDiffuse = float4(Input.vTexcoord2, 0, 1);
 	//output.vDiffuse = float4(Input.vNormalVS, 1);
 	

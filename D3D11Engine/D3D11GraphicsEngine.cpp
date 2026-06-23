@@ -2429,6 +2429,7 @@ XRESULT  D3D11GraphicsEngine::DrawSkeletalVertexNormals( SkeletalVobInfo* vi,
 
     VS_ExConstantBuffer_PerInstanceSkeletal cb2;
     cb2.World = world;
+    color.w = (vi && vi->Vob && vi->Vob->IsIndoorVob()) ? 0.05f : 1.0f;
     cb2.PI_ModelColor = color;
     cb2.PI_ModelFatness = fatness;
 
@@ -2505,6 +2506,7 @@ XRESULT D3D11GraphicsEngine::DrawSkeletalMesh( SkeletalVobInfo* vi,
 
     VS_ExConstantBuffer_PerInstanceSkeletal cb2;
     cb2.World = world;
+    color.w = (vi && vi->Vob && vi->Vob->IsIndoorVob()) ? 0.05f : 1.0f;
     cb2.PI_ModelColor = color;
     cb2.PI_ModelFatness = fatness;
     // Set PrevWorld for motion vectors (use current world if no previous is available)
@@ -2641,6 +2643,7 @@ XRESULT D3D11GraphicsEngine::DrawSkeletalMesh_Layered( SkeletalVobInfo* vi,
     VS_ExConstantBuffer_PerInstanceSkeletal cb2;
     cb2.World = world;
     cb2.PrevWorld = world;
+    color.w = (vi && vi->Vob && vi->Vob->IsIndoorVob()) ? 0.05f : 1.0f;
     cb2.PI_ModelColor = color;
     cb2.PI_ModelFatness = fatness;
     ActiveVS->GetBuffer("Matrices_PerInstances").Update( &cb2 ).Bind();
@@ -3085,6 +3088,7 @@ void D3D11GraphicsEngine::DrawSkeletalMeshVobs(
                     }
                 }
             }
+            modelColor.w = vi->Vob->IsIndoorVob() ? 0.05f : 1.0f;
 
             if ( updateState ) {
                 if ( vi->LastAniUpdateFrame != now ) {
@@ -3119,7 +3123,9 @@ void D3D11GraphicsEngine::DrawSkeletalMeshVobs(
 
                     VS_ExConstantBuffer_PerInstanceSkeletal cb2;
                     cb2.World = world;
-                    cb2.PI_ModelColor = color;
+                    auto maskedColor = color;
+                    maskedColor.w = vi->Vob->IsIndoorVob() ? 0.05f : 1.0f;
+                    cb2.PI_ModelColor = maskedColor;
                     cb2.PI_ModelFatness = fatness;
                     // Set PrevWorld for motion vectors (use current world if no previous is available)
                     cb2.PrevWorld = vi->HasValidPrevTransforms ? vi->PrevWorldMatrix : world;
@@ -3278,6 +3284,7 @@ void D3D11GraphicsEngine::DrawSkeletalMeshVobs(
             auto vi = data.VobInfo;
             auto model = data.Model;
             auto modelColor = data.ModelColor;
+            modelColor.w = (vi && vi->Vob && vi->Vob->IsIndoorVob()) ? 0.05f : 1.0f;
             auto transforms = std::span( &BoneTransformCache[data.BoneIdx], data.NumBones );
             auto fatness = data.Fatness;
             auto& world = data.World;

@@ -12,7 +12,7 @@
 void VobInfo::UpdateVobConstantBuffer(VS_ExConstantBuffer_PerInstance& cb) {
     UpdateState();
     cb.World = WorldMatrix;
-    cb.Color = {0.0f, 0.0f, 0.0f, 1.0f};
+    cb.Color = {0.0f, 0.0f, 0.0f, IsIndoorVob ? 0.05f : 1.0f};
 }
 
 void VobInfo::UpdateState() {
@@ -33,7 +33,7 @@ void VobInfo::UpdateState() {
 void SkeletalVobInfo::UpdateVobConstantBuffer(VS_ExConstantBuffer_PerInstance& cb) {
     UpdateState();
     cb.World = WorldMatrix;
-    cb.Color = {0.0f, 0.0f, 0.0f, 1.0f};
+    cb.Color = {0.0f, 0.0f, 0.0f, IndoorVob ? 0.05f : 1.0f};
 }
 
 void SkeletalVobInfo::UpdateState() {
