@@ -4752,7 +4752,7 @@ XRESULT D3D11GraphicsEngine::DrawMeshInfoListAlphablended(
 
     const XMMATRIX identityMatrix = XMMatrixIdentity();
     VS_ExConstantBuffer_PerInstance cbInstance = {};
-    cbInstance.World = identityMatrix;
+    XMStoreFloat4x4( &cbInstance.World, identityMatrix );
     cbInstance.Color = float4( 1.0f, 1.0f, 1.0f, 1.0f );
     ActiveVS->GetBuffer( "Matrices_PerInstances" ).Update( &cbInstance, sizeof( cbInstance ) ).Bind();
 
@@ -4947,7 +4947,7 @@ XRESULT D3D11GraphicsEngine::DrawWorldMesh( bool noTextures ) {
     // Set constant buffer
     const XMMATRIX identityMatrix = XMMatrixIdentity();
     VS_ExConstantBuffer_PerInstance cbInstance = {};
-    cbInstance.World = identityMatrix;
+    XMStoreFloat4x4( &cbInstance.World, identityMatrix );
     cbInstance.Color = float4( 1.0f, 1.0f, 1.0f, 1.0f );
     ActiveVS->GetBuffer( "Matrices_PerInstances" )
         .Update( &cbInstance, sizeof( cbInstance ) )
@@ -5512,7 +5512,7 @@ void XM_CALLCONV D3D11GraphicsEngine::DrawWorldAround(
 
     const XMMATRIX identityMatrix = XMMatrixIdentity();
     VS_ExConstantBuffer_PerInstance cbInstance = {};
-    cbInstance.World = identityMatrix;
+    XMStoreFloat4x4( &cbInstance.World, identityMatrix );
     cbInstance.Color = float4( 1.0f, 1.0f, 1.0f, 1.0f );
     ActiveVS->GetBuffer( "Matrices_PerInstances" ).Update( &cbInstance, sizeof( cbInstance ) ).Bind();
 
@@ -5860,7 +5860,7 @@ void XM_CALLCONV D3D11GraphicsEngine::DrawWorldAround_Layered(
 
     const XMMATRIX identityMatrix = XMMatrixIdentity();
     VS_ExConstantBuffer_PerInstance cbInstance = {};
-    cbInstance.World = identityMatrix;
+    XMStoreFloat4x4( &cbInstance.World, identityMatrix );
     cbInstance.Color = float4( 1.0f, 1.0f, 1.0f, 1.0f );
     ActiveVS->GetBuffer( "Matrices_PerInstances" ).Update( &cbInstance, sizeof( cbInstance ) ).Bind();
 
