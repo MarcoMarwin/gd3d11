@@ -58,11 +58,7 @@ bool D3D11PFX_FSR2::Init( const INT2& maxInputSize, const INT2& maxOutputSize ) 
             // No Need to reinitialize if sizes are the same
             return true;
         }
-        Initialized = false;
-        if ( Context != nullptr ) {
-            delete Context;
-            Context = nullptr;
-        }
+        Destroy();
     }
 
     D3D11GraphicsEngine* engine = reinterpret_cast<D3D11GraphicsEngine*>(Engine::GraphicsEngine);
@@ -130,16 +126,21 @@ bool D3D11PFX_FSR2::Init( const INT2& maxInputSize, const INT2& maxOutputSize ) 
 }
 
 void D3D11PFX_FSR2::Destroy() {
-    if ( Initialized ) {
+    if ( Initialized && Context ) {
         ffxFsr2ContextDestroy( Context );
-
-        if ( ScratchMemory ) {
-            free( ScratchMemory );
-            ScratchMemory = nullptr;
-        }
-
-        Initialized = false;
     }
+
+    if ( Context ) {
+        delete Context;
+        Context = nullptr;
+    }
+
+    if ( ScratchMemory ) {
+        free( ScratchMemory );
+        ScratchMemory = nullptr;
+    }
+
+    Initialized = false;
 }
 
 namespace {

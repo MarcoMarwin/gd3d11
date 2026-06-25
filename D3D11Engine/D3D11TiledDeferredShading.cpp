@@ -438,7 +438,8 @@ D3D11TiledDeferredShading::CullResult D3D11TiledDeferredShading::CullLights(
         tl.PositionWorld = XMFLOAT3( posWorld.x, posWorld.y, posWorld.z );
         tl.ShadowStrength = 1.0f;
         tl.IsIndoor = light->Vob && light->Vob->IsIndoorVob() ? 1.0f : 0.0f;
-        tl.Padding = XMFLOAT2( 0.0f, 0.0f );
+        tl.IgnoreIndoorOutdoorLimit = light->IgnoreIndoorOutdoorLimit ? 1.0f : 0.0f;
+        tl.Padding = 0.0f;
 
         if ( hasShadow ) {
             tl.ShadowCubeIndex = pl->GetTiledSlot();

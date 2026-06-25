@@ -12,7 +12,8 @@ struct TiledPointLight {
     int ShadowCubeIndex; // -1 = no shadow, else index into TextureCubeArray
     float ShadowStrength;
     float IsIndoor;
-    float2 Padding;
+    float IgnoreIndoorOutdoorLimit;
+    float Padding;
 };
 
 struct LightGrid {
@@ -53,8 +54,8 @@ float ComputeIndoorDoorFloorBleed(float indoorPixel, float3 wsPosition, float3 w
 	float doorwayProbe = 0.0f;
 	[unroll] for (int r = 1; r <= 3; ++r)
 	{
-		int radius = r * 6;
-		float sampleFade = 1.0f - (float)(r - 1) * 0.30f;
+		int radius = r * 8;
+		float sampleFade = 1.0f - (float)(r - 1) * 0.25f;
 		[unroll] for (int d = 0; d < 4; ++d)
 		{
 			int2 offset = int2(d == 0 ? radius : (d == 1 ? -radius : 0), d == 2 ? radius : (d == 3 ? -radius : 0));
@@ -138,7 +139,8 @@ void CSMain( uint3 groupID : SV_GroupID, uint3 threadID : SV_GroupThreadID, uint
 
         float indoorPixel = diffuse.a < 0.5f ? 1.0f : 0.0f;
         float doorFloorBleed = ComputeIndoorDoorFloorBleed(indoorPixel, wsPosition, wsNormal, light.PositionView, light.PositionWorld, light.Range, pixelCoord, expDepth);
-        lighting *= saturate( (1.0f - light.IsIndoor) + light.IsIndoor * max(indoorPixel, doorFloorBleed) );
+        float indoorBoundary = saturate( (1.0f - light.IsIndoor) + light.IsIndoor * max(indoorPixel, doorFloorBleed) );
+        lighting *= lerp(indoorBoundary, 1.0f, saturate(light.IgnoreIndoorOutdoorLimit));
 
         lighting = saturate( lighting );
 

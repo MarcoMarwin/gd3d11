@@ -291,11 +291,8 @@ PS_OUTPUT PSMain( PS_INPUT Input )
 #endif
 	PS_OUTPUT output;
 	output.color = directionalLight;
-#ifdef SNOW_FEATURE
-	output.reactiveMask = 0.0f;
-#else
-	output.reactiveMask = saturate(directionalLight.w * 5.0f);
-#endif
+	float precipitationMask = smoothstep(0.001f, 0.015f, directionalLight.w);
+	output.reactiveMask = max(precipitationMask, saturate(directionalLight.w * 12.0f));
 	return output;
 }
 

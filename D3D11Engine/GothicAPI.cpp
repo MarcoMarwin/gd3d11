@@ -6419,16 +6419,17 @@ static void CollectLeafVobs(
                 auto vit = VobLightMap.find( vob );
                 if ( vit == VobLightMap.end() ) {
                     bool PFXVobLight = false;
+                    bool actorLight = false;
                     if ( zCVob* parent = vob->GetVobParent() ) {
-                        if ( parent->As<oCVisualFX>() ) {
-                            PFXVobLight = true;
-                        }
+                        PFXVobLight = parent->As<oCVisualFX>() != nullptr;
+                        actorLight = parent->As<oCNPC>() != nullptr;
                     }
 
                     // Add if not. This light must have been added during gameplay
                     VobLightInfo* vi = new VobLightInfo;
                     vi->Vob = vob;
                     vi->IsPFXVobLight = PFXVobLight;
+                    vi->IgnoreIndoorOutdoorLimit = PFXVobLight || actorLight;
                     vi->UpdateShadows = !PFXVobLight;
                     vit = VobLightMap.emplace( vob, vi ).first;
 
@@ -6440,6 +6441,14 @@ static void CollectLeafVobs(
                     }
                 }
                 VobLightInfo* vi = vit->second;
+                bool parentPFXVobLight = false;
+                bool parentActorLight = false;
+                if ( zCVob* parent = vob->GetVobParent() ) {
+                    parentPFXVobLight = parent->As<oCVisualFX>() != nullptr;
+                    parentActorLight = parent->As<oCNPC>() != nullptr;
+                }
+                vi->IsPFXVobLight = vi->IsPFXVobLight || parentPFXVobLight;
+                vi->IgnoreIndoorOutdoorLimit = vi->IsPFXVobLight || parentActorLight;
                 vi->IsIndoorVob = vob->IsIndoorVob();
                 if ( !visitor->Visit( vi ) ) continue;
                 ctx.queue->PushLightVob( vi );

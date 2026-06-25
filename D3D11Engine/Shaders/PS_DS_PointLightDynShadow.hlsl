@@ -16,7 +16,8 @@ cbuffer DS_PointLightConstantBuffer : register( b0 )
 	float3 Pl_PositionView;
 	
 	float2 PL_ViewportSize;
-	float2 PL_Pad2;
+	float PL_IgnoreIndoorOutdoorLimit;
+	float PL_Pad2;
 	
 	float4 PL_ProjParams; // x = 1/P._11, y = 1/P._22, z = P._43, w = P._33
 	matrix PL_InvView; // Optimize out!
@@ -62,8 +63,8 @@ float ComputeIndoorDoorFloorBleed(float indoorPixel, float3 wsPosition, float3 w
 	float doorwayProbe = 0.0f;
 	[unroll] for (int r = 1; r <= 3; ++r)
 	{
-		float radius = (float)r * 6.0f;
-		float sampleFade = 1.0f - (float)(r - 1) * 0.30f;
+		float radius = (float)r * 8.0f;
+		float sampleFade = 1.0f - (float)(r - 1) * 0.25f;
 		[unroll] for (int d = 0; d < 4; ++d)
 		{
 			float2 offset = float2(d == 0 ? radius : (d == 1 ? -radius : 0.0f), d == 2 ? radius : (d == 3 ? -radius : 0.0f));
@@ -151,7 +152,8 @@ float4 PSMain( PS_INPUT Input ) : SV_TARGET
 	float indoor = 1.0f - PL_Outdoor;
 	float indoorPixel = diffuse.a < 0.5f ? 1.0f : 0.0f;
 	float doorFloorBleed = ComputeIndoorDoorFloorBleed(indoorPixel, wsPosition, wsNormal, Pl_PositionWorld, PL_Range, uv, expDepth);
-	lighting *= saturate(PL_Outdoor + indoor * max(indoorPixel, doorFloorBleed));
+	float indoorBoundary = saturate(PL_Outdoor + indoor * max(indoorPixel, doorFloorBleed));
+	lighting *= lerp(indoorBoundary, 1.0f, saturate(PL_IgnoreIndoorOutdoorLimit));
 	//return float4(0.2f,0.2f,0.2f,1);
 	//return float4(ndl.rrr,1);
 	return float4(saturate(lighting),1);

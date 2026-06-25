@@ -201,6 +201,10 @@ bool D3D11Upscaling::AddUpscalingPass( RenderGraph& graph,
 
     auto& settings = Engine::GAPI->GetRendererState().RendererSettings;
 
+    if ( engine.GetDevice()->GetFeatureLevel() < D3D_FEATURE_LEVEL_11_0 ) {
+        return false;
+    }
+
     if ( settings.ResolutionScalePercent < 100
             && settings.Upscaler == GothicRendererSettings::E_Upscaler::UPSCALER_FSR_1 ) {
 
@@ -208,10 +212,6 @@ bool D3D11Upscaling::AddUpscalingPass( RenderGraph& graph,
         return true;
     } 
     
-    if ( engine.GetDevice()->GetFeatureLevel() < D3D_FEATURE_LEVEL_11_0 ) {
-        return false;
-    }
-
     if ( settings.Upscaler == GothicRendererSettings::E_Upscaler::UPSCALER_FSR_2
             && (settings.ResolutionScalePercent <= 100)
             && settings.AntiAliasingMode == GothicRendererSettings::AA_FSR ) {

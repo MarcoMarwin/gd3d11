@@ -12,6 +12,10 @@ struct TiledPointLight {
     float4 Color;
     float3 PositionWorld;
     int ShadowCubeIndex;
+    float ShadowStrength;
+    float IsIndoor;
+    float IgnoreIndoorOutdoorLimit;
+    float Padding;
 };
 
 struct LightGrid {

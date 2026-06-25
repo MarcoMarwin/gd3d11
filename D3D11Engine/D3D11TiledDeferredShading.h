@@ -24,7 +24,8 @@ struct TiledPointLight {
     int32_t ShadowCubeIndex; // -1 = no shadow, else index into TextureCubeArray
     float ShadowStrength;
     float IsIndoor;
-    DirectX::XMFLOAT2 Padding;
+    float IgnoreIndoorOutdoorLimit;
+    float Padding;
 };
 
 static_assert( sizeof(TiledPointLight) == 64, "TiledPointLight must match the HLSL StructuredBuffer layout" );

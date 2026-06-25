@@ -112,7 +112,8 @@ struct TiledPointLight
     int ShadowCubeIndex;
     float ShadowStrength;
     float IsIndoor;
-    float2 Padding;
+    float IgnoreIndoorOutdoorLimit;
+    float Padding;
 };
 
 struct LightGrid
@@ -188,7 +189,8 @@ float3 FP_ComputePointLighting(
 
         float indoorPixel = diffuseColor.a < 0.5f ? 1.0f : 0.0f;
         float doorFloorBleed = ComputeIndoorDoorFloorBleed(indoorPixel, wsPosition, wsNormal, light.PositionWorld, light.Range);
-        lighting *= saturate( (1.0f - light.IsIndoor) + light.IsIndoor * max(indoorPixel, doorFloorBleed) );
+        float indoorBoundary = saturate( (1.0f - light.IsIndoor) + light.IsIndoor * max(indoorPixel, doorFloorBleed) );
+        lighting *= lerp(indoorBoundary, 1.0f, saturate(light.IgnoreIndoorOutdoorLimit));
 
         lighting = saturate( lighting );
         totalLighting += lighting;
