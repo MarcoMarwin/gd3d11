@@ -300,6 +300,9 @@ XRESULT D3D11PfxRenderer::CopyTextureToRTV( const Microsoft::WRL::ComPtr<ID3D11S
 /** Called on resize */
 XRESULT D3D11PfxRenderer::OnResize( const INT2& newResolution ) {
 
+
+    if ( PFX_FSR2 ) PFX_FSR2->ReleaseResources();
+    if ( PFX_FSR3 ) PFX_FSR3->Destroy();
     m_texturePool->Clear(); // textures will be created on demand
     if ( !FeatureLevel10Compatibility ) {
         FX_SMAA->OnResize( newResolution );

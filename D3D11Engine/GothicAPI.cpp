@@ -1040,6 +1040,17 @@ void GothicAPI::ResetVobs() {
     // complete what ever is currently working, and clear everything else.
     Engine::WorkerThreadPool->clearAndFlush();
     
+
+    // Stability: deferred queues store raw D3D pointers to textures that can be destroyed below.
+    Engine::GAPI->EnterResourceCriticalSection();
+    for ( auto& [res, texture] : FrameStagingTextures ) {
+        if ( res.second ) {
+            res.second->Release();
+        }
+    }
+    FrameStagingTextures.clear();
+    FrameMipMapGenerations.clear();
+    Engine::GAPI->LeaveResourceCriticalSection();
     // Delete light vobs, those depend on world sections and load stuff in the background.
     // by deleting them first we block the thread until the destructor finished
     for ( auto const& it : VobLightMap ) {

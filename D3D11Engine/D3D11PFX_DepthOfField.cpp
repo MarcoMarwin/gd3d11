@@ -57,15 +57,23 @@ D3D11PFX_DepthOfField::D3D11PFX_DepthOfField( D3D11PfxRenderer* rnd ) : D3D11PFX
         | (FeatureLevel10Compatibility ? 0 : D3D11_BIND_UNORDERED_ACCESS);
 
     for ( int i = 0; i < 2; i++ ) {
-        engine->GetDevice()->CreateTexture2D( &texDesc, nullptr, m_FocusTexture[i].GetAddressOf() );
-        engine->GetDevice()->CreateShaderResourceView( m_FocusTexture[i].Get(), nullptr, m_FocusSRV[i].GetAddressOf() );
-        engine->GetDevice()->CreateRenderTargetView( m_FocusTexture[i].Get(), nullptr, m_FocusRTV[i].GetAddressOf() );
+        HRESULT hr = engine->GetDevice()->CreateTexture2D( &texDesc, nullptr, m_FocusTexture[i].GetAddressOf() );
+        if ( FAILED( hr ) || m_FocusTexture[i].Get() == nullptr ) { LogError() << "DoF: CreateTexture2D failed for FocusTexture[" << i << "]. HRESULT: " << std::hex << hr; return; }
 
-        D3D11_UNORDERED_ACCESS_VIEW_DESC uavDesc = {};
-        uavDesc.Format = DXGI_FORMAT_R32_FLOAT;
-        uavDesc.ViewDimension = D3D11_UAV_DIMENSION_TEXTURE2D;
-        uavDesc.Texture2D.MipSlice = 0;
-        engine->GetDevice()->CreateUnorderedAccessView( m_FocusTexture[i].Get(), &uavDesc, m_FocusUAV[i].GetAddressOf() );
+        hr = engine->GetDevice()->CreateShaderResourceView( m_FocusTexture[i].Get(), nullptr, m_FocusSRV[i].GetAddressOf() );
+        if ( FAILED( hr ) || m_FocusSRV[i].Get() == nullptr ) { LogError() << "DoF: CreateSRV failed for FocusTexture[" << i << "]. HRESULT: " << std::hex << hr; return; }
+
+        hr = engine->GetDevice()->CreateRenderTargetView( m_FocusTexture[i].Get(), nullptr, m_FocusRTV[i].GetAddressOf() );
+        if ( FAILED( hr ) || m_FocusRTV[i].Get() == nullptr ) { LogError() << "DoF: CreateRTV failed for FocusTexture[" << i << "]. HRESULT: " << std::hex << hr; return; }
+
+        if ( !FeatureLevel10Compatibility ) {
+            D3D11_UNORDERED_ACCESS_VIEW_DESC uavDesc = {};
+            uavDesc.Format = DXGI_FORMAT_R32_FLOAT;
+            uavDesc.ViewDimension = D3D11_UAV_DIMENSION_TEXTURE2D;
+            uavDesc.Texture2D.MipSlice = 0;
+            hr = engine->GetDevice()->CreateUnorderedAccessView( m_FocusTexture[i].Get(), &uavDesc, m_FocusUAV[i].GetAddressOf() );
+            if ( FAILED( hr ) || m_FocusUAV[i].Get() == nullptr ) { LogError() << "DoF: CreateUAV failed for FocusTexture[" << i << "]. HRESULT: " << std::hex << hr; return; }
+        }
     }
 }
 
@@ -78,6 +86,11 @@ XRESULT D3D11PFX_DepthOfField::Render( ID3D11ShaderResourceView* backbuffer ) {
     Microsoft::WRL::ComPtr<ID3D11DepthStencilView> oldDSV;
     engine->GetContext()->OMGetRenderTargets( 1, oldRTV.GetAddressOf(), oldDSV.GetAddressOf() );
     auto& rendererSettings = Engine::GAPI->GetRendererState().RendererSettings;
+
+    if ( m_FocusSRV[0].Get() == nullptr || m_FocusSRV[1].Get() == nullptr || m_FocusRTV[0].Get() == nullptr || m_FocusRTV[1].Get() == nullptr
+        || ( !FeatureLevel10Compatibility && ( m_FocusUAV[0].Get() == nullptr || m_FocusUAV[1].Get() == nullptr ) ) ) {
+        return XR_FAILED;
+    }
 
     if ( !FeatureLevel10Compatibility ) {
         auto res = RenderCS( backbuffer );

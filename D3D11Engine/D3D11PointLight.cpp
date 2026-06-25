@@ -228,7 +228,10 @@ void D3D11PointLight::InitResources() {
         return;
     }
 
-    //Engine::GAPI->EnterResourceCriticalSection();
+    struct ResourceCriticalSectionGuard {
+        ResourceCriticalSectionGuard() { Engine::GAPI->EnterResourceCriticalSection(); }
+        ~ResourceCriticalSectionGuard() { Engine::GAPI->LeaveResourceCriticalSection(); }
+    } resourceCriticalSectionGuard;
 
     // Generate worldmesh cache if we aren't a dynamically added light
     if ( !DynamicLight ) {
@@ -242,8 +245,6 @@ void D3D11PointLight::InitResources() {
     }
 
     InitDone = true;
-
-    //Engine::GAPI->LeaveResourceCriticalSection();
 }
 
 /** Returns if this light is inited already */

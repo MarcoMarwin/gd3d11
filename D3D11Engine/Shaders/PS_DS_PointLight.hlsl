@@ -56,20 +56,22 @@ float ComputeIndoorDoorFloorBleed(float indoorPixel, float3 wsPosition, float3 w
 	if (baseMask <= 0.0f)
 		return 0.0f;
 
-	float2 probeDir = PL_LightScreenPos.xy - uv;
-	float probeLen = max(length(probeDir), 1e-5f);
-	probeDir /= probeLen;
-
+	float2 texel = 1.0f / PL_ViewportSize;
 	float doorwayProbe = 0.0f;
-	[unroll] for (int i = 1; i <= 3; ++i)
+	[unroll] for (int r = 1; r <= 3; ++r)
 	{
-		float sampleFade = 1.0f - (i - 1) * 0.33f;
-		float2 sampleUV = saturate(uv + probeDir * (float)i * 4.0f / PL_ViewportSize);
-		float4 sampleDiffuse = TX_Diffuse.SampleLevel(SS_Linear, sampleUV, 0);
-		float sampleIndoor = sampleDiffuse.a < 0.5f ? 1.0f : 0.0f;
-		float sampleDepth = TX_Depth.SampleLevel(SS_Linear, sampleUV, 0).r;
-		float depthOk = 1.0f - smoothstep(0.0025f, 0.0100f, abs(sampleDepth - currentDepth));
-		doorwayProbe = max(doorwayProbe, sampleIndoor * depthOk * sampleFade);
+		float radius = (float)r * 6.0f;
+		float sampleFade = 1.0f - (float)(r - 1) * 0.30f;
+		[unroll] for (int d = 0; d < 4; ++d)
+		{
+			float2 offset = float2(d == 0 ? radius : (d == 1 ? -radius : 0.0f), d == 2 ? radius : (d == 3 ? -radius : 0.0f));
+			float2 sampleUV = saturate(uv + offset * texel);
+			float4 sampleDiffuse = TX_Diffuse.SampleLevel(SS_Linear, sampleUV, 0);
+			float sampleIndoor = sampleDiffuse.a < 0.5f ? 1.0f : 0.0f;
+			float sampleDepth = TX_Depth.SampleLevel(SS_Linear, sampleUV, 0).r;
+			float depthOk = 1.0f - smoothstep(0.010f, 0.045f, abs(sampleDepth - currentDepth));
+			doorwayProbe = max(doorwayProbe, sampleIndoor * depthOk * sampleFade);
+		}
 	}
 
 	return baseMask * doorwayProbe;

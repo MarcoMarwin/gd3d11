@@ -50,24 +50,21 @@ float ComputeIndoorDoorFloorBleed(float indoorPixel, float3 wsPosition, float3 w
 	if (baseMask <= 0.0f)
 		return 0.0f;
 
-	float2 currentNdc = float2((pixelCoord.x + 0.5f) / ViewportSize.x, (pixelCoord.y + 0.5f) / ViewportSize.y);
-	float2 lightNdc = float2(0.5f + 0.5f * (lightPosView.x / max(abs(lightPosView.z), 1e-3f)) / ProjParams.x,
-		0.5f - 0.5f * (lightPosView.y / max(abs(lightPosView.z), 1e-3f)) / ProjParams.y);
-	float2 probeDir = lightNdc - currentNdc;
-	float probeLen = max(length(probeDir), 1e-5f);
-	probeDir /= probeLen;
-
 	float doorwayProbe = 0.0f;
-	[unroll] for (int i = 1; i <= 3; ++i)
+	[unroll] for (int r = 1; r <= 3; ++r)
 	{
-		float sampleFade = 1.0f - (i - 1) * 0.33f;
-		int2 offset = int2(round(probeDir * ((float)i * 4.0f)));
-		int2 sampleCoord = clamp(int2(pixelCoord) + offset, int2(0, 0), int2(ViewportSize) - int2(1, 1));
-		float4 sampleDiffuse = TX_Diffuse.Load(int3(sampleCoord, 0));
-		float sampleIndoor = sampleDiffuse.a < 0.5f ? 1.0f : 0.0f;
-		float sampleDepth = TX_Depth.Load(int3(sampleCoord, 0)).r;
-		float depthOk = 1.0f - smoothstep(0.0025f, 0.0100f, abs(sampleDepth - currentDepth));
-		doorwayProbe = max(doorwayProbe, sampleIndoor * depthOk * sampleFade);
+		int radius = r * 6;
+		float sampleFade = 1.0f - (float)(r - 1) * 0.30f;
+		[unroll] for (int d = 0; d < 4; ++d)
+		{
+			int2 offset = int2(d == 0 ? radius : (d == 1 ? -radius : 0), d == 2 ? radius : (d == 3 ? -radius : 0));
+			int2 sampleCoord = clamp(int2(pixelCoord) + offset, int2(0, 0), int2(ViewportSize) - int2(1, 1));
+			float4 sampleDiffuse = TX_Diffuse.Load(int3(sampleCoord, 0));
+			float sampleIndoor = sampleDiffuse.a < 0.5f ? 1.0f : 0.0f;
+			float sampleDepth = TX_Depth.Load(int3(sampleCoord, 0)).r;
+			float depthOk = 1.0f - smoothstep(0.010f, 0.045f, abs(sampleDepth - currentDepth));
+			doorwayProbe = max(doorwayProbe, sampleIndoor * depthOk * sampleFade);
+		}
 	}
 
 	return baseMask * doorwayProbe;

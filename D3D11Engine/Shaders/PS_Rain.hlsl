@@ -231,7 +231,9 @@ void rainResponse(PS_INPUT input, float3 lightVector, float lightIntensity, floa
 					
         opacity = lerp(hOpacity1,hOpacity2,t);
         opacity = pow(opacity,0.7); // inverse gamma correction (expand dynamic range)
-        opacity = 4.35f * lightIntensity * opacity * fallOff;
+        float3 sunDir = normalize(AR_LightPosition - AR_CameraPosition);
+        float dayRainBoost = lerp(1.0f, 1.55f, smoothstep(0.02f, 0.35f, sunDir.y));
+        opacity = 4.35f * dayRainBoost * lightIntensity * opacity * fallOff;
 #ifndef SNOW_FEATURE
         float eyeDistance = length(eyeVector);
         float veryNearFade = lerp(1.0f, 0.20f,
@@ -292,7 +294,7 @@ PS_OUTPUT PSMain( PS_INPUT Input )
 #ifdef SNOW_FEATURE
 	output.reactiveMask = 0.0f;
 #else
-	output.reactiveMask = saturate(directionalLight.w * 2.5f);
+	output.reactiveMask = saturate(directionalLight.w * 5.0f);
 #endif
 	return output;
 }

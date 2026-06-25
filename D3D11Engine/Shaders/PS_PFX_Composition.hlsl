@@ -249,7 +249,7 @@ float3 ComputeVolumetricLightShafts(float2 uv, float depth)
     float day = saturate(AC_LightPos.y * 2.0f + 0.15f);
     float night = saturate((-AC_LightPos.y + 0.05f) * 1.5f);
     float weather = max(saturate(AC_RainFXWeight), saturate(AC_SceneWettness));
-    float atmosphereWeight = saturate(day + night * 0.28f + weather * 0.65f);
+    float atmosphereWeight = saturate(day + night * 0.28f) * lerp(1.0f, 0.28f, weather);
 
     float2 lightCenter = saturate(AC_LightScreenPos.xy);
     float2 toLight = lightCenter - uv;
@@ -272,14 +272,14 @@ float3 ComputeVolumetricLightShafts(float2 uv, float depth)
     float geom = IsGeometryPixel(depth);
     float geometryMist = lerp(0.78f, 1.0f, 1.0f - geom);
     float radial = 1.0f - smoothstep(0.05f, 1.10f, distToLight);
-    float onScreenLight = saturate(AC_LightScreenPos.z + 0.28f + weather * 0.22f);
+    float onScreenLight = saturate(AC_LightScreenPos.z + 0.18f);
     float shaft = visibility * geometryMist * atmosphereWeight * radial * onScreenLight;
 
     float3 dayColor = float3(1.0f, 0.80f, 0.48f);
     float3 nightColor = float3(0.18f, 0.28f, 0.55f);
     float3 rainColor = float3(0.36f, 0.46f, 0.58f);
-    float3 shaftColor = lerp(lerp(dayColor, nightColor, night), rainColor, weather * 0.55f);
-    return shaftColor * shaft * saturate(AC_VolumetricLightShaftStrength) * 0.46f;
+    float3 shaftColor = lerp(lerp(dayColor, nightColor, night), rainColor, weather * 0.35f);
+    return shaftColor * shaft * saturate(AC_VolumetricLightShaftStrength) * lerp(0.46f, 0.18f, weather);
 }
 #endif
 //--------------------------------------------------------------------------------------
@@ -322,7 +322,9 @@ float4 PSMain( PS_INPUT Input ) : SV_TARGET
 #endif
 
 #if COMPOSE_LIGHTSHAFTS
-    color.rgb += ComputeVolumetricLightShafts(Input.vTexcoord, compositionDepth);
+    float3 lightShafts = ComputeVolumetricLightShafts(Input.vTexcoord, compositionDepth);
+    float shaftDither = 1.0f + FogDither(Input.vPosition.xy) * 0.08f * saturate(AC_VolumetricLightShaftStrength);
+    color.rgb += lightShafts * shaftDither;
 #endif
 
     return color;

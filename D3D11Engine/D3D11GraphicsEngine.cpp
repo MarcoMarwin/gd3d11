@@ -1387,6 +1387,7 @@ XRESULT D3D11GraphicsEngine::OnResize( INT2 newSize ) {
         }
     } else {
         LogInfo() << "Resizing swapchain  (Format: DXGI_FORMAT_SWAPCHAIN )";
+        GetContext()->ClearState();
         hr =SwapChain->ResizeBuffers( 0, bbres.x, bbres.y, DXGI_FORMAT_ENGINE_SWAPCHAIN , lastSwapchainFlags );
         if ( FAILED( hr ) ) {
             LogError() << "Failed to resize swapchain! HRESULT: " << std::hex << hr;
@@ -1569,6 +1570,10 @@ XRESULT D3D11GraphicsEngine::OnBeginFrame() {
 
     auto& stagingTextures = Engine::GAPI->GetStagingTextures();
     for ( auto& [res, texture] : stagingTextures ) {
+        if ( !texture || !res.second ) {
+            if ( res.second ) res.second->Release();
+            continue;
+        }
         GetContext()->CopySubresourceRegion( texture, res.first, 0, 0, 0, res.second, 0, nullptr );
         res.second->Release();
     }

@@ -148,6 +148,7 @@ namespace {
     }
 
     FfxResource GetAsFfxResource( ID3D11Resource* res, const wchar_t* name ) {
+        if ( !res ) return {};
         return ffxGetResourceDX11_Fsr31_( res, GetFfxResourceDescriptionDX11( res ), name );
     }
 
@@ -240,6 +241,7 @@ XRESULT D3D11PFX_FSR3::Apply(
     // Optional Resources (Passing nullptr handles them internally, e.g., Auto Exposure)
     // dispatchDesc.exposure = ffxGetResourceDX11_Fsr31_( nullptr, GetFfxResourceDescriptionDX11(nullptr), L"" );
     if (reactiveMask != nullptr) {
+        dispatchDesc.reactive = GetAsFfxResource( reactiveMask, L"FSR3_ReactiveMask" );
         dispatchDesc.transparencyAndComposition = GetAsFfxResource( reactiveMask, L"FSR3_TNC" );
     }
 
