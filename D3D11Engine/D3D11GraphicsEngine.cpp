@@ -4123,14 +4123,16 @@ XRESULT D3D11GraphicsEngine::OnStartWorldRendering() {
     if ( renderWetGroundSSR ) {
         graph.AddPass( RG_PASS_NAME("Wet Ground SSR"), [&]( RGBuilder& builder, RenderPass& pass ) {
             builder.Read( normalsResource );
+            builder.Read( reactiveMaskResource );
             builder.Read( waterMaskResource );
             builder.Read( backBufferHandle );
             builder.Write( backBufferHandle );
 
-            pass.m_executeCallback = [this, backBufferHandle, normalsResource, waterMaskResource](const RenderGraph& graph) {
+            pass.m_executeCallback = [this, backBufferHandle, normalsResource, reactiveMaskResource, waterMaskResource](const RenderGraph& graph) {
                 TracyD3D11ZoneCGX( "D3D11GraphicsEngine::Wet Ground SSR" );
                 auto* backBuffer = graph.GetPhysicalTexture( backBufferHandle );
                 auto* normals = graph.GetPhysicalTexture( normalsResource );
+                auto* reactiveMask = graph.GetPhysicalTexture( reactiveMaskResource );
                 auto* waterMask = graph.GetPhysicalTexture( waterMaskResource );
                 auto tempBuffer = PfxRenderer->GetTempBuffer();
 
@@ -4140,6 +4142,7 @@ XRESULT D3D11GraphicsEngine::OnStartWorldRendering() {
                     tempBuffer->GetShaderResView().Get(),
                     GetDepthBufferCopy()->GetShaderResView().Get(),
                     normals->GetShaderResView().Get(),
+                    reactiveMask->GetShaderResView().Get(),
                     waterMask->GetShaderResView().Get() );
             };
         });
@@ -4758,6 +4761,9 @@ XRESULT D3D11GraphicsEngine::DrawMeshInfoListAlphablended(
     if ( list.empty() ) {
         return XR_SUCCESS;
     }
+
+    GetContext()->OMSetRenderTargets( 1, HDRBackBuffer->GetRenderTargetView().GetAddressOf(),
+        DepthStencilBuffer->GetDepthStencilView().Get() );
 
     XMMATRIX view = Engine::GAPI->GetViewMatrixXM();
     Engine::GAPI->SetViewTransformXM( view );

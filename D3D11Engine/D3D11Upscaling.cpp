@@ -7,9 +7,84 @@
 #include "D3D11PFX_FSR2.h"
 #include "D3D11PFX_FSR3.h"
 #include "D3D11PFX_TAA.h"
+#include "D3D11ShaderManager.h"
 #include "oCGame.h"
 
 namespace {
+
+    RGResourceHandle AddReactiveMaskDilationPass( RenderGraph& graph,
+        D3D11GraphicsEngine& engine,
+        RGResourceHandle reactiveMaskResource )
+    {
+        RGResourceHandle dilatedReactiveMaskResource = RG_INVALID_HANDLE;
+
+        graph.AddPass( RG_PASS_NAME("FSR Precipitation Reactive Mask"), [&]( RGBuilder& builder, RenderPass& pass ) {
+            const auto size = engine.GetResolution();
+            dilatedReactiveMaskResource = builder.CreateTexture( { static_cast<uint32_t>(size.x), static_cast<uint32_t>(size.y), DXGI_FORMAT_R8_UNORM, L"DilatedReactiveMask" } );
+            builder.Read( reactiveMaskResource );
+
+            pass.m_executeCallback = [&engine, reactiveMaskResource, dilatedReactiveMaskResource]( const RenderGraph& graph ) {
+                auto sourceMask = graph.GetPhysicalTexture( reactiveMaskResource );
+                auto dilatedMask = graph.GetPhysicalTexture( dilatedReactiveMaskResource );
+                if ( !sourceMask || !dilatedMask ) {
+                    return;
+                }
+
+                auto& context = engine.GetContext();
+                auto res = engine.GetResolution();
+
+                D3D11_VIEWPORT oldVP = {};
+                UINT numViewports = 1;
+                context->RSGetViewports( &numViewports, &oldVP );
+
+                D3D11_VIEWPORT vp = {};
+                vp.Width = static_cast<float>(res.x);
+                vp.Height = static_cast<float>(res.y);
+                vp.MinDepth = 0.0f;
+                vp.MaxDepth = 1.0f;
+                context->RSSetViewports( 1, &vp );
+
+                Microsoft::WRL::ComPtr<ID3D11RenderTargetView> oldRTV;
+                Microsoft::WRL::ComPtr<ID3D11DepthStencilView> oldDSV;
+                context->OMGetRenderTargets( 1, oldRTV.GetAddressOf(), oldDSV.GetAddressOf() );
+
+                ID3D11ShaderResourceView* nullSRV = nullptr;
+                context->PSSetShaderResources( 0, 1, &nullSRV );
+
+                engine.GetShaderManager().GetVShader( VShaderID::VS_PFX )->Apply();
+                engine.GetShaderManager().GetPShader( PShaderID::PS_PFX_ReactiveMaskDilate )->Apply();
+
+                ID3D11RenderTargetView* rtv = dilatedMask->GetRenderTargetView().Get();
+                context->OMSetRenderTargets( 1, &rtv, nullptr );
+
+                ID3D11ShaderResourceView* srv = sourceMask->GetShaderResView().Get();
+                context->PSSetShaderResources( 0, 1, &srv );
+                ID3D11SamplerState* linearSampler = engine.GetLinearSamplerState();
+                context->PSSetSamplers( 0, 1, &linearSampler );
+
+                auto& rendererState = Engine::GAPI->GetRendererState();
+                rendererState.BlendState.SetDefault();
+                rendererState.BlendState.SetDirty();
+                rendererState.DepthState.DepthBufferCompareFunc = GothicDepthBufferStateInfo::CF_COMPARISON_ALWAYS;
+                rendererState.DepthState.DepthWriteEnabled = false;
+                rendererState.DepthState.SetDirty();
+
+                engine.GetPfxRenderer()->DrawFullScreenQuad();
+
+                context->PSSetShaderResources( 0, 1, &nullSRV );
+                context->OMSetRenderTargets( 1, oldRTV.GetAddressOf(), oldDSV.Get() );
+                if ( numViewports > 0 ) {
+                    context->RSSetViewports( 1, &oldVP );
+                }
+
+                rendererState.DepthState.DepthBufferCompareFunc = GothicDepthBufferStateInfo::DEFAULT_DEPTH_COMP_STATE;
+                rendererState.DepthState.DepthWriteEnabled = true;
+                rendererState.DepthState.SetDirty();
+            };
+        } );
+
+        return dilatedReactiveMaskResource;
+    }
 
     void AddFSR1Pass( RenderGraph& graph,
         D3D11GraphicsEngine& engine,
@@ -215,13 +290,15 @@ bool D3D11Upscaling::AddUpscalingPass( RenderGraph& graph,
     if ( settings.Upscaler == GothicRendererSettings::E_Upscaler::UPSCALER_FSR_2
             && (settings.ResolutionScalePercent <= 100)
             && settings.AntiAliasingMode == GothicRendererSettings::AA_FSR ) {
-        AddFSR2Pass( graph, engine, outputRTV, color, depth, motionVectors, reactiveMask );
+        const auto fsrReactiveMask = AddReactiveMaskDilationPass( graph, engine, reactiveMask );
+        AddFSR2Pass( graph, engine, outputRTV, color, depth, motionVectors, fsrReactiveMask );
         return true;
     } else if ( settings.Upscaler == GothicRendererSettings::E_Upscaler::UPSCALER_FSR_3
             && (settings.ResolutionScalePercent <= 100)
             && settings.AntiAliasingMode == GothicRendererSettings::AA_FSR ) {
 
-        AddFSR3Pass( graph, engine, outputRTV, color, depth, motionVectors, reactiveMask );
+        const auto fsrReactiveMask = AddReactiveMaskDilationPass( graph, engine, reactiveMask );
+        AddFSR3Pass( graph, engine, outputRTV, color, depth, motionVectors, fsrReactiveMask );
         return true;
     }
     return false;

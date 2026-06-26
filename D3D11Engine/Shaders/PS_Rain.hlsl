@@ -291,8 +291,8 @@ PS_OUTPUT PSMain( PS_INPUT Input )
 #endif
 	PS_OUTPUT output;
 	output.color = directionalLight;
-	float precipitationMask = smoothstep(0.001f, 0.015f, directionalLight.w);
-	output.reactiveMask = max(precipitationMask, saturate(directionalLight.w * 12.0f));
+	float precipitationMask = smoothstep(0.0005f, 0.006f, directionalLight.w);
+	output.reactiveMask = max(precipitationMask, saturate(directionalLight.w * 24.0f));
 	return output;
 }
 

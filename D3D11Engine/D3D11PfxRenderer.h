@@ -58,6 +58,7 @@ public:
                                 ID3D11ShaderResourceView* sceneSRV,
                                 ID3D11ShaderResourceView* depthSRV,
                                 ID3D11ShaderResourceView* normalsSRV,
+                                ID3D11ShaderResourceView* reactiveMaskSRV,
                                 ID3D11ShaderResourceView* waterMaskSRV );
 
     /** Copies the given texture to the given RTV */

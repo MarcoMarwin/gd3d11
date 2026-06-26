@@ -27,7 +27,8 @@ Texture2D TX_Depth : register(t1);
 Texture2D TX_Normals : register(t2);
 Texture2D TX_RainShadow : register(t3);
 Texture2D TX_Distortion : register(t4);
-Texture2D TX_WaterMask : register(t5);
+Texture2D TX_ReactiveMask : register(t5);
+Texture2D TX_WaterMask : register(t6);
 
 struct PS_INPUT
 {
@@ -67,6 +68,11 @@ float4 PSMain(PS_INPUT input) : SV_TARGET
     float2 uv = input.vTexcoord;
     float3 sceneColor = TX_Scene.SampleLevel(SS_Linear, uv, 0).rgb;
     if (TX_WaterMask.SampleLevel(SS_Linear, uv, 0).r > 0.5f)
+        return float4(sceneColor, 1.0f);
+
+    // Alpha-tested surfaces such as Minental ice write into the reactive mask.
+    // Keep them out of wet-ground SSR so rain cannot project reflections through them.
+    if (TX_ReactiveMask.SampleLevel(SS_Linear, uv, 0).r > 0.01f)
         return float4(sceneColor, 1.0f);
 
     float depth = TX_Depth.SampleLevel(SS_Linear, uv, 0).r;
