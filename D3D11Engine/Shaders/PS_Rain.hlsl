@@ -248,6 +248,14 @@ float4 PSMain( PS_INPUT Input ) : SV_TARGET
 	float4 directionalLight;
 	float3 lightPos = normalize(float3(0.333f,0.433f,0.333f)) * 10000.0f;
     rainResponse(Input, lightPos, globalLighting * Input.vDiffuse.a, float3(1.0,1.0,1.0), AR_CameraPosition - Input.vWorldPosition, false, directionalLight);
+
+#ifndef SNOW_FEATURE
+	float sunHeight = normalize(AR_LightPosition - AR_CameraPosition).y;
+	float nightRainBlend = smoothstep(0.0f, 1.0f, saturate(-sunHeight * 4.0f));
+	float verticalFade = smoothstep(0.02f, 0.14f, Input.vTexcoord.y)
+		* (1.0f - smoothstep(0.86f, 0.98f, Input.vTexcoord.y));
+	directionalLight.w *= lerp(1.0f, 0.78f, nightRainBlend) * verticalFade;
+#endif
 	
 	//float tx = TX_RainTextureArray.Sample(SS_Anisotropic, float3(Input.vTexcoord, 0)).r;
 	

@@ -95,12 +95,13 @@ XRESULT D3D11PfxRenderer::RenderWetGroundSSR(
     ID3D11ShaderResourceView* sceneSRV,
     ID3D11ShaderResourceView* depthSRV,
     ID3D11ShaderResourceView* normalsSRV,
+    ID3D11ShaderResourceView* reactiveMaskSRV,
     ID3D11ShaderResourceView* waterMaskSRV ) {
     auto* engine = reinterpret_cast<D3D11GraphicsEngine*>(Engine::GraphicsEngine);
     auto& context = engine->GetContext();
     auto* rainShadow = engine->Effects ? engine->Effects->GetRainShadowmap() : nullptr;
     auto* shadowMaps = engine->GetShadowMaps();
-    if ( !outputRTV || !sceneSRV || !depthSRV || !normalsSRV || !waterMaskSRV || !rainShadow || !shadowMaps ) {
+    if ( !outputRTV || !sceneSRV || !depthSRV || !normalsSRV || !reactiveMaskSRV || !waterMaskSRV || !rainShadow || !shadowMaps ) {
         return XR_FAILED;
     }
 
@@ -129,6 +130,10 @@ XRESULT D3D11PfxRenderer::RenderWetGroundSSR(
     cb.WG_Time = Engine::GAPI->GetTimeSeconds();
     ps->GetBuffer( "WetGroundSSRConstantBuffer" ).Update( &cb ).Bind();
 
+    Microsoft::WRL::ComPtr<ID3D11RenderTargetView> previousRTV;
+    Microsoft::WRL::ComPtr<ID3D11DepthStencilView> previousDSV;
+    context->OMGetRenderTargets( 1, previousRTV.GetAddressOf(), previousDSV.GetAddressOf() );
+
     context->OMSetRenderTargets( 1, &outputRTV, nullptr );
     ID3D11ShaderResourceView* resources[4] = {
         sceneSRV,
@@ -138,7 +143,8 @@ XRESULT D3D11PfxRenderer::RenderWetGroundSSR(
     };
     context->PSSetShaderResources( 0, 4, resources );
     engine->GetDistortionTexture()->BindToPixelShader( 4 );
-    context->PSSetShaderResources( 5, 1, &waterMaskSRV );
+    context->PSSetShaderResources( 5, 1, &reactiveMaskSRV );
+    context->PSSetShaderResources( 6, 1, &waterMaskSRV );
 
     ID3D11SamplerState* samplers[2] = {
         engine->GetClampSamplerState(),
@@ -158,8 +164,9 @@ XRESULT D3D11PfxRenderer::RenderWetGroundSSR(
 
     DrawFullScreenQuad();
 
-    ID3D11ShaderResourceView* nullResources[6] = {};
-    context->PSSetShaderResources( 0, 6, nullResources );
+    ID3D11ShaderResourceView* nullResources[7] = {};
+    context->PSSetShaderResources( 0, 7, nullResources );
+    context->OMSetRenderTargets( 1, previousRTV.GetAddressOf(), previousDSV.Get() );
     return XR_SUCCESS;
 }
 
@@ -197,8 +204,7 @@ XRESULT D3D11PfxRenderer::RenderTAA(const Microsoft::WRL::ComPtr<ID3D11ShaderRes
         engine->GetDepthBuffer()->GetShaderResView(),
         velocityBuffer.Get() ? velocityBuffer : FX_TAA->GetVelocityBufferSRV()
     );
-
-    // Stelle den DSV wieder her falls nötig
+    // Restore DSV if needed
     context->OMSetRenderTargets(1, currentRTV.GetAddressOf(), currentDSV.Get());
     return XR_SUCCESS;
 }
@@ -450,7 +456,7 @@ XRESULT D3D11PfxRenderer::RenderPostFXComposition(
     ID3D11ShaderResourceView* srvs[4] = { backbufferSRV, saoSRV, godraysSRV, depthSRV };
     context->PSSetShaderResources( 0, 4, srvs );
 
-    // No blending — direct overwrite
+    // No blending - direct overwrite
     Engine::GAPI->GetRendererState().BlendState.SetDefault();
     Engine::GAPI->GetRendererState().BlendState.SetDirty();
     Engine::GAPI->GetRendererState().DepthState.DepthBufferCompareFunc =

@@ -264,6 +264,7 @@ public:
 
     /** Draws a list of mesh infos */
     XRESULT DrawMeshInfoListAlphablended( const std::vector<std::pair<MeshKey, MeshInfo*>>& list );
+    XRESULT DrawWaterfallMask( ID3D11RenderTargetView* waterMaskRTV );
 
     /** Draws the static VOBs */
     XRESULT DrawVOBs( bool noTextures = false ) override;
@@ -510,8 +511,10 @@ protected:
     /** List of waterfall worldmeshes we have to render using alphablending */
     std::vector<std::pair<MeshKey, MeshInfo*>> FrameTransparencyMeshesWaterfall;
 
-    INT2 m_scaledResolution;
+    /** Transparent worldmeshes that must block rain/wet-ground SSR */
+    std::vector<std::pair<MeshKey, MeshInfo*>> FrameTransparencyMeshesWetSSRBlockers;
 
+    INT2 m_scaledResolution;
 public:
     /** Lighting */
     GMesh* InverseUnitSphereMesh;

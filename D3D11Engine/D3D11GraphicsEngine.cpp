@@ -3968,6 +3968,7 @@ XRESULT D3D11GraphicsEngine::OnStartWorldRendering() {
     FrameTransparencyMeshes.clear();
     FrameTransparencyMeshesPortal.clear();
     FrameTransparencyMeshesWaterfall.clear();
+    FrameTransparencyMeshesWetSSRBlockers.clear();
     m_FrameGeometryCache.Reset();
 
     // TODO: TODO: Hack for texture caching!
@@ -4115,7 +4116,7 @@ XRESULT D3D11GraphicsEngine::OnStartWorldRendering() {
         } );
     }
     else if ( compositionSAO ) {
-        // SAO compute-only pass ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â skips the final modulate blit (composition handles it)
+        // SAO compute-only pass skips the final modulate blit (composition handles it)
         graph.AddPass( RG_PASS_NAME("SAO Compute"), [&]( RGBuilder& builder, RenderPass& pass ) {
             builder.Read( normalsResource );
 
@@ -4174,20 +4175,25 @@ XRESULT D3D11GraphicsEngine::OnStartWorldRendering() {
                 waterMaskRTV = waterMask->GetRenderTargetView().Get();
             }
             DrawWaterSurfaces( waterMaskRTV );
+            if ( renderWetGroundSSR ) {
+                DrawWaterfallMask( waterMaskRTV );
+            }
         };
     });
 
     if ( renderWetGroundSSR ) {
         graph.AddPass( RG_PASS_NAME("Wet Ground SSR"), [&]( RGBuilder& builder, RenderPass& pass ) {
             builder.Read( normalsResource );
+            builder.Read( reactiveMaskResource );
             builder.Read( waterMaskResource );
             builder.Read( backBufferHandle );
             builder.Write( backBufferHandle );
 
-            pass.m_executeCallback = [this, backBufferHandle, normalsResource, waterMaskResource](const RenderGraph& graph) {
+            pass.m_executeCallback = [this, backBufferHandle, normalsResource, reactiveMaskResource, waterMaskResource](const RenderGraph& graph) {
                 TracyD3D11ZoneCGX( "D3D11GraphicsEngine::Wet Ground SSR" );
                 auto* backBuffer = graph.GetPhysicalTexture( backBufferHandle );
                 auto* normals = graph.GetPhysicalTexture( normalsResource );
+                auto* reactiveMask = graph.GetPhysicalTexture( reactiveMaskResource );
                 auto* waterMask = graph.GetPhysicalTexture( waterMaskResource );
                 auto tempBuffer = PfxRenderer->GetTempBuffer();
 
@@ -4197,6 +4203,7 @@ XRESULT D3D11GraphicsEngine::OnStartWorldRendering() {
                     tempBuffer->GetShaderResView().Get(),
                     GetDepthBufferCopy()->GetShaderResView().Get(),
                     normals->GetShaderResView().Get(),
+                    reactiveMask->GetShaderResView().Get(),
                     waterMask->GetShaderResView().Get() );
             };
         });
@@ -4277,8 +4284,8 @@ XRESULT D3D11GraphicsEngine::OnStartWorldRendering() {
     if (rendererState.RendererSettings.DrawFog &&
                 Engine::GAPI->GetLoadedWorldInfo()->BspTree->GetBspTreeMode() ==
                 zBSP_MODE_OUTDOOR && !compositionActive) {
-        // Standalone heightfog pass ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â only used when composition is not active (shouldn't happen
-        // when DrawFog is on, but kept as fallback for FL10 or edge cases)
+        // Standalone heightfog pass is only used when composition is not active.
+        // Kept as fallback for FL10 or edge cases.
         graph.AddPass( RG_PASS_NAME("Draw Heightfog"), [&]( RGBuilder& builder, RenderPass& pass ) {
             builder.Read( backBufferHandle );
             builder.Write( backBufferHandle );
@@ -4355,7 +4362,7 @@ XRESULT D3D11GraphicsEngine::OnStartWorldRendering() {
         Engine::GAPI->GetLoadedWorldInfo()->BspTree->GetBspTreeMode() ==
         zBSP_MODE_OUTDOOR) {
         if ( compositionActive ) {
-            // GodRays compute-only pass ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â writes to pool texture, skips the final additive blit
+            // GodRays compute-only pass writes to pool texture and skips the final additive blit.
             graph.AddPass( RG_PASS_NAME("GodRays Compute"), [&]( RGBuilder& builder, RenderPass& pass ) {
                 builder.Read( backBufferHandle );
 
@@ -4394,8 +4401,7 @@ XRESULT D3D11GraphicsEngine::OnStartWorldRendering() {
             });
         }
     }
-
-    // PostFX Composition pass ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â merges SAO, HeightFog, and GodRays in a single full-screen blit
+    // PostFX Composition pass merges SAO, HeightFog, and GodRays in a single full-screen blit.
     if ( compositionActive ) {
         graph.AddPass( RG_PASS_NAME("PostFX Composition"), [&]( RGBuilder& builder, RenderPass& pass ) {
             builder.Read( backBufferHandle );
@@ -4406,8 +4412,7 @@ XRESULT D3D11GraphicsEngine::OnStartWorldRendering() {
                 TracyD3D11ZoneCGX( "D3D11GraphicsEngine::PostFX Composition" );
 
                 auto backBuffer = graph.GetPhysicalTexture(backBufferHandle);
-
-                // Copy backbuffer to a temp texture ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â we need to read it as SRV while writing to RTV
+                // Copy backbuffer to a temp texture so it can be read as SRV while writing to RTV.
                 auto tempBuffer = PfxRenderer->GetTempBuffer();
                 GetContext()->CopyResource( tempBuffer->GetTexture().Get(), backBuffer->GetTexture().Get() );
 
@@ -4978,6 +4983,61 @@ XRESULT D3D11GraphicsEngine::DrawMeshInfoListAlphablended(
 }
 
 
+XRESULT D3D11GraphicsEngine::DrawWaterfallMask( ID3D11RenderTargetView* waterMaskRTV ) {
+    if ( (FrameTransparencyMeshesWaterfall.empty() && FrameTransparencyMeshesWetSSRBlockers.empty()) || !waterMaskRTV ) {
+        return XR_SUCCESS;
+    }
+
+    GetContext()->OMSetRenderTargets( 1, &waterMaskRTV,
+        DepthStencilBuffer->GetDepthStencilView().Get() );
+
+    XMMATRIX view = Engine::GAPI->GetViewMatrixXM();
+    Engine::GAPI->SetViewTransformXM( view );
+    Engine::GAPI->ResetWorldTransform();
+
+    SetActivePixelShader( PShaderID::PS_WaterMask );
+    SetActiveVertexShader( VShaderID::VS_Ex );
+
+    SetupVS_ExMeshDrawCall();
+    SetupVS_ExConstantBuffer();
+
+    const XMMATRIX identityMatrix = XMMatrixIdentity();
+    VS_ExConstantBuffer_PerInstance cbInstance = {};
+    XMStoreFloat4x4( &cbInstance.World, identityMatrix );
+    cbInstance.Color = float4( 1.0f, 1.0f, 1.0f, 1.0f );
+    ActiveVS->GetBuffer( "Matrices_PerInstances" ).Update( &cbInstance, sizeof( cbInstance ) ).Bind();
+
+    Engine::GAPI->GetRendererState().DepthState.DepthWriteEnabled = false;
+    Engine::GAPI->GetRendererState().DepthState.SetDirty();
+    Engine::GAPI->GetRendererState().BlendState.SetDefault();
+    Engine::GAPI->GetRendererState().BlendState.SetDirty();
+    UpdateRenderStates();
+
+    DrawVertexBufferIndexedUINT(
+        Engine::GAPI->GetWrappedWorldMesh()->MeshVertexBuffer,
+        Engine::GAPI->GetWrappedWorldMesh()->MeshIndexBuffer, 0, 0 );
+
+    for ( auto const& [meshKey, meshInfo] : FrameTransparencyMeshesWaterfall ) {
+        if ( meshKey.Material && meshKey.Material->GetAniTexture() ) {
+            DrawVertexBufferIndexedUINT( nullptr, nullptr, meshInfo->Indices.size(),
+                meshInfo->BaseIndexLocation );
+        }
+    }
+
+    for ( auto const& [meshKey, meshInfo] : FrameTransparencyMeshesWetSSRBlockers ) {
+        if ( meshKey.Material && meshKey.Material->GetAniTexture() ) {
+            DrawVertexBufferIndexedUINT( nullptr, nullptr, meshInfo->Indices.size(),
+                meshInfo->BaseIndexLocation );
+        }
+    }
+
+    Engine::GAPI->GetRendererState().DepthState.DepthWriteEnabled = true;
+    Engine::GAPI->GetRendererState().DepthState.SetDirty();
+    UpdateRenderStates();
+
+    return XR_SUCCESS;
+}
+
 XRESULT D3D11GraphicsEngine::DrawWorldMesh( bool noTextures ) {
     if ( !Engine::GAPI->GetRendererState().RendererSettings.DrawWorldMesh )
         return XR_SUCCESS;
@@ -5040,7 +5100,7 @@ XRESULT D3D11GraphicsEngine::DrawWorldMesh( bool noTextures ) {
         Engine::GAPI->CollectVisibleSections( m_FrameGeometryCache.visibleSections, nullptr, true );
         m_FrameGeometryCache.worldMeshBuilt = true;
     }
-    renderList = m_FrameGeometryCache.visibleSections; // shallow copy of pointers ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â O(N_sections), not O(BSP)
+    renderList = m_FrameGeometryCache.visibleSections; // shallow copy of pointers, O(N_sections), not O(BSP)
 
     MeshInfo* meshInfo = Engine::GAPI->GetWrappedWorldMesh();
     DrawVertexBufferIndexedUINT( meshInfo->MeshVertexBuffer, meshInfo->MeshIndexBuffer, 0, 0 );
@@ -5066,6 +5126,7 @@ XRESULT D3D11GraphicsEngine::DrawWorldMesh( bool noTextures ) {
     std::vector<TransparencyWorldMeshEntry> transparencyMeshes;
     std::vector<TransparencyWorldMeshEntry> portalTransparencyMeshes;
     std::vector<TransparencyWorldMeshEntry> waterfallTransparencyMeshes;
+    std::vector<TransparencyWorldMeshEntry> wetSSRBlockerTransparencyMeshes;
 
     GetContext()->IASetPrimitiveTopology( D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST );
     GetContext()->DSSetShader( nullptr, nullptr, 0 );
@@ -5120,6 +5181,9 @@ XRESULT D3D11GraphicsEngine::DrawWorldMesh( bool noTextures ) {
                         ) {
                         if ( !isZPrepass ) {
                             transparencyMeshes.push_back( { transparencyMesh, distanceSq } );
+                            if ( IsIceTexture( aniTex ) ) {
+                                wetSSRBlockerTransparencyMeshes.push_back( { transparencyMesh, distanceSq } );
+                            }
                         }
                         continue;
                     } else {
@@ -5179,6 +5243,7 @@ XRESULT D3D11GraphicsEngine::DrawWorldMesh( bool noTextures ) {
         sortAndAppendTransparencyMeshes( transparencyMeshes, FrameTransparencyMeshes );
         sortAndAppendTransparencyMeshes( portalTransparencyMeshes, FrameTransparencyMeshesPortal );
         sortAndAppendTransparencyMeshes( waterfallTransparencyMeshes, FrameTransparencyMeshesWaterfall );
+        sortAndAppendTransparencyMeshes( wetSSRBlockerTransparencyMeshes, FrameTransparencyMeshesWetSSRBlockers );
     }
     auto CompareMesh = []( std::pair<WorldMeshKey, MeshInfo*>& a, std::pair<WorldMeshKey, MeshInfo*>& b ) -> bool {
         if ( a.first.AlphaLevel != b.first.AlphaLevel )
@@ -7149,7 +7214,7 @@ XRESULT D3D11GraphicsEngine::DrawVOBsInstanced() {
                     auto _scopeCollectVisibleVobs = RecordGraphicsEvent( GE_NAME( "DrawVOBsInstanced::CollectVisibleVobs" ) );
                     Engine::GAPI->CollectVisibleVobs( vobs, m_FrameLights, mobs, EGothicCullFlags::CullAll, (EBspTreeCollectFlags)collect );
                 }
-                // Snapshot mobs into cache ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â the static 'mobs' vector is cleared at
+                // Snapshot mobs into cache; the static mobs vector is cleared at
                 // end of this function, so the lit pass would find it empty otherwise.
                 m_FrameGeometryCache.cachedMobs = mobs;
             }
