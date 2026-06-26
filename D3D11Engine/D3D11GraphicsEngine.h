@@ -264,6 +264,7 @@ public:
 
     /** Draws a list of mesh infos */
     XRESULT DrawMeshInfoListAlphablended( const std::vector<std::pair<MeshKey, MeshInfo*>>& list );
+    XRESULT DrawWaterfallMask( ID3D11RenderTargetView* waterMaskRTV );
 
     /** Draws the static VOBs */
     XRESULT DrawVOBs( bool noTextures = false ) override;

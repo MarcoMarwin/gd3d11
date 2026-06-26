@@ -55,33 +55,35 @@ float ComputeIndoorDoorFloorBleed(float indoorPixel, float3 wsPosition, float3 w
 	float belowLight = smoothstep(-80.0f, 160.0f, lightPosWorld.y - wsPosition.y);
 	float surfaceMask = lerp(0.35f, 1.0f, floorMask);
 	float baseMask = outdoorPixel * surfaceMask * belowLight;
-	float worldPixel = max(max(length(ddx(wsPosition)), length(ddy(wsPosition))), 0.25f);
-	float baseRadius = clamp(30.0f / worldPixel, 3.0f, 56.0f);
 	if (baseMask <= 0.0f)
 		return 0.0f;
 
+	float worldPixel = max(max(length(ddx(wsPosition)), length(ddy(wsPosition))), 0.25f);
+	float maxRadius = clamp(30.0f / worldPixel, 1.0f, 12.0f);
+	float radiusA = max(1.0f, maxRadius * 0.5f);
+	float radiusB = max(1.0f, maxRadius);
 	float2 texel = 1.0f / PL_ViewportSize;
 	float doorwayProbe = 0.0f;
-	[unroll] for (int r = 1; r <= 3; ++r)
+
+	[unroll] for (int r = 0; r < 2; ++r)
 	{
-		float radius = baseRadius * (float)r;
-		float sampleFade = 1.0f - (float)(r - 1) * 0.25f;
-		[unroll] for (int d = 0; d < 4; ++d)
+		float radius = (r == 0) ? radiusA : radiusB;
+		[unroll] for (int d = 0; d < 8; ++d)
 		{
-			float2 offset = float2(d == 0 ? radius : (d == 1 ? -radius : 0.0f), d == 2 ? radius : (d == 3 ? -radius : 0.0f));
-			float2 sampleUV = saturate(uv + offset * texel);
+			float sx = (d == 0 || d == 4 || d == 5) ? radius : ((d == 1 || d == 6 || d == 7) ? -radius : 0.0f);
+			float sy = (d == 2 || d == 4 || d == 6) ? radius : ((d == 3 || d == 5 || d == 7) ? -radius : 0.0f);
+			float2 sampleUV = saturate(uv + float2(sx, sy) * texel);
 			float4 sampleDiffuse = TX_Diffuse.SampleLevel(SS_Linear, sampleUV, 0);
 			float sampleIndoor = sampleDiffuse.a < 0.5f ? 1.0f : 0.0f;
 			float sampleDepth = TX_Depth.SampleLevel(SS_Linear, sampleUV, 0).r;
 			float3 sampleVS = VSPositionFromDepth(sampleDepth, sampleUV);
-			float depthOk = 1.0f - smoothstep(25.0f, 120.0f, abs(sampleVS.z - vsPosition.z));
-			doorwayProbe = max(doorwayProbe, sampleIndoor * depthOk * sampleFade);
+			float worldFade = 1.0f - smoothstep(0.0f, 30.0f, length(sampleVS - vsPosition));
+			doorwayProbe = max(doorwayProbe, sampleIndoor * worldFade);
 		}
 	}
 
 	return baseMask * doorwayProbe;
 }
-
 //--------------------------------------------------------------------------------------
 // Blinn-Phong Lighting Reflection Model
 //--------------------------------------------------------------------------------------
@@ -179,4 +181,3 @@ float4 PSMain( PS_INPUT Input ) : SV_TARGET
 	lighting *= lerp(indoorBoundary, 1.0f, saturate(PL_IgnoreIndoorOutdoorLimit));
 	return float4(saturate(lighting),1);
 }
-

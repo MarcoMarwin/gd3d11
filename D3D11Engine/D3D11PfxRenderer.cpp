@@ -126,7 +126,7 @@ XRESULT D3D11PfxRenderer::RenderWetGroundSSR(
     cb.WG_Wetness = Engine::GAPI->GetSceneWetness();
     const INT2 resolution = engine->GetResolution();
     cb.WG_InvResolution = float2( 1.0f / std::max( resolution.x, 1 ), 1.0f / std::max( resolution.y, 1 ) );
-    cb.WG_Strength = Engine::GAPI->GetRendererState().RendererSettings.SSRStrength * 0.6f;
+    cb.WG_Strength = Engine::GAPI->GetRendererState().RendererSettings.SSRStrength * 0.72f;
     cb.WG_Time = Engine::GAPI->GetTimeSeconds();
     ps->GetBuffer( "WetGroundSSRConstantBuffer" ).Update( &cb ).Bind();
 
@@ -205,7 +205,7 @@ XRESULT D3D11PfxRenderer::RenderTAA(const Microsoft::WRL::ComPtr<ID3D11ShaderRes
         velocityBuffer.Get() ? velocityBuffer : FX_TAA->GetVelocityBufferSRV()
     );
 
-    // Stelle den DSV wieder her falls nötig
+    // Restore the DSV if needed
     context->OMSetRenderTargets(1, currentRTV.GetAddressOf(), currentDSV.Get());
     return XR_SUCCESS;
 }
@@ -457,7 +457,7 @@ XRESULT D3D11PfxRenderer::RenderPostFXComposition(
     ID3D11ShaderResourceView* srvs[4] = { backbufferSRV, saoSRV, godraysSRV, depthSRV };
     context->PSSetShaderResources( 0, 4, srvs );
 
-    // No blending — direct overwrite
+    // No blending - direct overwrite
     Engine::GAPI->GetRendererState().BlendState.SetDefault();
     Engine::GAPI->GetRendererState().BlendState.SetDirty();
     Engine::GAPI->GetRendererState().DepthState.DepthBufferCompareFunc =

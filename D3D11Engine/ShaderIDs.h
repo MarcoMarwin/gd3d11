@@ -78,6 +78,7 @@ enum class PShaderID : size_t {
     PS_Diffuse,
     PS_PortalDiffuse,
     PS_WaterfallFoam,
+    PS_WaterMask,
     PS_DS_AtmosphericScattering_Rain,
     PS_LinDepth,
     PS_DiffuseNormalmapped,
