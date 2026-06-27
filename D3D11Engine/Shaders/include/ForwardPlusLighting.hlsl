@@ -113,7 +113,7 @@ struct TiledPointLight
     float ShadowStrength;
     float IsIndoor;
     float IgnoreIndoorOutdoorLimit;
-    float Padding;
+    float ShadowSoftness;
 };
 
 struct LightGrid

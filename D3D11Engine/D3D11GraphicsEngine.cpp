@@ -1206,7 +1206,8 @@ XRESULT D3D11GraphicsEngine::RecreateBuffers() {
 
 
     auto roundedTextureResolution = GetResolution( );
-    if ( lastRoundedTextureResolution == roundedTextureResolution ) {
+    const bool renderBuffersAlive = DepthStencilBuffer && DepthStencilBufferCopy && VelocityBuffer && Backbuffer && m_SwapchainDepthStencilBuffer;
+    if ( lastRoundedTextureResolution == roundedTextureResolution && renderBuffersAlive ) {
         // same resolution, just adjusting the viewport
         return XR_SUCCESS;
     }
