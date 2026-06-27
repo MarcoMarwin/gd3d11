@@ -18,6 +18,9 @@ cbuffer WetGroundSSRConstantBuffer : register(b0)
     float2 WG_InvResolution;
     float WG_Strength;
     float WG_Time;
+
+    float WG_RainFXWeight;
+    float3 WG_Pad;
 };
 
 SamplerState SS_Linear : register(s0);
@@ -72,6 +75,15 @@ float SampleWetSSRBlockMask(float2 uv)
     mask = max(mask, TX_WaterMask.SampleLevel(SS_Linear, uv - float2(0.0f, WG_InvResolution.y), 0).r);
     return mask;
 }
+
+float2 CalculateRainRipples(float2 wetUV, float time)
+{
+    float2 rippleA = TX_Distortion.SampleLevel(SS_Linear, wetUV * 2.70f + time * float2(0.047f, -0.031f), 0).xy * 2.0f - 1.0f;
+    float2 rippleB = TX_Distortion.SampleLevel(SS_Linear, wetUV * 5.10f + time * float2(-0.039f, 0.052f), 0).yx * 2.0f - 1.0f;
+    float waveA = sin((rippleA.x + rippleA.y + time * 1.70f) * 6.2831853f);
+    float waveB = sin((rippleB.x - rippleB.y - time * 2.10f) * 6.2831853f);
+    return rippleA * waveA * 0.55f + rippleB * waveB * 0.35f;
+}
 float4 PSMain(PS_INPUT input) : SV_TARGET
 {
     float2 uv = input.vTexcoord;
@@ -105,7 +117,10 @@ float4 PSMain(PS_INPUT input) : SV_TARGET
     float2 wetUV = wsPosition.xz / 1100.0f;
     float2 distortion = TX_Distortion.SampleLevel(SS_Linear, wetUV + WG_Time * float2(0.013f, -0.009f), 0).xy * 2.0f - 1.0f;
     distortion += (TX_Distortion.SampleLevel(SS_Linear, wetUV * 0.63f + WG_Time * float2(-0.007f, 0.011f), 0).xy * 2.0f - 1.0f) * 0.5f;
-    float3 wetNormal = normalize(wsNormal + float3(distortion.x, 0.0f, distortion.y) * 0.10f);
+    float rainRippleWeight = wetMask * saturate(WG_RainFXWeight) * smoothstep(0.05f, 0.45f, WG_Wetness);
+    float2 rippleDistortion = CalculateRainRipples(wetUV, WG_Time) * rainRippleWeight;
+    float2 combinedDistortion = distortion + rippleDistortion * 1.5f;
+    float3 wetNormal = normalize(wsNormal + float3(combinedDistortion.x, 0.0f, combinedDistortion.y) * 0.10f);
 
     float3 viewRay = normalize(wsPosition - WG_CameraPosition);
     float3 rayDirection = normalize(reflect(viewRay, wetNormal));
@@ -150,7 +165,8 @@ float4 PSMain(PS_INPUT input) : SV_TARGET
     if (hitWeight <= 0.0f)
         return float4(sceneColor, 1.0f);
 
-    float3 reflectedColor = SampleRoughReflection(hitUV, distortion);
+    float2 reflectedUV = saturate(hitUV + rippleDistortion * 0.015f);
+    float3 reflectedColor = SampleRoughReflection(reflectedUV, combinedDistortion);
     float reflectionLuma = dot(reflectedColor, float3(0.2126f, 0.7152f, 0.0722f));
     reflectedColor *= rcp(1.0f + max(0.0f, reflectionLuma - 1.0f) * 0.7f);
 

@@ -4657,25 +4657,6 @@ XRESULT D3D11GraphicsEngine::OnStartWorldRendering() {
                 };
             } );
         }
-
-        GSky* sky = Engine::GAPI->GetSky();
-        if ( sky && sky->GetAtmosphereCB().AC_EnableNightAtmosphere > 0.5f
-            && sky->GetAtmosphereCB().AC_LightPos.y < -0.0001f ) {
-            graph.AddPass( RG_PASS_NAME("Night Distance Dither"), [&]( RGBuilder& builder, RenderPass& pass ) {
-                builder.Read( backBufferHandle );
-                builder.Write( backBufferHandle );
-
-                pass.m_executeCallback = [this](const RenderGraph&) {
-                    TracyD3D11ZoneCGX( "D3D11GraphicsEngine::Night Distance Dither" );
-                    PfxRenderer->RenderNightDistanceDither(
-                        Backbuffer->GetShaderResView(),
-                        Backbuffer->GetRenderTargetView(),
-                        DepthStencilBufferCopy->GetShaderResView(),
-                        GetBackbufferResolution() );
-                };
-            } );
-        }
-
         graph.Compile();
         graph.Execute();
 

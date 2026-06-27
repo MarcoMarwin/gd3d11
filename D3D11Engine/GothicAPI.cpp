@@ -3504,7 +3504,7 @@ void GothicAPI::DrawParticleFX( zCVob* source, zCParticleFX* fx, ParticleFrameDa
             ii.position = p->PositionWS;
             ii.color = color;
             ii.velocity = p->Vel;
-            ii.particleLightingScale = waterfallParticle ? 0.5f : 1.0f;
+            ii.particleLightingScale = waterfallParticle ? 0.25f : 1.0f;
 
             if ( fx->GetEmitter()->GetVisAlignment() == 2 ) {
                 if ( zCVob* connectedVob = fx->GetConnectedVob() ) {

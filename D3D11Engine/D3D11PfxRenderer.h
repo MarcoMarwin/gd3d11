@@ -40,10 +40,6 @@ public:
 
     /** Renders the HDR-Effect */
     XRESULT RenderHDR(ID3D11RenderTargetView* output, ID3D11ShaderResourceView* backbuffer);
-    XRESULT RenderNightDistanceDither( const Microsoft::WRL::ComPtr<ID3D11ShaderResourceView>& scene,
-        const Microsoft::WRL::ComPtr<ID3D11RenderTargetView>& output,
-        const Microsoft::WRL::ComPtr<ID3D11ShaderResourceView>& depth,
-        INT2 outputSize );
 
     /** Renders the SMAA-Effect */
     XRESULT RenderSMAA(ID3D11ShaderResourceView* backbuffer);
