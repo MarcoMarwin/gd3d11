@@ -86,21 +86,6 @@ namespace {
         return name;
     }
 
-    bool NameStartsWithMarker( const char* name, const char* marker ) {
-        if ( !name || !marker )
-            return false;
-
-        while ( *marker ) {
-            if ( !*name )
-                return false;
-            const unsigned char nameChar = static_cast<unsigned char>(*name++);
-            const unsigned char markerChar = static_cast<unsigned char>(*marker++);
-            if ( ::tolower( nameChar ) != ::tolower( markerChar ) )
-                return false;
-        }
-        return true;
-    }
-
     bool IsWaterfallParticleTexture( zCTexture* texture ) {
         if ( !texture )
             return false;
@@ -3426,15 +3411,15 @@ void GothicAPI::DrawParticleFX( zCVob* source, zCParticleFX* fx, ParticleFrameDa
             }
         }
 
-        const char* pfxName = source && source->GetVisual() ? source->GetVisual()->GetObjectName() : reinterpret_cast<zCVisual*>(fx)->GetObjectName();
-        const bool lavaFogParticle = NameStartsWithMarker( pfxName, "LAVAFOG" );
         const bool waterfallParticle = IsWaterfallParticleTexture( texture );
+        const int blendMode = static_cast<int>(fx->GetEmitter()->GetVisAlphaFunc());
+        const ParticleBatchKey batchKey = { texture, blendMode };
 
-        // Set render states for this type
-        ParticleRenderInfo& inf = FrameParticleInfo[texture];
-        inf.SortBackToFront = inf.SortBackToFront || lavaFogParticle;
+        // Blend mode is part of the batch key because Gothic reuses particle textures
+        // across effects with incompatible blend states (for example LAVAFOG and smoke).
+        ParticleRenderInfo& inf = FrameParticleInfo[batchKey];
 
-        switch ( fx->GetEmitter()->GetVisAlphaFunc() ) {
+        switch ( blendMode ) {
         case zRND_ALPHA_FUNC_ADD:
             inf.BlendState.SetAdditiveBlending();
             inf.BlendMode = zRND_ALPHA_FUNC_ADD;
@@ -3451,7 +3436,7 @@ void GothicAPI::DrawParticleFX( zCVob* source, zCParticleFX* fx, ParticleFrameDa
             break;
         }
 
-        std::vector<ParticleInstanceInfo>& part = FrameParticles[texture];
+        std::vector<ParticleInstanceInfo>& part = FrameParticles[batchKey];
 
         // Check for kill
         zTParticle* kill = nullptr;
@@ -5598,6 +5583,7 @@ XRESULT GothicAPI::SaveMenuSettings( const std::string& file ) {
     WritePrivateProfileStringA( "General", "AntiAliasing", std::to_string( (int)s.AntiAliasingMode ).c_str(), ini.c_str() );
 
     WritePrivateProfileStringA( "SMAA", "SharpenFactor", std::to_string( s.SharpenFactor ).c_str(), ini.c_str() );
+    WritePrivateProfileStringA( "General", "SharpeningMode", std::to_string( static_cast<int>(s.SharpeningMode) ).c_str(), ini.c_str() );
 
     WritePrivateProfileStringA( "HBAO", "Enabled", std::to_string( s.HbaoSettings.Enabled ? TRUE : FALSE ).c_str(), ini.c_str() );
     WritePrivateProfileStringA( "HBAO", "Bias", std::to_string( s.HbaoSettings.Bias ).c_str(), ini.c_str() );
@@ -5751,7 +5737,12 @@ XRESULT GothicAPI::LoadMenuSettings( const std::string& file ) {
             s.AntiAliasingMode = GothicRendererSettings::E_AntiAliasingMode::AA_SMAA;
         }
 
-        s.SharpenFactor = GetPrivateProfileFloatA( "SMAA", "SharpenFactor", 0.30f, ini );
+        s.SharpenFactor = std::clamp( GetPrivateProfileFloatA( "SMAA", "SharpenFactor", 0.30f, ini ), 0.0f, 1.0f );
+        const int sharpeningMode = std::clamp(
+            GetPrivateProfileIntA( "General", "SharpeningMode", static_cast<int>(ds.SharpeningMode), ini.c_str() ),
+            static_cast<int>(GothicRendererSettings::SHARPEN_NONE),
+            static_cast<int>(GothicRendererSettings::SHARPEN_CAS) );
+        s.SharpeningMode = static_cast<GothicRendererSettings::E_SharpeningMode>(sharpeningMode);
         s.AntiAliasingMode = (GothicRendererSettings::E_AntiAliasingMode)GetPrivateProfileIntA( "General", "AntiAliasing", (int)ds.AntiAliasingMode, ini.c_str() );
 
         const HBAOSettings& defaultHBAOSettings = ds.HbaoSettings;
@@ -6122,7 +6113,7 @@ void GothicAPI::SetIntParamFromConfig( const std::string& param, int value ) {
 }
 
 /** Returns the frame particle info collected from all DrawParticleFX-Calls */
-std::map<zCTexture*, ParticleRenderInfo>& GothicAPI::GetFrameParticleInfo() {
+std::map<ParticleBatchKey, ParticleRenderInfo>& GothicAPI::GetFrameParticleInfo() {
     return FrameParticleInfo;
 }
 

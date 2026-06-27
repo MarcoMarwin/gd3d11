@@ -1189,6 +1189,9 @@
     <None Include="include\assimp\.editorconfig">
       <Filter>Librarys\Assimp</Filter>
     </None>
+    <None Include="Shaders\PS_PFX_NightDistanceDither.hlsl">
+      <Filter>Engine\Shaders</Filter>
+    </None>
     <None Include="Shaders\PS_PFX_TAA.hlsl">
       <Filter>Engine\Shaders</Filter>
     </None>

@@ -794,7 +794,7 @@ public:
     SkeletalVobInfo* GetSkeletalVobByVob( zCVob* vob );
 
     /** Returns the frame particle info collected from all DrawParticleFX-Calls */
-    std::map<zCTexture*, ParticleRenderInfo>& GetFrameParticleInfo();
+    std::map<ParticleBatchKey, ParticleRenderInfo>& GetFrameParticleInfo();
 
     /** Checks if the normalmaps are there */
     bool CheckNormalmapFilesOld();
@@ -893,8 +893,8 @@ private:
     /** Currently bound textures from gothic */
     zCTexture* BoundTextures[8];
 
-    std::map<zCTexture*, std::vector<ParticleInstanceInfo>> FrameParticles;
-    std::map<zCTexture*, ParticleRenderInfo> FrameParticleInfo;
+    std::map<ParticleBatchKey, std::vector<ParticleInstanceInfo>> FrameParticles;
+    std::map<ParticleBatchKey, ParticleRenderInfo> FrameParticleInfo;
 
     /** Loaded game sections */
     std::map<int, std::map<int, WorldMeshSectionInfo>> WorldSections;

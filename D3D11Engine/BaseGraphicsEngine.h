@@ -226,8 +226,8 @@ public:
     virtual void DrawFrameParticleMeshes( std::unordered_map<zCVob*, MeshVisualInfo*>& progMeshes ) {}
 
     /** Draws particle effects */
-    virtual void DrawFrameParticles(std::map<zCTexture*, std::vector<ParticleInstanceInfo>>& particles,
-        std::map<zCTexture*, ParticleRenderInfo>& info,
+    virtual void DrawFrameParticles(std::map<ParticleBatchKey, std::vector<ParticleInstanceInfo>>& particles,
+        std::map<ParticleBatchKey, ParticleRenderInfo>& info,
         RenderToTextureBuffer* bufferParticleColor,
         RenderToTextureBuffer* bufferParticleDistortion) {}
 

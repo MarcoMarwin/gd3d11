@@ -4658,6 +4658,24 @@ XRESULT D3D11GraphicsEngine::OnStartWorldRendering() {
             } );
         }
 
+        GSky* sky = Engine::GAPI->GetSky();
+        if ( sky && sky->GetAtmosphereCB().AC_EnableNightAtmosphere > 0.5f
+            && sky->GetAtmosphereCB().AC_LightPos.y < -0.0001f ) {
+            graph.AddPass( RG_PASS_NAME("Night Distance Dither"), [&]( RGBuilder& builder, RenderPass& pass ) {
+                builder.Read( backBufferHandle );
+                builder.Write( backBufferHandle );
+
+                pass.m_executeCallback = [this](const RenderGraph&) {
+                    TracyD3D11ZoneCGX( "D3D11GraphicsEngine::Night Distance Dither" );
+                    PfxRenderer->RenderNightDistanceDither(
+                        Backbuffer->GetShaderResView(),
+                        Backbuffer->GetRenderTargetView(),
+                        DepthStencilBufferCopy->GetShaderResView(),
+                        GetBackbufferResolution() );
+                };
+            } );
+        }
+
         graph.Compile();
         graph.Execute();
 
@@ -9097,8 +9115,8 @@ void D3D11GraphicsEngine::DrawFrameParticleMeshes( std::unordered_map<zCVob*, Me
 
 /** Draws particle effects */
 void D3D11GraphicsEngine::DrawFrameParticles(
-    std::map<zCTexture*, std::vector<ParticleInstanceInfo>>& particles,
-    std::map<zCTexture*, ParticleRenderInfo>& info,
+    std::map<ParticleBatchKey, std::vector<ParticleInstanceInfo>>& particles,
+    std::map<ParticleBatchKey, ParticleRenderInfo>& info,
     RenderToTextureBuffer* bufferParticleColor,
     RenderToTextureBuffer* bufferParticleDistortion ) {
     if ( particles.empty() ) return;
@@ -9147,10 +9165,11 @@ void D3D11GraphicsEngine::DrawFrameParticles(
         if ( textureParticle.second.empty() ) continue;
 
         ParticleRenderInfo* ri = &info[textureParticle.first];
+        zCTexture* texture = textureParticle.first.Texture;
         if ( ri->BlendMode == zRND_ALPHA_FUNC_ADD )
-            pvecAdd.push_back( std::make_tuple( textureParticle.first, ri, &textureParticle.second ) );
+            pvecAdd.push_back( std::make_tuple( texture, ri, &textureParticle.second ) );
         else
-            pvecRest.push_back( std::make_tuple( textureParticle.first, ri, &textureParticle.second ) );
+            pvecRest.push_back( std::make_tuple( texture, ri, &textureParticle.second ) );
     }
 
     ID3D11RenderTargetView* rtv[] = {
@@ -9217,19 +9236,6 @@ void D3D11GraphicsEngine::DrawFrameParticles(
                 tx->Bind( 0 );
             else
                 continue;
-        }
-
-        if ( partInfo.SortBackToFront && instances.size() > 1 ) {
-            const float3 cameraPosition = Engine::GAPI->GetCameraPosition();
-            std::sort( instances.begin(), instances.end(), [cameraPosition]( const ParticleInstanceInfo& a, const ParticleInstanceInfo& b ) {
-                const float adx = a.position.x - cameraPosition.x;
-                const float ady = a.position.y - cameraPosition.y;
-                const float adz = a.position.z - cameraPosition.z;
-                const float bdx = b.position.x - cameraPosition.x;
-                const float bdy = b.position.y - cameraPosition.y;
-                const float bdz = b.position.z - cameraPosition.z;
-                return adx * adx + ady * ady + adz * adz > bdx * bdx + bdy * bdy + bdz * bdz;
-            } );
         }
 
         GothicBlendStateInfo& blendState = partInfo.BlendState;

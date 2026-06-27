@@ -379,7 +379,7 @@ public:
     void DrawFrameParticleMeshes( std::unordered_map<zCVob*, MeshVisualInfo*>& progMeshes ) override;
 
     /** Draws particle effects */
-    void DrawFrameParticles(std::map<zCTexture*, std::vector<ParticleInstanceInfo>>& particles, std::map<zCTexture*, ParticleRenderInfo>& info, RenderToTextureBuffer
+    void DrawFrameParticles(std::map<ParticleBatchKey, std::vector<ParticleInstanceInfo>>& particles, std::map<ParticleBatchKey, ParticleRenderInfo>& info, RenderToTextureBuffer
                             * bufferParticleColor, RenderToTextureBuffer* bufferParticleDistortion) override;
 
     /** Returns the settings window availability */

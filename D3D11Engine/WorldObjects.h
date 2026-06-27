@@ -3,6 +3,7 @@
 #pragma warning( disable : 26495 )
 
 #include "pch.h"
+#include <functional>
 #include "GothicGraphicsState.h"
 #include "D3D11ConstantBuffer.h"
 #include "D3D11Texture.h"
@@ -23,10 +24,24 @@ struct BspInfo;
 class zCQuadMark;
 struct MaterialInfo;
 
+struct ParticleBatchKey {
+    ParticleBatchKey( zCTexture* texture = nullptr, int blendMode = zRND_ALPHA_FUNC_BLEND )
+        : Texture( texture ), BlendMode( blendMode ) {}
+
+    zCTexture* Texture;
+    int BlendMode;
+
+    bool operator<( const ParticleBatchKey& other ) const {
+        const std::less<zCTexture*> pointerLess;
+        if ( pointerLess( Texture, other.Texture ) ) return true;
+        if ( pointerLess( other.Texture, Texture ) ) return false;
+        return BlendMode < other.BlendMode;
+    }
+};
+
 struct ParticleRenderInfo {
     GothicBlendStateInfo BlendState;
     int BlendMode = zRND_ALPHA_FUNC_BLEND;
-    bool SortBackToFront = false;
 };
 
 struct ParticleInstanceInfo {

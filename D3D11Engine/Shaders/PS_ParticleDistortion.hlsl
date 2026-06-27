@@ -58,7 +58,7 @@ PS_OUTPUT PSMain( PS_INPUT Input )
 	float nonEmissiveDim = lerp(1.0f, 0.28f, nightParticle) * lerp(1.0f, 0.78f, rainParticle);
 	float emissiveDim = lerp(1.0f, 0.72f, nightParticle * rainParticle);
 	float particleLighting = lerp(nonEmissiveDim, emissiveDim, emissiveGuess);
-	color.rgb *= lerp(1.0f, particleLighting, saturate(AC_EnableParticleLighting * AC_ParticleLightingStrength * Input.vParticleLightingScale));
+	color.rgb *= lerp(1.0f, particleLighting, saturate(AC_EnableParticleLighting * AC_ParticleLightingStrength) * saturate(Input.vParticleLightingScale));
 	
 	PS_OUTPUT o;
 	// Store particle color

@@ -47,10 +47,6 @@ float3 VSPositionFromDepth( float depth, uint2 pixelCoord ) {
     return ReconstructVSPositionFromDepthReverseZInfinite( depth, pixelCoord, ViewportSize, ProjParams.xy );
 }
 
-float DoorBleedDither(float2 pixelCoord, float salt)
-{
-	return frac(sin(dot(pixelCoord + salt, float2(12.9898f, 78.233f))) * 43758.5453f);
-}
 
 float ComputeIndoorDoorFloorBleed(float indoorPixel, float3 wsPosition, float3 wsNormal, float3 vsPosition, float3 lightPosView, float3 lightPosWorld, float lightRange, uint2 pixelCoord, float currentDepth)
 {
@@ -66,11 +62,9 @@ float ComputeIndoorDoorFloorBleed(float indoorPixel, float3 wsPosition, float3 w
 	float worldPixel = max(2.0f * abs(vsPosition.z) * max(ProjParams.x / ViewportSize.x, ProjParams.y / ViewportSize.y), 0.02f);
 	int maxRadius = clamp((int)(bleedWorldSize / worldPixel + 0.5f), 1, 768);
 	float doorwayProbe = 0.0f;
-
-	[unroll] for (int r = 0; r < 3; ++r)
+	[unroll] for (int r = 0; r < 7; ++r)
 	{
-		float radiusJitter = DoorBleedDither(float2(pixelCoord), (float)r * 31.7f);
-		int radius = max(1, (int)((maxRadius * ((float)r + 0.65f + radiusJitter * 0.7f)) / 3.0f + 0.5f));
+		int radius = max(1, (maxRadius * (r + 1)) / 7);
 		[unroll] for (int d = 0; d < 8; ++d)
 		{
 			int sx = (d == 0 || d == 4 || d == 5) ? radius : ((d == 1 || d == 6 || d == 7) ? -radius : 0);

@@ -175,6 +175,61 @@ XRESULT D3D11PfxRenderer::RenderHDR( ID3D11RenderTargetView* output, ID3D11Shade
     return FX_HDR->Render( output, backbuffer );
 }
 
+XRESULT D3D11PfxRenderer::RenderNightDistanceDither(
+    const Microsoft::WRL::ComPtr<ID3D11ShaderResourceView>& scene,
+    const Microsoft::WRL::ComPtr<ID3D11RenderTargetView>& output,
+    const Microsoft::WRL::ComPtr<ID3D11ShaderResourceView>& depth,
+    INT2 outputSize ) {
+    auto* engine = reinterpret_cast<D3D11GraphicsEngine*>(Engine::GraphicsEngine);
+    GSky* sky = Engine::GAPI->GetSky();
+    if ( !engine || !sky || !scene.Get() || !output.Get() || !depth.Get() ) {
+        return XR_FAILED;
+    }
+
+    const AtmosphereConstantBuffer& atmosphere = sky->GetAtmosphereCB();
+    const float nightWeight = std::clamp( -atmosphere.AC_LightPos.y * 10.0f, 0.0f, 1.0f )
+        * std::clamp( atmosphere.AC_EnableNightAtmosphere, 0.0f, 1.0f );
+    if ( nightWeight <= 0.001f ) {
+        return XR_SUCCESS;
+    }
+
+    auto tempBuffer = GetBackbufferTempBuffer();
+    if ( !tempBuffer ) {
+        return XR_FAILED;
+    }
+
+    CopyTextureToRTV( scene, tempBuffer->GetRenderTargetView(), outputSize );
+
+    auto shader = engine->GetShaderManager().GetPShader( PShaderID::PS_PFX_NightDistanceDither );
+    auto vertexShader = engine->GetShaderManager().GetVShader( VShaderID::VS_PFX );
+    if ( !shader || !vertexShader ) {
+        return XR_FAILED;
+    }
+    shader->Apply();
+    vertexShader->Apply();
+
+    NightDistanceDitherConstantBuffer cb = {};
+    XMMATRIX view = Engine::GAPI->GetViewMatrixXM();
+    XMStoreFloat4x4( &cb.ND_InvView, XMMatrixInverse( nullptr, view ) );
+    const XMFLOAT4X4& projection = Engine::GAPI->GetProjectionMatrix();
+    cb.ND_ProjParams = float4( 1.0f / projection._11, 1.0f / projection._22, projection._43, projection._33 );
+    cb.ND_CameraPosition = Engine::GAPI->GetCameraPosition();
+    cb.ND_NightWeight = nightWeight;
+    cb.ND_FadeStart = std::max( 0.0f, atmosphere.AC_NightDarkeningStart );
+    cb.ND_FadeRange = std::max( 1000.0f, atmosphere.AC_NightDarkeningRange );
+    shader->GetBuffer( "NightDistanceDitherCB" ).Update( &cb ).Bind();
+
+    auto& context = engine->GetContext();
+    context->PSSetShaderResources( 1, 1, depth.GetAddressOf() );
+    ID3D11SamplerState* linearSampler = engine->GetLinearSamplerState();
+    context->PSSetSamplers( 0, 1, &linearSampler );
+
+    const XRESULT result = CopyTextureToRTV( tempBuffer->GetShaderResView(), output, outputSize, true );
+    ID3D11ShaderResourceView* nullResources[2] = {};
+    context->PSSetShaderResources( 0, 2, nullResources );
+    return result;
+}
+
 /** Renders the SMAA-Effect */
 XRESULT D3D11PfxRenderer::RenderSMAA(ID3D11ShaderResourceView* backbuffer) {
     FX_SMAA->RenderPostFX( backbuffer );

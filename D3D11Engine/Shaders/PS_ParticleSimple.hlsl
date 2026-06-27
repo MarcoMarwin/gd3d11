@@ -38,7 +38,7 @@ float3 AdaptParticleLighting(float3 rgb, float particleLightingScale)
     float nonEmissiveDim = lerp(1.0f, 0.24f, night) * lerp(1.0f, 0.78f, rain);
     float emissiveDim = lerp(1.0f, 0.70f, night * rain);
     float factor = lerp(nonEmissiveDim, emissiveDim, emissiveGuess);
-    return rgb * lerp(1.0f, factor, saturate(AC_EnableParticleLighting * AC_ParticleLightingStrength * particleLightingScale));
+    return rgb * lerp(1.0f, factor, saturate(AC_EnableParticleLighting * AC_ParticleLightingStrength) * saturate(particleLightingScale));
 }
 
 float4 PSMain( PS_INPUT Input ) : SV_TARGET

@@ -149,6 +149,16 @@ struct HDRSettingsConstantBuffer {
     float HDR_BloomStrength;
 };
 
+struct NightDistanceDitherConstantBuffer {
+    XMFLOAT4X4 ND_InvView;
+    float4 ND_ProjParams;
+    float3 ND_CameraPosition;
+    float ND_NightWeight;
+    float ND_FadeStart;
+    float ND_FadeRange;
+    float2 ND_Pad;
+};
+
 struct ViewportInfoConstantBuffer {
     float2 VPI_ViewportSize;
     float2 VPI_pad;
