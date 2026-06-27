@@ -5,6 +5,19 @@
 
 SamplerState SS_Linear : register( s0 );
 Texture2D TX_Texture0 : register( t0 );
+#ifndef USE_FFDATA
+Texture2D TX_Depth : register( t3 );
+
+cbuffer RefractionInfo : register( b0 )
+{
+    float4x4 RI_Projection;
+    float2 RI_ViewportSize;
+    float RI_Time;
+    float RI_Far;
+    float3 RI_CameraPosition;
+    float RI_Pad2;
+};
+#endif
 
 #ifdef USE_FFDATA
 struct FFData {
@@ -41,6 +54,22 @@ float3 AdaptParticleLighting(float3 rgb, float particleLightingScale)
     return rgb * lerp(1.0f, factor, saturate(AC_EnableParticleLighting * AC_ParticleLightingStrength) * saturate(particleLightingScale));
 }
 
+float SoftParticleFade( PS_INPUT Input )
+{
+#ifndef USE_FFDATA
+    float2 screenUV = Input.vPosition.xy / RI_ViewportSize;
+    float sceneDepth = TX_Depth.Sample( SS_Linear, saturate(screenUV) ).r;
+    if ( sceneDepth <= 1e-7f || Input.vViewPosition.z <= 0.0f )
+        return 1.0f;
+
+    float sceneViewDepth = RI_Projection._43 / (sceneDepth - RI_Projection._33);
+    float depthDifference = sceneViewDepth - Input.vViewPosition.z;
+    return saturate(depthDifference / 45.0f);
+#else
+    return 1.0f;
+#endif
+}
+
 float4 PSMain( PS_INPUT Input ) : SV_TARGET
 {
     float4 color = TX_Texture0.Sample(SS_Linear, Input.vTexcoord);
@@ -48,6 +77,7 @@ float4 PSMain( PS_INPUT Input ) : SV_TARGET
 #ifdef USE_FFDATA
     color *= cbFFData.textureFactor;
 #endif
+    color.a *= SoftParticleFade(Input);
     color.rgb = AdaptParticleLighting(color.rgb, Input.vParticleLightingScale);
     return color;
 }

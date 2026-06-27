@@ -288,7 +288,7 @@ struct ScreenFadeConstantBuffer {
 struct GhostAlphaConstantBuffer {
     float2 GA_ViewportSize;
     float GA_Alpha;
-    float GA_Pad;
+    float GA_LightingScale;
 };
 
 struct GrassConstantBuffer {

@@ -276,7 +276,7 @@ float3 ComputeVolumetricLightShafts(float2 uv, float depth)
 
     float geom = IsGeometryPixel(depth);
     float geometryMist = lerp(0.78f, 1.0f, 1.0f - geom);
-    float radial = 1.0f - smoothstep(0.05f, 1.10f, distToLight);
+    float radial = 1.0f - smoothstep(0.02f, 1.24f, distToLight);
     float onScreenLight = saturate(AC_LightScreenPos.z + 0.18f);
     float shaft = visibility * geometryMist * atmosphereWeight * radial * onScreenLight;
 
@@ -328,8 +328,7 @@ float4 PSMain( PS_INPUT Input ) : SV_TARGET
 
 #if COMPOSE_LIGHTSHAFTS
     float3 lightShafts = ComputeVolumetricLightShafts(Input.vTexcoord, compositionDepth);
-    float shaftDither = 1.0f + FogDither(Input.vPosition.xy) * 0.08f * saturate(AC_VolumetricLightShaftStrength);
-    color.rgb += lightShafts * shaftDither;
+    color.rgb += lightShafts;
 #endif
 
     return color;

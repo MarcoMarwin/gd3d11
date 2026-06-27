@@ -8686,6 +8686,17 @@ void D3D11GraphicsEngine::DrawDecalList( const std::vector<zCVob*>& decals,
 
     GhostAlphaConstantBuffer gacb = {};
     gacb.GA_ViewportSize = float2( Engine::GraphicsEngine->GetResolution().x, Engine::GraphicsEngine->GetResolution().y );
+    gacb.GA_Alpha = 1.0f;
+    gacb.GA_LightingScale = 1.0f;
+    if ( !lighting ) {
+        auto saturateDecal = []( float v ) { return v < 0.0f ? 0.0f : ( v > 1.0f ? 1.0f : v ); };
+        if ( auto sky = Engine::GAPI->GetSky() ) {
+            const auto& atmo = sky->GetAtmosphereCB();
+            float night = saturateDecal( ( -atmo.AC_LightPos.y + 0.08f ) * 2.5f );
+            float rain = std::max( saturateDecal( atmo.AC_RainFXWeight ), saturateDecal( atmo.AC_SceneWettness ) );
+            gacb.GA_LightingScale = ( 1.0f + ( 0.34f - 1.0f ) * night ) * ( 1.0f + ( 0.78f - 1.0f ) * rain );
+        }
+    }
     int lastAlphaFunc = -1;
     zCTexture* lastTex = nullptr;
     float lastGhostAlpha = gacb.GA_Alpha;
@@ -9196,6 +9207,8 @@ void D3D11GraphicsEngine::DrawFrameParticles(
     // Set usual rendering for everything else. Alphablending mostly.
     SetActivePixelShader( PShaderID::PS_ParticleSimple );
     ActivePS->Apply();
+    ActivePS->GetBuffer( "RefractionInfo" ).Update( &ricb ).Bind();
+    DepthStencilBufferCopy->BindToPixelShader( GetContext().Get(), 3 );
     if ( auto sky = Engine::GAPI->GetSky() ) {
         ActivePS->GetBuffer( "Atmosphere" ).Update( &sky->GetAtmosphereCB() ).Bind();
     }

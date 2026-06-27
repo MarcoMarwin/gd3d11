@@ -3270,6 +3270,7 @@ void GothicAPI::DrawTransparencyVobs() {
             GhostAlphaConstantBuffer gacb;
             gacb.GA_ViewportSize = float2( Engine::GraphicsEngine->GetResolution().x, Engine::GraphicsEngine->GetResolution().y );
             gacb.GA_Alpha = TransVobInfo.alpha;
+            gacb.GA_LightingScale = 1.0f;
             psBufGAI.Update( &gacb ).Bind();
             DrawSkeletalMeshVob( TransVobInfo.skeletalVob, TransVobInfo.distance, false );
         } else if ( TransVobInfo.normalVob ) {
@@ -3307,6 +3308,7 @@ void GothicAPI::DrawTransparencyVobs() {
             GhostAlphaConstantBuffer gacb;
             gacb.GA_ViewportSize = float2( Engine::GraphicsEngine->GetResolution().x, Engine::GraphicsEngine->GetResolution().y );
             gacb.GA_Alpha = TransVobInfo.alpha;
+            gacb.GA_LightingScale = 1.0f;
             psBufGAI.Update( &gacb ).Bind();
 
             for ( auto const& materialMesh : TransVobInfo.normalVob->VisualInfo->Meshes ) {
