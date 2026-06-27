@@ -370,6 +370,9 @@ struct VobLightInfo {
     /** True if this light-vob was discovered at runtime instead of during static BSP cache build. */
     bool IsDynamicVobLight = false;
 
+    /** True when the light is directly attached to a renderable parent vob. */
+    bool HasRenderableParentVob = false;
+
     /** True for dynamic/actor/PFX lights that should not be clipped at indoor/outdoor transitions. */
     bool IgnoreIndoorOutdoorLimit = false;
 

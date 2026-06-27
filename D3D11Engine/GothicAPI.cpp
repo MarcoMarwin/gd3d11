@@ -4361,7 +4361,7 @@ void GothicAPI::CollectVisibleVobs(
                 vi->VisibleInFrame = true;
 
                 // Update the lights shadows if: Light is dynamic or full shadow-updates are set
-                if ( !vi->IsPFXVobLight ) {
+                if ( !vi->IsPFXVobLight && vi->HasRenderableParentVob ) {
                     if ( RendererState.RendererSettings.EnablePointlightShadows >= GothicRendererSettings::PLS_FULL
                         || (RendererState.RendererSettings.EnablePointlightShadows >= GothicRendererSettings::PLS_UPDATE_DYNAMIC && !vi->Vob->IsStatic()) ) {
                         // Now check for distances, etc
@@ -4824,6 +4824,12 @@ static void CVVH_AddNotDrawnVobToList(
     }
 }
 
+static bool HasRenderableLightParent( zCVobLight* light ) {
+    if ( !light ) return false;
+    zCVob* parent = light->GetVobParent();
+    return parent && parent->GetVisual();
+}
+
 /** Helper function for going through the bsp-tree */
 void GothicAPI::BuildBspVobMapCacheHelper( zCBspBase* base ) {
     if ( !base )
@@ -4896,11 +4902,11 @@ void GothicAPI::BuildBspVobMapCacheHelper( zCBspBase* base ) {
             if ( vit == VobLightMap.end() ) {
                 VobLightInfo* vi = new VobLightInfo;
                 vi->Vob = vob;
+                vi->HasRenderableParentVob = HasRenderableLightParent( vob );
                 VobLightMap[vob] = vi;
 
-                float minDynamicUpdateLightRange = Engine::GAPI->GetRendererState().RendererSettings.MinLightShadowUpdateRange;
-                if ( RendererState.RendererSettings.EnablePointlightShadows >= GothicRendererSettings::PLS_STATIC_ONLY
-                    && vi->Vob->GetLightRange() > minDynamicUpdateLightRange ) {
+                if ( vi->HasRenderableParentVob
+                    && RendererState.RendererSettings.EnablePointlightShadows >= GothicRendererSettings::PLS_STATIC_ONLY ) {
                     // Create shadowcubemap, if wanted
                     BaseShadowedPointLight* bpl;
                     Engine::GraphicsEngine->CreateShadowedPointLight( &bpl, vi );
@@ -6451,12 +6457,13 @@ static void CollectLeafVobs(
                     vi->Vob = vob;
                     vi->IsPFXVobLight = PFXVobLight;
                     vi->IsDynamicVobLight = true;
+                    vi->HasRenderableParentVob = HasRenderableLightParent( vob );
                     vi->IgnoreIndoorOutdoorLimit = true;
-                    vi->UpdateShadows = !PFXVobLight;
+                    vi->UpdateShadows = !PFXVobLight && vi->HasRenderableParentVob;
                     vit = VobLightMap.emplace( vob, vi ).first;
 
                     // Create shadow-buffers for these lights since it was dynamically added to the world
-                    if ( !vi->IsPFXVobLight && rendererSettings.EnablePointlightShadows >= GothicRendererSettings::PLS_STATIC_ONLY ) {
+                    if ( !vi->IsPFXVobLight && vi->HasRenderableParentVob && rendererSettings.EnablePointlightShadows >= GothicRendererSettings::PLS_STATIC_ONLY ) {
                         BaseShadowedPointLight* bpl;
                         Engine::GraphicsEngine->CreateShadowedPointLight( &bpl, vi, true ); // Also flag as dynamic
                         vi->LightShadowBuffers.reset(bpl);

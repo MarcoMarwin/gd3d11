@@ -954,6 +954,10 @@ void ImGuiShim::RenderSettingsWindow()
                 ImGui::EndCombo();
             }
 
+            ImText( "Shadow Softness", buttonWidth ); ImGui::SameLine();
+            ImGui::SliderFloat( "##ShadowSoftness", &settings.ShadowSoftness, 0.5f, 2.0f, "%.2f", ImGuiSliderFlags_AlwaysClamp );
+            ImGui::SetItemTooltip( "Controls world and point-light shadow softness. 1.0 is the default." );
+
             ImText( "Pointlight Shadows", buttonWidth ); ImGui::SameLine();
             
             const static std::vector<std::tuple<const char*, GothicRendererSettings::EPointLightShadowMode, const char*>> dynamicShadowValues = {

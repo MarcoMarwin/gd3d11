@@ -25,7 +25,7 @@ struct TiledPointLight {
     float ShadowStrength;
     float IsIndoor;
     float IgnoreIndoorOutdoorLimit;
-    float Padding;
+    float ShadowSoftness;
 };
 
 static_assert( sizeof(TiledPointLight) == 64, "TiledPointLight must match the HLSL StructuredBuffer layout" );

@@ -17,7 +17,7 @@ cbuffer DS_PointLightConstantBuffer : register( b0 )
 	
 	float2 PL_ViewportSize;
 	float PL_IgnoreIndoorOutdoorLimit;
-	float PL_Pad2;
+	float PL_ShadowSoftness;
 	
 	float4 PL_ProjParams; // x = 1/P._11, y = 1/P._22, z = P._43, w = P._33
 	matrix PL_InvView; // Optimize out!
@@ -134,7 +134,7 @@ float4 PSMain( PS_INPUT Input ) : SV_TARGET
 	float ndl = max(0, dot(lightDir, normal));
 	
 	// Apply dynamic shadow
-	float shadow = PLS_SampleShadowCube(TX_ShadowCube, SS_Comp, wsPosition, wsNormal, Pl_PositionWorld, PL_Range);
+	float shadow = PLS_SampleShadowCube(TX_ShadowCube, SS_Comp, wsPosition, wsNormal, Pl_PositionWorld, PL_Range, PL_ShadowSoftness);
 	//return float4(ndl.rrr,1);
 	
 	// Get rid of lighting on the backfaces of normalmapped surfaces

@@ -78,6 +78,7 @@ void PLS_PrepareShadowSampling(
     float3 N, 
     float3 lightPosWorld,
     float lightRange,
+    float shadowSoftness,
     out float3 dir,
     out float compareDistance,
     out float fixedBias,
@@ -113,7 +114,7 @@ void PLS_PrepareShadowSampling(
     float baseBlur = lerp( 0.02f, 0.08f, depthCurve );
 
     float noise = PLS_AggressiveNoise(wsPosition * 50.0f);
-    fixedBlurScale = baseBlur * lerp(0.5f, 1.5f, noise);
+    fixedBlurScale = baseBlur * clamp(shadowSoftness, 0.2f, 8.0f) * lerp(0.5f, 1.5f, noise);
 
     up = abs( dir.y ) < 0.999f ? float3( 0, 1, 0 ) : float3( 1, 0, 0 );
     right = normalize( cross( up, dir ) );
@@ -129,7 +130,8 @@ float PLS_SampleShadowCube(
     float3 wsPosition,
     float3 N, 
     float3 lightPosWorld,
-    float lightRange )
+    float lightRange,
+    float shadowSoftness )
 {
     float3 dir;
     float compareDistance;
@@ -141,7 +143,7 @@ float PLS_SampleShadowCube(
     float cosA;
 
     PLS_PrepareShadowSampling(
-        wsPosition, N, lightPosWorld, lightRange,
+        wsPosition, N, lightPosWorld, lightRange, shadowSoftness,
         dir, compareDistance, fixedBias, fixedBlurScale,
         right, up, sinA, cosA );
 
@@ -172,7 +174,8 @@ float PLS_SampleShadowCubeArray(
     float3 N, 
     float3 lightPosWorld,
     float lightRange,
-    int cubeIndex )
+    int cubeIndex,
+    float shadowSoftness )
 {
     float3 dir;
     float compareDistance;
@@ -184,7 +187,7 @@ float PLS_SampleShadowCubeArray(
     float cosA;
 
     PLS_PrepareShadowSampling(
-        wsPosition, N, lightPosWorld, lightRange,
+        wsPosition, N, lightPosWorld, lightRange, shadowSoftness,
         dir, compareDistance, fixedBias, fixedBlurScale,
         right, up, sinA, cosA );
 

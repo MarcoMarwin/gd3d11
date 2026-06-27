@@ -449,7 +449,7 @@ XRESULT D3D11ShadowMap::PrepareRender()
     // Clamp far plane to avoid extreme shadow distances
     const float baseFarPlane = std::min( camera->GetFarPlane(), 12000.0f ); // ~120 meters, fine with Fog enabled.
 
-    // WorldShadowRangeScale als Multiplikator für die Schattenreichweite
+    // WorldShadowRangeScale als Multiplikator fuer die Schattenreichweite
     const float shadowRangeScale = settings.WorldShadowRangeScale;
     const float farPlane = baseFarPlane * std::max( 0.1f, shadowRangeScale );
     int numCascades = settings.NumShadowCascades;
@@ -556,7 +556,7 @@ XRESULT D3D11ShadowMap::PrepareRender()
     // Indoor check
     static zTBspMode lastBspMode = zBSP_MODE_OUTDOOR;
 
-    // Array für alle Cascade-Matrizen
+    // Array fuer alle Cascade-Matrizen
     bool isOutdoor = Engine::GAPI->GetLoadedWorldInfo()->BspTree->GetBspTreeMode() == zBSP_MODE_OUTDOOR;
 
     const FXMVECTOR p = WorldShadowCP + dir * 10000.0f;
@@ -585,7 +585,7 @@ XRESULT D3D11ShadowMap::PrepareRender()
             lastBspMode = zBSP_MODE_INDOOR;
         }
 
-        // Setze Default für Indoor
+        // Setze Default fuer Indoor
         for ( int i = 0; i < numCascades; ++i ) {
             if ( numCascades > 1 && i == numCascades - 1 ) {
                 const auto p = lastCascadeP;
@@ -951,6 +951,14 @@ XRESULT D3D11ShadowMap::DrawPointlightShadows( std::vector<VobLightInfo*>& light
         if ( !light->Vob->IsEnabled() || !light->VisibleInFrame ) {
             continue;
         }
+        if ( !light->HasRenderableParentVob ) {
+            light->UpdateShadows = false;
+            if ( D3D11PointLight* pl = dynamic_cast<D3D11PointLight*>(light->LightShadowBuffers.get()) ) {
+                pl->ClearTiledSlot();
+                pl->ReleaseShadowMap();
+            }
+            continue;
+        }
         // Create shadowmap in case we should have one but haven't got it yet
         if ( !light->LightShadowBuffers && light->UpdateShadows ) {
             BaseShadowedPointLight* bpl;
@@ -982,7 +990,7 @@ XRESULT D3D11ShadowMap::DrawPointlightShadows( std::vector<VobLightInfo*>& light
                     pl->ClearTiledSlot();
                     pl->ReleaseShadowMap();
 
-                    // Try tiled slot for small (64×64) lights when tiled lighting is active
+                    // Try tiled slot for small (64x64) lights when tiled lighting is active
                     if ( isTiledShadingEnabled ) {
                         if ( desiredResolution != SHADOW_CUBE_SIZE ) {
                             light->UpdateShadows = false;

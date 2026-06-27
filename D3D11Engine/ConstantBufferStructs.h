@@ -165,7 +165,7 @@ struct DS_PointLightConstantBuffer {
 
     float2 PL_ViewportSize;
     float PL_IgnoreIndoorOutdoorLimit;
-    float PL_Pad2;
+    float PL_ShadowSoftness;
 
     float4 PL_ProjParams; // x = 1/P._11, y = 1/P._22, z = P._43, w = P._33
     XMFLOAT4X4 PL_InvView;

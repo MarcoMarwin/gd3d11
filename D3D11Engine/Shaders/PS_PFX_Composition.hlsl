@@ -90,7 +90,7 @@ float FogDither(float2 pixelPosition)
     return n1 + n2 - 1.0f;
 }
 
-float4 ComputeHeightFog( float2 texcoord )
+float4 ComputeHeightFog( float2 texcoord, float2 pixelPosition )
 {
     float expDepth = TX_Depth.Sample( SS_Linear, texcoord ).r;
     float3 position = VSPositionFromDepth( expDepth, texcoord );
@@ -110,6 +110,9 @@ float4 ComputeHeightFog( float2 texcoord )
     float weatherFog = max(fog, stableWorldFade) * activeWeatherFog;
     float dryNightFog = fog * nightTimeBlend * (1.0f - activeWeatherFog);
     fog = max(weatherFog, dryNightFog);
+    float fogGradientWeight = saturate(fog * (1.0f - fog) * 4.0f);
+    float fogGradientDither = FogDither(pixelPosition) * nightTimeBlend * (1.5f / 255.0f);
+    float ditheredFog = saturate(fog + fogGradientDither * fogGradientWeight);
     float3 color = ApplyAtmosphericScatteringGround( position, HF_FogColorMod, true, false );
 	float nightFogBrightness = lerp(1.0f, max(0.0f, AC_NightFogBrightness), saturate(AC_EnableNightAtmosphere));
 	float3 nightFogColor = float3(0.12f, 0.18f, 0.27f) * nightFogBrightness;
@@ -119,7 +122,7 @@ float4 ComputeHeightFog( float2 texcoord )
 	float darknessFactor = lerp(dayDarknessFactor, 2.5f, nightTimeBlend);
 	float maxFogOpacity = lerp(1.0f, 0.85f, nightTimeBlend);
 
-	return float4(saturate(color / darknessFactor), saturate(fog) * maxFogOpacity);
+	return float4(saturate(color / darknessFactor), ditheredFog * maxFogOpacity);
 }
 #endif
 
@@ -311,10 +314,10 @@ float4 PSMain( PS_INPUT Input ) : SV_TARGET
 #endif
 
 #if COMPOSE_HEIGHTFOG
-    float4 fog = ComputeHeightFog( Input.vTexcoord );
+    float4 fog = ComputeHeightFog( Input.vTexcoord, Input.vPosition.xy );
     color.rgb = lerp( color.rgb, fog.rgb, fog.a );
     float nightTimeBlend = smoothstep(0.0f, 1.0f, saturate(-AC_LightPos.y * 4.0f));
-    float ditherStrength = lerp(1.5f, 2.0f, nightTimeBlend) / 255.0f;
+    float ditherStrength = lerp(1.5f, 3.0f, nightTimeBlend) / 255.0f;
     color.rgb = saturate(color.rgb + FogDither(Input.vPosition.xy) * fog.a * ditherStrength);
 #endif
 

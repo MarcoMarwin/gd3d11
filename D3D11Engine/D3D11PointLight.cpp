@@ -26,11 +26,11 @@ D3D11PointLight::D3D11PointLight( VobLightInfo* info, bool dynamicLight ) {
     m_DepthCubemap = nullptr;
     m_StaticDepthCubemap = nullptr;
     WorldCacheInvalid = true;
+    m_PendingInit = {};
 
     StartReInit();
 
     DrawnOnce = false;
-    m_PendingInit = {};
 }
 
 D3D11PointLight::~D3D11PointLight() {
