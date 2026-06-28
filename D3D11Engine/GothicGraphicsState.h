@@ -724,16 +724,12 @@ struct GothicRendererSettings {
         WaterCubemapStrength = 1.0f;
         EnableSSS = true;
         SSSIntensity = 1.0f;
-        EnableVolumetricLightShafts = true;
-        VolumetricLightShaftStrength = 1.0f; // UI-normalized: 1.0 keeps the former 0.75 effect strength.
         EnableContactShadows = true;
         ContactShadowStrength = 1.0f; // UI-normalized: 1.0 keeps the former 0.35 effect strength.
         EnableScreenSpaceGI = false;
         ScreenSpaceGIStrength = 1.0f;
         EnableParticleLighting = true;
         ParticleLightingStrength = 1.0f;
-        EnableSoftParticles = true;
-        SoftParticleStrength = 1.0f;
         EnableDoF = true;
         DoFGaussBlur = false;
         DoFFocusDistance = 12000.0f;
@@ -939,16 +935,12 @@ struct GothicRendererSettings {
     float WaterCubemapStrength;
     bool EnableSSS;
     float SSSIntensity;
-    bool EnableVolumetricLightShafts;
-    float VolumetricLightShaftStrength;
     bool EnableContactShadows;
     float ContactShadowStrength;
     bool EnableScreenSpaceGI;
     float ScreenSpaceGIStrength;
     bool EnableParticleLighting;
     float ParticleLightingStrength;
-    bool EnableSoftParticles;
-    float SoftParticleStrength;
     bool EnableDoF;
     bool DoFGaussBlur;
     float DoFFocusDistance;

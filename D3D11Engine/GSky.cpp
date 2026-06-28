@@ -337,18 +337,18 @@ XRESULT GSky::RenderSky() {
     AtmosphereCB.AC_NightDarkeningStart = 3000.0f;
     AtmosphereCB.AC_NightDarkeningRange = 12000.0f;
     AtmosphereCB.AC_NightDarkeningMax = 1.0f;
-    AtmosphereCB.AC_EnableVolumetricLightShafts = (Engine::GAPI->GetRendererState().RendererSettings.EnableVolumetricLightShafts && Engine::GAPI->GetRendererState().RendererSettings.VolumetricLightShaftStrength > 0.0f) ? 1.0f : 0.0f;
+    AtmosphereCB.AC_PadLightFX0 = 0.0f;
     AtmosphereCB.AC_WorldCameraPos = camPos;
     AtmosphereCB.AC_EnableContactShadows = (Engine::GAPI->GetRendererState().RendererSettings.EnableContactShadows && Engine::GAPI->GetRendererState().RendererSettings.ContactShadowStrength > 0.0f) ? 1.0f : 0.0f;
     AtmosphereCB.AC_EnableScreenSpaceGI = (Engine::GAPI->GetRendererState().RendererSettings.EnableScreenSpaceGI && Engine::GAPI->GetRendererState().RendererSettings.ScreenSpaceGIStrength > 0.0f) ? 1.0f : 0.0f;
     const auto& rendererSettings = Engine::GAPI->GetRendererState().RendererSettings;
-    AtmosphereCB.AC_VolumetricLightShaftStrength = rendererSettings.VolumetricLightShaftStrength * 0.75f;
+    AtmosphereCB.AC_PadLightFX1 = 0.0f;
     AtmosphereCB.AC_ContactShadowStrength = rendererSettings.ContactShadowStrength * 0.35f;
     AtmosphereCB.AC_ScreenSpaceGIStrength = rendererSettings.ScreenSpaceGIStrength * 0.25f;
     AtmosphereCB.AC_EnableParticleLighting = rendererSettings.EnableParticleLighting ? 1.0f : 0.0f;
     AtmosphereCB.AC_ParticleLightingStrength = rendererSettings.ParticleLightingStrength * 1.5f;
-    AtmosphereCB.AC_EnableSoftParticles = rendererSettings.EnableSoftParticles ? 1.0f : 0.0f;
-    AtmosphereCB.AC_SoftParticleStrength = rendererSettings.SoftParticleStrength;
+    AtmosphereCB.AC_PadParticle0 = 0.0f;
+    AtmosphereCB.AC_PadParticle1 = 0.0f;
 
     //Engine::GraphicsEngine->DrawSky();
 

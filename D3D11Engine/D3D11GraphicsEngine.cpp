@@ -4075,10 +4075,9 @@ XRESULT D3D11GraphicsEngine::OnStartWorldRendering() {
     bool compositionSAO = (rendererState.RendererSettings.AoMode == AOMode::AO_SAO);
     bool compositionGodRays = (rendererState.RendererSettings.EnableGodRays && isOutdoor);
     bool compositionHeightFog = (rendererState.RendererSettings.DrawFog && isOutdoor);
-    bool compositionLightShafts = (rendererState.RendererSettings.EnableVolumetricLightShafts && rendererState.RendererSettings.VolumetricLightShaftStrength > 0.0f && isOutdoor);
     bool compositionContactShadows = rendererState.RendererSettings.EnableContactShadows && rendererState.RendererSettings.ContactShadowStrength > 0.0f;
     bool compositionSSGI = rendererState.RendererSettings.EnableScreenSpaceGI && rendererState.RendererSettings.ScreenSpaceGIStrength > 0.0f;
-    bool compositionNeedsDepth = compositionHeightFog || compositionLightShafts || compositionContactShadows || compositionSSGI;
+    bool compositionNeedsDepth = compositionHeightFog || compositionContactShadows || compositionSSGI;
     bool compositionActive = compositionSAO || compositionGodRays || compositionNeedsDepth;
 
     if ( rendererState.RendererSettings.AoMode == AOMode::AO_HBAO ) {
@@ -8516,6 +8515,7 @@ void D3D11GraphicsEngine::DrawDecalList( const std::vector<zCVob*>& decals,
     struct DecalInstance {
         zCMaterial* material;
         XMFLOAT4X4 worldView;
+        bool ignoreDayLight;
     };
     static std::vector<DecalInstance> instances;
     instances.clear();
@@ -8643,6 +8643,7 @@ void D3D11GraphicsEngine::DrawDecalList( const std::vector<zCVob*>& decals,
 
         DecalInstance inst;
         inst.material = material;
+        inst.ignoreDayLight = d->GetDecalSettings()->IgnoreDayLight != FALSE;
         XMStoreFloat4x4( &inst.worldView, view * world * offset * scale );
         instances.push_back( inst );
     }
@@ -8698,17 +8699,6 @@ void D3D11GraphicsEngine::DrawDecalList( const std::vector<zCVob*>& decals,
         }
     }
     const float ambientDecalLightingScale = gacb.GA_LightingScale;
-    if ( !lighting ) {
-        struct DecalSoftParticleConstants {
-            float4 DepthParams;
-        } dspcb = {};
-        const auto& projection = Engine::GAPI->GetProjectionMatrix();
-        const auto& rendererSettings = Engine::GAPI->GetRendererState().RendererSettings;
-        dspcb.DepthParams = float4( projection._33, projection._43, 10.0f * rendererSettings.SoftParticleStrength,
-            rendererSettings.EnableSoftParticles ? 1.0f : 0.0f );
-        GetActivePS()->GetBuffer( "DecalSoftParticleInfo" ).Update( &dspcb ).Bind();
-        DepthStencilBufferCopy->BindToPixelShader( GetContext().Get(), 3 );
-    }
 
     int lastAlphaFunc = -1;
     zCTexture* lastTex = nullptr;
@@ -8742,7 +8732,8 @@ void D3D11GraphicsEngine::DrawDecalList( const std::vector<zCVob*>& decals,
             // we should still be able to batch them if texture, flags and color match - i hope?
             if ( material->GetColor() != instances[i].material->GetColor()
                 || material->GetAniTexture() != instances[i].material->GetAniTexture()
-                || material->GetFlags() != instances[i].material->GetFlags()) {
+                || material->GetFlags() != instances[i].material->GetFlags()
+                || instances[start].ignoreDayLight != instances[i].ignoreDayLight) {
                 break;
             }
             ++i;
@@ -8759,7 +8750,7 @@ void D3D11GraphicsEngine::DrawDecalList( const std::vector<zCVob*>& decals,
         }
 
         if ( !lighting ) {
-            const float lightingScale = alphaFunc == zMAT_ALPHA_FUNC_ADD ? -1.0f : ambientDecalLightingScale;
+            const float lightingScale = instances[start].ignoreDayLight ? 1.0f : ambientDecalLightingScale;
             if ( lastLightingScale != lightingScale ) {
                 gacb.GA_LightingScale = lightingScale;
                 psBufGAI.Update( &gacb );
@@ -8984,10 +8975,8 @@ void D3D11GraphicsEngine::DrawUnderwaterEffects() {
 
     // Set up water final copy
     SetActivePixelShader( PShaderID::PS_PFX_UnderwaterFinal );
-    ActivePS->GetBuffer( "RefractionInfo" ).Update( &ricb ).Bind();
 
     DistortionTexture->BindToPixelShader( 2 );
-    DepthStencilBufferCopy->BindToPixelShader( GetContext().Get(), 3 );
 
     PfxRenderer->BlurTexture( HDRBackBuffer.get(), false, 0.10f, UNDERWATER_COLOR_MOD,
         PShaderID::PS_PFX_UnderwaterFinal );
@@ -9150,17 +9139,8 @@ void D3D11GraphicsEngine::DrawFrameParticles(
     Context->ClearRenderTargetView( bufferParticleColor->GetRenderTargetView().Get(), clearColor );
     Context->ClearRenderTargetView( bufferParticleDistortion->GetRenderTargetView().Get(), clearColor );
 
-    RefractionInfoConstantBuffer ricb = {};
-    ricb.RI_Projection = Engine::GAPI->GetProjectionMatrix();
-    ricb.RI_ViewportSize = float2( Resolution.x, Resolution.y );
-    ricb.RI_Time = Engine::GAPI->GetTimeSeconds();
-    ricb.RI_CameraPosition = Engine::GAPI->GetCameraPosition();
-    ricb.RI_Far = Engine::GAPI->GetFarPlane();
-
     SetActivePixelShader( PShaderID::PS_ParticleDistortion );
     ActivePS->Apply();
-    ActivePS->GetBuffer("RefractionInfo").Update(&ricb).Bind();
-    DepthStencilBufferCopy->BindToPixelShader( GetContext().Get(), 3 );
     if ( auto sky = Engine::GAPI->GetSky() ) {
         ActivePS->GetBuffer( "Atmosphere" ).Update( &sky->GetAtmosphereCB() ).Bind();
     }
@@ -9232,8 +9212,6 @@ void D3D11GraphicsEngine::DrawFrameParticles(
     // Set usual rendering for everything else. Alphablending mostly.
     SetActivePixelShader( PShaderID::PS_ParticleSimple );
     ActivePS->Apply();
-    ActivePS->GetBuffer( "RefractionInfo" ).Update( &ricb ).Bind();
-    DepthStencilBufferCopy->BindToPixelShader( GetContext().Get(), 3 );
     if ( auto sky = Engine::GAPI->GetSky() ) {
         ActivePS->GetBuffer( "Atmosphere" ).Update( &sky->GetAtmosphereCB() ).Bind();
     }
@@ -9299,7 +9277,6 @@ void D3D11GraphicsEngine::DrawFrameParticles(
         GetResolution(), true );
 
     GetContext()->PSSetShaderResources( 1, 2, s_nullSRVs );
-    GetContext()->PSSetShaderResources( 3, 1, s_nullSRVs );
 }
 
 /** Called when a vob was removed from the world */

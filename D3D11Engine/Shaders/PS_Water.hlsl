@@ -234,15 +234,17 @@ PS_OUTPUT PSMain( PS_INPUT Input )
 	// Dynamic SSR is the only screen-space reflection layer now. The cubemap is the fallback
 	// whenever the strength is zero or the near/contact SSR masks suppress actor artifacts.
 	float waterViewDistance = length(Input.vWorldPosition - AC_WorldCameraPos);
-	float rainCubemapVisibility = 1.0f - saturate(AC_RainFXWeight) * smoothstep(12000.0f, 50000.0f, waterViewDistance);
+	float rainReflectionFog = saturate(AC_RainFXWeight);
+	float rainCubemapVisibility = lerp(1.0f, 0.12f, rainReflectionFog) * (1.0f - rainReflectionFog * smoothstep(5000.0f, 22000.0f, waterViewDistance));
 	scene.rgb += reflection * cubeWeight * rainCubemapVisibility * fresnel * lerp(1.0f, diffuse, 0.6f);
 	float ssrBlend = saturate(ssrWeight * ssrFresnel * reflectionStrength * 0.78f * lerp(0.85f, 1.10f, nightAmount));
 	float rainFogVisibility = 1.0f;
 	if (ssrHitValid > 0.5f)
 	{
 		float hitDistance = length(ssrHitWorldPosition - AC_WorldCameraPos);
-		float rainFogOcclusion = saturate(AC_RainFXWeight) * smoothstep(12000.0f, 50000.0f, hitDistance);
+		float rainFogOcclusion = rainReflectionFog * smoothstep(5000.0f, 22000.0f, hitDistance);
 		rainFogVisibility = 1.0f - rainFogOcclusion;
+		rainFogVisibility *= rainFogVisibility;
 	}
 	ssrBlend *= rainFogVisibility;
 	float3 color = lerp(scene, sceneClean, pow(saturate(pxDistance / 35000.0f), 4.0f));

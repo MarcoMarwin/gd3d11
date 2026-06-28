@@ -82,7 +82,7 @@ float2 CalculateRainRipples(float2 wetUV, float time)
     float2 rippleB = TX_Distortion.SampleLevel(SS_Linear, wetUV * 5.10f + time * float2(-0.0045f, 0.0055f), 0).yx * 2.0f - 1.0f;
     float waveA = sin((rippleA.x + rippleA.y + time * 0.28f) * 6.2831853f);
     float waveB = sin((rippleB.x - rippleB.y - time * 0.21f) * 6.2831853f);
-    return rippleA * waveA * 0.50f + rippleB * waveB * 0.32f;
+    return rippleA * waveA * 0.70f + rippleB * waveB * 0.44f;
 }
 float4 PSMain(PS_INPUT input) : SV_TARGET
 {
@@ -119,9 +119,9 @@ float4 PSMain(PS_INPUT input) : SV_TARGET
     distortion += (TX_Distortion.SampleLevel(SS_Linear, wetUV * 0.63f + WG_Time * float2(-0.007f, 0.011f), 0).xy * 2.0f - 1.0f) * 0.5f;
     float rainRippleWeight = wetMask * saturate(WG_RainFXWeight) * smoothstep(0.05f, 0.45f, WG_Wetness);
     float2 rippleDistortion = CalculateRainRipples(wetUV, WG_Time) * rainRippleWeight;
-    float slowDriftPhase = WG_Time * 0.18f + dot(wetUV, float2(0.11f, 0.07f));
-    float2 slowReflectionDrift = float2(sin(slowDriftPhase) * 0.0022f, cos(slowDriftPhase * 0.73f) * 0.00025f) * rainRippleWeight;
-    float2 reflectionDistortion = distortion + rippleDistortion * 0.35f;
+    float slowDriftPhase = WG_Time * 0.12f + dot(wetUV, float2(0.11f, 0.07f));
+    float2 slowReflectionDrift = float2(sin(slowDriftPhase) * 0.0038f, cos(slowDriftPhase * 0.73f) * 0.00040f) * rainRippleWeight;
+    float2 reflectionDistortion = distortion + rippleDistortion * 0.55f;
     float3 wetNormal = normalize(wsNormal + float3(distortion.x, 0.0f, distortion.y) * 0.10f);
 
     float3 viewRay = normalize(wsPosition - WG_CameraPosition);
@@ -167,7 +167,7 @@ float4 PSMain(PS_INPUT input) : SV_TARGET
     if (hitWeight <= 0.0f)
         return float4(sceneColor, 1.0f);
 
-    float2 reflectedUV = saturate(hitUV + rippleDistortion * 0.0025f + slowReflectionDrift);
+    float2 reflectedUV = saturate(hitUV + rippleDistortion * 0.0040f + slowReflectionDrift);
     float3 reflectedColor = SampleRoughReflection(reflectedUV, reflectionDistortion);
     float reflectionLuma = dot(reflectedColor, float3(0.2126f, 0.7152f, 0.0722f));
     reflectedColor *= rcp(1.0f + max(0.0f, reflectionLuma - 1.0f) * 0.7f);

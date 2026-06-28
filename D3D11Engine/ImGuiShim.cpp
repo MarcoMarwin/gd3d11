@@ -677,14 +677,13 @@ void ImGuiShim::RenderSettingsWindow()
                 ImGui::EndCombo();
             }
             ImGui::SetItemTooltip( "Screen-Space ambient occlusion mode.\nChanging this will reload shaders." );
-            bool screenSpaceLightFX = settings.EnableVolumetricLightShafts || settings.EnableContactShadows || settings.EnableScreenSpaceGI;
+            bool screenSpaceLightFX = settings.EnableContactShadows || settings.EnableScreenSpaceGI;
             if ( ImGui::Checkbox( "Screen-Space Light FX", &screenSpaceLightFX ) ) {
-                settings.EnableVolumetricLightShafts = screenSpaceLightFX;
                 settings.EnableContactShadows = screenSpaceLightFX;
                 settings.EnableScreenSpaceGI = screenSpaceLightFX;
                 Engine::GraphicsEngine->ReloadShaders( ShaderCategory::Other );
             }
-            ImGui::SetItemTooltip( "Enables light shafts, contact shadows, and indirect screen-space light.\nChanging this will reload shaders." );
+            ImGui::SetItemTooltip( "Enables contact shadows and indirect screen-space light.\nChanging this will reload shaders." );
 
             if ( ImGui::Checkbox( "Godrays", &settings.EnableGodRays ) ) {
                 Engine::GraphicsEngine->ReloadShaders( ShaderCategory::Other );
@@ -1667,11 +1666,10 @@ void RenderAdvancedColumn4( GothicRendererSettings& settings, GothicAPI* gapi ) 
         ImGui::SeparatorText( "Screen-Space Light FX" );
         {
             ImGui::PushID( "ScreenSpaceLightingSettings" );
-            const bool screenSpaceLightFX = settings.EnableVolumetricLightShafts || settings.EnableContactShadows || settings.EnableScreenSpaceGI;
+            const bool screenSpaceLightFX = settings.EnableContactShadows || settings.EnableScreenSpaceGI;
 
             ImGui::BeginDisabled( !screenSpaceLightFX );
             bool reloadScreenSpaceLightFX = false;
-            reloadScreenSpaceLightFX |= ImGui::SliderFloat( "Light Shafts", &settings.VolumetricLightShaftStrength, 0.0f, 2.0f, "%.2f", ImGuiSliderFlags_AlwaysClamp );
             reloadScreenSpaceLightFX |= ImGui::SliderFloat( "Contact Shadows", &settings.ContactShadowStrength, 0.0f, 2.0f, "%.2f", ImGuiSliderFlags_AlwaysClamp );
             reloadScreenSpaceLightFX |= ImGui::SliderFloat( "Indirect Light", &settings.ScreenSpaceGIStrength, 0.0f, 2.0f, "%.2f", ImGuiSliderFlags_AlwaysClamp );
             if ( reloadScreenSpaceLightFX ) Engine::GraphicsEngine->ReloadShaders( ShaderCategory::Other );
@@ -1685,10 +1683,6 @@ void RenderAdvancedColumn4( GothicRendererSettings& settings, GothicAPI* gapi ) 
             ImGui::Checkbox( "Adapt to Scene Lighting", &settings.EnableParticleLighting );
             ImGui::BeginDisabled( !settings.EnableParticleLighting );
             ImGui::SliderFloat( "Lighting Adaptation", &settings.ParticleLightingStrength, 0.0f, 2.0f, "%.2f", ImGuiSliderFlags_AlwaysClamp );
-            ImGui::EndDisabled();
-            ImGui::Checkbox( "Soft Particles", &settings.EnableSoftParticles );
-            ImGui::BeginDisabled( !settings.EnableSoftParticles );
-            ImGui::SliderFloat( "Soft Particle Strength", &settings.SoftParticleStrength, 0.0f, 2.0f, "%.2f", ImGuiSliderFlags_AlwaysClamp );
             ImGui::EndDisabled();
             ImGui::PopID();
         }

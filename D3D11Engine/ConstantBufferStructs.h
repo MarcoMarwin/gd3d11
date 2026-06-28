@@ -405,20 +405,20 @@ struct AtmosphereConstantBuffer {
     float AC_NightDarkeningStart;
     float AC_NightDarkeningMax;
     float AC_NightDarkeningRange;
-    float AC_EnableVolumetricLightShafts;
+    float AC_PadLightFX0;
 
     float3 AC_WorldCameraPos;
     float AC_EnableContactShadows;
 
     float AC_EnableScreenSpaceGI;
-    float AC_VolumetricLightShaftStrength;
+    float AC_PadLightFX1;
     float AC_ContactShadowStrength;
     float AC_ScreenSpaceGIStrength;
 
     float AC_EnableParticleLighting;
     float AC_ParticleLightingStrength;
-    float AC_EnableSoftParticles;
-    float AC_SoftParticleStrength;
+    float AC_PadParticle0;
+    float AC_PadParticle1;
 
     float4 AC_LightScreenPos;
 };

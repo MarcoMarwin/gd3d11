@@ -4,7 +4,7 @@
 // Permutation macros: COMPOSE_SAO, COMPOSE_HEIGHTFOG, COMPOSE_GODRAYS
 //--------------------------------------------------------------------------------------
 
-#if COMPOSE_HEIGHTFOG || COMPOSE_LIGHTSHAFTS || COMPOSE_CONTACT_SHADOWS || COMPOSE_SSGI
+#if COMPOSE_HEIGHTFOG || COMPOSE_CONTACT_SHADOWS || COMPOSE_SSGI
 #include <AtmosphericScattering.h>
 #endif
 #if COMPOSE_HEIGHTFOG
@@ -50,7 +50,7 @@ Texture2D TX_SAO : register( t1 );
 Texture2D TX_GodRays : register( t2 );
 #endif
 
-#if COMPOSE_HEIGHTFOG || COMPOSE_LIGHTSHAFTS || COMPOSE_CONTACT_SHADOWS || COMPOSE_SSGI
+#if COMPOSE_HEIGHTFOG || COMPOSE_CONTACT_SHADOWS || COMPOSE_SSGI
 Texture2D TX_Depth : register( t3 );
 #endif
 
@@ -137,7 +137,7 @@ struct PS_INPUT
 };
 
 
-#if COMPOSE_LIGHTSHAFTS || COMPOSE_CONTACT_SHADOWS || COMPOSE_SSGI
+#if COMPOSE_CONTACT_SHADOWS || COMPOSE_SSGI
 float GetDepthRaw(float2 uv)
 {
     return TX_Depth.SampleLevel(SS_Linear, saturate(uv), 0).r;
@@ -248,54 +248,6 @@ float3 ComputeScreenSpaceGILight(float2 uv, float centerDepth, float3 baseColor)
 }
 #endif
 
-#if COMPOSE_LIGHTSHAFTS
-float LightShaftGeometryCoverage(float depth)
-{
-    // Keep the sky/geometry transition continuous so temporal projection jitter cannot flip the mask.
-    return smoothstep(0.0000001f, 0.0000060f, max(depth, 0.0f));
-}
-
-float3 ComputeVolumetricLightShafts(float2 uv, float depth)
-{
-    float day = saturate(AC_LightPos.y * 2.0f + 0.15f);
-    float night = saturate((-AC_LightPos.y + 0.05f) * 1.5f);
-    float weather = max(saturate(AC_RainFXWeight), saturate(AC_SceneWettness));
-    float atmosphereWeight = saturate(day + night * 0.28f) * lerp(1.0f, 0.28f, weather);
-
-    float2 lightCenter = AC_LightScreenPos.xy;
-    float2 toLight = lightCenter - uv;
-    float distToLight = length(toLight);
-    float2 dir = toLight / max(distToLight, 0.0001f);
-
-    float visibility = 0.0f;
-    float visibilityWeight = 0.0f;
-    [unroll]
-    for (int i = 0; i < 24; ++i)
-    {
-        float t = ((float)i + 0.5f) / 24.0f;
-        float2 suv = saturate(uv + dir * t * 0.24f);
-        float sd = GetDepthRaw(suv);
-        float sky = 1.0f - LightShaftGeometryCoverage(sd);
-        float sampleWeight = 1.0f - t * 0.10f;
-        visibility += lerp(0.38f, 1.0f, sky) * sampleWeight;
-        visibilityWeight += sampleWeight;
-    }
-    visibility /= max(visibilityWeight, 0.001f);
-
-    float geom = LightShaftGeometryCoverage(depth);
-    float geometryMist = lerp(0.82f, 1.0f, geom);
-    float radial = pow(1.0f - smoothstep(0.00f, 1.34f, distToLight), 1.12f);
-    float skyShaftLimit = lerp(0.42f, 1.0f, geom);
-    float onScreenLight = saturate(AC_LightScreenPos.z + 0.18f);
-    float shaft = visibility * geometryMist * atmosphereWeight * radial * skyShaftLimit * onScreenLight;
-
-    float3 dayColor = float3(1.0f, 0.80f, 0.48f);
-    float3 nightColor = float3(0.18f, 0.28f, 0.55f);
-    float3 rainColor = float3(0.36f, 0.46f, 0.58f);
-    float3 shaftColor = lerp(lerp(dayColor, nightColor, night), rainColor, weather * 0.35f);
-    return shaftColor * shaft * saturate(AC_VolumetricLightShaftStrength) * lerp(0.46f, 0.18f, weather);
-}
-#endif
 //--------------------------------------------------------------------------------------
 // Pixel Shader
 //--------------------------------------------------------------------------------------
@@ -310,7 +262,7 @@ float4 PSMain( PS_INPUT Input ) : SV_TARGET
     color.rgb *= ao;
 #endif
 
-#if COMPOSE_CONTACT_SHADOWS || COMPOSE_SSGI || COMPOSE_LIGHTSHAFTS
+#if COMPOSE_CONTACT_SHADOWS || COMPOSE_SSGI
     float compositionDepth = GetDepthRaw(Input.vTexcoord);
 #endif
 
@@ -335,10 +287,6 @@ float4 PSMain( PS_INPUT Input ) : SV_TARGET
     color.rgb += godrays;
 #endif
 
-#if COMPOSE_LIGHTSHAFTS
-    float3 lightShafts = ComputeVolumetricLightShafts(Input.vTexcoord, compositionDepth);
-    color.rgb += lightShafts;
-#endif
 
     return color;
 }

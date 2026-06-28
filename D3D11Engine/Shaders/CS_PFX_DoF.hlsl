@@ -42,14 +42,6 @@ bool IsSkyDepth( float depth )
     return depth <= 1e-7f;
 }
 
-float GeometryCoverage( float depth )
-{
-    if ( DoF_Pad < 0.5f )
-        return IsSkyDepth( depth ) ? 0.0f : 1.0f;
-
-    return smoothstep( 1e-7f, 6e-6f, max( depth, 0.0f ) );
-}
-
 static const int SAMPLE_COUNT = 48;
 
 float2 GetSpiralSample( int index, int count )
@@ -79,15 +71,13 @@ void CSMain( uint3 DTid : SV_DispatchThreadID )
 
     float centerDepth = TX_Depth.SampleLevel( SS_Linear, texcoord, 0 ).r;
     float3 centerColor = TX_Scene.SampleLevel( SS_Linear, texcoord, 0 ).rgb;
-    float centerCoverage = GeometryCoverage( centerDepth );
-    if ( centerCoverage <= 0.001f )
+    if ( IsSkyDepth( centerDepth ) )
     {
         OutputBlur[DTid.xy] = float4( centerColor, 0.0f );
         return;
     }
 
-    float stableCenterDepth = DoF_Pad >= 0.5f ? max( centerDepth, 6e-6f ) : centerDepth;
-    float centerLinear = LinearizeDepth( stableCenterDepth );
+    float centerLinear = LinearizeDepth( centerDepth );
     float centerCoC = ComputeCoC( centerLinear, focusDepth );
 
     // Early out: pass through sharp pixel
@@ -119,7 +109,7 @@ void CSMain( uint3 DTid : SV_DispatchThreadID )
         float sampleDepth = TX_Depth.SampleLevel( SS_Linear, sampleUV, 0 ).r;
 
         float r2 = dot( offset, offset );
-        float weight = GeometryCoverage( sampleDepth ) * exp( -r2 * 3.0f );
+        float weight = IsSkyDepth( sampleDepth ) ? 0.0f : exp( -r2 * 3.0f );
 
         colorAccum += sampleColor * weight;
         weightAccum += weight;
@@ -143,15 +133,13 @@ void CSMain( uint3 DTid : SV_DispatchThreadID )
 
         float3 sampleColor = TX_Scene.SampleLevel( SS_Linear, sampleUV, 0 ).rgb;
         float sampleDepth = TX_Depth.SampleLevel( SS_Linear, sampleUV, 0 ).r;
-        float sampleCoverage = GeometryCoverage( sampleDepth );
-        if ( sampleCoverage <= 0.001f )
+        if ( IsSkyDepth( sampleDepth ) )
             continue;
 
-        float stableSampleDepth = DoF_Pad >= 0.5f ? max( sampleDepth, 6e-6f ) : sampleDepth;
-        float sampleLinear = LinearizeDepth( stableSampleDepth );
+        float sampleLinear = LinearizeDepth( sampleDepth );
         float sampleCoC = ComputeCoC( sampleLinear, focusDepth );
 
-        float weight = (( sampleCoC >= length( offset ) * centerCoC ) ? 1.0 : sampleCoC) * sampleCoverage;
+        float weight = ( sampleCoC >= length( offset ) * centerCoC ) ? 1.0 : sampleCoC;
 
         // Asymmetric foreground rejection
         float depthMargin = max( centerLinear * 0.05, 5.0 );
@@ -168,6 +156,5 @@ void CSMain( uint3 DTid : SV_DispatchThreadID )
 
     colorAccum /= max( weightAccum, 0.001 );
 
-    colorAccum = lerp( centerColor, colorAccum, centerCoverage );
-    OutputBlur[DTid.xy] = float4( colorAccum, centerCoC * centerCoverage );
+    OutputBlur[DTid.xy] = float4( colorAccum, centerCoC );
 }
