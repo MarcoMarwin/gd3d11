@@ -356,7 +356,10 @@ struct WetGroundSSRConstantBuffer {
 
     float2 WG_InvResolution;
     float WG_Strength;
-    float WG_Pad0;
+    float WG_Time;
+
+    float WG_RainFXWeight;
+    float3 WG_Pad;
 };
 
 static_assert( sizeof(WetGroundSSRConstantBuffer) % 16 == 0, "WetGroundSSRConstantBuffer must be 16-byte aligned" );

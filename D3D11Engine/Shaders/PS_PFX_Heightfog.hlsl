@@ -58,7 +58,7 @@ float ComputeVolumetricFog(float3 cameraToWorldPos, float3 posOriginal)
 	
 	return exp( -HF_GlobalDensity * w * fogInt );
 }
-`r`n
+
 //--------------------------------------------------------------------------------------
 // Input / Output structures
 //--------------------------------------------------------------------------------------

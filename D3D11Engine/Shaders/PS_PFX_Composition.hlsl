@@ -82,7 +82,7 @@ float ComputeVolumetricFog( float3 cameraToWorldPos, float3 posOriginal )
 
     return exp( -HF_GlobalDensity * w * fogInt );
 }
-`r`n
+
 float4 ComputeHeightFog( float2 texcoord, float2 pixelPosition )
 {
     float expDepth = TX_Depth.Sample( SS_Linear, texcoord ).r;
