@@ -198,10 +198,6 @@ XRESULT D3D11ShaderManager::Init() {
 
     Shaders.push_back( ShaderInfo::make<VShaderID::VS_ExInstanced>( "VS_ExInstanced.hlsl" )
         .with_layout( VERTEX_INPUT_LAYOUT_4_VS_ExInstanced ) );
-
-    Shaders.push_back( ShaderInfo::make<VShaderID::VS_GrassInstanced>( "VS_GrassInstanced.hlsl" )
-        .with_layout( VERTEX_INPUT_LAYOUT_9_VS_GrassInstanced )  );
-
     Shaders.push_back( ShaderInfo::make<VShaderID::VS_Lines>( "VS_Lines.hlsl" )
         .with_layout( VERTEX_INPUT_LAYOUT_6_Lines )  );
 
@@ -240,7 +236,7 @@ XRESULT D3D11ShaderManager::Init() {
 
     Shaders.push_back( ShaderInfo::make<PShaderID::PS_PFX_ApplyParticleDistortion>( "PS_PFX_ApplyParticleDistortion.hlsl" ) );
 
-    Shaders.push_back( ShaderInfo::make<PShaderID::PS_Grass>( "PS_Grass.hlsl" ) );
+
 
     Shaders.push_back( ShaderInfo::make<VShaderID::VS_PFX>( "VS_PFX.hlsl" ) );
 

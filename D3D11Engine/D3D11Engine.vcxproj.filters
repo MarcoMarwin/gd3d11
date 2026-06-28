@@ -58,9 +58,6 @@
     <Filter Include="Librarys\StackWalker">
       <UniqueIdentifier>{e45daa27-5530-477e-a17c-9778bd2dfcaf}</UniqueIdentifier>
     </Filter>
-    <Filter Include="Engine\D2D\Views\Editor">
-      <UniqueIdentifier>{bbb9a900-54fc-4e56-9cb6-9b7d93f6b1e6}</UniqueIdentifier>
-    </Filter>
     <Filter Include="Librarys\Assimp">
       <UniqueIdentifier>{9bec2d0d-0bea-4659-aeef-99300438c197}</UniqueIdentifier>
     </Filter>
@@ -78,9 +75,6 @@
     </Filter>
     <Filter Include="Librarys\imgui\backends">
       <UniqueIdentifier>{e4f071b6-4339-4759-8c39-b629df4c8412}</UniqueIdentifier>
-    </Filter>
-    <Filter Include="Librarys\ImGuizmo">
-      <UniqueIdentifier>{cd93a51d-0cd2-425d-be4f-d00292503999}</UniqueIdentifier>
     </Filter>
     <Filter Include="Engine\Shaders">
       <UniqueIdentifier>{7b924380-794f-4471-9819-06c3fca71231}</UniqueIdentifier>
@@ -316,9 +310,6 @@
     <ClInclude Include="MemoryTracker.h">
       <Filter>Librarys</Filter>
     </ClInclude>
-    <ClInclude Include="GVegetationBox.h">
-      <Filter>Engine\GAPI\Objects</Filter>
-    </ClInclude>
     <ClInclude Include="StackWalker.h">
       <Filter>Librarys\StackWalker</Filter>
     </ClInclude>
@@ -405,25 +396,12 @@
     <ClInclude Include="GothicMemoryLocations2_6_fix_Spacer.h">
       <Filter>ZenGin</Filter>
     </ClInclude>
-    <ClInclude Include="WidgetContainer.h">
-      <Filter>Engine\D2D\Views\Editor</Filter>
-    </ClInclude>
-    <ClInclude Include="EditorLinePrimitive.h">
-      <Filter>Engine\GAPI</Filter>
-    </ClInclude>
-    <ClInclude Include="BaseWidget.h">
-      <Filter>Engine\D2D\Views\Editor</Filter>
-    </ClInclude>
-    <ClInclude Include="Widget_TransRot.h">
-      <Filter>Engine\D2D\Views\Editor</Filter>
-    </ClInclude>
     <ClInclude Include="WorldObjects.h">
       <Filter>Engine\GAPI</Filter>
     </ClInclude>
     <ClInclude Include="ThreadPool.h">
       <Filter>Tools</Filter>
     </ClInclude>
-    <ClInclude Include="GMeshSimple.h" />
     <ClInclude Include="BaseShadowedPointLight.h" />
     <ClInclude Include="zCClassDef.h">
       <Filter>ZenGin\Classes</Filter>
@@ -759,7 +737,6 @@
       <Filter>Engine\D3D11\PFX\Effects</Filter>
     </ClInclude>
     <ClInclude Include="Frustum.h" />
-    <ClInclude Include="ImGuiEditorView.h" />
     <ClInclude Include="D3D11PFX_FSR1.h">
       <Filter>Engine\D3D11\PFX\Effects</Filter>
     </ClInclude>
@@ -838,12 +815,6 @@
     <ClInclude Include="D3D11TracyDebug.h">
       <Filter>Engine\D3D11</Filter>
     </ClInclude>
-    <ClInclude Include="include\ImGuizmo\src\GraphEditor.h" />
-    <ClInclude Include="include\ImGuizmo\src\ImCurveEdit.h" />
-    <ClInclude Include="include\ImGuizmo\src\ImGradient.h" />
-    <ClInclude Include="include\ImGuizmo\src\ImGuizmo.h" />
-    <ClInclude Include="include\ImGuizmo\src\ImSequencer.h" />
-    <ClInclude Include="include\ImGuizmo\src\ImZoomSlider.h" />
     <ClInclude Include="zFILE_VDFS.h">
       <Filter>Engine\GAPI</Filter>
     </ClInclude>
@@ -928,9 +899,6 @@
     <ClCompile Include="D3D11PFX_HDR.cpp">
       <Filter>Engine\D3D11\PFX\Effects</Filter>
     </ClCompile>
-    <ClCompile Include="GVegetationBox.cpp">
-      <Filter>Engine\GAPI\Objects</Filter>
-    </ClCompile>
     <ClCompile Include="StackWalker.cpp">
       <Filter>Librarys\StackWalker</Filter>
     </ClCompile>
@@ -977,22 +945,9 @@
     <ClCompile Include="D3D11PointLight.cpp">
       <Filter>Engine\D3D11</Filter>
     </ClCompile>
-    <ClCompile Include="WidgetContainer.cpp">
-      <Filter>Engine\D2D\Views\Editor</Filter>
-    </ClCompile>
-    <ClCompile Include="EditorLinePrimitive.cpp">
-      <Filter>Engine\GAPI</Filter>
-    </ClCompile>
-    <ClCompile Include="BaseWidget.cpp">
-      <Filter>Engine\D2D\Views\Editor</Filter>
-    </ClCompile>
-    <ClCompile Include="Widget_TransRot.cpp">
-      <Filter>Engine\D2D\Views\Editor</Filter>
-    </ClCompile>
     <ClCompile Include="WorldObjects.cpp">
       <Filter>Engine\GAPI</Filter>
     </ClCompile>
-    <ClCompile Include="GMeshSimple.cpp" />
     <ClCompile Include="BaseShadowedPointLight.cpp" />
     <ClCompile Include="D3D11GraphicsEngine.cpp">
       <Filter>Engine\D3D11\Engine</Filter>
@@ -1088,7 +1043,6 @@
     <ClCompile Include="D3D11PFX_SimpleSharpen.cpp">
       <Filter>Engine\D3D11\PFX\Effects</Filter>
     </ClCompile>
-    <ClCompile Include="ImGuiEditorView.cpp" />
     <ClCompile Include="D3D11PFX_FSR1.cpp">
       <Filter>Engine\D3D11\PFX\Effects</Filter>
     </ClCompile>
@@ -1151,11 +1105,6 @@
     <ClCompile Include="include\meshoptimizer\src\quantization.cpp" />
     <ClCompile Include="include\meshoptimizer\src\vcacheoptimizer.cpp" />
     <ClCompile Include="include\meshoptimizer\src\vfetchoptimizer.cpp" />
-    <ClCompile Include="include\ImGuizmo\src\GraphEditor.cpp" />
-    <ClCompile Include="include\ImGuizmo\src\ImCurveEdit.cpp" />
-    <ClCompile Include="include\ImGuizmo\src\ImGradient.cpp" />
-    <ClCompile Include="include\ImGuizmo\src\ImGuizmo.cpp" />
-    <ClCompile Include="include\ImGuizmo\src\ImSequencer.cpp" />
   </ItemGroup>
   <ItemGroup>
     <None Include="ddraw.def">
@@ -1201,13 +1150,7 @@
     <None Include="Shaders\PS_PFX_Velocity.hlsl">
       <Filter>Engine\Shaders</Filter>
     </None>
-    <None Include="Shaders\VS_GrassInstanced.hlsl">
-      <Filter>Engine\Shaders</Filter>
-    </None>
     <None Include="Shaders\VS_DecalInstanced.hlsl">
-      <Filter>Engine\Shaders</Filter>
-    </None>
-    <None Include="Shaders\PS_Grass.hlsl">
       <Filter>Engine\Shaders</Filter>
     </None>
     <None Include="Shaders\PS_PFX_VelocityDebug.hlsl">

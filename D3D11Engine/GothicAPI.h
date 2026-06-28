@@ -265,7 +265,6 @@ class zCBspBase;
 class GInventory;
 class zCVobLight;
 class MyDirectDrawSurface7;
-class GVegetationBox;
 class zCMorphMesh;
 class zCDecal;
 
@@ -709,18 +708,6 @@ public:
     /** Returns gothics output window */
     HWND GetOutputWindow() { return OutputWindow; }
 
-    /** Spawns a vegetationbox at the camera */
-    GVegetationBox* SpawnVegetationBoxAt( const XMFLOAT3& position, const XMFLOAT3& min = XMFLOAT3( -1000, -500, -1000 ), const XMFLOAT3& max = XMFLOAT3( 1000, 500, 1000 ), float density = 1.0f, const std::string& restrictByTexture = "" );
-
-    /** Adds a vegetationbox to the world */
-    void AddVegetationBox( GVegetationBox* box );
-
-    /** Returns the list of current GVegentationBoxes */
-    const std::list<GVegetationBox*>& GetVegetationBoxes() { return VegetationBoxes; }
-
-    /** Removes a vegetationbox from the world */
-    void RemoveVegetationBox( GVegetationBox* box );
-
     /** Teleports the player to the given location */
     void SetPlayerPosition( const XMFLOAT3& pos );
 
@@ -995,9 +982,6 @@ private:
 
     /** Replacement values for the camera */
     CameraReplacement* CameraReplacementPtr;
-
-    /** List of available GVegetationBoxes */
-    std::list<GVegetationBox*> VegetationBoxes;
 
     /** Gothics output window */
     HWND OutputWindow;

@@ -153,7 +153,6 @@ namespace {
         { VERTEX_INPUT_LAYOUT_4_VS_ExInstanced, {layout4, std::size( layout4 )} },
         { VERTEX_INPUT_LAYOUT_6_Lines, {layout6, std::size( layout6 )} },
         { VERTEX_INPUT_LAYOUT_7_VS_XYZRHW_DIF_T1, {layout7, std::size( layout7 )} },
-        { VERTEX_INPUT_LAYOUT_9_VS_GrassInstanced, {layout9, std::size( layout9 )} },
         { VERTEX_INPUT_LAYOUT_10_VS_ExInstancedObj, {layout10, std::size( layout10 )} },
         { VERTEX_INPUT_LAYOUT_11_VS_ParticlePoint, {layout11, std::size( layout11 )} },
         { VERTEX_INPUT_LAYOUT_13, {layout13, std::size( layout13 )} },

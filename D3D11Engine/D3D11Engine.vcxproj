@@ -875,7 +875,6 @@ copy "$(OutDir)$(TargetName).pdb" "$(G1_SYSTEM_PATH)\ddraw.pdb"</Command>
     <ClInclude Include="AlignedAllocator.h" />
     <ClInclude Include="BasePipelineStates.h" />
     <ClInclude Include="BaseLineRenderer.h" />
-    <ClInclude Include="BaseWidget.h" />
     <ClInclude Include="BasicTimer.h" />
     <ClInclude Include="D3D11CascadedShadowMapBuffer.h" />
     <ClInclude Include="D3D11FileRelativeInclude.h" />
@@ -947,13 +946,11 @@ copy "$(OutDir)$(TargetName).pdb" "$(G1_SYSTEM_PATH)\ddraw.pdb"</Command>
     <ClInclude Include="D3DGraphicsEventRecord.h" />
     <ClInclude Include="Detours\detours.h" />
     <ClInclude Include="Detours\detver.h" />
-    <ClInclude Include="EditorLinePrimitive.h" />
     <ClInclude Include="Engine.h" />
     <ClInclude Include="Frustum.h" />
     <ClInclude Include="GFSDK_SSAO.h" />
     <ClInclude Include="GInventory.h" />
     <ClInclude Include="GMesh.h" />
-    <ClInclude Include="GMeshSimple.h" />
     <ClInclude Include="GothicAPI.h" />
     <ClInclude Include="GothicExternals.h" />
     <ClInclude Include="GothicGraphicsState.h" />
@@ -966,12 +963,10 @@ copy "$(OutDir)$(TargetName).pdb" "$(G1_SYSTEM_PATH)\ddraw.pdb"</Command>
     <ClInclude Include="GraphicsShader.h" />
     <ClInclude Include="GSky.h" />
     <ClInclude Include="GSpriteCloud.h" />
-    <ClInclude Include="GVegetationBox.h" />
     <ClInclude Include="GothicMemoryLocations2_6_fix_Spacer.h" />
     <ClInclude Include="HookExceptionFilter.h" />
     <ClInclude Include="HookedFunctions.h" />
     <ClInclude Include="IkarusBindings.h" />
-    <ClInclude Include="ImGuiEditorView.h" />
     <ClInclude Include="ImGuiShim.h" />
     <ClInclude Include="include\assimp\aabb.h" />
     <ClInclude Include="include\assimp\ai_assert.h" />
@@ -1046,12 +1041,6 @@ copy "$(OutDir)$(TargetName).pdb" "$(G1_SYSTEM_PATH)\ddraw.pdb"</Command>
     <ClInclude Include="include\assimp\Vertex.h" />
     <ClInclude Include="include\assimp\XMLTools.h" />
     <ClInclude Include="include\assimp\ZipArchiveIOSystem.h" />
-    <ClInclude Include="include\ImGuizmo\src\GraphEditor.h" />
-    <ClInclude Include="include\ImGuizmo\src\ImCurveEdit.h" />
-    <ClInclude Include="include\ImGuizmo\src\ImGradient.h" />
-    <ClInclude Include="include\ImGuizmo\src\ImGuizmo.h" />
-    <ClInclude Include="include\ImGuizmo\src\ImSequencer.h" />
-    <ClInclude Include="include\ImGuizmo\src\ImZoomSlider.h" />
     <ClInclude Include="include\imgui\backends\imgui_impl_dx11.h" />
     <ClInclude Include="include\imgui\backends\imgui_impl_win32.h" />
     <ClInclude Include="include\imgui\imconfig.h" />
@@ -1084,8 +1073,6 @@ copy "$(OutDir)$(TargetName).pdb" "$(G1_SYSTEM_PATH)\ddraw.pdb"</Command>
     <ClInclude Include="TexturePool.h" />
     <ClInclude Include="ThreadPool.h" />
     <ClInclude Include="VersionCheck.h" />
-    <ClInclude Include="WidgetContainer.h" />
-    <ClInclude Include="Widget_TransRot.h" />
     <ClInclude Include="win32ClipboardWrapper.h" />
     <ClInclude Include="WorldObjects.h" />
     <ClInclude Include="zAllocator.h" />
@@ -1146,7 +1133,6 @@ copy "$(OutDir)$(TargetName).pdb" "$(G1_SYSTEM_PATH)\ddraw.pdb"</Command>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="BaseLineRenderer.cpp" />
-    <ClCompile Include="BaseWidget.cpp" />
     <ClCompile Include="D3D11CascadedShadowMapBuffer.cpp" />
     <ClCompile Include="D3D11FileRelativeInclude.cpp" />
     <ClCompile Include="D3D11GraphicsShader.cpp" />
@@ -1241,26 +1227,17 @@ copy "$(OutDir)$(TargetName).pdb" "$(G1_SYSTEM_PATH)\ddraw.pdb"</Command>
     <ClCompile Include="Detours\image.cpp" />
     <ClCompile Include="Detours\modules.cpp" />
     <ClCompile Include="DLLMain.cpp" />
-    <ClCompile Include="EditorLinePrimitive.cpp" />
     <ClCompile Include="Engine.cpp" />
     <ClCompile Include="GInventory.cpp" />
     <ClCompile Include="GMesh.cpp" />
-    <ClCompile Include="GMeshSimple.cpp" />
     <ClCompile Include="GothicAPI.cpp" />
     <ClCompile Include="GothicExternals.cpp" />
     <ClCompile Include="GraphicsShader.cpp" />
     <ClCompile Include="GSky.cpp" />
     <ClCompile Include="GSpriteCloud.cpp" />
-    <ClCompile Include="GVegetationBox.cpp" />
     <ClCompile Include="HookedFunctions.cpp" />
     <ClCompile Include="IkarusBindings.cpp" />
-    <ClCompile Include="ImGuiEditorView.cpp" />
     <ClCompile Include="ImGuiShim.cpp" />
-    <ClCompile Include="include\ImGuizmo\src\GraphEditor.cpp" />
-    <ClCompile Include="include\ImGuizmo\src\ImCurveEdit.cpp" />
-    <ClCompile Include="include\ImGuizmo\src\ImGradient.cpp" />
-    <ClCompile Include="include\ImGuizmo\src\ImGuizmo.cpp" />
-    <ClCompile Include="include\ImGuizmo\src\ImSequencer.cpp" />
     <ClCompile Include="include\imgui\backends\imgui_impl_dx11.cpp" />
     <ClCompile Include="include\imgui\backends\imgui_impl_win32.cpp" />
     <ClCompile Include="include\imgui\imgui.cpp" />
@@ -1306,8 +1283,6 @@ copy "$(OutDir)$(TargetName).pdb" "$(G1_SYSTEM_PATH)\ddraw.pdb"</Command>
     </ClCompile>
     <ClCompile Include="BaseShadowedPointLight.cpp" />
     <ClCompile Include="zSndMss.cpp" />
-    <None Include="Shaders\PS_Grass.hlsl" />
-    <None Include="Shaders\VS_GrassInstanced.hlsl" />
     <None Include="Shaders\VS_DecalInstanced.hlsl" />
     <None Include="Shaders\PS_PFX_VelocityDebug.hlsl" />
     <ClCompile Include="RenderGraph.cpp" />
@@ -1331,8 +1306,6 @@ copy "$(OutDir)$(TargetName).pdb" "$(G1_SYSTEM_PATH)\ddraw.pdb"</Command>
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Release_G1_AVX2|Win32'">NotUsing</PrecompiledHeader>
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Release_NoOpt_G1|Win32'">NotUsing</PrecompiledHeader>
     </ClCompile>
-    <ClCompile Include="WidgetContainer.cpp" />
-    <ClCompile Include="Widget_TransRot.cpp" />
     <ClCompile Include="win32ClipboardWrapper.cpp" />
     <ClCompile Include="WorldConverter.cpp" />
     <ClCompile Include="WorldObjects.cpp" />

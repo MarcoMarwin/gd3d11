@@ -8137,14 +8137,7 @@ XRESULT D3D11GraphicsEngine::OnKeyDown( unsigned int key ) {
             SaveScreenshotNextFrame = true;
         }
         break;
-    case VK_F1:
-        if (zCOption::GetOptions()->IsParameter("XEnableEditorPanel") || IS_SPACER_BUILD) {
-            if (Engine::ImGuiHandle) {
-                Engine::ImGuiHandle->ToggleEditor();
-            }
-            UpdateShouldBlockGameInput();
-        }
-        break;
+
     default:
         break;
     }
@@ -8329,7 +8322,7 @@ LRESULT D3D11GraphicsEngine::OnWindowMessage( HWND hWnd, UINT msg, WPARAM wParam
 void D3D11GraphicsEngine::UpdateShouldBlockGameInput( ) {
     if ( auto hImgui = Engine::ImGuiHandle ) {
         auto oldIsActive = hImgui->IsActive;
-        hImgui->IsActive = hImgui->SettingsVisible || hImgui->GetIsEditorVisible() || hImgui->AdvancedSettingsVisible || hImgui->LibShowBlockingThisFrame;
+        hImgui->IsActive = hImgui->SettingsVisible || hImgui->AdvancedSettingsVisible || hImgui->LibShowBlockingThisFrame;
         hImgui->UpdateBlockGameInput();
 
         if ( oldIsActive != hImgui->IsActive ) {
@@ -8374,11 +8367,7 @@ void D3D11GraphicsEngine::OnUIEvent( EUIEvent uiEvent ) {
         UpdateShouldBlockGameInput();
 
         UpdateClipCursor( OutputWindow );
-    } else if ( uiEvent == UI_OpenEditor ) {
-        if (Engine::ImGuiHandle) {
-            Engine::ImGuiHandle->ToggleEditor();
-        }
-        UpdateShouldBlockGameInput();
+UpdateShouldBlockGameInput();
     }
 }
 
@@ -9281,8 +9270,6 @@ void D3D11GraphicsEngine::DrawFrameParticles(
 
 /** Called when a vob was removed from the world */
 XRESULT D3D11GraphicsEngine::OnVobRemovedFromWorld( zCVob* vob ) {
-    if ( Engine::ImGuiHandle ) Engine::ImGuiHandle->OnVobRemovedFromWorld( vob );
-
     // Take out of shadowupdate queue
     for ( auto&& it = FrameShadowUpdateLights.begin(); it != FrameShadowUpdateLights.end(); ++it ) {
         if ( (*it)->Vob == vob ) {

@@ -680,11 +680,6 @@ struct GothicRendererSettings {
         DisableRendering = false;
         DisableDrawcalls = false;
 
-#ifdef BUILD_SPACER
-        EnableEditorPanel = true;
-#else
-        EnableEditorPanel = false;
-#endif
         AntiAliasingMode = E_AntiAliasingMode::AA_SMAA;
 
         TesselationFactor = 20.0f;
@@ -704,7 +699,7 @@ struct GothicRendererSettings {
         PCSSLightSize = 0.140f; // Shadow-UV light radius used by PCSS blocker search
 
         BloomStrength = 1.0f;
-        GlobalWindStrength = 1.0f;
+        GlobalWindStrength = 1.0f; // UI-normalized: 1.0 maps to the former effective 2.0 wind strength.
         VegetationAlphaToCoverage = true;
 
         BrightnessValue = 1.0f;
@@ -734,7 +729,7 @@ struct GothicRendererSettings {
         DoFGaussBlur = false;
         DoFFocusDistance = 12000.0f;
         DoFFocusRange = 8000.0f;
-        DoFBokehRadius = 5.0f;
+        DoFBokehRadius = 3.5f;
         DoFMaxBlur = 12.0f;
 
         WindQuality = WIND_QUALITY_ADVANCED;
@@ -781,12 +776,12 @@ struct GothicRendererSettings {
         LoadedResolution = INT2( desktopRect.right, desktopRect.bottom );
 
         ResolutionScalePercent = 100;
-        Upscaler = E_Upscaler::UPSCALER_FSR_1;
+        Upscaler = E_Upscaler::UPSCALER_DEFAULT;
 
         GothicUIScale = 1.0f;
         //DisableEverything();
 
-        LimitLightIntesity = false;
+        LimitLightIntesity = true;
         AllowNormalmaps = false;
         EnableParallaxOcclusionMapping = false;
         ParallaxOcclusionStrength = 1.0f;
@@ -925,7 +920,6 @@ struct GothicRendererSettings {
     bool DisableWatermark;
     bool DisableRendering;
     bool DisableDrawcalls;
-    bool EnableEditorPanel;
     // deferred render pass geometry Z-Prepass.
     // doesn't help much if at all.
     bool DoZPrepass;

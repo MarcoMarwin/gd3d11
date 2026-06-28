@@ -1,4 +1,4 @@
-﻿#pragma once
+#pragma once
 #include "pch.h"
 #include "Engine.h"
 #include "D3D11GraphicsEngineBase.h"
@@ -8,9 +8,7 @@
 #include <imgui.h>
 #include <imgui_impl_win32.h>
 #include <imgui_impl_dx11.h>
-#include <ImGuizmo/src/ImGuizmo.h>
 
-#include "ImGuiEditorView.h"
 
 class ImGuiShim {
 public:
@@ -40,14 +38,6 @@ public:
     void UpdateBlockGameInput() {
         m_lastFrameBlockGameInput = GetBlockGameInput();
     }
-    
-    void ToggleEditor() {
-        m_EditorView->SetIsEnabled(!m_EditorView->GetIsEnabled());
-    }
-    
-    bool GetIsEditorVisible() { return m_EditorView->GetIsEnabled(); }
-    
-    void OnVobRemovedFromWorld(zCVob* vob) { m_EditorView->OnVobRemovedFromWorld(vob); } 
 
     static WindowModes InterpretWindowMode( const GothicRendererSettings& s ) {
 
@@ -70,6 +60,4 @@ private:
     void RenderAdvancedSettingsWindow();
     void RenderAdvancedColumn2(GothicRendererSettings& settings, GothicAPI* gapi);
     bool m_lastFrameBlockGameInput = false;
-    bool m_FrameStatisticsVisible = false;
-    std::unique_ptr<ImGuiEditorView> m_EditorView;
 };

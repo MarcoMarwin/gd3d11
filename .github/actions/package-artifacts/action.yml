@@ -63,13 +63,6 @@ runs:
       run: |
         $relDir = "${{ steps.calc-path.outputs.release-dir }}"
         7z a -tzip -mx=7 -mmt=on "-xr!*.pdb" "$relDir.zip" "./$relDir/*"
-
-    - name: Create final Zip (debug)
-      shell: pwsh
-      run: |
-        $relDir = "${{ steps.calc-path.outputs.release-dir }}"
-        7z a -tzip -mx=7 -mmt=on "$relDir-debug.zip" "./$relDir/*"        
-
     - name: Upload Zip artifact
       id: artifact-upload
       uses: actions/upload-artifact@v6

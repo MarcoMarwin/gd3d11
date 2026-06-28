@@ -78,9 +78,9 @@ float SampleWetSSRBlockMask(float2 uv)
 
 float2 CalculateRainRipples(float2 wetUV, float time)
 {
-    float2 rippleA = TX_Distortion.SampleLevel(SS_Linear, wetUV * 2.70f + time * float2(0.0235f, -0.0155f), 0).xy * 2.0f - 1.0f;
-    float2 rippleB = TX_Distortion.SampleLevel(SS_Linear, wetUV * 5.10f + time * float2(-0.0195f, 0.0260f), 0).yx * 2.0f - 1.0f;
-    float waveA = sin((rippleA.x + rippleA.y + time * 0.85f) * 6.2831853f);
+    float2 rippleA = TX_Distortion.SampleLevel(SS_Linear, wetUV * 2.70f + time * float2(0.0705f, -0.0465f), 0).xy * 2.0f - 1.0f;
+    float2 rippleB = TX_Distortion.SampleLevel(SS_Linear, wetUV * 5.10f + time * float2(-0.0585f, 0.0780f), 0).yx * 2.0f - 1.0f;
+    float waveA = sin((rippleA.x + rippleA.y + time * 2.55f) * 6.2831853f);
     float waveB = sin((rippleB.x - rippleB.y - time * 1.05f) * 6.2831853f);
     return rippleA * waveA * 0.55f + rippleB * waveB * 0.35f;
 }
@@ -120,7 +120,7 @@ float4 PSMain(PS_INPUT input) : SV_TARGET
     distortion += (TX_Distortion.SampleLevel(SS_Linear, wetUV * 0.63f + WG_Time * float2(-0.0035f, 0.0055f), 0).xy * 2.0f - 1.0f) * 0.5f;
     float rainRippleWeight = wetMask * saturate(WG_RainFXWeight) * smoothstep(0.05f, 0.45f, WG_Wetness);
     float2 rippleDistortion = CalculateRainRipples(wetUV, WG_Time) * rainRippleWeight;
-    float2 softenedRippleDistortion = float2(rippleDistortion.x * 0.5f, rippleDistortion.y);
+    float2 softenedRippleDistortion = float2(rippleDistortion.x * 0.25f, rippleDistortion.y);
     float2 combinedDistortion = distortion + softenedRippleDistortion * 1.5f;
     float3 wetNormal = normalize(wsNormal + float3(combinedDistortion.x, 0.0f, combinedDistortion.y) * 0.10f);
 
@@ -167,7 +167,7 @@ float4 PSMain(PS_INPUT input) : SV_TARGET
     if (hitWeight <= 0.0f)
         return float4(sceneColor, 1.0f);
 
-    float2 reflectedUV = saturate(hitUV + float2(rippleDistortion.x * 0.0075f, rippleDistortion.y * 0.015f));
+    float2 reflectedUV = saturate(hitUV + float2(rippleDistortion.x * 0.00375f, rippleDistortion.y * 0.015f));
     float3 reflectedColor = SampleRoughReflection(reflectedUV, combinedDistortion);
     float reflectionLuma = dot(reflectedColor, float3(0.2126f, 0.7152f, 0.0722f));
     reflectedColor *= rcp(1.0f + max(0.0f, reflectionLuma - 1.0f) * 0.7f);

@@ -33,7 +33,6 @@
 #include "D3D11PShader.h"
 #include "D3D11VShader.h"
 #include "D3D7\MyDirect3DDevice7.h"
-#include "GVegetationBox.h"
 #include "oCNPC.h"
 #include "oCVisFX.h"
 #include "zCMeshSoftSkin.h"
@@ -1007,31 +1006,6 @@ void GothicAPI::OnSetWindow( HWND hWnd ) {
 GothicRendererState& GothicAPI::GetRendererState() { return RendererState; }
 
 
-/** Spawns a vegetationbox at the camera */
-GVegetationBox* GothicAPI::SpawnVegetationBoxAt( const XMFLOAT3& position, const XMFLOAT3& min, const XMFLOAT3& max, float density, const std::string& restrictByTexture ) {
-    GVegetationBox* v = new GVegetationBox;
-    XMFLOAT3 minposition;
-    XMFLOAT3 maxposition;
-    XMStoreFloat3( &minposition, XMLoadFloat3( &min ) + XMLoadFloat3( &position ) );
-    XMStoreFloat3( &maxposition, XMLoadFloat3( &max ) + XMLoadFloat3( &position ) );
-    v->InitVegetationBox( minposition, maxposition, "", density, 1.0f, restrictByTexture );
-
-    VegetationBoxes.push_back( v );
-
-    return v;
-}
-
-/** Adds a vegetationbox to the world */
-void GothicAPI::AddVegetationBox( GVegetationBox* box ) {
-    VegetationBoxes.push_back( box );
-}
-
-/** Removes a vegetationbox from the world */
-void GothicAPI::RemoveVegetationBox( GVegetationBox* box ) {
-    VegetationBoxes.remove( box );
-    delete box;
-}
-
 /** Resets the object, like at level load */
 void GothicAPI::ResetWorld() {
     ResetVobs();
@@ -1264,10 +1238,6 @@ void GothicAPI::OnWorldLoaded() {
     SetEnableGothicInput( true );
 #endif
 
-    // Enable the editorpanel, if in spacer
-#ifdef BUILD_SPACER
-    Engine::GraphicsEngine->OnUIEvent( BaseGraphicsEngine::UI_OpenEditor );
-#endif
 
     _canClearVobsByVisual = false;
 }
@@ -1592,11 +1562,6 @@ void GothicAPI::DrawWorldMeshNaive() {
         ZoneScopedN( "World Mesh" );
         auto _1 = Engine::GraphicsEngine->RecordGraphicsEvent( GE_NAME( "World Mesh" ) );
         Engine::GraphicsEngine->DrawWorldMesh();
-    }
-    
-
-    for ( auto const& vegetationBox : VegetationBoxes ) {
-        vegetationBox->RenderVegetation( GetCameraPosition() );
     }
 
     const auto cameraPosXm = GetCameraPositionXM();
@@ -5226,269 +5191,48 @@ zCVob* GothicAPI::GetPlayerVob() {
 
 /** Loads resources created for this .ZEN */
 void GothicAPI::LoadCustomZENResources() {
-    auto gameName = GetGameName();
-    std::string zenFolder;
-    if ( gameName == "Original" ) {
-        zenFolder = "system\\GD3D11\\ZENResources\\";
-    } else {
-        zenFolder = "system\\GD3D11\\ZENResources\\" + gameName + "\\";
-    }
-    if ( !Toolbox::FolderExists( zenFolder ) ) {
-        LogInfo() << "Custom ZEN-Resources. Directory not found: " << zenFolder;
-        return;
-    }
-
-    std::string zen = zenFolder + LoadedWorldInfo->WorldName;
-
-    LogInfo() << "Loading custom ZEN-Resources from: " << zen;
-
-    // Suppressed Textures
-    LoadSuppressedTextures( zen + ".spt" );
-
-    // Load vegetation
-    LoadVegetation( zen + ".veg" );
+    // Editor-only .spt/.veg resources are intentionally ignored in the player build.
 }
 
 /** Saves resources created for this .ZEN */
 void GothicAPI::SaveCustomZENResources() {
-    auto gameName = GetGameName();
-    std::string zenFolder;
-    if ( gameName == "Original" ) {
-        zenFolder = "system\\GD3D11\\ZENResources\\";
-    } else {
-        zenFolder = "system\\GD3D11\\ZENResources\\" + gameName + "\\";
-    }
-
-    bool mkDirErr = false;
-    if ( !Toolbox::FolderExists( zenFolder ) ) {
-        mkDirErr = !Toolbox::CreateDirectoryRecursive( zenFolder );
-    }
-
-    if ( mkDirErr ) {
-        LogError() << "Could not save custom ZEN-Resources. Could not create directory: " << zenFolder;
-        return;
-    }
-
-    std::string zen = zenFolder + LoadedWorldInfo->WorldName;
-
-    LogInfo() << "Saving custom ZEN-Resources to: " << zen;
-
-    // Suppressed Textures
-    SaveSuppressedTextures( zen + ".spt" );
-
-    // Save vegetation
-    SaveVegetation( zen + ".veg" );
+    // Editor-only .spt/.veg resources are intentionally ignored in the player build.
 }
 
 /** Applys the suppressed textures */
 void GothicAPI::ApplySuppressedSectionTextures() {
-    for ( auto const& it : SuppressedTexturesBySection ) {
-        WorldMeshSectionInfo* section = it.first;
-
-        // Look into each mesh of this section and find the texture
-        for ( auto mit = section->WorldMeshes.begin(); mit != section->WorldMeshes.end(); ) {
-            bool movedToSuppressed = false;
-            for ( unsigned int i = 0; i < it.second.size(); i++ ) {
-                // Is this the texture we are looking for?
-                if ( (*mit).first.Material && (*mit).first.Material->GetTexture() && (*mit).first.Material->GetTexture()->GetNameWithoutExt() == it.second[i] ) {
-                    // Yes, move it to the suppressed map
-                    section->SuppressedMeshes[(*mit).first] = (*mit).second;
-                    mit = section->WorldMeshes.erase( mit );
-                    movedToSuppressed = true;
-                    break;
-                }
-            }
-
-            if ( !movedToSuppressed ) {
-                ++mit;
-            }
-        }
-    }
 }
 
 /** Resets the suppressed textures */
 void GothicAPI::ResetSupressedTextures() {
-    for ( auto const& it : SuppressedTexturesBySection ) {
-        WorldMeshSectionInfo* section = it.first;
-
-        // Look into each mesh of this section and find the texture
-        for ( auto const& mit : section->WorldMeshes ) {
-            section->WorldMeshes[mit.first] = mit.second;
-        }
-    }
-
     SuppressedTexturesBySection.clear();
 }
 
 /** Resets the vegetation */
 void GothicAPI::ResetVegetation() {
-    for ( auto&& it : VegetationBoxes ) {
-        delete it;
-    }
-    VegetationBoxes.clear();
 }
-
 
 /** Removes the given texture from the given section and stores the supression, so we can load it next time */
-void GothicAPI::SupressTexture( WorldMeshSectionInfo* section, const std::string& texture ) {
-    SuppressedTexturesBySection[section].push_back( texture );
-
-    ApplySuppressedSectionTextures(); // This is an editor only feature, so it's okay to "not be blazing fast"
+void GothicAPI::SupressTexture( WorldMeshSectionInfo*, const std::string& ) {
 }
 
 /** Saves Suppressed textures to a file */
-XRESULT GothicAPI::SaveSuppressedTextures( const std::string& file ) {
-    FILE* f = fopen( file.c_str(), "wb" );
-
-    LogInfo() << "Saving suppressed textures";
-
-    if ( !f )
-        return XR_FAILED;
-
-    int version = 1;
-    fwrite( &version, sizeof( version ), 1, f );
-
-    size_t count = SuppressedTexturesBySection.size();
-    fwrite( &count, sizeof( count ), 1, f );
-
-    for ( auto const& it : SuppressedTexturesBySection ) {
-        // Write section xy-coords
-        fwrite( &it.first->WorldCoordinates, sizeof( INT2 ), 1, f );
-
-        size_t countTX = it.second.size();
-        fwrite( &countTX, sizeof( countTX ), 1, f );
-
-        for ( size_t i = 0; i < countTX; i++ ) {
-            size_t numChars = std::min<size_t>( 255, it.second[i].size() );
-
-            // Write num of chars
-            fwrite( &numChars, sizeof( numChars ), 1, f );
-
-            // Write chars
-            fwrite( &it.second[0], numChars, 1, f );
-        }
-    }
-
-    fclose( f );
-
+XRESULT GothicAPI::SaveSuppressedTextures( const std::string& ) {
     return XR_SUCCESS;
 }
 
 /** Saves Suppressed textures to a file */
-XRESULT GothicAPI::LoadSuppressedTextures( const std::string& file ) {
-    FILE* f = fopen( file.c_str(), "rb" );
-
-    LogInfo() << "Loading Suppressed textures";
-
-    // Clean first
-    ResetSupressedTextures();
-
-    if ( !f )
-        return XR_FAILED;
-
-    int version;
-    fread( &version, sizeof( version ), 1, f );
-
-    size_t count;
-    fread( &count, sizeof( count ), 1, f );
-
-
-    for ( size_t c = 0; c < count; c++ ) {
-        size_t countTX;
-        fread( &countTX, sizeof( countTX ), 1, f );
-
-        for ( size_t i = 0; i < countTX; i++ ) {
-            // Read section xy-coords
-            INT2 coords;
-            fread( &coords, sizeof( INT2 ), 1, f );
-
-            // Read num of chars
-            size_t numChars;
-            fread( &numChars, sizeof( numChars ), 1, f );
-
-            // Read chars
-            char name[256] = {};
-            if ( numChars > 0 ) {
-                if ( numChars > 255 ) {
-                    fread( name, 255, 1, f );
-                    fseek( f, static_cast<long>(numChars - 255), SEEK_CUR );
-                } else {
-                    fread( name, numChars, 1, f );
-                }
-            }
-
-            // Add to map
-            SuppressedTexturesBySection[&WorldSections[coords.x][coords.y]].push_back( std::string( name ) );
-        }
-    }
-
-    fclose( f );
-
-    // Apply the whole thing
-    ApplySuppressedSectionTextures();
-
+XRESULT GothicAPI::LoadSuppressedTextures( const std::string& ) {
     return XR_SUCCESS;
 }
 
 /** Saves vegetation to a file */
-XRESULT GothicAPI::SaveVegetation( const std::string& file ) {
-    FILE* f = fopen( file.c_str(), "wb" );
-
-    LogInfo() << "Saving vegetation";
-
-    if ( !f )
-        return XR_FAILED;
-
-    int version = 1;
-    fwrite( &version, sizeof( version ), 1, f );
-
-    size_t num = VegetationBoxes.size();
-    fwrite( &num, sizeof( num ), 1, f );
-
-    for ( auto const& it : VegetationBoxes ) {
-        it->SaveToFILE( f, version );
-    }
-
-    fclose( f );
-
+XRESULT GothicAPI::SaveVegetation( const std::string& ) {
     return XR_SUCCESS;
 }
 
 /** Saves vegetation to a file */
-XRESULT GothicAPI::LoadVegetation( const std::string& file ) {
-    LogInfo() << "Loading vegetation";
-
-    // Reset first
-    ResetVegetation();
-
-    zFILE_VDFS::Ptr vdfsFile;
-    if ( std::filesystem::path( file ).is_absolute() ) {
-        vdfsFile = zFILE_VDFS::Create( file.c_str() );
-    } else if ( !file.empty() && file[0] != '\\' ) {
-        vdfsFile = zFILE_VDFS::Create( ("\\"+ file).c_str());
-    } else {
-        vdfsFile = zFILE_VDFS::Create( file.c_str() );
-    }
-
-    if ( !vdfsFile->Exists() || !vdfsFile->Open( false ) ) {
-        return XR_FAILED;
-    }
-
-    int version;
-    vdfsFile->Read( &version, sizeof( version ) );
-
-    size_t num = VegetationBoxes.size();
-    vdfsFile->Read( &num, sizeof( num ) );
-
-    for ( size_t i = 0; i < num; i++ ) {
-        GVegetationBox* b = new GVegetationBox;
-        b->LoadFromFILE( vdfsFile.get(), version );
-
-        AddVegetationBox( b );
-    }
-
-    vdfsFile->Close();
-
+XRESULT GothicAPI::LoadVegetation( const std::string& ) {
     return XR_SUCCESS;
 }
 
@@ -5650,7 +5394,7 @@ XRESULT GothicAPI::LoadMenuSettings( const std::string& file ) {
         s.DoFGaussBlur = GetPrivateProfileBoolA( "General", "DoFGaussBlur", ds.DoFGaussBlur, ini );
         s.DoFFocusDistance = std::clamp( GetPrivateProfileFloatA( "General", "DoFFocusDistance", ds.DoFFocusDistance, ini ), 0.0f, 30000.0f );
         s.DoFFocusRange = GetPrivateProfileFloatA( "General", "DoFFocusRange", ds.DoFFocusRange, ini );
-        s.DoFBokehRadius = std::clamp( GetPrivateProfileFloatA( "General", "DoFBokehRadius", ds.DoFBokehRadius, ini ), 1.0f, 32.0f );
+        s.DoFBokehRadius = std::clamp( GetPrivateProfileFloatA( "General", "DoFBokehRadius", ds.DoFBokehRadius, ini ), 1.0f, 10.0f );
         s.DoFMaxBlur = GetPrivateProfileFloatA( "General", "DoFMaxBlur", ds.DoFMaxBlur, ini );
         s.AllowNormalmaps = GetPrivateProfileBoolA( "General", "AllowNormalmaps", ds.AllowNormalmaps, ini );
         s.EnableParallaxOcclusionMapping = GetPrivateProfileBoolA( "General", "EnableParallaxOcclusionMapping", ds.EnableParallaxOcclusionMapping, ini );
@@ -5737,7 +5481,7 @@ XRESULT GothicAPI::LoadMenuSettings( const std::string& file ) {
         // ....
 
         s.WindQuality = GetPrivateProfileIntA( "Display", "WindQuality", 0, ini.c_str() );
-        s.GlobalWindStrength = GetPrivateProfileFloatA( "Display", "WindStrength", ds.GlobalWindStrength, ini );
+        s.GlobalWindStrength = std::clamp( GetPrivateProfileFloatA( "Display", "WindStrength", ds.GlobalWindStrength, ini ), 0.1f, 2.0f );
         s.EnableWaterAnimation = GetPrivateProfileBoolA( "Display", "WaterWaveAnimation", ds.EnableWaterAnimation, ini );
         s.HeroAffectsObjects = GetPrivateProfileBoolA( "Display", "HeroAffectsObjects", ds.HeroAffectsObjects, ini );
 
@@ -5888,8 +5632,8 @@ POINT GothicAPI::GetCursorPosition() {
     float x = static_cast<float>(p.x) / static_cast<float>(r.right);
     float y = static_cast<float>(p.y) / static_cast<float>(r.bottom);
 
-    p.x = static_cast<long>(x * static_cast<float>(Engine::GraphicsEngine->GetBackbufferResolution().x));
-    p.y = static_cast<long>(y * static_cast<float>(Engine::GraphicsEngine->GetBackbufferResolution().y));
+    p.x = static_cast<long>(x * static_cast<float>(r.right));
+    p.y = static_cast<long>(y * static_cast<float>(r.bottom));
 
     return p;
 }
@@ -6619,7 +6363,7 @@ static void CollectVisibleVobsHelper( BspInfo* base,
  *  Uses the p-vertex (positive-vertex) method: for each plane, the corner of the AABB most
  *  aligned with the plane normal is tested. If that corner is outside the plane, the whole
  *  AABB is outside. All 8 leaves are tested in parallel; surviving leaves are processed
- *  with CollectLeafVobs.  Requires a perspective (plane-cached) Frustum — checked by the caller.
+ *  with CollectLeafVobs.  Requires a perspective (plane-cached) Frustum Ã¢â‚¬â€ checked by the caller.
  */
 static void CollectVisibleVobsWithLeafCache(
     const RndCullContext& ctx,
@@ -6702,7 +6446,7 @@ static void CollectVisibleVobsWithLeafCache(
         vOutside = _mm256_or_ps( vOutside, _mm256_cmp_ps( vDistSq, vDistSqThresh, _CMP_GE_OQ ) );
 
         const int cullMask = _mm256_movemask_ps( vOutside );
-        if ( cullMask == 0xFF ) continue; // All 8 culled — skip scalar work
+        if ( cullMask == 0xFF ) continue; // All 8 culled Ã¢â‚¬â€ skip scalar work
 
         if ( cullMask == 0 ) {
             for ( uint32_t lane = 0; lane < 8; ++lane ) {
