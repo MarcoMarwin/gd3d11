@@ -714,6 +714,9 @@ public:
     /** Returns the player-vob */
     zCVob* GetPlayerVob();
 
+    /** Collects nearby NPC positions for local vegetation interaction. */
+    size_t CollectNearbyNpcInteractionPositions( const XMFLOAT3& center, float maxDistanceWorld, size_t maxCount, float4* outPositions );
+
     /** Returns the map of static mesh visuals */
     const gtl::flat_hash_map<zCProgMeshProto*, MeshVisualInfo*>& GetStaticMeshVisuals() { return StaticMeshVisuals; }
 

@@ -5185,6 +5185,62 @@ zCVob* GothicAPI::GetPlayerVob() {
     return oCGame::GetPlayer();
 }
 
+size_t GothicAPI::CollectNearbyNpcInteractionPositions( const XMFLOAT3& center, float maxDistanceWorld, size_t maxCount, float4* outPositions ) {
+    if ( !outPositions || maxCount == 0 || maxDistanceWorld <= 0.0f ) {
+        return 0;
+    }
+
+    constexpr size_t LocalCapacity = 5;
+    maxCount = std::min( maxCount, LocalCapacity );
+
+    struct Candidate {
+        float DistanceSq = FLT_MAX;
+        XMFLOAT3 Position = XMFLOAT3( 0, 0, 0 );
+    };
+
+    Candidate nearest[LocalCapacity];
+    const float maxDistanceSq = maxDistanceWorld * maxDistanceWorld;
+    zCVob* player = GetPlayerVob();
+    zCWorld* playerWorld = player ? player->GetHomeWorld() : nullptr;
+
+    for ( auto const& it : SkeletalMeshNpcs ) {
+        oCNPC* npc = it.first;
+        if ( !npc || npc->IsAPlayer() || !npc->GetShowVisual() || npc->GetSleepingMode() != 0 ) {
+            continue;
+        }
+        if ( playerWorld && npc->GetHomeWorld() != playerWorld ) {
+            continue;
+        }
+
+        const XMFLOAT3 npcPos = npc->GetPositionWorld();
+        const float dx = npcPos.x - center.x;
+        const float dz = npcPos.z - center.z;
+        const float distanceSq = dx * dx + dz * dz;
+        if ( distanceSq > maxDistanceSq ) {
+            continue;
+        }
+
+        for ( size_t i = 0; i < maxCount; ++i ) {
+            if ( distanceSq >= nearest[i].DistanceSq ) {
+                continue;
+            }
+            for ( size_t j = maxCount - 1; j > i; --j ) {
+                nearest[j] = nearest[j - 1];
+            }
+            nearest[i].DistanceSq = distanceSq;
+            nearest[i].Position = npcPos;
+            break;
+        }
+    }
+
+    size_t count = 0;
+    for ( size_t i = 0; i < maxCount && nearest[i].DistanceSq < FLT_MAX; ++i ) {
+        outPositions[count++] = float4( nearest[i].Position.x, nearest[i].Position.y, nearest[i].Position.z, 1.0f );
+    }
+
+    return count;
+}
+
 /** Loads resources created for this .ZEN */
 void GothicAPI::LoadCustomZENResources() {
     // Editor-only .spt/.veg resources are intentionally ignored in the player build.
@@ -5252,11 +5308,12 @@ XRESULT GothicAPI::SaveMenuSettings( const std::string& file ) {
     WritePrivateProfileStringA( "General", "EnableDebugLog", std::to_string( s.EnableDebugLog ? TRUE : FALSE ).c_str(), ini.c_str() );
     WritePrivateProfileStringA( "General", "EnableAutoupdates", std::to_string( s.EnableAutoupdates ? TRUE : FALSE ).c_str(), ini.c_str() );
     WritePrivateProfileStringA( "General", "EnableGodRays", std::to_string( s.EnableGodRays ? TRUE : FALSE ).c_str(), ini.c_str() );
+    WritePrivateProfileStringA( "General", "GodRayStrength", float_to_string( s.GodRayStrength, 2 ).c_str(), ini.c_str() );
     WritePrivateProfileStringA( "General", "EnableDoF", std::to_string( s.EnableDoF ? TRUE : FALSE ).c_str(), ini.c_str() );
     WritePrivateProfileStringA( "General", "DoFGaussBlur", std::to_string( s.DoFGaussBlur ? TRUE : FALSE ).c_str(), ini.c_str() );
     WritePrivateProfileStringA( "General", "DoFFocusDistance", float_to_string( s.DoFFocusDistance, 1 ).c_str(), ini.c_str() );
     WritePrivateProfileStringA( "General", "DoFFocusRange", float_to_string( s.DoFFocusRange, 1 ).c_str(), ini.c_str() );
-    WritePrivateProfileStringA( "General", "DoFBokehRadius", float_to_string( s.DoFBokehRadius, 1 ).c_str(), ini.c_str() );
+    WritePrivateProfileStringA( "General", "DoFBokehRadius", float_to_string( s.DoFBokehRadius, 2 ).c_str(), ini.c_str() );
     WritePrivateProfileStringA( "General", "DoFMaxBlur", float_to_string( s.DoFMaxBlur, 1 ).c_str(), ini.c_str() );
     WritePrivateProfileStringA( "General", "AllowNormalmaps", std::to_string( s.AllowNormalmaps ? TRUE : FALSE ).c_str(), ini.c_str() );
     WritePrivateProfileStringA( "General", "EnableParallaxOcclusionMapping", std::to_string( s.EnableParallaxOcclusionMapping ? TRUE : FALSE ).c_str(), ini.c_str() );
@@ -5277,6 +5334,8 @@ XRESULT GothicAPI::SaveMenuSettings( const std::string& file ) {
     WritePrivateProfileStringA( "General", "ScreenSpaceGIStrength", float_to_string( s.ScreenSpaceGIStrength, 2 ).c_str(), ini.c_str() );
     WritePrivateProfileStringA( "General", "EnableParticleLighting", std::to_string( s.EnableParticleLighting ? TRUE : FALSE ).c_str(), ini.c_str() );
     WritePrivateProfileStringA( "General", "ParticleLightingStrength", float_to_string( s.ParticleLightingStrength, 2 ).c_str(), ini.c_str() );
+    WritePrivateProfileStringA( "General", "EnableSSS", std::to_string( s.EnableSSS ? TRUE : FALSE ).c_str(), ini.c_str() );
+    WritePrivateProfileStringA( "General", "SSSIntensity", float_to_string( s.SSSIntensity, 2 ).c_str(), ini.c_str() );
 
     /*
     * Draw-distance is saved on a per World basis using SaveRendererWorldSettings
@@ -5311,6 +5370,7 @@ XRESULT GothicAPI::SaveMenuSettings( const std::string& file ) {
     WritePrivateProfileStringA( "Display", "WindStrength", std::to_string( s.GlobalWindStrength ).c_str(), ini.c_str() );
     WritePrivateProfileStringA( "Display", "WaterWaveAnimation", std::to_string( s.EnableWaterAnimation ? TRUE : FALSE ).c_str(), ini.c_str() );
     WritePrivateProfileStringA( "Display", "HeroAffectsObjects", std::to_string( s.HeroAffectsObjects ? TRUE : FALSE ).c_str(), ini.c_str() );
+    WritePrivateProfileStringA( "Display", "HeroAffectsObjectsStrength", float_to_string( s.HeroAffectsObjectsStrength, 2 ).c_str(), ini.c_str() );
     
 
     WritePrivateProfileStringA( "Shadows", "EnableShadows", std::to_string( s.EnableShadows ? TRUE : FALSE ).c_str(), ini.c_str() );
@@ -5346,6 +5406,7 @@ XRESULT GothicAPI::SaveMenuSettings( const std::string& file ) {
     WritePrivateProfileStringA( "HBAO", "SsaoStepCount", std::to_string( s.HbaoSettings.SsaoStepCount ).c_str(), ini.c_str() );
 
     WritePrivateProfileStringA( "AO", "Mode", std::to_string( static_cast<int>(s.AoMode) ).c_str(), ini.c_str() );
+    WritePrivateProfileStringA( "AO", "Strength", float_to_string( s.AOStrength, 2 ).c_str(), ini.c_str() );
     WritePrivateProfileStringA( "SAO", "Radius", std::to_string( s.SaoSettings.Radius ).c_str(), ini.c_str() );
     WritePrivateProfileStringA( "SAO", "Bias", std::to_string( s.SaoSettings.Bias ).c_str(), ini.c_str() );
     WritePrivateProfileStringA( "SAO", "Intensity", std::to_string( s.SaoSettings.Intensity ).c_str(), ini.c_str() );
@@ -5386,11 +5447,12 @@ XRESULT GothicAPI::LoadMenuSettings( const std::string& file ) {
         s.EnableDebugLog = GetPrivateProfileBoolA( "General", "EnableDebugLog", ds.EnableDebugLog, ini );
         s.EnableAutoupdates = GetPrivateProfileBoolA( "General", "EnableAutoupdates", ds.EnableAutoupdates, ini );
         s.EnableGodRays = GetPrivateProfileBoolA( "General", "EnableGodRays", ds.EnableGodRays, ini );
+        s.GodRayStrength = std::clamp( GetPrivateProfileFloatA( "General", "GodRayStrength", ds.GodRayStrength, ini ), 0.01f, 2.0f );
         s.EnableDoF = GetPrivateProfileBoolA( "General", "EnableDoF", ds.EnableDoF, ini );
         s.DoFGaussBlur = GetPrivateProfileBoolA( "General", "DoFGaussBlur", ds.DoFGaussBlur, ini );
         s.DoFFocusDistance = std::clamp( GetPrivateProfileFloatA( "General", "DoFFocusDistance", ds.DoFFocusDistance, ini ), 0.0f, 30000.0f );
         s.DoFFocusRange = GetPrivateProfileFloatA( "General", "DoFFocusRange", ds.DoFFocusRange, ini );
-        s.DoFBokehRadius = std::clamp( GetPrivateProfileFloatA( "General", "DoFBokehRadius", ds.DoFBokehRadius, ini ), 1.0f, 10.0f );
+        s.DoFBokehRadius = std::clamp( GetPrivateProfileFloatA( "General", "DoFBokehRadius", ds.DoFBokehRadius, ini ), 0.035f, 7.0f );
         s.DoFMaxBlur = GetPrivateProfileFloatA( "General", "DoFMaxBlur", ds.DoFMaxBlur, ini );
         s.AllowNormalmaps = GetPrivateProfileBoolA( "General", "AllowNormalmaps", ds.AllowNormalmaps, ini );
         s.EnableParallaxOcclusionMapping = GetPrivateProfileBoolA( "General", "EnableParallaxOcclusionMapping", ds.EnableParallaxOcclusionMapping, ini );
@@ -5404,14 +5466,16 @@ XRESULT GothicAPI::LoadMenuSettings( const std::string& file ) {
         s.SunLightStrength = GetPrivateProfileFloatA( "General", "SunLightStrength", ds.SunLightStrength, ini );
         s.DrawG1ForestPortals = GetPrivateProfileBoolA( "General", "DrawG1ForestPortals", ds.DrawG1ForestPortals, ini );
         s.DrawRainThroughTransformFeedback = GetPrivateProfileBoolA( "General", "DrawRainThroughTransformFeedback", ds.DrawRainThroughTransformFeedback, ini );
-        s.SSRStrength = std::clamp( GetPrivateProfileFloatA( "General", "SSRStrength", ds.SSRStrength, ini ), 0.0f, 2.0f );
+        s.SSRStrength = std::clamp( GetPrivateProfileFloatA( "General", "SSRStrength", ds.SSRStrength, ini ), 0.01f, 2.0f );
         s.WaterCubemapStrength = ds.WaterCubemapStrength;
         s.EnableContactShadows = GetPrivateProfileBoolA( "General", "EnableContactShadows", ds.EnableContactShadows, ini );
-        s.ContactShadowStrength = std::clamp( GetPrivateProfileFloatA( "General", "ContactShadowStrength", ds.ContactShadowStrength, ini ), 0.0f, 2.0f );
+        s.ContactShadowStrength = std::clamp( GetPrivateProfileFloatA( "General", "ContactShadowStrength", ds.ContactShadowStrength, ini ), 0.01f, 2.0f );
         s.EnableScreenSpaceGI = GetPrivateProfileBoolA( "General", "EnableScreenSpaceGI", ds.EnableScreenSpaceGI, ini );
-        s.ScreenSpaceGIStrength = std::clamp( GetPrivateProfileFloatA( "General", "ScreenSpaceGIStrength", ds.ScreenSpaceGIStrength, ini ), 0.0f, 2.0f );
+        s.ScreenSpaceGIStrength = std::clamp( GetPrivateProfileFloatA( "General", "ScreenSpaceGIStrength", ds.ScreenSpaceGIStrength, ini ), 0.01f, 2.0f );
         s.EnableParticleLighting = GetPrivateProfileBoolA( "General", "EnableParticleLighting", ds.EnableParticleLighting, ini );
-        s.ParticleLightingStrength = std::clamp( GetPrivateProfileFloatA( "General", "ParticleLightingStrength", ds.ParticleLightingStrength, ini ), 0.0f, 2.0f );
+        s.ParticleLightingStrength = std::clamp( GetPrivateProfileFloatA( "General", "ParticleLightingStrength", ds.ParticleLightingStrength, ini ), 0.01f, 2.0f );
+        s.EnableSSS = GetPrivateProfileBoolA( "General", "EnableSSS", ds.EnableSSS, ini );
+        s.SSSIntensity = std::clamp( GetPrivateProfileFloatA( "General", "SSSIntensity", ds.SSSIntensity, ini ), 0.0075f, 1.5f );
 
         /*
         * Draw-distance is Loaded on a per World basis using LoadRendererWorldSettings
@@ -5443,7 +5507,7 @@ XRESULT GothicAPI::LoadMenuSettings( const std::string& file ) {
         s.SmoothShadowCameraUpdate = GetPrivateProfileBoolA( "Shadows", "SmoothCameraUpdate", ds.SmoothShadowCameraUpdate, ini );
         s.SmoothShadowFrequency = GetPrivateProfileFloatA( "Shadows", "SmoothShadowFrequency", ds.SmoothShadowFrequency, ini );
         s.ShadowStrength = GetPrivateProfileFloatA( "Shadows", "ShadowStrength", ds.ShadowStrength, ini );
-        s.ShadowSoftness = GetPrivateProfileFloatA( "Shadows", "ShadowSoftness", ds.ShadowSoftness, ini );
+        s.ShadowSoftness = std::clamp( GetPrivateProfileFloatA( "Shadows", "ShadowSoftness", ds.ShadowSoftness, ini ), 0.01f, 2.0f );
         s.ShadowAOStrength = GetPrivateProfileFloatA( "Shadows", "ShadowAOStrength", ds.ShadowAOStrength, ini );
         s.WorldAOStrength = GetPrivateProfileFloatA( "Shadows", "WorldAOStrength", ds.WorldAOStrength, ini );
 
@@ -5477,9 +5541,10 @@ XRESULT GothicAPI::LoadMenuSettings( const std::string& file ) {
         // ....
 
         s.WindQuality = GetPrivateProfileIntA( "Display", "WindQuality", 0, ini.c_str() );
-        s.GlobalWindStrength = std::clamp( GetPrivateProfileFloatA( "Display", "WindStrength", ds.GlobalWindStrength, ini ), 0.1f, 2.0f );
+        s.GlobalWindStrength = std::clamp( GetPrivateProfileFloatA( "Display", "WindStrength", ds.GlobalWindStrength, ini ), 0.01f, 2.0f );
         s.EnableWaterAnimation = GetPrivateProfileBoolA( "Display", "WaterWaveAnimation", ds.EnableWaterAnimation, ini );
         s.HeroAffectsObjects = GetPrivateProfileBoolA( "Display", "HeroAffectsObjects", ds.HeroAffectsObjects, ini );
+        s.HeroAffectsObjectsStrength = std::clamp( GetPrivateProfileFloatA( "Display", "HeroAffectsObjectsStrength", ds.HeroAffectsObjectsStrength, ini ), 0.01f, 2.0f );
 
         if ( GetPrivateProfileBoolA( "SMAA", "Enabled", false, ini ) ) {
             s.AntiAliasingMode = GothicRendererSettings::E_AntiAliasingMode::AA_SMAA;
@@ -5508,6 +5573,7 @@ XRESULT GothicAPI::LoadMenuSettings( const std::string& file ) {
         // Use ASSAO as default when no AO mode is stored.
         int defaultAoMode = static_cast<int>(ds.AoMode);
         s.AoMode = static_cast<AOMode>(GetPrivateProfileIntA( "AO", "Mode", defaultAoMode, ini.c_str() ));
+        s.AOStrength = std::clamp( GetPrivateProfileFloatA( "AO", "Strength", ds.AOStrength, ini ), 0.01f, 2.0f );
 
         const SAOSettings& defaultSAOSettings = ds.SaoSettings;
         s.SaoSettings.Radius = GetPrivateProfileFloatA( "SAO", "Radius", defaultSAOSettings.Radius, ini );

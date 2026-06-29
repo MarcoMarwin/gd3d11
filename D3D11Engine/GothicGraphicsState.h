@@ -718,7 +718,7 @@ struct GothicRendererSettings {
         SSRStrength = 1.0f; // UI-normalized: 1.0 equals the former 1.2 slider value.
         WaterCubemapStrength = 1.0f;
         EnableSSS = true;
-        SSSIntensity = 1.0f;
+        SSSIntensity = 0.75f; // UI-normalized: 1.0 maps to the intended 0.75 backlight intensity.
         EnableContactShadows = true;
         ContactShadowStrength = 1.0f; // UI-normalized: 1.0 keeps the former 0.35 effect strength.
         EnableScreenSpaceGI = false;
@@ -734,6 +734,7 @@ struct GothicRendererSettings {
 
         WindQuality = WIND_QUALITY_ADVANCED;
         HeroAffectsObjects = false;
+        HeroAffectsObjectsStrength = 1.0f;
         EnablePointlightShadows = PLS_UPDATE_DYNAMIC;
         MinLightShadowUpdateRange = 300.0f;
         PartialDynamicShadowUpdates = true;
@@ -765,9 +766,11 @@ struct GothicRendererSettings {
         GodRayDecay = 0.97f;
         GodRayWeight = 0.85f;
         GodRayDensity = 0.70f;
+        GodRayStrength = 1.0f;
         GodRayColorMod = float3( 1.0f, 0.8f, 0.6f );
 
         AoMode = AOMode::AO_ASSAO;
+        AOStrength = 1.0f;
 
         RECT desktopRect;
         GetClientRect( GetDesktopWindow(), &desktopRect );
@@ -898,6 +901,7 @@ struct GothicRendererSettings {
     float FogRange;
     int WindQuality;
     bool HeroAffectsObjects;
+    float HeroAffectsObjectsStrength;
     bool DrawG1ForestPortals;
     bool DrawRainThroughTransformFeedback;
     bool EnableHDR;
@@ -999,6 +1003,7 @@ struct GothicRendererSettings {
     float GodRayDecay;
     float GodRayWeight;
     float GodRayDensity;
+    float GodRayStrength;
     float3 GodRayColorMod;
     bool EnableGodRays;
 
@@ -1006,6 +1011,7 @@ struct GothicRendererSettings {
     SAOSettings SaoSettings;
     ASSAO_Settings AssaoSettings;
     AOMode AoMode;
+    float AOStrength;
 
     bool FixViewFrustum;
 
@@ -1079,6 +1085,26 @@ struct GothicRendererSettings {
         } FeatureSet;
     } DebugSettings;
 
+    static int SnapFSRResolutionScale( int value ) {
+        constexpr int levels[] = { 100, 83, 75, 66, 50, 33 };
+        const int clampedValue = std::clamp( value, 33, 100 );
+        int nearestLevel = levels[0];
+        int nearestDistance = nearestLevel > clampedValue
+            ? nearestLevel - clampedValue
+            : clampedValue - nearestLevel;
+
+        for ( int level : levels ) {
+            const int distance = level > clampedValue
+                ? level - clampedValue
+                : clampedValue - level;
+            if ( distance < nearestDistance ) {
+                nearestLevel = level;
+                nearestDistance = distance;
+            }
+        }
+        return nearestLevel;
+    }
+
     void FixupUpscalingSettings() {
         // AA_FSR3 is a UI-only value. Runtime FSR3 uses AA_FSR plus the FSR3 upscaler.
         if ( AntiAliasingMode == E_AntiAliasingMode::AA_FSR3 ) {
@@ -1091,7 +1117,7 @@ struct GothicRendererSettings {
                 && Upscaler != E_Upscaler::UPSCALER_FSR_3 ) {
                 Upscaler = E_Upscaler::UPSCALER_FSR_3;
             }
-            ResolutionScalePercent = std::clamp( ResolutionScalePercent, 33, 100 );
+            ResolutionScalePercent = SnapFSRResolutionScale( ResolutionScalePercent );
             return;
         }
 

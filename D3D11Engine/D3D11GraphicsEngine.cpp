@@ -84,6 +84,31 @@ bool FeatureRTArrayIndexFromAnyShader = false;
 
 VS_ExConstantBuffer_Wind g_windBuffer;
 
+static void UpdateCharacterInteractionPositions( VS_ExConstantBuffer_Wind& windBuff ) {
+    for ( int i = 0; i < MAX_CHARACTER_INTERACTION_INFLUENCERS; ++i ) {
+        windBuff.interactionPositions[i] = float4( 0, 0, 0, 0 );
+    }
+
+    if ( !Engine::GAPI->GetRendererState().RendererSettings.HeroAffectsObjects ) {
+        return;
+    }
+
+    zCVob* player = Engine::GAPI->GetPlayerVob();
+    if ( !player ) {
+        return;
+    }
+
+    const XMFLOAT3 playerPosition = player->GetPositionWorld();
+    windBuff.interactionPositions[0] = float4( playerPosition.x, playerPosition.y, playerPosition.z, 1.0f );
+
+    constexpr float NpcInteractionSearchRadius = 1200.0f; // 12 meters in Gothic world units.
+    Engine::GAPI->CollectNearbyNpcInteractionPositions(
+        playerPosition,
+        NpcInteractionSearchRadius,
+        MAX_CHARACTER_INTERACTION_NPCS,
+        &windBuff.interactionPositions[1] );
+}
+
 static ID3D11ShaderResourceView* GetParallaxDisplacementSRV( MyDirectDrawSurface7* surface ) {
     const auto& settings = Engine::GAPI->GetRendererState().RendererSettings;
     if ( !surface || !settings.AllowNormalmaps || !settings.EnableParallaxOcclusionMapping
@@ -6794,9 +6819,8 @@ void XM_CALLCONV D3D11GraphicsEngine::DrawWorldAroundForWorldShadow( FXMVECTOR p
             windBuffer.Bind();
         }
 
-        XMFLOAT3 vPlayerPosition = Engine::GAPI->GetPlayerVob() ? Engine::GAPI->GetPlayerVob()->GetPositionWorld() : XMFLOAT3( 0, 0, 0 );
-        g_windBuffer.playerPos = float3( vPlayerPosition.x, vPlayerPosition.y, vPlayerPosition.z );
         if ( windBuffer.GetRawBuffer() ) {
+            UpdateCharacterInteractionPositions( g_windBuffer );
             windBuffer.Update( &g_windBuffer );
         }
 
@@ -7116,6 +7140,9 @@ void D3D11GraphicsEngine::ApplyWindProps( VS_ExConstantBuffer_Wind& windBuff ) {
     // Sets wind dir to const buffer
     XMStoreFloat3( reinterpret_cast<XMFLOAT3*>(&windBuff.windDir), currentDir );
 
+    const auto& settings = Engine::GAPI->GetRendererState().RendererSettings;
+    windBuff.characterInteractionStrength = settings.HeroAffectsObjectsStrength;
+
     //LogInfo() << windBuff.windDir.x << " " << windBuff.windDir.y << " " << windBuff.windDir.z;
 
     static float WindGlobalTime = 0.0f;
@@ -7130,8 +7157,10 @@ void D3D11GraphicsEngine::ApplyWindProps( VS_ExConstantBuffer_Wind& windBuff ) {
     constexpr float rainMaxStrengthMultiplier = 2.75f;
     constexpr float rainMaxSpeedMultiplier = 2.15f;
 
+    // UI-normalized wind strength: 1.0 keeps the former effective strength of 2.0.
     vobAnimation_WindStrength = (1.0f + rainWeight * (rainMaxStrengthMultiplier - 1.0f))
-        * Engine::GAPI->GetRendererState().RendererSettings.GlobalWindStrength;
+        * settings.GlobalWindStrength
+        * 2.0f;
 
     WindGlobalTime += dt * (1.5f * (1.0f + rainWeight * (rainMaxSpeedMultiplier - 1.0f)));
     windBuff.globalTime = WindGlobalTime;
@@ -7405,9 +7434,8 @@ XRESULT D3D11GraphicsEngine::DrawVOBsInstanced() {
                 UnbindWindMetadata();
             }
 
-            XMFLOAT3 vPlayerPosition = Engine::GAPI->GetPlayerVob() ? Engine::GAPI->GetPlayerVob()->GetPositionWorld() : XMFLOAT3( 0, 0, 0 );
-            g_windBuffer.playerPos = float3( vPlayerPosition.x, vPlayerPosition.y, vPlayerPosition.z );
             if ( windBuffer.GetRawBuffer() ) {
+                UpdateCharacterInteractionPositions( g_windBuffer );
                 windBuffer.Update( &g_windBuffer );
             }
 
@@ -7759,6 +7787,7 @@ XRESULT D3D11GraphicsEngine::DrawFrameAlphaMeshes()
         (Engine::GAPI->GetRendererState().RendererSettings.WindQuality > 0 || Engine::GAPI->GetRendererState().RendererSettings.HeroAffectsObjects) ) {
         windBuffer = ActiveVS->GetBuffer( "WindParams" );
         windBuffer.Bind();
+        UpdateCharacterInteractionPositions( g_windBuffer );
         windBuffer.Update( &g_windBuffer );
     }
 

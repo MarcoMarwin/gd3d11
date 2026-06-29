@@ -9,6 +9,9 @@ cbuffer Matrices_PerFrame : register( b0 )
 	VS_ExConstantBuffer_PerFrame frame;
 };
 
+#define MAX_CHARACTER_INTERACTION_NPCS 5
+#define MAX_CHARACTER_INTERACTION_INFLUENCERS (1 + MAX_CHARACTER_INTERACTION_NPCS)
+
 cbuffer WindParams : register(b1)
 {
      float3 windDir;
@@ -16,8 +19,9 @@ cbuffer WindParams : register(b1)
      float minHeight;
      float maxHeight;
      float2 padding0;
-     float3 playerPos;
-     float padding1;
+     float4 interactionPositions[MAX_CHARACTER_INTERACTION_INFLUENCERS];
+     float characterInteractionStrength;
+     float3 padding1;
 };
 
 #ifndef WIND_META_SRV
@@ -121,21 +125,24 @@ float3 ApplyTreeWind(float3 vertexPos, float3 direction, float heightNorm, float
 
 #if SHD_INFLUENCE
 
-// HERO AFFECTS CONST (Gothic world units)
-static const float heroAffectInnerRadius = 35.0f;
-static const float heroAffectOuterRadius = 110.0f;
-static const float heroAffectVerticalInnerRadius = 80.0f;
-static const float heroAffectVerticalOuterRadius = 160.0f;
+// HERO/NPC INTERACTION CONST (Gothic world units)
+static const float heroAffectInnerRadius = 22.0f;
+static const float heroAffectOuterRadius = 85.0f;
+static const float heroAffectVerticalInnerRadius = 70.0f;
+static const float heroAffectVerticalOuterRadius = 140.0f;
 static const float heroAffectStrength = 38.0f;
 
-float3 CalculatePlayerInfluence(
-    float3 playerPos,
+float3 CalculateSingleActorInfluence(
+    float4 actorPositionAndActive,
     float3 vertexLocalPos,
     float minHeight,
     float maxHeight,
     float4x4 instWorldMatrix
 )
 {
+    if (actorPositionAndActive.w <= 0.5f)
+        return float3(0.0f, 0.0f, 0.0f);
+
     float heightRange = max(maxHeight - minHeight, 0.001f);
     float vertexHeightNorm = saturate((vertexLocalPos.y - minHeight) / heightRange);
 
@@ -143,11 +150,11 @@ float3 CalculatePlayerInfluence(
     float heightMask = smoothstep(0.14f, 0.16f, vertexHeightNorm);
 
     float3 vertexWorldPos = mul(float4(vertexLocalPos, 1.0f), instWorldMatrix).xyz;
-    float3 toVertex = vertexWorldPos - playerPos;
+    float3 toVertex = vertexWorldPos - actorPositionAndActive.xyz;
     float distanceXZ = length(toVertex.xz);
 
-    // Full response close to the hero, a soft edge, then exactly zero.
-    // Unlike the previous Gaussian tail this cannot move distant parts of a large object.
+    // Full response close to the actor, a tight soft edge, then exactly zero.
+    // This keeps interaction local even on large vegetation objects.
     float radialFactor = 1.0f - smoothstep(heroAffectInnerRadius, heroAffectOuterRadius, distanceXZ);
     float verticalFactor = 1.0f - smoothstep(
         heroAffectVerticalInnerRadius,
@@ -160,15 +167,41 @@ float3 CalculatePlayerInfluence(
     float3 displaceDirWorld = float3(horizontalDirection.x, 0.0f, horizontalDirection.y);
 
     float influence = localityMask * vertexHeightNorm * heightMask;
-    float randomOffset = frac(sin(dot(vertexLocalPos.xz, float2(12.9898f, 78.233f))) * 43758.5453f);
-    influence *= 0.9f + 0.1f * randomOffset;
 
     // Instance positions are transformed as row vectors, so transpose the rotation
     // when converting the world-space push direction back into local space.
     float3 displaceDirLocal = mul(displaceDirWorld, transpose((float3x3)instWorldMatrix));
     float localDirectionLengthSq = dot(displaceDirLocal, displaceDirLocal);
     displaceDirLocal *= rsqrt(max(localDirectionLengthSq, 0.0001f));
-    return displaceDirLocal * heroAffectStrength * influence;
+    return displaceDirLocal * heroAffectStrength * characterInteractionStrength * influence;
+}
+
+float3 CalculateActorInteractionInfluence(
+    float3 vertexLocalPos,
+    float minHeight,
+    float maxHeight,
+    float4x4 instWorldMatrix
+)
+{
+    float3 totalInfluence = float3(0.0f, 0.0f, 0.0f);
+
+    [unroll]
+    for (int i = 0; i < MAX_CHARACTER_INTERACTION_INFLUENCERS; ++i)
+    {
+        totalInfluence += CalculateSingleActorInfluence(
+            interactionPositions[i],
+            vertexLocalPos,
+            minHeight,
+            maxHeight,
+            instWorldMatrix);
+    }
+
+    float maxDisplacement = heroAffectStrength * characterInteractionStrength;
+    float totalLengthSq = dot(totalInfluence, totalInfluence);
+    if (totalLengthSq > maxDisplacement * maxDisplacement)
+        totalInfluence *= maxDisplacement * rsqrt(max(totalLengthSq, 0.0001f));
+
+    return totalInfluence;
 }
 #endif
 
@@ -194,8 +227,8 @@ VS_OUTPUT VSMain( VS_INPUT Input )
     
     if (Input.InstanceWind.y > 0)
     {
-        // HERO MOVING BUSHES SHADER
-        position += CalculatePlayerInfluence(playerPos, position, localMinHeight, localMaxHeight, Input.InstanceWorldMatrix);
+        // CHARACTER INTERACTION MOVING BUSHES SHADER
+        position += CalculateActorInteractionInfluence(position, localMinHeight, localMaxHeight, Input.InstanceWorldMatrix);
     }
 #endif
     

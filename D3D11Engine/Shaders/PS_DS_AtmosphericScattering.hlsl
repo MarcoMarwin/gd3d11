@@ -341,7 +341,7 @@ float4 PSMain(PS_INPUT Input) : SV_TARGET
         litPixel = diffuse.rgb * SQ_ShadowStrength * sunStrength * shadowAO
             + nightSpecColored;
 
-        const float moonLightStrength = 0.025f;
+        const float moonLightStrength = 0.055f;
         float moonDirect = sun * AC_MoonVisibility;
         float3 moonColor = float3(0.42f, 0.56f, 1.0f);
         litPixel += diffuse.rgb * moonColor * moonLightStrength * moonDirect * worldAO;

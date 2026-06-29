@@ -49,7 +49,8 @@ XRESULT D3D11NVHBAO::Render(
     UINT num = 1;
     engine->GetContext()->RSGetViewports( &num, &vp );
 
-    HBAOSettings& settings = Engine::GAPI->GetRendererState().RendererSettings.HbaoSettings;
+    auto& rendererSettings = Engine::GAPI->GetRendererState().RendererSettings;
+    HBAOSettings& settings = rendererSettings.HbaoSettings;
 
     GFSDK_SSAO_InputData_D3D11 Input;
     Input.DepthData.DepthTextureType = GFSDK_SSAO_HARDWARE_DEPTHS;
@@ -68,6 +69,8 @@ XRESULT D3D11NVHBAO::Render(
     Params.Radius = settings.Radius;
     Params.Bias = settings.Bias;
     Params.PowerExponent = settings.PowerExponent;
+    Params.SmallScaleAO = rendererSettings.AOStrength;
+    Params.LargeScaleAO = rendererSettings.AOStrength;
     Params.StepCount = GFSDK_SSAO_StepCount( settings.SsaoStepCount );
     //Params.EnableDualLayerAO = settings.EnableDualLayerAO;
     Params.Blur.Enable = settings.EnableBlur;

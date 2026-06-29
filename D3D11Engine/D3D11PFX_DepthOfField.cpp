@@ -22,7 +22,7 @@ static DepthOfFieldConstantBuffer BuildDepthOfFieldConstants() {
     DepthOfFieldConstantBuffer cb = {};
     cb.DoF_FocusDistance = settings.DoFFocusDistance;
     cb.DoF_FocusRange = settings.DoFFocusRange;
-    const float strengthScale = std::clamp( settings.DoFBokehRadius / 8.0f, 0.125f, 4.0f );
+    const float strengthScale = std::clamp( settings.DoFBokehRadius / 8.0f, 0.004375f, 4.0f );
     cb.DoF_BokehRadius = 8.0f * strengthScale;
     cb.DoF_MaxBlur = 12.0f * strengthScale;
 

@@ -188,7 +188,7 @@ struct DS_ScreenQuadConstantBuffer {
 
     float4 SQ_LightColor;
     
-    // CSM: Cascade 0 (f�r Kompatibilit�t mit bestehenden Shadern)
+    // CSM: Cascade 0 (for compatibility with existing shaders)
     XMFLOAT4X4 SQ_ShadowViewProj[MAX_CSM_CASCADES];
 
     float SQ_ShadowStrength;
@@ -234,6 +234,9 @@ struct VS_ExConstantBuffer_PerFrame {
     XMFLOAT4X4 UnjitteredViewProj; // Current frame's unjittered view-projection for motion vectors
 };
 
+constexpr int MAX_CHARACTER_INTERACTION_NPCS = 5;
+constexpr int MAX_CHARACTER_INTERACTION_INFLUENCERS = 1 + MAX_CHARACTER_INTERACTION_NPCS;
+
 struct VS_ExConstantBuffer_Wind {
     float3 windDir;
     float globalTime;
@@ -242,8 +245,10 @@ struct VS_ExConstantBuffer_Wind {
     float maxHeight;
     float2 padding0;
 
-    float3 playerPos;
-    float padding1;
+    // xyz = actor world position, w = active flag. Slot 0 is the hero, following slots are nearby NPCs.
+    float4 interactionPositions[MAX_CHARACTER_INTERACTION_INFLUENCERS];
+    float characterInteractionStrength;
+    float3 padding1;
 };
 
 struct ParticlePointShadingConstantBuffer {

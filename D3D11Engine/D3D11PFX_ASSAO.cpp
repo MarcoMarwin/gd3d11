@@ -35,7 +35,9 @@ void D3D11PFX_ASSAO::Render(
     ID3D11ShaderResourceView* normals,
     ID3D11RenderTargetView* renderTarget )
 {
-    ASSAO_Settings settingsCopy = Engine::GAPI->GetRendererState().RendererSettings.AssaoSettings;
+    const auto& rendererSettings = Engine::GAPI->GetRendererState().RendererSettings;
+    ASSAO_Settings settingsCopy = rendererSettings.AssaoSettings;
+    settingsCopy.ShadowMultiplier *= rendererSettings.AOStrength;
     // scale to gothic world scale (centimeters)
     settingsCopy.Radius *= 100;
     settingsCopy.FadeOutFrom *= 100;

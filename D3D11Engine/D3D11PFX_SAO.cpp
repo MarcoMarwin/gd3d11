@@ -65,7 +65,7 @@ XRESULT D3D11PFX_SAO::Render(
     saoCB.SAO_ProjParams = float4( 1.0f / projMatrix._11, 1.0f / projMatrix._22, projMatrix._34, projMatrix._33 );
     saoCB.SAO_Radius = saoSettings.Radius * 100.0f; // Scale to match engine units
     saoCB.SAO_Bias = saoSettings.Bias;
-    saoCB.SAO_Intensity = saoSettings.Intensity;
+    saoCB.SAO_Intensity = saoSettings.Intensity * Engine::GAPI->GetRendererState().RendererSettings.AOStrength;
     saoCB.SAO_NumSamples = saoSettings.NumSamples;
     saoCB.SAO_InvResolution = float2( 1.0f / res.x, 1.0f / res.y );
     saoCB.SAO_BlurSharpness = saoSettings.BlurSharpness;
@@ -214,7 +214,7 @@ XRESULT D3D11PFX_SAO::RenderAO(
     saoCB.SAO_ProjParams = float4( 1.0f / projMatrix._11, 1.0f / projMatrix._22, projMatrix._34, projMatrix._33 );
     saoCB.SAO_Radius = saoSettings.Radius * 100.0f;
     saoCB.SAO_Bias = saoSettings.Bias;
-    saoCB.SAO_Intensity = saoSettings.Intensity;
+    saoCB.SAO_Intensity = saoSettings.Intensity * Engine::GAPI->GetRendererState().RendererSettings.AOStrength;
     saoCB.SAO_NumSamples = saoSettings.NumSamples;
     saoCB.SAO_InvResolution = float2( 1.0f / res.x, 1.0f / res.y );
     saoCB.SAO_BlurSharpness = saoSettings.BlurSharpness;
