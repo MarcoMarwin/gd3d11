@@ -5203,9 +5203,15 @@ size_t GothicAPI::CollectNearbyNpcInteractionPositions( const XMFLOAT3& center, 
     zCVob* player = GetPlayerVob();
     zCWorld* playerWorld = player ? player->GetHomeWorld() : nullptr;
 
-    for ( auto const& it : SkeletalMeshNpcs ) {
-        oCNPC* npc = it.first;
-        if ( !npc || npc->IsAPlayer() || !npc->GetShowVisual() || npc->GetSleepingMode() != 0 ) {
+    // Use the registered world-vob list rather than the NPC model cache. The
+    // latter can be rebuilt when armor/models change and does not reliably
+    // represent every currently active NPC.
+    for ( SkeletalVobInfo* vobInfo : SkeletalMeshVobs ) {
+        if ( !vobInfo || !vobInfo->Vob || vobInfo->Vob->GetVobType() != zVOB_TYPE_NSC ) {
+            continue;
+        }
+        oCNPC* npc = static_cast<oCNPC*>(vobInfo->Vob);
+        if ( npc->IsAPlayer() || !npc->GetShowVisual() ) {
             continue;
         }
         if ( playerWorld && npc->GetHomeWorld() != playerWorld ) {

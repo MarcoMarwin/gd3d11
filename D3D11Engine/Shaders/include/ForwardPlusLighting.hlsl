@@ -232,7 +232,7 @@ float3 FP_ComputeSunLighting(
         // Preserve the old night base and add only a tiny shadowed moon term.
         litPixel = diffuseColor * SQ_ShadowStrength * sunStrength * shadowAO;
 
-        const float moonLightStrength = 0.055f;
+        const float moonLightStrength = 0.14f;
         float moonDirect = sun * AC_MoonVisibility;
         float3 moonColor = float3( 0.42f, 0.56f, 1.0f );
         litPixel += diffuseColor * moonColor * moonLightStrength * moonDirect * worldAO;

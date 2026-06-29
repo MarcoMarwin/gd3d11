@@ -12,6 +12,7 @@
 #include <chrono>
 #include <numeric>
 #include <codecvt>
+#include <cstdio>
 
 namespace ImGui {
     void TextUnformatted( const wchar_t* text ) {
@@ -40,72 +41,125 @@ enum class TX_QUALITY : uint16_t {
 };
 
 namespace {
-    float SnapNormalizedUiStrength( float value, float minimum = 0.01f )
+    int FindNearestStepIndex( float value, const float* levels, int levelCount )
     {
-        const float clamped = std::clamp( value, minimum, 2.0f );
-        const std::array<float, 11> levels = {
-            minimum, 0.2f, 0.4f, 0.6f, 0.8f, 1.0f,
-            1.2f, 1.4f, 1.6f, 1.8f, 2.0f
-        };
-
-        float best = levels.front();
-        float bestDistance = clamped > best ? clamped - best : best - clamped;
-        for ( float level : levels ) {
-            if ( level < minimum ) continue;
-            const float distance = clamped > level ? clamped - level : level - clamped;
+        int bestIndex = 0;
+        float bestDistance = fabsf( value - levels[0] );
+        for ( int i = 1; i < levelCount; ++i ) {
+            const float distance = fabsf( value - levels[i] );
             if ( distance < bestDistance ) {
-                best = level;
+                bestIndex = i;
                 bestDistance = distance;
             }
         }
-        return best;
+        return bestIndex;
     }
 
-    void DrawNormalizedUiStrengthTicks( float minimum )
+    bool SliderSteppedIndex(
+        const char* label,
+        int* index,
+        int maximumIndex,
+        bool drawTicks,
+        int emphasizedTick = -1,
+        const char* displayText = nullptr )
     {
+        *index = std::clamp( *index, 0, maximumIndex );
+
+        // Let ImGui handle mouse, keyboard and gamepad interaction with an integer
+        // slider. Integer indices make the grab jump to real steps while dragging.
+        ImGui::PushStyleColor( ImGuiCol_FrameBg, ImVec4( 0, 0, 0, 0 ) );
+        ImGui::PushStyleColor( ImGuiCol_FrameBgHovered, ImVec4( 0, 0, 0, 0 ) );
+        ImGui::PushStyleColor( ImGuiCol_FrameBgActive, ImVec4( 0, 0, 0, 0 ) );
+        ImGui::PushStyleColor( ImGuiCol_SliderGrab, ImVec4( 0, 0, 0, 0 ) );
+        ImGui::PushStyleColor( ImGuiCol_SliderGrabActive, ImVec4( 0, 0, 0, 0 ) );
+        const bool changed = ImGui::SliderInt(
+            label, index, 0, maximumIndex, "", ImGuiSliderFlags_AlwaysClamp );
+        ImGui::PopStyleColor( 5 );
+
         const ImVec2 itemMin = ImGui::GetItemRectMin();
         const ImVec2 itemMax = ImGui::GetItemRectMax();
         const float width = itemMax.x - itemMin.x;
         const float height = itemMax.y - itemMin.y;
-        const float range = 2.0f - minimum;
-        if ( width <= 0.0f || height <= 0.0f || range <= 0.0f ) return;
+        if ( width <= 0.0f || height <= 0.0f || maximumIndex <= 0 ) {
+            return changed;
+        }
 
-        static constexpr std::array<float, 11> levels = {
-            0.0f, 0.2f, 0.4f, 0.6f, 0.8f, 1.0f,
-            1.2f, 1.4f, 1.6f, 1.8f, 2.0f
-        };
-
+        const ImGuiStyle& style = ImGui::GetStyle();
         ImDrawList* drawList = ImGui::GetWindowDrawList();
-        const float centerY = (itemMin.y + itemMax.y) * 0.5f;
-        const ImU32 minorTick = ImGui::GetColorU32( ImGuiCol_TextDisabled, 0.65f );
-        const ImU32 standardShadow = ImGui::GetColorU32( ImVec4( 0.0f, 0.0f, 0.0f, 0.85f ) );
-        const ImU32 standardTick = ImGui::GetColorU32( ImGuiCol_CheckMark );
+        const bool active = ImGui::IsItemActive();
+        const bool hovered = ImGui::IsItemHovered();
+        const ImU32 frameColor = ImGui::GetColorU32(
+            active ? ImGuiCol_FrameBgActive : (hovered ? ImGuiCol_FrameBgHovered : ImGuiCol_FrameBg) );
+        drawList->AddRectFilled( itemMin, itemMax, frameColor, style.FrameRounding );
+        if ( style.FrameBorderSize > 0.0f ) {
+            drawList->AddRect(
+                itemMin, itemMax, ImGui::GetColorU32( ImGuiCol_Border ),
+                style.FrameRounding, style.FrameBorderSize );
+        }
 
-        for ( float level : levels ) {
-            if ( level < minimum ) continue;
-            const float t = (level - minimum) / range;
-            const float x = itemMin.x + width * t;
-            if ( level > 0.999f && level < 1.001f ) {
-                drawList->AddLine( ImVec2( x + 1.0f, itemMin.y + 2.0f ), ImVec2( x + 1.0f, itemMax.y - 2.0f ), standardShadow, 3.0f );
-                drawList->AddLine( ImVec2( x, itemMin.y + 2.0f ), ImVec2( x, itemMax.y - 2.0f ), standardTick, 2.0f );
-            } else {
-                drawList->AddLine( ImVec2( x, centerY - 3.0f ), ImVec2( x, centerY + 3.0f ), minorTick, 1.0f );
+        const float grabPadding = 2.0f;
+        const float sliderSize = std::max( 0.0f, width - grabPadding * 2.0f );
+        const float grabSize = std::min(
+            sliderSize, std::max( style.GrabMinSize, sliderSize / static_cast<float>(maximumIndex + 1) ) );
+        const float usableWidth = std::max( 0.0f, sliderSize - grabSize );
+        const float firstX = itemMin.x + grabPadding + grabSize * 0.5f;
+        const float centerY = (itemMin.y + itemMax.y) * 0.5f;
+
+        if ( drawTicks ) {
+            const ImU32 minorTick = ImGui::GetColorU32( ImGuiCol_TextDisabled, 0.65f );
+            const ImU32 emphasizedShadow = ImGui::GetColorU32( ImVec4( 0.0f, 0.0f, 0.0f, 0.85f ) );
+            const ImU32 emphasizedColor = ImGui::GetColorU32( ImGuiCol_CheckMark );
+            for ( int tick = 0; tick <= maximumIndex; ++tick ) {
+                const float x = firstX + usableWidth * (static_cast<float>(tick) / maximumIndex);
+                if ( tick == emphasizedTick ) {
+                    drawList->AddLine(
+                        ImVec2( x + 1.0f, itemMin.y + 2.0f ),
+                        ImVec2( x + 1.0f, itemMax.y - 2.0f ), emphasizedShadow, 3.0f );
+                    drawList->AddLine(
+                        ImVec2( x, itemMin.y + 2.0f ),
+                        ImVec2( x, itemMax.y - 2.0f ), emphasizedColor, 2.0f );
+                } else {
+                    drawList->AddLine(
+                        ImVec2( x, centerY - 3.0f ),
+                        ImVec2( x, centerY + 3.0f ), minorTick, 1.0f );
+                }
             }
         }
+
+        // Draw the grab last so every tick remains behind it.
+        const float grabCenterX = firstX + usableWidth * (static_cast<float>(*index) / maximumIndex);
+        drawList->AddRectFilled(
+            ImVec2( grabCenterX - grabSize * 0.5f, itemMin.y + grabPadding ),
+            ImVec2( grabCenterX + grabSize * 0.5f, itemMax.y - grabPadding ),
+            ImGui::GetColorU32( active ? ImGuiCol_SliderGrabActive : ImGuiCol_SliderGrab ),
+            style.GrabRounding );
+
+        if ( displayText && displayText[0] != '\0' ) {
+            const ImVec2 textSize = ImGui::CalcTextSize( displayText );
+            drawList->AddText(
+                ImVec2( itemMin.x + (width - textSize.x) * 0.5f,
+                    itemMin.y + (height - textSize.y) * 0.5f ),
+                ImGui::GetColorU32( ImGuiCol_Text ), displayText );
+        }
+
+        return changed;
     }
 
-    bool SliderNormalizedUiStrength( const char* label, float* value, float minimum = 0.01f, const char* format = "" )
+    bool SliderNormalizedUiStrength( const char* label, float* value, float minimum = 0.01f, const char* = "" )
     {
-        *value = SnapNormalizedUiStrength( *value, minimum );
-        float editedValue = *value;
-        const bool changed = ImGui::SliderFloat( label, &editedValue, minimum, 2.0f, format, ImGuiSliderFlags_AlwaysClamp );
-        DrawNormalizedUiStrengthTicks( minimum );
-        if ( changed ) {
-            *value = SnapNormalizedUiStrength( editedValue, minimum );
+        const std::array<float, 11> levels = {
+            minimum, 0.2f, 0.4f, 0.6f, 0.8f, 1.0f,
+            1.2f, 1.4f, 1.6f, 1.8f, 2.0f
+        };
+        int index = FindNearestStepIndex( *value, levels.data(), static_cast<int>(levels.size()) );
+        *value = levels[index];
+        if ( SliderSteppedIndex( label, &index, 10, true, 5 ) ) {
+            *value = levels[index];
             return true;
         }
         return false;
     }
+
     int SnapRenderScalePercentNonFSR( int value )
     {
         static constexpr std::array<int, 21> levels = {
@@ -124,6 +178,32 @@ namespace {
         }
         return best;
     }
+
+    bool SliderRenderScalePercentNonFSR( const char* label, int* value )
+    {
+        static constexpr std::array<int, 21> levels = {
+            25, 33, 40, 48, 55, 63, 70, 78, 85, 93, 100,
+            110, 120, 130, 140, 150, 160, 170, 180, 190, 200
+        };
+        int index = 0;
+        int bestDistance = abs( *value - levels[0] );
+        for ( int i = 1; i < static_cast<int>(levels.size()); ++i ) {
+            const int distance = abs( *value - levels[i] );
+            if ( distance < bestDistance ) {
+                index = i;
+                bestDistance = distance;
+            }
+        }
+        *value = levels[index];
+        char display[16];
+        std::snprintf( display, sizeof(display), "%d%%", *value );
+        if ( SliderSteppedIndex( label, &index, 20, false, 10, display ) ) {
+            *value = levels[index];
+            return true;
+        }
+        return false;
+    }
+
     float SnapDisplayTuningStrength( float value )
     {
         const float clamped = std::clamp( value, 0.0f, 2.0f );
@@ -134,9 +214,11 @@ namespace {
     bool SliderDisplayTuningStrength( const char* label, float* value )
     {
         *value = SnapDisplayTuningStrength( *value );
-        float editedValue = *value;
-        if ( ImGui::SliderFloat( label, &editedValue, 0.0f, 2.0f, "%.2f", ImGuiSliderFlags_::ImGuiSliderFlags_ClampOnInput ) ) {
-            *value = SnapDisplayTuningStrength( editedValue );
+        int index = std::clamp( static_cast<int>(*value * 20.0f + 0.5f), 0, 40 );
+        char display[16];
+        std::snprintf( display, sizeof(display), "%.2f", *value );
+        if ( SliderSteppedIndex( label, &index, 40, false, 20, display ) ) {
+            *value = static_cast<float>(index) * 0.05f;
             return true;
         }
         return false;
@@ -696,8 +778,8 @@ void ImGuiShim::RenderSettingsWindow()
                     settings.ResolutionScalePercent = resolutionScale;
                     FixupSettings( settings );
                 }
-                if ( ImGui::SliderInt( "##ResolutionScalePercent", &resolutionScale, 25, 200, "%d%%", ImGuiSliderFlags_AlwaysClamp ) ) {
-                    settings.ResolutionScalePercent = SnapRenderScalePercentNonFSR( resolutionScale );
+                if ( SliderRenderScalePercentNonFSR( "##ResolutionScalePercent", &resolutionScale ) ) {
+                    settings.ResolutionScalePercent = resolutionScale;
                     FixupSettings( settings );
                 }
                 ImGui::SetItemTooltip("Effective resolution: %d x %d",
@@ -853,14 +935,6 @@ void ImGuiShim::RenderSettingsWindow()
             ImText( "Brightness", buttonWidth ); ImGui::SameLine();
             SliderDisplayTuningStrength( "##Brightness", &settings.BrightnessValue );
             ImGui::PopItemWidth();
-
-
-            ImGui::Spacing();
-            auto availableSize = ImGui::GetWindowSize();
-            static const char* advancedSettingsHint = "Advanced settings: CTRL+F11 ";
-            auto textSize = ImGui::CalcTextSize( advancedSettingsHint );
-            ImGui::SetCursorPos( ImVec2( (availableSize.x - textSize.x) - 15, availableSize.y - textSize.y - 50 ) );
-            ImGui::TextUnformatted( advancedSettingsHint );
 
             ImGui::EndGroup();
         }
@@ -1039,6 +1113,12 @@ void ImGuiShim::RenderSettingsWindow()
             ImGui::SetItemTooltip( "Limits overly bright point lights to reduce blown-out interiors." );
             ImGui::EndGroup();
         }
+
+        ImGui::Spacing();
+        static const char* advancedSettingsHint = "Advanced settings: CTRL+F11 ";
+        const float advancedHintWidth = ImGui::CalcTextSize( advancedSettingsHint ).x;
+        ImGui::SetCursorPosX( std::max( ImGui::GetCursorPosX(), ImGui::GetWindowContentRegionMax().x - advancedHintWidth ) );
+        ImGui::TextUnformatted( advancedSettingsHint );
         
         auto saved = ImGui::Button( "Save Settings", ImVec2( ImGui::GetContentRegionAvail().x, 30.f ) );
         auto worldSettingsPath = Engine::GAPI->GetLoadedWorldSettingsPath(false);
