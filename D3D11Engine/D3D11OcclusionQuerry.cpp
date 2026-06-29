@@ -7,11 +7,23 @@
 #include "Toolbox.h"
 #include "zCCamera.h"
 
-// Delay to recheck visible objects for occlusion
-const int VISIBLE_RECHECK_FRAME_DELAY = 1;
+// Conservative occlusion settings. The goal is stable rendering first, saved draw calls second.
+// A single invisible query result is not enough to hide BSP leaves, because camera motion and
+// one-frame GPU latency otherwise cause visible world rebuild/pop-in during fast turns.
+const unsigned int VISIBLE_RECHECK_FRAME_DELAY = 6;
+const unsigned int INVISIBLE_CONFIRM_FRAME_COUNT = 3;
+const unsigned int VISIBLE_GRACE_FRAME_COUNT = 10;
+const unsigned int FAST_CAMERA_GRACE_FRAME_COUNT = 18;
+const float FAST_CAMERA_MOVE_DISTANCE = 180.0f;
+const float FAST_CAMERA_TURN_DOT = 0.985f;
 
 D3D11OcclusionQuerry::D3D11OcclusionQuerry() {
     FrameID = 0;
+    PreviousCameraPosition = XMFLOAT3( 0.0f, 0.0f, 0.0f );
+    PreviousCameraForward = XMFLOAT3( 0.0f, 0.0f, 1.0f );
+    HasPreviousCamera = false;
+    CameraRelaxedMode = false;
+    ConservativeVisibleFrames = 0;
 }
 
 D3D11OcclusionQuerry::~D3D11OcclusionQuerry() {
@@ -39,6 +51,13 @@ unsigned int D3D11OcclusionQuerry::AddPredicationObject() {
     return Predicates.size() - 1;
 }
 
+XMFLOAT3 D3D11OcclusionQuerry::GetCameraForward() const {
+    XMMATRIX invView = XMMatrixInverse( nullptr, Engine::GAPI->GetViewMatrixXM() );
+    XMFLOAT3 forward;
+    XMStoreFloat3( &forward, XMVector3Normalize( invView.r[2] ) );
+    return forward;
+}
+
 /** Checks the BSP-Tree for visibility */
 void D3D11OcclusionQuerry::DoOcclusionForBSP( BspInfo* root ) {
     if ( !root || !root->OriginalNode )
@@ -46,95 +65,110 @@ void D3D11OcclusionQuerry::DoOcclusionForBSP( BspInfo* root ) {
 
     D3D11GraphicsEngine* g = reinterpret_cast<D3D11GraphicsEngine*>(Engine::GraphicsEngine);
 
-    // Check if this node has it's queryID
+    // Check if this node has its queryID
     if ( root->OcclusionInfo.QueryID == -1 ) {
-        // Add new object
         root->OcclusionInfo.QueryID = AddPredicationObject();
-
-        // Create the occlusion-mesh for the node
         CreateOcclusionNodeMeshFor( root );
+
+        // First-frame safety: render new nodes until occlusion has had enough time to prove
+        // invisibility. This is especially important directly after world/load transitions.
+        root->OcclusionInfo.VisibleLastFrame = true;
+        root->OcclusionInfo.LastVisibleFrameID = FrameID;
+        root->OcclusionInfo.VisibleGraceUntilFrameID = FrameID + VISIBLE_GRACE_FRAME_COUNT;
+        root->OcclusionInfo.InvisibleCandidateFrames = 0;
     }
 
-    // Check last frustum-culling state
-    int fstate = Engine::GAPI->GetCameraBBox3DInFrustum( root->OriginalNode->BBox3D,
+    const int fstate = Engine::GAPI->GetCameraBBox3DInFrustum( root->OriginalNode->BBox3D,
         EGothicCullFlags::CullAll );
 
-    // If this node wasn't inside the frustum last frame, but got inside it this frame, just draw it
-    // to reduce the popping in dialogs where the camera switches heavily between targets
-    // This may introduce a little framedrop when the camera switches targets, but it has to be ok.
-    if ( root->OcclusionInfo.LastCameraClipType == ZTCAM_CLIPTYPE_OUT && fstate != ZTCAM_CLIPTYPE_OUT ) {
-        // Mark entire subtree visible
-        MarkTreeVisible( root->Front, true );
-        MarkTreeVisible( root->Back, true );
-
-        root->OcclusionInfo.VisibleLastFrame = true;
-        root->OcclusionInfo.LastVisitedFrameID = FrameID;
-
-        // Save this for the next frame
+    // Outside the frustum is a safe CPU decision. Do not turn that into an occlusion miss;
+    // frustum re-entry is handled conservatively below.
+    if ( fstate == ZTCAM_CLIPTYPE_OUT ) {
         root->OcclusionInfo.LastCameraClipType = fstate;
         return;
     }
 
-    // Save this
+    const bool enteredFrustum = root->OcclusionInfo.LastCameraClipType == ZTCAM_CLIPTYPE_OUT;
     root->OcclusionInfo.LastCameraClipType = fstate;
 
-    // If the node wasn't visible last frame, we need to test it again
-    // Invisible nodes need to be tested each frame in case they go visible
-    // Visible nodes don't need to be tested every frame
+    // During fast camera movement or immediate frustum re-entry, prefer stability over saving
+    // draw calls. Marking the subtree visible prevents delayed GPU query answers from causing
+    // visible pop-in while the player turns quickly.
+    if ( CameraRelaxedMode || enteredFrustum ) {
+        MarkTreeVisible( root, true, FAST_CAMERA_GRACE_FRAME_COUNT );
+        return;
+    }
+
+    // Invisible nodes are rechecked every frame. Visible nodes are only rechecked periodically,
+    // with a grace period so one bad query result cannot immediately hide them.
     if ( !root->OcclusionInfo.VisibleLastFrame ||
         (root->OcclusionInfo.LastVisitedFrameID + VISIBLE_RECHECK_FRAME_DELAY <= FrameID && root->OcclusionInfo.VisibleLastFrame) ) {
 
-        // Take those which have the camera inside as visible
-        // Also make leafs which don't contain anything just visible so we can save the draw-call
         if ( Toolbox::PositionInsideBox( Engine::GAPI->GetCameraPosition(), root->OriginalNode->BBox3D.Min, root->OriginalNode->BBox3D.Max ) ||
             (root->IsEmpty() && root->OriginalNode->IsLeaf()) ) {
             DoOcclusionForBSP( root->Front );
             DoOcclusionForBSP( root->Back );
 
             root->OcclusionInfo.VisibleLastFrame = true;
+            root->OcclusionInfo.LastVisibleFrameID = FrameID;
+            root->OcclusionInfo.VisibleGraceUntilFrameID = FrameID + VISIBLE_GRACE_FRAME_COUNT;
+            root->OcclusionInfo.InvisibleCandidateFrames = 0;
             root->OcclusionInfo.LastVisitedFrameID = FrameID;
             return;
         }
-        
-        ID3D11Predicate* p = Predicates[root->OcclusionInfo.QueryID];
-        
-        // Query is done. Save the result!
-        UINT32 data = 0;
-        if ( g->GetContext()->GetData( p, &data, sizeof( UINT32 ), D3D11_ASYNC_GETDATA_DONOTFLUSH ) == S_OK ) {
-            root->OcclusionInfo.VisibleLastFrame = (data > 0); // data contains visible pixels of the object
 
-            if ( data == 0 ) {
-                // Mark entire subtree invisible and don't waste draw-calls for it
-                MarkTreeVisible( root->Front, false );
-                MarkTreeVisible( root->Back, false );
-            } else {
-                // Try to check the next nodes as well
+        ID3D11Predicate* p = Predicates[root->OcclusionInfo.QueryID];
+
+        UINT32 data = 0;
+        const HRESULT queryResult = g->GetContext()->GetData( p, &data, sizeof( UINT32 ), D3D11_ASYNC_GETDATA_DONOTFLUSH );
+        if ( queryResult == S_OK ) {
+            if ( data > 0 ) {
+                root->OcclusionInfo.VisibleLastFrame = true;
+                root->OcclusionInfo.LastVisibleFrameID = FrameID;
+                root->OcclusionInfo.VisibleGraceUntilFrameID = FrameID + VISIBLE_GRACE_FRAME_COUNT;
+                root->OcclusionInfo.InvisibleCandidateFrames = 0;
+
                 DoOcclusionForBSP( root->Front );
                 DoOcclusionForBSP( root->Back );
+            } else {
+                const bool stillInGrace = root->OcclusionInfo.VisibleGraceUntilFrameID >= FrameID;
+                if ( stillInGrace || root->OcclusionInfo.InvisibleCandidateFrames + 1 < INVISIBLE_CONFIRM_FRAME_COUNT ) {
+                    root->OcclusionInfo.VisibleLastFrame = true;
+                    root->OcclusionInfo.InvisibleCandidateFrames++;
+
+                    DoOcclusionForBSP( root->Front );
+                    DoOcclusionForBSP( root->Back );
+                } else {
+                    root->OcclusionInfo.VisibleLastFrame = false;
+                    root->OcclusionInfo.InvisibleCandidateFrames = INVISIBLE_CONFIRM_FRAME_COUNT;
+                    MarkTreeVisible( root->Front, false );
+                    MarkTreeVisible( root->Back, false );
+                }
             }
 
             root->OcclusionInfo.QueryInProgress = false;
         } else {
-            // Try to check the next nodes as well
-            DoOcclusionForBSP( root->Front );
-            DoOcclusionForBSP( root->Back );
+            // Pending query: keep prior visibility and continue descending if it was visible.
+            // This is intentionally conservative; a pending GPU answer must never hide content.
+            if ( root->OcclusionInfo.VisibleLastFrame ) {
+                DoOcclusionForBSP( root->Front );
+                DoOcclusionForBSP( root->Back );
+            }
         }
 
         if ( !root->OcclusionInfo.QueryInProgress ) {
-            // Issue the new query
             MeshInfo* mi = root->OcclusionInfo.NodeMesh;
-
-            g->GetContext()->Begin( p );
-            g->DrawVertexBufferIndexed( mi->MeshVertexBuffer, mi->MeshIndexBuffer, mi->Indices.size() );
-            g->GetContext()->End( p );
-
-            root->OcclusionInfo.QueryInProgress = true;
+            if ( mi && !mi->Indices.empty() ) {
+                g->GetContext()->Begin( p );
+                g->DrawVertexBufferIndexed( mi->MeshVertexBuffer, mi->MeshIndexBuffer, mi->Indices.size() );
+                g->GetContext()->End( p );
+                root->OcclusionInfo.QueryInProgress = true;
+            }
         }
 
         root->OcclusionInfo.LastVisitedFrameID = FrameID;
     }
 }
-
 /** Begins the occlusion-checks */
 void D3D11OcclusionQuerry::BeginOcclusionPass() {
     D3D11GraphicsEngine* g = reinterpret_cast<D3D11GraphicsEngine*>(Engine::GraphicsEngine);
@@ -157,6 +191,34 @@ void D3D11OcclusionQuerry::EndOcclusionPass() {
 /** Advances the frame counter of this */
 void D3D11OcclusionQuerry::AdvanceFrameCounter() {
     FrameID++;
+
+    const XMFLOAT3 cameraPosition = Engine::GAPI->GetCameraPosition();
+    const XMFLOAT3 cameraForward = GetCameraForward();
+
+    if ( HasPreviousCamera ) {
+        const XMVECTOR curPos = XMLoadFloat3( &cameraPosition );
+        const XMVECTOR prevPos = XMLoadFloat3( &PreviousCameraPosition );
+        float moveDistance = 0.0f;
+        XMStoreFloat( &moveDistance, XMVector3Length( curPos - prevPos ) );
+
+        const XMVECTOR curForward = XMLoadFloat3( &cameraForward );
+        const XMVECTOR prevForward = XMLoadFloat3( &PreviousCameraForward );
+        float turnDot = 1.0f;
+        XMStoreFloat( &turnDot, XMVector3Dot( curForward, prevForward ) );
+
+        if ( moveDistance > FAST_CAMERA_MOVE_DISTANCE || turnDot < FAST_CAMERA_TURN_DOT ) {
+            ConservativeVisibleFrames = FAST_CAMERA_GRACE_FRAME_COUNT;
+        } else if ( ConservativeVisibleFrames > 0 ) {
+            ConservativeVisibleFrames--;
+        }
+    } else {
+        HasPreviousCamera = true;
+        ConservativeVisibleFrames = VISIBLE_GRACE_FRAME_COUNT;
+    }
+
+    PreviousCameraPosition = cameraPosition;
+    PreviousCameraForward = cameraForward;
+    CameraRelaxedMode = ConservativeVisibleFrames > 0;
 }
 
 /** Creates the occlusion-node-mesh for the specific bsp-node */
@@ -226,14 +288,23 @@ void D3D11OcclusionQuerry::DebugVisualizeNodeMesh( MeshInfo* m, const XMFLOAT4& 
     }
 }
 
-/** Marks the entire subtree visible */
-void D3D11OcclusionQuerry::MarkTreeVisible( BspInfo* root, bool visible ) {
+/** Marks the entire subtree visible/invisible */
+void D3D11OcclusionQuerry::MarkTreeVisible( BspInfo* root, bool visible, unsigned int graceFrames ) {
     if ( !root || !root->OriginalNode )
         return;
 
     root->OcclusionInfo.LastVisitedFrameID = FrameID;
     root->OcclusionInfo.VisibleLastFrame = visible;
+    if ( visible ) {
+        root->OcclusionInfo.LastVisibleFrameID = FrameID;
+        const unsigned int graceUntilFrameID = FrameID + graceFrames;
+        if ( root->OcclusionInfo.VisibleGraceUntilFrameID < graceUntilFrameID )
+            root->OcclusionInfo.VisibleGraceUntilFrameID = graceUntilFrameID;
+        root->OcclusionInfo.InvisibleCandidateFrames = 0;
+    } else {
+        root->OcclusionInfo.InvisibleCandidateFrames = INVISIBLE_CONFIRM_FRAME_COUNT;
+    }
 
-    MarkTreeVisible( root->Front, visible );
-    MarkTreeVisible( root->Back, visible );
+    MarkTreeVisible( root->Front, visible, graceFrames );
+    MarkTreeVisible( root->Back, visible, graceFrames );
 }

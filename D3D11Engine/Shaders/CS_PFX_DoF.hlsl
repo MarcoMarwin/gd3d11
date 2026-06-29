@@ -32,11 +32,19 @@ float LinearizeDepth( float d )
     return LinearizeDepthReverseZInfinite( d );
 }
 
-float ComputeCoC( float linearDepth, float focusDepth )
+float GetNearBlurScreenMask( float2 texcoord )
+{
+    // Keep the central subject sharp and progressively strengthen only the near blur toward the sides.
+    const float horizontalDistance = abs( texcoord.x * 2.0f - 1.0f );
+    return smoothstep( 0.18f, 0.85f, horizontalDistance );
+}
+
+float ComputeCoC( float linearDepth, float focusDepth, float2 texcoord )
 {
     const float farCoC = saturate( ( linearDepth - focusDepth ) / DoF_FocusRange );
     const float nearRange = max( DoF_NearBlurDistance - DoF_NearPlane, 1.0f );
-    const float nearCoC = saturate( ( DoF_NearBlurDistance - linearDepth ) / nearRange ) * DoF_NearBlurStrength;
+    const float nearCoC = saturate( ( DoF_NearBlurDistance - linearDepth ) / nearRange )
+        * DoF_NearBlurStrength * GetNearBlurScreenMask( texcoord );
     return max( farCoC, nearCoC );
 }
 
@@ -81,7 +89,7 @@ void CSMain( uint3 DTid : SV_DispatchThreadID )
     }
 
     float centerLinear = LinearizeDepth( centerDepth );
-    float centerCoC = ComputeCoC( centerLinear, focusDepth );
+    float centerCoC = ComputeCoC( centerLinear, focusDepth, texcoord );
 
     // Early out: pass through sharp pixel
     if ( centerCoC < 0.01 )
@@ -140,7 +148,7 @@ void CSMain( uint3 DTid : SV_DispatchThreadID )
             continue;
 
         float sampleLinear = LinearizeDepth( sampleDepth );
-        float sampleCoC = ComputeCoC( sampleLinear, focusDepth );
+        float sampleCoC = ComputeCoC( sampleLinear, focusDepth, sampleUV );
 
         float weight = ( sampleCoC >= length( offset ) * centerCoC ) ? 1.0 : sampleCoC;
 

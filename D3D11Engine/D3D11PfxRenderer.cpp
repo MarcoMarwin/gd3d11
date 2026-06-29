@@ -20,6 +20,7 @@
 #include "D3D11PFX_FSR3.h"
 #include "D3D11PFX_SAO.h"
 #include "D3D11PFX_ASSAO.h"
+#include "D3D11PFX_XeGTAO.h"
 #include "D3D11Effect.h"
 #include "D3D11ShadowMap.h"
 #include "D3D11ConstantBuffer.h"
@@ -45,6 +46,7 @@ D3D11PfxRenderer::D3D11PfxRenderer() {
         FX_TAA = std::make_unique<D3D11PFX_TAA>( this );
         NvHBAO = std::make_unique<D3D11NVHBAO>();
         FX_SAO = std::make_unique<D3D11PFX_SAO>( this );
+        PFX_XeGTAO = std::make_unique<D3D11PFX_XeGTAO>( this );
         PFX_FSR3 = std::make_unique<D3D11PFX_FSR3>( this );
         PFX_ASSAO = std::make_unique<D3D11PFX_ASSAO>(
             engine->GetDevice().Get(),
@@ -473,6 +475,13 @@ XRESULT D3D11PfxRenderer::RenderPostFXComposition(
     Engine::GAPI->GetRendererState().DepthState.SetDirty();
 
     return XR_SUCCESS;
+}
+
+XRESULT D3D11PfxRenderer::RenderXeGTAO( ID3D11ShaderResourceView* depthSRV,
+                                        ID3D11ShaderResourceView* normalsSRV,
+                                        ID3D11RenderTargetView* outputRTV ) {
+    if ( !PFX_XeGTAO ) return XR_FAILED;
+    return PFX_XeGTAO->Render( depthSRV, normalsSRV, outputRTV );
 }
 
 XRESULT D3D11PfxRenderer::RenderASSAO( ID3D11RenderTargetView* outputRTV, ID3D11ShaderResourceView* depthCopy, ID3D11ShaderResourceView* normals )

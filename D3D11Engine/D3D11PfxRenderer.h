@@ -18,6 +18,7 @@ class D3D11NVHBAO;
 class D3D11PFX_SAO;
 class D3D11PFX_SimpleSharpen;
 class D3D11PFX_ASSAO;
+class D3D11PFX_XeGTAO;
 
 class D3D11PfxRenderer {
 public:
@@ -96,6 +97,10 @@ public:
                                      ID3D11ShaderResourceView* godraysSRV,
                                      ID3D11ShaderResourceView* depthSRV );
 
+    XRESULT RenderXeGTAO( ID3D11ShaderResourceView* depthSRV,
+                            ID3D11ShaderResourceView* normalsSRV,
+                            ID3D11RenderTargetView* outputRTV );
+
     XRESULT RenderASSAO( ID3D11RenderTargetView* outputRTV,
                             ID3D11ShaderResourceView* depthCopy,
                             ID3D11ShaderResourceView* normals );
@@ -142,6 +147,7 @@ private:
     std::unique_ptr<D3D11PFX_SimpleSharpen> PFX_SimpleSharpen;
     std::unique_ptr<D3D11PFX_FSR3> PFX_FSR3;
     std::unique_ptr<D3D11PFX_ASSAO> PFX_ASSAO;
+    std::unique_ptr<D3D11PFX_XeGTAO> PFX_XeGTAO;
     std::unique_ptr<TexturePool> m_texturePool;
     std::unique_ptr<DepthStencilPool> m_depthStencilPool;
 };

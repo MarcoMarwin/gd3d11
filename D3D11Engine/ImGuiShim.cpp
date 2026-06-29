@@ -218,6 +218,21 @@ namespace {
         return false;
     }
 
+    bool SliderNearDoFStrength( const char* label, float* value )
+    {
+        const std::array<float, 11> levels = {
+            0.0f, 0.5f, 1.0f, 1.5f, 2.0f, 2.5f,
+            3.0f, 3.5f, 4.0f, 4.5f, 5.0f
+        };
+        int index = FindNearestStepIndex( *value, levels.data(), static_cast<int>(levels.size()) );
+        *value = levels[index];
+        if ( SliderSteppedIndex( label, &index, 10, true, 2 ) ) {
+            *value = levels[index];
+            return true;
+        }
+        return false;
+    }
+
     int SnapRenderScalePercentNonFSR( int value )
     {
         const int clamped = std::clamp( value, 100, 200 );
@@ -563,6 +578,11 @@ void ApplyFeatureLevel10Downgrades(GothicRendererSettings& s) {
     // one 4k texture, 1/2 2k textures max.
     s.NumShadowCascades = std::min(s.NumShadowCascades, MAX_CSM_CASCADES);
 
+    s.EnableFrameGeneration = false;
+    if ( s.AoMode == AOMode::AO_XEGTAO ) {
+        s.AoMode = AOMode::AO_ASSAO;
+    }
+
     if (s.NumShadowCascades >= 2) {
         s.DebugSettings.ShadowCascades.Lambda = D3D11ShadowMap::lambdaBiasTable[s.NumShadowCascades].lambda;
         s.DebugSettings.ShadowCascades.Bias = D3D11ShadowMap::lambdaBiasTable[s.NumShadowCascades].bias;
@@ -580,6 +600,7 @@ void ApplyGraphicsPresets( GothicRendererSettings& s ) {
     s.EnableGodRays = true;
     s.EnableContactShadows = true;
     s.EnableScreenSpaceGI = true;
+    s.EnableFrameGeneration = false;
 
     switch ( preset ) {
     case GothicRendererSettings::GRAPHICS_LOW:
@@ -817,6 +838,20 @@ void ImGuiShim::RenderSettingsWindow()
                 ImGui::SetItemTooltip( "Selects edge smoothing. FSR 3 also uses Render Scale for its quality presets." );
                 ImGui::PopID();
             }
+
+            const bool frameGenerationAvailable = !FeatureLevel10Compatibility
+                && settings.AntiAliasingMode == GothicRendererSettings::E_AntiAliasingMode::AA_FSR
+                && settings.Upscaler == GothicRendererSettings::E_Upscaler::UPSCALER_FSR_3;
+            if ( !frameGenerationAvailable ) {
+                settings.EnableFrameGeneration = false;
+            }
+            ImText( "Frame Generation", buttonWidth ); ImGui::SameLine();
+            ImGui::BeginDisabled( !frameGenerationAvailable );
+            ImGui::Checkbox( "##Enable Frame Generation", &settings.EnableFrameGeneration );
+            ImGui::EndDisabled();
+            ImGui::SetItemTooltip( frameGenerationAvailable
+                ? "Uses FidelityFX Optical Flow and Frame Interpolation to generate one additional frame between rendered frames."
+                : "Available with FSR 3 on DirectX 11 feature level 11 hardware." );
 
             ImText( "Render Scale", buttonWidth ); ImGui::SameLine();
             if ( settings.Upscaler == GothicRendererSettings::UPSCALER_FSR_3 ) {
@@ -1059,6 +1094,7 @@ void ImGuiShim::RenderSettingsWindow()
                     {"HBAO+", AOMode::AO_HBAO, "NVIDIA HBAO+ (Horizon-Based Ambient Occlusion Plus)"},
                     {"SAO", AOMode::AO_SAO, nullptr},
                     {"ASSAO", AOMode::AO_ASSAO, "Intel ASSAO (Adaptive Screen Space Ambient Occlusion)"},
+                    {"XeGTAO", AOMode::AO_XEGTAO, "Intel XeGTAO (Ground Truth Ambient Occlusion)"},
             };
             ImText( "AO Mode", { aoModeLabelWidth, buttonWidth.y } ); ImGui::SameLine();
             ImGui::SetNextItemWidth( compactComboWidth );
@@ -1174,6 +1210,9 @@ void ImGuiShim::RenderSettingsWindow()
             ImText( "Limit Light Intensity", { buttonWidth.x - ImGui::GetFrameHeight() - style.ItemSpacing.x, buttonWidth.y } ); ImGui::SameLine();
             ImGui::Checkbox( "##Limit Light Intensity", &settings.LimitLightIntesity );
             ImGui::SetItemTooltip( "Limits overly bright point lights to reduce blown-out interiors." );
+            ImText( "Occlusion Culling", { buttonWidth.x - ImGui::GetFrameHeight() - style.ItemSpacing.x, buttonWidth.y } ); ImGui::SameLine();
+            ImGui::Checkbox( "##Enable Occlusion Culling", &settings.EnableOcclusionCulling );
+            ImGui::SetItemTooltip( "Skips hidden world sections for better performance. Conservative visibility checks reduce visible pop-in." );
             ImText( "HDR", { buttonWidth.x - ImGui::GetFrameHeight() - style.ItemSpacing.x, buttonWidth.y } ); ImGui::SameLine();
             ImGui::Checkbox( "##Enable HDR", &settings.EnableHDR );
             ImGui::SetItemTooltip( "Enables high dynamic range rendering for the renderer post-processing pipeline." );
@@ -1187,7 +1226,7 @@ void ImGuiShim::RenderSettingsWindow()
         ImGui::TextUnformatted( advancedSettingsHint );
         
         const float footerButtonWidth = (ImGui::GetContentRegionAvail().x - style.ItemSpacing.x) * 0.5f;
-        const bool cancelled = ImGui::Button( "Abbrechen", ImVec2( footerButtonWidth, 30.f ) );
+        const bool cancelled = ImGui::Button( "Cancel", ImVec2( footerButtonWidth, 30.f ) );
         ImGui::SetItemTooltip( "Discard changes made since opening the F11 menu." );
         ImGui::SameLine();
         const bool saved = ImGui::Button( "Save Settings", ImVec2( footerButtonWidth, 30.f ) );
@@ -1254,8 +1293,7 @@ void ImGuiShim::RenderAdvancedColumn2( GothicRendererSettings& settings, GothicA
             Engine::GAPI->UpdateCompressBackBuffer();
         }
         ImGui::SetItemTooltip( "Uses a lower-precision HDR backbuffer to reduce memory bandwidth." );
-        ImGui::Checkbox( "Occlusion Culling", &settings.EnableOcclusionCulling );
-        ImGui::SetItemTooltip( "Experimental previous-frame occlusion culling; may cause delayed object visibility." );
+
         ImGui::Checkbox( "Sort Render Queue", &settings.SortRenderQueue );
         ImGui::Checkbox( "Draw Threaded", &settings.DrawThreaded );
         ImGui::Checkbox( "Do Z Prepass", &settings.DoZPrepass );
@@ -1330,6 +1368,17 @@ void RenderAdvancedColumn4( GothicRendererSettings& settings, GothicAPI* gapi ) 
             ImGui::SliderInt( "Blur Pass Count", &settings.AssaoSettings.BlurPassCount, 0, 6 );
             ImGui::DragFloat( "Sharpness", &settings.AssaoSettings.Sharpness, 0.01f, 0.0f, 1.0f, "%.2f", ImGuiSliderFlags_ClampOnInput );
             ImGui::DragFloat( "Detail Shadow Strength", &settings.AssaoSettings.DetailShadowStrength, 0.01f, 0.0f, 5.0f, "%.2f", ImGuiSliderFlags_ClampOnInput );
+        } else if ( settings.AoMode == AOMode::AO_XEGTAO ) {
+            static std::vector<std::pair<const char*, int>> xegtaoQuality = {
+                {"Low", 0}, {"Medium", 1}, {"High", 2}, {"Ultra", 3}
+            };
+            if ( ImComboBox( "Quality", xegtaoQuality, &settings.XegtaoSettings.QualityLevel ) ) ImGui::EndCombo();
+            static std::vector<std::pair<const char*, int>> xegtaoDenoising = {
+                {"Sharp", 1}, {"Medium", 2}, {"Soft", 3}
+            };
+            if ( ImComboBox( "Denoising", xegtaoDenoising, &settings.XegtaoSettings.DenoisePasses ) ) ImGui::EndCombo();
+            ImGui::SliderFloat( "Effect Radius", &settings.XegtaoSettings.Radius, 10.0f, 200.0f, "%.0f", ImGuiSliderFlags_AlwaysClamp );
+            ImGui::SetItemTooltip( "Ambient-occlusion radius in Gothic view-space units. 100 units equal approximately one meter." );
         }
         ImGui::PopID();
 
@@ -1375,8 +1424,8 @@ void RenderAdvancedColumn4( GothicRendererSettings& settings, GothicAPI* gapi ) 
             settings.DoFBokehRadius = advancedDepthOfFieldStrength * 3.5f;
         }
         ImGui::SliderFloat( "Near Blur Distance", &settings.DoFNearBlurDistance, 0.0f, 1000.0f, "%.0f", ImGuiSliderFlags_AlwaysClamp );
-        SliderNormalizedUiStrength( "Near Blur Strength", &settings.DoFNearBlurStrength, 0.0f );
-        ImGui::SetItemTooltip( "Adds blur only to geometry very close to the camera. The existing far-distance blur is unchanged." );
+        SliderNearDoFStrength( "Near Blur Strength", &settings.DoFNearBlurStrength );
+        ImGui::SetItemTooltip( "Controls near-camera blur up to 5x. The image center stays sharp while the effect increases toward the sides; far-distance blur is unchanged." );
         ImGui::EndDisabled();
 
         ImGui::SeparatorText( "Sharpening" );

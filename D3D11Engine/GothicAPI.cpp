@@ -5353,6 +5353,7 @@ XRESULT GothicAPI::SaveMenuSettings( const std::string& file ) {
     WritePrivateProfileStringA( "Display", "ResolutionScale", std::to_string( s.ResolutionScalePercent ).c_str(), ini.c_str() );
     WritePrivateProfileStringA( "Display", "Upscaler", std::to_string( static_cast<int>(s.Upscaler) ).c_str(), ini.c_str() );
     WritePrivateProfileStringA( "Display", "VSync", std::to_string( s.EnableVSync ? TRUE : FALSE ).c_str(), ini.c_str() );
+    WritePrivateProfileStringA( "Display", "FrameGeneration", std::to_string( s.EnableFrameGeneration ? TRUE : FALSE ).c_str(), ini.c_str() );
     WritePrivateProfileStringA( "Display", "ForceFOV", std::to_string( s.ForceFOV ? TRUE : FALSE ).c_str(), ini.c_str() );
     WritePrivateProfileStringA( "Display", "FOVHoriz", std::to_string( static_cast<int>(s.FOVHoriz) ).c_str(), ini.c_str() );
     WritePrivateProfileStringA( "Display", "FOVVert", std::to_string( static_cast<int>(s.FOVVert) ).c_str(), ini.c_str() );
@@ -5409,6 +5410,9 @@ XRESULT GothicAPI::SaveMenuSettings( const std::string& file ) {
 
     WritePrivateProfileStringA( "AO", "Mode", std::to_string( static_cast<int>(s.AoMode) ).c_str(), ini.c_str() );
     WritePrivateProfileStringA( "AO", "Strength", float_to_string( s.AOStrength, 2 ).c_str(), ini.c_str() );
+    WritePrivateProfileStringA( "XeGTAO", "Quality", std::to_string( s.XegtaoSettings.QualityLevel ).c_str(), ini.c_str() );
+    WritePrivateProfileStringA( "XeGTAO", "DenoisePasses", std::to_string( s.XegtaoSettings.DenoisePasses ).c_str(), ini.c_str() );
+    WritePrivateProfileStringA( "XeGTAO", "Radius", std::to_string( s.XegtaoSettings.Radius ).c_str(), ini.c_str() );
     WritePrivateProfileStringA( "SAO", "Radius", std::to_string( s.SaoSettings.Radius ).c_str(), ini.c_str() );
     WritePrivateProfileStringA( "SAO", "Bias", std::to_string( s.SaoSettings.Bias ).c_str(), ini.c_str() );
     WritePrivateProfileStringA( "SAO", "Intensity", std::to_string( s.SaoSettings.Intensity ).c_str(), ini.c_str() );
@@ -5457,7 +5461,7 @@ XRESULT GothicAPI::LoadMenuSettings( const std::string& file ) {
         s.DoFBokehRadius = std::clamp( GetPrivateProfileFloatA( "General", "DoFBokehRadius", ds.DoFBokehRadius, ini ), 0.035f, 7.0f );
         s.DoFMaxBlur = GetPrivateProfileFloatA( "General", "DoFMaxBlur", ds.DoFMaxBlur, ini );
         s.DoFNearBlurDistance = std::clamp( GetPrivateProfileFloatA( "General", "DoFNearBlurDistance", ds.DoFNearBlurDistance, ini ), 0.0f, 1000.0f );
-        s.DoFNearBlurStrength = std::clamp( GetPrivateProfileFloatA( "General", "DoFNearBlurStrength", ds.DoFNearBlurStrength, ini ), 0.0f, 2.0f );
+        s.DoFNearBlurStrength = std::clamp( GetPrivateProfileFloatA( "General", "DoFNearBlurStrength", ds.DoFNearBlurStrength, ini ), 0.0f, 5.0f );
         s.AllowNormalmaps = GetPrivateProfileBoolA( "General", "AllowNormalmaps", ds.AllowNormalmaps, ini );
         s.EnableParallaxOcclusionMapping = GetPrivateProfileBoolA( "General", "EnableParallaxOcclusionMapping", ds.EnableParallaxOcclusionMapping, ini );
         s.ParallaxOcclusionStrength = std::clamp( GetPrivateProfileFloatA( "General", "ParallaxOcclusionStrength", ds.ParallaxOcclusionStrength, ini ), 0.0f, 4.0f );
@@ -5524,6 +5528,7 @@ XRESULT GothicAPI::LoadMenuSettings( const std::string& file ) {
         s.ResolutionScalePercent = std::clamp<int>( GetPrivateProfileIntA( "Display", "ResolutionScale", ds.ResolutionScalePercent, ini.c_str() ), 33, 200 );
         s.Upscaler = (GothicRendererSettings::E_Upscaler)std::clamp<int>( GetPrivateProfileIntA( "Display", "Upscaler", ds.Upscaler, ini.c_str() ), 0, GothicRendererSettings::E_Upscaler::_UPSCALER_NUM_MODES - 1 );
         s.EnableVSync = GetPrivateProfileBoolA( "Display", "VSync", ds.EnableVSync, ini );
+        s.EnableFrameGeneration = GetPrivateProfileBoolA( "Display", "FrameGeneration", ds.EnableFrameGeneration, ini );
         s.ForceFOV = GetPrivateProfileBoolA( "Display", "ForceFOV", ds.ForceFOV, ini );
         s.FOVHoriz = GetPrivateProfileIntA( "Display", "FOVHoriz", 90, ini.c_str() );
         s.FOVVert = GetPrivateProfileIntA( "Display", "FOVVert", 90, ini.c_str() );
@@ -5576,8 +5581,13 @@ XRESULT GothicAPI::LoadMenuSettings( const std::string& file ) {
 
         // Use ASSAO as default when no AO mode is stored.
         int defaultAoMode = static_cast<int>(ds.AoMode);
-        s.AoMode = static_cast<AOMode>(GetPrivateProfileIntA( "AO", "Mode", defaultAoMode, ini.c_str() ));
+        const int aoMode = std::clamp( GetPrivateProfileIntA( "AO", "Mode", defaultAoMode, ini.c_str() ),
+            static_cast<int>(AOMode::AO_NONE), static_cast<int>(AOMode::AO_XEGTAO) );
+        s.AoMode = static_cast<AOMode>(aoMode);
         s.AOStrength = std::clamp( GetPrivateProfileFloatA( "AO", "Strength", ds.AOStrength, ini ), 0.01f, 2.0f );
+        s.XegtaoSettings.QualityLevel = std::clamp( GetPrivateProfileIntA( "XeGTAO", "Quality", ds.XegtaoSettings.QualityLevel, ini.c_str() ), 0, 3 );
+        s.XegtaoSettings.DenoisePasses = std::clamp( GetPrivateProfileIntA( "XeGTAO", "DenoisePasses", ds.XegtaoSettings.DenoisePasses, ini.c_str() ), 1, 3 );
+        s.XegtaoSettings.Radius = std::clamp( GetPrivateProfileFloatA( "XeGTAO", "Radius", ds.XegtaoSettings.Radius, ini ), 1.0f, 500.0f );
 
         const SAOSettings& defaultSAOSettings = ds.SaoSettings;
         s.SaoSettings.Radius = GetPrivateProfileFloatA( "SAO", "Radius", defaultSAOSettings.Radius, ini );

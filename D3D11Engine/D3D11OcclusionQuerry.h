@@ -29,7 +29,9 @@ public:
 private:
 
     /** Marks the entire subtree visible */
-    void MarkTreeVisible( BspInfo* root, bool visible );
+    void MarkTreeVisible( BspInfo* root, bool visible, unsigned int graceFrames = 0 );
+
+    XMFLOAT3 GetCameraForward() const;
 
     void DebugVisualizeNodeMesh( MeshInfo* m, const XMFLOAT4& color );
 
@@ -38,5 +40,11 @@ private:
 
     /** Current frame */
     unsigned int FrameID;
+
+    XMFLOAT3 PreviousCameraPosition;
+    XMFLOAT3 PreviousCameraForward;
+    bool HasPreviousCamera;
+    bool CameraRelaxedMode;
+    unsigned int ConservativeVisibleFrames;
 };
 

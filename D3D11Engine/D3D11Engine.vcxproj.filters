@@ -748,6 +748,9 @@
       <Filter>Engine\Graph</Filter>
     </ClInclude>
     <ClInclude Include="D3D11RenderQueue.h" />
+    <ClInclude Include="D3D11PFX_XeGTAO.h">
+      <Filter>Engine\D3D11\PFX\Effects</Filter>
+    </ClInclude>
     <ClInclude Include="D3D11PFX_FSR3.h">
       <Filter>Engine\D3D11\PFX\Effects</Filter>
     </ClInclude>
@@ -1042,6 +1045,12 @@
     <ClCompile Include="RenderGraph.cpp">
       <Filter>Engine\Graph</Filter>
     </ClCompile>
+    <ClCompile Include="D3D11PFX_XeGTAO.cpp">
+      <Filter>Engine\D3D11\PFX\Effects</Filter>
+    </ClCompile>
+    <ClCompile Include="FidelityFXFrameGeneration\fsr3\ffx_fsr3.cpp" />
+    <ClCompile Include="FidelityFXFrameGeneration\frameinterpolation\ffx_frameinterpolation.cpp" />
+    <ClCompile Include="FidelityFXFrameGeneration\opticalflow\ffx_opticalflow.cpp" />
     <ClCompile Include="D3D11PFX_FSR3.cpp">
       <Filter>Engine\D3D11\PFX\Effects</Filter>
     </ClCompile>

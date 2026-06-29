@@ -52,6 +52,7 @@ enum class PShaderID : size_t {
     PS_PFX_ApplyParticleDistortion,
     PS_PFX_Simple,
     PS_PFX_Simple_R8,
+    PS_PFX_AOComposite,
     PS_PFX_VelocityDebug,
     PS_PFX_GaussBlur,
     PS_PFX_Heightfog,
@@ -132,6 +133,13 @@ enum class CShaderID : size_t {
     CS_PFX_DoF_Composite,
     CS_PFX_SAO,
     CS_PFX_SAO_Blur,
+    CS_PFX_XeGTAO_Prefilter,
+    CS_PFX_XeGTAO_Low,
+    CS_PFX_XeGTAO_Medium,
+    CS_PFX_XeGTAO_High,
+    CS_PFX_XeGTAO_Ultra,
+    CS_PFX_XeGTAO_Denoise,
+    CS_PFX_XeGTAO_DenoiseLast,
     CS_PFX_Sharpen,
     COUNT
 };

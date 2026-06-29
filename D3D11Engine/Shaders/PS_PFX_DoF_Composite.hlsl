@@ -43,7 +43,13 @@ bool IsSkyDepth( float d )
     return d <= 1e-7f;
 }
 
-float ComputeCoCFromDepth( float d, float focusDepth )
+float GetNearBlurScreenMask( float2 texcoord )
+{
+    const float horizontalDistance = abs( texcoord.x * 2.0f - 1.0f );
+    return smoothstep( 0.18f, 0.85f, horizontalDistance );
+}
+
+float ComputeCoCFromDepth( float d, float focusDepth, float2 texcoord )
 {
     if ( IsSkyDepth( d ) )
         return 0.0f;
@@ -51,7 +57,8 @@ float ComputeCoCFromDepth( float d, float focusDepth )
     const float linearDepth = LinearizeDepth( d );
     const float farCoC = saturate( ( linearDepth - focusDepth ) / DoF_FocusRange );
     const float nearRange = max( DoF_NearBlurDistance - DoF_NearPlane, 1.0f );
-    const float nearCoC = saturate( ( DoF_NearBlurDistance - linearDepth ) / nearRange ) * DoF_NearBlurStrength;
+    const float nearCoC = saturate( ( DoF_NearBlurDistance - linearDepth ) / nearRange )
+        * DoF_NearBlurStrength * GetNearBlurScreenMask( texcoord );
     return max( farCoC, nearCoC );
 }
 
@@ -77,7 +84,7 @@ float4 GetSkyEdgeBlurSample(float2 texcoord, float2 dtexel, float focusDepth)
         float2 offset = GetSkyEdgeSpiralSample(i);
         float2 sampleUV = texcoord + offset * edgeRadius * dtexel;
         float depth = TX_Depth.SampleLevel(SS_Linear, sampleUV, 0).r;
-        float coc = ComputeCoCFromDepth(depth, focusDepth);
+        float coc = ComputeCoCFromDepth(depth, focusDepth, sampleUV);
         float4 blur = TX_Blur.SampleLevel(SS_Linear, sampleUV, 0);
         float radialWeight = exp(-dot(offset, offset) * 2.4f);
         float geometryWeight = IsSkyDepth(depth) ? 0.0f : smoothstep(0.12f, 0.65f, coc);
@@ -114,15 +121,15 @@ float4 PSMain( PS_INPUT Input ) : SV_TARGET
         return float4( lerp( sharpColor, skyEdgeBlur.rgb, skyEdgeBlur.a ), 1.0 );
     }
 
-    float cocC = ComputeCoCFromDepth( depthC, focusDepth );
+    float cocC = ComputeCoCFromDepth( depthC, focusDepth, Input.vTexcoord );
     float depthL = TX_Depth.Sample( SS_Linear, Input.vTexcoord + float2( -dtexel.x, 0 ) ).r;
     float depthR = TX_Depth.Sample( SS_Linear, Input.vTexcoord + float2(  dtexel.x, 0 ) ).r;
     float depthU = TX_Depth.Sample( SS_Linear, Input.vTexcoord + float2( 0, -dtexel.y ) ).r;
     float depthD = TX_Depth.Sample( SS_Linear, Input.vTexcoord + float2( 0,  dtexel.y ) ).r;
-    float cocL = IsSkyDepth( depthL ) ? cocC : ComputeCoCFromDepth( depthL, focusDepth );
-    float cocR = IsSkyDepth( depthR ) ? cocC : ComputeCoCFromDepth( depthR, focusDepth );
-    float cocU = IsSkyDepth( depthU ) ? cocC : ComputeCoCFromDepth( depthU, focusDepth );
-    float cocD = IsSkyDepth( depthD ) ? cocC : ComputeCoCFromDepth( depthD, focusDepth );
+    float cocL = IsSkyDepth( depthL ) ? cocC : ComputeCoCFromDepth( depthL, focusDepth, Input.vTexcoord + float2( -dtexel.x, 0 ) );
+    float cocR = IsSkyDepth( depthR ) ? cocC : ComputeCoCFromDepth( depthR, focusDepth, Input.vTexcoord + float2(  dtexel.x, 0 ) );
+    float cocU = IsSkyDepth( depthU ) ? cocC : ComputeCoCFromDepth( depthU, focusDepth, Input.vTexcoord + float2( 0, -dtexel.y ) );
+    float cocD = IsSkyDepth( depthD ) ? cocC : ComputeCoCFromDepth( depthD, focusDepth, Input.vTexcoord + float2( 0,  dtexel.y ) );
 
     float2 inwardShift = float2(
         (IsSkyDepth(depthL) ? 1.0f : 0.0f) - (IsSkyDepth(depthR) ? 1.0f : 0.0f),

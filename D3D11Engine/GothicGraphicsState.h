@@ -515,11 +515,18 @@ struct HBAOSettings {
     int SsaoStepCount;
 };
 
+struct XeGTAOConfig {
+    int QualityLevel = 2;   // 0 low, 1 medium, 2 high, 3 ultra
+    int DenoisePasses = 1;  // 1 sharp, 2 medium, 3 soft
+    float Radius = 50.0f;   // Gothic view-space units (100 units = 1 meter)
+};
+
 enum class AOMode : int {
     AO_NONE = 0,
     AO_HBAO = 1,
     AO_SAO = 2,
     AO_ASSAO = 3,
+    AO_XEGTAO = 4,
 };
 
 struct SAOSettings {
@@ -712,6 +719,7 @@ struct GothicRendererSettings {
         EnableShadows = true;
         ThreadedShadowCulling = false;
         EnableVSync = true;
+        EnableFrameGeneration = false;
         DoZPrepass = false;
         SortRenderQueue = false;
         DrawThreaded = false;
@@ -910,6 +918,7 @@ struct GothicRendererSettings {
     bool EnableHDR;
     E_HDRToneMap HDRToneMap;
     bool EnableVSync;
+    bool EnableFrameGeneration;
     bool FastShadows;
     bool ReplaceSunDirection;
     bool AtmosphericScattering;
@@ -1015,6 +1024,7 @@ struct GothicRendererSettings {
     HBAOSettings HbaoSettings;
     SAOSettings SaoSettings;
     ASSAO_Settings AssaoSettings;
+    XeGTAOConfig XegtaoSettings;
     AOMode AoMode;
     float AOStrength;
 
@@ -1125,6 +1135,7 @@ struct GothicRendererSettings {
             return;
         }
 
+        EnableFrameGeneration = false;
         ResolutionScalePercent = std::clamp( ResolutionScalePercent, 100, 200 );
         Upscaler = E_Upscaler::UPSCALER_DEFAULT;
     }
