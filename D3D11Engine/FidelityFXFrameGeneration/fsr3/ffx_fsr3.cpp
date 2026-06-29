@@ -491,7 +491,16 @@ FfxErrorCode ffxFsr3ConfigureFrameGeneration(FfxFsr3Context* context, const FfxF
         }
     }
 
-    return contextPrivate->backendInterfaceFrameInterpolation.fpSwapChainConfigureFrameGeneration(&patchedConfig);
+    if (contextPrivate->backendInterfaceFrameInterpolation.fpSwapChainConfigureFrameGeneration)
+    {
+        return contextPrivate->backendInterfaceFrameInterpolation.fpSwapChainConfigureFrameGeneration(&patchedConfig);
+    }
+
+    // GD3D11 drives DX11 frame generation manually via ffxFsr3DispatchFrameGeneration
+    // instead of installing the FidelityFX swapchain present hook. The DX11 backend
+    // used here therefore legitimately does not expose a swapchain configuration
+    // callback; the context state above is still required for manual dispatch.
+    return FFX_OK;
 }
 #endif // FFX_OF && FFX_IF
 
