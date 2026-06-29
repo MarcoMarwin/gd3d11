@@ -30,11 +30,14 @@ namespace {
         if ( !resource ) {
             return {};
         }
-        return ffxGetResourceDX11_Fsr31(
-            resource,
-            GetFfxResourceDescriptionDX11( resource ),
-            name,
-            state );
+        FfxResource ffxResource = {};
+        ffxResource.resource = resource;
+        ffxResource.description = GetFfxResourceDescriptionDX11( resource );
+        ffxResource.state = state;
+        if ( name ) {
+            wcscpy_s( ffxResource.name, name );
+        }
+        return ffxResource;
     }
 
     ID3D11Resource* GetResourceFromView( ID3D11View* view ) {
