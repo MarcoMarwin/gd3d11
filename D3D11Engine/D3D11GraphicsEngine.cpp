@@ -1607,7 +1607,7 @@ XRESULT D3D11GraphicsEngine::OnBeginFrame() {
         m_FrameLimiter->SetLimit( 20 );
         m_FrameLimiter->Start();
     } else {
-        if ( rendererState.RendererSettings.FpsLimit != 0 ) {
+        if ( !rendererState.RendererSettings.EnableVSync && rendererState.RendererSettings.FpsLimit != 0 ) {
             m_FrameLimiter->SetLimit( rendererState.RendererSettings.FpsLimit );
             m_FrameLimiter->Start();
         } else {

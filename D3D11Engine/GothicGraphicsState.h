@@ -640,7 +640,7 @@ struct GothicRendererSettings {
         FastShadows = false;
         MaxNumFaces = 0;
         IndoorVobDrawRadius = 5000.0f;
-        OutdoorVobDrawRadius = 30000.0f;
+        OutdoorVobDrawRadius = 100000.0f; // Advanced-only large-object distance; F11 presets must not override it.
         SkeletalMeshDrawRadius = 6000.0f;
         VisualFXDrawRadius = 10000.0f;
 
@@ -783,7 +783,7 @@ struct GothicRendererSettings {
 
         LimitLightIntesity = true;
         AllowNormalmaps = false;
-        EnableParallaxOcclusionMapping = false;
+        EnableParallaxOcclusionMapping = true; // Preset selection for Surface Detail; inactive while AllowNormalmaps is false.
         ParallaxOcclusionStrength = 1.0f;
 
         AllowNumpadKeys = false;

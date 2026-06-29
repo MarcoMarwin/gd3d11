@@ -121,38 +121,53 @@ float3 ApplyTreeWind(float3 vertexPos, float3 direction, float heightNorm, float
 
 #if SHD_INFLUENCE
 
-// HERO AFFECTS CONST
-static const float heroAffectRange = 100.0f;
+// HERO AFFECTS CONST (Gothic world units)
+static const float heroAffectInnerRadius = 35.0f;
+static const float heroAffectOuterRadius = 110.0f;
+static const float heroAffectVerticalInnerRadius = 80.0f;
+static const float heroAffectVerticalOuterRadius = 160.0f;
 static const float heroAffectStrength = 38.0f;
 
 float3 CalculatePlayerInfluence(
-    float3 playerPos, 
+    float3 playerPos,
     float3 vertexLocalPos,
     float minHeight,
     float maxHeight,
     float4x4 instWorldMatrix
 )
 {
-    float heightRange = max(maxHeight - minHeight, 0.001);
+    float heightRange = max(maxHeight - minHeight, 0.001f);
     float vertexHeightNorm = saturate((vertexLocalPos.y - minHeight) / heightRange);
-    
-    // 15% of object height check
-    float heightMask = smoothstep(0.14, 0.16, vertexHeightNorm);
-    
-    float3 vertexWorldPos = mul(float4(vertexLocalPos, 1.0), instWorldMatrix).xyz;
-    float3 toVertex = vertexWorldPos - playerPos;
-    
-    float3 displaceDirWorld = lerp(float3(0, 1, 0), normalize(toVertex), step(0.001, length(toVertex)));
-    
-    float distanceXZ = length(toVertex.xz);
-    float distanceFactor = exp(-(distanceXZ*distanceXZ)/(1.8*heroAffectRange*heroAffectRange));
-    
-    float influence = distanceFactor * vertexHeightNorm * heightMask;
-    
-    float randomOffset = frac(sin(dot(vertexLocalPos.xz, float2(12.9898, 78.233))) * 43758.5453);
-    influence *= 0.9 + 0.1 * randomOffset;
 
-    float3 displaceDirLocal = normalize(mul(displaceDirWorld, (float3x3)instWorldMatrix));
+    // Keep the base planted and move only the flexible upper portion.
+    float heightMask = smoothstep(0.14f, 0.16f, vertexHeightNorm);
+
+    float3 vertexWorldPos = mul(float4(vertexLocalPos, 1.0f), instWorldMatrix).xyz;
+    float3 toVertex = vertexWorldPos - playerPos;
+    float distanceXZ = length(toVertex.xz);
+
+    // Full response close to the hero, a soft edge, then exactly zero.
+    // Unlike the previous Gaussian tail this cannot move distant parts of a large object.
+    float radialFactor = 1.0f - smoothstep(heroAffectInnerRadius, heroAffectOuterRadius, distanceXZ);
+    float verticalFactor = 1.0f - smoothstep(
+        heroAffectVerticalInnerRadius,
+        heroAffectVerticalOuterRadius,
+        abs(toVertex.y));
+    float localityMask = radialFactor * verticalFactor;
+
+    float horizontalLengthSq = dot(toVertex.xz, toVertex.xz);
+    float2 horizontalDirection = toVertex.xz * rsqrt(max(horizontalLengthSq, 0.0001f));
+    float3 displaceDirWorld = float3(horizontalDirection.x, 0.0f, horizontalDirection.y);
+
+    float influence = localityMask * vertexHeightNorm * heightMask;
+    float randomOffset = frac(sin(dot(vertexLocalPos.xz, float2(12.9898f, 78.233f))) * 43758.5453f);
+    influence *= 0.9f + 0.1f * randomOffset;
+
+    // Instance positions are transformed as row vectors, so transpose the rotation
+    // when converting the world-space push direction back into local space.
+    float3 displaceDirLocal = mul(displaceDirWorld, transpose((float3x3)instWorldMatrix));
+    float localDirectionLengthSq = dot(displaceDirLocal, displaceDirLocal);
+    displaceDirLocal *= rsqrt(max(localDirectionLengthSq, 0.0001f));
     return displaceDirLocal * heroAffectStrength * influence;
 }
 #endif

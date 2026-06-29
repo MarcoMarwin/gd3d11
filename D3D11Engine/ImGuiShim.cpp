@@ -369,12 +369,9 @@ void ApplyGraphicsPresets( GothicRendererSettings& s ) {
         s.AoMode = AOMode::AO_NONE;
         s.EnableDoF = false;
         s.WindQuality = GothicRendererSettings::EWindQuality::WIND_QUALITY_NONE;
-        s.EnableDynamicLighting = true;
         s.EnablePointlightShadows = GothicRendererSettings::EPointLightShadowMode::PLS_STATIC_ONLY;
-        s.OutdoorVobDrawRadius = 30'000.0f;
         s.OutdoorSmallVobDrawRadius = 10'000.0f;
         s.SectionDrawRadius = 1;
-        s.VisualFXDrawRadius = 5'000.0f;
         s.textureMaxSize = static_cast<int>(TX_QUALITY::High);
         break;
     case GothicRendererSettings::GRAPHICS_MEDIUM:
@@ -385,12 +382,9 @@ void ApplyGraphicsPresets( GothicRendererSettings& s ) {
         s.AoMode = AOMode::AO_ASSAO;
         s.EnableDoF = true;
         s.WindQuality = GothicRendererSettings::EWindQuality::WIND_QUALITY_ADVANCED;
-        s.EnableDynamicLighting = true;
         s.EnablePointlightShadows = GothicRendererSettings::EPointLightShadowMode::PLS_UPDATE_DYNAMIC;
-        s.OutdoorVobDrawRadius = 50'000.0f;
         s.OutdoorSmallVobDrawRadius = 15'000.0f;
         s.SectionDrawRadius = 5;
-        s.VisualFXDrawRadius = 10'000.0f;
         s.textureMaxSize = static_cast<int>(TX_QUALITY::MAX);
         break;
     case GothicRendererSettings::GRAPHICS_HIGH:
@@ -401,12 +395,9 @@ void ApplyGraphicsPresets( GothicRendererSettings& s ) {
         s.AoMode = AOMode::AO_ASSAO;
         s.EnableDoF = true;
         s.WindQuality = GothicRendererSettings::EWindQuality::WIND_QUALITY_ADVANCED;
-        s.EnableDynamicLighting = true;
         s.EnablePointlightShadows = GothicRendererSettings::EPointLightShadowMode::PLS_UPDATE_DYNAMIC;
-        s.OutdoorVobDrawRadius = 75'000.0f;
         s.OutdoorSmallVobDrawRadius = 20'000.0f;
         s.SectionDrawRadius = 10;
-        s.VisualFXDrawRadius = 10'000.0f;
         s.textureMaxSize = static_cast<int>(TX_QUALITY::MAX);
         break;
     case GothicRendererSettings::GRAPHICS_VERY_HIGH:
@@ -417,12 +408,9 @@ void ApplyGraphicsPresets( GothicRendererSettings& s ) {
         s.AoMode = AOMode::AO_ASSAO;
         s.EnableDoF = true;
         s.WindQuality = GothicRendererSettings::EWindQuality::WIND_QUALITY_ADVANCED;
-        s.EnableDynamicLighting = true;
         s.EnablePointlightShadows = GothicRendererSettings::EPointLightShadowMode::PLS_UPDATE_DYNAMIC;
-        s.OutdoorVobDrawRadius = 100'000.0f;
         s.OutdoorSmallVobDrawRadius = 25'000.0f;
         s.SectionDrawRadius = 20;
-        s.VisualFXDrawRadius = 10'000.0f;
         s.textureMaxSize = static_cast<int>(TX_QUALITY::MAX);
         break;
     default:
@@ -503,14 +491,47 @@ void ImGuiShim::RenderSettingsWindow()
         
         {
             ImGui::BeginGroup();
-            ImGui::Checkbox( "Vsync", &settings.EnableVSync );
-            if ( ImGui::Checkbox( "NormalMaps", &settings.AllowNormalmaps ) ) {
+            ImText( "VSync", { 80.0f, buttonWidth.y } ); ImGui::SameLine();
+            ImGui::Checkbox( "##Enable VSync", &settings.EnableVSync );
+            ImGui::SameLine();
+
+            bool fpsLimitEnabled = settings.FpsLimit > 0;
+            ImGui::BeginDisabled( settings.EnableVSync );
+            ImText( "FPS Limit", { 95.0f, buttonWidth.y } ); ImGui::SameLine();
+            if ( ImGui::Checkbox( "##Enable FPS Limit", &fpsLimitEnabled ) ) {
+                settings.FpsLimit = fpsLimitEnabled ? 60 : 0;
+            }
+            ImGui::SameLine();
+
+            int inactiveFpsLimit = settings.FpsLimit > 0 ? settings.FpsLimit : 60;
+            int* displayedFpsLimit = fpsLimitEnabled ? &settings.FpsLimit : &inactiveFpsLimit;
+            ImGui::BeginDisabled( !fpsLimitEnabled );
+            ImGui::SetNextItemWidth( 165.0f );
+            ImGui::SliderInt( "##FPSLimit", displayedFpsLimit, 10, 300,
+                settings.EnableVSync ? "Inactive (VSync)" : (fpsLimitEnabled ? "%d FPS" : "Off"),
+                ImGuiSliderFlags_AlwaysClamp );
+            ImGui::EndDisabled();
+            ImGui::EndDisabled();
+            ImGui::SetItemTooltip( settings.EnableVSync
+                ? "The FPS limiter is inactive while VSync controls frame presentation. Its saved value becomes active again when VSync is disabled."
+                : "Limits rendering independently of the display refresh rate. This does not prevent screen tearing." );
+            ImText( "Surface Detail", { buttonWidth.x - ImGui::GetFrameHeight() - style.ItemSpacing.x, buttonWidth.y } ); ImGui::SameLine();
+            if ( ImGui::Checkbox( "##Enable Surface Detail", &settings.AllowNormalmaps ) ) {
                 Engine::GAPI->UpdateTextureMaxSize();
             }
+            ImGui::SameLine();
+
+            static const std::vector<std::pair<const char*, bool>> surfaceDetailModes = {
+                {"Normal Maps", false},
+                {"Parallax", true},
+            };
             ImGui::BeginDisabled( !settings.AllowNormalmaps );
-            ImGui::Checkbox( "Parallax Occlusion Mapping", &settings.EnableParallaxOcclusionMapping );
-            ImGui::SetItemTooltip( "Uses *_disp.dds height maps from textures/replacements/Displacementmaps_* folders. Maps are loaded with normalmaps and only used while POM is enabled." );
+            ImGui::SetNextItemWidth( standardComboWidth );
+            if ( ImComboBoxC( "##SurfaceDetailMode", surfaceDetailModes, &settings.EnableParallaxOcclusionMapping, [] {} ) ) {
+                ImGui::EndCombo();
+            }
             ImGui::EndDisabled();
+            ImGui::SetItemTooltip( "Normal Maps adds surface lighting detail. Parallax additionally uses available *_disp.dds height maps; textures without displacement maps continue to use normal mapping." );
 
             static std::vector<std::tuple<const char*, AOMode, const char*>> aoModes = {
                     {"Disabled", AOMode::AO_NONE, nullptr},
@@ -528,12 +549,23 @@ void ImGuiShim::RenderSettingsWindow()
             }
             ImGui::SetItemTooltip( "Screen-Space ambient occlusion mode.\nChanging this will reload shaders." );
             bool screenSpaceLightFX = settings.EnableContactShadows || settings.EnableScreenSpaceGI;
-            if ( ImGui::Checkbox( "Screen-Space Light FX", &screenSpaceLightFX ) ) {
+            ImText( "Screen-Space Light FX", { buttonWidth.x - ImGui::GetFrameHeight() - style.ItemSpacing.x, buttonWidth.y } ); ImGui::SameLine();
+            if ( ImGui::Checkbox( "##Enable Screen-Space Light FX", &screenSpaceLightFX ) ) {
                 settings.EnableContactShadows = screenSpaceLightFX;
                 settings.EnableScreenSpaceGI = screenSpaceLightFX;
-                Engine::GraphicsEngine->ReloadShaders( ShaderCategory::Other );
+                shadersToReload |= ShaderCategory::Other;
             }
-            ImGui::SetItemTooltip( "Enables contact shadows and indirect screen-space light.\nChanging this will reload shaders." );
+            ImGui::SameLine();
+            ImGui::BeginDisabled( !screenSpaceLightFX );
+            ImGui::SetNextItemWidth( standardComboWidth );
+            float screenSpaceLightFXStrength = (settings.ContactShadowStrength + settings.ScreenSpaceGIStrength) * 0.5f;
+            if ( ImGui::SliderFloat( "##ScreenSpaceLightFXStrength", &screenSpaceLightFXStrength, 0.0f, 2.0f, "%.2f", ImGuiSliderFlags_AlwaysClamp ) ) {
+                settings.ContactShadowStrength = screenSpaceLightFXStrength;
+                settings.ScreenSpaceGIStrength = screenSpaceLightFXStrength;
+                shadersToReload |= ShaderCategory::Other;
+            }
+            ImGui::EndDisabled();
+            ImGui::SetItemTooltip( "Controls contact shadows and indirect screen-space light together. Separate fine tuning remains available in Advanced Settings." );
 
             if ( ImGui::Checkbox( "Godrays", &settings.EnableGodRays ) ) {
                 Engine::GraphicsEngine->ReloadShaders( ShaderCategory::Other );
@@ -541,38 +573,38 @@ void ImGuiShim::RenderSettingsWindow()
             ImGui::SetItemTooltip( "Changing this will reload shaders." );
 
             bool enhancedWater = settings.EnableSSR;
-            if ( ImGui::Checkbox( "Water Effects", &enhancedWater ) ) {
+            ImText( "Water Effects", { buttonWidth.x - ImGui::GetFrameHeight() - style.ItemSpacing.x, buttonWidth.y } ); ImGui::SameLine();
+            if ( ImGui::Checkbox( "##Enable Water Effects", &enhancedWater ) ) {
                 settings.EnableSSR = enhancedWater;
                 settings.EnableWaterAnimation = enhancedWater;
                 shadersToReload |= ShaderCategory::Water;
             }
-            ImGui::SetItemTooltip( "Enables water reflections, animated waves, and reflections on rain-wet ground." );
-            ImGui::Checkbox( "Backlit Vegetation", &settings.EnableSSS );
-            ImGui::SetItemTooltip( "Adds soft light transmission to grass, leaves, and alpha-tested vegetation." );
-            ImGui::Checkbox( "Depth of Field", &settings.EnableDoF );
-            ImGui::SetItemTooltip( "Keeps the subject sharp while softly blurring distant scenery and dialog backgrounds." );
+            ImGui::SameLine();
+            ImGui::BeginDisabled( !enhancedWater );
+            ImGui::SetNextItemWidth( standardComboWidth );
+            ImGui::SliderFloat( "##WaterEffectsStrength", &settings.SSRStrength, 0.0f, 2.0f, "%.2f", ImGuiSliderFlags_AlwaysClamp );
+            ImGui::EndDisabled();
+            ImGui::SetItemTooltip( "Controls the strength of water and wet-ground reflections." );
+
+            ImText( "Backlit Vegetation", { buttonWidth.x - ImGui::GetFrameHeight() - style.ItemSpacing.x, buttonWidth.y } ); ImGui::SameLine();
+            ImGui::Checkbox( "##Enable Backlit Vegetation", &settings.EnableSSS );
+            ImGui::SameLine();
+            ImGui::BeginDisabled( !settings.EnableSSS );
+            ImGui::SetNextItemWidth( standardComboWidth );
+            ImGui::SliderFloat( "##BacklitVegetationStrength", &settings.SSSIntensity, 0.0f, 2.0f, "%.2f", ImGuiSliderFlags_AlwaysClamp );
+            ImGui::EndDisabled();
+            ImGui::SetItemTooltip( "Controls soft light transmission through grass, leaves, and alpha-tested vegetation." );
+
+            ImText( "Depth of Field", { buttonWidth.x - ImGui::GetFrameHeight() - style.ItemSpacing.x, buttonWidth.y } ); ImGui::SameLine();
+            ImGui::Checkbox( "##Enable Depth of Field", &settings.EnableDoF );
+            ImGui::SameLine();
+            ImGui::BeginDisabled( !settings.EnableDoF );
+            ImGui::SetNextItemWidth( standardComboWidth );
+            ImGui::SliderFloat( "##DepthOfFieldBlurStrength", &settings.DoFBokehRadius, 1.0f, 10.0f, "%.1f", ImGuiSliderFlags_AlwaysClamp );
+            ImGui::EndDisabled();
+            ImGui::SetItemTooltip( "Controls the blur strength. Blur distance and focus range remain available in Advanced Settings." );
 
             ImGui::Checkbox( "HDR", &settings.EnableHDR );
-            if ( ImGui::Checkbox( "World Shadows", &settings.EnableShadows ) ) {
-                shadersToReload |= ShaderCategory::LightsAndShadows;
-            }
-            ImGui::SetItemTooltip( "Enables cascaded world shadows from the current directional light. Point-light shadows are configured separately." );
-            {
-                static std::vector<std::pair<const char*, GothicRendererSettings::E_ShadowFilterMode>> shadowFilterModes = {
-                    {"Disabled", GothicRendererSettings::E_ShadowFilterMode::SHADOW_FILTER_DISABLED},
-                    {"Simple", GothicRendererSettings::E_ShadowFilterMode::SHADOW_FILTER_SIMPLE},
-                    {"PCSS", GothicRendererSettings::E_ShadowFilterMode::SHADOW_FILTER_PCSS},
-                };
-                ImGui::TextUnformatted( "Shadow Filtering" );
-                ImGui::SameLine( standardComboStart );
-                ImGui::SetNextItemWidth( standardComboWidth );
-                if ( ImComboBoxC( "##ShadowFiltering", shadowFilterModes, &settings.ShadowFilterMode, [&shadersToReload]() {
-                    shadersToReload |= ShaderCategory::LightsAndShadows;
-                    } ) ) {
-                    ImGui::EndCombo();
-                }
-            }
-
 
 
 #if defined(BUILD_GOTHIC_2_6_fix) || (defined(BUILD_GOTHIC_1_08k) && !defined(BUILD_1_12F))
@@ -581,13 +613,19 @@ void ImGuiShim::RenderSettingsWindow()
 #endif
             {
                 bool windEffect = settings.WindQuality != GothicRendererSettings::EWindQuality::WIND_QUALITY_NONE;
-                if ( ImGui::Checkbox( "Wind effect", &windEffect ) ) {
+                ImText( "Wind Effect", { buttonWidth.x - ImGui::GetFrameHeight() - style.ItemSpacing.x, buttonWidth.y } ); ImGui::SameLine();
+                if ( ImGui::Checkbox( "##Enable Wind Effect", &windEffect ) ) {
                     settings.WindQuality = windEffect
                         ? GothicRendererSettings::EWindQuality::WIND_QUALITY_ADVANCED
                         : GothicRendererSettings::EWindQuality::WIND_QUALITY_NONE;
                     shadersToReload |= ShaderCategory::Other;
                 }
-                ImGui::SetItemTooltip( "Enables animated wind movement for trees, grass and wheat." );
+                ImGui::SameLine();
+                ImGui::BeginDisabled( !windEffect );
+                ImGui::SetNextItemWidth( standardComboWidth );
+                ImGui::SliderFloat( "##WindEffectStrength", &settings.GlobalWindStrength, 0.1f, 2.0f, "%.2f", ImGuiSliderFlags_AlwaysClamp );
+                ImGui::EndDisabled();
+                ImGui::SetItemTooltip( "Controls animated wind movement for trees, grass, and wheat." );
             }
 
             if ( ImGui::Checkbox( "Hero affects objects", &settings.HeroAffectsObjects ) ) {
@@ -752,8 +790,6 @@ void ImGuiShim::RenderSettingsWindow()
                 ImGui::EndCombo();
             }
 
-            ImText( "Shadow Quality", buttonWidth ); ImGui::SameLine();
-
             const static std::vector<std::pair<const char*, int>> shadowMapSizesMax = {
                 {"very low", 512},
                 {"low", 1024},
@@ -773,63 +809,80 @@ void ImGuiShim::RenderSettingsWindow()
                 ? shadowMapSizesDxFeature10
                 : shadowMapSizesMax;
 
-            if ( ImComboBoxC( "##ShadowQuality", shadowMapSizes, &settings.ShadowMapSize, [&shadersToReload]{
+            ImText( "World Shadows", { buttonWidth.x - ImGui::GetFrameHeight() - style.ItemSpacing.x, buttonWidth.y } ); ImGui::SameLine();
+            if ( ImGui::Checkbox( "##Enable World Shadows", &settings.EnableShadows ) ) {
+                shadersToReload |= ShaderCategory::LightsAndShadows;
+            }
+            ImGui::SameLine();
+            ImGui::BeginDisabled( !settings.EnableShadows );
+            if ( ImComboBoxC( "##WorldShadowQuality", shadowMapSizes, &settings.ShadowMapSize, [&shadersToReload]{
                 shadersToReload |= ShaderCategory::LightsAndShadows;
             } ) ) {
                 ImGui::EndCombo();
             }
+            ImGui::EndDisabled();
+            ImGui::SetItemTooltip( "Enables sun and moon world shadows and selects their cascaded shadow-map resolution." );
+
+            static std::vector<std::pair<const char*, GothicRendererSettings::E_ShadowFilterMode>> shadowFilterModes = {
+                {"Disabled", GothicRendererSettings::E_ShadowFilterMode::SHADOW_FILTER_DISABLED},
+                {"Simple", GothicRendererSettings::E_ShadowFilterMode::SHADOW_FILTER_SIMPLE},
+                {"PCSS", GothicRendererSettings::E_ShadowFilterMode::SHADOW_FILTER_PCSS},
+            };
+            ImText( "Shadow Filtering", buttonWidth ); ImGui::SameLine();
+            ImGui::BeginDisabled( !settings.EnableShadows );
+            if ( ImComboBoxC( "##ShadowFiltering", shadowFilterModes, &settings.ShadowFilterMode, [&shadersToReload]() {
+                shadersToReload |= ShaderCategory::LightsAndShadows;
+                } ) ) {
+                ImGui::EndCombo();
+            }
+            ImGui::EndDisabled();
+            ImGui::SetItemTooltip( "Selects the filtering method for sun and moon world shadows." );
+
+            static GothicRendererSettings::EPointLightShadowMode lastEnabledPointlightShadowMode =
+                GothicRendererSettings::EPointLightShadowMode::PLS_UPDATE_DYNAMIC;
+            if ( settings.EnablePointlightShadows != GothicRendererSettings::EPointLightShadowMode::PLS_DISABLED ) {
+                lastEnabledPointlightShadowMode = settings.EnablePointlightShadows;
+            }
+            bool pointlightShadowsEnabled = settings.EnablePointlightShadows != GothicRendererSettings::EPointLightShadowMode::PLS_DISABLED;
+
+            ImText( "Pointlight Shadows", { buttonWidth.x - ImGui::GetFrameHeight() - style.ItemSpacing.x, buttonWidth.y } ); ImGui::SameLine();
+            if ( ImGui::Checkbox( "##Enable Pointlight Shadows", &pointlightShadowsEnabled ) ) {
+                settings.EnablePointlightShadows = pointlightShadowsEnabled
+                    ? lastEnabledPointlightShadowMode
+                    : GothicRendererSettings::EPointLightShadowMode::PLS_DISABLED;
+            }
+            ImGui::SameLine();
+
+            const static std::vector<std::tuple<const char*, GothicRendererSettings::EPointLightShadowMode, const char*>> pointlightShadowModes = {
+                { "Static", GothicRendererSettings::EPointLightShadowMode::PLS_STATIC_ONLY, nullptr },
+                { "Dynamic Update", GothicRendererSettings::EPointLightShadowMode::PLS_UPDATE_DYNAMIC, nullptr },
+                { "Full", GothicRendererSettings::EPointLightShadowMode::PLS_FULL, "Very expensive. Don't use unless you encounter visual bugs." },
+            };
+            auto displayedPointlightShadowMode = pointlightShadowsEnabled
+                ? settings.EnablePointlightShadows
+                : lastEnabledPointlightShadowMode;
+            ImGui::BeginDisabled( !pointlightShadowsEnabled );
+            if ( ImComboBoxCT( "##PointlightShadowMode", pointlightShadowModes, &displayedPointlightShadowMode, [&settings, &displayedPointlightShadowMode] {
+                settings.EnablePointlightShadows = displayedPointlightShadowMode;
+                lastEnabledPointlightShadowMode = displayedPointlightShadowMode;
+                } ) ) {
+                ImGui::EndCombo();
+            }
+            ImGui::EndDisabled();
+            ImGui::SetItemTooltip( "Enables point-light shadows and selects how their cubemaps are updated." );
 
             ImText( "Shadow Softness", buttonWidth ); ImGui::SameLine();
             ImGui::SliderFloat( "##ShadowSoftness", &settings.ShadowSoftness, 0.0f, 2.0f, "%.2f", ImGuiSliderFlags_AlwaysClamp );
             ImGui::SetItemTooltip( "Controls world and point-light shadow softness. 1.0 uses the softer default." );
 
-            ImText( "Pointlight Shadows", buttonWidth ); ImGui::SameLine();
-            
-            const static std::vector<std::tuple<const char*, GothicRendererSettings::EPointLightShadowMode, const char*>> dynamicShadowValues = {
-                { "Off", GothicRendererSettings::EPointLightShadowMode::PLS_DISABLED, nullptr },
-                { "Static", GothicRendererSettings::EPointLightShadowMode::PLS_STATIC_ONLY, nullptr },
-                { "Dynamic Update", GothicRendererSettings::EPointLightShadowMode::PLS_UPDATE_DYNAMIC, nullptr },
-                { "Full", GothicRendererSettings::EPointLightShadowMode::PLS_FULL, "Very expensive. Don't use unless you encounter visual bugs." },
-            };
 
-            if ( ImComboBoxCT( "##DynamicShadows", dynamicShadowValues, &settings.EnablePointlightShadows, [] {} ) ) {
-                ImGui::EndCombo();
-            }
-
-            static bool fpsLimitEnabled = 0;
-            fpsLimitEnabled = settings.FpsLimit > 0;
-
-            ImText( "FPS Limit", { buttonWidth.x - ImGui::GetFrameHeight() - style.ItemSpacing.x, buttonWidth.y } ); ImGui::SameLine();
-            if ( ImGui::Checkbox( "##Enable FPS Limit", &fpsLimitEnabled ) ) {
-                if ( !fpsLimitEnabled ) {
-                    settings.FpsLimit = 0;
-                } else {
-                    settings.FpsLimit = 60;
-                }
-            }
-            ImGui::SameLine();
-
-            ImGui::BeginDisabled( !fpsLimitEnabled );
-            ImGui::SliderInt( "##FPSLimit", &settings.FpsLimit, 10, 300 );
-            ImGui::EndDisabled();
-
+            float objectDrawDistance = settings.OutdoorSmallVobDrawRadius / 1000.0f;
             ImText( "Object Draw Distance", buttonWidth ); ImGui::SameLine();
-            float objectDrawDistance = settings.OutdoorVobDrawRadius / 1000.0f;
-            if ( ImGui::SliderFloat( "##OutdoorVobDrawRadius", &objectDrawDistance, 1.f, 100.0f, "%.0f" ) ) {
-                settings.OutdoorVobDrawRadius = static_cast<float>(objectDrawDistance * 1000.0f);
+            if ( ImGui::SliderFloat( "##OutdoorSmallVobDrawRadius", &objectDrawDistance, 1.f, 100.0f, "%.0f", ImGuiSliderFlags_::ImGuiSliderFlags_ClampOnInput ) ) {
+                settings.OutdoorSmallVobDrawRadius = static_cast<float>(objectDrawDistance * 1000.0f);
             }
+            ImGui::SetItemTooltip( "Controls the draw distance of grass, vegetation, clutter, and other small objects. This can have a significant performance impact." );
 
-            float smallObjectDrawDistance = settings.OutdoorSmallVobDrawRadius / 1000.0f;
-            ImText( "Small Object Draw Distance", buttonWidth ); ImGui::SameLine();
-            if ( ImGui::SliderFloat( "##OutdoorSmallVobDrawRadius", &smallObjectDrawDistance, 1.f, 100.0f, "%.0f", ImGuiSliderFlags_::ImGuiSliderFlags_ClampOnInput ) ) {
-                settings.OutdoorSmallVobDrawRadius = static_cast<float>(smallObjectDrawDistance * 1000.0f);
-            }
-
-            float visualFXDrawDistance = settings.VisualFXDrawRadius / 1000.0f;
-            ImText( "VisualFX Draw Distance", buttonWidth ); ImGui::SameLine();
-            if ( ImGui::SliderFloat( "##VisualFXDrawRadius", &visualFXDrawDistance, 0.1f, 10.0f, "%.0f", ImGuiSliderFlags_::ImGuiSliderFlags_ClampOnInput ) ) {
-                settings.VisualFXDrawRadius = static_cast<float>(visualFXDrawDistance * 1000.0f);
-            }
             ImText( "World Draw Distance", buttonWidth ); ImGui::SameLine();
             ImGui::SliderInt( "##SectionDrawRadius", &settings.SectionDrawRadius, 1, 20, "%d", ImGuiSliderFlags_::ImGuiSliderFlags_ClampOnInput );
 
@@ -916,6 +969,18 @@ void ImGuiShim::RenderAdvancedColumn2( GothicRendererSettings& settings, GothicA
         ImGui::Checkbox( "Draw Threaded", &settings.DrawThreaded );
         ImGui::Checkbox( "Do Z Prepass", &settings.DoZPrepass );
         ImGui::SetItemTooltip("Lightweight depth prepass. It can help low-bandwidth systems and hurt others." );
+
+        float largeObjectDrawDistance = settings.OutdoorVobDrawRadius / 1000.0f;
+        if ( ImGui::SliderFloat( "Large Object Draw Distance", &largeObjectDrawDistance, 1.0f, 100.0f, "%.0f", ImGuiSliderFlags_AlwaysClamp ) ) {
+            settings.OutdoorVobDrawRadius = largeObjectDrawDistance * 1000.0f;
+        }
+        ImGui::SetItemTooltip( "Controls the draw distance of large static VOBs. This setting is intentionally not changed by F11 graphics presets." );
+
+        float visualFXDrawDistance = settings.VisualFXDrawRadius / 1000.0f;
+        if ( ImGui::SliderFloat( "VisualFX Draw Distance", &visualFXDrawDistance, 0.1f, 10.0f, "%.1f", ImGuiSliderFlags_AlwaysClamp ) ) {
+            settings.VisualFXDrawRadius = visualFXDrawDistance * 1000.0f;
+        }
+        ImGui::SetItemTooltip( "Controls the draw distance of particle, flash, and associated dynamic-light effects. This setting is intentionally not changed by F11 graphics presets." );
 
         ImGui::SeparatorText( "Interface and Camera" );
         ImGui::DragFloat( "Gothic UI Scale", &settings.GothicUIScale, 0.01f, 0.01f, 20.0f, "%.2f" );
