@@ -40,6 +40,46 @@ D3D11Effect::~D3D11Effect() {
     delete RainBufferStreamTo;
 }
 
+ID3D11BlendState* D3D11Effect::GetRainReactiveBlendState() {
+    if ( m_RainReactiveBlendState ) {
+        return m_RainReactiveBlendState.Get();
+    }
+
+    auto* engine = reinterpret_cast<D3D11GraphicsEngineBase*>(Engine::GraphicsEngine);
+    if ( !engine || !engine->GetDevice().Get() ) {
+        return nullptr;
+    }
+
+    D3D11_BLEND_DESC desc = {};
+    desc.IndependentBlendEnable = TRUE;
+
+    auto& colorTarget = desc.RenderTarget[0];
+    colorTarget.BlendEnable = TRUE;
+    colorTarget.SrcBlend = D3D11_BLEND_SRC_ALPHA;
+    colorTarget.DestBlend = D3D11_BLEND_INV_SRC_ALPHA;
+    colorTarget.BlendOp = D3D11_BLEND_OP_ADD;
+    colorTarget.SrcBlendAlpha = D3D11_BLEND_ONE;
+    colorTarget.DestBlendAlpha = D3D11_BLEND_ZERO;
+    colorTarget.BlendOpAlpha = D3D11_BLEND_OP_ADD;
+    colorTarget.RenderTargetWriteMask = D3D11_COLOR_WRITE_ENABLE_ALL;
+
+    auto& reactiveTarget = desc.RenderTarget[1];
+    reactiveTarget.BlendEnable = TRUE;
+    reactiveTarget.SrcBlend = D3D11_BLEND_ONE;
+    reactiveTarget.DestBlend = D3D11_BLEND_ONE;
+    reactiveTarget.BlendOp = D3D11_BLEND_OP_MAX;
+    reactiveTarget.SrcBlendAlpha = D3D11_BLEND_ONE;
+    reactiveTarget.DestBlendAlpha = D3D11_BLEND_ONE;
+    reactiveTarget.BlendOpAlpha = D3D11_BLEND_OP_MAX;
+    reactiveTarget.RenderTargetWriteMask = D3D11_COLOR_WRITE_ENABLE_RED;
+
+    if ( FAILED( engine->GetDevice()->CreateBlendState( &desc, m_RainReactiveBlendState.GetAddressOf() ) ) ) {
+        LogError() << "Rain: Failed to create independent FSR3 reactive-mask blend state.";
+        return nullptr;
+    }
+    return m_RainReactiveBlendState.Get();
+}
+
 /** Loads a texturearray. Use like the following: Put path and prefix as parameter. The files must then be called name_xxxx.dds */
 HRESULT LoadTextureArray( Microsoft::WRL::ComPtr<ID3D11Device1> pd3dDevice, Microsoft::WRL::ComPtr<ID3D11DeviceContext1> context, const char* sTexturePrefix, int iNumTextures, ID3D11Texture2D** ppTex2D, ID3D11ShaderResourceView** ppSRV );
 
@@ -230,6 +270,15 @@ XRESULT D3D11Effect::DrawRain() {
     e->GetContext()->IASetPrimitiveTopology( D3D11_PRIMITIVE_TOPOLOGY_TRIANGLESTRIP );
     e->UpdateRenderStates();
 
+    Microsoft::WRL::ComPtr<ID3D11BlendState> previousBlendState;
+    FLOAT previousBlendFactor[4] = {};
+    UINT previousSampleMask = 0xffffffff;
+    e->GetContext()->OMGetBlendState( previousBlendState.GetAddressOf(), previousBlendFactor, &previousSampleMask );
+    if ( ID3D11BlendState* rainBlendState = GetRainReactiveBlendState() ) {
+        const FLOAT blendFactor[4] = {};
+        e->GetContext()->OMSetBlendState( rainBlendState, blendFactor, 0xffffffff );
+    }
+
     // Apply particle shaders
     e->GetContext()->GSSetShader( nullptr, 0, 0 );
     particleVS->Apply();
@@ -276,6 +325,7 @@ XRESULT D3D11Effect::DrawRain() {
     // Reset this
     e->GetContext()->IASetPrimitiveTopology( D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST );
     e->GetContext()->GSSetShader( nullptr, 0, 0 );
+    e->GetContext()->OMSetBlendState( previousBlendState.Get(), previousBlendFactor, previousSampleMask );
     return XR_SUCCESS;
 }
 
@@ -388,6 +438,15 @@ XRESULT D3D11Effect::DrawRain_CS() {
     e->GetContext()->IASetPrimitiveTopology( D3D11_PRIMITIVE_TOPOLOGY_TRIANGLESTRIP );
     e->UpdateRenderStates();
 
+    Microsoft::WRL::ComPtr<ID3D11BlendState> previousBlendState;
+    FLOAT previousBlendFactor[4] = {};
+    UINT previousSampleMask = 0xffffffff;
+    e->GetContext()->OMGetBlendState( previousBlendState.GetAddressOf(), previousBlendFactor, &previousSampleMask );
+    if ( ID3D11BlendState* rainBlendState = GetRainReactiveBlendState() ) {
+        const FLOAT blendFactor[4] = {};
+        e->GetContext()->OMSetBlendState( rainBlendState, blendFactor, 0xffffffff );
+    }
+
     // Apply particle shaders
     particleVS->Apply();
     rainPS->Apply();
@@ -432,6 +491,7 @@ XRESULT D3D11Effect::DrawRain_CS() {
 
     // Reset primitive topology
     e->GetContext()->IASetPrimitiveTopology( D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST );
+    e->GetContext()->OMSetBlendState( previousBlendState.Get(), previousBlendFactor, previousSampleMask );
     return XR_SUCCESS;
 }
 

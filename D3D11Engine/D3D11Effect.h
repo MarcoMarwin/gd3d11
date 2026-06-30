@@ -30,6 +30,7 @@ protected:
 
     /** Fills vectors of random raindrop data, split into mutable and immutable parts */
     void FillRandomRaindropData( std::vector<RainParticleDynamic>& dynamicData, std::vector<RainParticleStatic>& staticData );
+    ID3D11BlendState* GetRainReactiveBlendState();
 
     /** Rain */
     D3D11VertexBuffer* RainBufferStatic;
@@ -45,5 +46,6 @@ protected:
     CameraReplacement RainShadowmapCameraRepl;
 
     Microsoft::WRL::ComPtr<ID3D11SamplerState> m_RainDropShadowSamplerState;
+    Microsoft::WRL::ComPtr<ID3D11BlendState> m_RainReactiveBlendState;
 };
 

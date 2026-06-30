@@ -22,7 +22,8 @@ public:
         RGResourceHandle backBufferHandle,
         RGResourceHandle& outNormalsResource,
         RGResourceHandle& outSpecularResource,
-        RGResourceHandle& outReactiveMaskResource ) override;
+        RGResourceHandle& outReactiveMaskResource,
+        RGResourceHandle& outTransparencyAndCompositionMaskResource ) override;
 
     void AddLightingPasses(
         RenderGraph& graph,

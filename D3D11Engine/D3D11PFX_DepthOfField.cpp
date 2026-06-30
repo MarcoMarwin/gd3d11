@@ -24,7 +24,10 @@ static bool HasCenteredNearbyNpc( D3D11GraphicsEngine* engine, float maxViewDist
 
     zCVob* player = Engine::GAPI->GetPlayerVob();
     zCWorld* playerWorld = player ? player->GetHomeWorld() : nullptr;
-    const auto& candidates = engine->GetFrameVisibleNpcVobs();
+    // The dedicated visible-NPC list is populated by Gothic only after the
+    // render graph has already executed. The cached skeletal list is built by
+    // the geometry pass before DoF and therefore represents this frame.
+    const auto& candidates = engine->GetFrameVisibleSkeletalVobs();
 
     XMFLOAT3 cameraPosition;
     XMStoreFloat3( &cameraPosition, Engine::GAPI->GetCameraPositionXM() );

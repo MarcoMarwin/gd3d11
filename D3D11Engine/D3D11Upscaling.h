@@ -17,7 +17,8 @@ public:
         RGResourceHandle color,
         ID3D11ShaderResourceView* depth,
         RGResourceHandle motionVectors,
-        RGResourceHandle reactiveMask );
+        RGResourceHandle reactiveMask,
+        RGResourceHandle transparencyAndCompositionMask );
 private:
 };
 

@@ -406,8 +406,10 @@ static FfxErrorCode frameinterpolationCreate(FfxFrameInterpolationContext_Privat
             FFX_SURFACE_FORMAT_R32_UINT, contextDescription->maxRenderSize.width, contextDescription->maxRenderSize.height, 1,      FFX_RESOURCE_FLAGS_ALIASABLE},
         {FFX_FRAMEINTERPOLATION_RESOURCE_IDENTIFIER_INPAINTING_PYRAMID,                     L"FI_InpaintingPyramid",                    FFX_RESOURCE_TYPE_TEXTURE2D, FFX_RESOURCE_USAGE_UAV,
             FFX_SURFACE_FORMAT_R16G16B16A16_FLOAT, inpaintingPyramidWidth, inpaintingPyramidHeight, inpaintingPyramidMipCount, FFX_RESOURCE_FLAGS_ALIASABLE},
+        // DX11 needs a typed UINT UAV here; UNKNOWN requires a structured-buffer
+        // flag that the shipped native backend does not set and returns E_INVALIDARG.
         {FFX_FRAMEINTERPOLATION_RESOURCE_IDENTIFIER_COUNTERS,                               L"FI_Counters",                             FFX_RESOURCE_TYPE_BUFFER, FFX_RESOURCE_USAGE_UAV,
-            FFX_SURFACE_FORMAT_UNKNOWN, 8, 4, 1, FFX_RESOURCE_FLAGS_NONE}, // structured buffer contraining 2 UINT values
+            FFX_SURFACE_FORMAT_R32_UINT, 8, 4, 1, FFX_RESOURCE_FLAGS_NONE}, // typed buffer containing 2 UINT values
         {FFX_FRAMEINTERPOLATION_RESOURCE_IDENTIFIER_OPTICAL_FLOW_MOTION_VECTOR_FIELD_X,     L"FI_OpticalFlowMotionVectorFieldX",        FFX_RESOURCE_TYPE_TEXTURE2D, FFX_RESOURCE_USAGE_UAV,
             FFX_SURFACE_FORMAT_R32_UINT, contextDescription->maxRenderSize.width, contextDescription->maxRenderSize.height, 1,      FFX_RESOURCE_FLAGS_ALIASABLE},
         {FFX_FRAMEINTERPOLATION_RESOURCE_IDENTIFIER_OPTICAL_FLOW_MOTION_VECTOR_FIELD_Y,     L"FI_OpticalFlowMotionVectorFieldY",        FFX_RESOURCE_TYPE_TEXTURE2D, FFX_RESOURCE_USAGE_UAV,

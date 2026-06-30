@@ -31,11 +31,13 @@ void D3D11ForwardPlusRenderer::AddGeometryPasses(
     RGResourceHandle backBufferHandle,
     RGResourceHandle& outNormalsResource,
     RGResourceHandle& outSpecularResource,
-    RGResourceHandle& outReactiveMaskResource ) {
+    RGResourceHandle& outReactiveMaskResource,
+    RGResourceHandle& outTransparencyAndCompositionMaskResource ) {
 
     RGResourceHandle normalsResource = {};
     RGResourceHandle specularResource = {};
     RGResourceHandle reactiveMaskResource = {};
+    RGResourceHandle transparencyAndCompositionMaskResource = {};
     RGResourceHandle shadowMaskResource = RG_INVALID_HANDLE;
     const bool useScreenSpaceShadowMask = Engine::GAPI->GetRendererState().RendererSettings.DebugSettings.FeatureSet.UseScreenSpaceShadowMask;
 
@@ -186,7 +188,9 @@ void D3D11ForwardPlusRenderer::AddGeometryPasses(
         normalsResource = builder.CreateTexture( { static_cast<uint32_t>( size.x ), static_cast<uint32_t>( size.y ), DXGI_FORMAT_R16G16_FLOAT, L"GBufferNormals" } );
         specularResource = builder.CreateTexture( { static_cast<uint32_t>( size.x ), static_cast<uint32_t>( size.y ), DXGI_FORMAT_R16G16_FLOAT, L"GBufferSpecular" } );
         reactiveMaskResource = builder.CreateTexture( { static_cast<uint32_t>( size.x ), static_cast<uint32_t>( size.y ), DXGI_FORMAT_R8_UNORM, L"ReactiveMask" } );
+        transparencyAndCompositionMaskResource = builder.CreateTexture( { static_cast<uint32_t>( size.x ), static_cast<uint32_t>( size.y ), DXGI_FORMAT_R8_UNORM, L"TransparencyAndCompositionMask" } );
         builder.Write( reactiveMaskResource );
+        builder.Write( transparencyAndCompositionMaskResource );
         builder.Write( velocityBufferHandle );
         builder.Write( colorResource );
         builder.Write( normalsResource );
@@ -196,7 +200,7 @@ void D3D11ForwardPlusRenderer::AddGeometryPasses(
             builder.Read( shadowMaskResource );
         }
 
-        pass.m_executeCallback = [this, &engine, colorResource, normalsResource, specularResource, reactiveMaskResource, velocityBufferHandle, shadowMaskResource, useScreenSpaceShadowMask]( const RenderGraph& graph ) -> void {
+        pass.m_executeCallback = [this, &engine, colorResource, normalsResource, specularResource, reactiveMaskResource, transparencyAndCompositionMaskResource, velocityBufferHandle, shadowMaskResource, useScreenSpaceShadowMask]( const RenderGraph& graph ) -> void {
             TracyD3D11ZoneCGX( "D3D11ForwardPlusRenderer::Lit Geometry" );
             auto& context = engine.GetContext();
             auto* shadowMaps = engine.GetShadowMaps();
@@ -204,6 +208,7 @@ void D3D11ForwardPlusRenderer::AddGeometryPasses(
             auto normals = graph.GetPhysicalTexture( normalsResource );
             auto specular = graph.GetPhysicalTexture( specularResource );
             auto reactiveMask = graph.GetPhysicalTexture( reactiveMaskResource );
+            auto transparencyAndCompositionMask = graph.GetPhysicalTexture( transparencyAndCompositionMaskResource );
             auto velocityBuffer = graph.GetPhysicalTexture( velocityBufferHandle );
             auto* shadowMask = ( useScreenSpaceShadowMask && shadowMaskResource != RG_INVALID_HANDLE )
                 ? graph.GetPhysicalTexture( shadowMaskResource )
@@ -221,7 +226,7 @@ void D3D11ForwardPlusRenderer::AddGeometryPasses(
                 normals ? normals->GetRenderTargetView().Get() : nullptr,
                 specular ? specular->GetRenderTargetView().Get() : nullptr,
                 velocityBuffer ? velocityBuffer->GetRenderTargetView().Get() : nullptr,
-                reactiveMask ? reactiveMask->GetRenderTargetView().Get() : nullptr,
+                transparencyAndCompositionMask ? transparencyAndCompositionMask->GetRenderTargetView().Get() : nullptr,
             };
 
             constexpr float black[] { 0.f, 0.f, 0.f, 0.f };
@@ -239,6 +244,8 @@ void D3D11ForwardPlusRenderer::AddGeometryPasses(
                     && rendererSettings.Upscaler == GothicRendererSettings::UPSCALER_FSR_3);
             const float skyTncValue = fsr3Active ? 1.f : 0.f;
             const float skyTransparencyAndComposition[] { skyTncValue, skyTncValue, skyTncValue, skyTncValue };
+            if ( reactiveMask )
+                context->ClearRenderTargetView( reactiveMask->GetRenderTargetView().Get(), black );
             if ( rtvs[4] )
                 context->ClearRenderTargetView( rtvs[4], skyTransparencyAndComposition );
 
@@ -330,6 +337,7 @@ void D3D11ForwardPlusRenderer::AddGeometryPasses(
     outNormalsResource = normalsResource;
     outSpecularResource = specularResource;
     outReactiveMaskResource = reactiveMaskResource;
+    outTransparencyAndCompositionMaskResource = transparencyAndCompositionMaskResource;
 }
 
 void D3D11ForwardPlusRenderer::AddLightingPasses(

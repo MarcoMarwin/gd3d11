@@ -4136,11 +4136,13 @@ XRESULT D3D11GraphicsEngine::OnStartWorldRendering() {
     RGResourceHandle normalsResource;
     RGResourceHandle specularResource;
     RGResourceHandle reactiveMaskResource;
+    RGResourceHandle transparencyAndCompositionMaskResource;
     // Re-evaluate active renderer each frame (allows runtime switching)
     SelectActiveRenderer();
     ActiveSceneRenderer->AddGeometryPasses( graph, *this,
         colorResource, velocityBufferHandle, backBufferHandle,
-        normalsResource, specularResource, reactiveMaskResource );
+        normalsResource, specularResource, reactiveMaskResource,
+        transparencyAndCompositionMaskResource );
 
     graph.AddPass( RG_PASS_NAME("Draw ParticleFX #1"), [&]( RGBuilder& builder, RenderPass& pass ) {
         // Setup / Declare
@@ -4327,16 +4329,16 @@ XRESULT D3D11GraphicsEngine::OnStartWorldRendering() {
     if ( renderWetGroundSSR ) {
         graph.AddPass( RG_PASS_NAME("Wet Ground SSR"), [&]( RGBuilder& builder, RenderPass& pass ) {
             builder.Read( normalsResource );
-            builder.Read( reactiveMaskResource );
+            builder.Read( transparencyAndCompositionMaskResource );
             builder.Read( waterMaskResource );
             builder.Read( backBufferHandle );
             builder.Write( backBufferHandle );
 
-            pass.m_executeCallback = [this, backBufferHandle, normalsResource, reactiveMaskResource, waterMaskResource](const RenderGraph& graph) {
+            pass.m_executeCallback = [this, backBufferHandle, normalsResource, transparencyAndCompositionMaskResource, waterMaskResource](const RenderGraph& graph) {
                 TracyD3D11ZoneCGX( "D3D11GraphicsEngine::Wet Ground SSR" );
                 auto* backBuffer = graph.GetPhysicalTexture( backBufferHandle );
                 auto* normals = graph.GetPhysicalTexture( normalsResource );
-                auto* reactiveMask = graph.GetPhysicalTexture( reactiveMaskResource );
+                auto* transparencyAndCompositionMask = graph.GetPhysicalTexture( transparencyAndCompositionMaskResource );
                 auto* waterMask = graph.GetPhysicalTexture( waterMaskResource );
                 auto tempBuffer = PfxRenderer->GetTempBuffer();
 
@@ -4346,7 +4348,7 @@ XRESULT D3D11GraphicsEngine::OnStartWorldRendering() {
                     tempBuffer->GetShaderResView().Get(),
                     GetDepthBufferCopy()->GetShaderResView().Get(),
                     normals->GetShaderResView().Get(),
-                    reactiveMask->GetShaderResView().Get(),
+                    transparencyAndCompositionMask->GetShaderResView().Get(),
                     waterMask->GetShaderResView().Get() );
             };
         });
@@ -4773,7 +4775,8 @@ XRESULT D3D11GraphicsEngine::OnStartWorldRendering() {
         backBufferHandle,
         DepthStencilBufferCopy->GetShaderResView().Get(),
         velocityBufferHandle,
-        reactiveMaskResource );
+        reactiveMaskResource,
+        transparencyAndCompositionMaskResource );
 
     // Before returning to gothics UI, set render target to backbuffer
     {

@@ -15,16 +15,18 @@ namespace {
         RGResourceHandle backBufferHandle,
         ID3D11ShaderResourceView* depth,
         RGResourceHandle velocityBufferHandle,
-        RGResourceHandle reactiveMaskResource )
+        RGResourceHandle reactiveMaskResource,
+        RGResourceHandle transparencyAndCompositionMaskResource )
     {
         graph.AddPass( RG_PASS_NAME("FSR 3"), [&]( RGBuilder& builder, RenderPass& pass ) {
             builder.Read( velocityBufferHandle );
             builder.Read( reactiveMaskResource );
+            builder.Read( transparencyAndCompositionMaskResource );
             builder.Read( backBufferHandle );
 
             builder.Write( backBufferHandle );
 
-            pass.m_executeCallback = [&engine, backBufferHandle, outputRTV, velocityBufferHandle, reactiveMaskResource, depth]( const RenderGraph& graph ) {
+            pass.m_executeCallback = [&engine, backBufferHandle, outputRTV, velocityBufferHandle, reactiveMaskResource, transparencyAndCompositionMaskResource, depth]( const RenderGraph& graph ) {
                 auto& settings = Engine::GAPI->GetRendererState().RendererSettings;
 
                 auto backbufferTex = graph.GetPhysicalTexture( backBufferHandle );
@@ -33,6 +35,7 @@ namespace {
 
                 auto velocityBufferTex = graph.GetPhysicalTexture( velocityBufferHandle );
                 auto reactiveMask = graph.GetPhysicalTexture( reactiveMaskResource );
+                auto transparencyAndCompositionMask = graph.GetPhysicalTexture( transparencyAndCompositionMaskResource );
 
                 auto jitter = engine.GetPfxRenderer()->GetTAAEffect()->GetJitterOffsetUnscaled();
                 const auto inputSize = engine.GetResolution();
@@ -60,7 +63,7 @@ namespace {
                     depth,
                     velocityBufferTex->GetShaderResView().Get(),
                     reactiveMask ? reactiveMask->GetShaderResView().Get() : nullptr,
-                    reactiveMask ? reactiveMask->GetShaderResView().Get() : nullptr,
+                    transparencyAndCompositionMask ? transparencyAndCompositionMask->GetShaderResView().Get() : nullptr,
                     outputRTV,
                     inputSize,
                     engine.GetBackbufferResolution(),
@@ -101,7 +104,8 @@ bool D3D11Upscaling::AddUpscalingPass( RenderGraph& graph,
     RGResourceHandle color, 
     ID3D11ShaderResourceView* depth,
     RGResourceHandle motionVectors,
-    RGResourceHandle reactiveMask )
+    RGResourceHandle reactiveMask,
+    RGResourceHandle transparencyAndCompositionMask )
 {
 
     auto& settings = Engine::GAPI->GetRendererState().RendererSettings;
@@ -115,7 +119,8 @@ bool D3D11Upscaling::AddUpscalingPass( RenderGraph& graph,
             && (settings.ResolutionScalePercent <= 100)
             && settings.AntiAliasingMode == GothicRendererSettings::AA_FSR ) {
 
-        AddFSR3Pass( graph, engine, outputRTV, color, depth, motionVectors, reactiveMask );
+        AddFSR3Pass( graph, engine, outputRTV, color, depth, motionVectors, reactiveMask,
+            transparencyAndCompositionMask );
         return true;
     }
     return false;

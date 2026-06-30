@@ -275,7 +275,7 @@ PS_OUTPUT PSMain( PS_INPUT Input )
 #endif
     PS_OUTPUT output;
     output.color = directionalLight;
-    float rainReactive = saturate(directionalLight.w * 0.85f);
+    float rainReactive = min(saturate(directionalLight.w), 0.9f);
     output.reactiveMask = float4(rainReactive, rainReactive, rainReactive, rainReactive);
     return output;
 }

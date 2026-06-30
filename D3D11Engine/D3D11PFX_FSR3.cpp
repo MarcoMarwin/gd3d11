@@ -81,6 +81,21 @@ namespace {
     void FfxLog( FfxMsgType type, const wchar_t* message ) {
         LogError() << "FidelityFX FSR3 (" << type << "): " << message;
     }
+
+    // The third-party DX11 backend throws across the DLL boundary when a D3D11
+    // resource call fails. Keep that backend exception from escaping into Gothic;
+    // normal FidelityFX error handling can then disable only the failed request.
+    FfxErrorCode GuardedFsr3ContextCreate(
+        FfxFsr3Context* context,
+        const FfxFsr3ContextDescription* description )
+    {
+        __try {
+            return ffxFsr3ContextCreate( context, description );
+        }
+        __except ( EXCEPTION_EXECUTE_HANDLER ) {
+            return FFX_ERROR_BACKEND_API_ERROR;
+        }
+    }
 }
 
 D3D11PFX_FSR3::D3D11PFX_FSR3( D3D11PfxRenderer* renderer )
@@ -185,15 +200,7 @@ bool D3D11PFX_FSR3::Init(
     desc.backendInterfaceFrameInterpolation = Backends[BACKEND_FRAME_INTERPOLATION];
 
     Context = new FfxFsr3Context{};
-    FfxErrorCode createResult = FFX_ERROR_BACKEND_API_ERROR;
-    try {
-        createResult = ffxFsr3ContextCreate( Context, &desc );
-    } catch ( ... ) {
-        LogError() << "FSR3: DX11 backend exception while creating the combined upscaling/frame-generation context.";
-        SAFE_DELETE( Context );
-        Destroy();
-        return false;
-    }
+    const FfxErrorCode createResult = GuardedFsr3ContextCreate( Context, &desc );
     if ( createResult != FFX_OK ) {
         LogError() << "FSR3: Failed to create combined upscaling/frame-generation context (" << createResult << ").";
         SAFE_DELETE( Context );

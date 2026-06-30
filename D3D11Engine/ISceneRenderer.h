@@ -31,7 +31,8 @@ public:
         RGResourceHandle backBufferHandle,
         RGResourceHandle& outNormalsResource,
         RGResourceHandle& outSpecularResource,
-        RGResourceHandle& outReactiveMaskResource ) = 0;
+        RGResourceHandle& outReactiveMaskResource,
+        RGResourceHandle& outTransparencyAndCompositionMaskResource ) = 0;
 
     /** Add the lighting resolution pass(es) to the render graph.
         Deferred: tiled / legacy deferred shading.  Forward+: no-op. */
