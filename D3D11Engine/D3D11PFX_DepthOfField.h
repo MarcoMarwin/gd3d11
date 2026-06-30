@@ -20,6 +20,7 @@ public:
 private:
     /** Compute shader path for FL11+ */
     XRESULT RenderCS( ID3D11ShaderResourceView* backbuffer );
+    void UpdateAdaptiveFocus( float configuredNearDistance );
 
     // Ping-pong 1x1 R32_FLOAT textures for temporal focus smoothing
     Microsoft::WRL::ComPtr<ID3D11Texture2D> m_FocusTexture[2];
@@ -27,4 +28,10 @@ private:
     Microsoft::WRL::ComPtr<ID3D11RenderTargetView> m_FocusRTV[2];
     Microsoft::WRL::ComPtr<ID3D11UnorderedAccessView> m_FocusUAV[2];
     int m_FocusIndex;
+
+    float m_AutoFocusBlend;
+    float m_AutoFocusTransitionStart;
+    float m_AutoFocusTransitionElapsed;
+    float m_AutoFocusHoldElapsed;
+    bool m_AutoFocusSuppressed;
 };

@@ -175,15 +175,23 @@ bool D3D11PFX_FSR3::Init(
         static_cast<uint32_t>(maxOutputSize.y)
     };
     desc.displaySize = desc.maxUpscaleSize;
-    desc.backBufferFormat = FFX_SURFACE_FORMAT_R8G8B8A8_UNORM;
+    desc.backBufferFormat = FFX_SURFACE_FORMAT_R16G16B16A16_FLOAT;
     desc.backendInterfaceSharedResources = Backends[BACKEND_SHARED_RESOURCES];
     desc.backendInterfaceUpscaling = Backends[BACKEND_UPSCALING];
     desc.backendInterfaceFrameInterpolation = Backends[BACKEND_FRAME_INTERPOLATION];
 
     Context = new FfxFsr3Context{};
-    const FfxErrorCode createResult = ffxFsr3ContextCreate( Context, &desc );
+    FfxErrorCode createResult = FFX_ERROR_BACKEND_API_ERROR;
+    try {
+        createResult = ffxFsr3ContextCreate( Context, &desc );
+    } catch ( ... ) {
+        LogError() << "FSR3: DX11 backend exception while creating the combined upscaling/frame-generation context.";
+        SAFE_DELETE( Context );
+        Destroy();
+        return false;
+    }
     if ( createResult != FFX_OK ) {
-        LogError() << "FSR3: Failed to create combined upscaling/frame-generation context.";
+        LogError() << "FSR3: Failed to create combined upscaling/frame-generation context (" << createResult << ").";
         SAFE_DELETE( Context );
         Destroy();
         return false;
@@ -195,15 +203,15 @@ bool D3D11PFX_FSR3::Init(
             | D3D11_BIND_UNORDERED_ACCESS;
 
         HudlessColor = std::make_unique<RenderToTextureBuffer>(
-            device, maxOutputSize.x, maxOutputSize.y, DXGI_FORMAT_R8G8B8A8_UNORM,
+            device, maxOutputSize.x, maxOutputSize.y, DXGI_FORMAT_R16G16B16A16_FLOAT,
             nullptr, DXGI_FORMAT_UNKNOWN, DXGI_FORMAT_UNKNOWN, 1, 1,
             D3D11_BIND_RENDER_TARGET | D3D11_BIND_SHADER_RESOURCE );
         PresentColor = std::make_unique<RenderToTextureBuffer>(
-            device, maxOutputSize.x, maxOutputSize.y, DXGI_FORMAT_R8G8B8A8_UNORM,
+            device, maxOutputSize.x, maxOutputSize.y, DXGI_FORMAT_R16G16B16A16_FLOAT,
             nullptr, DXGI_FORMAT_UNKNOWN, DXGI_FORMAT_UNKNOWN, 1, 1,
             D3D11_BIND_RENDER_TARGET | D3D11_BIND_SHADER_RESOURCE );
         InterpolatedOutput = std::make_unique<RenderToTextureBuffer>(
-            device, maxOutputSize.x, maxOutputSize.y, DXGI_FORMAT_R8G8B8A8_UNORM,
+            device, maxOutputSize.x, maxOutputSize.y, DXGI_FORMAT_R16G16B16A16_FLOAT,
             nullptr, DXGI_FORMAT_UNKNOWN, DXGI_FORMAT_UNKNOWN, 1, 1, bindFlags );
 
         if ( !HudlessColor->GetShaderResView()
@@ -227,7 +235,11 @@ bool D3D11PFX_FSR3::Init(
 
 void D3D11PFX_FSR3::Destroy() {
     if ( Context ) {
-        ffxFsr3ContextDestroy( Context );
+        try {
+            ffxFsr3ContextDestroy( Context );
+        } catch ( ... ) {
+            LogError() << "FSR3: DX11 backend exception while destroying the context.";
+        }
         SAFE_DELETE( Context );
     }
 
@@ -330,7 +342,12 @@ XRESULT D3D11PFX_FSR3::Apply(
     dispatch.cameraFar = cameraFar;
     dispatch.frameID = FrameId;
 
-    const FfxErrorCode upscaleResult = ffxFsr3ContextDispatchUpscale( Context, &dispatch );
+    FfxErrorCode upscaleResult = FFX_ERROR_BACKEND_API_ERROR;
+    try {
+        upscaleResult = ffxFsr3ContextDispatchUpscale( Context, &dispatch );
+    } catch ( ... ) {
+        LogError() << "FSR3: DX11 backend exception during upscaling dispatch.";
+    }
     if ( upscaleResult != FFX_OK ) {
         LogError() << "FSR3: Upscaling dispatch failed (" << upscaleResult << ").";
         ResetFrameGenerationHistory();
@@ -355,8 +372,12 @@ XRESULT D3D11PFX_FSR3::Apply(
         prepare.cameraFovAngleVertical = dispatch.cameraFovAngleVertical;
         prepare.frameID = FrameId;
 
-        const FfxErrorCode prepareResult =
-            ffxFsr3ContextDispatchFrameGenerationPrepare( Context, &prepare );
+        FfxErrorCode prepareResult = FFX_ERROR_BACKEND_API_ERROR;
+        try {
+            prepareResult = ffxFsr3ContextDispatchFrameGenerationPrepare( Context, &prepare );
+        } catch ( ... ) {
+            LogError() << "FSR3: DX11 backend exception during frame-generation prepare.";
+        }
         if ( prepareResult == FFX_OK ) {
             PreparedFrameId = FrameId;
             FrameGenerationPrepared = true;
@@ -421,7 +442,12 @@ ID3D11ShaderResourceView* D3D11PFX_FSR3::GenerateInterpolatedFrame(
         HudlessColor->GetTexture().Get(),
         L"FSR3 HUD-less Color" );
 
-    const FfxErrorCode configResult = ffxFsr3ConfigureFrameGeneration( Context, &config );
+    FfxErrorCode configResult = FFX_ERROR_BACKEND_API_ERROR;
+    try {
+        configResult = ffxFsr3ConfigureFrameGeneration( Context, &config );
+    } catch ( ... ) {
+        LogError() << "FSR3: DX11 backend exception during frame-generation configuration.";
+    }
     if ( configResult != FFX_OK ) {
         LogError() << "FSR3: Frame-generation configuration failed (" << configResult << ").";
         ResetFrameGenerationHistory();
@@ -457,7 +483,12 @@ ID3D11ShaderResourceView* D3D11PFX_FSR3::GenerateInterpolatedFrame(
     };
     dispatch.frameID = PreparedFrameId;
 
-    const FfxErrorCode result = ffxFsr3DispatchFrameGeneration( &dispatch );
+    FfxErrorCode result = FFX_ERROR_BACKEND_API_ERROR;
+    try {
+        result = ffxFsr3DispatchFrameGeneration( &dispatch );
+    } catch ( ... ) {
+        LogError() << "FSR3: DX11 backend exception during Optical Flow / Frame Interpolation dispatch.";
+    }
 
     UnbindComputeResources( context );
     engine->SetDefaultStates();

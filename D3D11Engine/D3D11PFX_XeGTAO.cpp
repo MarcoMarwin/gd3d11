@@ -239,7 +239,11 @@ XRESULT D3D11PFX_XeGTAO::Render( ID3D11ShaderResourceView* depthSRV,
     engine->GetShaderManager().GetVShader( VShaderID::VS_PFX )->Apply();
     auto composite = engine->GetShaderManager().GetPShader( PShaderID::PS_PFX_AOComposite );
     composite->Apply();
-    AOCompositeConstantBuffer compositeConstants = { rendererSettings.AOStrength, {} };
+    // XeGTAO is normalized around the tested Gothic default: UI 1.0 equals 50% composite strength.
+    constexpr float XeGTAONormalizedStrength = 0.5f;
+    AOCompositeConstantBuffer compositeConstants = {
+        rendererSettings.AOStrength * XeGTAONormalizedStrength, {}
+    };
     composite->GetBuffer( "AOCompositeConstantBuffer" ).Update( &compositeConstants ).Bind();
 
     D3D11_VIEWPORT viewport = {};

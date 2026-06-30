@@ -386,6 +386,14 @@ static FfxErrorCode frameinterpolationCreate(FfxFrameInterpolationContext_Privat
     uint32_t atomicInitData[2] = { 0, 0 };
     float defaultExposure[] = { 0.0f, 0.0f };
     const FfxResourceType texture1dResourceType = (context->contextDescription.flags & FFX_FRAMEINTERPOLATION_ENABLE_TEXTURE1D_USAGE) ? FFX_RESOURCE_TYPE_TEXTURE1D : FFX_RESOURCE_TYPE_TEXTURE2D;
+    const uint32_t inpaintingPyramidWidth = std::max(1u, contextDescription->displaySize.width / 2);
+    const uint32_t inpaintingPyramidHeight = std::max(1u, contextDescription->displaySize.height / 2);
+    uint32_t inpaintingPyramidMipCount = 1;
+    for (uint32_t dimension = std::max(inpaintingPyramidWidth, inpaintingPyramidHeight);
+         dimension > 1 && inpaintingPyramidMipCount < 13;
+         dimension >>= 1) {
+        ++inpaintingPyramidMipCount;
+    }
 
     // declare internal resources needed
     const FfxInternalResourceDescription internalSurfaceDesc[] = {
@@ -397,7 +405,7 @@ static FfxErrorCode frameinterpolationCreate(FfxFrameInterpolationContext_Privat
         {FFX_FRAMEINTERPOLATION_RESOURCE_IDENTIFIER_GAME_MOTION_VECTOR_FIELD_Y,             L"FI_GameMotionVectorFieldY",               FFX_RESOURCE_TYPE_TEXTURE2D, FFX_RESOURCE_USAGE_UAV,
             FFX_SURFACE_FORMAT_R32_UINT, contextDescription->maxRenderSize.width, contextDescription->maxRenderSize.height, 1,      FFX_RESOURCE_FLAGS_ALIASABLE},
         {FFX_FRAMEINTERPOLATION_RESOURCE_IDENTIFIER_INPAINTING_PYRAMID,                     L"FI_InpaintingPyramid",                    FFX_RESOURCE_TYPE_TEXTURE2D, FFX_RESOURCE_USAGE_UAV,
-            FFX_SURFACE_FORMAT_R16G16B16A16_FLOAT, contextDescription->displaySize.width / 2, contextDescription->displaySize.height / 2, 0, FFX_RESOURCE_FLAGS_ALIASABLE},
+            FFX_SURFACE_FORMAT_R16G16B16A16_FLOAT, inpaintingPyramidWidth, inpaintingPyramidHeight, inpaintingPyramidMipCount, FFX_RESOURCE_FLAGS_ALIASABLE},
         {FFX_FRAMEINTERPOLATION_RESOURCE_IDENTIFIER_COUNTERS,                               L"FI_Counters",                             FFX_RESOURCE_TYPE_BUFFER, FFX_RESOURCE_USAGE_UAV,
             FFX_SURFACE_FORMAT_UNKNOWN, 8, 4, 1, FFX_RESOURCE_FLAGS_NONE}, // structured buffer contraining 2 UINT values
         {FFX_FRAMEINTERPOLATION_RESOURCE_IDENTIFIER_OPTICAL_FLOW_MOTION_VECTOR_FIELD_X,     L"FI_OpticalFlowMotionVectorFieldX",        FFX_RESOURCE_TYPE_TEXTURE2D, FFX_RESOURCE_USAGE_UAV,

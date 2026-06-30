@@ -17,44 +17,86 @@
 
 extern bool FeatureLevel10Compatibility;
 
-static bool IsThirdPersonCameraForNearDoF() {
-    zCVob* player = Engine::GAPI->GetPlayerVob();
-    if ( !player ) {
+static bool HasCenteredNearbyNpc( D3D11GraphicsEngine* engine, float maxViewDistance, bool relaxedCenter ) {
+    if ( !engine || maxViewDistance <= 0.0f ) {
         return false;
     }
 
-    const XMFLOAT3 cameraPosition = Engine::GAPI->GetCameraPosition();
-    const XMFLOAT3 playerPosition = player->GetPositionWorld();
-    const float dx = cameraPosition.x - playerPosition.x;
-    const float dz = cameraPosition.z - playerPosition.z;
-    const float horizontalDistanceSq = dx * dx + dz * dz;
+    zCVob* player = Engine::GAPI->GetPlayerVob();
+    zCWorld* playerWorld = player ? player->GetHomeWorld() : nullptr;
+    const auto& candidates = engine->GetFrameVisibleSkeletalVobs();
 
-    // First-person keeps the camera almost on the hero. In third-person the visible hero
-    // is separated from the camera, so near-field DoF may be applied.
-    constexpr float THIRD_PERSON_MIN_HORIZONTAL_DISTANCE = 60.0f;
-    return horizontalDistanceSq > THIRD_PERSON_MIN_HORIZONTAL_DISTANCE * THIRD_PERSON_MIN_HORIZONTAL_DISTANCE;
+    const XMMATRIX rawView = Engine::GAPI->GetViewMatrixXM();
+    const XMMATRIX view = XMMatrixTranspose( rawView );
+    XMFLOAT4X4 projection = Engine::GAPI->GetProjectionMatrix();
+    projection._13 = 0.0f;
+    projection._23 = 0.0f;
+    const XMMATRIX viewProjection = XMMatrixTranspose(
+        XMMatrixMultiply( XMLoadFloat4x4( &projection ), rawView ) );
+
+    const float horizontalLimit = relaxedCenter ? 0.24f : 0.16f;
+    const float verticalLimit = relaxedCenter ? 0.30f : 0.20f;
+
+    for ( const SkeletalVobInfo* candidate : candidates ) {
+        zCVob* npc = candidate ? candidate->Vob : nullptr;
+        if ( !npc || npc == player || npc->GetVobType() != zVOB_TYPE_NSC
+            || !npc->GetShowVisual() || (playerWorld && npc->GetHomeWorld() != playerWorld) ) {
+            continue;
+        }
+
+        const zTBBox3D bounds = npc->GetBBox();
+        const XMFLOAT3 center(
+            (bounds.Min.x + bounds.Max.x) * 0.5f,
+            (bounds.Min.y + bounds.Max.y) * 0.5f,
+            (bounds.Min.z + bounds.Max.z) * 0.5f );
+        const XMVECTOR centerWorld = XMLoadFloat3( &center );
+
+        XMFLOAT3 centerView;
+        XMStoreFloat3( &centerView, XMVector3TransformCoord( centerWorld, view ) );
+        if ( centerView.z <= 0.0f || centerView.z > maxViewDistance ) {
+            continue;
+        }
+
+        XMFLOAT3 centerNdc;
+        XMStoreFloat3( &centerNdc, XMVector3TransformCoord( centerWorld, viewProjection ) );
+        if ( std::isfinite( centerNdc.x ) && std::isfinite( centerNdc.y )
+            && std::abs( centerNdc.x ) <= horizontalLimit
+            && std::abs( centerNdc.y ) <= verticalLimit ) {
+            return true;
+        }
+    }
+
+    return false;
 }
 
-static DepthOfFieldConstantBuffer BuildDepthOfFieldConstants() {
+static DepthOfFieldConstantBuffer BuildDepthOfFieldConstants( float adaptiveFocusBlend ) {
     auto& settings = Engine::GAPI->GetRendererState().RendererSettings;
 
     DepthOfFieldConstantBuffer cb = {};
     cb.DoF_FocusDistance = settings.DoFFocusDistance;
     cb.DoF_FocusRange = settings.DoFFocusRange;
     const float strengthScale = std::clamp( settings.DoFBokehRadius / 8.0f, 0.004375f, 4.0f );
-    cb.DoF_BokehRadius = 8.0f * strengthScale;
-    cb.DoF_MaxBlur = 12.0f * strengthScale;
+    const float blurBlend = std::clamp( adaptiveFocusBlend, 0.0f, 1.0f );
+    cb.DoF_BokehRadius = 8.0f * strengthScale * blurBlend;
+    cb.DoF_MaxBlur = 12.0f * strengthScale * blurBlend;
 
     auto& proj = Engine::GAPI->GetProjectionMatrix();
     cb.DoF_ProjParams = float4( 1.0f / proj._11, 1.0f / proj._22, proj._34, proj._33 );
     cb.DoF_NearPlane = Engine::GAPI->GetRendererState().RendererInfo.NearPlane;
     cb.DoF_FarPlane = Engine::GAPI->GetRendererState().RendererInfo.FarPlane;
-    cb.DoF_NearBlurDistance = settings.DoFNearBlurDistance;
-    cb.DoF_NearBlurStrength = IsThirdPersonCameraForNearDoF() ? settings.DoFNearBlurStrength : 0.0f;
+    cb.DoF_NearBlurDistance = settings.DoFNearBlurDistance * blurBlend;
+    cb.DoF_NearBlurStrength = settings.DoFNearBlurStrength * blurBlend;
     return cb;
 }
 
-D3D11PFX_DepthOfField::D3D11PFX_DepthOfField( D3D11PfxRenderer* rnd ) : D3D11PFX_Effect( rnd ), m_FocusIndex( 0 ) {
+D3D11PFX_DepthOfField::D3D11PFX_DepthOfField( D3D11PfxRenderer* rnd )
+    : D3D11PFX_Effect( rnd )
+    , m_FocusIndex( 0 )
+    , m_AutoFocusBlend( 1.0f )
+    , m_AutoFocusTransitionStart( 1.0f )
+    , m_AutoFocusTransitionElapsed( 0.0f )
+    , m_AutoFocusHoldElapsed( 0.0f )
+    , m_AutoFocusSuppressed( false ) {
     auto* engine = reinterpret_cast<D3D11GraphicsEngine*>(Engine::GraphicsEngine);
 
     D3D11_TEXTURE2D_DESC texDesc = {};
@@ -89,6 +131,44 @@ D3D11PFX_DepthOfField::D3D11PFX_DepthOfField( D3D11PfxRenderer* rnd ) : D3D11PFX
     }
 }
 
+void D3D11PFX_DepthOfField::UpdateAdaptiveFocus( float configuredNearDistance ) {
+    auto* engine = reinterpret_cast<D3D11GraphicsEngine*>(Engine::GraphicsEngine);
+    const float deltaTime = std::clamp( Engine::GAPI->GetFrameTimeSec(), 0.0f, 0.1f );
+    if ( deltaTime <= 0.0f ) {
+        return;
+    }
+
+    const bool relaxedCenter = m_AutoFocusSuppressed || m_AutoFocusBlend < 0.999f;
+    const bool characterCentered = HasCenteredNearbyNpc(
+        engine, std::max( configuredNearDistance, 0.0f ), relaxedCenter );
+
+    if ( characterCentered != m_AutoFocusSuppressed ) {
+        m_AutoFocusHoldElapsed += deltaTime;
+        const float requiredHold = characterCentered ? 0.8f : 0.4f;
+        if ( m_AutoFocusHoldElapsed >= requiredHold ) {
+            m_AutoFocusSuppressed = characterCentered;
+            m_AutoFocusHoldElapsed = 0.0f;
+            m_AutoFocusTransitionStart = m_AutoFocusBlend;
+            m_AutoFocusTransitionElapsed = 0.0f;
+        }
+    } else {
+        m_AutoFocusHoldElapsed = 0.0f;
+    }
+
+    const float targetBlend = m_AutoFocusSuppressed ? 0.0f : 1.0f;
+    if ( std::abs( m_AutoFocusBlend - targetBlend ) <= 0.0001f ) {
+        m_AutoFocusBlend = targetBlend;
+        return;
+    }
+
+    const float transitionDuration = m_AutoFocusSuppressed ? 1.5f : 1.8f;
+    m_AutoFocusTransitionElapsed += deltaTime;
+    const float transition = std::clamp( m_AutoFocusTransitionElapsed / transitionDuration, 0.0f, 1.0f );
+    const float smoothTransition = transition * transition * (3.0f - 2.0f * transition);
+    m_AutoFocusBlend = m_AutoFocusTransitionStart
+        + (targetBlend - m_AutoFocusTransitionStart) * smoothTransition;
+}
+
 XRESULT D3D11PFX_DepthOfField::Render( ID3D11ShaderResourceView* backbuffer ) {
     D3D11GraphicsEngine* engine = reinterpret_cast<D3D11GraphicsEngine*>(Engine::GraphicsEngine);
 
@@ -98,6 +178,7 @@ XRESULT D3D11PFX_DepthOfField::Render( ID3D11ShaderResourceView* backbuffer ) {
     Microsoft::WRL::ComPtr<ID3D11DepthStencilView> oldDSV;
     engine->GetContext()->OMGetRenderTargets( 1, oldRTV.GetAddressOf(), oldDSV.GetAddressOf() );
     auto& rendererSettings = Engine::GAPI->GetRendererState().RendererSettings;
+    UpdateAdaptiveFocus( rendererSettings.DoFNearBlurDistance );
 
     if ( m_FocusSRV[0].Get() == nullptr || m_FocusSRV[1].Get() == nullptr || m_FocusRTV[0].Get() == nullptr || m_FocusRTV[1].Get() == nullptr
         || ( !FeatureLevel10Compatibility && ( m_FocusUAV[0].Get() == nullptr || m_FocusUAV[1].Get() == nullptr ) ) ) {
@@ -121,7 +202,7 @@ XRESULT D3D11PFX_DepthOfField::Render( ID3D11ShaderResourceView* backbuffer ) {
     vs->Apply();
 
 
-    DepthOfFieldConstantBuffer cb = BuildDepthOfFieldConstants();
+    DepthOfFieldConstantBuffer cb = BuildDepthOfFieldConstants( m_AutoFocusBlend );
 
     // --- Pass 0: Focus Resolve (1x1 deterministic focus) ---
     int prevIdx = m_FocusIndex;
@@ -216,7 +297,7 @@ XRESULT D3D11PFX_DepthOfField::RenderCS( ID3D11ShaderResourceView* backbuffer ) 
 
     auto& rendererSettings = Engine::GAPI->GetRendererState().RendererSettings;
 
-    DepthOfFieldConstantBuffer cb = BuildDepthOfFieldConstants();
+    DepthOfFieldConstantBuffer cb = BuildDepthOfFieldConstants( m_AutoFocusBlend );
 
     auto defaultSampler = engine->GetDefaultSamplerState();
     ID3D11UnorderedAccessView* nullUAV = nullptr;

@@ -609,7 +609,7 @@ void ApplyGraphicsPresets( GothicRendererSettings& s ) {
         s.Upscaler = GothicRendererSettings::E_Upscaler::UPSCALER_FSR_3;
         s.ResolutionScalePercent = 75;
         s.SharpenFactor = 1.0f;
-        s.AoMode = AOMode::AO_ASSAO;
+        s.AoMode = AOMode::AO_XEGTAO;
         s.EnableDoF = true;
         s.WindQuality = GothicRendererSettings::EWindQuality::WIND_QUALITY_ADVANCED;
         s.EnablePointlightShadows = GothicRendererSettings::EPointLightShadowMode::PLS_UPDATE_DYNAMIC;
@@ -622,7 +622,7 @@ void ApplyGraphicsPresets( GothicRendererSettings& s ) {
         s.Upscaler = GothicRendererSettings::E_Upscaler::UPSCALER_DEFAULT;
         s.ResolutionScalePercent = 100;
         s.SharpenFactor = 0.2f;
-        s.AoMode = AOMode::AO_ASSAO;
+        s.AoMode = AOMode::AO_XEGTAO;
         s.EnableDoF = true;
         s.WindQuality = GothicRendererSettings::EWindQuality::WIND_QUALITY_ADVANCED;
         s.EnablePointlightShadows = GothicRendererSettings::EPointLightShadowMode::PLS_UPDATE_DYNAMIC;
@@ -635,7 +635,7 @@ void ApplyGraphicsPresets( GothicRendererSettings& s ) {
         s.Upscaler = GothicRendererSettings::E_Upscaler::UPSCALER_DEFAULT;
         s.ResolutionScalePercent = 100;
         s.SharpenFactor = 0.2f;
-        s.AoMode = AOMode::AO_ASSAO;
+        s.AoMode = AOMode::AO_XEGTAO;
         s.EnableDoF = true;
         s.WindQuality = GothicRendererSettings::EWindQuality::WIND_QUALITY_ADVANCED;
         s.EnablePointlightShadows = GothicRendererSettings::EPointLightShadowMode::PLS_UPDATE_DYNAMIC;
@@ -936,6 +936,7 @@ void ImGuiShim::RenderSettingsWindow()
             if ( ImGui::Checkbox( "##Enable World Shadows", &settings.EnableShadows ) ) {
                 shadersToReload |= ShaderCategory::LightsAndShadows;
             }
+            ImGui::SetItemTooltip( "Turns directional shadows from the sun and moon on or off." );
             ImGui::SameLine();
             ImGui::BeginDisabled( !settings.EnableShadows );
             if ( ImComboBoxC( "##WorldShadowQuality", shadowMapSizes, &settings.ShadowMapSize, [&shadersToReload]{
@@ -944,7 +945,7 @@ void ImGuiShim::RenderSettingsWindow()
                 ImGui::EndCombo();
             }
             ImGui::EndDisabled();
-            ImGui::SetItemTooltip( "Enables sun and moon world shadows and selects their cascaded shadow-map resolution." );
+            ImGui::SetItemTooltip( "Selects the detail and resolution of sun and moon shadows. Higher settings use more GPU time and memory." );
 
             static std::vector<std::pair<const char*, GothicRendererSettings::E_ShadowFilterMode>> shadowFilterModes = {
                 {"Disabled", GothicRendererSettings::E_ShadowFilterMode::SHADOW_FILTER_DISABLED},
@@ -974,6 +975,7 @@ void ImGuiShim::RenderSettingsWindow()
                     ? lastEnabledPointlightShadowMode
                     : GothicRendererSettings::EPointLightShadowMode::PLS_DISABLED;
             }
+            ImGui::SetItemTooltip( "Turns shadows from lamps, torches, spells, and other point lights on or off." );
             ImGui::SameLine();
 
             const static std::vector<std::tuple<const char*, GothicRendererSettings::EPointLightShadowMode, const char*>> pointlightShadowModes = {
@@ -992,7 +994,7 @@ void ImGuiShim::RenderSettingsWindow()
                 ImGui::EndCombo();
             }
             ImGui::EndDisabled();
-            ImGui::SetItemTooltip( "Enables point-light shadows and selects how their cubemaps are updated." );
+            ImGui::SetItemTooltip( "Static is fastest, Dynamic Update follows moving objects, and Full refreshes every shadow at a high performance cost." );
 
             ImText( "Shadow Softness", buttonWidth ); ImGui::SameLine();
             SliderNormalizedUiStrength( "##ShadowSoftness", &settings.ShadowSoftness );
@@ -1028,6 +1030,7 @@ void ImGuiShim::RenderSettingsWindow()
             ImGui::BeginGroup();
             ImText( "VSync", { inlineToggleLabelWidth, buttonWidth.y } ); ImGui::SameLine();
             ImGui::Checkbox( "##Enable VSync", &settings.EnableVSync );
+            ImGui::SetItemTooltip( "Synchronizes frame presentation with the monitor refresh rate to prevent screen tearing. The independent FPS limiter is unavailable while VSync is active." );
             ImGui::SameLine();
 
             bool fpsLimitEnabled = settings.FpsLimit > 0;
@@ -1036,6 +1039,9 @@ void ImGuiShim::RenderSettingsWindow()
             if ( ImGui::Checkbox( "##Enable FPS Limit", &fpsLimitEnabled ) ) {
                 settings.FpsLimit = fpsLimitEnabled ? 60 : 0;
             }
+            ImGui::SetItemTooltip( settings.EnableVSync
+                ? "VSync is active, so the independent FPS limiter cannot be enabled."
+                : "Turns on an independent frame-rate cap without enabling VSync." );
             ImGui::SameLine();
 
             int inactiveFpsLimit = settings.FpsLimit > 0 ? settings.FpsLimit : 60;
@@ -1048,12 +1054,15 @@ void ImGuiShim::RenderSettingsWindow()
             ImGui::EndDisabled();
             ImGui::EndDisabled();
             ImGui::SetItemTooltip( settings.EnableVSync
-                ? "VSync is active, so frame pacing follows the monitor and the separate FPS limiter is inactive."
-                : "Limits rendering independently of VSync. Useful for lower heat, noise, and power draw." );
+                ? "VSync controls presentation at the monitor refresh rate; the independent FPS cap is inactive."
+                : (fpsLimitEnabled
+                    ? "Sets the maximum rendered frames per second. Lower values can reduce heat, noise, and power draw."
+                    : "Enable FPS Limit to set a maximum frame rate independently of VSync.") );
             ImText( "Surface Detail", { buttonWidth.x - ImGui::GetFrameHeight() - style.ItemSpacing.x, buttonWidth.y } ); ImGui::SameLine();
             if ( ImGui::Checkbox( "##Enable Surface Detail", &settings.AllowNormalmaps ) ) {
                 Engine::GAPI->UpdateTextureMaxSize();
             }
+            ImGui::SetItemTooltip( "Turns normal-map and optional parallax surface depth on or off." );
             ImGui::SameLine();
 
             static const std::vector<std::pair<const char*, bool>> surfaceDetailModes = {
@@ -1083,13 +1092,13 @@ void ImGuiShim::RenderSettingsWindow()
                 ImGui::EndCombo();
             }
 
-            ImGui::SetItemTooltip( "Selects the ambient occlusion method. The strength slider adjusts the overall intensity; mode-specific fine tuning remains available in Advanced Settings." );
+            ImGui::SetItemTooltip( "Selects the ambient occlusion method. The adjacent strength slider uses the recommended strength at its marked center; mode-specific tuning remains in Advanced Settings." );
             ImGui::SameLine();
             ImGui::BeginDisabled( settings.AoMode == AOMode::AO_NONE );
             ImGui::SetNextItemWidth( standardComboWidth );
             SliderNormalizedUiStrength( "##AOStrength", &settings.AOStrength );
             ImGui::EndDisabled();
-            ImGui::SetItemTooltip( "Controls the overall ambient occlusion strength. Mode-specific fine tuning remains available in Advanced Settings." );
+            ImGui::SetItemTooltip( "Controls normalized ambient occlusion strength from minimum to twice the recommended level. The marked center is the recommended 1.0 setting." );
             bool screenSpaceLightFX = settings.EnableContactShadows || settings.EnableScreenSpaceGI;
             ImText( "Screen-Space Light FX", { buttonWidth.x - ImGui::GetFrameHeight() - style.ItemSpacing.x, buttonWidth.y } ); ImGui::SameLine();
             if ( ImGui::Checkbox( "##Enable Screen-Space Light FX", &screenSpaceLightFX ) ) {
@@ -1199,7 +1208,7 @@ void ImGuiShim::RenderSettingsWindow()
             ImGui::SetItemTooltip( "Limits overly bright point lights to reduce blown-out interiors." );
             ImText( "Occlusion Culling", { buttonWidth.x - ImGui::GetFrameHeight() - style.ItemSpacing.x, buttonWidth.y } ); ImGui::SameLine();
             ImGui::Checkbox( "##Enable Occlusion Culling", &settings.EnableOcclusionCulling );
-            ImGui::SetItemTooltip( "Skips hidden world sections for better performance. Conservative visibility checks reduce visible pop-in." );
+            ImGui::SetItemTooltip( "Improves performance by avoiding the drawing of world geometry hidden behind other objects." );
             ImText( "HDR", { buttonWidth.x - ImGui::GetFrameHeight() - style.ItemSpacing.x, buttonWidth.y } ); ImGui::SameLine();
             ImGui::Checkbox( "##Enable HDR", &settings.EnableHDR );
             ImGui::SetItemTooltip( "Enables high dynamic range rendering for the renderer post-processing pipeline." );
@@ -1420,7 +1429,7 @@ void RenderAdvancedColumn4( GothicRendererSettings& settings, GothicAPI* gapi ) 
         ImGui::SliderFloat( "Near Blur Distance", &settings.DoFNearBlurDistance, 0.0f, 1000.0f, "%.0f", ImGuiSliderFlags_AlwaysClamp );
         SetNextAdvancedSteppedSliderWidth();
         SliderNormalizedUiStrength( "Near Blur Strength", &settings.DoFNearBlurStrength, 0.0f );
-        ImGui::SetItemTooltip( "Controls near-camera blur in third-person view. First-person disables the near blur; far-distance blur is unchanged." );
+        ImGui::SetItemTooltip( "Controls near-camera blur distance. A nearby centered character smoothly refocuses both near and far blur until the character leaves the center." );
         ImGui::EndDisabled();
 
         ImGui::SeparatorText( "Sharpening" );

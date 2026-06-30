@@ -517,8 +517,8 @@ struct HBAOSettings {
 
 struct XeGTAOConfig {
     int QualityLevel = 2;   // 0 low, 1 medium, 2 high, 3 ultra
-    int DenoisePasses = 1;  // 1 sharp, 2 medium, 3 soft
-    float Radius = 50.0f;   // Gothic view-space units; matches Intel XeGTAO default radius 0.5 in Gothic scale.
+    int DenoisePasses = 3;  // 1 sharp, 2 medium, 3 soft
+    float Radius = 200.0f;  // Broad, softly filtered Gothic-scale AO radius.
 };
 
 enum class AOMode : int {
@@ -740,7 +740,7 @@ struct GothicRendererSettings {
         DoFFocusRange = 8000.0f;
         DoFBokehRadius = 3.5f;
         DoFMaxBlur = 12.0f;
-        DoFNearBlurDistance = 200.0f;
+        DoFNearBlurDistance = 150.0f;
         DoFNearBlurStrength = 2.0f;
 
         WindQuality = WIND_QUALITY_ADVANCED;
@@ -780,7 +780,7 @@ struct GothicRendererSettings {
         GodRayStrength = 1.0f;
         GodRayColorMod = float3( 1.0f, 0.8f, 0.6f );
 
-        AoMode = AOMode::AO_ASSAO;
+        AoMode = AOMode::AO_XEGTAO;
         AOStrength = 1.0f;
 
         RECT desktopRect;

@@ -406,6 +406,7 @@ public:
     D3D11Texture* GetWhiteTexture() const { return WhiteTexture.get(); }
 
     RenderToTextureBuffer* GetVelocityBuffer() const { return VelocityBuffer.get(); }
+    const std::vector<SkeletalVobInfo*>& GetFrameVisibleSkeletalVobs() const { return m_FrameGeometryCache.cachedMobs; }
 
     const XMFLOAT4X4& GetPrevViewProjMatrix() const { return m_PrevViewProjMatrix; }
     void StorePrevViewProjMatrix();

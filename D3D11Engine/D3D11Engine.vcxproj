@@ -1155,7 +1155,9 @@ copy "$(OutDir)$(TargetName).pdb" "$(G1_SYSTEM_PATH)\ddraw.pdb"</Command>
     <ClCompile Include="D3D11PFX_Blur.cpp" />
     <ClCompile Include="D3D11PFX_CAS.cpp" />
     <ClCompile Include="D3D11PFX_DistanceBlur.cpp" />
-    <ClCompile Include="D3D11PFX_FSR3.cpp" />
+    <ClCompile Include="D3D11PFX_FSR3.cpp">
+      <ExceptionHandling>Sync</ExceptionHandling>
+    </ClCompile>
     <ClCompile Include="D3D11PFX_XeGTAO.cpp" />
     <ClCompile Include="FidelityFXFrameGeneration\fsr3\ffx_fsr3.cpp">
       <PrecompiledHeader>NotUsing</PrecompiledHeader>
