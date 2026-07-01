@@ -25,60 +25,80 @@ static bool HasCenteredNearbyNpc( float maxViewDistance, bool relaxedCenter ) {
     zCVob* player = Engine::GAPI->GetPlayerVob();
     zCWorld* playerWorld = player ? player->GetHomeWorld() : nullptr;
     const auto& candidates = Engine::GAPI->GetSkeletalMeshVobs();
+    const INT2 resolution = Engine::GraphicsEngine->GetBackbufferResolution();
+    if ( resolution.x <= 0 || resolution.y <= 0 ) {
+        return false;
+    }
 
     XMFLOAT3 cameraPosition;
     XMStoreFloat3( &cameraPosition, Engine::GAPI->GetCameraPositionXM() );
-    const XMMATRIX view = XMMatrixTranspose( Engine::GAPI->GetViewMatrixXM() );
-    XMFLOAT4X4 projection = Engine::GAPI->GetProjectionMatrix();
-    projection._13 = 0.0f;
-    projection._23 = 0.0f;
-    const XMMATRIX proj = XMMatrixTranspose( XMLoadFloat4x4( &projection ) );
-    const XMMATRIX viewProjection = XMMatrixMultiply( view, proj );
 
-    const float horizontalLimit = relaxedCenter ? 0.30f : 0.22f;
-    const float verticalLimit = relaxedCenter ? 0.34f : 0.26f;
-    auto isCentered = [&]( const XMFLOAT3& point ) {
-        const XMVECTOR clip = XMVector4Transform(
-            XMVectorSet( point.x, point.y, point.z, 1.0f ), viewProjection );
-        const float w = XMVectorGetW( clip );
-        if ( !std::isfinite( w ) || w <= 0.001f ) {
-            return false;
-        }
-        const float ndcX = XMVectorGetX( clip ) / w;
-        const float ndcY = XMVectorGetY( clip ) / w;
-        return std::isfinite( ndcX ) && std::isfinite( ndcY )
-            && std::abs( ndcX ) <= horizontalLimit
-            && std::abs( ndcY ) <= verticalLimit;
+    // A small cross of screen-centre rays is substantially more robust than
+    // projecting one torso/head point. Very close characters fill the centre
+    // even when their bounding-box centre lies outside the old NDC window.
+    const float radius = relaxedCenter ? 0.035f : 0.025f;
+    const float dx = static_cast<float>(resolution.x) * radius;
+    const float dy = static_cast<float>(resolution.y) * radius;
+    const float2 rayPixels[] = {
+        { resolution.x * 0.5f, resolution.y * 0.5f },
+        { resolution.x * 0.5f - dx, resolution.y * 0.5f },
+        { resolution.x * 0.5f + dx, resolution.y * 0.5f },
+        { resolution.x * 0.5f, resolution.y * 0.5f - dy },
+        { resolution.x * 0.5f, resolution.y * 0.5f + dy },
     };
 
-    for ( const SkeletalVobInfo* candidate : candidates ) {
-        zCVob* npc = candidate ? candidate->Vob : nullptr;
-        if ( !npc || npc == player || npc->GetVobType() != zVOB_TYPE_NSC
-            || !npc->GetShowVisual() || (playerWorld && npc->GetHomeWorld() != playerWorld) ) {
-            continue;
-        }
+    auto intersectNpcBounds = [&]( const zTBBox3D& bounds, const XMFLOAT3& direction ) {
+        float tMin = 0.0f;
+        float tMax = maxViewDistance;
+        const float origin[3] = { cameraPosition.x, cameraPosition.y, cameraPosition.z };
+        const float dir[3] = { direction.x, direction.y, direction.z };
+        const float minimum[3] = { bounds.Min.x, bounds.Min.y, bounds.Min.z };
+        const float maximum[3] = { bounds.Max.x, bounds.Max.y, bounds.Max.z };
 
-        const zTBBox3D bounds = npc->GetBBox();
-        const float dx = std::max( std::max( bounds.Min.x - cameraPosition.x, 0.0f ), cameraPosition.x - bounds.Max.x );
-        const float dy = std::max( std::max( bounds.Min.y - cameraPosition.y, 0.0f ), cameraPosition.y - bounds.Max.y );
-        const float dz = std::max( std::max( bounds.Min.z - cameraPosition.z, 0.0f ), cameraPosition.z - bounds.Max.z );
-        if ( std::sqrt( dx * dx + dy * dy + dz * dz ) > maxViewDistance ) {
-            continue;
-        }
+        for ( int axis = 0; axis < 3; ++axis ) {
+            if ( std::abs( dir[axis] ) < 1e-6f ) {
+                if ( origin[axis] < minimum[axis] || origin[axis] > maximum[axis] ) {
+                    return false;
+                }
+                continue;
+            }
 
-        const float centerX = (bounds.Min.x + bounds.Max.x) * 0.5f;
-        const float centerZ = (bounds.Min.z + bounds.Max.z) * 0.5f;
-        const float height = std::max( bounds.Max.y - bounds.Min.y, 1.0f );
-        const XMFLOAT3 torso( centerX, bounds.Min.y + height * 0.55f, centerZ );
-        const XMFLOAT3 head( centerX, bounds.Min.y + height * 0.82f, centerZ );
-        if ( isCentered( torso ) || isCentered( head ) ) {
-            return true;
+            const float inverseDirection = 1.0f / dir[axis];
+            float nearT = (minimum[axis] - origin[axis]) * inverseDirection;
+            float farT = (maximum[axis] - origin[axis]) * inverseDirection;
+            if ( nearT > farT ) {
+                std::swap( nearT, farT );
+            }
+            tMin = std::max( tMin, nearT );
+            tMax = std::min( tMax, farT );
+            if ( tMin > tMax ) {
+                return false;
+            }
+        }
+        return tMax >= 0.0f && tMin <= maxViewDistance;
+    };
+
+    for ( const float2& pixel : rayPixels ) {
+        XMVECTOR rayPosition;
+        XMVECTOR rayDirectionVector;
+        Engine::GAPI->UnprojectXM( pixel, rayPosition, rayDirectionVector );
+        XMFLOAT3 rayDirection;
+        XMStoreFloat3( &rayDirection, XMVector3Normalize( rayDirectionVector ) );
+
+        for ( const SkeletalVobInfo* candidate : candidates ) {
+            zCVob* npc = candidate ? candidate->Vob : nullptr;
+            if ( !npc || npc == player || npc->GetVobType() != zVOB_TYPE_NSC
+                || !npc->GetShowVisual() || (playerWorld && npc->GetHomeWorld() != playerWorld) ) {
+                continue;
+            }
+            if ( intersectNpcBounds( npc->GetBBox(), rayDirection ) ) {
+                return true;
+            }
         }
     }
 
     return false;
 }
-
 static DepthOfFieldConstantBuffer BuildDepthOfFieldConstants( float adaptiveFocusBlend ) {
     auto& settings = Engine::GAPI->GetRendererState().RendererSettings;
 

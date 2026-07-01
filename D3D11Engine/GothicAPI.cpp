@@ -5787,6 +5787,9 @@ void GothicAPI::DrawMorphMesh( zCMorphMesh* msh, std::map<zCMaterial*, std::vect
         && RendererState.RendererSettings.AntiAliasingMode == GothicRendererSettings::AA_FSR
         && RendererState.RendererSettings.Upscaler == GothicRendererSettings::UPSCALER_FSR_3 ) {
         graphicsState.FF_GSwitches |= GSWITCH_FSR3_REACTIVE;
+        if ( !Engine::GAPI->DialogFinished() ) {
+            graphicsState.FF_GSwitches |= GSWITCH_FSR3_DIALOG_REACTIVE;
+        }
     }
     auto bindFixedFunctionState = [&]() {
         if ( auto ps = g->GetActivePS() ) {

@@ -13,6 +13,7 @@ const int GSWITCH_LIGHING = 4;
 const int GSWITCH_REFLECTIONS = 8;
 const int GSWITCH_LINEAR_DEPTH = 16;
 const int GSWITCH_FSR3_REACTIVE = 32;
+const int GSWITCH_FSR3_DIALOG_REACTIVE = 64;
 
 enum RenderStage {
     STAGE_DRAW_UNKNOWN = 0,
@@ -690,7 +691,7 @@ struct GothicRendererSettings {
         DisableRendering = false;
         DisableDrawcalls = false;
 
-        AntiAliasingMode = E_AntiAliasingMode::AA_SMAA;
+        AntiAliasingMode = E_AntiAliasingMode::AA_FSR;
 
         TesselationFactor = 20.0f;
         TesselationRange = 8.0f;
@@ -761,7 +762,7 @@ struct GothicRendererSettings {
         FOVVert = 90.0f;
 
         SharpeningMode = E_SharpeningMode::SHARPEN_CAS;
-        SharpenFactor = 0.2f;
+        SharpenFactor = 1.0f;
 
         RainRadiusRange = 5000.0f;
         RainHeightRange = 1000.0f;
@@ -792,7 +793,7 @@ struct GothicRendererSettings {
         LoadedResolution = INT2( desktopRect.right, desktopRect.bottom );
 
         ResolutionScalePercent = 100;
-        Upscaler = E_Upscaler::UPSCALER_DEFAULT;
+        Upscaler = E_Upscaler::UPSCALER_FSR_3;
 
         GothicUIScale = 1.0f;
         //DisableEverything();

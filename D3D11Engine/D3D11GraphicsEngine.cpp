@@ -1946,11 +1946,11 @@ XRESULT D3D11GraphicsEngine::Present() {
         fsr3->ResetFrameGenerationHistory();
     }
 
-    // With VSync, the two Present calls are paced by DXGI. Without VSync,
-    // pace generated and rendered frames evenly. If no explicit FPS limit is
-    // set, use the active monitor refresh rate as the output target.
+    // With VSync, DXGI paces the generated/real pair. Without VSync, pace
+    // both presentations evenly. An explicit FPS limit describes rendered
+    // Gothic frames, so the presentation rate is twice that value.
     if ( frameGenerationActive && !vsync ) {
-        int outputFps = settings.FpsLimit;
+        int outputFps = settings.FpsLimit > 0 ? settings.FpsLimit * 2 : 0;
         if ( outputFps <= 0 ) {
             outputFps = 60;
             if ( CachedRefreshRate.Numerator > 0 && CachedRefreshRate.Denominator > 0 ) {
@@ -2016,7 +2016,10 @@ XRESULT D3D11GraphicsEngine::Present() {
             result = SwapChain->Present( vsync ? 1 : 0, 0 );
         }
 
-        if ( result == S_OK && frameLatencyWaitableObject ) {
+        // The two FSR3 Present calls already provide DXGI pacing. Waiting on
+        // the frame-latency object after each one serializes both frames and
+        // cuts Gothic's rendered frame rate roughly in half a second time.
+        if ( result == S_OK && frameLatencyWaitableObject && !frameGenerationActive ) {
             ZoneScopedN( "Present::frameLatencyWaitableObject" );
             WaitForSingleObjectEx( frameLatencyWaitableObject, INFINITE, true );
         }
@@ -3023,6 +3026,9 @@ void D3D11GraphicsEngine::DrawSkeletalMeshVobs(
         && rendererSettings.AntiAliasingMode == GothicRendererSettings::AA_FSR
         && rendererSettings.Upscaler == GothicRendererSettings::UPSCALER_FSR_3 ) {
         graphicsState.FF_GSwitches |= GSWITCH_FSR3_REACTIVE;
+        if ( !Engine::GAPI->DialogFinished() ) {
+            graphicsState.FF_GSwitches |= GSWITCH_FSR3_DIALOG_REACTIVE;
+        }
     }
     bool useStructuredBones = !FeatureLevel10Compatibility;
 
@@ -4453,7 +4459,9 @@ XRESULT D3D11GraphicsEngine::OnStartWorldRendering() {
         });
     }
 
-    if (Engine::GAPI->GetRainFXWeight() > 0.0f) {
+    const bool renderRainAfterUpscaling = fsr3ActiveForReactiveMask
+        && Engine::GAPI->GetRainFXWeight() > 0.0f;
+    if (Engine::GAPI->GetRainFXWeight() > 0.0f && !renderRainAfterUpscaling) {
         if ( FeatureLevel10Compatibility || Engine::GAPI->GetRendererState().RendererSettings.DrawRainThroughTransformFeedback ) {
             graph.AddPass( RG_PASS_NAME("Draw Rain"), [&]( RGBuilder& builder, RenderPass& pass ) {
                 builder.Read( backBufferHandle );
@@ -4846,6 +4854,22 @@ XRESULT D3D11GraphicsEngine::OnStartWorldRendering() {
         }
         graph.Compile();
         graph.Execute();
+
+        // Thin rain streaks can disappear before temporal upscaling. Under
+        // FSR3, rasterize them once at output resolution after upscaling and
+        // reject occluded pixels against the copied internal scene depth.
+        if ( renderRainAfterUpscaling ) {
+            SetViewport( ViewportInfo( 0, 0, GetBackbufferResolution() ) );
+            GetContext()->OMSetRenderTargets( 1, Backbuffer->GetRenderTargetView().GetAddressOf(), nullptr );
+            DepthStencilBufferCopy->BindToPixelShader( GetContext().Get(), 1 );
+            if ( FeatureLevel10Compatibility || rendererState.RendererSettings.DrawRainThroughTransformFeedback ) {
+                Effects->DrawRain( true );
+            } else {
+                Effects->DrawRain_CS( true );
+            }
+            ID3D11ShaderResourceView* nullRainDepth = nullptr;
+            GetContext()->PSSetShaderResources( 1, 1, &nullRainDepth );
+        }
 
         // Preserve the upscaled scene before Gothic draws HUD elements. The
         // FidelityFX frame interpolator uses this copy for optical flow.

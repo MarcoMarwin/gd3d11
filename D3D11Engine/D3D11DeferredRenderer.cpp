@@ -73,6 +73,7 @@ void D3D11DeferredRenderer::AddGeometryPasses( RenderGraph& graph,
                 specular ? specular->GetRenderTargetView().Get() : nullptr,
                 velocityBuffer ? velocityBuffer->GetRenderTargetView().Get() : nullptr,
                 transparencyAndCompositionMask ? transparencyAndCompositionMask->GetRenderTargetView().Get() : nullptr,
+                reactiveMask ? reactiveMask->GetRenderTargetView().Get() : nullptr,
             };
 
             constexpr float black[] { 0.f, 0.f, 0.f, 0.f };
@@ -94,7 +95,7 @@ void D3D11DeferredRenderer::AddGeometryPasses( RenderGraph& graph,
                 context->ClearRenderTargetView( reactiveMask->GetRenderTargetView().Get(), black );
             if ( rtvs[4] )
                 context->ClearRenderTargetView( rtvs[4], skyTransparencyAndComposition );
-            context->OMSetRenderTargets( 5, rtvs, engine.GetDepthBuffer()->GetDepthStencilView().Get() );
+            context->OMSetRenderTargets( 6, rtvs, engine.GetDepthBuffer()->GetDepthStencilView().Get() );
 
             Engine::GAPI->DrawWorldMeshNaive();
 

@@ -83,11 +83,18 @@ namespace {
 
 void D3D11Upscaling::UpdateUpscaling( D3D11GraphicsEngine& engine )
 {
+    auto& settings = Engine::GAPI->GetRendererState().RendererSettings;
     if ( engine.GetDevice()->GetFeatureLevel() < D3D_FEATURE_LEVEL_11_0 ) {
+        if ( settings.AntiAliasingMode == GothicRendererSettings::AA_FSR
+            && settings.Upscaler == GothicRendererSettings::UPSCALER_FSR_3 ) {
+            settings.AntiAliasingMode = GothicRendererSettings::AA_SMAA;
+            settings.Upscaler = GothicRendererSettings::UPSCALER_DEFAULT;
+            settings.ResolutionScalePercent = 100;
+            settings.SharpenFactor = 0.2f;
+            settings.EnableFrameGeneration = false;
+        }
         return;
     }
-
-    auto& settings = Engine::GAPI->GetRendererState().RendererSettings;
 
     const bool needsJitteredProj = settings.AntiAliasingMode == GothicRendererSettings::AA_FSR
         || settings.AntiAliasingMode == GothicRendererSettings::AA_TAA

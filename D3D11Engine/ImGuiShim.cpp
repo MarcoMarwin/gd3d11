@@ -567,6 +567,13 @@ void ApplyFeatureLevel10Downgrades(GothicRendererSettings& s) {
     s.NumShadowCascades = std::min(s.NumShadowCascades, MAX_CSM_CASCADES);
 
     s.EnableFrameGeneration = false;
+    if ( s.AntiAliasingMode == GothicRendererSettings::AA_FSR
+        && s.Upscaler == GothicRendererSettings::UPSCALER_FSR_3 ) {
+        s.AntiAliasingMode = GothicRendererSettings::AA_SMAA;
+        s.Upscaler = GothicRendererSettings::UPSCALER_DEFAULT;
+        s.ResolutionScalePercent = 100;
+        s.SharpenFactor = 0.2f;
+    }
     if ( s.AoMode == AOMode::AO_XEGTAO ) {
         s.AoMode = AOMode::AO_ASSAO;
     }
@@ -583,12 +590,28 @@ void ApplyGraphicsPresets( GothicRendererSettings& s ) {
         return;
     }
 
+    // Presets own visible quality/performance settings, while display mode,
+    // resolution, VSync/FPS limit, HDR, brightness and contrast stay personal.
+    s.EnableShadows = true;
     s.EnableSSR = true;
-    s.EnableSSS = true;
+    s.EnableWaterAnimation = true;
     s.EnableGodRays = true;
-    s.EnableContactShadows = true;
-    s.EnableScreenSpaceGI = true;
+    s.EnableRain = true;
+    s.LimitLightIntesity = true;
     s.EnableFrameGeneration = false;
+
+    // Reset all visible effect strengths to their normalized UI defaults.
+    s.AOStrength = 1.0f;
+    s.ContactShadowStrength = 1.0f;
+    s.ScreenSpaceGIStrength = 1.0f;
+    s.GodRayStrength = 1.0f;
+    s.SSRStrength = 1.0f;
+    s.WaterCubemapStrength = 1.0f;
+    s.SSSIntensity = 0.75f;
+    s.DoFBokehRadius = 3.5f;
+    s.GlobalWindStrength = 1.0f;
+    s.HeroAffectsObjectsStrength = 1.0f;
+    s.ShadowSoftness = 1.0f;
 
     switch ( preset ) {
     case GothicRendererSettings::GRAPHICS_LOW:
@@ -596,9 +619,18 @@ void ApplyGraphicsPresets( GothicRendererSettings& s ) {
         s.Upscaler = GothicRendererSettings::E_Upscaler::UPSCALER_FSR_3;
         s.ResolutionScalePercent = 50;
         s.SharpenFactor = 1.0f;
+        s.ShadowMapSize = 1024;
+        s.ShadowFilterMode = GothicRendererSettings::SHADOW_FILTER_DISABLED;
         s.AoMode = AOMode::AO_NONE;
+        s.EnableContactShadows = false;
+        s.EnableScreenSpaceGI = false;
+        s.EnableSSS = false;
         s.EnableDoF = false;
+        s.AllowNormalmaps = false;
+        s.EnableParallaxOcclusionMapping = true;
         s.WindQuality = GothicRendererSettings::EWindQuality::WIND_QUALITY_NONE;
+        s.HeroAffectsObjects = false;
+        s.EnableOcclusionCulling = true;
         s.EnablePointlightShadows = GothicRendererSettings::EPointLightShadowMode::PLS_STATIC_ONLY;
         s.OutdoorSmallVobDrawRadius = 10'000.0f;
         s.SectionDrawRadius = 1;
@@ -609,35 +641,62 @@ void ApplyGraphicsPresets( GothicRendererSettings& s ) {
         s.Upscaler = GothicRendererSettings::E_Upscaler::UPSCALER_FSR_3;
         s.ResolutionScalePercent = 75;
         s.SharpenFactor = 1.0f;
+        s.ShadowMapSize = 2048;
+        s.ShadowFilterMode = GothicRendererSettings::SHADOW_FILTER_SIMPLE;
         s.AoMode = AOMode::AO_XEGTAO;
+        s.EnableContactShadows = true;
+        s.EnableScreenSpaceGI = true;
+        s.EnableSSS = true;
         s.EnableDoF = true;
+        s.AllowNormalmaps = false;
+        s.EnableParallaxOcclusionMapping = true;
         s.WindQuality = GothicRendererSettings::EWindQuality::WIND_QUALITY_ADVANCED;
+        s.HeroAffectsObjects = true;
+        s.EnableOcclusionCulling = true;
         s.EnablePointlightShadows = GothicRendererSettings::EPointLightShadowMode::PLS_UPDATE_DYNAMIC;
         s.OutdoorSmallVobDrawRadius = 15'000.0f;
         s.SectionDrawRadius = 5;
         s.textureMaxSize = static_cast<int>(TX_QUALITY::MAX);
         break;
     case GothicRendererSettings::GRAPHICS_HIGH:
-        s.AntiAliasingMode = GothicRendererSettings::E_AntiAliasingMode::AA_SMAA;
-        s.Upscaler = GothicRendererSettings::E_Upscaler::UPSCALER_DEFAULT;
+        s.AntiAliasingMode = GothicRendererSettings::E_AntiAliasingMode::AA_FSR;
+        s.Upscaler = GothicRendererSettings::E_Upscaler::UPSCALER_FSR_3;
         s.ResolutionScalePercent = 100;
-        s.SharpenFactor = 0.2f;
+        s.SharpenFactor = 1.0f;
+        s.ShadowMapSize = 4096;
+        s.ShadowFilterMode = GothicRendererSettings::SHADOW_FILTER_SIMPLE;
         s.AoMode = AOMode::AO_XEGTAO;
+        s.EnableContactShadows = true;
+        s.EnableScreenSpaceGI = true;
+        s.EnableSSS = true;
         s.EnableDoF = true;
+        s.AllowNormalmaps = true;
+        s.EnableParallaxOcclusionMapping = true;
         s.WindQuality = GothicRendererSettings::EWindQuality::WIND_QUALITY_ADVANCED;
+        s.HeroAffectsObjects = true;
+        s.EnableOcclusionCulling = false;
         s.EnablePointlightShadows = GothicRendererSettings::EPointLightShadowMode::PLS_UPDATE_DYNAMIC;
         s.OutdoorSmallVobDrawRadius = 20'000.0f;
         s.SectionDrawRadius = 10;
         s.textureMaxSize = static_cast<int>(TX_QUALITY::MAX);
         break;
     case GothicRendererSettings::GRAPHICS_VERY_HIGH:
-        s.AntiAliasingMode = GothicRendererSettings::E_AntiAliasingMode::AA_SMAA;
-        s.Upscaler = GothicRendererSettings::E_Upscaler::UPSCALER_DEFAULT;
+        s.AntiAliasingMode = GothicRendererSettings::E_AntiAliasingMode::AA_FSR;
+        s.Upscaler = GothicRendererSettings::E_Upscaler::UPSCALER_FSR_3;
         s.ResolutionScalePercent = 100;
-        s.SharpenFactor = 0.2f;
+        s.SharpenFactor = 1.0f;
+        s.ShadowMapSize = 8192;
+        s.ShadowFilterMode = GothicRendererSettings::SHADOW_FILTER_PCSS;
         s.AoMode = AOMode::AO_XEGTAO;
+        s.EnableContactShadows = true;
+        s.EnableScreenSpaceGI = true;
+        s.EnableSSS = true;
         s.EnableDoF = true;
+        s.AllowNormalmaps = true;
+        s.EnableParallaxOcclusionMapping = true;
         s.WindQuality = GothicRendererSettings::EWindQuality::WIND_QUALITY_ADVANCED;
+        s.HeroAffectsObjects = true;
+        s.EnableOcclusionCulling = false;
         s.EnablePointlightShadows = GothicRendererSettings::EPointLightShadowMode::PLS_UPDATE_DYNAMIC;
         s.OutdoorSmallVobDrawRadius = 25'000.0f;
         s.SectionDrawRadius = 20;
@@ -1117,7 +1176,7 @@ void ImGuiShim::RenderSettingsWindow()
                 shadersToReload |= ShaderCategory::Other;
             }
             ImGui::EndDisabled();
-            ImGui::SetItemTooltip( "Adds contact shadows and subtle indirect lighting." );
+            ImGui::SetItemTooltip( "Controls contact-shadow and indirect-lighting strength." );
 
             ImText( "Godrays", { buttonWidth.x - ImGui::GetFrameHeight() - style.ItemSpacing.x, buttonWidth.y } ); ImGui::SameLine();
             if ( ImGui::Checkbox( "##Enable Godrays", &settings.EnableGodRays ) ) {
@@ -1129,7 +1188,7 @@ void ImGuiShim::RenderSettingsWindow()
             ImGui::SetNextItemWidth( standardComboWidth );
             SliderNormalizedUiStrength( "##GodrayStrength", &settings.GodRayStrength );
             ImGui::EndDisabled();
-            ImGui::SetItemTooltip( "Adds sunlight beams when the sun is partially blocked by trees, buildings, or terrain." );
+            ImGui::SetItemTooltip( "Controls sunlight-beam intensity." );
             bool enhancedWater = settings.EnableSSR;
             ImText( "Water Effects", { buttonWidth.x - ImGui::GetFrameHeight() - style.ItemSpacing.x, buttonWidth.y } ); ImGui::SameLine();
             if ( ImGui::Checkbox( "##Enable Water Effects", &enhancedWater ) ) {
@@ -1143,7 +1202,7 @@ void ImGuiShim::RenderSettingsWindow()
             ImGui::SetNextItemWidth( standardComboWidth );
             SliderNormalizedUiStrength( "##WaterEffectsStrength", &settings.SSRStrength );
             ImGui::EndDisabled();
-            ImGui::SetItemTooltip( "Enables water reflections and animated water movement." );
+            ImGui::SetItemTooltip( "Controls water-reflection strength." );
 
             ImText( "Backlit Vegetation", { buttonWidth.x - ImGui::GetFrameHeight() - style.ItemSpacing.x, buttonWidth.y } ); ImGui::SameLine();
             ImGui::Checkbox( "##Enable Backlit Vegetation", &settings.EnableSSS );
@@ -1156,7 +1215,7 @@ void ImGuiShim::RenderSettingsWindow()
                 settings.SSSIntensity = backlitVegetationStrength * 0.75f;
             }
             ImGui::EndDisabled();
-            ImGui::SetItemTooltip( "Adds soft backlighting through leaves, grass, and alpha-tested vegetation." );
+            ImGui::SetItemTooltip( "Controls vegetation-backlighting intensity." );
 
             ImText( "Depth of Field", { buttonWidth.x - ImGui::GetFrameHeight() - style.ItemSpacing.x, buttonWidth.y } ); ImGui::SameLine();
             ImGui::Checkbox( "##Enable Depth of Field", &settings.EnableDoF );
@@ -1169,7 +1228,7 @@ void ImGuiShim::RenderSettingsWindow()
                 settings.DoFBokehRadius = depthOfFieldStrength * 3.5f;
             }
             ImGui::EndDisabled();
-            ImGui::SetItemTooltip( "Adds near- and far-distance camera blur." );
+            ImGui::SetItemTooltip( "Controls near- and far-distance blur strength." );
 
 #if defined(BUILD_GOTHIC_2_6_fix) || (defined(BUILD_GOTHIC_1_08k) && !defined(BUILD_1_12F))
 #if defined(BUILD_GOTHIC_1_08k) && !defined(BUILD_1_12F)
@@ -1184,13 +1243,13 @@ void ImGuiShim::RenderSettingsWindow()
                         : GothicRendererSettings::EWindQuality::WIND_QUALITY_NONE;
                     shadersToReload |= ShaderCategory::Other;
                 }
-                ImGui::SetItemTooltip( "Controls animated wind movement for trees, grass, and wheat." );
+                ImGui::SetItemTooltip( "Enables animated wind movement for trees, grass, and wheat." );
                 ImGui::SameLine();
                 ImGui::BeginDisabled( !windEffect );
                 ImGui::SetNextItemWidth( standardComboWidth );
                 SliderNormalizedUiStrength( "##WindEffectStrength", &settings.GlobalWindStrength );
                 ImGui::EndDisabled();
-                ImGui::SetItemTooltip( "Controls animated wind movement for trees, grass, and wheat." );
+                ImGui::SetItemTooltip( "Controls wind-movement strength." );
             }
 
             ImText( "Characters affect objects", { buttonWidth.x - ImGui::GetFrameHeight() - style.ItemSpacing.x, buttonWidth.y } ); ImGui::SameLine();

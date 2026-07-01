@@ -7,6 +7,7 @@ static const int GSWITCH_ALPHAREF = 2;
 static const int GSWITCH_LIGHING = 4;
 static const int GSWITCH_REFLECTIONS = 8;
 static const int GSWITCH_FSR3_REACTIVE = 32;
+static const int GSWITCH_FSR3_DIALOG_REACTIVE = 64;
 
 struct TextureStage
 {

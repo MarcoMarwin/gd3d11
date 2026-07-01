@@ -125,7 +125,7 @@ void D3D11Effect::FillRandomRaindropData( std::vector<RainParticleDynamic>& dyna
 }
 
 /** Draws GPU-Based rain */
-XRESULT D3D11Effect::DrawRain() {
+XRESULT D3D11Effect::DrawRain( bool outputResolution ) {
     D3D11GraphicsEngineBase* e = reinterpret_cast<D3D11GraphicsEngineBase*>(Engine::GraphicsEngine);
     GothicRendererState& state = Engine::GAPI->GetRendererState();
 
@@ -204,8 +204,12 @@ XRESULT D3D11Effect::DrawRain() {
     acb.AR_GlobalVelocity = velocity;
     acb.AR_MoveRainParticles = state.RendererSettings.RainMoveParticles ? 1 : 0;
     acb.AR_Pad1.x = state.RendererSettings.EnableRain ? 1.0f : 0.0f;
-    acb.AR_Pad1.y = state.RendererSettings.AntiAliasingMode == GothicRendererSettings::AA_FSR
+    acb.AR_Pad1.y = !outputResolution
+        && state.RendererSettings.AntiAliasingMode == GothicRendererSettings::AA_FSR
         && state.RendererSettings.Upscaler == GothicRendererSettings::UPSCALER_FSR_3 ? 1.0f : 0.0f;
+    acb.AR_Pad1.z = outputResolution
+        ? static_cast<float>(e->GetResolution().x) / static_cast<float>(e->GetBackbufferResolution().x)
+        : 0.0f;
     auto advRainBuf = particleAdvanceVS->GetBuffer( "AdvanceRainConstantBuffer" );
     advRainBuf.Update( &acb ).Bind();
     advRainBuf.GetRawBuffer()->BindToPixelShader( 1 );
@@ -335,7 +339,7 @@ XRESULT D3D11Effect::DrawRain() {
     return XR_SUCCESS;
 }
 
-XRESULT D3D11Effect::DrawRain_CS() {
+XRESULT D3D11Effect::DrawRain_CS( bool outputResolution ) {
     D3D11GraphicsEngineBase* e = reinterpret_cast<D3D11GraphicsEngineBase*>(Engine::GraphicsEngine);
     GothicRendererState& state = Engine::GAPI->GetRendererState();
 
@@ -405,8 +409,12 @@ XRESULT D3D11Effect::DrawRain_CS() {
     acb.AR_GlobalVelocity = velocity;
     acb.AR_MoveRainParticles = numParticles;
     acb.AR_Pad1.x = state.RendererSettings.EnableRain ? 1.0f : 0.0f;
-    acb.AR_Pad1.y = state.RendererSettings.AntiAliasingMode == GothicRendererSettings::AA_FSR
+    acb.AR_Pad1.y = !outputResolution
+        && state.RendererSettings.AntiAliasingMode == GothicRendererSettings::AA_FSR
         && state.RendererSettings.Upscaler == GothicRendererSettings::UPSCALER_FSR_3 ? 1.0f : 0.0f;
+    acb.AR_Pad1.z = outputResolution
+        ? static_cast<float>(e->GetResolution().x) / static_cast<float>(e->GetBackbufferResolution().x)
+        : 0.0f;
 
     advanceRainCS->GetBuffer( "AdvanceRainConstantBuffer" ).Update( &acb );
     advanceRainCS->GetBuffer( "AdvanceRainConstantBuffer" ).GetRawBuffer()->BindToPixelShader( 1 );

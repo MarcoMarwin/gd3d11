@@ -9,6 +9,7 @@
 SamplerState SS_Anisotropic : register( s0 );
 //Texture2D	TX_Texture0 : register( t0 );
 Texture2DArray TX_RainTextureArray : register( t0 );
+Texture2D<float> TX_SceneDepth : register( t1 );
 
 #define PI 3.14159265
 
@@ -244,6 +245,20 @@ struct PS_OUTPUT
 
 PS_OUTPUT PSMain( PS_INPUT Input )
 {
+    // FSR3 rain is rasterized after upscaling so sub-pixel streaks survive.
+    // Reject drops hidden by scene geometry using the copied inverted depth.
+    if (AR_Pad1.z > 0.0f)
+    {
+        uint depthWidth, depthHeight;
+        TX_SceneDepth.GetDimensions(depthWidth, depthHeight);
+        int2 depthPixel = clamp(
+            int2(Input.vPosition.xy * AR_Pad1.z),
+            int2(0, 0),
+            int2((int)depthWidth - 1, (int)depthHeight - 1));
+        float sceneDepth = TX_SceneDepth.Load(int3(depthPixel, 0));
+        if (sceneDepth > Input.vPosition.z + 0.00001f)
+            discard;
+    }
 	//float4 color = pow(TX_Texture0.Sample(SS_Linear, Input.vTexcoord), 1.0f);
 	float4 color = float4(1,1,1, 0.2f);
 	

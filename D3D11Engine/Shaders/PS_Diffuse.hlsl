@@ -86,7 +86,11 @@ float2 CalculateVelocity(float4 currClipPos, float4 prevClipPos)
 FORWARD_PLUS_PS_OUTPUT PSMain( PS_INPUT Input )
 {
 	FORWARD_PLUS_PS_OUTPUT output;
-	output.vReactiveMask = (FF_GSwitches & GSWITCH_FSR3_REACTIVE) != 0 ? 0.75f : 0.0f;
+	float fsr3ReactiveValue = (FF_GSwitches & GSWITCH_FSR3_DIALOG_REACTIVE) != 0
+		? 1.0f
+		: ((FF_GSwitches & GSWITCH_FSR3_REACTIVE) != 0 ? 0.75f : 0.0f);
+	output.vTransparencyAndCompositionMask = fsr3ReactiveValue;
+	output.vReactiveMask = fsr3ReactiveValue;
 
 	float2 materialUV = Input.vTexcoord;
 #if NORMALMAPPING == 1
@@ -100,7 +104,8 @@ FORWARD_PLUS_PS_OUTPUT PSMain( PS_INPUT Input )
 
 #if ALPHATEST == 1
 	DoAlphaTest(color.a);
-	output.vReactiveMask = 0.04f;
+	if (fsr3ReactiveValue <= 0.0f)
+		output.vTransparencyAndCompositionMask = 0.04f;
 #endif
 
 #if NORMALMAPPING == 1
@@ -201,7 +206,11 @@ DEFERRED_PS_OUTPUT PSMain( PS_INPUT Input ) : SV_TARGET
 #endif
 {
 	DEFERRED_PS_OUTPUT output;
-	output.vReactiveMask = (FF_GSwitches & GSWITCH_FSR3_REACTIVE) != 0 ? 0.75f : 0.0f;
+	float fsr3ReactiveValue = (FF_GSwitches & GSWITCH_FSR3_DIALOG_REACTIVE) != 0
+		? 1.0f
+		: ((FF_GSwitches & GSWITCH_FSR3_REACTIVE) != 0 ? 0.75f : 0.0f);
+	output.vTransparencyAndCompositionMask = fsr3ReactiveValue;
+	output.vReactiveMask = fsr3ReactiveValue;
 
 	float2 materialUV = Input.vTexcoord;
 #if NORMALMAPPING == 1
@@ -217,7 +226,8 @@ DEFERRED_PS_OUTPUT PSMain( PS_INPUT Input ) : SV_TARGET
 	
 	// WorldMesh can always do the alphatest
 	DoAlphaTest(color.a);
-	output.vReactiveMask = 0.04f; // low value keeps distant alpha-tested vegetation stable while still blocking SSR on cutouts
+	if (fsr3ReactiveValue <= 0.0f)
+		output.vTransparencyAndCompositionMask = 0.04f; // low value keeps distant alpha-tested vegetation stable while still blocking SSR on cutouts
 #endif
 	
 	// Apply normalmapping if wanted

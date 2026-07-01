@@ -53,7 +53,7 @@ float3 ApplyMoonTexture(float3 worldPosition)
         dot(skyDirection, moonRight),
         dot(skyDirection, moonUp)) / max(0.001f, forward);
 
-    const float moonAngularHalfSize = 0.09f;
+    const float moonAngularHalfSize = 0.08f;
     float2 moonUV = float2(0.5f, 0.5f) +
         tangentPosition / (moonAngularHalfSize * 2.0f);
     moonUV.y = 1.0f - moonUV.y;
