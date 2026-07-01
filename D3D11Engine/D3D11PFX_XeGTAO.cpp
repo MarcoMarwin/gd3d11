@@ -239,8 +239,8 @@ XRESULT D3D11PFX_XeGTAO::Render( ID3D11ShaderResourceView* depthSRV,
     engine->GetShaderManager().GetVShader( VShaderID::VS_PFX )->Apply();
     auto composite = engine->GetShaderManager().GetPShader( PShaderID::PS_PFX_AOComposite );
     composite->Apply();
-    // XeGTAO is normalized around the tested Gothic default: UI 1.0 equals 50% composite strength.
-    constexpr float XeGTAONormalizedStrength = 0.5f;
+    // UI-normalized XeGTAO strength: 1.0 maps to the selected 60% composite strength.
+    constexpr float XeGTAONormalizedStrength = 0.6f;
     AOCompositeConstantBuffer compositeConstants = {
         rendererSettings.AOStrength * XeGTAONormalizedStrength, {}
     };

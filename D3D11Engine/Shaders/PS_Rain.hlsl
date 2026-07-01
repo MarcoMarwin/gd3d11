@@ -274,8 +274,10 @@ PS_OUTPUT PSMain( PS_INPUT Input )
 		directionalLight.w);
 #endif
     PS_OUTPUT output;
+    const float fsr3Rain = saturate(AR_Pad1.y);
+    directionalLight.w = saturate(directionalLight.w * lerp(1.0f, 1.45f, fsr3Rain));
     output.color = directionalLight;
-    float rainReactive = min(saturate(directionalLight.w), 0.9f);
+    float rainReactive = min(saturate(directionalLight.w * lerp(1.0f, 6.0f, fsr3Rain)), 0.95f);
     output.reactiveMask = float4(rainReactive, rainReactive, rainReactive, rainReactive);
     return output;
 }

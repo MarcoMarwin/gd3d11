@@ -3013,6 +3013,17 @@ void D3D11GraphicsEngine::DrawSkeletalMeshVobs(
     const bool isZPrepass = GetRenderingStage() == DES_Z_PRE_PASS;
     const bool isMainStage = GetRenderingStage() == DES_MAIN;
     const bool isMainReuseStage = isZPrepass || isMainStage;
+    struct ScopedGraphicsSwitchRestore {
+        unsigned int& Value;
+        unsigned int Previous;
+        ~ScopedGraphicsSwitchRestore() { Value = Previous; }
+    } graphicsSwitchRestore { graphicsState.FF_GSwitches, graphicsState.FF_GSwitches };
+    const auto& rendererSettings = Engine::GAPI->GetRendererState().RendererSettings;
+    if ( isMainStage
+        && rendererSettings.AntiAliasingMode == GothicRendererSettings::AA_FSR
+        && rendererSettings.Upscaler == GothicRendererSettings::UPSCALER_FSR_3 ) {
+        graphicsState.FF_GSwitches |= GSWITCH_FSR3_REACTIVE;
+    }
     bool useStructuredBones = !FeatureLevel10Compatibility;
 
     std::vector<VS_ExConstantBuffer_SkeletalBoneRange> structuredBoneRanges( vis.size() );

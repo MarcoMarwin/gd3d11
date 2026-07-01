@@ -204,6 +204,8 @@ XRESULT D3D11Effect::DrawRain() {
     acb.AR_GlobalVelocity = velocity;
     acb.AR_MoveRainParticles = state.RendererSettings.RainMoveParticles ? 1 : 0;
     acb.AR_Pad1.x = state.RendererSettings.EnableRain ? 1.0f : 0.0f;
+    acb.AR_Pad1.y = state.RendererSettings.AntiAliasingMode == GothicRendererSettings::AA_FSR
+        && state.RendererSettings.Upscaler == GothicRendererSettings::UPSCALER_FSR_3 ? 1.0f : 0.0f;
     auto advRainBuf = particleAdvanceVS->GetBuffer( "AdvanceRainConstantBuffer" );
     advRainBuf.Update( &acb ).Bind();
     advRainBuf.GetRawBuffer()->BindToPixelShader( 1 );
@@ -290,6 +292,10 @@ XRESULT D3D11Effect::DrawRain() {
     gcb.PGS_RainFxWeight = Engine::GAPI->GetRainFXWeight();
     gcb.PGS_RainHeight = state.RendererSettings.RainHeightRange;
     gcb.PGS_RainScale = isSnow ? snowScale : rainScale;
+    if ( !isSnow && acb.AR_Pad1.y > 0.5f ) {
+        gcb.PGS_RainScale.x *= 1.6f;
+        gcb.PGS_RainScale.y *= 1.1f;
+    }
 
     particleVS->GetBuffer( "ParticleGSInfo" ).Update( &gcb ).Bind();
 
@@ -399,6 +405,8 @@ XRESULT D3D11Effect::DrawRain_CS() {
     acb.AR_GlobalVelocity = velocity;
     acb.AR_MoveRainParticles = numParticles;
     acb.AR_Pad1.x = state.RendererSettings.EnableRain ? 1.0f : 0.0f;
+    acb.AR_Pad1.y = state.RendererSettings.AntiAliasingMode == GothicRendererSettings::AA_FSR
+        && state.RendererSettings.Upscaler == GothicRendererSettings::UPSCALER_FSR_3 ? 1.0f : 0.0f;
 
     advanceRainCS->GetBuffer( "AdvanceRainConstantBuffer" ).Update( &acb );
     advanceRainCS->GetBuffer( "AdvanceRainConstantBuffer" ).GetRawBuffer()->BindToPixelShader( 1 );
@@ -457,6 +465,10 @@ XRESULT D3D11Effect::DrawRain_CS() {
     gcb.PGS_RainFxWeight = Engine::GAPI->GetRainFXWeight();
     gcb.PGS_RainHeight = state.RendererSettings.RainHeightRange;
     gcb.PGS_RainScale = isSnow ? snowScale : rainScale;
+    if ( !isSnow && acb.AR_Pad1.y > 0.5f ) {
+        gcb.PGS_RainScale.x *= 1.6f;
+        gcb.PGS_RainScale.y *= 1.1f;
+    }
 
     particleVS->GetBuffer( "ParticleGSInfo" ).Update( &gcb ).Bind();
 

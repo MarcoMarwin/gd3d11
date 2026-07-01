@@ -624,6 +624,7 @@ struct GothicRendererSettings {
         SectionDrawRadius = 4;
 
         FpsLimit = 0;
+        FpsLimitLastEnabled = 60;
         DrawVOBs = true;
         DrawWorldMesh = 3;
         DrawSkeletalMeshes = true;
@@ -902,6 +903,7 @@ struct GothicRendererSettings {
 
     /** Rendering options */
     int FpsLimit;
+    int FpsLimitLastEnabled;
     bool DrawVOBs;
     bool DrawDynamicVOBs;
     int DrawWorldMesh;

@@ -17,30 +17,39 @@
 
 extern bool FeatureLevel10Compatibility;
 
-static bool HasCenteredNearbyNpc( D3D11GraphicsEngine* engine, float maxViewDistance, bool relaxedCenter ) {
-    if ( !engine || maxViewDistance <= 0.0f ) {
+static bool HasCenteredNearbyNpc( float maxViewDistance, bool relaxedCenter ) {
+    if ( maxViewDistance <= 0.0f ) {
         return false;
     }
 
     zCVob* player = Engine::GAPI->GetPlayerVob();
     zCWorld* playerWorld = player ? player->GetHomeWorld() : nullptr;
-    // The dedicated visible-NPC list is populated by Gothic only after the
-    // render graph has already executed. The cached skeletal list is built by
-    // the geometry pass before DoF and therefore represents this frame.
-    const auto& candidates = engine->GetFrameVisibleSkeletalVobs();
+    const auto& candidates = Engine::GAPI->GetSkeletalMeshVobs();
 
     XMFLOAT3 cameraPosition;
     XMStoreFloat3( &cameraPosition, Engine::GAPI->GetCameraPositionXM() );
-    const XMMATRIX rawView = Engine::GAPI->GetViewMatrixXM();
-    const XMMATRIX view = XMMatrixTranspose( rawView );
+    const XMMATRIX view = XMMatrixTranspose( Engine::GAPI->GetViewMatrixXM() );
     XMFLOAT4X4 projection = Engine::GAPI->GetProjectionMatrix();
     projection._13 = 0.0f;
     projection._23 = 0.0f;
     const XMMATRIX proj = XMMatrixTranspose( XMLoadFloat4x4( &projection ) );
     const XMMATRIX viewProjection = XMMatrixMultiply( view, proj );
 
-    const float horizontalLimit = relaxedCenter ? 0.24f : 0.16f;
-    const float verticalLimit = relaxedCenter ? 0.30f : 0.20f;
+    const float horizontalLimit = relaxedCenter ? 0.30f : 0.22f;
+    const float verticalLimit = relaxedCenter ? 0.34f : 0.26f;
+    auto isCentered = [&]( const XMFLOAT3& point ) {
+        const XMVECTOR clip = XMVector4Transform(
+            XMVectorSet( point.x, point.y, point.z, 1.0f ), viewProjection );
+        const float w = XMVectorGetW( clip );
+        if ( !std::isfinite( w ) || w <= 0.001f ) {
+            return false;
+        }
+        const float ndcX = XMVectorGetX( clip ) / w;
+        const float ndcY = XMVectorGetY( clip ) / w;
+        return std::isfinite( ndcX ) && std::isfinite( ndcY )
+            && std::abs( ndcX ) <= horizontalLimit
+            && std::abs( ndcY ) <= verticalLimit;
+    };
 
     for ( const SkeletalVobInfo* candidate : candidates ) {
         zCVob* npc = candidate ? candidate->Vob : nullptr;
@@ -50,26 +59,19 @@ static bool HasCenteredNearbyNpc( D3D11GraphicsEngine* engine, float maxViewDist
         }
 
         const zTBBox3D bounds = npc->GetBBox();
-        const XMFLOAT3 center(
-            (bounds.Min.x + bounds.Max.x) * 0.5f,
-            (bounds.Min.y + bounds.Max.y) * 0.5f,
-            (bounds.Min.z + bounds.Max.z) * 0.5f );
-        const XMVECTOR centerWorld = XMLoadFloat3( &center );
-
-
         const float dx = std::max( std::max( bounds.Min.x - cameraPosition.x, 0.0f ), cameraPosition.x - bounds.Max.x );
         const float dy = std::max( std::max( bounds.Min.y - cameraPosition.y, 0.0f ), cameraPosition.y - bounds.Max.y );
         const float dz = std::max( std::max( bounds.Min.z - cameraPosition.z, 0.0f ), cameraPosition.z - bounds.Max.z );
-        const float distanceToCamera = std::sqrt( dx * dx + dy * dy + dz * dz );
-        if ( distanceToCamera > maxViewDistance ) {
+        if ( std::sqrt( dx * dx + dy * dy + dz * dz ) > maxViewDistance ) {
             continue;
         }
 
-        XMFLOAT3 centerNdc;
-        XMStoreFloat3( &centerNdc, XMVector3TransformCoord( centerWorld, viewProjection ) );
-        if ( std::isfinite( centerNdc.x ) && std::isfinite( centerNdc.y )
-            && std::abs( centerNdc.x ) <= horizontalLimit
-            && std::abs( centerNdc.y ) <= verticalLimit ) {
+        const float centerX = (bounds.Min.x + bounds.Max.x) * 0.5f;
+        const float centerZ = (bounds.Min.z + bounds.Max.z) * 0.5f;
+        const float height = std::max( bounds.Max.y - bounds.Min.y, 1.0f );
+        const XMFLOAT3 torso( centerX, bounds.Min.y + height * 0.55f, centerZ );
+        const XMFLOAT3 head( centerX, bounds.Min.y + height * 0.82f, centerZ );
+        if ( isCentered( torso ) || isCentered( head ) ) {
             return true;
         }
     }
@@ -140,7 +142,6 @@ D3D11PFX_DepthOfField::D3D11PFX_DepthOfField( D3D11PfxRenderer* rnd )
 }
 
 void D3D11PFX_DepthOfField::UpdateAdaptiveFocus( float configuredNearDistance ) {
-    auto* engine = reinterpret_cast<D3D11GraphicsEngine*>(Engine::GraphicsEngine);
     const float deltaTime = std::clamp( Engine::GAPI->GetFrameTimeSec(), 0.0f, 0.1f );
     if ( deltaTime <= 0.0f ) {
         return;
@@ -148,11 +149,11 @@ void D3D11PFX_DepthOfField::UpdateAdaptiveFocus( float configuredNearDistance ) 
 
     const bool relaxedCenter = m_AutoFocusSuppressed || m_AutoFocusBlend < 0.999f;
     const bool characterCentered = HasCenteredNearbyNpc(
-        engine, std::max( configuredNearDistance, 0.0f ), relaxedCenter );
+        std::max( configuredNearDistance, 0.0f ), relaxedCenter );
 
     if ( characterCentered != m_AutoFocusSuppressed ) {
         m_AutoFocusHoldElapsed += deltaTime;
-        const float requiredHold = characterCentered ? 0.8f : 0.4f;
+        const float requiredHold = characterCentered ? 1.0f : 0.5f;
         if ( m_AutoFocusHoldElapsed >= requiredHold ) {
             m_AutoFocusSuppressed = characterCentered;
             m_AutoFocusHoldElapsed = 0.0f;
@@ -169,7 +170,7 @@ void D3D11PFX_DepthOfField::UpdateAdaptiveFocus( float configuredNearDistance ) 
         return;
     }
 
-    const float transitionDuration = m_AutoFocusSuppressed ? 1.5f : 1.8f;
+    const float transitionDuration = 2.0f;
     m_AutoFocusTransitionElapsed += deltaTime;
     const float transition = std::clamp( m_AutoFocusTransitionElapsed / transitionDuration, 0.0f, 1.0f );
     const float smoothTransition = transition * transition * (3.0f - 2.0f * transition);

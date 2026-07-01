@@ -41,18 +41,14 @@ static DirectionalLightState GetDirectionalLightState() {
     state.Direction = sky->GetMainLightDirection();
     state.Visibility = sky->GetMainLightVisibility();
 
-    if ( sky->IsMoonLightActive() ) {
-        // Night/Moonlight shadows: use a soft, cool blue illumination
-        // of low strength to cast subtle nightly shadows.
-        state.Color = float3( 0.045f, 0.065f, 0.12f );
-        state.Strength = 0.16f * (1.0f - rain);
-    } else {
-        state.Color = settings.SunLightColor;
-        state.Strength = Toolbox::lerp(
-            settings.SunLightStrength,
-            settings.RainSunLightStrength,
-            std::min( 1.0f, rain * 2.0f ) );
-    }
+    // Preserve the established sun/night base exactly. The moon direction and
+    // visibility drive its shadow map, while moon illumination stays additive
+    // in the lighting shaders and never replaces general night brightness.
+    state.Color = settings.SunLightColor;
+    state.Strength = Toolbox::lerp(
+        settings.SunLightStrength,
+        settings.RainSunLightStrength,
+        std::min( 1.0f, rain * 2.0f ) );
 
     return state;
 }

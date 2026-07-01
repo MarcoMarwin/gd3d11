@@ -5350,6 +5350,7 @@ XRESULT GothicAPI::SaveMenuSettings( const std::string& file ) {
 
     WritePrivateProfileStringA( "General", "EnableOcclusionCulling", std::to_string( s.EnableOcclusionCulling ).c_str(), ini.c_str() );
     WritePrivateProfileStringA( "General", "FpsLimit", std::to_string( s.FpsLimit ).c_str(), ini.c_str() );
+    WritePrivateProfileStringA( "General", "FpsLimitLastEnabled", std::to_string( s.FpsLimitLastEnabled ).c_str(), ini.c_str() );
     
     auto res = Engine::GraphicsEngine->GetBackbufferResolution();
     WritePrivateProfileStringA( "Display", "TextureQuality", std::to_string( s.textureMaxSize ).c_str(), ini.c_str() );
@@ -5496,6 +5497,13 @@ XRESULT GothicAPI::LoadMenuSettings( const std::string& file ) {
 
         s.EnableOcclusionCulling = GetPrivateProfileBoolA( "General", "EnableOcclusionCulling", ds.EnableOcclusionCulling, ini );
         s.FpsLimit = GetPrivateProfileIntA( "General", "FpsLimit", 0, ini.c_str() );
+        s.FpsLimitLastEnabled = std::clamp(
+            GetPrivateProfileIntA( "General", "FpsLimitLastEnabled",
+                s.FpsLimit > 0 ? s.FpsLimit : ds.FpsLimitLastEnabled, ini.c_str() ),
+            10, 300 );
+        if ( s.FpsLimit > 0 ) {
+            s.FpsLimitLastEnabled = std::clamp( s.FpsLimit, 10, 300 );
+        }
 
         // override INI settings with GMP minimum values.
         if ( GMPModeActive ) {
@@ -5627,6 +5635,9 @@ XRESULT GothicAPI::LoadMenuSettings( const std::string& file ) {
     // Override Settings from Commandline Parameters
     if ( Engine::GAPI->HasCommandlineParameter( "ZMAXFPS" ) ) {
         s.FpsLimit = std::stoi( zCOption::GetOptions()->ParameterValue( "ZMAXFPS" ) );
+        if ( s.FpsLimit > 0 ) {
+            s.FpsLimitLastEnabled = std::clamp( s.FpsLimit, 10, 300 );
+        }
         LogInfo() << "-> FpsLimit: " << s.FpsLimit;
     }
 
