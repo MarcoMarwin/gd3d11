@@ -3040,7 +3040,7 @@ void D3D11GraphicsEngine::DrawSkeletalMeshVobs(
                 Engine->UpdateRenderStates();
             }
         }
-    } skeletalShadowBias( this, graphicsState.RasterizerState, GetRenderingStage() == DES_SHADOWMAP );
+    } skeletalShadowBias( this, Engine::GAPI->GetRendererState().RasterizerState, GetRenderingStage() == DES_SHADOWMAP );
 
     const bool isZPrepass = GetRenderingStage() == DES_Z_PRE_PASS;
     const bool isMainStage = GetRenderingStage() == DES_MAIN;
