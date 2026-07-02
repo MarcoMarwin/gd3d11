@@ -1634,6 +1634,7 @@ XRESULT D3D11GraphicsEngine::OnBeginFrame() {
     const bool frameGenerationTimingActive = m_isWindowActive
         && !FeatureLevel10Compatibility
         && rendererState.RendererSettings.EnableFrameGeneration
+        && m_swapchainflip
         && rendererState.RendererSettings.AntiAliasingMode == GothicRendererSettings::AA_FSR
         && rendererState.RendererSettings.Upscaler == GothicRendererSettings::UPSCALER_FSR_3
         && !rendererState.RendererSettings.BinkVideoRunning
@@ -1930,6 +1931,7 @@ XRESULT D3D11GraphicsEngine::Present() {
         && m_isWindowActive
         && !FeatureLevel10Compatibility
         && settings.EnableFrameGeneration
+        && m_swapchainflip
         && settings.AntiAliasingMode == GothicRendererSettings::AA_FSR
         && settings.Upscaler == GothicRendererSettings::UPSCALER_FSR_3
         && !settings.BinkVideoRunning
@@ -3012,13 +3014,11 @@ void D3D11GraphicsEngine::DrawSkeletalMeshVobs(
         ~ScopedGraphicsSwitchRestore() { Value = Previous; }
     } graphicsSwitchRestore { graphicsState.FF_GSwitches, graphicsState.FF_GSwitches };
     const auto& rendererSettings = Engine::GAPI->GetRendererState().RendererSettings;
-    if ( isMainStage ) {
-        // Keep an actor marker in the G-buffer for actor-specific shadow filtering.
-        // FSR3 also consumes the same marker as its reactive mask when active.
+    if ( isMainStage
+        && rendererSettings.AntiAliasingMode == GothicRendererSettings::AA_FSR
+        && rendererSettings.Upscaler == GothicRendererSettings::UPSCALER_FSR_3 ) {
         graphicsState.FF_GSwitches |= GSWITCH_FSR3_REACTIVE;
-        if ( rendererSettings.AntiAliasingMode == GothicRendererSettings::AA_FSR
-            && rendererSettings.Upscaler == GothicRendererSettings::UPSCALER_FSR_3
-            && !Engine::GAPI->DialogFinished() ) {
+        if ( !Engine::GAPI->DialogFinished() ) {
             graphicsState.FF_GSwitches |= GSWITCH_FSR3_DIALOG_REACTIVE;
         }
     }
@@ -4176,7 +4176,7 @@ XRESULT D3D11GraphicsEngine::OnStartWorldRendering() {
 
     ActiveSceneRenderer->AddLightingPasses( graph, *this,
         colorResource, normalsResource, specularResource,
-        reactiveMaskResource, backBufferHandle, m_FrameLights );
+        backBufferHandle, m_FrameLights );
 
     // XeGTAO is composited before transparent alpha meshes so particles, fire and
     // other translucent effects are not darkened by opaque-world AO.
@@ -4809,6 +4809,7 @@ XRESULT D3D11GraphicsEngine::OnStartWorldRendering() {
         // Preserve the upscaled scene before Gothic draws HUD elements. The
         // FidelityFX frame interpolator uses this copy for optical flow.
         if ( rendererState.RendererSettings.EnableFrameGeneration
+            && m_swapchainflip
             && PfxRenderer
             && PfxRenderer->GetFSR3() ) {
             PfxRenderer->GetFSR3()->CaptureHUDLess( Backbuffer->GetShaderResView().Get() );
@@ -5189,7 +5190,7 @@ XRESULT D3D11GraphicsEngine::DrawWaterfallMask( ID3D11RenderTargetView* waterMas
     }
 
     for ( auto const& [meshKey, meshInfo] : FrameTransparencyMeshesWetSSRBlockers ) {
-        if ( meshKey.Material && meshKey.Material->GetAniTexture() ) {
+        if ( meshKey.Material && meshInfo ) {
             DrawVertexBufferIndexedUINT( nullptr, nullptr, meshInfo->Indices.size(),
                 meshInfo->BaseIndexLocation );
         }
@@ -5341,6 +5342,12 @@ XRESULT D3D11GraphicsEngine::DrawWorldMesh( bool noTextures ) {
                         continue;
                     }
 
+                    // Rain-ground SSR must never treat Minental ice as wet stone.
+                    // Collect every recognized ice mesh, independent of its alpha mode.
+                    if ( !isZPrepass && IsIceTexture( aniTex ) ) {
+                        wetSSRBlockerTransparencyMeshes.push_back( { transparencyMesh, distanceSq } );
+                    }
+
                     // Check for alphablending
                     if ( (worldMesh.first.Material->GetAlphaFunc() > zMAT_ALPHA_FUNC_NONE &&
                         worldMesh.first.Material->GetAlphaFunc() != zMAT_ALPHA_FUNC_TEST)
@@ -5348,9 +5355,6 @@ XRESULT D3D11GraphicsEngine::DrawWorldMesh( bool noTextures ) {
                         ) {
                         if ( !isZPrepass ) {
                             transparencyMeshes.push_back( { transparencyMesh, distanceSq } );
-                            if ( IsIceTexture( aniTex ) ) {
-                                wetSSRBlockerTransparencyMeshes.push_back( { transparencyMesh, distanceSq } );
-                            }
                         }
                         continue;
                     } else {

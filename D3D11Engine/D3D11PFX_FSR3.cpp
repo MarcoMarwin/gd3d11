@@ -224,16 +224,11 @@ bool D3D11PFX_FSR3::Init(
             device, maxOutputSize.x, maxOutputSize.y, DXGI_FORMAT_R8G8B8A8_UNORM,
             nullptr, DXGI_FORMAT_UNKNOWN, DXGI_FORMAT_UNKNOWN, 1, 1,
             D3D11_BIND_RENDER_TARGET | D3D11_BIND_SHADER_RESOURCE );
-        PresentColor = std::make_unique<RenderToTextureBuffer>(
-            device, maxOutputSize.x, maxOutputSize.y, DXGI_FORMAT_R8G8B8A8_UNORM,
-            nullptr, DXGI_FORMAT_UNKNOWN, DXGI_FORMAT_UNKNOWN, 1, 1,
-            D3D11_BIND_RENDER_TARGET | D3D11_BIND_SHADER_RESOURCE );
         InterpolatedOutput = std::make_unique<RenderToTextureBuffer>(
             device, maxOutputSize.x, maxOutputSize.y, DXGI_FORMAT_R8G8B8A8_UNORM,
             nullptr, DXGI_FORMAT_UNKNOWN, DXGI_FORMAT_UNKNOWN, 1, 1, bindFlags );
 
         if ( !HudlessColor->GetShaderResView()
-            || !PresentColor->GetShaderResView()
             || !InterpolatedOutput->GetShaderResView()
             || !InterpolatedOutput->GetUnorderedAccessView() ) {
             LogError() << "FSR3: Failed to create frame-generation color resources.";
@@ -242,7 +237,6 @@ bool D3D11PFX_FSR3::Init(
         }
 
         SetDebugName( HudlessColor->GetTexture().Get(), "FSR3 Frame Generation HUD-less Color" );
-        SetDebugName( PresentColor->GetTexture().Get(), "FSR3 Frame Generation Present Color" );
         SetDebugName( InterpolatedOutput->GetTexture().Get(), "FSR3 Frame Generation Output" );
     }
 
@@ -262,7 +256,6 @@ void D3D11PFX_FSR3::Destroy() {
     }
 
     HudlessColor.reset();
-    PresentColor.reset();
     InterpolatedOutput.reset();
 
     for ( int i = 0; i < BACKEND_COUNT; ++i ) {
@@ -306,6 +299,7 @@ XRESULT D3D11PFX_FSR3::Apply(
     auto& settings = Engine::GAPI->GetRendererState().RendererSettings;
     const bool rendererMenuActive = Engine::ImGuiHandle && Engine::ImGuiHandle->GetIsActive();
     const bool frameGenerationContextRequested = settings.EnableFrameGeneration
+        && settings.DisplayFlip
         && settings.AntiAliasingMode == GothicRendererSettings::AA_FSR
         && settings.Upscaler == GothicRendererSettings::UPSCALER_FSR_3
         && !FeatureLevel10Compatibility;
@@ -464,7 +458,6 @@ ID3D11ShaderResourceView* D3D11PFX_FSR3::GenerateInterpolatedFrame(
         || !FrameGenerationPrepared
         || !HudlessCaptured
         || !presentColor
-        || !PresentColor
         || !InterpolatedOutput ) {
         return nullptr;
     }
@@ -474,11 +467,6 @@ ID3D11ShaderResourceView* D3D11PFX_FSR3::GenerateInterpolatedFrame(
     auto* engine = static_cast<D3D11GraphicsEngine*>(Engine::GraphicsEngine);
     ID3D11DeviceContext* context = engine->GetContext().Get();
     UnbindFrameGenerationInputs( context );
-
-    Renderer->CopyTextureToRTV(
-        presentColor,
-        PresentColor->GetRenderTargetView(),
-        MaxOutputSize );
 
     if ( !FrameGenerationConfigured ) {
         FfxFrameGenerationConfig config = {};
@@ -512,8 +500,8 @@ ID3D11ShaderResourceView* D3D11PFX_FSR3::GenerateInterpolatedFrame(
 
     FfxFrameGenerationDispatchDescription dispatch = {};
     dispatch.commandList = ffxGetCommandListDX11( context );
-    dispatch.presentColor = WrapResource(
-        PresentColor->GetTexture().Get(),
+    dispatch.presentColor = WrapView(
+        presentColor,
         L"FSR3 Present Color" );
     dispatch.outputs[0] = WrapResource(
         InterpolatedOutput->GetTexture().Get(),

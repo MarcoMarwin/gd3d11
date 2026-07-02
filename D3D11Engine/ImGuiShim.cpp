@@ -720,6 +720,7 @@ namespace
     }
     bool FrameGenerationAvailable( const GothicRendererSettings& s ) {
         return !FeatureLevel10Compatibility
+            && s.DisplayFlip
             && s.AntiAliasingMode == GothicRendererSettings::E_AntiAliasingMode::AA_FSR
             && s.Upscaler == GothicRendererSettings::E_Upscaler::UPSCALER_FSR_3;
     }
@@ -730,10 +731,10 @@ namespace
         }
 
         // The centre position preserves Gothic's original camera projection.
-        // Only values deliberately chosen away from 90 degrees override it.
-        s.FOVHoriz = std::clamp( static_cast<float>( std::round( s.FOVHoriz / 5.0f ) * 5.0f ), 70.0f, 110.0f );
+        // 100 is an explicit sentinel; values away from it override only the horizontal angle.
+        s.FOVHoriz = std::clamp( static_cast<float>( std::round( s.FOVHoriz / 5.0f ) * 5.0f ), 70.0f, 120.0f );
         s.FOVVert = s.FOVHoriz;
-        s.ForceFOV = std::abs( s.FOVHoriz - 90.0f ) > 0.1f;
+        s.ForceFOV = std::abs( s.FOVHoriz - 100.0f ) > 0.1f;
     }
 }
 
@@ -959,25 +960,25 @@ void ImGuiShim::RenderSettingsWindow()
 
             ImGui::SetItemTooltip( "Selects fullscreen or windowed display mode." );
 
-            static constexpr std::array<float, 9> fieldOfViewLevels = {
-                70.0f, 75.0f, 80.0f, 85.0f, 90.0f, 95.0f, 100.0f, 105.0f, 110.0f
+            static constexpr std::array<float, 11> fieldOfViewLevels = {
+                70.0f, 75.0f, 80.0f, 85.0f, 90.0f, 95.0f, 100.0f, 105.0f, 110.0f, 115.0f, 120.0f
             };
             int fieldOfViewIndex = FindNearestStepIndex(
                 settings.FOVHoriz, fieldOfViewLevels.data(), static_cast<int>(fieldOfViewLevels.size()) );
             char fieldOfViewText[24] = {};
-            if ( fieldOfViewIndex == 4 ) {
+            if ( fieldOfViewIndex == 6 ) {
                 snprintf( fieldOfViewText, sizeof( fieldOfViewText ), "Original" );
             } else {
                 snprintf( fieldOfViewText, sizeof( fieldOfViewText ), "%.0f deg", fieldOfViewLevels[fieldOfViewIndex] );
             }
             ImText( "Field of View", buttonWidth ); ImGui::SameLine();
-            if ( SliderSteppedIndex( "##FieldOfView", &fieldOfViewIndex, 8, true, 4, fieldOfViewText ) ) {
+            if ( SliderSteppedIndex( "##FieldOfView", &fieldOfViewIndex, 10, true, 6, fieldOfViewText ) ) {
                 settings.FOVHoriz = fieldOfViewLevels[fieldOfViewIndex];
                 // Change only the horizontal viewing angle. Gothic's original
                 // vertical FOV controls the third-person camera composition.
-                settings.ForceFOV = fieldOfViewIndex != 4;
+                settings.ForceFOV = fieldOfViewIndex != 6;
             }
-            ImGui::SetItemTooltip( "Adjusts horizontal view width without moving the third-person camera." );
+            ImGui::SetItemTooltip( "100 (Original) leaves Gothics camera projection untouched; other values change only the horizontal view." );
 
             const static std::vector<std::pair<const char*, int>> shadowMapSizesMax = {
                 {"very low", 512},
@@ -1274,7 +1275,10 @@ void ImGuiShim::RenderSettingsWindow()
                 ImGui::BeginTooltip();
                 ImGui::TextUnformatted( "Generates intermediate frames for smoother motion. Requires FSR 3." );
                 if ( !frameGenerationAvailable ) {
-                    ImGui::TextUnformatted( "Select FSR 3 under Anti Aliasing to enable it." );
+                    if ( !settings.DisplayFlip )
+                        ImGui::TextUnformatted( "Select a Borderless/Low-latency/Windowed flip display mode first." );
+                    else
+                        ImGui::TextUnformatted( "Select FSR 3 under Anti Aliasing to enable it." );
                 } else if ( settings.EnableFrameGeneration ) {
                     auto* graphicsEngine = static_cast<D3D11GraphicsEngine*>( Engine::GraphicsEngine );
                     auto* fsr3 = graphicsEngine && graphicsEngine->GetPfxRenderer()

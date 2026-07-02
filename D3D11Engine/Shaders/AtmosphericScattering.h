@@ -117,6 +117,12 @@ float GetNightWeight()
 	return saturate((-AC_LightPos.y) * 10.0f);
 }
 
+float GetRainSkyVisibility()
+{
+	float rainOcclusion = smoothstep(0.05f, 0.65f, saturate(AC_RainFXWeight));
+	return 1.0f - rainOcclusion;
+}
+
 float GetNightDistanceFade(float3 worldPosition)
 {
 	float cameraDistance = length(worldPosition - AC_WorldCameraPos);
@@ -268,7 +274,8 @@ float3 ApplyAtmosphericScatteringSky(float3 worldPosition)
 	
 	// Finally, scale the Mie and Rayleigh colors and set up the varying variables for the pixel shader
 	float3 c0 = vFrontColor * (vInvWavelength * AC_KrESun);
-	float3 c1 = vFrontColor * AC_KmESun;	
+	// Rain clouds occlude only the concentrated Mie sun glow; the base sky transition stays intact.
+	float3 c1 = vFrontColor * AC_KmESun * GetRainSkyVisibility();
 	
 	
 	

@@ -76,7 +76,6 @@ private:
     void* ScratchMemory[3];
 
     std::unique_ptr<RenderToTextureBuffer> HudlessColor;
-    std::unique_ptr<RenderToTextureBuffer> PresentColor;
     std::unique_ptr<RenderToTextureBuffer> InterpolatedOutput;
 
     INT2 MaxInputSize;

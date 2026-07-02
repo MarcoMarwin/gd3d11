@@ -80,6 +80,7 @@ float4 PSMain( PS_INPUT Input ) : SV_TARGET
 	
 	clouds.rgb *= lerp(atmoColor, 1.0f, saturate(AC_LightPos.y));
 	night.rgb = lerp(0.0f, night, saturate(-AC_LightPos.y * 4)); // Make sure stars are only visible at night
+	night.rgb *= GetRainSkyVisibility(); // Dense rain clouds fully occlude stars.
 	
 	
 	atmoColor += ApplyMoonTexture(Input.vWorldPosition);

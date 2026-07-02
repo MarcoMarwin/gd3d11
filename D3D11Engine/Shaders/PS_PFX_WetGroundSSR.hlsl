@@ -120,8 +120,9 @@ float4 PSMain(PS_INPUT input) : SV_TARGET
     distortion += (TX_Distortion.SampleLevel(SS_Linear, wetUV * 0.63f + WG_Time * float2(-0.0035f, 0.0055f), 0).xy * 2.0f - 1.0f) * 0.5f;
     float rainRippleWeight = wetMask * saturate(WG_RainFXWeight) * smoothstep(0.05f, 0.45f, WG_Wetness);
     float2 rippleDistortion = CalculateRainRipples(wetUV, WG_Time) * rainRippleWeight;
-    float2 softenedRippleDistortion = float2(rippleDistortion.x * 0.25f, rippleDistortion.y);
-    float2 combinedDistortion = distortion + softenedRippleDistortion * 1.5f;
+    // Ground reflections should drift mainly with the rain direction, not sweep sideways.
+    float2 softenedRippleDistortion = float2(rippleDistortion.x * 0.12f, rippleDistortion.y);
+    float2 combinedDistortion = float2(distortion.x * 0.30f, distortion.y) + softenedRippleDistortion * 1.35f;
     float3 wetNormal = normalize(wsNormal + float3(combinedDistortion.x, 0.0f, combinedDistortion.y) * 0.10f);
 
     float3 viewRay = normalize(wsPosition - WG_CameraPosition);
@@ -167,7 +168,7 @@ float4 PSMain(PS_INPUT input) : SV_TARGET
     if (hitWeight <= 0.0f)
         return float4(sceneColor, 1.0f);
 
-    float2 reflectedUV = saturate(hitUV + float2(rippleDistortion.x * 0.00375f, rippleDistortion.y * 0.015f));
+    float2 reflectedUV = saturate(hitUV + float2(rippleDistortion.x * 0.0015f, rippleDistortion.y * 0.012f));
     float3 reflectedColor = SampleRoughReflection(reflectedUV, combinedDistortion);
     float reflectionLuma = dot(reflectedColor, float3(0.2126f, 0.7152f, 0.0722f));
     reflectedColor *= rcp(1.0f + max(0.0f, reflectionLuma - 1.0f) * 0.7f);
