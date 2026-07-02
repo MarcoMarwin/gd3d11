@@ -6337,7 +6337,7 @@ static void CollectLeafVobs(
                     vi->Vob = vob;
                     vi->IsPFXVobLight = PFXVobLight;
                     vi->IsDynamicVobLight = true;
-                    vi->AllowsPointlightShadows = AllowsPointlightShadowSource( vob );
+                    vi->AllowsPointlightShadows = Engine::GAPI->AllowsPointlightShadowSource( vob );
                     vi->IgnoreIndoorOutdoorLimit = true;
                     vi->UpdateShadows = !PFXVobLight && vi->AllowsPointlightShadows;
                     vit = VobLightMap.emplace( vob, vi ).first;
