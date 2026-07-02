@@ -1548,15 +1548,9 @@ void GothicAPI::DrawWorldMeshNaive() {
         if ( camera )
             camera->GetFOV( setfovH, setfovV );
 
-        const float nativeHorizontal = nativeFovValid ? nativeFovH : setfovH;
-        const float nativeVertical = nativeFovValid ? nativeFovV : setfovV;
-        const float zoomFactor = std::clamp( RendererState.RendererSettings.FOVHoriz / 100.0f, 0.70f, 1.20f );
-        const auto zoomFovAngle = [zoomFactor]( float nativeAngle ) {
-            const float halfAngle = XMConvertToRadians( std::clamp( nativeAngle, 1.0f, 179.0f ) ) * 0.5f;
-            return XMConvertToDegrees( 2.0f * std::atan( std::tan( halfAngle ) / zoomFactor ) );
-        };
-        const float targetFovH = zoomFovAngle( nativeHorizontal );
-        const float targetFovV = zoomFovAngle( nativeVertical );
+        const float aspectHeightOverWidth = Engine::GraphicsEngine->GetResolution().y / static_cast<float>(Engine::GraphicsEngine->GetResolution().x);
+        const float targetFovH = std::clamp( RendererState.RendererSettings.FOVHoriz, 1.0f, 179.0f );
+        const float targetFovV = aspectHeightOverWidth * std::clamp( RendererState.RendererSettings.FOVVert, 1.0f, 179.0f );
         if ( camera
             // FIXME: This is being reset after a dialog!
             && (camera != CurrentCamera || std::abs( setfovH - targetFovH ) > 0.001f || std::abs( setfovV - targetFovV ) > 0.001f) ) {
@@ -1565,9 +1559,8 @@ void GothicAPI::DrawWorldMeshNaive() {
                 setfovH = targetFovH;
                 setfovV = targetFovV;
 
-                // Scale both native viewing angles around the exact Gothic camera.
-                // This preserves the original third-person composition at 100,
-                // while values above 100 zoom in and values below 100 zoom out.
+                // Kirides-style Hor+ widescreen FOV: keep the vertical basis stable
+                // and widen/narrow the horizontal angle instead of zooming both axes.
                 camera->SetFOV( setfovH, setfovV );
                 camera->Activate();
 
@@ -5557,15 +5550,21 @@ XRESULT GothicAPI::LoadMenuSettings( const std::string& file ) {
         s.ResolutionScalePercent = std::clamp<int>( GetPrivateProfileIntA( "Display", "ResolutionScale", ds.ResolutionScalePercent, ini.c_str() ), 33, 200 );
         s.Upscaler = (GothicRendererSettings::E_Upscaler)std::clamp<int>( GetPrivateProfileIntA( "Display", "Upscaler", ds.Upscaler, ini.c_str() ), 0, GothicRendererSettings::E_Upscaler::_UPSCALER_NUM_MODES - 1 );
         s.EnableVSync = GetPrivateProfileBoolA( "Display", "VSync", ds.EnableVSync, ini );
-        s.EnableFrameGeneration = GetPrivateProfileBoolA( "Display", "FrameGeneration", ds.EnableFrameGeneration, ini );
+        s.EnableFrameGeneration = false; // Disabled for the current DX11/x86 path; the manual FG path serializes and causes heavy framedrops.
         // ForceFOV=false migrates older configurations to the explicit 100=Original sentinel.
+        // When forced, FOVHoriz is again a real horizontal angle; FOVVert keeps Kirides' 90-degree vertical basis.
         const bool configuredForceFov = GetPrivateProfileBoolA( "Display", "ForceFOV", false, ini );
-        const float configuredFov = std::clamp( static_cast<float>(GetPrivateProfileIntA( "Display", "FOVHoriz", 100, ini.c_str() )), 70.0f, 120.0f );
+        const float configuredFovH = std::clamp( static_cast<float>(GetPrivateProfileIntA( "Display", "FOVHoriz", 100, ini.c_str() )), 90.0f, 120.0f );
+        const float configuredFovV = std::clamp( static_cast<float>(GetPrivateProfileIntA( "Display", "FOVVert", 90, ini.c_str() )), 1.0f, 179.0f );
         s.FOVHoriz = configuredForceFov
-            ? static_cast<float>( std::round( configuredFov / 5.0f ) * 5.0f )
+            ? configuredFovH
             : 100.0f;
-        s.FOVVert = s.FOVHoriz;
+        s.FOVVert = configuredForceFov ? configuredFovV : 90.0f;
         s.ForceFOV = configuredForceFov && std::abs( s.FOVHoriz - 100.0f ) > 0.1f;
+        if ( !s.ForceFOV ) {
+            s.FOVHoriz = 100.0f;
+            s.FOVVert = 90.0f;
+        }
         s.GammaValue = GetPrivateProfileFloatA( "Display", "DisplayContrast", 1.0f, ini );
         s.BrightnessValue = GetPrivateProfileFloatA( "Display", "DisplayBrightness", 1.0f, ini );
         s.DisplayFlip = GetPrivateProfileBoolA( "Display", "DisplayFlip", ds.DisplayFlip, ini );

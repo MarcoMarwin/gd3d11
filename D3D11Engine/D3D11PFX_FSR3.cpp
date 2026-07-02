@@ -298,6 +298,7 @@ XRESULT D3D11PFX_FSR3::Apply(
 {
     auto& settings = Engine::GAPI->GetRendererState().RendererSettings;
     const bool rendererMenuActive = Engine::ImGuiHandle && Engine::ImGuiHandle->GetIsActive();
+    settings.EnableFrameGeneration = false; // Disabled for the current DX11/x86 path; see F11 tooltip.
     const bool frameGenerationContextRequested = settings.EnableFrameGeneration
         && settings.DisplayFlip
         && settings.AntiAliasingMode == GothicRendererSettings::AA_FSR

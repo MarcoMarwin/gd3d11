@@ -287,7 +287,8 @@ XRESULT GSky::RenderSky() {
     AtmosphereCB.AC_LightPos = LightDir;
     AtmosphereCB.AC_MoonPos = MoonDir;
     const float moonFade = std::clamp( MoonDir.y / 0.12f, 0.0f, 1.0f );
-    AtmosphereCB.AC_MoonVisibility = moonFade * moonFade * (3.0f - 2.0f * moonFade);
+    const float rainLightFade = 1.0f - std::clamp( Engine::GAPI->GetRainFXWeight() * 2.0f, 0.0f, 1.0f );
+    AtmosphereCB.AC_MoonVisibility = moonFade * moonFade * (3.0f - 2.0f * moonFade) * rainLightFade;
 
     XMVECTOR lightDirVec = XMVector3Normalize( XMLoadFloat3( &LightDir ) );
     const float lightDistance = std::max( 10000.0f, Engine::GAPI->GetFarPlane() );
@@ -432,7 +433,8 @@ XMFLOAT3 GSky::GetMainLightDirection() const {
 float GSky::GetMainLightVisibility() const {
     const XMFLOAT3 direction = GetMainLightDirection();
     const float fade = std::clamp( (direction.y - 0.015f) / 0.12f, 0.0f, 1.0f );
-    return fade * fade * (3.0f - 2.0f * fade);
+    const float rainLightFade = 1.0f - std::clamp( Engine::GAPI->GetRainFXWeight() * 2.0f, 0.0f, 1.0f );
+    return fade * fade * (3.0f - 2.0f * fade) * rainLightFade;
 }
 
 // The scale equation calculated by Vernier's Graphical Analysis

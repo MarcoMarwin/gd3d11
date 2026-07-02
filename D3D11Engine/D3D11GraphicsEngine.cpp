@@ -214,14 +214,53 @@ namespace
         return false;
     }
 
-    bool IsIceTexture( zCTexture* texture ) {
+    bool TextureNameStartsWithMarker( const std::string& name, const char* marker ) {
+        if ( !marker || !*marker ) {
+            return false;
+        }
+
+        size_t markerLen = 0;
+        while ( marker[markerLen] ) {
+            ++markerLen;
+        }
+        if ( name.size() < markerLen ) {
+            return false;
+        }
+
+        for ( size_t i = 0; i < markerLen; ++i ) {
+            char c = name[i];
+            if ( c >= 'a' && c <= 'z' ) {
+                c = static_cast<char>(c - 'a' + 'A');
+            }
+            if ( c != marker[i] ) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    bool IsIceRegionTexture( zCTexture* texture ) {
         if ( !texture ) {
             return false;
         }
 
         const std::string name = texture->GetNameWithoutExt();
-        return TextureNameContainsMarker( name, "ICE" )
-            || TextureNameContainsMarker( name, "EIS" );
+        return TextureNameStartsWithMarker( name, "ICEREGION" );
+    }
+
+    bool MeshUsesIceRegionTexture( const MeshKey& meshKey ) {
+        if ( IsIceRegionTexture( meshKey.Texture ) ) {
+            return true;
+        }
+        if ( meshKey.Material ) {
+            if ( IsIceRegionTexture( meshKey.Material->GetTexture() ) ) {
+                return true;
+            }
+            if ( IsIceRegionTexture( meshKey.Material->GetAniTexture() ) ) {
+                return true;
+            }
+        }
+        return false;
     }
 
     bool IsWaterTextureExcludedFromSSR( zCTexture* texture ) {
@@ -230,11 +269,10 @@ namespace
         }
 
         const std::string name = texture->GetNameWithoutExt();
-        return IsIceTexture( texture )
+        return IsIceRegionTexture( texture )
             || TextureNameContainsMarker( name, "WATERFALL" )
             || TextureNameContainsMarker( name, "WASSERFALL" );
     }
-
     bool EnsureStructuredMatrixBuffer(
         std::unique_ptr<D3D11VertexBuffer>& buffer,
         UINT matrixCount,
@@ -5396,9 +5434,10 @@ XRESULT D3D11GraphicsEngine::DrawWorldMesh( bool noTextures ) {
                         continue;
                     }
 
-                    // Rain-ground SSR must never treat Minental ice as wet stone.
-                    // Collect every recognized ice mesh, independent of its alpha mode.
-                    if ( !isZPrepass && IsIceTexture( aniTex ) ) {
+                    // Rain-ground SSR and rain particles must not affect the Minental IceRegion material set.
+                    // Check both the mesh texture and the material/animated texture because transition materials
+                    // can bind a non-IceRegion blend texture while the actual material still carries the IceRegion name.
+                    if ( !isZPrepass && MeshUsesIceRegionTexture( worldMesh.first ) ) {
                         wetSSRBlockerTransparencyMeshes.push_back( { transparencyMesh, distanceSq } );
                     }
 
@@ -5536,6 +5575,7 @@ XRESULT D3D11GraphicsEngine::DrawWorldMesh( bool noTextures ) {
     // Now draw the actual pixels
     const int previousWorldRainSwitches = Engine::GAPI->GetRendererState().GraphicsState.FF_GSwitches;
     zCTexture* bound = nullptr;
+    bool boundDisableRainEffects = false;
     if ( !meshList.empty() ) {
         ZoneScopedN( "DrawWorldMesh::OpaqueSubmission" );
         auto _scopeOpaqueSubmission = RecordGraphicsEvent( GE_NAME( "DrawWorldMesh::OpaqueSubmission" ) );
@@ -5551,9 +5591,9 @@ XRESULT D3D11GraphicsEngine::DrawWorldMesh( bool noTextures ) {
         for ( size_t i = 0; i < numMeshes; i++ ) {
             auto const& mesh = meshList[i];
 
-            if ( mesh.first.Texture != bound &&
+            const bool disableRainEffects = MeshUsesIceRegionTexture( mesh.first );
+            if ( (mesh.first.Texture != bound || disableRainEffects != boundDisableRainEffects) &&
                 Engine::GAPI->GetRendererState().RendererSettings.DrawWorldMesh > 1 ) {
-                const bool disableRainEffects = IsIceTexture( mesh.first.Texture );
                 const int switchesBeforeMaterial = Engine::GAPI->GetRendererState().GraphicsState.FF_GSwitches;
                 if ( disableRainEffects )
                     Engine::GAPI->GetRendererState().GraphicsState.FF_GSwitches |= GSWITCH_DISABLE_RAIN_EFFECTS;
@@ -5614,6 +5654,7 @@ XRESULT D3D11GraphicsEngine::DrawWorldMesh( bool noTextures ) {
                     lastMatCbAllocation = materialInfoBufferAllocation;
                 }
                 bound = mesh.first.Texture;
+                boundDisableRainEffects = disableRainEffects;
             }
 
             if ( Engine::GAPI->GetRendererState().RendererSettings.DrawWorldMesh > 2 ) {
@@ -5808,7 +5849,7 @@ void D3D11GraphicsEngine::DrawWaterSurfaces( ID3D11RenderTargetView* waterMaskRT
 
                 WaterMaterialInfoConstantBuffer wmcb = {};
                 wmcb.WM_DisableSSR = IsWaterTextureExcludedFromSSR( batch.texture ) ? 1.0f : 0.0f;
-                wmcb.WM_DisableRainEffects = IsIceTexture( batch.texture ) ? 1.0f : 0.0f;
+                wmcb.WM_DisableRainEffects = IsIceRegionTexture( batch.texture ) ? 1.0f : 0.0f;
                 ActivePS->GetBuffer( "WaterMaterialInfo" ).Update( &wmcb ).Bind();
 
                 DrawMultiIndexedInstancedIndirect( Context.Get(),
@@ -5824,7 +5865,7 @@ void D3D11GraphicsEngine::DrawWaterSurfaces( ID3D11RenderTargetView* waterMaskRT
 
                 WaterMaterialInfoConstantBuffer wmcb = {};
                 wmcb.WM_DisableSSR = IsWaterTextureExcludedFromSSR( batch.texture ) ? 1.0f : 0.0f;
-                wmcb.WM_DisableRainEffects = IsIceTexture( batch.texture ) ? 1.0f : 0.0f;
+                wmcb.WM_DisableRainEffects = IsIceRegionTexture( batch.texture ) ? 1.0f : 0.0f;
                 ActivePS->GetBuffer( "WaterMaterialInfo" ).Update( &wmcb ).Bind();
 
                 for ( unsigned int i = 0; i < batch.drawCount; i++ ) {

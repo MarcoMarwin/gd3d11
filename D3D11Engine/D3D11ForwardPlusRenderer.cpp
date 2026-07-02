@@ -243,7 +243,7 @@ void D3D11ForwardPlusRenderer::AddGeometryPasses(
             const bool fsr3Active = rendererSettings.AntiAliasingMode == GothicRendererSettings::AA_FSR3
                 || (rendererSettings.AntiAliasingMode == GothicRendererSettings::AA_FSR
                     && rendererSettings.Upscaler == GothicRendererSettings::UPSCALER_FSR_3);
-            const float skyTncValue = fsr3Active ? 0.35f : 0.f;
+            const float skyTncValue = fsr3Active ? 0.05f : 0.f;
             const float skyTransparencyAndComposition[] { skyTncValue, skyTncValue, skyTncValue, skyTncValue };
             if ( reactiveMask )
                 context->ClearRenderTargetView( reactiveMask->GetRenderTargetView().Get(), black );

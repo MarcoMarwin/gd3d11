@@ -719,10 +719,11 @@ namespace
             || (s.AntiAliasingMode == GothicRendererSettings::E_AntiAliasingMode::AA_FSR && IsFSRUpscaler( s.Upscaler ));
     }
     bool FrameGenerationAvailable( const GothicRendererSettings& s ) {
-        return !FeatureLevel10Compatibility
-            && s.DisplayFlip
-            && s.AntiAliasingMode == GothicRendererSettings::E_AntiAliasingMode::AA_FSR
-            && s.Upscaler == GothicRendererSettings::E_Upscaler::UPSCALER_FSR_3;
+        (void)s;
+        // Disabled for the current DX11/x86 path: without AMD's DX12/Vulkan proxy
+        // swapchain the optical-flow/interpolation workload is serialized on the
+        // immediate context and costs roughly one rendered frame per generated frame.
+        return false;
     }
     void FixupSettings( GothicRendererSettings& s ) {
         s.FixupUpscalingSettings();
@@ -730,12 +731,16 @@ namespace
             s.EnableFrameGeneration = false;
         }
 
-        // The slider is a zoom percentage around Gothic's native projection.
-        // 100 preserves both original camera angles exactly; higher values narrow
-        // the view and lower values widen it.
-        s.FOVHoriz = std::clamp( static_cast<float>( std::round( s.FOVHoriz / 5.0f ) * 5.0f ), 70.0f, 120.0f );
-        s.FOVVert = s.FOVHoriz;
-        s.ForceFOV = std::abs( s.FOVHoriz - 100.0f ) > 0.1f;
+        // 100 is the explicit "Original" sentinel and leaves Gothic's camera/FOV untouched.
+        // Other values are real horizontal FOV angles for Kirides-style Hor+ widescreen correction.
+        s.FOVHoriz = std::clamp( static_cast<float>( std::round( s.FOVHoriz / 5.0f ) * 5.0f ), 90.0f, 120.0f );
+        if ( std::abs( s.FOVHoriz - 100.0f ) <= 0.1f ) {
+            s.FOVHoriz = 100.0f;
+            s.ForceFOV = false;
+        } else {
+            s.ForceFOV = true;
+        }
+        s.FOVVert = 90.0f;
     }
 }
 
@@ -961,24 +966,24 @@ void ImGuiShim::RenderSettingsWindow()
 
             ImGui::SetItemTooltip( "Selects fullscreen or windowed display mode." );
 
-            static constexpr std::array<float, 11> fieldOfViewLevels = {
-                70.0f, 75.0f, 80.0f, 85.0f, 90.0f, 95.0f, 100.0f, 105.0f, 110.0f, 115.0f, 120.0f
+            static constexpr std::array<float, 7> fieldOfViewLevels = {
+                90.0f, 95.0f, 100.0f, 105.0f, 110.0f, 115.0f, 120.0f
             };
             int fieldOfViewIndex = FindNearestStepIndex(
                 settings.FOVHoriz, fieldOfViewLevels.data(), static_cast<int>(fieldOfViewLevels.size()) );
             char fieldOfViewText[24] = {};
-            if ( fieldOfViewIndex == 6 ) {
+            if ( fieldOfViewIndex == 2 ) {
                 snprintf( fieldOfViewText, sizeof( fieldOfViewText ), "Original" );
             } else {
-                snprintf( fieldOfViewText, sizeof( fieldOfViewText ), "%.0f %%", fieldOfViewLevels[fieldOfViewIndex] );
+                snprintf( fieldOfViewText, sizeof( fieldOfViewText ), "%.0f deg", fieldOfViewLevels[fieldOfViewIndex] );
             }
             ImText( "Field of View", buttonWidth ); ImGui::SameLine();
-            if ( SliderSteppedIndex( "##FieldOfView", &fieldOfViewIndex, 10, true, 6, fieldOfViewText ) ) {
+            if ( SliderSteppedIndex( "##FieldOfView", &fieldOfViewIndex, 6, true, 2, fieldOfViewText ) ) {
                 settings.FOVHoriz = fieldOfViewLevels[fieldOfViewIndex];
-                settings.FOVVert = settings.FOVHoriz;
-                settings.ForceFOV = fieldOfViewIndex != 6;
+                settings.FOVVert = 90.0f;
+                settings.ForceFOV = fieldOfViewIndex != 2;
             }
-            ImGui::SetItemTooltip( "100 (Original) preserves Gothics camera exactly. Higher percentages narrow both viewing angles; lower percentages widen them." );
+            ImGui::SetItemTooltip( "100 (Original) leaves Gothics camera untouched. Other values set a horizontal FOV angle; the vertical basis stays Kirides-style aspect-corrected, so widescreen gains side vision instead of zooming both axes." );
 
             const static std::vector<std::pair<const char*, int>> shadowMapSizesMax = {
                 {"very low", 512},
@@ -1284,10 +1289,8 @@ void ImGuiShim::RenderSettingsWindow()
                 ImGui::BeginTooltip();
                 ImGui::TextUnformatted( "Generates intermediate frames for smoother motion. Requires FSR 3." );
                 if ( !frameGenerationAvailable ) {
-                    if ( !settings.DisplayFlip )
-                        ImGui::TextUnformatted( "Select a Borderless/Low-latency/Windowed flip display mode first." );
-                    else
-                        ImGui::TextUnformatted( "Select FSR 3 under Anti Aliasing to enable it." );
+                    ImGui::TextUnformatted( "Disabled in the DX11 build: the current manual path serializes Optical Flow/Frame Interpolation and causes heavy framedrops." );
+                    ImGui::TextUnformatted( "A useful implementation needs AMD's proxy swapchain path or a rebuilt DX11 runtime with proper pacing." );
                 } else if ( settings.EnableFrameGeneration ) {
                     auto* graphicsEngine = static_cast<D3D11GraphicsEngine*>( Engine::GraphicsEngine );
                     auto* fsr3 = graphicsEngine && graphicsEngine->GetPfxRenderer()
