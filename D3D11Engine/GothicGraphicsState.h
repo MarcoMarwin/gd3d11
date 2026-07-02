@@ -510,14 +510,9 @@ struct GothicRendererSettings {
         _PLS_NUM_SETTINGS
     };
     enum E_HDRToneMap {
-        ToneMap_jafEq4,
-        Uncharted2Tonemap,
-        ACESFilmTonemap,
-        PerceptualQuantizerTonemap,
-        ToneMap_Simple,
-        ACESFittedTonemap,
-        LPMToneMap,
-        _HDRToneMap_Count,
+        // Preserve the established INI values while exposing only supported modes.
+        ToneMap_Simple = 4,
+        LPMToneMap = 6,
     };
     enum EWindQuality {
         WIND_QUALITY_NONE = 0,
@@ -678,7 +673,6 @@ struct GothicRendererSettings {
         EnableShadows = true;
         ThreadedShadowCulling = false;
         EnableVSync = true;
-        EnableFrameGeneration = false;
         DoZPrepass = false;
         SortRenderQueue = false;
         DrawThreaded = false;
@@ -841,7 +835,6 @@ struct GothicRendererSettings {
     bool EnableHDR;
     E_HDRToneMap HDRToneMap;
     bool EnableVSync;
-    bool EnableFrameGeneration;
     bool FastShadows;
     bool ReplaceSunDirection;
     bool AtmosphericScattering;
@@ -1054,8 +1047,6 @@ struct GothicRendererSettings {
             ResolutionScalePercent = SnapFSRResolutionScale( ResolutionScalePercent );
             return;
         }
-
-        EnableFrameGeneration = false;
         ResolutionScalePercent = std::clamp( ResolutionScalePercent, 100, 200 );
         Upscaler = E_Upscaler::UPSCALER_DEFAULT;
     }

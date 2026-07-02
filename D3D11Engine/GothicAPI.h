@@ -871,6 +871,9 @@ private:
     /** Cleans empty BSPNodes */
     void CleanBSPNodes();
 
+    bool HasNearbyFlameVisual( zCVobLight* light ) const;
+    bool AllowsPointlightShadowSource( zCVobLight* light ) const;
+
     /** Helper function for going through the bsp-tree */
     void BuildBspVobMapCacheHelper( zCBspBase* base );
     void BuildBspLeafLinearCache();

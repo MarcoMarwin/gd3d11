@@ -26,10 +26,7 @@
 /// Runtime FidelityFX Effect Components that compile and link to calling effect libraries
 /// 
 /// @ingroup ffxSDK
-#include <FidelityFX/host/ffx_fsr3.h>
 #include <FidelityFX/host/ffx_fsr3upscaler.h>
-#include <FidelityFX/host/ffx_frameinterpolation.h>
-#include <FidelityFX/host/ffx_opticalflow.h>
 #include <FidelityFX/host/ffx_spd.h>
 #include <FidelityFX/host/ffx_lpm.h>
 #include <FidelityFX/host/ffx_vrs.h>

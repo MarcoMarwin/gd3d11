@@ -281,9 +281,13 @@ void D3D11ShadowMap::RecreateShadowSampler() {
     // Create sampler
     D3D11_SAMPLER_DESC samplerDesc = {};
     samplerDesc.Filter = D3D11_FILTER_COMPARISON_MIN_MAG_MIP_LINEAR;
-    // Atlas path uses CLAMP to prevent seam bleeding at cascade boundaries.
-    // Texture array path uses WRAP for compatibility with previous behavior.
-    auto addressMode = m_useAtlas ? D3D11_TEXTURE_ADDRESS_CLAMP : D3D11_TEXTURE_ADDRESS_WRAP;
+    // Atlas cascades are packed sub-rects and therefore use CLAMP.
+    // Array cascades use a lit border so PCF taps cannot wrap to the opposite edge.
+    auto addressMode = m_useAtlas ? D3D11_TEXTURE_ADDRESS_CLAMP : D3D11_TEXTURE_ADDRESS_BORDER;
+    samplerDesc.BorderColor[0] = 1.0f;
+    samplerDesc.BorderColor[1] = 1.0f;
+    samplerDesc.BorderColor[2] = 1.0f;
+    samplerDesc.BorderColor[3] = 1.0f;
     samplerDesc.AddressU = addressMode;
     samplerDesc.AddressV = addressMode;
     samplerDesc.AddressW = addressMode;
@@ -977,7 +981,7 @@ XRESULT D3D11ShadowMap::DrawPointlightShadows( std::vector<VobLightInfo*>& light
         if ( !light->Vob->IsEnabled() || !light->VisibleInFrame ) {
             continue;
         }
-        if ( !light->HasRenderableParentVob ) {
+        if ( !light->AllowsPointlightShadows ) {
             light->UpdateShadows = false;
             if ( D3D11PointLight* pl = dynamic_cast<D3D11PointLight*>(light->LightShadowBuffers.get()) ) {
                 pl->ClearTiledSlot();
@@ -1368,6 +1372,7 @@ DS_ScreenQuadConstantBuffer D3D11ShadowMap::FillSunCSMConstantBuffer() const {
 
     DS_ScreenQuadConstantBuffer scb = {};
     scb.SQ_ProjParams = float4( 1.0f / proj._11, 1.0f / proj._22, proj._43, proj._33 );
+    scb.SQ_JitterOffset = float2( proj._13 * 0.5f, -proj._23 * 0.5f );
     XMStoreFloat4x4( &scb.SQ_InvView, XMMatrixInverse( nullptr, viewRaw ) );
     XMStoreFloat4x4( &scb.SQ_View, viewRaw );
 
@@ -1474,6 +1479,7 @@ XRESULT D3D11ShadowMap::DrawWorldLights()
     auto& proj = Engine::GAPI->GetProjectionMatrix();
     DS_ScreenQuadConstantBuffer scb = {};
     scb.SQ_ProjParams = float4( 1.0f / proj._11, 1.0f / proj._22, proj._43, proj._33 );
+    scb.SQ_JitterOffset = float2( proj._13 * 0.5f, -proj._23 * 0.5f );
     XMStoreFloat4x4( &scb.SQ_InvView, XMMatrixInverse( nullptr, viewRaw ) );
     XMStoreFloat4x4( &scb.SQ_View, viewRaw );
 

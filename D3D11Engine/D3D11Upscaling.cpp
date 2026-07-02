@@ -104,7 +104,6 @@ void D3D11Upscaling::UpdateUpscaling( D3D11GraphicsEngine& engine )
             settings.Upscaler = GothicRendererSettings::UPSCALER_DEFAULT;
             settings.ResolutionScalePercent = 100;
             settings.SharpenFactor = 0.2f;
-            settings.EnableFrameGeneration = false;
         }
         return;
     }

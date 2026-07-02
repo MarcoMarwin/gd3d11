@@ -445,7 +445,7 @@ void ImGuiShim::OnResize( INT2 newSize )
 {
     CurrentResolution = newSize;
     if ( SettingsVisible ) {
-        m_centerSettingsWindowNextFrame = true;
+        m_centerSettingsWindowFrames = 3;
     }
 
     std::vector<DisplayModeInfo> modes;
@@ -565,8 +565,6 @@ void ImText( const char* label, const ImVec2& size ) {
 void ApplyFeatureLevel10Downgrades(GothicRendererSettings& s) {
     // one 4k texture, 1/2 2k textures max.
     s.NumShadowCascades = std::min(s.NumShadowCascades, MAX_CSM_CASCADES);
-
-    s.EnableFrameGeneration = false;
     if ( s.AntiAliasingMode == GothicRendererSettings::AA_FSR
         && s.Upscaler == GothicRendererSettings::UPSCALER_FSR_3 ) {
         s.AntiAliasingMode = GothicRendererSettings::AA_SMAA;
@@ -596,7 +594,6 @@ void ApplyGraphicsPresets( GothicRendererSettings& s ) {
     s.EnableGodRays = true;
     s.EnableRain = true;
     s.LimitLightIntesity = true;
-    // Frame Generation is a personal experimental option and is not changed by presets.
 
     // Reset all visible effect strengths to their normalized UI defaults.
     s.AOStrength = 1.0f;
@@ -721,19 +718,8 @@ namespace
             || s.AntiAliasingMode == GothicRendererSettings::E_AntiAliasingMode::AA_FSR3
             || (s.AntiAliasingMode == GothicRendererSettings::E_AntiAliasingMode::AA_FSR && IsFSRUpscaler( s.Upscaler ));
     }
-    bool FrameGenerationAvailable( const GothicRendererSettings& s ) {
-        (void)s;
-        // Disabled for the current DX11/x86 path: without AMD's DX12/Vulkan proxy
-        // swapchain the optical-flow/interpolation workload is serialized on the
-        // immediate context and costs roughly one rendered frame per generated frame.
-        return false;
-    }
     void FixupSettings( GothicRendererSettings& s ) {
         s.FixupUpscalingSettings();
-        if ( !FrameGenerationAvailable( s ) ) {
-            s.EnableFrameGeneration = false;
-        }
-
         if ( s.HDRToneMap != GothicRendererSettings::E_HDRToneMap::ToneMap_Simple
             && s.HDRToneMap != GothicRendererSettings::E_HDRToneMap::LPMToneMap ) {
             s.HDRToneMap = GothicRendererSettings::E_HDRToneMap::ToneMap_Simple;
@@ -750,7 +736,7 @@ void ImGuiShim::BeginSettingsEdit() {
         return;
     }
 
-    m_centerSettingsWindowNextFrame = true;
+    m_centerSettingsWindowFrames = 3;
     m_settingsSnapshot = Engine::GAPI->GetRendererState().RendererSettings;
     m_settingsResolutionSnapshot = CurrentResolution;
     m_settingsEditActive = true;
@@ -827,15 +813,22 @@ void ImGuiShim::RenderSettingsWindow()
     ImGui::PushStyleVar( ImGuiStyleVar_FramePadding, scaledFramePadding );
     ImGui::PushStyleVar( ImGuiStyleVar_ItemSpacing, scaledItemSpacing );
     ImGui::SetNextWindowSizeConstraints( ImVec2( 0.0f, 0.0f ), maxSettingsWindowSize );
-    if ( m_centerSettingsWindowNextFrame ) {
+    const bool centerSettingsWindow = m_centerSettingsWindowFrames > 0;
+    if ( centerSettingsWindow ) {
         ImGui::SetNextWindowPos(
             ImVec2( windowSize.x / 2, windowSize.y / 2 ),
             ImGuiCond_Always,
             ImVec2( 0.5f, 0.5f ) );
-        m_centerSettingsWindowNextFrame = false;
     }
     if ( ImGui::Begin( settingsLabel, nullptr, ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoResize ) ) {
         ImGui::SetWindowFontScale( menuScale );
+        if ( centerSettingsWindow ) {
+            const ImVec2 actualWindowSize = ImGui::GetWindowSize();
+            ImGui::SetWindowPos( ImVec2(
+                std::round( (framebufferWidth - actualWindowSize.x) * 0.5f ),
+                std::round( (framebufferHeight - actualWindowSize.y) * 0.5f ) ),
+                ImGuiCond_Always );
+        }
         GothicRendererSettings& settings = Engine::GAPI->GetRendererState().RendererSettings;
         FixupSettings(settings);
 
@@ -1108,6 +1101,25 @@ void ImGuiShim::RenderSettingsWindow()
             ImText( "Brightness", buttonWidth ); ImGui::SameLine();
             SliderDisplayTuningStrength( "##Brightness", &settings.BrightnessValue );
             ImGui::SetItemTooltip( "Adjusts display brightness." );
+
+            ImText( "HDR", { buttonWidth.x - ImGui::GetFrameHeight() - style.ItemSpacing.x, buttonWidth.y } ); ImGui::SameLine();
+            ImGui::Checkbox( "##Enable HDR", &settings.EnableHDR );
+            ImGui::SetItemTooltip( "Enables HDR tone mapping." );
+            ImGui::SameLine();
+
+            static const std::vector<std::pair<const char*, GothicRendererSettings::E_HDRToneMap>> toneMappingModes = {
+                { "Legacy", GothicRendererSettings::E_HDRToneMap::ToneMap_Simple },
+                { "LPM", GothicRendererSettings::E_HDRToneMap::LPMToneMap },
+            };
+            ImGui::BeginDisabled( !settings.EnableHDR );
+            ImGui::SetNextItemWidth( standardComboWidth );
+            if ( ImComboBoxC( "##HDRToneMapping", toneMappingModes, &settings.HDRToneMap, [&shadersToReload] {
+                shadersToReload |= ShaderCategory::Tonemapping;
+            } ) ) {
+                ImGui::EndCombo();
+            }
+            ImGui::EndDisabled();
+            ImGui::SetItemTooltip( "Selects the HDR tone-mapping curve." );
             ImGui::PopItemWidth();
 
             ImGui::EndGroup();
@@ -1297,57 +1309,7 @@ void ImGuiShim::RenderSettingsWindow()
             ImText( "Occlusion Culling", { buttonWidth.x - ImGui::GetFrameHeight() - style.ItemSpacing.x, buttonWidth.y } ); ImGui::SameLine();
             ImGui::Checkbox( "##Enable Occlusion Culling", &settings.EnableOcclusionCulling );
             ImGui::SetItemTooltip( "Skips world geometry hidden behind other objects." );
-            const bool frameGenerationAvailable = FrameGenerationAvailable( settings );
-            ImText( "Frame Generation", { buttonWidth.x - ImGui::GetFrameHeight() - style.ItemSpacing.x, buttonWidth.y } ); ImGui::SameLine();
-            ImGui::BeginDisabled( !frameGenerationAvailable );
-            ImGui::Checkbox( "##Enable Frame Generation", &settings.EnableFrameGeneration );
-            ImGui::EndDisabled();
-            if ( ImGui::IsItemHovered( ImGuiHoveredFlags_AllowWhenDisabled ) ) {
-                ImGui::BeginTooltip();
-                ImGui::TextUnformatted( "Generates intermediate frames for smoother motion. Requires FSR 3." );
-                if ( !frameGenerationAvailable ) {
-                    ImGui::TextUnformatted( "Disabled in the DX11 build: the current manual path serializes Optical Flow/Frame Interpolation and causes heavy framedrops." );
-                    ImGui::TextUnformatted( "A useful implementation needs AMD's proxy swapchain path or a rebuilt DX11 runtime with proper pacing." );
-                } else if ( settings.EnableFrameGeneration ) {
-                    auto* graphicsEngine = static_cast<D3D11GraphicsEngine*>( Engine::GraphicsEngine );
-                    auto* fsr3 = graphicsEngine && graphicsEngine->GetPfxRenderer()
-                        ? graphicsEngine->GetPfxRenderer()->GetFSR3()
-                        : nullptr;
-                    if ( fsr3 ) {
-                        const auto& diagnostics = fsr3->GetFrameGenerationDiagnostics();
-                        ImGui::Separator();
-                        ImGui::Text( "Rendered: %.1f FPS", diagnostics.RenderedFps );
-                        ImGui::Text( "Prepared: %.1f FPS", diagnostics.PreparedFps );
-                        ImGui::Text( "Generated: %.1f FPS", diagnostics.GeneratedFps );
-                        ImGui::Text( "Presented: %.1f FPS", diagnostics.PresentedFps );
-                        ImGui::Text( "Resets: %llu   Errors: %llu",
-                            static_cast<unsigned long long>( diagnostics.TotalResets ),
-                            static_cast<unsigned long long>( diagnostics.TotalErrors ) );
-                        if ( diagnostics.RenderedFps > 0.0f && diagnostics.RenderedFps < 30.0f ) {
-                            ImGui::Separator();
-                            ImGui::TextUnformatted( "Warning: Below 30 rendered FPS, frame generation is diagnostic only." );
-                        }
-                    }
-                }
-                ImGui::EndTooltip();
-            }
-            ImText( "HDR", { buttonWidth.x - ImGui::GetFrameHeight() - style.ItemSpacing.x, buttonWidth.y } ); ImGui::SameLine();
-            ImGui::Checkbox( "##Enable HDR", &settings.EnableHDR );
-            ImGui::SetItemTooltip( "Enables high dynamic range rendering." );
 
-            static const std::vector<std::pair<const char*, GothicRendererSettings::E_HDRToneMap>> toneMappingModes = {
-                { "Legacy", GothicRendererSettings::E_HDRToneMap::ToneMap_Simple },
-                { "LPM", GothicRendererSettings::E_HDRToneMap::LPMToneMap },
-            };
-            ImText( "Tone Mapping", buttonWidth ); ImGui::SameLine();
-            ImGui::BeginDisabled( !settings.EnableHDR );
-            if ( ImComboBoxC( "##HDRToneMapping", toneMappingModes, &settings.HDRToneMap, [&shadersToReload] {
-                shadersToReload |= ShaderCategory::Tonemapping;
-            } ) ) {
-                ImGui::EndCombo();
-            }
-            ImGui::EndDisabled();
-            ImGui::SetItemTooltip( "Selects the HDR brightness curve." );
             ImGui::EndGroup();
         }
 
@@ -1395,6 +1357,9 @@ void ImGuiShim::RenderSettingsWindow()
     }
     ImGui::End();
     ImGui::PopStyleVar( 3 );
+    if ( m_centerSettingsWindowFrames > 0 ) {
+        --m_centerSettingsWindowFrames;
+    }
 
     if ( shadersToReload != ShaderCategory::None ) {
         Engine::GraphicsEngine->ReloadShaders( shadersToReload );

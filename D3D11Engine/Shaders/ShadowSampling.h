@@ -332,10 +332,12 @@ void GetCascadeUVAndBounds(float3 wsPosition, int cascadeIndex,
     vShadowSamplingPos = mul(float4(wsPosition, 1), viewProj);
     projectedTexCoords = vShadowSamplingPos.xy * float2(0.5f, -0.5f) + float2(0.5f, 0.5f);
     
-    // Check if within bounds (with margin for blend zone)
-    const float margin = 0.02f;
+    // Keep a small filter-safe XY inset. Z must also lie inside this cascade;
+    // otherwise selection falls through to a farther cascade instead of producing a dark band.
+    const float margin = 1.5f / SQ_ShadowmapSize;
     bool isInBounds = projectedTexCoords.x > margin && projectedTexCoords.x < (1.0f - margin) &&
-                      projectedTexCoords.y > margin && projectedTexCoords.y < (1.0f - margin);
+                      projectedTexCoords.y > margin && projectedTexCoords.y < (1.0f - margin) &&
+                      vShadowSamplingPos.z >= 0.0f && vShadowSamplingPos.z <= 1.0f;
     inBounds = isInBounds ? 1.0f : 0.0f;
     
     // Calculate blend factor based on distance to edge

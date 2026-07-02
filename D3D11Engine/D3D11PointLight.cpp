@@ -438,12 +438,6 @@ void D3D11PointLight::RenderFullCubemap() {
             CopyStaticAsideToActiveTarget();
         }
 
-        // Spacer II lightStatic lights keep static world/VOB shadows, but do not
-        // cast dynamic shadows from the player or other animated characters.
-        if ( LightInfo->Vob->IsStatic() ) {
-            return;
-        }
-
         RenderAnimatedShadowPass( *activeTarget, false );
         return;
     }
@@ -453,11 +447,8 @@ void D3D11PointLight::RenderFullCubemap() {
         wc = nullptr;
     }
 
-    const unsigned int casterMask = LightInfo->Vob->IsStatic()
-        ? SHADOW_CASTER_WORLD | SHADOW_CASTER_VOBS | SHADOW_CASTER_MOBS
-        : SHADOW_CASTER_ALL;
     engine->RenderShadowCube( LightInfo->Vob->GetPositionWorldXM(), LightInfo->Vob->GetLightRange(), *activeTarget,
-        nullptr, nullptr, false, LightInfo->IsIndoorVob, false, &VobCache, &SkeletalVobCache, wc, true, casterMask );
+        nullptr, nullptr, false, LightInfo->IsIndoorVob, false, &VobCache, &SkeletalVobCache, wc, true, SHADOW_CASTER_ALL );
 }
 
 bool D3D11PointLight::IsReady()

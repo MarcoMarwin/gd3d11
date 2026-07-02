@@ -63,5 +63,5 @@ private:
     bool m_settingsEditActive = false;
     GothicRendererSettings m_settingsSnapshot;
     INT2 m_settingsResolutionSnapshot = INT2( 0, 0 );
-    bool m_centerSettingsWindowNextFrame = true;
+    unsigned int m_centerSettingsWindowFrames = 3;
 };

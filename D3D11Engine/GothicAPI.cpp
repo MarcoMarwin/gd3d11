@@ -11,6 +11,7 @@
 #include "zCMaterial.h"
 #include "zCTexture.h"
 #include "zCVisual.h"
+#include "zCDecal.h"
 #include "zCVob.h"
 #include "zCClassDef.h"
 #include "zCProgMeshProto.h"
@@ -106,6 +107,24 @@ namespace {
         const std::string name = ToLowerMaterialName( texture->GetNameWithoutExt() );
         // FIRESMOKE+ADD is Gothic's LAVAFOG, not an emissive flame.
         return name.find( "firesmoke" ) == std::string::npos;
+    }
+
+    bool IsFlameVisualName( std::string name ) {
+        name = ToLowerMaterialName( std::move( name ) );
+        const bool flameMarker = name.find( "fire" ) != std::string::npos
+            || name.find( "flame" ) != std::string::npos
+            || name.find( "torch" ) != std::string::npos
+            || name.find( "candle" ) != std::string::npos
+            || name.find( "feuer" ) != std::string::npos
+            || name.find( "fackel" ) != std::string::npos
+            || name.find( "kerze" ) != std::string::npos;
+        if ( !flameMarker )
+            return false;
+
+        return name.find( "smoke" ) == std::string::npos
+            && name.find( "spark" ) == std::string::npos
+            && name.find( "water" ) == std::string::npos
+            && name.find( "magic" ) == std::string::npos;
     }
 
     void ApplyMaterialCompatibility( MaterialInfo::Buffer& buffer, int version ) {
@@ -4304,8 +4323,9 @@ void GothicAPI::CollectVisibleVobs(
                 vi->VisibleInFrame = true;
 
                 // Update the lights shadows if: Light is dynamic or full shadow-updates are set
-                if ( !vi->IsPFXVobLight && vi->HasRenderableParentVob ) {
-                    if ( RendererState.RendererSettings.EnablePointlightShadows >= GothicRendererSettings::PLS_UPDATE_DYNAMIC ) {
+                if ( !vi->IsPFXVobLight && vi->AllowsPointlightShadows ) {
+                    if ( RendererState.RendererSettings.EnablePointlightShadows >= GothicRendererSettings::PLS_FULL
+                        || (RendererState.RendererSettings.EnablePointlightShadows >= GothicRendererSettings::PLS_UPDATE_DYNAMIC && !vi->Vob->IsStatic()) ) {
                         // Now check for distances, etc
                         float lightCameraDist;
                         XMStoreFloat( &lightCameraDist, XMVector3Length( cameraPosition - vi->Vob->GetPositionWorldXM() ) );
@@ -4766,10 +4786,70 @@ static void CVVH_AddNotDrawnVobToList(
     }
 }
 
-static bool HasRenderableLightParent( zCVobLight* light ) {
-    if ( !light ) return false;
-    zCVob* parent = light->GetVobParent();
-    return parent && parent->GetVisual();
+bool GothicAPI::HasNearbyFlameVisual( zCVobLight* light ) const {
+    if ( !light )
+        return false;
+
+    constexpr float FLAME_LIGHT_LINK_RADIUS = 150.0f;
+    constexpr float FLAME_LIGHT_LINK_RADIUS_SQ = FLAME_LIGHT_LINK_RADIUS * FLAME_LIGHT_LINK_RADIUS;
+    const XMVECTOR lightPosition = light->GetPositionWorldXM();
+
+    auto isNearby = [&]( zCVob* flameVob ) {
+        if ( !flameVob || !flameVob->GetShowVisual() )
+            return false;
+        return XMVectorGetX( XMVector3LengthSq( flameVob->GetPositionWorldXM() - lightPosition ) ) <= FLAME_LIGHT_LINK_RADIUS_SQ;
+    };
+
+    for ( zCVob* particleVob : ParticleEffectVobs ) {
+        if ( !isNearby( particleVob ) )
+            continue;
+        zCVisual* visual = particleVob->GetVisual();
+        if ( !visual )
+            continue;
+        zCParticleFX* particle = reinterpret_cast<zCParticleFX*>(visual);
+        zCParticleEmitter* emitter = particle->GetEmitter();
+        if ( !emitter || emitter->GetVisAlphaFunc() != zRND_ALPHA_FUNC_ADD )
+            continue;
+
+        bool flameVisual = IsFlameVisualName( visual->GetObjectName() );
+        if ( zTParticle* firstParticle = particle->GetFirstParticle() ) {
+            if ( zCTexture* texture = emitter->GetVisTexture( firstParticle ) )
+                flameVisual = flameVisual || IsFlameVisualName( texture->GetNameWithoutExt() );
+        }
+        if ( flameVisual )
+            return true;
+    }
+
+    for ( zCVob* decalVob : DecalVobs ) {
+        if ( !isNearby( decalVob ) )
+            continue;
+        zCVisual* visual = decalVob->GetVisual();
+        if ( !visual )
+            continue;
+        zCDecal* decal = reinterpret_cast<zCDecal*>(visual);
+        DecalSettings* settings = decal->GetDecalSettings();
+        zCMaterial* material = settings ? settings->DecalMaterial : nullptr;
+        zCTexture* texture = material ? material->GetTexture() : nullptr;
+        if ( IsFlameVisualName( visual->GetObjectName() )
+            || (texture && IsFlameVisualName( texture->GetNameWithoutExt() )) )
+            return true;
+    }
+
+    return false;
+}
+
+bool GothicAPI::AllowsPointlightShadowSource( zCVobLight* light ) const {
+    if ( !light )
+        return false;
+
+    if ( zCVob* parent = light->GetVobParent() ) {
+        // Actor- and spell-attached lights are transient effects, not persistent world lamps.
+        if ( parent->As<oCNPC>() || parent->As<oCVisualFX>() )
+            return false;
+        return true;
+    }
+
+    return HasNearbyFlameVisual( light );
 }
 
 /** Helper function for going through the bsp-tree */
@@ -4844,11 +4924,13 @@ void GothicAPI::BuildBspVobMapCacheHelper( zCBspBase* base ) {
             if ( vit == VobLightMap.end() ) {
                 VobLightInfo* vi = new VobLightInfo;
                 vi->Vob = vob;
-                vi->HasRenderableParentVob = HasRenderableLightParent( vob );
+                vi->AllowsPointlightShadows = AllowsPointlightShadowSource( vob );
                 VobLightMap[vob] = vi;
 
-                if ( vi->HasRenderableParentVob
-                    && RendererState.RendererSettings.EnablePointlightShadows >= GothicRendererSettings::PLS_STATIC_ONLY ) {
+                float minDynamicUpdateLightRange = Engine::GAPI->GetRendererState().RendererSettings.MinLightShadowUpdateRange;
+                if ( vi->AllowsPointlightShadows
+                    && RendererState.RendererSettings.EnablePointlightShadows >= GothicRendererSettings::PLS_STATIC_ONLY
+                    && vi->Vob->GetLightRange() > minDynamicUpdateLightRange ) {
                     // Create shadowcubemap, if wanted
                     BaseShadowedPointLight* bpl;
                     Engine::GraphicsEngine->CreateShadowedPointLight( &bpl, vi );
@@ -5311,7 +5393,6 @@ XRESULT GothicAPI::SaveMenuSettings( const std::string& file ) {
     WritePrivateProfileStringA( "Display", "ResolutionScale", std::to_string( s.ResolutionScalePercent ).c_str(), ini.c_str() );
     WritePrivateProfileStringA( "Display", "Upscaler", std::to_string( static_cast<int>(s.Upscaler) ).c_str(), ini.c_str() );
     WritePrivateProfileStringA( "Display", "VSync", std::to_string( s.EnableVSync ? TRUE : FALSE ).c_str(), ini.c_str() );
-    WritePrivateProfileStringA( "Display", "FrameGeneration", std::to_string( s.EnableFrameGeneration ? TRUE : FALSE ).c_str(), ini.c_str() );
     WritePrivateProfileStringA( "Display", "ForceFOV", nullptr, ini.c_str() );
     WritePrivateProfileStringA( "Display", "FOVHoriz", nullptr, ini.c_str() );
     WritePrivateProfileStringA( "Display", "FOVVert", nullptr, ini.c_str() );
@@ -5391,11 +5472,10 @@ XRESULT GothicAPI::LoadMenuSettings( const std::string& file ) {
         s.FogRange = GetPrivateProfileFloatA( "General", "FogRange", ds.FogRange, ini.c_str() );
         s.AtmosphericScattering = GetPrivateProfileBoolA( "General", "AtmosphericScattering", ds.AtmosphericScattering, ini );
         s.EnableHDR = GetPrivateProfileBoolA( "General", "EnableHDR", ds.EnableHDR, ini );
-        s.HDRToneMap = GothicRendererSettings::E_HDRToneMap( std::clamp<int>( GetPrivateProfileIntA( "General", "HDRToneMap", ds.HDRToneMap, ini.c_str() ), 0, GothicRendererSettings::E_HDRToneMap::_HDRToneMap_Count - 1 ) );
-        if ( s.HDRToneMap != GothicRendererSettings::E_HDRToneMap::ToneMap_Simple
-            && s.HDRToneMap != GothicRendererSettings::E_HDRToneMap::LPMToneMap ) {
-            s.HDRToneMap = GothicRendererSettings::E_HDRToneMap::ToneMap_Simple;
-        }
+        const int savedHDRToneMap = GetPrivateProfileIntA( "General", "HDRToneMap", ds.HDRToneMap, ini.c_str() );
+        s.HDRToneMap = savedHDRToneMap == GothicRendererSettings::E_HDRToneMap::LPMToneMap
+            ? GothicRendererSettings::E_HDRToneMap::LPMToneMap
+            : GothicRendererSettings::E_HDRToneMap::ToneMap_Simple;
         s.EnableDebugLog = GetPrivateProfileBoolA( "General", "EnableDebugLog", ds.EnableDebugLog, ini );
         s.EnableAutoupdates = GetPrivateProfileBoolA( "General", "EnableAutoupdates", ds.EnableAutoupdates, ini );
         s.EnableGodRays = GetPrivateProfileBoolA( "General", "EnableGodRays", ds.EnableGodRays, ini );
@@ -5481,16 +5561,12 @@ XRESULT GothicAPI::LoadMenuSettings( const std::string& file ) {
         s.ResolutionScalePercent = std::clamp<int>( GetPrivateProfileIntA( "Display", "ResolutionScale", ds.ResolutionScalePercent, ini.c_str() ), 33, 200 );
         s.Upscaler = (GothicRendererSettings::E_Upscaler)std::clamp<int>( GetPrivateProfileIntA( "Display", "Upscaler", ds.Upscaler, ini.c_str() ), 0, GothicRendererSettings::E_Upscaler::_UPSCALER_NUM_MODES - 1 );
         s.EnableVSync = GetPrivateProfileBoolA( "Display", "VSync", ds.EnableVSync, ini );
-        s.EnableFrameGeneration = false; // Disabled for the current DX11/x86 path; the manual FG path serializes and causes heavy framedrops.
         s.ForceFOV = false;
         s.FOVHoriz = 100.0f;
         s.FOVVert = 100.0f;
         s.GammaValue = GetPrivateProfileFloatA( "Display", "DisplayContrast", 1.0f, ini );
         s.BrightnessValue = GetPrivateProfileFloatA( "Display", "DisplayBrightness", 1.0f, ini );
         s.DisplayFlip = GetPrivateProfileBoolA( "Display", "DisplayFlip", ds.DisplayFlip, ini );
-        // Manual DX11 frame generation needs a multi-buffer flip-model swapchain.
-        if ( !s.DisplayFlip )
-            s.EnableFrameGeneration = false;
         s.LowLatency = GetPrivateProfileBoolA( "Display", "LowLatency", ds.LowLatency, ini );
         s.HDR_Monitor = GetPrivateProfileBoolA( "Display", "HDR_Monitor", false, ini );
         s.StretchWindow = GetPrivateProfileBoolA( "Display", "StretchWindow", ds.StretchWindow, ini );
@@ -6261,13 +6337,13 @@ static void CollectLeafVobs(
                     vi->Vob = vob;
                     vi->IsPFXVobLight = PFXVobLight;
                     vi->IsDynamicVobLight = true;
-                    vi->HasRenderableParentVob = HasRenderableLightParent( vob );
+                    vi->AllowsPointlightShadows = AllowsPointlightShadowSource( vob );
                     vi->IgnoreIndoorOutdoorLimit = true;
-                    vi->UpdateShadows = !PFXVobLight && vi->HasRenderableParentVob;
+                    vi->UpdateShadows = !PFXVobLight && vi->AllowsPointlightShadows;
                     vit = VobLightMap.emplace( vob, vi ).first;
 
                     // Create shadow-buffers for these lights since it was dynamically added to the world
-                    if ( !vi->IsPFXVobLight && vi->HasRenderableParentVob && rendererSettings.EnablePointlightShadows >= GothicRendererSettings::PLS_STATIC_ONLY ) {
+                    if ( !vi->IsPFXVobLight && vi->AllowsPointlightShadows && rendererSettings.EnablePointlightShadows >= GothicRendererSettings::PLS_STATIC_ONLY ) {
                         BaseShadowedPointLight* bpl;
                         Engine::GraphicsEngine->CreateShadowedPointLight( &bpl, vi, true ); // Also flag as dynamic
                         vi->LightShadowBuffers.reset(bpl);

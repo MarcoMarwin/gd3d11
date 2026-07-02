@@ -266,7 +266,7 @@ XRESULT D3D11ShaderManager::Init() {
         .with_category(ShaderCategory::Tonemapping)
         .with_macros( []( std::vector<D3D_SHADER_MACRO>& list ) {
             const auto& s = Engine::GAPI->GetRendererState().RendererSettings;
-            list.push_back( { "USE_TONEMAP", sNums[std::clamp( size_t(s.HDRToneMap), size_t(0), std::size(sNums)-1)]});
+            list.push_back( { "USE_TONEMAP", s.HDRToneMap == GothicRendererSettings::E_HDRToneMap::LPMToneMap ? "1" : "0" } );
         } )  );
 
     Shaders.push_back( ShaderInfo::make<PShaderID::PS_PFX_GodRayMask>( "PS_PFX_GodRayMask.hlsl" ) );
@@ -287,7 +287,7 @@ XRESULT D3D11ShaderManager::Init() {
         .with_category(ShaderCategory::Tonemapping)
         .with_macros( []( std::vector<D3D_SHADER_MACRO>& list ) {
             const auto& s = Engine::GAPI->GetRendererState().RendererSettings;
-            list.push_back( { "USE_TONEMAP", sNums[std::clamp( size_t( s.HDRToneMap ), size_t( 0 ), std::size( sNums ) - 1 )] } );
+            list.push_back( { "USE_TONEMAP", s.HDRToneMap == GothicRendererSettings::E_HDRToneMap::LPMToneMap ? "1" : "0" } );
         } ) );
 
     Shaders.push_back( ShaderInfo::make<PShaderID::PS_AtmosphereGround>( "PS_AtmosphereGround.hlsl" )  );

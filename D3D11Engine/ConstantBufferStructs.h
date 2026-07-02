@@ -178,7 +178,7 @@ struct DS_ScreenQuadConstantBuffer {
     float SQ_ShadowSoftness;
     uint32_t SQ_FrameIndex;
     float SQ_LightSize;
-    float2 SQ_Pad;
+    float2 SQ_JitterOffset;
 
     // Shadow atlas: per-cascade UV rect (xy = offset, zw = scale)
     // Used when SHADOW_ATLAS is enabled (Feature Level 10 path)

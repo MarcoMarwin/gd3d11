@@ -57,7 +57,7 @@ cbuffer FP_ScreenQuadConstantBuffer : register( b4 )
     float SQ_ShadowSoftness;
     uint SQ_FrameIndex;
     float SQ_LightSize;
-    float2 SQ_Pad;
+    float2 SQ_JitterOffset; // Unused here; keeps CPU/shader layout parity.
     float4 SQ_CascadeAtlasRect[MAX_CSM_CASCADES];
 };
 

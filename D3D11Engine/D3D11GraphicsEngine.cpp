@@ -1629,23 +1629,9 @@ XRESULT D3D11GraphicsEngine::OnBeginFrame() {
 #ifdef BUILD_SPACER_NET
     rendererState.RendererSettings.EnableInactiveFpsLock = false;
 #endif //  BUILD_SPACERNET
-
-    const bool frameGenerationTimingActive = m_isWindowActive
-        && !FeatureLevel10Compatibility
-        && rendererState.RendererSettings.EnableFrameGeneration
-        && m_swapchainflip
-        && rendererState.RendererSettings.AntiAliasingMode == GothicRendererSettings::AA_FSR
-        && rendererState.RendererSettings.Upscaler == GothicRendererSettings::UPSCALER_FSR_3
-        && !rendererState.RendererSettings.BinkVideoRunning
-        && !Engine::GAPI->IsInSavingLoadingState()
-        && !Engine::GAPI->IsGamePaused();
-
     if ( !m_isWindowActive && rendererState.RendererSettings.EnableInactiveFpsLock ) {
         m_FrameLimiter->SetLimit( 20 );
         m_FrameLimiter->Start();
-    } else if ( frameGenerationTimingActive ) {
-        // Frame Generation paces both generated and rendered presents itself.
-        m_FrameLimiter->Reset();
     } else if ( !rendererState.RendererSettings.EnableVSync && rendererState.RendererSettings.FpsLimit != 0 ) {
         m_FrameLimiter->SetLimit( rendererState.RendererSettings.FpsLimit );
         m_FrameLimiter->Start();
@@ -1908,11 +1894,48 @@ XRESULT D3D11GraphicsEngine::Present() {
     ZoneScoped;
     const auto& settings = Engine::GAPI->GetRendererState().RendererSettings;
 
-    // Present and FidelityFX frame interpolation must stay on the main thread.
-    if ( Engine::GAPI->GetMainThreadID() != GetCurrentThreadId() ) {
-        if ( PfxRenderer && PfxRenderer->GetFSR3() ) {
-            PfxRenderer->GetFSR3()->ResetFrameGenerationHistory();
+    SetViewport( ViewportInfo( 0, 0, GetBackbufferResolution() ) );
+    SetDefaultStates();
+    UpdateRenderStates();
+
+    {
+        auto _ = RecordGraphicsEvent( GE_NAME( "Blit onto Swapchain" ) );
+        SetActivePixelShader( PShaderID::PS_PFX_GammaCorrectInv );
+        ActivePS->Apply();
+
+        GammaCorrectConstantBuffer gcb = {};
+        gcb.G_Gamma = Engine::GAPI->GetGammaValue();
+        gcb.G_Brightness = Engine::GAPI->GetBrightnessValue();
+        ActivePS->GetBuffer( "GammaCorrectConstantBuffer" ).Update( &gcb ).Bind();
+
+        PfxRenderer->CopyTextureToRTV( Backbuffer->GetShaderResView(), BackbufferRTV, {}, true );
+
+        static int show_velocity = 0;
+        if ( settings.DebugSettings.TAA.DisplayVelocity ) {
+            RenderVelocity( this, settings, BackbufferRTV );
+        } else if ( show_velocity == 2 && GetPfxRenderer()->GetTAAEffect() ) {
+            GetPfxRenderer()->CopyTextureToRTV(
+                GetPfxRenderer()->GetTAAEffect()->GetVelocityBufferSRV(),
+                BackbufferRTV,
+                GetBackbufferResolution() );
         }
+
+        GetContext()->OMSetRenderTargets( 1, BackbufferRTV.GetAddressOf(), nullptr );
+    }
+
+    if ( Engine::ImGuiHandle ) {
+        SetDefaultStates();
+        UpdateRenderStates();
+        if ( Engine::ImGuiHandle->Initiated ) {
+            Engine::ImGuiHandle->RenderLoop();
+        }
+    }
+
+    GetContext()->CopyResource(
+        DepthStencilBuffer->GetTexture().Get(),
+        DepthStencilBufferCopy->GetTexture().Get() );
+
+    if ( Engine::GAPI->GetMainThreadID() != GetCurrentThreadId() ) {
         GetContext()->Flush();
         PresentPending = false;
         return XR_SUCCESS;
@@ -1923,141 +1946,11 @@ XRESULT D3D11GraphicsEngine::Present() {
         vsync = false;
     }
 
-    const bool imguiActive = Engine::ImGuiHandle && Engine::ImGuiHandle->GetIsActive();
-
-    D3D11PFX_FSR3* fsr3 = PfxRenderer ? PfxRenderer->GetFSR3() : nullptr;
-    const bool frameGenerationActive = fsr3
-        && m_isWindowActive
-        && !FeatureLevel10Compatibility
-        && settings.EnableFrameGeneration
-        && m_swapchainflip
-        && settings.AntiAliasingMode == GothicRendererSettings::AA_FSR
-        && settings.Upscaler == GothicRendererSettings::UPSCALER_FSR_3
-        && !settings.BinkVideoRunning
-        && !Engine::GAPI->IsInSavingLoadingState()
-        && !Engine::GAPI->IsGamePaused()
-        && !imguiActive;
-
-    const UINT desiredMaximumFrameLatency = frameGenerationActive ? 2u : 1u;
-    if ( m_swapchainflip && SwapChain && m_ConfiguredMaximumFrameLatency != desiredMaximumFrameLatency ) {
-        wrl::ComPtr<IDXGISwapChain2> swapChain2;
-        if ( SUCCEEDED( SwapChain.As( &swapChain2 ) ) ) {
-            if ( SUCCEEDED( swapChain2->SetMaximumFrameLatency( desiredMaximumFrameLatency ) ) ) {
-                m_ConfiguredMaximumFrameLatency = desiredMaximumFrameLatency;
-            }
-        }
+    UINT presentFlags = 0u;
+    if ( m_flipWithTearing && !vsync ) {
+        presentFlags |= DXGI_PRESENT_ALLOW_TEARING;
     }
-
-    ID3D11ShaderResourceView* interpolatedFrame = nullptr;
-    if ( frameGenerationActive ) {
-        interpolatedFrame = fsr3->GenerateInterpolatedFrame( Backbuffer->GetShaderResView().Get() );
-    } else if ( fsr3 ) {
-        fsr3->ResetFrameGenerationHistory();
-    }
-
-    auto blitToSwapchain = [&]( ID3D11ShaderResourceView* source, bool renderDebugOverlay ) {
-        SetViewport( ViewportInfo( 0, 0, GetBackbufferResolution() ) );
-        SetDefaultStates();
-        UpdateRenderStates();
-
-        auto _ = RecordGraphicsEvent( GE_NAME( "Blit onto Swapchain" ) );
-        SetActivePixelShader( PShaderID::PS_PFX_GammaCorrectInv );
-        ActivePS->Apply();
-
-        GammaCorrectConstantBuffer gcb = {};
-        gcb.G_Gamma = Engine::GAPI->GetGammaValue();
-        gcb.G_Brightness = Engine::GAPI->GetBrightnessValue();
-        ActivePS->GetBuffer( "GammaCorrectConstantBuffer" ).Update( &gcb ).Bind();
-
-        PfxRenderer->CopyTextureToRTV( source, BackbufferRTV, {}, true );
-
-        if ( renderDebugOverlay ) {
-            static int show_velocity = 0;
-            if ( settings.DebugSettings.TAA.DisplayVelocity ) {
-                RenderVelocity( this, settings, BackbufferRTV );
-            } else if ( show_velocity == 2 && GetPfxRenderer()->GetTAAEffect() ) {
-                GetPfxRenderer()->CopyTextureToRTV(
-                    GetPfxRenderer()->GetTAAEffect()->GetVelocityBufferSRV(),
-                    BackbufferRTV,
-                    GetBackbufferResolution() );
-            }
-        }
-
-        GetContext()->OMSetRenderTargets( 1, BackbufferRTV.GetAddressOf(), nullptr );
-    };
-
-    auto presentSwapchain = [&]( bool generatedFrame ) -> HRESULT {
-        // A generated/real pair must share one presentation cadence. Waiting a
-        // full VSync interval on the real image after already queuing the generated
-        // image consumes two refresh intervals and halves Gothic's rendered FPS.
-        // Borderless mode remains synchronized by DWM; tearing is still forbidden
-        // below whenever the user enabled VSync.
-        const UINT syncInterval = ( vsync && !frameGenerationActive ) ? 1u : 0u;
-        HRESULT result = S_OK;
-        UINT presentFlags = 0u;
-        if ( m_flipWithTearing && !vsync && syncInterval == 0u ) {
-            presentFlags |= DXGI_PRESENT_ALLOW_TEARING;
-        }
-        // Never let the optional interpolated frame stall Gothic's real frame.
-        // A full DX12/Vulkan proxy swapchain schedules this asynchronously; the
-        // manual DX11 path must explicitly drop it when the queue is still busy.
-        if ( generatedFrame ) {
-            presentFlags |= DXGI_PRESENT_DO_NOT_WAIT;
-        }
-        result = SwapChain->Present( syncInterval, presentFlags );
-
-        if ( generatedFrame && FAILED( result ) ) {
-            // The generated frame is optional. A busy/unsupported non-blocking
-            // Present must never prevent the following real frame from showing.
-            if ( result != DXGI_ERROR_WAS_STILL_DRAWING && frameGenerationActive && fsr3 ) {
-                fsr3->NotifyPresent( true, false );
-            }
-            return S_OK;
-        }
-
-        if ( frameGenerationActive && fsr3 ) {
-            fsr3->NotifyPresent( generatedFrame, SUCCEEDED( result ) );
-        }
-
-        // The two FSR3 Present calls already provide DXGI pacing. Waiting on
-        // the frame-latency object after each one serializes both frames and
-        // cuts Gothic's rendered frame rate roughly in half a second time.
-        if ( result == S_OK && frameLatencyWaitableObject && !frameGenerationActive ) {
-            ZoneScopedN( "Present::frameLatencyWaitableObject" );
-            WaitForSingleObjectEx( frameLatencyWaitableObject, INFINITE, true );
-        }
-        return result;
-    };
-
-    HRESULT hr = S_OK;
-
-    // Generated frame first, then the current rendered frame. The generated
-    // frame already contains the stable Gothic HUD reconstructed by FSR3.
-    if ( interpolatedFrame ) {
-        blitToSwapchain( interpolatedFrame, false );
-        hr = presentSwapchain( true );
-    }
-
-    if ( SUCCEEDED( hr ) ) {
-        blitToSwapchain( Backbuffer->GetShaderResView().Get(), true );
-
-        // Dear ImGui is intentionally drawn only on the real frame. Frame
-        // generation is disabled while blocking renderer menus are open.
-        if ( Engine::ImGuiHandle ) {
-            SetDefaultStates();
-            UpdateRenderStates();
-            if ( Engine::ImGuiHandle->Initiated ) {
-                Engine::ImGuiHandle->RenderLoop();
-            }
-        }
-
-        hr = presentSwapchain( false );
-    }
-
-    // Restore the depth buffer from the copy.
-    GetContext()->CopyResource(
-        DepthStencilBuffer->GetTexture().Get(),
-        DepthStencilBufferCopy->GetTexture().Get() );
+    HRESULT hr = SwapChain->Present( vsync ? 1u : 0u, presentFlags );
 
     if ( hr == DXGI_ERROR_DEVICE_REMOVED ) {
         switch ( GetDevice()->GetDeviceRemovedReason() ) {
@@ -2087,12 +1980,17 @@ XRESULT D3D11GraphicsEngine::Present() {
         default:
             LogWarnBox() << "Device Removed! (Unknown reason)";
         }
+    } else if ( hr == S_OK && frameLatencyWaitableObject ) {
+        ZoneScopedN( "Present::frameLatencyWaitableObject" );
+        WaitForSingleObjectEx( frameLatencyWaitableObject, INFINITE, true );
     }
 
     PresentPending = false;
     TracyD3D11Collect( s_tracyD3D11Ctx );
+
     return XR_SUCCESS;
 }
+
 /** Called to set the current viewport */
 XRESULT D3D11GraphicsEngine::SetViewport( const ViewportInfo& viewportInfo ) {
     // Set the viewport
@@ -4080,7 +3978,6 @@ XRESULT D3D11GraphicsEngine::OnStartWorldRendering() {
         // Disable here what we can't draw in feature level 10 compatibility
         rendererState.RendererSettings.AoMode = AOMode::AO_NONE;
         rendererState.RendererSettings.AntiAliasingMode = GothicRendererSettings::E_AntiAliasingMode::AA_NONE;
-        rendererState.RendererSettings.EnableFrameGeneration = false;
     }
 
 #if BUILD_SPACER_NET
@@ -4917,16 +4814,6 @@ XRESULT D3D11GraphicsEngine::OnStartWorldRendering() {
             ID3D11ShaderResourceView* nullRainInputs[2] = {};
             GetContext()->PSSetShaderResources( 1, 2, nullRainInputs );
         }
-
-        // Preserve the upscaled scene before Gothic draws HUD elements. The
-        // FidelityFX frame interpolator uses this copy for optical flow.
-        if ( rendererState.RendererSettings.EnableFrameGeneration
-            && m_swapchainflip
-            && PfxRenderer
-            && PfxRenderer->GetFSR3() ) {
-            PfxRenderer->GetFSR3()->CaptureHUDLess( Backbuffer->GetShaderResView().Get() );
-        }
-
         GetContext()->ClearDepthStencilView( DepthStencilBuffer->GetDepthStencilView().Get(), D3D11_CLEAR_DEPTH, 0, 0 );
         GetContext()->ClearDepthStencilView( m_SwapchainDepthStencilBuffer->GetDepthStencilView().Get(), D3D11_CLEAR_DEPTH, 0, 0 );
         SetDefaultStates();
