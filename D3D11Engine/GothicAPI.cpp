@@ -1550,34 +1550,19 @@ void GothicAPI::DrawWorldMeshNaive() {
 
         const float nativeHorizontal = nativeFovValid ? nativeFovH : setfovH;
         const float nativeVertical = nativeFovValid ? nativeFovV : setfovV;
-        const float fovControl = std::clamp( RendererState.RendererSettings.FOVHoriz, 80.0f, 130.0f );
-        const INT2 outputResolution = Engine::GraphicsEngine->GetBackbufferResolution();
-        const float currentAspect = outputResolution.x
-            / static_cast<float>(std::max( outputResolution.y, 1 ));
-        constexpr float gothicReferenceAspect = 4.0f / 3.0f;
-        const float aspectWidthScale = std::max( currentAspect / gothicReferenceAspect, 0.01f );
-
-        // The slider changes the complete view angle in tangent space. Horizontal
-        // FOV additionally receives the smooth 4:3-to-current-aspect Hor+ correction.
-        const float overallFovScale = fovControl / 100.0f;
-        float aspectCorrectionScale = 1.0f;
-        if ( fovControl >= 100.0f ) {
-            // 100 is exact original. 101..120 blend continuously to the full Hor+
-            // correction for the active aspect ratio; 121..130 add optional extra width.
-            const float widescreenBlend = std::clamp( (fovControl - 100.0f) / 20.0f, 0.0f, 1.0f );
-            aspectCorrectionScale = 1.0f + (aspectWidthScale - 1.0f) * widescreenBlend;
-            if ( fovControl > 120.0f ) {
-                aspectCorrectionScale *= 1.0f + (fovControl - 120.0f) / 100.0f;
-            }
-        }
-
-        const auto scaleFovAngle = []( float nativeAngle, float tangentScale ) {
-            const float halfAngle = DirectX::XMConvertToRadians( std::clamp( nativeAngle, 1.0f, 179.0f ) ) * 0.5f;
-            return DirectX::XMConvertToDegrees( 2.0f * std::atan( std::tan( halfAngle ) * tangentScale ) );
+        const float fovControl = std::clamp( RendererState.RendererSettings.FOVHoriz, 100.0f, 130.0f );
+        const float wideAngleScale = fovControl / 100.0f;
+        const auto scaleFovAngle = [wideAngleScale]( float nativeAngle ) {
+            const float halfAngle = DirectX::XMConvertToRadians(
+                std::clamp( nativeAngle, 1.0f, 179.0f ) ) * 0.5f;
+            return DirectX::XMConvertToDegrees(
+                2.0f * std::atan( std::tan( halfAngle ) * wideAngleScale ) );
         };
-        const float targetFovH = scaleFovAngle(
-            nativeHorizontal, overallFovScale * aspectCorrectionScale );
-        const float targetFovV = scaleFovAngle( nativeVertical, overallFovScale );
+
+        // A real wide-angle change scales both projection tangents equally.
+        // This opens the lens without stretching either image axis.
+        const float targetFovH = scaleFovAngle( nativeHorizontal );
+        const float targetFovV = scaleFovAngle( nativeVertical );
         if ( camera
             // FIXME: This is being reset after a dialog!
             && (camera != CurrentCamera || std::abs( setfovH - targetFovH ) > 0.001f || std::abs( setfovV - targetFovV ) > 0.001f) ) {
@@ -1586,8 +1571,8 @@ void GothicAPI::DrawWorldMeshNaive() {
                 setfovH = targetFovH;
                 setfovV = targetFovV;
 
-                // Scale both native FOV axes continuously. The horizontal axis also
-                // carries the aspect-ratio correction; 100 never overrides Gothic.
+                // Scale both projection tangents equally for an undistorted wide-angle view;
+                // 100 never overrides Gothic.
                 camera->SetFOV( setfovH, setfovV );
                 camera->Activate();
 
@@ -3225,12 +3210,8 @@ void GothicAPI::DrawSkeletalMeshVob_Layered( SkeletalVobInfo * vi, float distanc
                     zCMorphMesh* mm = reinterpret_cast<zCMorphMesh*>( mvi->Visual );
                     // Only draw this as a morphmesh when rendering the main scene or when rendering as ghost
                     if ( g->GetRenderingStage() == DES_MAIN || g->GetRenderingStage() == DES_GHOST ) {
-                        if ( updateState ) {
-                            if ( mvi->LastAniUpdateFrame != now ) {
-                                mvi->LastAniUpdateFrame = now;
-                                mm->AdvanceAnis();
-                                mm->CalcVertexPositions();
-                            }
+                        if ( updateState && mvi->LastAniUpdateFrame != now ) {
+                            WorldConverter::UpdateMorphMeshVisual( mm, mvi );
                         }
                         DrawMorphMesh_Layered( mm, mvi->Meshes );
                         continue;
@@ -5578,11 +5559,11 @@ XRESULT GothicAPI::LoadMenuSettings( const std::string& file ) {
         s.Upscaler = (GothicRendererSettings::E_Upscaler)std::clamp<int>( GetPrivateProfileIntA( "Display", "Upscaler", ds.Upscaler, ini.c_str() ), 0, GothicRendererSettings::E_Upscaler::_UPSCALER_NUM_MODES - 1 );
         s.EnableVSync = GetPrivateProfileBoolA( "Display", "VSync", ds.EnableVSync, ini );
         s.EnableFrameGeneration = false; // Disabled for the current DX11/x86 path; the manual FG path serializes and causes heavy framedrops.
-        // FOVHoriz/FOVVert share one full-frustum percentage; 100 is untouched original.
+        // FOVHoriz controls one uniform wide-angle scale for both projection axes.
         const bool configuredForceFov = GetPrivateProfileBoolA( "Display", "ForceFOV", false, ini );
-        const float configuredFovScale = std::clamp( static_cast<float>(GetPrivateProfileIntA( "Display", "FOVHoriz", 100, ini.c_str() )), 80.0f, 130.0f );
+        const float configuredFovScale = std::clamp( static_cast<float>(GetPrivateProfileIntA( "Display", "FOVHoriz", 100, ini.c_str() )), 100.0f, 130.0f );
         s.FOVHoriz = configuredForceFov ? configuredFovScale : 100.0f;
-        s.FOVVert = s.FOVHoriz;
+        s.FOVVert = 100.0f;
         s.ForceFOV = configuredForceFov && std::abs( s.FOVHoriz - 100.0f ) > 0.1f;
         if ( !s.ForceFOV ) {
             s.FOVHoriz = 100.0f;
@@ -5865,23 +5846,8 @@ void GothicAPI::DrawMorphMesh_Layered( zCMorphMesh* msh, std::map<zCMaterial*, s
         return;
 
     D3D11GraphicsEngine* g = reinterpret_cast<D3D11GraphicsEngine*>(Engine::GraphicsEngine);
-    XMFLOAT3* posList = morphMesh->GetPositionList()->Array->toXMFLOAT3();
-    std::vector<ExVertexStruct> vertices;
     for ( int i = 0; i < morphMesh->GetNumSubmeshes(); i++ ) {
-
         zCSubMesh* s = morphMesh->GetSubmesh( i );
-        vertices.clear();
-        vertices.reserve( s->WedgeList.NumInArray );
-        for ( int v = 0; v < s->WedgeList.NumInArray; v++ ) {
-            zTPMWedge& wedge = s->WedgeList.Array[v];
-            vertices.emplace_back();
-            ExVertexStruct& vx = vertices.back();
-            vx.Position = posList[wedge.position];
-            vx.Normal = wedge.normal;
-            vx.TexCoord = wedge.texUV;
-            vx.Color = 0xFFFFFFFF;
-        }
-
         if ( zCTexture* texture = s->Material->GetAniTexture() ) {
             if ( !g->BindTextureNRFX( texture, (g->GetRenderingStage() == DES_MAIN) ) )
                 continue;
@@ -5890,8 +5856,8 @@ void GothicAPI::DrawMorphMesh_Layered( zCMorphMesh* msh, std::map<zCMaterial*, s
         for ( auto const& it : meshes ) {
             for ( MeshInfo* mi : it.second ) {
                 if ( mi->MeshIndex == i ) {
-                    mi->MeshVertexBuffer->UpdateBuffer( &vertices[0], vertices.size() * sizeof( ExVertexStruct ) );
-                    g->DrawVertexBufferInstancedIndexed( mi->MeshVertexBuffer, mi->MeshIndexBuffer, mi->Indices.size(), 6 );
+                    g->DrawVertexBufferInstancedIndexed(
+                        mi->MeshVertexBuffer, mi->MeshIndexBuffer, mi->Indices.size(), 6 );
                     goto Out_Of_Nested_Loop;
                 }
             }
@@ -5899,7 +5865,6 @@ void GothicAPI::DrawMorphMesh_Layered( zCMorphMesh* msh, std::map<zCMaterial*, s
         Out_Of_Nested_Loop:;
     }
 }
-
 /** Add particle effect */
 void GothicAPI::AddParticleEffect( zCVob* vob ) {
     if ( zCParticleFX* particle = reinterpret_cast<zCParticleFX*>(vob->GetVisual()) ) {

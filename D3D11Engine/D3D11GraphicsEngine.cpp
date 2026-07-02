@@ -3529,8 +3529,12 @@ void D3D11GraphicsEngine::DrawSkeletalMeshVobs(
                 const XMMATRIX curTransform = XMLoadFloat4x4( &transforms[i] );
                 XMFLOAT4X4 finalWorld; XMStoreFloat4x4( &finalWorld, world * curTransform );
 
+                XMMATRIX prevTransform = curTransform;
+                if ( vi->HasValidPrevTransforms && i < vi->PrevBoneTransforms.size() ) {
+                    prevTransform = XMLoadFloat4x4( &vi->PrevBoneTransforms[i] );
+                }
                 const XMMATRIX prevWorldXm = XMLoadFloat4x4( &prevWorld );
-                XMFLOAT4X4 finalPrevWorld; XMStoreFloat4x4( &finalPrevWorld, prevWorldXm * curTransform );
+                XMFLOAT4X4 finalPrevWorld; XMStoreFloat4x4( &finalPrevWorld, prevWorldXm * prevTransform );
 
                 for ( MeshVisualInfo* mvi : nodeAttachment->second ) {
 

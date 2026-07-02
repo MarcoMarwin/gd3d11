@@ -1370,6 +1370,20 @@ void WorldConverter::ExtractNodeVisual( int index, zCModelNodeInst* node, gtl::f
     }
 }
 
+/** Packs the previous-to-current local morph displacement into the otherwise unused vertex color. */
+static DWORD PackPreviousMorphDelta( const XMFLOAT3& currentPosition, const XMFLOAT3& previousPosition ) {
+    constexpr float morphDeltaRange = 16.0f;
+    const auto packComponent = [=]( float delta ) {
+        const float normalized = std::clamp( delta / morphDeltaRange, -1.0f, 1.0f );
+        return static_cast<DWORD>(std::lround( normalized * 127.0f + 128.0f ));
+    };
+
+    const DWORD x = packComponent( previousPosition.x - currentPosition.x );
+    const DWORD y = packComponent( previousPosition.y - currentPosition.y );
+    const DWORD z = packComponent( previousPosition.z - currentPosition.z );
+    return x | (y << 8) | (z << 16); // Alpha 0 marks valid morph history.
+}
+
 /** Updates a Morph-Mesh visual */
 void WorldConverter::UpdateMorphMeshVisual( void* v, MeshVisualInfo* meshInfo ) {
     ZoneScoped;
@@ -1378,9 +1392,13 @@ void WorldConverter::UpdateMorphMeshVisual( void* v, MeshVisualInfo* meshInfo ) 
     visual->GetTexAniState()->UpdateTexList(); // always update tex list, otherwise texture corrupt (very rarely).
 
     const auto now = Engine::GAPI->GetTotalTimeDW();
-    if ( meshInfo->LastAniUpdateFrame == now ) {
+    const auto previousUpdateTime = meshInfo->LastAniUpdateFrame;
+    if ( previousUpdateTime == now ) {
         return;
     }
+    const bool continuousMorphHistory = previousUpdateTime != 0
+        && now >= previousUpdateTime
+        && now - previousUpdateTime <= 250;
     meshInfo->LastAniUpdateFrame = now;
 
     visual->AdvanceAnis();
@@ -1392,32 +1410,50 @@ void WorldConverter::UpdateMorphMeshVisual( void* v, MeshVisualInfo* meshInfo ) 
 
     XMFLOAT3* posList = morphMesh->GetPositionList()->Array->toXMFLOAT3();
     for ( int i = 0; i < morphMesh->GetNumSubmeshes(); i++ ) {
-        std::vector<ExVertexStruct> vertices;
-
-        zCSubMesh* s = morphMesh->GetSubmesh( i );
-        vertices.reserve( s->WedgeList.NumInArray );
-        for ( int v = 0; v < s->WedgeList.NumInArray; v++ ) {
-            zTPMWedge& wedge = s->WedgeList.Array[v];
-            vertices.emplace_back();
-            ExVertexStruct& vx = vertices.back();
-            vx.Position = posList[wedge.position];
-            vx.Normal = wedge.normal;
-            vx.TexCoord = wedge.texUV;
-            vx.Color = 0xFFFFFFFF;
-        }
-
+        MeshInfo* targetMesh = nullptr;
         for ( auto const& it : meshInfo->Meshes ) {
             for ( MeshInfo* mi : it.second ) {
                 if ( mi->MeshIndex == i ) {
-                    mi->MeshVertexBuffer->UpdateBuffer( &vertices[0], vertices.size() * sizeof( ExVertexStruct ) );
-                    goto Out_Of_Nested_Loop;
+                    targetMesh = mi;
+                    break;
                 }
             }
+            if ( targetMesh )
+                break;
         }
-        Out_Of_Nested_Loop:;
+        if ( !targetMesh )
+            continue;
+
+        zCSubMesh* s = morphMesh->GetSubmesh( i );
+        std::vector<ExVertexStruct> vertices;
+        std::vector<XMFLOAT3> currentPositions;
+        vertices.reserve( s->WedgeList.NumInArray );
+        currentPositions.reserve( s->WedgeList.NumInArray );
+
+        const bool hasPreviousPositions = continuousMorphHistory
+            && targetMesh->PreviousMorphPositions.size()
+                == static_cast<size_t>(s->WedgeList.NumInArray);
+        for ( int vertexIndex = 0; vertexIndex < s->WedgeList.NumInArray; vertexIndex++ ) {
+            zTPMWedge& wedge = s->WedgeList.Array[vertexIndex];
+            const XMFLOAT3 currentPosition = posList[wedge.position];
+            const XMFLOAT3 previousPosition = hasPreviousPositions
+                ? targetMesh->PreviousMorphPositions[vertexIndex]
+                : currentPosition;
+
+            vertices.emplace_back();
+            ExVertexStruct& vx = vertices.back();
+            vx.Position = currentPosition;
+            vx.Normal = wedge.normal;
+            vx.TexCoord = wedge.texUV;
+            vx.Color = PackPreviousMorphDelta( currentPosition, previousPosition );
+            currentPositions.push_back( currentPosition );
+        }
+
+        targetMesh->MeshVertexBuffer->UpdateBuffer(
+            vertices.data(), vertices.size() * sizeof( ExVertexStruct ) );
+        targetMesh->PreviousMorphPositions = std::move( currentPositions );
     }
 }
-
 /** Extracts a 3DS-Mesh from a zCVisual */
 void WorldConverter::Extract3DSMeshFromVisual2( zCProgMeshProto* visual, MeshVisualInfo* meshInfo ) {
     ZoneScoped;

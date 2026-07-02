@@ -732,15 +732,15 @@ namespace
         }
 
         // 100 leaves Gothic's native camera/FOV untouched. Other values continuously
-        // scale both native FOV axes; horizontal FOV also receives Hor+ correction.
-        s.FOVHoriz = std::clamp( static_cast<float>( std::round( s.FOVHoriz ) ), 80.0f, 130.0f );
+        // widen both projection axes equally so the image proportions stay unchanged.
+        s.FOVHoriz = std::clamp( static_cast<float>( std::round( s.FOVHoriz ) ), 100.0f, 130.0f );
         if ( std::abs( s.FOVHoriz - 100.0f ) <= 0.5f ) {
             s.FOVHoriz = 100.0f;
             s.ForceFOV = false;
         } else {
             s.ForceFOV = true;
         }
-        s.FOVVert = s.FOVHoriz;
+        s.FOVVert = 100.0f;
     }
 }
 
@@ -825,14 +825,10 @@ void ImGuiShim::RenderSettingsWindow()
     ImGui::PushStyleVar( ImGuiStyleVar_FramePadding, scaledFramePadding );
     ImGui::PushStyleVar( ImGuiStyleVar_ItemSpacing, scaledItemSpacing );
     ImGui::SetNextWindowSizeConstraints( ImVec2( 0.0f, 0.0f ), maxSettingsWindowSize );
-    static INT2 lastCenteredResolution( 0, 0 );
-    const bool resolutionChanged = lastCenteredResolution.x != windowSize.x
-        || lastCenteredResolution.y != windowSize.y;
     ImGui::SetNextWindowPos(
         ImVec2( windowSize.x / 2, windowSize.y / 2 ),
-        resolutionChanged ? ImGuiCond_Always : ImGuiCond_Appearing,
+        ImGuiCond_Always,
         ImVec2( 0.5f, 0.5f ) );
-    lastCenteredResolution = windowSize;
     if ( ImGui::Begin( settingsLabel, nullptr, ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoResize ) ) {
         ImGui::SetWindowFontScale( menuScale );
         GothicRendererSettings& settings = Engine::GAPI->GetRendererState().RendererSettings;
@@ -1005,18 +1001,18 @@ void ImGuiShim::RenderSettingsWindow()
             float fieldOfViewPercent = settings.FOVHoriz;
             const char* fieldOfViewFormat = std::abs( fieldOfViewPercent - 100.0f ) <= 0.1f
                 ? "Original"
-                : (std::abs( fieldOfViewPercent - 120.0f ) <= 0.1f ? "Widescreen" : "%.0f %%");
+                : (std::abs( fieldOfViewPercent - 130.0f ) <= 0.1f ? "Wide angle" : "%.0f");
             ImText( "Field of View", buttonWidth ); ImGui::SameLine();
-            if ( ImGui::SliderFloat( "##FieldOfView", &fieldOfViewPercent, 80.0f, 130.0f,
+            if ( ImGui::SliderFloat( "##FieldOfView", &fieldOfViewPercent, 100.0f, 130.0f,
                 fieldOfViewFormat, ImGuiSliderFlags_::ImGuiSliderFlags_ClampOnInput ) ) {
                 fieldOfViewPercent = std::round( fieldOfViewPercent );
                 if ( std::abs( fieldOfViewPercent - 100.0f ) <= 0.5f )
                     fieldOfViewPercent = 100.0f;
                 settings.FOVHoriz = fieldOfViewPercent;
-                settings.FOVVert = fieldOfViewPercent;
+                settings.FOVVert = 100.0f;
                 settings.ForceFOV = std::abs( fieldOfViewPercent - 100.0f ) > 0.1f;
             }
-            ImGui::SetItemTooltip( "100 (Original) leaves Gothics camera and projection exactly untouched. Other values continuously scale vertical and horizontal FOV; horizontal FOV additionally blends to the correct Hor+ width for the current monitor aspect ratio up to 120. Values 121-130 add extra width." );
+            ImGui::SetItemTooltip( "Widens the camera view." );
 
             const static std::vector<std::pair<const char*, int>> shadowMapSizesMax = {
                 {"very low", 512},

@@ -712,7 +712,7 @@ struct GothicRendererSettings {
 
         EnableGodRays = true;
 
-        // 100 preserves Gothics native camera projection; other values scale both FOV axes with horizontal Hor+ correction.
+        // 100 preserves Gothics native camera projection; higher values widen both projection axes equally.
         FOVHoriz = 100.0f;
         FOVVert = 100.0f;
 

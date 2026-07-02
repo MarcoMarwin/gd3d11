@@ -47,6 +47,14 @@ VS_OUTPUT VSMain( VS_INPUT Input )
 	VS_OUTPUT Output;
 	
 	float3 localPos = (Input.vPosition + cbInstance.M_Fatness * Input.vNormal) * cbInstance.M_Scaling;
+	float3 previousLocalPos = localPos;
+	if (Input.vDiffuse.a < 0.5f)
+	{
+		// Morph meshes carry their previous local displacement in RGB8.
+		const float3 previousDelta = ((Input.vDiffuse.rgb * 255.0f - 128.0f) / 127.0f) * 16.0f;
+		previousLocalPos = (Input.vPosition + previousDelta + cbInstance.M_Fatness * Input.vNormal)
+			* cbInstance.M_Scaling;
+	}
 	float3 positionWorld = mul(float4(localPos, 1), cbInstance.M_World).xyz;
 	
 	//Output.vPosition = float4(Input.vPosition, 1);
@@ -60,7 +68,7 @@ VS_OUTPUT VSMain( VS_INPUT Input )
 	
 	// Motion Vectors - use UNJITTERED matrices for correct velocity
 	Output.vCurrClipPos = mul(float4(positionWorld, 1), frame.M_UnjitteredViewProj);
-	float3 prevPositionWorld = mul(float4(localPos, 1), cbInstance.M_PrevWorld).xyz;
+	float3 prevPositionWorld = mul(float4(previousLocalPos, 1), cbInstance.M_PrevWorld).xyz;
 	Output.vPrevClipPos = mul(float4(prevPositionWorld, 1), frame.M_PrevViewProj);
 	
 	return Output;

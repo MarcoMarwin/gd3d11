@@ -117,6 +117,7 @@ struct MeshInfo {
     D3D11VertexBuffer* MeshIndexBuffer;
     D3D11VertexBuffer* MeshShadowIndexBuffer;
     std::vector<ExVertexStruct> Vertices;
+    std::vector<XMFLOAT3> PreviousMorphPositions;
     std::vector<VERTEX_INDEX> Indices;
     std::vector<VERTEX_INDEX> ShadowIndices;
 
