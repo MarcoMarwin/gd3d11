@@ -27,9 +27,12 @@ Texture2D TX_Focus : register( t2 );   // 1x1 R32_FLOAT smoothed focus depth
 
 RWTexture2D<float4> OutputBlur : register( u0 ); // Half-res output
 
-float LinearizeDepth( float d )
+float CameraDistanceFromDepth( float d, float2 texcoord )
 {
-    return LinearizeDepthReverseZInfinite( d );
+    const float viewZ = LinearizeDepthReverseZInfinite( d );
+    const float2 ndc = texcoord * 2.0f - 1.0f;
+    const float2 viewXY = ndc * DoF_ProjParams.xy * viewZ;
+    return length( float3( viewXY, viewZ ) );
 }
 
 
@@ -83,7 +86,7 @@ void CSMain( uint3 DTid : SV_DispatchThreadID )
         return;
     }
 
-    float centerLinear = LinearizeDepth( centerDepth );
+    float centerLinear = CameraDistanceFromDepth( centerDepth, texcoord );
     float centerCoC = ComputeCoC( centerLinear, focusDepth, texcoord );
 
     // Early out: pass through sharp pixel
@@ -142,7 +145,7 @@ void CSMain( uint3 DTid : SV_DispatchThreadID )
         if ( IsSkyDepth( sampleDepth ) )
             continue;
 
-        float sampleLinear = LinearizeDepth( sampleDepth );
+        float sampleLinear = CameraDistanceFromDepth( sampleDepth, sampleUV );
         float sampleCoC = ComputeCoC( sampleLinear, focusDepth, sampleUV );
 
         float weight = ( sampleCoC >= length( offset ) * centerCoC ) ? 1.0 : sampleCoC;

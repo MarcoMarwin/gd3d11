@@ -1512,88 +1512,7 @@ void GothicAPI::DrawWorldMeshNaive() {
     if ( !zCCamera::GetCamera() || !oCGame::GetGame() )
         return;
 
-    static float setfovH = RendererState.RendererSettings.FOVHoriz;
-    static float setfovV = RendererState.RendererSettings.FOVVert;
-    static zCCamera* nativeFovCamera = nullptr;
-    static float nativeFovH = 90.0f;
-    static float nativeFovV = 90.0f;
-    static bool nativeFovValid = false;
-    static bool fovWasForced = false;
 
-/*
-#ifdef BUILD_GOTHIC_1_08k
-    if ( RendererState.RendererSettings.ForceFOV ) {
-        setfovH = RendererState.RendererSettings.FOVHoriz;
-        setfovV = RendererState.RendererSettings.FOVVert;
-
-        // Fix camera FOV-Bug
-        zCCamera::GetCamera()->SetFOV( RendererState.RendererSettings.FOVHoriz, (Engine::GraphicsEngine->GetResolution().y / static_cast<float>(Engine::GraphicsEngine->GetResolution().x)) * RendererState.RendererSettings.FOVVert );
-
-        CurrentCamera = zCCamera::GetCamera();
-    }
-#else
-*/
-#if defined(BUILD_GOTHIC_1_08k) || defined(BUILD_1_12F) || defined(BUILD_GOTHIC_2_6_fix)
-    zCCamera* camera = zCCamera::GetCamera();
-    if ( RendererState.RendererSettings.ForceFOV ) {
-        // Preserve the projection Gothic selected before the renderer overrides it.
-        // This must be captured only when entering forced-FOV mode; otherwise a
-        // subsequent slider step would accidentally store the previous override.
-        if ( camera && (!fovWasForced || nativeFovCamera != camera) ) {
-            camera->GetFOV( nativeFovH, nativeFovV );
-            nativeFovCamera = camera;
-            nativeFovValid = true;
-        }
-
-        if ( camera )
-            camera->GetFOV( setfovH, setfovV );
-
-        const float nativeHorizontal = nativeFovValid ? nativeFovH : setfovH;
-        const float nativeVertical = nativeFovValid ? nativeFovV : setfovV;
-        const float fovControl = std::clamp( RendererState.RendererSettings.FOVHoriz, 100.0f, 130.0f );
-        const float wideAngleScale = fovControl / 100.0f;
-        const auto scaleFovAngle = [wideAngleScale]( float nativeAngle ) {
-            const float halfAngle = DirectX::XMConvertToRadians(
-                std::clamp( nativeAngle, 1.0f, 179.0f ) ) * 0.5f;
-            return DirectX::XMConvertToDegrees(
-                2.0f * std::atan( std::tan( halfAngle ) * wideAngleScale ) );
-        };
-
-        // A real wide-angle change scales both projection tangents equally.
-        // This opens the lens without stretching either image axis.
-        const float targetFovH = scaleFovAngle( nativeHorizontal );
-        const float targetFovV = scaleFovAngle( nativeVertical );
-        if ( camera
-            // FIXME: This is being reset after a dialog!
-            && (camera != CurrentCamera || std::abs( setfovH - targetFovH ) > 0.001f || std::abs( setfovV - targetFovV ) > 0.001f) ) {
-            // if player is in a dialog state with a npc, we do not change FOV, or create an option for it in F11 menu
-            if ( DialogFinished() ) {
-                setfovH = targetFovH;
-                setfovV = targetFovV;
-
-                // Scale both projection tangents equally for an undistorted wide-angle view;
-                // 100 never overrides Gothic.
-                camera->SetFOV( setfovH, setfovV );
-                camera->Activate();
-
-                CurrentCamera = camera;
-            }
-        }
-        fovWasForced = true;
-    } else {
-        // Disabling ForceFOV alone leaves the last renderer projection installed.
-        // Restore the exact horizontal and vertical values Gothic used beforehand.
-        if ( fovWasForced && nativeFovValid && camera && camera == nativeFovCamera ) {
-            camera->SetFOV( nativeFovH, nativeFovV );
-            camera->Activate();
-            CurrentCamera = nullptr;
-        }
-        fovWasForced = false;
-        nativeFovValid = false;
-        nativeFovCamera = nullptr;
-    }
-#endif
-//#endif
 
     FrameParticleInfo.clear();
     FrameParticles.clear();
@@ -5393,9 +5312,9 @@ XRESULT GothicAPI::SaveMenuSettings( const std::string& file ) {
     WritePrivateProfileStringA( "Display", "Upscaler", std::to_string( static_cast<int>(s.Upscaler) ).c_str(), ini.c_str() );
     WritePrivateProfileStringA( "Display", "VSync", std::to_string( s.EnableVSync ? TRUE : FALSE ).c_str(), ini.c_str() );
     WritePrivateProfileStringA( "Display", "FrameGeneration", std::to_string( s.EnableFrameGeneration ? TRUE : FALSE ).c_str(), ini.c_str() );
-    WritePrivateProfileStringA( "Display", "ForceFOV", std::to_string( s.ForceFOV ? TRUE : FALSE ).c_str(), ini.c_str() );
-    WritePrivateProfileStringA( "Display", "FOVHoriz", std::to_string( static_cast<int>(s.FOVHoriz) ).c_str(), ini.c_str() );
-    WritePrivateProfileStringA( "Display", "FOVVert", std::to_string( static_cast<int>(s.FOVVert) ).c_str(), ini.c_str() );
+    WritePrivateProfileStringA( "Display", "ForceFOV", nullptr, ini.c_str() );
+    WritePrivateProfileStringA( "Display", "FOVHoriz", nullptr, ini.c_str() );
+    WritePrivateProfileStringA( "Display", "FOVVert", nullptr, ini.c_str() );
     WritePrivateProfileStringA( "Display", "DisplayContrast", std::to_string( s.GammaValue ).c_str(), ini.c_str() );
     WritePrivateProfileStringA( "Display", "DisplayBrightness", std::to_string( s.BrightnessValue ).c_str(), ini.c_str() );
     WritePrivateProfileStringA( "Display", "DisplayFlip", std::to_string( s.DisplayFlip ? TRUE : FALSE ).c_str(), ini.c_str() );
@@ -5472,7 +5391,11 @@ XRESULT GothicAPI::LoadMenuSettings( const std::string& file ) {
         s.FogRange = GetPrivateProfileFloatA( "General", "FogRange", ds.FogRange, ini.c_str() );
         s.AtmosphericScattering = GetPrivateProfileBoolA( "General", "AtmosphericScattering", ds.AtmosphericScattering, ini );
         s.EnableHDR = GetPrivateProfileBoolA( "General", "EnableHDR", ds.EnableHDR, ini );
-        s.HDRToneMap = GothicRendererSettings::E_HDRToneMap( GetPrivateProfileIntA( "General", "HDRToneMap", ds.HDRToneMap, ini.c_str() ) );
+        s.HDRToneMap = GothicRendererSettings::E_HDRToneMap( std::clamp<int>( GetPrivateProfileIntA( "General", "HDRToneMap", ds.HDRToneMap, ini.c_str() ), 0, GothicRendererSettings::E_HDRToneMap::_HDRToneMap_Count - 1 ) );
+        if ( s.HDRToneMap != GothicRendererSettings::E_HDRToneMap::ToneMap_Simple
+            && s.HDRToneMap != GothicRendererSettings::E_HDRToneMap::LPMToneMap ) {
+            s.HDRToneMap = GothicRendererSettings::E_HDRToneMap::ToneMap_Simple;
+        }
         s.EnableDebugLog = GetPrivateProfileBoolA( "General", "EnableDebugLog", ds.EnableDebugLog, ini );
         s.EnableAutoupdates = GetPrivateProfileBoolA( "General", "EnableAutoupdates", ds.EnableAutoupdates, ini );
         s.EnableGodRays = GetPrivateProfileBoolA( "General", "EnableGodRays", ds.EnableGodRays, ini );
@@ -5559,15 +5482,9 @@ XRESULT GothicAPI::LoadMenuSettings( const std::string& file ) {
         s.Upscaler = (GothicRendererSettings::E_Upscaler)std::clamp<int>( GetPrivateProfileIntA( "Display", "Upscaler", ds.Upscaler, ini.c_str() ), 0, GothicRendererSettings::E_Upscaler::_UPSCALER_NUM_MODES - 1 );
         s.EnableVSync = GetPrivateProfileBoolA( "Display", "VSync", ds.EnableVSync, ini );
         s.EnableFrameGeneration = false; // Disabled for the current DX11/x86 path; the manual FG path serializes and causes heavy framedrops.
-        // FOVHoriz controls one uniform wide-angle scale for both projection axes.
-        const bool configuredForceFov = GetPrivateProfileBoolA( "Display", "ForceFOV", false, ini );
-        const float configuredFovScale = std::clamp( static_cast<float>(GetPrivateProfileIntA( "Display", "FOVHoriz", 100, ini.c_str() )), 100.0f, 130.0f );
-        s.FOVHoriz = configuredForceFov ? configuredFovScale : 100.0f;
+        s.ForceFOV = false;
+        s.FOVHoriz = 100.0f;
         s.FOVVert = 100.0f;
-        s.ForceFOV = configuredForceFov && std::abs( s.FOVHoriz - 100.0f ) > 0.1f;
-        if ( !s.ForceFOV ) {
-            s.FOVHoriz = 100.0f;
-        }
         s.GammaValue = GetPrivateProfileFloatA( "Display", "DisplayContrast", 1.0f, ini );
         s.BrightnessValue = GetPrivateProfileFloatA( "Display", "DisplayBrightness", 1.0f, ini );
         s.DisplayFlip = GetPrivateProfileBoolA( "Display", "DisplayFlip", ds.DisplayFlip, ini );

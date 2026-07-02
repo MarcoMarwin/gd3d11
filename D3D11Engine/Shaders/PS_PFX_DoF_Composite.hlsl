@@ -33,9 +33,12 @@ struct PS_INPUT
     float4 vPosition : SV_POSITION;
 };
 
-float LinearizeDepth( float d )
+float CameraDistanceFromDepth( float d, float2 texcoord )
 {
-    return LinearizeDepthReverseZInfinite( d );
+    const float viewZ = LinearizeDepthReverseZInfinite( d );
+    const float2 ndc = texcoord * 2.0f - 1.0f;
+    const float2 viewXY = ndc * DoF_ProjParams.xy * viewZ;
+    return length( float3( viewXY, viewZ ) );
 }
 
 bool IsSkyDepth( float d )
@@ -51,12 +54,12 @@ float ComputeNearCoCFromLinearDepth( float linearDepth )
     return saturate( ( DoF_NearBlurDistance - nearDepth ) / nearRange ) * DoF_NearBlurStrength;
 }
 
-float ComputeNearCoCFromDepth( float d )
+float ComputeNearCoCFromDepth( float d, float2 texcoord )
 {
     if ( IsSkyDepth( d ) )
         return 0.0f;
 
-    return ComputeNearCoCFromLinearDepth( LinearizeDepth( d ) );
+    return ComputeNearCoCFromLinearDepth( CameraDistanceFromDepth( d, texcoord ) );
 }
 
 float ComputeCoCFromDepth( float d, float focusDepth, float2 texcoord )
@@ -64,7 +67,7 @@ float ComputeCoCFromDepth( float d, float focusDepth, float2 texcoord )
     if ( IsSkyDepth( d ) )
         return 0.0f;
 
-    const float linearDepth = LinearizeDepth( d );
+    const float linearDepth = CameraDistanceFromDepth( d, texcoord );
     const float farCoC = saturate( ( linearDepth - focusDepth ) / DoF_FocusRange );
     const float nearCoC = ComputeNearCoCFromLinearDepth( linearDepth );
     return max( farCoC, nearCoC );
@@ -136,11 +139,11 @@ float4 PSMain( PS_INPUT Input ) : SV_TARGET
     float cocR = IsSkyDepth( depthR ) ? cocC : ComputeCoCFromDepth( depthR, focusDepth, Input.vTexcoord + float2(  dtexel.x, 0 ) );
     float cocU = IsSkyDepth( depthU ) ? cocC : ComputeCoCFromDepth( depthU, focusDepth, Input.vTexcoord + float2( 0, -dtexel.y ) );
     float cocD = IsSkyDepth( depthD ) ? cocC : ComputeCoCFromDepth( depthD, focusDepth, Input.vTexcoord + float2( 0,  dtexel.y ) );
-    float nearC = ComputeNearCoCFromDepth( depthC );
-    float nearL = ComputeNearCoCFromDepth( depthL );
-    float nearR = ComputeNearCoCFromDepth( depthR );
-    float nearU = ComputeNearCoCFromDepth( depthU );
-    float nearD = ComputeNearCoCFromDepth( depthD );
+    float nearC = ComputeNearCoCFromDepth( depthC, Input.vTexcoord );
+    float nearL = ComputeNearCoCFromDepth( depthL, Input.vTexcoord + float2( -dtexel.x, 0 ) );
+    float nearR = ComputeNearCoCFromDepth( depthR, Input.vTexcoord + float2(  dtexel.x, 0 ) );
+    float nearU = ComputeNearCoCFromDepth( depthU, Input.vTexcoord + float2( 0, -dtexel.y ) );
+    float nearD = ComputeNearCoCFromDepth( depthD, Input.vTexcoord + float2( 0,  dtexel.y ) );
     float nearNeighbourCoC = max( max( nearC, nearL ), max( nearR, max( nearU, nearD ) ) );
 
     float2 inwardShift = float2(

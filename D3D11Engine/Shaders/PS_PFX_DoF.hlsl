@@ -32,9 +32,12 @@ struct PS_INPUT
     float4 vPosition : SV_POSITION;
 };
 
-float LinearizeDepth( float d )
+float CameraDistanceFromDepth( float d, float2 texcoord )
 {
-    return LinearizeDepthReverseZInfinite( d );
+    const float viewZ = LinearizeDepthReverseZInfinite( d );
+    const float2 ndc = texcoord * 2.0f - 1.0f;
+    const float2 viewXY = ndc * DoF_ProjParams.xy * viewZ;
+    return length( float3( viewXY, viewZ ) );
 }
 
 
@@ -76,7 +79,7 @@ float4 PSMain( PS_INPUT Input ) : SV_TARGET
     if ( IsSkyDepth( centerDepth ) )
         return float4( centerColor, 0.0f );
 
-    float centerLinear = LinearizeDepth( centerDepth );
+    float centerLinear = CameraDistanceFromDepth( centerDepth, Input.vTexcoord );
     float centerCoC = ComputeCoC( centerLinear, focusDepth, Input.vTexcoord );
 
     // Early out: pass through sharp pixel
@@ -132,7 +135,7 @@ float4 PSMain( PS_INPUT Input ) : SV_TARGET
         if ( IsSkyDepth( sampleDepth ) )
             continue;
 
-        float sampleLinear = LinearizeDepth( sampleDepth );
+        float sampleLinear = CameraDistanceFromDepth( sampleDepth, sampleUV );
         float sampleCoC = ComputeCoC( sampleLinear, focusDepth, sampleUV );
 
         float weight = ( sampleCoC >= length( offset ) * centerCoC ) ? 1.0 : sampleCoC;

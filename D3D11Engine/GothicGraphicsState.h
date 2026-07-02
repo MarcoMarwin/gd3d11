@@ -516,6 +516,8 @@ struct GothicRendererSettings {
         PerceptualQuantizerTonemap,
         ToneMap_Simple,
         ACESFittedTonemap,
+        LPMToneMap,
+        _HDRToneMap_Count,
     };
     enum EWindQuality {
         WIND_QUALITY_NONE = 0,

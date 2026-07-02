@@ -203,4 +203,27 @@ float3 ACESFittedTonemap(float3 vColor, Texture2D lumTex, SamplerState samplerSt
 	return retColor;
 }
 
+float3 LPMToneMap(float3 vColor, Texture2D lumTex, SamplerState samplerState) : COLOR
+{
+    const float3 lumaWeights = float3(0.2126f, 0.7152f, 0.0722f);
+    const float fLumAvg = max(lumTex.SampleLevel(samplerState, float2(0.5f, 0.5f), 9).r, 0.001f);
+    const float whitePoint = max(HDR_LumWhite, 1.0f);
+
+    float3 color = max(vColor * (HDR_MiddleGray / fLumAvg), 0.0f);
+    float luminanceIn = max(dot(color, lumaWeights), 0.0001f);
+
+    // Luma-preserving shoulder: compress brightness through luminance, then scale RGB.
+    float luminanceOut = (luminanceIn * (1.0f + luminanceIn / (whitePoint * whitePoint))) / (1.0f + luminanceIn);
+    float3 mapped = color * (luminanceOut / luminanceIn);
+
+    // Soft gamut guard; keeps colour ratios stable before the final HDR pass output conversion.
+    mapped = max(mapped, 0.0f);
+    float peak = max(max(mapped.r, mapped.g), mapped.b);
+    if (peak > 1.0f) {
+        mapped /= peak;
+    }
+
+    return pow(saturate(mapped), 1.0f / 2.2f);
+}
+
 #endif

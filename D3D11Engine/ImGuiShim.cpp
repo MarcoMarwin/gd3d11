@@ -444,6 +444,9 @@ LRESULT ImGuiShim::OnWindowMessage( HWND hWnd, UINT msg, WPARAM wParam, LPARAM l
 void ImGuiShim::OnResize( INT2 newSize )
 {
     CurrentResolution = newSize;
+    if ( SettingsVisible ) {
+        m_centerSettingsWindowNextFrame = true;
+    }
 
     std::vector<DisplayModeInfo> modes;
     Engine::GraphicsEngine->GetDisplayModeList( &modes );
@@ -731,15 +734,13 @@ namespace
             s.EnableFrameGeneration = false;
         }
 
-        // 100 leaves Gothic's native camera/FOV untouched. Other values continuously
-        // widen both projection axes equally so the image proportions stay unchanged.
-        s.FOVHoriz = std::clamp( static_cast<float>( std::round( s.FOVHoriz ) ), 100.0f, 130.0f );
-        if ( std::abs( s.FOVHoriz - 100.0f ) <= 0.5f ) {
-            s.FOVHoriz = 100.0f;
-            s.ForceFOV = false;
-        } else {
-            s.ForceFOV = true;
+        if ( s.HDRToneMap != GothicRendererSettings::E_HDRToneMap::ToneMap_Simple
+            && s.HDRToneMap != GothicRendererSettings::E_HDRToneMap::LPMToneMap ) {
+            s.HDRToneMap = GothicRendererSettings::E_HDRToneMap::ToneMap_Simple;
         }
+
+        s.ForceFOV = false;
+        s.FOVHoriz = 100.0f;
         s.FOVVert = 100.0f;
     }
 }
@@ -749,6 +750,7 @@ void ImGuiShim::BeginSettingsEdit() {
         return;
     }
 
+    m_centerSettingsWindowNextFrame = true;
     m_settingsSnapshot = Engine::GAPI->GetRendererState().RendererSettings;
     m_settingsResolutionSnapshot = CurrentResolution;
     m_settingsEditActive = true;
@@ -825,10 +827,13 @@ void ImGuiShim::RenderSettingsWindow()
     ImGui::PushStyleVar( ImGuiStyleVar_FramePadding, scaledFramePadding );
     ImGui::PushStyleVar( ImGuiStyleVar_ItemSpacing, scaledItemSpacing );
     ImGui::SetNextWindowSizeConstraints( ImVec2( 0.0f, 0.0f ), maxSettingsWindowSize );
-    ImGui::SetNextWindowPos(
-        ImVec2( windowSize.x / 2, windowSize.y / 2 ),
-        ImGuiCond_Always,
-        ImVec2( 0.5f, 0.5f ) );
+    if ( m_centerSettingsWindowNextFrame ) {
+        ImGui::SetNextWindowPos(
+            ImVec2( windowSize.x / 2, windowSize.y / 2 ),
+            ImGuiCond_Always,
+            ImVec2( 0.5f, 0.5f ) );
+        m_centerSettingsWindowNextFrame = false;
+    }
     if ( ImGui::Begin( settingsLabel, nullptr, ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoResize ) ) {
         ImGui::SetWindowFontScale( menuScale );
         GothicRendererSettings& settings = Engine::GAPI->GetRendererState().RendererSettings;
@@ -997,23 +1002,6 @@ void ImGuiShim::RenderSettingsWindow()
 
 
             ImGui::SetItemTooltip( "Selects fullscreen or windowed display mode." );
-
-            float fieldOfViewPercent = settings.FOVHoriz;
-            const char* fieldOfViewFormat = std::abs( fieldOfViewPercent - 100.0f ) <= 0.1f
-                ? "Original"
-                : (std::abs( fieldOfViewPercent - 130.0f ) <= 0.1f ? "Wide angle" : "%.0f");
-            ImText( "Field of View", buttonWidth ); ImGui::SameLine();
-            if ( ImGui::SliderFloat( "##FieldOfView", &fieldOfViewPercent, 100.0f, 130.0f,
-                fieldOfViewFormat, ImGuiSliderFlags_::ImGuiSliderFlags_ClampOnInput ) ) {
-                fieldOfViewPercent = std::round( fieldOfViewPercent );
-                if ( std::abs( fieldOfViewPercent - 100.0f ) <= 0.5f )
-                    fieldOfViewPercent = 100.0f;
-                settings.FOVHoriz = fieldOfViewPercent;
-                settings.FOVVert = 100.0f;
-                settings.ForceFOV = std::abs( fieldOfViewPercent - 100.0f ) > 0.1f;
-            }
-            ImGui::SetItemTooltip( "Widens the camera view." );
-
             const static std::vector<std::pair<const char*, int>> shadowMapSizesMax = {
                 {"very low", 512},
                 {"low", 1024},
@@ -1346,6 +1334,20 @@ void ImGuiShim::RenderSettingsWindow()
             ImText( "HDR", { buttonWidth.x - ImGui::GetFrameHeight() - style.ItemSpacing.x, buttonWidth.y } ); ImGui::SameLine();
             ImGui::Checkbox( "##Enable HDR", &settings.EnableHDR );
             ImGui::SetItemTooltip( "Enables high dynamic range rendering." );
+
+            static const std::vector<std::pair<const char*, GothicRendererSettings::E_HDRToneMap>> toneMappingModes = {
+                { "Legacy", GothicRendererSettings::E_HDRToneMap::ToneMap_Simple },
+                { "LPM", GothicRendererSettings::E_HDRToneMap::LPMToneMap },
+            };
+            ImText( "Tone Mapping", buttonWidth ); ImGui::SameLine();
+            ImGui::BeginDisabled( !settings.EnableHDR );
+            if ( ImComboBoxC( "##HDRToneMapping", toneMappingModes, &settings.HDRToneMap, [&shadersToReload] {
+                shadersToReload |= ShaderCategory::Tonemapping;
+            } ) ) {
+                ImGui::EndCombo();
+            }
+            ImGui::EndDisabled();
+            ImGui::SetItemTooltip( "Selects the HDR brightness curve." );
             ImGui::EndGroup();
         }
 
