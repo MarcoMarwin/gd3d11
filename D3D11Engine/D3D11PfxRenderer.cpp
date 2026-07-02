@@ -74,8 +74,8 @@ XRESULT D3D11PfxRenderer::RenderGodRays(ID3D11ShaderResourceView* backbuffer, ID
 }
 
 /** Renders the depth-of-field effect */
-XRESULT D3D11PfxRenderer::RenderDepthOfField( ID3D11ShaderResourceView* backbuffer ) {
-    return FX_DepthOfField->Render( backbuffer );
+XRESULT D3D11PfxRenderer::RenderDepthOfField( ID3D11ShaderResourceView* backbuffer, const INT2& targetResolution ) {
+    return FX_DepthOfField->Render( backbuffer, targetResolution );
 }
 
 XRESULT D3D11PfxRenderer::RenderWetGroundSSR(

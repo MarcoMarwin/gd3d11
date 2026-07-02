@@ -83,6 +83,13 @@ bool FeatureRTArrayIndexFromAnyShader = false;
 
 VS_ExConstantBuffer_Wind g_windBuffer;
 
+struct SkyVelocityConstantBuffer {
+    XMFLOAT4X4 InvViewProj;
+    XMFLOAT4X4 PrevViewProj;
+    XMFLOAT2 JitterOffset;
+    XMFLOAT2 Padding;
+};
+
 static void UpdateCharacterInteractionPositions( VS_ExConstantBuffer_Wind& windBuff ) {
     for ( int i = 0; i < MAX_CHARACTER_INTERACTION_INFLUENCERS; ++i ) {
         windBuff.interactionPositions[i] = float4( 0, 0, 0, 0 );
@@ -4221,6 +4228,29 @@ XRESULT D3D11GraphicsEngine::OnStartWorldRendering() {
     bool compositionNeedsDepth = compositionHeightFog || compositionContactShadows || compositionSSGI;
     bool compositionActive = compositionGodRays || compositionNeedsDepth;
 
+    const bool fsr3UpscalingActive = GetDevice()->GetFeatureLevel() >= D3D_FEATURE_LEVEL_11_0
+        && rendererState.RendererSettings.Upscaler == GothicRendererSettings::UPSCALER_FSR_3
+        && rendererState.RendererSettings.ResolutionScalePercent <= 100
+        && rendererState.RendererSettings.AntiAliasingMode == GothicRendererSettings::AA_FSR
+        && PfxRenderer && PfxRenderer->GetFSR3() && PfxRenderer->GetTAAEffect();
+    const bool renderTemporalSkyVelocity = rendererState.RendererSettings.DrawSky
+        && fsr3UpscalingActive;
+    XMFLOAT4X4 skyCurrentInvViewProj;
+    const XMFLOAT4X4 skyPreviousViewProj = m_PrevViewProjMatrix;
+    XMFLOAT2 skyJitterOffset( 0.0f, 0.0f );
+    if ( PfxRenderer && PfxRenderer->GetTAAEffect() ) {
+        const XMFLOAT4X4& currentViewProj = PfxRenderer->GetTAAEffect()->GetUnjitteredViewProj();
+        XMStoreFloat4x4( &skyCurrentInvViewProj,
+            XMMatrixInverse( nullptr, XMLoadFloat4x4( &currentViewProj ) ) );
+        skyJitterOffset = PfxRenderer->GetTAAEffect()->GetJitterOffset();
+    } else {
+        XMFLOAT4X4 currentProjection = Engine::GAPI->GetProjectionMatrix();
+        currentProjection._13 = 0.0f;
+        currentProjection._23 = 0.0f;
+        const XMMATRIX currentViewProj = XMMatrixMultiply(
+            XMLoadFloat4x4( &currentProjection ), Engine::GAPI->GetViewMatrixXM() );
+        XMStoreFloat4x4( &skyCurrentInvViewProj, XMMatrixInverse( nullptr, currentViewProj ) );
+    }
     if ( rendererState.RendererSettings.DrawSky ) {
         graph.AddPass( RG_PASS_NAME( "Draw Sky" ), [&]( RGBuilder& builder, RenderPass& pass ) {
             //// Setup / Declare
@@ -4237,7 +4267,48 @@ XRESULT D3D11GraphicsEngine::OnStartWorldRendering() {
             };
         } );
     }
+    if ( renderTemporalSkyVelocity ) {
+        graph.AddPass( RG_PASS_NAME( "Sky Velocity" ), [&]( RGBuilder& builder, RenderPass& pass ) {
+            builder.Read( velocityBufferHandle );
+            builder.Write( velocityBufferHandle );
 
+            pass.m_executeCallback = [this, velocityBufferHandle, skyCurrentInvViewProj,
+                                      skyPreviousViewProj, skyJitterOffset]( const RenderGraph& graph ) {
+                TracyD3D11ZoneCGX( "D3D11GraphicsEngine::Sky Velocity" );
+                auto* velocityBuffer = graph.GetPhysicalTexture( velocityBufferHandle );
+                if ( !velocityBuffer ) {
+                    return;
+                }
+
+                SetDefaultStates();
+                UpdateRenderStates();
+                SetViewport( ViewportInfo( 0, 0, GetResolution() ) );
+                GetContext()->OMSetRenderTargets(
+                    1, velocityBuffer->GetRenderTargetView().GetAddressOf(), nullptr );
+
+                auto skyVelocityPS = GetShaderManager().GetPShader( PShaderID::PS_PFX_SkyVelocity );
+                if ( !skyVelocityPS ) {
+                    return;
+                }
+
+                SkyVelocityConstantBuffer constants = {};
+                constants.InvViewProj = skyCurrentInvViewProj;
+                constants.PrevViewProj = skyPreviousViewProj;
+                constants.JitterOffset = skyJitterOffset;
+
+                GetShaderManager().GetVShader( VShaderID::VS_PFX )->Apply();
+                skyVelocityPS->Apply();
+                skyVelocityPS->GetBuffer( "SkyVelocityConstants" ).Update( &constants ).Bind();
+
+                ID3D11ShaderResourceView* depthSRV = GetDepthBuffer()->GetShaderResView().Get();
+                GetContext()->PSSetShaderResources( 0, 1, &depthSRV );
+                PfxRenderer->DrawFullScreenQuad();
+
+                ID3D11ShaderResourceView* nullSRV = nullptr;
+                GetContext()->PSSetShaderResources( 0, 1, &nullSRV );
+            };
+        } );
+    }
     const bool renderRainExclusionMask = rendererState.RendererSettings.EnableRain
         && Engine::GAPI->GetSceneWetness() > 1e-6f && isOutdoor;
     const bool renderWetGroundSSR = rendererState.RendererSettings.EnableSSR
@@ -4588,7 +4659,11 @@ XRESULT D3D11GraphicsEngine::OnStartWorldRendering() {
         });
     }
 
-    if ( rendererState.RendererSettings.EnableDoF ) {
+    const bool renderDoFAfterUpscaling = rendererState.RendererSettings.EnableDoF
+        && fsr3UpscalingActive;
+
+
+    if ( rendererState.RendererSettings.EnableDoF && !renderDoFAfterUpscaling ) {
         graph.AddPass( RG_PASS_NAME("Draw DepthOfField"), [&]( RGBuilder& builder, RenderPass& pass ) {
             builder.Read( backBufferHandle );
             builder.Write( backBufferHandle );
@@ -4596,7 +4671,7 @@ XRESULT D3D11GraphicsEngine::OnStartWorldRendering() {
             pass.m_executeCallback = [this, backBufferHandle](const RenderGraph& graph) {
                 TracyD3D11ZoneCGX( "D3D11GraphicsEngine::Draw DepthOfField" );
                 auto backbufferResource = graph.GetPhysicalTexture( backBufferHandle );
-                PfxRenderer->RenderDepthOfField( backbufferResource->GetShaderResView().Get() );
+                PfxRenderer->RenderDepthOfField( backbufferResource->GetShaderResView().Get(), GetResolution() );
             };
         } );
     }
@@ -4820,6 +4895,15 @@ XRESULT D3D11GraphicsEngine::OnStartWorldRendering() {
         }
         graph.Compile();
         graph.Execute();
+        // FSR should receive the sharp scene. Apply depth of field once at
+        // presentation resolution so it cannot be amplified by temporal reconstruction.
+        if ( isUpscaling && rendererState.RendererSettings.EnableDoF ) {
+            SetViewport( ViewportInfo( 0, 0, GetBackbufferResolution() ) );
+            GetContext()->OMSetRenderTargets(
+                1, Backbuffer->GetRenderTargetView().GetAddressOf(), nullptr );
+            PfxRenderer->RenderDepthOfField(
+                Backbuffer->GetShaderResView().Get(), GetBackbufferResolution() );
+        }
 
         // Thin rain streaks can disappear before temporal upscaling. Under
         // FSR3, rasterize them once at output resolution after upscaling and

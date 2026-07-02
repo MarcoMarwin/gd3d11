@@ -453,6 +453,7 @@ XRESULT D3D11ShaderManager::Init() {
 
     // Velocity Buffer Shader
     Shaders.push_back( ShaderInfo::make<PShaderID::PS_PFX_Velocity>( "PS_PFX_Velocity.hlsl" ) );
+    Shaders.push_back( ShaderInfo::make<PShaderID::PS_PFX_SkyVelocity>( "PS_PFX_SkyVelocity.hlsl" ) );
 
     Shaders.push_back( ShaderInfo::make<PShaderID::PS_PFX_CAS>( "PS_PFX_CAS.hlsl" ));
 

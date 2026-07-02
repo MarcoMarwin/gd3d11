@@ -15,11 +15,11 @@ public:
 
     /** Draws this effect to the given buffer */
     XRESULT Render( RenderToTextureBuffer* fxbuffer ) override { return XR_FAILED; }
-    XRESULT Render( ID3D11ShaderResourceView* backbuffer );
+    XRESULT Render( ID3D11ShaderResourceView* backbuffer, const INT2& targetResolution );
 
 private:
     /** Compute shader path for FL11+ */
-    XRESULT RenderCS( ID3D11ShaderResourceView* backbuffer );
+    XRESULT RenderCS( ID3D11ShaderResourceView* backbuffer, const INT2& targetResolution );
     void UpdateAdaptiveFocus( float configuredNearDistance );
 
     // Ping-pong 1x1 R32_FLOAT textures for temporal focus smoothing
