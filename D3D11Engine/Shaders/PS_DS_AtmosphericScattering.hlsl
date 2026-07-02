@@ -302,8 +302,8 @@ float4 PSMain(PS_INPUT Input) : SV_TARGET
 	
 #ifdef APPLY_RAIN_EFFECTS
     const float rainMaterialMarker = TX_RainExclusionMask.Load(int3(int2(Input.vPosition.xy), 0)).r;
-    const float frozenMaterial = step(0.45f, rainMaterialMarker) * (1.0f - step(0.75f, rainMaterialMarker));
-    ApplySceneWettness(wsPosition, vsPosition, V, normal, diffuse.rgb, specIntensity, specPower, specWet, localWettness, 1.0f - frozenMaterial);
+    const float rainExcludedMaterial = step(0.75f, rainMaterialMarker);
+    ApplySceneWettness(wsPosition, vsPosition, V, normal, diffuse.rgb, specIntensity, specPower, specWet, localWettness, 1.0f - rainExcludedMaterial);
 	
 	// Boost specWet when not in shadow
 	specWet += specWet * shadow;

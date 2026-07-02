@@ -86,12 +86,9 @@ float2 CalculateVelocity(float4 currClipPos, float4 prevClipPos)
 FORWARD_PLUS_PS_OUTPUT PSMain( PS_INPUT Input )
 {
 	FORWARD_PLUS_PS_OUTPUT output;
-	const bool fsr3DialogReactive = (FF_GSwitches & GSWITCH_FSR3_DIALOG_REACTIVE) != 0;
-	const bool fsr3ActorReactive = (FF_GSwitches & GSWITCH_FSR3_REACTIVE) != 0;
-	const bool disableRainEffects = (FF_GSwitches & GSWITCH_DISABLE_RAIN_EFFECTS) != 0;
-	float fsr3ReactiveValue = fsr3DialogReactive ? 0.30f : (fsr3ActorReactive ? 0.12f : 0.0f);
-	output.vTransparencyAndCompositionMask = disableRainEffects ? 0.50f : 0.0f;
-	output.vReactiveMask = fsr3ReactiveValue;
+	// Match Kirides Nightly temporal masks for opaque world geometry.
+	output.vTransparencyAndCompositionMask = 0.0f;
+	output.vReactiveMask = 0.0f;
 
 	float2 materialUV = Input.vTexcoord;
 #if NORMALMAPPING == 1
@@ -105,8 +102,7 @@ FORWARD_PLUS_PS_OUTPUT PSMain( PS_INPUT Input )
 
 #if ALPHATEST == 1
 	DoAlphaTest(color.a);
-	if (!fsr3DialogReactive && !fsr3ActorReactive)
-		output.vReactiveMask = 0.10f; // Kirides-style alpha reactivity keeps foliage edges stable against sky.
+	output.vReactiveMask = 0.10f; // Kirides Nightly: minimal alpha-test reactivity.
 #endif
 
 #if NORMALMAPPING == 1
@@ -207,12 +203,9 @@ DEFERRED_PS_OUTPUT PSMain( PS_INPUT Input ) : SV_TARGET
 #endif
 {
 	DEFERRED_PS_OUTPUT output;
-	const bool fsr3DialogReactive = (FF_GSwitches & GSWITCH_FSR3_DIALOG_REACTIVE) != 0;
-	const bool fsr3ActorReactive = (FF_GSwitches & GSWITCH_FSR3_REACTIVE) != 0;
-	const bool disableRainEffects = (FF_GSwitches & GSWITCH_DISABLE_RAIN_EFFECTS) != 0;
-	float fsr3ReactiveValue = fsr3DialogReactive ? 0.30f : (fsr3ActorReactive ? 0.12f : 0.0f);
-	output.vTransparencyAndCompositionMask = disableRainEffects ? 0.50f : 0.0f;
-	output.vReactiveMask = fsr3ReactiveValue;
+	// Match Kirides Nightly temporal masks for opaque world geometry.
+	output.vTransparencyAndCompositionMask = 0.0f;
+	output.vReactiveMask = 0.0f;
 
 	float2 materialUV = Input.vTexcoord;
 #if NORMALMAPPING == 1
@@ -228,8 +221,7 @@ DEFERRED_PS_OUTPUT PSMain( PS_INPUT Input ) : SV_TARGET
 	
 	// WorldMesh can always do the alphatest
 	DoAlphaTest(color.a);
-	if (!fsr3DialogReactive && !fsr3ActorReactive)
-		output.vReactiveMask = 0.10f; // Kirides-style alpha reactivity keeps foliage edges stable against sky.
+	output.vReactiveMask = 0.10f; // Kirides Nightly: minimal alpha-test reactivity.
 #endif
 	
 	// Apply normalmapping if wanted

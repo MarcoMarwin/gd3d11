@@ -1548,9 +1548,31 @@ void GothicAPI::DrawWorldMeshNaive() {
         if ( camera )
             camera->GetFOV( setfovH, setfovV );
 
-        const float aspectHeightOverWidth = Engine::GraphicsEngine->GetResolution().y / static_cast<float>(Engine::GraphicsEngine->GetResolution().x);
-        const float targetFovH = std::clamp( RendererState.RendererSettings.FOVHoriz, 1.0f, 179.0f );
-        const float targetFovV = aspectHeightOverWidth * std::clamp( RendererState.RendererSettings.FOVVert, 1.0f, 179.0f );
+        const float nativeHorizontal = nativeFovValid ? nativeFovH : setfovH;
+        const float nativeVertical = nativeFovValid ? nativeFovV : setfovV;
+        const float fovControl = std::clamp( RendererState.RendererSettings.FOVHoriz, 80.0f, 130.0f );
+        const float currentAspect = Engine::GraphicsEngine->GetResolution().x
+            / static_cast<float>(std::max( Engine::GraphicsEngine->GetResolution().y, 1 ));
+        constexpr float gothicReferenceAspect = 4.0f / 3.0f;
+        const float aspectWidthScale = std::max( currentAspect / gothicReferenceAspect, 0.01f );
+
+        float horizontalWidthScale = fovControl / 100.0f;
+        if ( fovControl >= 100.0f ) {
+            // 100 is exact original. 101..120 blend continuously to the full Hor+
+            // correction for the active aspect ratio; 121..130 add optional extra width.
+            const float widescreenBlend = std::clamp( (fovControl - 100.0f) / 20.0f, 0.0f, 1.0f );
+            horizontalWidthScale = 1.0f + (aspectWidthScale - 1.0f) * widescreenBlend;
+            if ( fovControl > 120.0f ) {
+                horizontalWidthScale *= 1.0f + (fovControl - 120.0f) / 100.0f;
+            }
+        }
+
+        const auto scaleFovAngle = []( float nativeAngle, float widthScale ) {
+            const float halfAngle = DirectX::XMConvertToRadians( std::clamp( nativeAngle, 1.0f, 179.0f ) ) * 0.5f;
+            return DirectX::XMConvertToDegrees( 2.0f * std::atan( std::tan( halfAngle ) * widthScale ) );
+        };
+        const float targetFovH = scaleFovAngle( nativeHorizontal, horizontalWidthScale );
+        const float targetFovV = nativeVertical;
         if ( camera
             // FIXME: This is being reset after a dialog!
             && (camera != CurrentCamera || std::abs( setfovH - targetFovH ) > 0.001f || std::abs( setfovV - targetFovV ) > 0.001f) ) {
@@ -1559,8 +1581,8 @@ void GothicAPI::DrawWorldMeshNaive() {
                 setfovH = targetFovH;
                 setfovV = targetFovV;
 
-                // Kirides-style Hor+ widescreen FOV: keep the vertical basis stable
-                // and widen/narrow the horizontal angle instead of zooming both axes.
+                // Scale Gothic's native horizontal frustum continuously while preserving
+                // its native vertical angle and therefore the original camera height.
                 camera->SetFOV( setfovH, setfovV );
                 camera->Activate();
 
@@ -5551,19 +5573,14 @@ XRESULT GothicAPI::LoadMenuSettings( const std::string& file ) {
         s.Upscaler = (GothicRendererSettings::E_Upscaler)std::clamp<int>( GetPrivateProfileIntA( "Display", "Upscaler", ds.Upscaler, ini.c_str() ), 0, GothicRendererSettings::E_Upscaler::_UPSCALER_NUM_MODES - 1 );
         s.EnableVSync = GetPrivateProfileBoolA( "Display", "VSync", ds.EnableVSync, ini );
         s.EnableFrameGeneration = false; // Disabled for the current DX11/x86 path; the manual FG path serializes and causes heavy framedrops.
-        // ForceFOV=false migrates older configurations to the explicit 100=Original sentinel.
-        // When forced, FOVHoriz is again a real horizontal angle; FOVVert keeps Kirides' 90-degree vertical basis.
+        // FOVHoriz is a percentage of Gothic's native horizontal frustum; 100 is untouched original.
         const bool configuredForceFov = GetPrivateProfileBoolA( "Display", "ForceFOV", false, ini );
-        const float configuredFovH = std::clamp( static_cast<float>(GetPrivateProfileIntA( "Display", "FOVHoriz", 100, ini.c_str() )), 90.0f, 120.0f );
-        const float configuredFovV = std::clamp( static_cast<float>(GetPrivateProfileIntA( "Display", "FOVVert", 90, ini.c_str() )), 1.0f, 179.0f );
-        s.FOVHoriz = configuredForceFov
-            ? configuredFovH
-            : 100.0f;
-        s.FOVVert = configuredForceFov ? configuredFovV : 90.0f;
+        const float configuredFovScale = std::clamp( static_cast<float>(GetPrivateProfileIntA( "Display", "FOVHoriz", 100, ini.c_str() )), 80.0f, 130.0f );
+        s.FOVHoriz = configuredForceFov ? configuredFovScale : 100.0f;
+        s.FOVVert = 100.0f;
         s.ForceFOV = configuredForceFov && std::abs( s.FOVHoriz - 100.0f ) > 0.1f;
         if ( !s.ForceFOV ) {
             s.FOVHoriz = 100.0f;
-            s.FOVVert = 90.0f;
         }
         s.GammaValue = GetPrivateProfileFloatA( "Display", "DisplayContrast", 1.0f, ini );
         s.BrightnessValue = GetPrivateProfileFloatA( "Display", "DisplayBrightness", 1.0f, ini );

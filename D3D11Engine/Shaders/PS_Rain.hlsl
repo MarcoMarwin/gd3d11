@@ -270,7 +270,7 @@ PS_OUTPUT PSMain( PS_INPUT Input )
         TX_RainExclusionMask.GetDimensions(maskWidth, maskHeight);
         int2 maskPixel = clamp(inputPixel, int2(0, 0), int2((int)maskWidth - 1, (int)maskHeight - 1));
         // 0.25 marks regular water for wet-ground SSR only; 1.0 is the hard
-        // rain exclusion used by frozen/Icedragon materials and blockers.
+        // rain exclusion used by transparent world materials and waterfalls.
         if (TX_RainExclusionMask.Load(int3(maskPixel, 0)) > 0.75f)
             discard;
     }

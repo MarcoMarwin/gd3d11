@@ -712,9 +712,9 @@ struct GothicRendererSettings {
 
         EnableGodRays = true;
 
-        // 100 is the UI sentinel for Gothics untouched original camera projection.
+        // 100 preserves Gothics native camera projection; other values scale its horizontal frustum in percent.
         FOVHoriz = 100.0f;
-        FOVVert = 90.0f;
+        FOVVert = 100.0f;
 
         SharpeningMode = E_SharpeningMode::SHARPEN_CAS;
         SharpenFactor = 1.0f;

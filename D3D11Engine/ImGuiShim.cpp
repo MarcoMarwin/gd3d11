@@ -731,16 +731,16 @@ namespace
             s.EnableFrameGeneration = false;
         }
 
-        // 100 is the explicit "Original" sentinel and leaves Gothic's camera/FOV untouched.
-        // Other values are real horizontal FOV angles for Kirides-style Hor+ widescreen correction.
-        s.FOVHoriz = std::clamp( static_cast<float>( std::round( s.FOVHoriz / 5.0f ) * 5.0f ), 90.0f, 120.0f );
-        if ( std::abs( s.FOVHoriz - 100.0f ) <= 0.1f ) {
+        // 100 leaves Gothic's native camera/FOV untouched. Other values continuously
+        // scale the native horizontal frustum while its vertical angle remains unchanged.
+        s.FOVHoriz = std::clamp( static_cast<float>( std::round( s.FOVHoriz ) ), 80.0f, 130.0f );
+        if ( std::abs( s.FOVHoriz - 100.0f ) <= 0.5f ) {
             s.FOVHoriz = 100.0f;
             s.ForceFOV = false;
         } else {
             s.ForceFOV = true;
         }
-        s.FOVVert = 90.0f;
+        s.FOVVert = 100.0f;
     }
 }
 
@@ -786,8 +786,29 @@ void ImGuiShim::RenderSettingsWindow()
     // Get the center point of the screen, then shift the window by 50% of its size in both directions.
     // TIP: Don't use ImGui::GetMainViewport for framebuffer sizes since GD3D11 can undersample or oversample the game.
     // Use whatever the resolution is spit out instead.
-    ImVec2 buttonWidth( 275, 0 );
     auto& style = ImGui::GetStyle();
+    const float framebufferWidth = static_cast<float>( windowSize.x );
+    const float framebufferHeight = static_cast<float>( windowSize.y );
+    // Keep the F11 menu usable at low output resolutions such as 800x600.
+    // The layout is intentionally still two-column, but fixed widths and font
+    // scale shrink together and the window is capped to the visible framebuffer.
+    const float menuScale = std::clamp(
+        std::min( (framebufferWidth - 40.0f) / 1080.0f, (framebufferHeight - 40.0f) / 680.0f ),
+        0.65f,
+        1.0f );
+    const float labelWidth = std::round( 275.0f * menuScale );
+    const float controlWidth = std::round( 250.0f * menuScale );
+    const float footerHeight = std::round( 30.0f * menuScale );
+    const ImVec2 scaledWindowPadding(
+        std::round( style.WindowPadding.x * menuScale ),
+        std::round( style.WindowPadding.y * menuScale ) );
+    const ImVec2 scaledFramePadding(
+        std::round( style.FramePadding.x * menuScale ),
+        std::round( style.FramePadding.y * menuScale ) );
+    const ImVec2 scaledItemSpacing(
+        std::round( style.ItemSpacing.x * menuScale ),
+        std::round( style.ItemSpacing.y * menuScale ) );
+    ImVec2 buttonWidth( labelWidth, 0 );
 
 #ifdef IS_DEV_BUILD
     static const char* settingsLabel = "GD3D11 " VERSION_NUMBER " - (" BUILD_DATE ")";
@@ -797,8 +818,16 @@ void ImGuiShim::RenderSettingsWindow()
 
     ShaderCategory shadersToReload = ShaderCategory::None;
 
+    const ImVec2 maxSettingsWindowSize(
+        std::max( 320.0f, framebufferWidth - 20.0f ),
+        std::max( 240.0f, framebufferHeight - 20.0f ) );
+    ImGui::PushStyleVar( ImGuiStyleVar_WindowPadding, scaledWindowPadding );
+    ImGui::PushStyleVar( ImGuiStyleVar_FramePadding, scaledFramePadding );
+    ImGui::PushStyleVar( ImGuiStyleVar_ItemSpacing, scaledItemSpacing );
+    ImGui::SetNextWindowSizeConstraints( ImVec2( 0.0f, 0.0f ), maxSettingsWindowSize );
     ImGui::SetNextWindowPos( ImVec2( windowSize.x / 2, windowSize.y / 2 ), ImGuiCond_Appearing, ImVec2( 0.5f, 0.5f ) );
     if ( ImGui::Begin( settingsLabel, nullptr, ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoResize ) ) {
+        ImGui::SetWindowFontScale( menuScale );
         GothicRendererSettings& settings = Engine::GAPI->GetRendererState().RendererSettings;
         FixupSettings(settings);
 
@@ -812,7 +841,7 @@ void ImGuiShim::RenderSettingsWindow()
 
         ImGui::TextUnformatted("Graphics Preset"); ImGui::SameLine();
         
-        ImGui::PushItemWidth( 250 );
+        ImGui::PushItemWidth( controlWidth );
         if ( ImComboBoxC( "##GraphicsPreset", graphicsPresets, (int*)&settings.GraphicsPreset, [&settings]() {
             ApplyGraphicsPresets( settings );
             } ) ) {
@@ -822,14 +851,14 @@ void ImGuiShim::RenderSettingsWindow()
         ImGui::PopItemWidth();
         ImGui::Separator();
 
-        const float standardComboWidth = 250.0f;
+        const float standardComboWidth = controlWidth;
         // All right-column value controls start at the same x position.
         const float inlineToggleWidth = (buttonWidth.x - style.ItemSpacing.x) * 0.5f;
         const float inlineToggleLabelWidth = inlineToggleWidth - ImGui::GetFrameHeight() - style.ItemSpacing.x;
         
         {
             ImGui::BeginGroup();
-            ImGui::PushItemWidth( 250 );
+            ImGui::PushItemWidth( controlWidth );
 
             for (size_t i = 0; i < Resolutions.size(); ++i){
                 if (Resolutions[i].first == CurrentResolution) {
@@ -966,24 +995,21 @@ void ImGuiShim::RenderSettingsWindow()
 
             ImGui::SetItemTooltip( "Selects fullscreen or windowed display mode." );
 
-            static constexpr std::array<float, 7> fieldOfViewLevels = {
-                90.0f, 95.0f, 100.0f, 105.0f, 110.0f, 115.0f, 120.0f
-            };
-            int fieldOfViewIndex = FindNearestStepIndex(
-                settings.FOVHoriz, fieldOfViewLevels.data(), static_cast<int>(fieldOfViewLevels.size()) );
-            char fieldOfViewText[24] = {};
-            if ( fieldOfViewIndex == 2 ) {
-                snprintf( fieldOfViewText, sizeof( fieldOfViewText ), "Original" );
-            } else {
-                snprintf( fieldOfViewText, sizeof( fieldOfViewText ), "%.0f deg", fieldOfViewLevels[fieldOfViewIndex] );
-            }
+            float fieldOfViewPercent = settings.FOVHoriz;
+            const char* fieldOfViewFormat = std::abs( fieldOfViewPercent - 100.0f ) <= 0.1f
+                ? "Original"
+                : (std::abs( fieldOfViewPercent - 120.0f ) <= 0.1f ? "Widescreen" : "%.0f %%");
             ImText( "Field of View", buttonWidth ); ImGui::SameLine();
-            if ( SliderSteppedIndex( "##FieldOfView", &fieldOfViewIndex, 6, true, 2, fieldOfViewText ) ) {
-                settings.FOVHoriz = fieldOfViewLevels[fieldOfViewIndex];
-                settings.FOVVert = 90.0f;
-                settings.ForceFOV = fieldOfViewIndex != 2;
+            if ( ImGui::SliderFloat( "##FieldOfView", &fieldOfViewPercent, 80.0f, 130.0f,
+                fieldOfViewFormat, ImGuiSliderFlags_::ImGuiSliderFlags_ClampOnInput ) ) {
+                fieldOfViewPercent = std::round( fieldOfViewPercent );
+                if ( std::abs( fieldOfViewPercent - 100.0f ) <= 0.5f )
+                    fieldOfViewPercent = 100.0f;
+                settings.FOVHoriz = fieldOfViewPercent;
+                settings.FOVVert = 100.0f;
+                settings.ForceFOV = std::abs( fieldOfViewPercent - 100.0f ) > 0.1f;
             }
-            ImGui::SetItemTooltip( "100 (Original) leaves Gothics camera untouched. Other values set a horizontal FOV angle; the vertical basis stays Kirides-style aspect-corrected, so widescreen gains side vision instead of zooming both axes." );
+            ImGui::SetItemTooltip( "100 (Original) leaves Gothics camera and projection exactly untouched. Values up to 120 continuously blend to the full Hor+ correction for the current monitor aspect ratio; 121-130 add extra width. The native vertical angle and camera height remain unchanged." );
 
             const static std::vector<std::pair<const char*, int>> shadowMapSizesMax = {
                 {"very low", 512},
@@ -1322,13 +1348,13 @@ void ImGuiShim::RenderSettingsWindow()
 
         ImGui::Spacing();
         const float footerButtonWidth = (ImGui::GetContentRegionAvail().x - style.ItemSpacing.x * 2.0f) / 3.0f;
-        const bool resetToDefaults = ImGui::Button( "Reset to Defaults", ImVec2( footerButtonWidth, 30.f ) );
+        const bool resetToDefaults = ImGui::Button( "Reset to Defaults", ImVec2( footerButtonWidth, footerHeight ) );
         ImGui::SetItemTooltip( "Restores the default renderer settings." );
         ImGui::SameLine();
-        const bool cancelled = ImGui::Button( "Cancel", ImVec2( footerButtonWidth, 30.f ) );
+        const bool cancelled = ImGui::Button( "Cancel", ImVec2( footerButtonWidth, footerHeight ) );
         ImGui::SetItemTooltip( "Discard changes made since opening the F11 menu." );
         ImGui::SameLine();
-        const bool saved = ImGui::Button( "Save Settings", ImVec2( footerButtonWidth, 30.f ) );
+        const bool saved = ImGui::Button( "Save Settings", ImVec2( footerButtonWidth, footerHeight ) );
         auto worldSettingsPath = Engine::GAPI->GetLoadedWorldSettingsPath(false);
         const bool isInWorld = !worldSettingsPath.empty();
         const bool hasWorldSettings = Toolbox::FileExists( worldSettingsPath );
@@ -1363,6 +1389,7 @@ void ImGuiShim::RenderSettingsWindow()
         }
     }
     ImGui::End();
+    ImGui::PopStyleVar( 3 );
 
     if ( shadersToReload != ShaderCategory::None ) {
         Engine::GraphicsEngine->ReloadShaders( shadersToReload );

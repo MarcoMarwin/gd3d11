@@ -83,18 +83,11 @@ void D3D11DeferredRenderer::AddGeometryPasses( RenderGraph& graph,
                     context->ClearRenderTargetView( rtvs[i], black );
             }
 
-            // Sky is rendered later without depth or MRT writes. With FSR3 active, opaque
-            // geometry overwrites this value with 0 and uncovered sky remains fully marked.
-            const auto& rendererSettings = Engine::GAPI->GetRendererState().RendererSettings;
-            const bool fsr3Active = rendererSettings.AntiAliasingMode == GothicRendererSettings::AA_FSR3
-                || (rendererSettings.AntiAliasingMode == GothicRendererSettings::AA_FSR
-                    && rendererSettings.Upscaler == GothicRendererSettings::UPSCALER_FSR_3);
-            const float skyTncValue = fsr3Active ? 0.05f : 0.f;
-            const float skyTransparencyAndComposition[] { skyTncValue, skyTncValue, skyTncValue, skyTncValue };
+            // Kirides Nightly leaves both world geometry and the later sky outside T&C by default.
             if ( reactiveMask )
                 context->ClearRenderTargetView( reactiveMask->GetRenderTargetView().Get(), black );
             if ( rtvs[4] )
-                context->ClearRenderTargetView( rtvs[4], skyTransparencyAndComposition );
+                context->ClearRenderTargetView( rtvs[4], black );
             context->OMSetRenderTargets( 6, rtvs, engine.GetDepthBuffer()->GetDepthStencilView().Get() );
 
             Engine::GAPI->DrawWorldMeshNaive();
