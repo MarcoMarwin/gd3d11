@@ -248,7 +248,8 @@ namespace
         return TextureNameStartsWithMarker( name, "ICEREGION" );
     }
 
-    bool MeshUsesIceRegionTexture( const MeshKey& meshKey ) {
+    template <typename T>
+    bool MeshUsesIceRegionTexture( const T& meshKey ) {
         if ( IsIceRegionTexture( meshKey.Texture ) ) {
             return true;
         }
