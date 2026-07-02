@@ -4659,11 +4659,7 @@ XRESULT D3D11GraphicsEngine::OnStartWorldRendering() {
         });
     }
 
-    const bool renderDoFAfterUpscaling = rendererState.RendererSettings.EnableDoF
-        && fsr3UpscalingActive;
-
-
-    if ( rendererState.RendererSettings.EnableDoF && !renderDoFAfterUpscaling ) {
+    if ( rendererState.RendererSettings.EnableDoF ) {
         graph.AddPass( RG_PASS_NAME("Draw DepthOfField"), [&]( RGBuilder& builder, RenderPass& pass ) {
             builder.Read( backBufferHandle );
             builder.Write( backBufferHandle );
@@ -4671,7 +4667,7 @@ XRESULT D3D11GraphicsEngine::OnStartWorldRendering() {
             pass.m_executeCallback = [this, backBufferHandle](const RenderGraph& graph) {
                 TracyD3D11ZoneCGX( "D3D11GraphicsEngine::Draw DepthOfField" );
                 auto backbufferResource = graph.GetPhysicalTexture( backBufferHandle );
-                PfxRenderer->RenderDepthOfField( backbufferResource->GetShaderResView().Get(), GetResolution() );
+                PfxRenderer->RenderDepthOfField( backbufferResource->GetShaderResView().Get() );
             };
         } );
     }
@@ -4895,15 +4891,6 @@ XRESULT D3D11GraphicsEngine::OnStartWorldRendering() {
         }
         graph.Compile();
         graph.Execute();
-        // FSR should receive the sharp scene. Apply depth of field once at
-        // presentation resolution so it cannot be amplified by temporal reconstruction.
-        if ( isUpscaling && rendererState.RendererSettings.EnableDoF ) {
-            SetViewport( ViewportInfo( 0, 0, GetBackbufferResolution() ) );
-            GetContext()->OMSetRenderTargets(
-                1, Backbuffer->GetRenderTargetView().GetAddressOf(), nullptr );
-            PfxRenderer->RenderDepthOfField(
-                Backbuffer->GetShaderResView().Get(), GetBackbufferResolution() );
-        }
 
         // Thin rain streaks can disappear before temporal upscaling. Under
         // FSR3, rasterize them once at output resolution after upscaling and

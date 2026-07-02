@@ -1551,28 +1551,33 @@ void GothicAPI::DrawWorldMeshNaive() {
         const float nativeHorizontal = nativeFovValid ? nativeFovH : setfovH;
         const float nativeVertical = nativeFovValid ? nativeFovV : setfovV;
         const float fovControl = std::clamp( RendererState.RendererSettings.FOVHoriz, 80.0f, 130.0f );
-        const float currentAspect = Engine::GraphicsEngine->GetResolution().x
-            / static_cast<float>(std::max( Engine::GraphicsEngine->GetResolution().y, 1 ));
+        const INT2 outputResolution = Engine::GraphicsEngine->GetBackbufferResolution();
+        const float currentAspect = outputResolution.x
+            / static_cast<float>(std::max( outputResolution.y, 1 ));
         constexpr float gothicReferenceAspect = 4.0f / 3.0f;
         const float aspectWidthScale = std::max( currentAspect / gothicReferenceAspect, 0.01f );
 
-        float horizontalWidthScale = fovControl / 100.0f;
+        // The slider changes the complete view angle in tangent space. Horizontal
+        // FOV additionally receives the smooth 4:3-to-current-aspect Hor+ correction.
+        const float overallFovScale = fovControl / 100.0f;
+        float aspectCorrectionScale = 1.0f;
         if ( fovControl >= 100.0f ) {
             // 100 is exact original. 101..120 blend continuously to the full Hor+
             // correction for the active aspect ratio; 121..130 add optional extra width.
             const float widescreenBlend = std::clamp( (fovControl - 100.0f) / 20.0f, 0.0f, 1.0f );
-            horizontalWidthScale = 1.0f + (aspectWidthScale - 1.0f) * widescreenBlend;
+            aspectCorrectionScale = 1.0f + (aspectWidthScale - 1.0f) * widescreenBlend;
             if ( fovControl > 120.0f ) {
-                horizontalWidthScale *= 1.0f + (fovControl - 120.0f) / 100.0f;
+                aspectCorrectionScale *= 1.0f + (fovControl - 120.0f) / 100.0f;
             }
         }
 
-        const auto scaleFovAngle = []( float nativeAngle, float widthScale ) {
+        const auto scaleFovAngle = []( float nativeAngle, float tangentScale ) {
             const float halfAngle = DirectX::XMConvertToRadians( std::clamp( nativeAngle, 1.0f, 179.0f ) ) * 0.5f;
-            return DirectX::XMConvertToDegrees( 2.0f * std::atan( std::tan( halfAngle ) * widthScale ) );
+            return DirectX::XMConvertToDegrees( 2.0f * std::atan( std::tan( halfAngle ) * tangentScale ) );
         };
-        const float targetFovH = scaleFovAngle( nativeHorizontal, horizontalWidthScale );
-        const float targetFovV = nativeVertical;
+        const float targetFovH = scaleFovAngle(
+            nativeHorizontal, overallFovScale * aspectCorrectionScale );
+        const float targetFovV = scaleFovAngle( nativeVertical, overallFovScale );
         if ( camera
             // FIXME: This is being reset after a dialog!
             && (camera != CurrentCamera || std::abs( setfovH - targetFovH ) > 0.001f || std::abs( setfovV - targetFovV ) > 0.001f) ) {
@@ -1581,8 +1586,8 @@ void GothicAPI::DrawWorldMeshNaive() {
                 setfovH = targetFovH;
                 setfovV = targetFovV;
 
-                // Scale Gothic's native horizontal frustum continuously while preserving
-                // its native vertical angle and therefore the original camera height.
+                // Scale both native FOV axes continuously. The horizontal axis also
+                // carries the aspect-ratio correction; 100 never overrides Gothic.
                 camera->SetFOV( setfovH, setfovV );
                 camera->Activate();
 
@@ -5573,11 +5578,11 @@ XRESULT GothicAPI::LoadMenuSettings( const std::string& file ) {
         s.Upscaler = (GothicRendererSettings::E_Upscaler)std::clamp<int>( GetPrivateProfileIntA( "Display", "Upscaler", ds.Upscaler, ini.c_str() ), 0, GothicRendererSettings::E_Upscaler::_UPSCALER_NUM_MODES - 1 );
         s.EnableVSync = GetPrivateProfileBoolA( "Display", "VSync", ds.EnableVSync, ini );
         s.EnableFrameGeneration = false; // Disabled for the current DX11/x86 path; the manual FG path serializes and causes heavy framedrops.
-        // FOVHoriz is a percentage of Gothic's native horizontal frustum; 100 is untouched original.
+        // FOVHoriz/FOVVert share one full-frustum percentage; 100 is untouched original.
         const bool configuredForceFov = GetPrivateProfileBoolA( "Display", "ForceFOV", false, ini );
         const float configuredFovScale = std::clamp( static_cast<float>(GetPrivateProfileIntA( "Display", "FOVHoriz", 100, ini.c_str() )), 80.0f, 130.0f );
         s.FOVHoriz = configuredForceFov ? configuredFovScale : 100.0f;
-        s.FOVVert = 100.0f;
+        s.FOVVert = s.FOVHoriz;
         s.ForceFOV = configuredForceFov && std::abs( s.FOVHoriz - 100.0f ) > 0.1f;
         if ( !s.ForceFOV ) {
             s.FOVHoriz = 100.0f;

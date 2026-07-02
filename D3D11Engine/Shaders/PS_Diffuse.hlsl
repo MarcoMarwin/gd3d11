@@ -76,6 +76,11 @@ float2 CalculateVelocity(float4 currClipPos, float4 prevClipPos)
 	return velocity;
 }
 
+
+float GetFsr3DialogReactiveMask()
+{
+    return (FF_GSwitches & GSWITCH_FSR3_DIALOG_REACTIVE) != 0 ? 0.30f : 0.0f;
+}
 //--------------------------------------------------------------------------------------
 // Pixel Shader
 //--------------------------------------------------------------------------------------
@@ -88,7 +93,7 @@ FORWARD_PLUS_PS_OUTPUT PSMain( PS_INPUT Input )
 	FORWARD_PLUS_PS_OUTPUT output;
 	// Match Kirides Nightly temporal masks for opaque world geometry.
 	output.vTransparencyAndCompositionMask = 0.0f;
-	output.vReactiveMask = 0.0f;
+	output.vReactiveMask = GetFsr3DialogReactiveMask();
 
 	float2 materialUV = Input.vTexcoord;
 #if NORMALMAPPING == 1
@@ -102,7 +107,7 @@ FORWARD_PLUS_PS_OUTPUT PSMain( PS_INPUT Input )
 
 #if ALPHATEST == 1
 	DoAlphaTest(color.a);
-	output.vReactiveMask = 0.10f; // Kirides Nightly: minimal alpha-test reactivity.
+	output.vReactiveMask = max(output.vReactiveMask, 0.10f); // Preserve dialog reactivity; Kirides alpha-test floor.
 #endif
 
 #if NORMALMAPPING == 1
@@ -205,7 +210,7 @@ DEFERRED_PS_OUTPUT PSMain( PS_INPUT Input ) : SV_TARGET
 	DEFERRED_PS_OUTPUT output;
 	// Match Kirides Nightly temporal masks for opaque world geometry.
 	output.vTransparencyAndCompositionMask = 0.0f;
-	output.vReactiveMask = 0.0f;
+	output.vReactiveMask = GetFsr3DialogReactiveMask();
 
 	float2 materialUV = Input.vTexcoord;
 #if NORMALMAPPING == 1
@@ -221,7 +226,7 @@ DEFERRED_PS_OUTPUT PSMain( PS_INPUT Input ) : SV_TARGET
 	
 	// WorldMesh can always do the alphatest
 	DoAlphaTest(color.a);
-	output.vReactiveMask = 0.10f; // Kirides Nightly: minimal alpha-test reactivity.
+	output.vReactiveMask = max(output.vReactiveMask, 0.10f); // Preserve dialog reactivity; Kirides alpha-test floor.
 #endif
 	
 	// Apply normalmapping if wanted

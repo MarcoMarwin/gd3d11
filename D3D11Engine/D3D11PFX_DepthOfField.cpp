@@ -240,7 +240,7 @@ void D3D11PFX_DepthOfField::UpdateAdaptiveFocus( float configuredNearDistance ) 
     m_AutoFocusBlend = m_AutoFocusTransitionStart
         + (targetBlend - m_AutoFocusTransitionStart) * smoothTransition;
 }
-XRESULT D3D11PFX_DepthOfField::Render( ID3D11ShaderResourceView* backbuffer, const INT2& targetResolution ) {
+XRESULT D3D11PFX_DepthOfField::Render( ID3D11ShaderResourceView* backbuffer ) {
     D3D11GraphicsEngine* engine = reinterpret_cast<D3D11GraphicsEngine*>(Engine::GraphicsEngine);
 
     engine->SetDefaultStates();
@@ -257,7 +257,7 @@ XRESULT D3D11PFX_DepthOfField::Render( ID3D11ShaderResourceView* backbuffer, con
     }
 
     if ( !FeatureLevel10Compatibility ) {
-        auto res = RenderCS( backbuffer, targetResolution );
+        auto res = RenderCS( backbuffer );
         engine->GetContext()->OMSetRenderTargets( 1, oldRTV.GetAddressOf(), oldDSV.Get() );
         return res;
     }
@@ -301,7 +301,7 @@ XRESULT D3D11PFX_DepthOfField::Render( ID3D11ShaderResourceView* backbuffer, con
     engine->GetContext()->PSSetShaderResources( 0, 2, nullSRV2 );
 
     // --- Pass 1: Half-res bokeh blur ---
-    const INT2 res = targetResolution;
+    auto res = engine->GetResolution();
     DXGI_FORMAT bbufferFormat = engine->GetBackBufferFormat();
     auto halfBuffer = FxRenderer->GetTexturePool()->Acquire(
         TexturePool::Description{ res.x / 2, res.y / 2, bbufferFormat } );
@@ -353,7 +353,7 @@ XRESULT D3D11PFX_DepthOfField::Render( ID3D11ShaderResourceView* backbuffer, con
 }
 
 /** Compute shader path for FL11+ */
-XRESULT D3D11PFX_DepthOfField::RenderCS( ID3D11ShaderResourceView* backbuffer, const INT2& targetResolution ) {
+XRESULT D3D11PFX_DepthOfField::RenderCS( ID3D11ShaderResourceView* backbuffer ) {
     D3D11GraphicsEngine* engine = reinterpret_cast<D3D11GraphicsEngine*>(Engine::GraphicsEngine);
     auto& context = engine->GetContext();
 
@@ -399,7 +399,7 @@ XRESULT D3D11PFX_DepthOfField::RenderCS( ID3D11ShaderResourceView* backbuffer, c
     m_FocusIndex = curIdx;
 
     // --- Pass 1: Half-res bokeh blur ---
-    const INT2 res = targetResolution;
+    auto res = engine->GetResolution();
     DXGI_FORMAT bbufferFormat = engine->GetBackBufferFormat();
     auto halfBuffer = FxRenderer->GetTexturePool()->Acquire(
         TexturePool::Description{ res.x / 2, res.y / 2, bbufferFormat,
