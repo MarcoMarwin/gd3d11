@@ -10,6 +10,7 @@ SamplerState SS_Anisotropic : register( s0 );
 //Texture2D	TX_Texture0 : register( t0 );
 Texture2DArray TX_RainTextureArray : register( t0 );
 Texture2D<float> TX_SceneDepth : register( t1 );
+Texture2D<float> TX_RainExclusionMask : register( t2 );
 
 #define PI 3.14159265
 
@@ -247,16 +248,30 @@ PS_OUTPUT PSMain( PS_INPUT Input )
 {
     // FSR3 rain is rasterized after upscaling so sub-pixel streaks survive.
     // Reject drops hidden by scene geometry using the copied inverted depth.
+    float inputResolutionScale = AR_Pad1.z > 0.0f ? AR_Pad1.z : 1.0f;
+    int2 inputPixel = int2(Input.vPosition.xy * inputResolutionScale);
+
     if (AR_Pad1.z > 0.0f)
     {
         uint depthWidth, depthHeight;
         TX_SceneDepth.GetDimensions(depthWidth, depthHeight);
         int2 depthPixel = clamp(
-            int2(Input.vPosition.xy * AR_Pad1.z),
+            inputPixel,
             int2(0, 0),
             int2((int)depthWidth - 1, (int)depthHeight - 1));
         float sceneDepth = TX_SceneDepth.Load(int3(depthPixel, 0));
         if (sceneDepth > Input.vPosition.z + 0.00001f)
+            discard;
+    }
+
+    if (AR_Pad1.x > 0.5f)
+    {
+        uint maskWidth, maskHeight;
+        TX_RainExclusionMask.GetDimensions(maskWidth, maskHeight);
+        int2 maskPixel = clamp(inputPixel, int2(0, 0), int2((int)maskWidth - 1, (int)maskHeight - 1));
+        // 0.25 marks regular water for wet-ground SSR only; 1.0 is the hard
+        // rain exclusion used by frozen/Icedragon materials and blockers.
+        if (TX_RainExclusionMask.Load(int3(maskPixel, 0)) > 0.75f)
             discard;
     }
 	//float4 color = pow(TX_Texture0.Sample(SS_Linear, Input.vTexcoord), 1.0f);
@@ -290,6 +305,10 @@ PS_OUTPUT PSMain( PS_INPUT Input )
 #endif
     PS_OUTPUT output;
     const float fsr3Rain = saturate(AR_Pad1.y);
+    const float postUpscaleRain = AR_Pad1.z > 0.0f ? 1.0f : 0.0f;
+#ifndef SNOW_FEATURE
+    directionalLight.w *= lerp(1.0f, 0.80f, postUpscaleRain);
+#endif
     directionalLight.w = saturate(directionalLight.w * lerp(1.0f, 1.45f, fsr3Rain));
     output.color = directionalLight;
     float rainReactive = min(saturate(directionalLight.w * lerp(1.0f, 6.0f, fsr3Rain)), 0.95f);

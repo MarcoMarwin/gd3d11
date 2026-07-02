@@ -32,6 +32,7 @@ public:
         RGResourceHandle colorResource,
         RGResourceHandle normalsResource,
         RGResourceHandle specularResource,
+        RGResourceHandle rainExclusionMaskResource,
         RGResourceHandle backBufferHandle,
         std::vector<VobLightInfo*>& frameLights ) override;
 

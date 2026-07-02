@@ -730,8 +730,9 @@ namespace
             s.EnableFrameGeneration = false;
         }
 
-        // The centre position preserves Gothic's original camera projection.
-        // 100 is an explicit sentinel; values away from it override only the horizontal angle.
+        // The slider is a zoom percentage around Gothic's native projection.
+        // 100 preserves both original camera angles exactly; higher values narrow
+        // the view and lower values widen it.
         s.FOVHoriz = std::clamp( static_cast<float>( std::round( s.FOVHoriz / 5.0f ) * 5.0f ), 70.0f, 120.0f );
         s.FOVVert = s.FOVHoriz;
         s.ForceFOV = std::abs( s.FOVHoriz - 100.0f ) > 0.1f;
@@ -969,16 +970,15 @@ void ImGuiShim::RenderSettingsWindow()
             if ( fieldOfViewIndex == 6 ) {
                 snprintf( fieldOfViewText, sizeof( fieldOfViewText ), "Original" );
             } else {
-                snprintf( fieldOfViewText, sizeof( fieldOfViewText ), "%.0f deg", fieldOfViewLevels[fieldOfViewIndex] );
+                snprintf( fieldOfViewText, sizeof( fieldOfViewText ), "%.0f %%", fieldOfViewLevels[fieldOfViewIndex] );
             }
             ImText( "Field of View", buttonWidth ); ImGui::SameLine();
             if ( SliderSteppedIndex( "##FieldOfView", &fieldOfViewIndex, 10, true, 6, fieldOfViewText ) ) {
                 settings.FOVHoriz = fieldOfViewLevels[fieldOfViewIndex];
-                // Change only the horizontal viewing angle. Gothic's original
-                // vertical FOV controls the third-person camera composition.
+                settings.FOVVert = settings.FOVHoriz;
                 settings.ForceFOV = fieldOfViewIndex != 6;
             }
-            ImGui::SetItemTooltip( "100 (Original) leaves Gothics camera projection untouched; other values change only the horizontal view." );
+            ImGui::SetItemTooltip( "100 (Original) preserves Gothics camera exactly. Higher percentages narrow both viewing angles; lower percentages widen them." );
 
             const static std::vector<std::pair<const char*, int>> shadowMapSizesMax = {
                 {"very low", 512},
@@ -1266,6 +1266,15 @@ void ImGuiShim::RenderSettingsWindow()
             ImGui::SetItemTooltip( "Lets grass and wheat bend around nearby characters." );
 #endif //BUILD_GOTHIC_2_6_fix
 
+            ImText( "Enable Rain", { buttonWidth.x - ImGui::GetFrameHeight() - style.ItemSpacing.x, buttonWidth.y } ); ImGui::SameLine();
+            ImGui::Checkbox( "##Enable Rain", &settings.EnableRain );
+            ImGui::SetItemTooltip( "Enables rain particles and wet-ground effects." );
+            ImText( "Limit Light Intensity", { buttonWidth.x - ImGui::GetFrameHeight() - style.ItemSpacing.x, buttonWidth.y } ); ImGui::SameLine();
+            ImGui::Checkbox( "##Limit Light Intensity", &settings.LimitLightIntesity );
+            ImGui::SetItemTooltip( "Limits the maximum intensity of point lights." );
+            ImText( "Occlusion Culling", { buttonWidth.x - ImGui::GetFrameHeight() - style.ItemSpacing.x, buttonWidth.y } ); ImGui::SameLine();
+            ImGui::Checkbox( "##Enable Occlusion Culling", &settings.EnableOcclusionCulling );
+            ImGui::SetItemTooltip( "Skips world geometry hidden behind other objects." );
             const bool frameGenerationAvailable = FrameGenerationAvailable( settings );
             ImText( "Frame Generation", { buttonWidth.x - ImGui::GetFrameHeight() - style.ItemSpacing.x, buttonWidth.y } ); ImGui::SameLine();
             ImGui::BeginDisabled( !frameGenerationAvailable );
@@ -1302,15 +1311,6 @@ void ImGuiShim::RenderSettingsWindow()
                 }
                 ImGui::EndTooltip();
             }
-            ImText( "Enable Rain", { buttonWidth.x - ImGui::GetFrameHeight() - style.ItemSpacing.x, buttonWidth.y } ); ImGui::SameLine();
-            ImGui::Checkbox( "##Enable Rain", &settings.EnableRain );
-            ImGui::SetItemTooltip( "Enables rain particles and wet-ground effects." );
-            ImText( "Limit Light Intensity", { buttonWidth.x - ImGui::GetFrameHeight() - style.ItemSpacing.x, buttonWidth.y } ); ImGui::SameLine();
-            ImGui::Checkbox( "##Limit Light Intensity", &settings.LimitLightIntesity );
-            ImGui::SetItemTooltip( "Limits the maximum intensity of point lights." );
-            ImText( "Occlusion Culling", { buttonWidth.x - ImGui::GetFrameHeight() - style.ItemSpacing.x, buttonWidth.y } ); ImGui::SameLine();
-            ImGui::Checkbox( "##Enable Occlusion Culling", &settings.EnableOcclusionCulling );
-            ImGui::SetItemTooltip( "Skips world geometry hidden behind other objects." );
             ImText( "HDR", { buttonWidth.x - ImGui::GetFrameHeight() - style.ItemSpacing.x, buttonWidth.y } ); ImGui::SameLine();
             ImGui::Checkbox( "##Enable HDR", &settings.EnableHDR );
             ImGui::SetItemTooltip( "Enables high dynamic range rendering." );

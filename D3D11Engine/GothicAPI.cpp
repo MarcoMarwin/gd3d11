@@ -1548,17 +1548,26 @@ void GothicAPI::DrawWorldMeshNaive() {
         if ( camera )
             camera->GetFOV( setfovH, setfovV );
 
-        const float targetFovV = nativeFovValid ? nativeFovV : setfovV;
+        const float nativeHorizontal = nativeFovValid ? nativeFovH : setfovH;
+        const float nativeVertical = nativeFovValid ? nativeFovV : setfovV;
+        const float zoomFactor = std::clamp( RendererState.RendererSettings.FOVHoriz / 100.0f, 0.70f, 1.20f );
+        const auto zoomFovAngle = [zoomFactor]( float nativeAngle ) {
+            const float halfAngle = XMConvertToRadians( std::clamp( nativeAngle, 1.0f, 179.0f ) ) * 0.5f;
+            return XMConvertToDegrees( 2.0f * std::atan( std::tan( halfAngle ) / zoomFactor ) );
+        };
+        const float targetFovH = zoomFovAngle( nativeHorizontal );
+        const float targetFovV = zoomFovAngle( nativeVertical );
         if ( camera
             // FIXME: This is being reset after a dialog!
-            && (camera != CurrentCamera || setfovH != RendererState.RendererSettings.FOVHoriz || setfovV != targetFovV) ) {
+            && (camera != CurrentCamera || std::abs( setfovH - targetFovH ) > 0.001f || std::abs( setfovV - targetFovV ) > 0.001f) ) {
             // if player is in a dialog state with a npc, we do not change FOV, or create an option for it in F11 menu
             if ( DialogFinished() ) {
-                setfovH = RendererState.RendererSettings.FOVHoriz;
+                setfovH = targetFovH;
                 setfovV = targetFovV;
 
-                // Widen or narrow only the horizontal view. Keeping Gothic's
-                // native vertical FOV prevents the third-person camera from jumping.
+                // Scale both native viewing angles around the exact Gothic camera.
+                // This preserves the original third-person composition at 100,
+                // while values above 100 zoom in and values below 100 zoom out.
                 camera->SetFOV( setfovH, setfovV );
                 camera->Activate();
 

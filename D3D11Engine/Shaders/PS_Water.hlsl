@@ -31,7 +31,8 @@ cbuffer RefractionInfo : register( b2 )
 cbuffer WaterMaterialInfo : register( b3 )
 {
 	float WM_DisableSSR;
-	float3 WM_Pad;
+	float WM_DisableRainEffects;
+	float2 WM_Pad;
 };
 
 //--------------------------------------------------------------------------------------
@@ -235,7 +236,8 @@ PS_OUTPUT PSMain( PS_INPUT Input )
 	// Dynamic SSR is the only screen-space reflection layer now. The cubemap is the fallback
 	// whenever the strength is zero or the near/contact SSR masks suppress actor artifacts.
 	float waterViewDistance = length(Input.vWorldPosition - AC_WorldCameraPos);
-	float rainReflectionFog = saturate(AC_RainFXWeight);
+	float waterMaterialAllowsRain = 1.0f - step(0.5f, WM_DisableRainEffects);
+	float rainReflectionFog = saturate(AC_RainFXWeight) * waterMaterialAllowsRain;
 	float rainCubemapVisibility = lerp(1.0f, 0.12f, rainReflectionFog) * (1.0f - rainReflectionFog * smoothstep(5000.0f, 22000.0f, waterViewDistance));
 	scene.rgb += reflection * cubeWeight * rainCubemapVisibility * fresnel * lerp(1.0f, diffuse, 0.6f);
 	float ssrBlend = saturate(ssrWeight * ssrFresnel * reflectionStrength * 0.78f * lerp(0.85f, 1.10f, nightAmount));
@@ -273,7 +275,9 @@ PS_OUTPUT PSMain( PS_INPUT Input )
 	float3 finalColor = color / darknessFactor;
 	finalColor = lerp(finalColor, reflectionSSRColor, ssrBlend);
 	output.color = float4(finalColor, 1);
-	output.waterMask = 1.0f;
+	// Regular water blocks wet-ground SSR (0.25), while frozen water also blocks
+	// rain particles and the remaining rain-only water response (1.0).
+	output.waterMask = lerp(0.25f, 1.0f, step(0.5f, WM_DisableRainEffects));
 	// Water and SSR reflections change without reliable object motion vectors, so feed
 	// FSR3 a moderate reactive value. Full 1.0 is too unstable on animated water.
 	output.fsr3ReactiveMask = 0.45f;

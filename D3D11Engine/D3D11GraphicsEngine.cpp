@@ -178,8 +178,10 @@ namespace
 
     struct WaterMaterialInfoConstantBuffer {
         float WM_DisableSSR;
-        float WM_Pad[3];
+        float WM_DisableRainEffects;
+        float WM_Pad[2];
     };
+    static_assert( sizeof( WaterMaterialInfoConstantBuffer ) == 16 );
 
     bool TextureNameContainsMarker( const std::string& name, const char* marker ) {
         if ( !marker || !*marker ) {
@@ -412,6 +414,7 @@ D3D11GraphicsEngine::D3D11GraphicsEngine() :
     QuadIndexBuffer(nullptr),
     CachedRefreshRate{0, 0},
     frameLatencyWaitableObject(nullptr),
+    m_ConfiguredMaximumFrameLatency(0),
     SaveScreenshotNextFrame(false),
     m_flipWithTearing(false),
     m_swapchainflip(false),
@@ -1365,6 +1368,7 @@ XRESULT D3D11GraphicsEngine::OnResize( INT2 newSize ) {
         CloseHandle( frameLatencyWaitableObject );
         frameLatencyWaitableObject = nullptr;
     }
+    m_ConfiguredMaximumFrameLatency = 0;
 
     static UINT lastSwapchainFlags = scflags;
 
@@ -1938,6 +1942,16 @@ XRESULT D3D11GraphicsEngine::Present() {
         && !Engine::GAPI->IsInSavingLoadingState()
         && !Engine::GAPI->IsGamePaused()
         && !imguiActive;
+
+    const UINT desiredMaximumFrameLatency = frameGenerationActive ? 2u : 1u;
+    if ( m_swapchainflip && SwapChain && m_ConfiguredMaximumFrameLatency != desiredMaximumFrameLatency ) {
+        wrl::ComPtr<IDXGISwapChain2> swapChain2;
+        if ( SUCCEEDED( SwapChain.As( &swapChain2 ) ) ) {
+            if ( SUCCEEDED( swapChain2->SetMaximumFrameLatency( desiredMaximumFrameLatency ) ) ) {
+                m_ConfiguredMaximumFrameLatency = desiredMaximumFrameLatency;
+            }
+        }
+    }
 
     ID3D11ShaderResourceView* interpolatedFrame = nullptr;
     if ( frameGenerationActive ) {
@@ -4176,7 +4190,7 @@ XRESULT D3D11GraphicsEngine::OnStartWorldRendering() {
 
     ActiveSceneRenderer->AddLightingPasses( graph, *this,
         colorResource, normalsResource, specularResource,
-        backBufferHandle, m_FrameLights );
+        transparencyAndCompositionMaskResource, backBufferHandle, m_FrameLights );
 
     // XeGTAO is composited before transparent alpha meshes so particles, fire and
     // other translucent effects are not darkened by opaque-world AO.
@@ -4236,10 +4250,24 @@ XRESULT D3D11GraphicsEngine::OnStartWorldRendering() {
         } );
     }
 
-    const bool renderWetGroundSSR = rendererState.RendererSettings.EnableSSR
-        && rendererState.RendererSettings.EnableRain
+    const bool renderRainExclusionMask = rendererState.RendererSettings.EnableRain
         && Engine::GAPI->GetSceneWetness() > 1e-6f && isOutdoor;
+    const bool renderWetGroundSSR = rendererState.RendererSettings.EnableSSR
+        && renderRainExclusionMask;
     RGResourceHandle waterMaskResource = RG_INVALID_HANDLE;
+    if ( renderRainExclusionMask ) {
+        const auto maskSize = GetResolution();
+        if ( !RainExclusionMaskBuffer
+            || RainExclusionMaskBuffer->GetSizeX() != maskSize.x
+            || RainExclusionMaskBuffer->GetSizeY() != maskSize.y ) {
+            RainExclusionMaskBuffer = std::make_unique<RenderToTextureBuffer>(
+                GetDevice().Get(), maskSize.x, maskSize.y, DXGI_FORMAT_R8_UNORM,
+                nullptr, DXGI_FORMAT_UNKNOWN, DXGI_FORMAT_UNKNOWN, 1, 1,
+                D3D11_BIND_RENDER_TARGET | D3D11_BIND_SHADER_RESOURCE );
+            SetDebugName( RainExclusionMaskBuffer->GetTexture().Get(), "Rain Exclusion Mask" );
+        }
+        waterMaskResource = graph.ImportResource( L"RainExclusionMask", RainExclusionMaskBuffer.get() );
+    }
     const bool fsr3ActiveForReactiveMask = rendererState.RendererSettings.AntiAliasingMode == GothicRendererSettings::AA_FSR3
         || (rendererState.RendererSettings.AntiAliasingMode == GothicRendererSettings::AA_FSR
             && rendererState.RendererSettings.Upscaler == GothicRendererSettings::UPSCALER_FSR_3);
@@ -4247,11 +4275,7 @@ XRESULT D3D11GraphicsEngine::OnStartWorldRendering() {
     graph.AddPass( RG_PASS_NAME("DrawWaterSurfaces"), [&]( RGBuilder& builder, RenderPass& pass ) {
         builder.Read( backBufferHandle );
         builder.Write( backBufferHandle );
-        if ( renderWetGroundSSR ) {
-            const auto size = GetResolution();
-            waterMaskResource = builder.CreateTexture( {
-                static_cast<uint32_t>(size.x), static_cast<uint32_t>(size.y),
-                DXGI_FORMAT_R8_UNORM, L"WaterMask" } );
+        if ( renderRainExclusionMask ) {
             builder.Write( waterMaskResource );
         }
         if ( fsr3ActiveForReactiveMask ) {
@@ -4259,10 +4283,10 @@ XRESULT D3D11GraphicsEngine::OnStartWorldRendering() {
             builder.Write( reactiveMaskResource );
         }
 
-        pass.m_executeCallback = [this, renderWetGroundSSR, waterMaskResource, fsr3ActiveForReactiveMask, reactiveMaskResource](const RenderGraph& graph) {
+        pass.m_executeCallback = [this, renderRainExclusionMask, waterMaskResource, fsr3ActiveForReactiveMask, reactiveMaskResource](const RenderGraph& graph) {
             SetViewport( ViewportInfo( 0, 0, GetResolution() ) );
             ID3D11RenderTargetView* waterMaskRTV = nullptr;
-            if ( renderWetGroundSSR ) {
+            if ( renderRainExclusionMask ) {
                 auto* waterMask = graph.GetPhysicalTexture( waterMaskResource );
                 const float clearMask[4] = {};
                 GetContext()->ClearRenderTargetView( waterMask->GetRenderTargetView().Get(), clearMask );
@@ -4274,7 +4298,7 @@ XRESULT D3D11GraphicsEngine::OnStartWorldRendering() {
                 fsr3ReactiveMaskRTV = fsr3Mask ? fsr3Mask->GetRenderTargetView().Get() : nullptr;
             }
             DrawWaterSurfaces( waterMaskRTV, fsr3ReactiveMaskRTV );
-            if ( renderWetGroundSSR ) {
+            if ( renderRainExclusionMask ) {
                 DrawWaterfallMask( waterMaskRTV );
             }
         };
@@ -4403,12 +4427,15 @@ XRESULT D3D11GraphicsEngine::OnStartWorldRendering() {
             graph.AddPass( RG_PASS_NAME("Draw Rain"), [&]( RGBuilder& builder, RenderPass& pass ) {
                 builder.Read( backBufferHandle );
                 builder.Write( backBufferHandle );
+                if ( renderRainExclusionMask ) {
+                    builder.Read( waterMaskResource );
+                }
                 if ( fsr3ActiveForReactiveMask ) {
                     builder.Read( reactiveMaskResource );
                     builder.Write( reactiveMaskResource );
                 }
 
-                pass.m_executeCallback = [this, backBufferHandle, fsr3ActiveForReactiveMask, reactiveMaskResource](const RenderGraph& graph) {
+                pass.m_executeCallback = [this, backBufferHandle, fsr3ActiveForReactiveMask, reactiveMaskResource, renderRainExclusionMask, waterMaskResource](const RenderGraph& graph) {
                     TracyD3D11ZoneCGX( "D3D11GraphicsEngine::Draw Rain" );
                     if ( fsr3ActiveForReactiveMask ) {
                         auto* backBuffer = graph.GetPhysicalTexture( backBufferHandle );
@@ -4419,19 +4446,30 @@ XRESULT D3D11GraphicsEngine::OnStartWorldRendering() {
                         };
                         GetContext()->OMSetRenderTargets( 2, rtvs, DepthStencilBuffer->GetDepthStencilView().Get() );
                     }
-                    Effects->DrawRain();
+                    ID3D11ShaderResourceView* rainExclusionSRV = nullptr;
+                    if ( renderRainExclusionMask ) {
+                        auto* rainExclusionMask = graph.GetPhysicalTexture( waterMaskResource );
+                        rainExclusionSRV = rainExclusionMask ? rainExclusionMask->GetShaderResView().Get() : nullptr;
+                        GetContext()->PSSetShaderResources( 2, 1, &rainExclusionSRV );
+                    }
+                    Effects->DrawRain( false, rainExclusionSRV != nullptr );
+                    ID3D11ShaderResourceView* nullRainExclusion = nullptr;
+                    GetContext()->PSSetShaderResources( 2, 1, &nullRainExclusion );
                 };
             });
         } else {
             graph.AddPass( RG_PASS_NAME("Draw Rain CS"), [&]( RGBuilder& builder, RenderPass& pass ) {
                 builder.Read( backBufferHandle );
                 builder.Write( backBufferHandle );
+                if ( renderRainExclusionMask ) {
+                    builder.Read( waterMaskResource );
+                }
                 if ( fsr3ActiveForReactiveMask ) {
                     builder.Read( reactiveMaskResource );
                     builder.Write( reactiveMaskResource );
                 }
 
-                pass.m_executeCallback = [this, backBufferHandle, fsr3ActiveForReactiveMask, reactiveMaskResource](const RenderGraph& graph) {
+                pass.m_executeCallback = [this, backBufferHandle, fsr3ActiveForReactiveMask, reactiveMaskResource, renderRainExclusionMask, waterMaskResource](const RenderGraph& graph) {
                     TracyD3D11ZoneCGX( "D3D11GraphicsEngine::Draw Rain (CS)" );
                     if ( fsr3ActiveForReactiveMask ) {
                         auto* backBuffer = graph.GetPhysicalTexture( backBufferHandle );
@@ -4442,7 +4480,15 @@ XRESULT D3D11GraphicsEngine::OnStartWorldRendering() {
                         };
                         GetContext()->OMSetRenderTargets( 2, rtvs, DepthStencilBuffer->GetDepthStencilView().Get() );
                     }
-                    Effects->DrawRain_CS();
+                    ID3D11ShaderResourceView* rainExclusionSRV = nullptr;
+                    if ( renderRainExclusionMask ) {
+                        auto* rainExclusionMask = graph.GetPhysicalTexture( waterMaskResource );
+                        rainExclusionSRV = rainExclusionMask ? rainExclusionMask->GetShaderResView().Get() : nullptr;
+                        GetContext()->PSSetShaderResources( 2, 1, &rainExclusionSRV );
+                    }
+                    Effects->DrawRain_CS( false, rainExclusionSRV != nullptr );
+                    ID3D11ShaderResourceView* nullRainExclusion = nullptr;
+                    GetContext()->PSSetShaderResources( 2, 1, &nullRainExclusion );
                 };
             });
         }
@@ -4797,13 +4843,19 @@ XRESULT D3D11GraphicsEngine::OnStartWorldRendering() {
             SetViewport( ViewportInfo( 0, 0, GetBackbufferResolution() ) );
             GetContext()->OMSetRenderTargets( 1, Backbuffer->GetRenderTargetView().GetAddressOf(), nullptr );
             DepthStencilBufferCopy->BindToPixelShader( GetContext().Get(), 1 );
-            if ( FeatureLevel10Compatibility || rendererState.RendererSettings.DrawRainThroughTransformFeedback ) {
-                Effects->DrawRain( true );
-            } else {
-                Effects->DrawRain_CS( true );
+            ID3D11ShaderResourceView* rainExclusionSRV = nullptr;
+            if ( renderRainExclusionMask ) {
+                auto* rainExclusionMask = graph.GetPhysicalTexture( waterMaskResource );
+                rainExclusionSRV = rainExclusionMask ? rainExclusionMask->GetShaderResView().Get() : nullptr;
+                GetContext()->PSSetShaderResources( 2, 1, &rainExclusionSRV );
             }
-            ID3D11ShaderResourceView* nullRainDepth = nullptr;
-            GetContext()->PSSetShaderResources( 1, 1, &nullRainDepth );
+            if ( FeatureLevel10Compatibility || rendererState.RendererSettings.DrawRainThroughTransformFeedback ) {
+                Effects->DrawRain( true, rainExclusionSRV != nullptr );
+            } else {
+                Effects->DrawRain_CS( true, rainExclusionSRV != nullptr );
+            }
+            ID3D11ShaderResourceView* nullRainInputs[2] = {};
+            GetContext()->PSSetShaderResources( 1, 2, nullRainInputs );
         }
 
         // Preserve the upscaled scene before Gothic draws HUD elements. The
@@ -5162,6 +5214,8 @@ XRESULT D3D11GraphicsEngine::DrawWaterfallMask( ID3D11RenderTargetView* waterMas
 
     SetActivePixelShader( PShaderID::PS_WaterMask );
     SetActiveVertexShader( VShaderID::VS_Ex );
+    ActivePS->Apply();
+    ActiveVS->Apply();
 
     SetupVS_ExMeshDrawCall();
     SetupVS_ExConstantBuffer();
@@ -5480,6 +5534,7 @@ XRESULT D3D11GraphicsEngine::DrawWorldMesh( bool noTextures ) {
         .Bind();
 
     // Now draw the actual pixels
+    const int previousWorldRainSwitches = Engine::GAPI->GetRendererState().GraphicsState.FF_GSwitches;
     zCTexture* bound = nullptr;
     if ( !meshList.empty() ) {
         ZoneScopedN( "DrawWorldMesh::OpaqueSubmission" );
@@ -5498,6 +5553,14 @@ XRESULT D3D11GraphicsEngine::DrawWorldMesh( bool noTextures ) {
 
             if ( mesh.first.Texture != bound &&
                 Engine::GAPI->GetRendererState().RendererSettings.DrawWorldMesh > 1 ) {
+                const bool disableRainEffects = IsIceTexture( mesh.first.Texture );
+                const int switchesBeforeMaterial = Engine::GAPI->GetRendererState().GraphicsState.FF_GSwitches;
+                if ( disableRainEffects )
+                    Engine::GAPI->GetRendererState().GraphicsState.FF_GSwitches |= GSWITCH_DISABLE_RAIN_EFFECTS;
+                else
+                    Engine::GAPI->GetRendererState().GraphicsState.FF_GSwitches &= ~GSWITCH_DISABLE_RAIN_EFFECTS;
+                const bool rainMaterialSwitchChanged = switchesBeforeMaterial != Engine::GAPI->GetRendererState().GraphicsState.FF_GSwitches;
+
                 MyDirectDrawSurface7* surface = mesh.first.Texture->GetSurface();
                 ID3D11ShaderResourceView* srv[4];
                 MaterialInfo* info = mesh.first.Info;
@@ -5511,7 +5574,7 @@ XRESULT D3D11GraphicsEngine::DrawWorldMesh( bool noTextures ) {
                     ? surface->GetFxMap()->GetShaderResourceView().Get()
                     : nullptr;
                 srv[3] = GetParallaxDisplacementSRV( surface );
-                if ( !srv[1] ) {
+                if ( !srv[1] && !disableRainEffects ) {
                     srv[1] = GetWetNormalFallbackSRV( surface, DistortionTexture.get() );
                     if ( srv[1] && info &&
                         info->buffer.NormalmapStrength != DEFAULT_NORMALMAP_STRENGTH ) {
@@ -5523,10 +5586,11 @@ XRESULT D3D11GraphicsEngine::DrawWorldMesh( bool noTextures ) {
                 GetContext()->PSSetShaderResources( 0, 3, srv );
                 GetContext()->PSSetShaderResources( 13, 1, &srv[3] );
 
-                // Get the right shader for it
-                if ( BindShaderForTexture( mesh.first.Texture, false,
-                    zMAT_ALPHA_FUNC_MAT_DEFAULT, MaterialInfo::MT_None, true ) ) { // default alpha stuff, we defer blend/add
-                    // shader changed? update buffers.
+                // Get the right shader for it. Frozen Icedragon materials keep their
+                // authored normal/specular response and never receive the wet fallback.
+                const bool shaderChanged = BindShaderForTexture( mesh.first.Texture, false,
+                    zMAT_ALPHA_FUNC_MAT_DEFAULT, MaterialInfo::MT_None, !disableRainEffects );
+                if ( shaderChanged || rainMaterialSwitchChanged ) {
                     updatePSBuffers();
                 }
 
@@ -5556,6 +5620,12 @@ XRESULT D3D11GraphicsEngine::DrawWorldMesh( bool noTextures ) {
                 DrawVertexBufferIndexedUINT( nullptr, nullptr, mesh.second->Indices.size(), mesh.second->BaseIndexLocation );
             }
         }
+    }
+    Engine::GAPI->GetRendererState().GraphicsState.FF_GSwitches = previousWorldRainSwitches;
+    if ( ActivePS ) {
+        ActivePS->GetBuffer( "FFPipelineConstantBuffer" )
+            .Update( &Engine::GAPI->GetRendererState().GraphicsState )
+            .Bind();
     }
 
     UpdateOcclusion();
@@ -5738,6 +5808,7 @@ void D3D11GraphicsEngine::DrawWaterSurfaces( ID3D11RenderTargetView* waterMaskRT
 
                 WaterMaterialInfoConstantBuffer wmcb = {};
                 wmcb.WM_DisableSSR = IsWaterTextureExcludedFromSSR( batch.texture ) ? 1.0f : 0.0f;
+                wmcb.WM_DisableRainEffects = IsIceTexture( batch.texture ) ? 1.0f : 0.0f;
                 ActivePS->GetBuffer( "WaterMaterialInfo" ).Update( &wmcb ).Bind();
 
                 DrawMultiIndexedInstancedIndirect( Context.Get(),
@@ -5753,6 +5824,7 @@ void D3D11GraphicsEngine::DrawWaterSurfaces( ID3D11RenderTargetView* waterMaskRT
 
                 WaterMaterialInfoConstantBuffer wmcb = {};
                 wmcb.WM_DisableSSR = IsWaterTextureExcludedFromSSR( batch.texture ) ? 1.0f : 0.0f;
+                wmcb.WM_DisableRainEffects = IsIceTexture( batch.texture ) ? 1.0f : 0.0f;
                 ActivePS->GetBuffer( "WaterMaterialInfo" ).Update( &wmcb ).Bind();
 
                 for ( unsigned int i = 0; i < batch.drawCount; i++ ) {

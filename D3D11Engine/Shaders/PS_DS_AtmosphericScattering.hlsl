@@ -56,6 +56,7 @@ TextureCube TX_ReflectionCube : register(t5);
 Texture2D TX_Distortion : register(t6);
 Texture2D TX_SI_SP : register(t7);
 Texture2D TX_ShadowBlueNoise : register(t8);
+Texture2D TX_RainExclusionMask : register(t9);
 
 #include "ShadowSampling.h"
 
@@ -155,10 +156,10 @@ void ApplyRainNormalDeformation(inout float3 vsNormal, float3 wsPosition, inout 
 }
 
 /** Returns new diffusecolor (rgb)*/
-void ApplySceneWettness(float3 wsPosition, float3 vsPosition, float3 vsDir, inout float3 vsNormal, in out float3 diffuse, in out float specIntensity, in out float specPower, out float specAdd, out float localWettness)
+void ApplySceneWettness(float3 wsPosition, float3 vsPosition, float3 vsDir, inout float3 vsNormal, in out float3 diffuse, in out float specIntensity, in out float specPower, out float specAdd, out float localWettness, float rainEffectsEnabled)
 {
 	// Ask the rain-shadowmap if we can hit this pixel
-    float pixelWettnes = ComputeShadowValue(0.0f, wsPosition, TX_RainShadowmap, SS_Comp, vsPosition.z, 1.0f, SQ_RainViewProj, 0.0001f, 2.5f) * AC_SceneWettness;
+    float pixelWettnes = ComputeShadowValue(0.0f, wsPosition, TX_RainShadowmap, SS_Comp, vsPosition.z, 1.0f, SQ_RainViewProj, 0.0001f, 2.5f) * AC_SceneWettness * rainEffectsEnabled;
     pixelWettnes = pixelWettnes < 0.001f ? 0 : pixelWettnes;
     
     //IsWet(wsPosition, TX_RainShadowmap, SS_Comp) * AC_SceneWettness;
@@ -300,7 +301,9 @@ float4 PSMain(PS_INPUT Input) : SV_TARGET
     float localWettness = 0.0f;
 	
 #ifdef APPLY_RAIN_EFFECTS
-    ApplySceneWettness(wsPosition, vsPosition, V, normal, diffuse.rgb, specIntensity, specPower, specWet, localWettness);
+    const float rainMaterialMarker = TX_RainExclusionMask.Load(int3(int2(Input.vPosition.xy), 0)).r;
+    const float frozenMaterial = step(0.45f, rainMaterialMarker) * (1.0f - step(0.75f, rainMaterialMarker));
+    ApplySceneWettness(wsPosition, vsPosition, V, normal, diffuse.rgb, specIntensity, specPower, specWet, localWettness, 1.0f - frozenMaterial);
 	
 	// Boost specWet when not in shadow
 	specWet += specWet * shadow;

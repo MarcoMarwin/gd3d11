@@ -1216,6 +1216,7 @@ XRESULT D3D11ShadowMap::DrawLighting(
     RenderToTextureBuffer& color,
     RenderToTextureBuffer& normals,
     RenderToTextureBuffer& specular,
+    RenderToTextureBuffer& rainExclusionMask,
     RenderToTextureBuffer& depthCopy) {
     auto graphicsEngine = reinterpret_cast<D3D11GraphicsEngine*>(Engine::GraphicsEngine);
     auto& settings = Engine::GAPI->GetRendererState().RendererSettings;
@@ -1250,7 +1251,13 @@ XRESULT D3D11ShadowMap::DrawLighting(
     srvs[0] = specular.GetShaderResView().Get();
     m_context->PSSetShaderResources( 7, 1, srvs );
 
+    srvs[0] = rainExclusionMask.GetShaderResView().Get();
+    m_context->PSSetShaderResources( 9, 1, srvs );
+
     DrawWorldLights();
+
+    ID3D11ShaderResourceView* nullRainExclusionMask = nullptr;
+    m_context->PSSetShaderResources( 9, 1, &nullRainExclusionMask );
 
     m_context->OMSetRenderTargets( 1, graphicsEngine->GetHDRBackBuffer().GetRenderTargetView().GetAddressOf(),
         graphicsEngine->GetDepthBuffer()->GetDepthStencilView().Get() );

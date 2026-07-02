@@ -27,3 +27,4 @@ cbuffer FFPipelineConstantBuffer : register( b0 )
 
 static const uint GSWITCH_FSR3_REACTIVE = 32;
 static const uint GSWITCH_FSR3_DIALOG_REACTIVE = 64;
+static const uint GSWITCH_DISABLE_RAIN_EFFECTS = 128;

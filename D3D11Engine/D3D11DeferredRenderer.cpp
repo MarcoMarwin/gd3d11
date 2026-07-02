@@ -89,7 +89,7 @@ void D3D11DeferredRenderer::AddGeometryPasses( RenderGraph& graph,
             const bool fsr3Active = rendererSettings.AntiAliasingMode == GothicRendererSettings::AA_FSR3
                 || (rendererSettings.AntiAliasingMode == GothicRendererSettings::AA_FSR
                     && rendererSettings.Upscaler == GothicRendererSettings::UPSCALER_FSR_3);
-            const float skyTncValue = fsr3Active ? 1.f : 0.f;
+            const float skyTncValue = fsr3Active ? 0.35f : 0.f;
             const float skyTransparencyAndComposition[] { skyTncValue, skyTncValue, skyTncValue, skyTncValue };
             if ( reactiveMask )
                 context->ClearRenderTargetView( reactiveMask->GetRenderTargetView().Get(), black );
@@ -116,20 +116,23 @@ void D3D11DeferredRenderer::AddLightingPasses( RenderGraph& graph,
     RGResourceHandle colorResource,
     RGResourceHandle normalsResource,
     RGResourceHandle specularResource,
+    RGResourceHandle rainExclusionMaskResource,
     RGResourceHandle backBufferHandle,
     std::vector<VobLightInfo*>& frameLights ) {
 
-    graph.AddPass( RG_PASS_NAME("Draw Lighting"), [&, colorResource, normalsResource, specularResource, backBufferHandle]( RGBuilder& builder, RenderPass& pass ) {
+    graph.AddPass( RG_PASS_NAME("Draw Lighting"), [&, colorResource, normalsResource, specularResource, rainExclusionMaskResource, backBufferHandle]( RGBuilder& builder, RenderPass& pass ) {
         builder.Read( colorResource );
         builder.Read( normalsResource );
         builder.Read( specularResource );
+        builder.Read( rainExclusionMaskResource );
         builder.Write( backBufferHandle );
 
-        pass.m_executeCallback = [&engine, &frameLights, colorResource, normalsResource, specularResource]( const RenderGraph& graph ) -> void {
+        pass.m_executeCallback = [&engine, &frameLights, colorResource, normalsResource, specularResource, rainExclusionMaskResource]( const RenderGraph& graph ) -> void {
             TracyD3D11ZoneCGX( "D3D11DeferredRenderer::Draw Lighting" );
             auto colorTexture = graph.GetPhysicalTexture( colorResource );
             auto normalsTexture = graph.GetPhysicalTexture( normalsResource );
             auto specularTexture = graph.GetPhysicalTexture( specularResource );
+            auto rainExclusionMaskTexture = graph.GetPhysicalTexture( rainExclusionMaskResource );
 
             engine.CopyDepthStencil(); // always needed due to depth testing!
 
@@ -137,6 +140,7 @@ void D3D11DeferredRenderer::AddLightingPasses( RenderGraph& graph,
                 *colorTexture,
                 *normalsTexture,
                 *specularTexture,
+                *rainExclusionMaskTexture,
                 *engine.GetDepthBufferCopy() );
 
             if ( !Engine::GAPI->GetRendererState().RendererSettings.FixViewFrustum ) {

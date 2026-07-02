@@ -125,7 +125,7 @@ void D3D11Effect::FillRandomRaindropData( std::vector<RainParticleDynamic>& dyna
 }
 
 /** Draws GPU-Based rain */
-XRESULT D3D11Effect::DrawRain( bool outputResolution ) {
+XRESULT D3D11Effect::DrawRain( bool outputResolution, bool useRainExclusionMask ) {
     D3D11GraphicsEngineBase* e = reinterpret_cast<D3D11GraphicsEngineBase*>(Engine::GraphicsEngine);
     GothicRendererState& state = Engine::GAPI->GetRendererState();
 
@@ -203,7 +203,7 @@ XRESULT D3D11Effect::DrawRain( bool outputResolution ) {
     acb.AR_CameraPosition = Engine::GAPI->GetCameraPosition();
     acb.AR_GlobalVelocity = velocity;
     acb.AR_MoveRainParticles = state.RendererSettings.RainMoveParticles ? 1 : 0;
-    acb.AR_Pad1.x = state.RendererSettings.EnableRain ? 1.0f : 0.0f;
+    acb.AR_Pad1.x = useRainExclusionMask ? 1.0f : 0.0f;
     acb.AR_Pad1.y = !outputResolution
         && state.RendererSettings.AntiAliasingMode == GothicRendererSettings::AA_FSR
         && state.RendererSettings.Upscaler == GothicRendererSettings::UPSCALER_FSR_3 ? 1.0f : 0.0f;
@@ -339,7 +339,7 @@ XRESULT D3D11Effect::DrawRain( bool outputResolution ) {
     return XR_SUCCESS;
 }
 
-XRESULT D3D11Effect::DrawRain_CS( bool outputResolution ) {
+XRESULT D3D11Effect::DrawRain_CS( bool outputResolution, bool useRainExclusionMask ) {
     D3D11GraphicsEngineBase* e = reinterpret_cast<D3D11GraphicsEngineBase*>(Engine::GraphicsEngine);
     GothicRendererState& state = Engine::GAPI->GetRendererState();
 
@@ -408,7 +408,7 @@ XRESULT D3D11Effect::DrawRain_CS( bool outputResolution ) {
     acb.AR_CameraPosition = Engine::GAPI->GetCameraPosition();
     acb.AR_GlobalVelocity = velocity;
     acb.AR_MoveRainParticles = numParticles;
-    acb.AR_Pad1.x = state.RendererSettings.EnableRain ? 1.0f : 0.0f;
+    acb.AR_Pad1.x = useRainExclusionMask ? 1.0f : 0.0f;
     acb.AR_Pad1.y = !outputResolution
         && state.RendererSettings.AntiAliasingMode == GothicRendererSettings::AA_FSR
         && state.RendererSettings.Upscaler == GothicRendererSettings::UPSCALER_FSR_3 ? 1.0f : 0.0f;

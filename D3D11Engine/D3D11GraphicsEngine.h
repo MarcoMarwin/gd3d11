@@ -693,6 +693,9 @@ private:
     /** Low latency object handle */
     HANDLE frameLatencyWaitableObject;
 
+    /** Last DXGI maximum frame latency configured for the swapchain */
+    UINT m_ConfiguredMaximumFrameLatency;
+
     /** If true, we will save a screenshot after the next frame */
     bool SaveScreenshotNextFrame;
 
@@ -706,6 +709,7 @@ private:
     float unionCurrentCustomFontMultiplier;
 
     std::unique_ptr<RenderToTextureBuffer> VelocityBuffer;
+    std::unique_ptr<RenderToTextureBuffer> RainExclusionMaskBuffer;
     XMFLOAT4X4 m_PrevViewProjMatrix;
     
     INT2 NewResolution;
