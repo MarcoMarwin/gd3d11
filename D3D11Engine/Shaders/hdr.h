@@ -44,7 +44,8 @@ float3 ToneMap_Simple(float3 vColor, Texture2D lumTex, SamplerState samplerState
 float3 LPMToneMap(float3 vColor, Texture2D lumTex, SamplerState samplerState)
 {
     FfxFloat32x3 color = max(vColor * GetToneMapExposure(lumTex, samplerState, 0.18f, 0.5f), 0.0f);
-    LpmFilter(color.r, color.g, color.b, FFX_FALSE, LPM_CONFIG_709_709);
+    LpmFilter(color.r, color.g, color.b,
+        FFX_FALSE, FFX_FALSE, FFX_FALSE, FFX_FALSE, FFX_FALSE, FFX_FALSE);
     return saturate(color);
 }
 #endif

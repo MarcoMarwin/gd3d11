@@ -39,6 +39,10 @@ struct zTParticle {
 class zCParticleEmitter {
 public:
 
+    zCTexture* GetBaseVisTexture() {
+        return *reinterpret_cast<zCTexture**>(THISPTR_OFFSET( GothicMemoryLocations::zCParticleEmitter::Offset_VisTexture ));
+    }
+
     zCTexture* GetVisTexture( zTParticle* pfx ) {
         // Gothic 2 shares the same material object between different pfx'es
         // which can be problematic when there are different animated textures on screen

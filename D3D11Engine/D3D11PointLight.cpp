@@ -109,7 +109,10 @@ void D3D11PointLight::ClearTiledSlot() {
 }
 
 int D3D11PointLight::GetCurrentShadowMode() const {
-    return static_cast<int>(Engine::GAPI->GetRendererState().RendererSettings.EnablePointlightShadows);
+    int mode = static_cast<int>(Engine::GAPI->GetRendererState().RendererSettings.EnablePointlightShadows);
+    if ( mode == GothicRendererSettings::PLS_DYNAMIC_VFX )
+        return GothicRendererSettings::PLS_UPDATE_DYNAMIC;
+    return mode;
 }
 
 void D3D11PointLight::HandleShadowModeChange( int shadowMode ) {

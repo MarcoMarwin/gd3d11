@@ -628,7 +628,7 @@ void ApplyGraphicsPresets( GothicRendererSettings& s ) {
         s.EnableOcclusionCulling = true;
         s.EnablePointlightShadows = GothicRendererSettings::EPointLightShadowMode::PLS_STATIC_ONLY;
         s.OutdoorSmallVobDrawRadius = 10'000.0f;
-        s.SectionDrawRadius = 1;
+        s.SectionDrawRadius = 3;
         s.textureMaxSize = static_cast<int>(TX_QUALITY::High);
         break;
     case GothicRendererSettings::GRAPHICS_MEDIUM:
@@ -650,7 +650,7 @@ void ApplyGraphicsPresets( GothicRendererSettings& s ) {
         s.EnableOcclusionCulling = true;
         s.EnablePointlightShadows = GothicRendererSettings::EPointLightShadowMode::PLS_UPDATE_DYNAMIC;
         s.OutdoorSmallVobDrawRadius = 15'000.0f;
-        s.SectionDrawRadius = 5;
+        s.SectionDrawRadius = 4;
         s.textureMaxSize = static_cast<int>(TX_QUALITY::MAX);
         break;
     case GothicRendererSettings::GRAPHICS_HIGH:
@@ -672,7 +672,7 @@ void ApplyGraphicsPresets( GothicRendererSettings& s ) {
         s.EnableOcclusionCulling = false;
         s.EnablePointlightShadows = GothicRendererSettings::EPointLightShadowMode::PLS_UPDATE_DYNAMIC;
         s.OutdoorSmallVobDrawRadius = 20'000.0f;
-        s.SectionDrawRadius = 10;
+        s.SectionDrawRadius = 5;
         s.textureMaxSize = static_cast<int>(TX_QUALITY::MAX);
         break;
     case GothicRendererSettings::GRAPHICS_VERY_HIGH:
@@ -692,9 +692,9 @@ void ApplyGraphicsPresets( GothicRendererSettings& s ) {
         s.WindQuality = GothicRendererSettings::EWindQuality::WIND_QUALITY_ADVANCED;
         s.HeroAffectsObjects = true;
         s.EnableOcclusionCulling = false;
-        s.EnablePointlightShadows = GothicRendererSettings::EPointLightShadowMode::PLS_UPDATE_DYNAMIC;
+        s.EnablePointlightShadows = GothicRendererSettings::EPointLightShadowMode::PLS_DYNAMIC_VFX;
         s.OutdoorSmallVobDrawRadius = 25'000.0f;
-        s.SectionDrawRadius = 20;
+        s.SectionDrawRadius = 6;
         s.textureMaxSize = static_cast<int>(TX_QUALITY::MAX);
         break;
     default:
@@ -1062,8 +1062,8 @@ void ImGuiShim::RenderSettingsWindow()
 
             const static std::vector<std::tuple<const char*, GothicRendererSettings::EPointLightShadowMode, const char*>> pointlightShadowModes = {
                 { "Static", GothicRendererSettings::EPointLightShadowMode::PLS_STATIC_ONLY, nullptr },
-                { "Dynamic Update", GothicRendererSettings::EPointLightShadowMode::PLS_UPDATE_DYNAMIC, nullptr },
-                { "Full", GothicRendererSettings::EPointLightShadowMode::PLS_FULL, nullptr },
+                { "Dynamic", GothicRendererSettings::EPointLightShadowMode::PLS_UPDATE_DYNAMIC, nullptr },
+                { "Dynamic + VFX", GothicRendererSettings::EPointLightShadowMode::PLS_DYNAMIC_VFX, nullptr },
             };
             auto displayedPointlightShadowMode = pointlightShadowsEnabled
                 ? settings.EnablePointlightShadows
@@ -1076,7 +1076,7 @@ void ImGuiShim::RenderSettingsWindow()
                 ImGui::EndCombo();
             }
             ImGui::EndDisabled();
-            ImGui::SetItemTooltip( "Selects how point-light shadows are updated." );
+            ImGui::SetItemTooltip( "Selects static, dynamic, or VFX shadows." );
 
             ImText( "Shadow Softness", buttonWidth ); ImGui::SameLine();
             SliderNormalizedUiStrength( "##ShadowSoftness", &settings.ShadowSoftness );
@@ -1091,7 +1091,7 @@ void ImGuiShim::RenderSettingsWindow()
             ImGui::SetItemTooltip( "Controls the draw distance of small objects and vegetation." );
 
             ImText( "World Draw Distance", buttonWidth ); ImGui::SameLine();
-            ImGui::SliderInt( "##SectionDrawRadius", &settings.SectionDrawRadius, 1, 20, "%d", ImGuiSliderFlags_::ImGuiSliderFlags_ClampOnInput );
+            ImGui::SliderInt( "##SectionDrawRadius", &settings.SectionDrawRadius, 1, 10, "%d", ImGuiSliderFlags_::ImGuiSliderFlags_ClampOnInput );
             ImGui::SetItemTooltip( "Controls terrain and building draw distance." );
 
             ImText( "Contrast", buttonWidth ); ImGui::SameLine();

@@ -436,7 +436,7 @@ D3D11TiledDeferredShading::CullResult D3D11TiledDeferredShading::CullLights(
         tl.Range = lightRange;
         tl.Color = XMFLOAT4( lightColor.x, lightColor.y, lightColor.z, lightColor.w );
         tl.PositionWorld = XMFLOAT3( posWorld.x, posWorld.y, posWorld.z );
-        tl.ShadowStrength = 1.0f;
+        tl.ShadowStrength = light->PointlightShadowStrength;
         tl.IsIndoor = light->Vob && light->Vob->IsIndoorVob() ? 1.0f : 0.0f;
         tl.IgnoreIndoorOutdoorLimit = light->IgnoreIndoorOutdoorLimit ? 1.0f : 0.0f;
         tl.ShadowSoftness = settings.ShadowSoftness * 2.0f;

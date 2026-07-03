@@ -383,7 +383,16 @@ struct VobLightInfo {
 
     /** Flag to see if this vob was drawn in the current render pass. Used to collect the same vob only once. Cleared immediately. */
     std::atomic<size_t> VisibleInRenderPass{};
-    bool IsPFXVobLight = false;
+
+    /** True when this zCVobLight is produced by an oCVisualFX spell/effect. */
+    bool IsVisualFXLight = false;
+
+    /** Stable VisualFX lights use the normal cached dynamic-shadow path; moving ones are budgeted separately. */
+    bool VisualFXShadowIsStable = false;
+    bool VisualFXShadowStabilityInitialized = false;
+    float VisualFXShadowStableTime = 0.0f;
+    XMFLOAT3 LastVisualFXShadowPosition = {};
+    float LastVisualFXShadowRange = 0.0f;
 
     /** True if this light-vob was discovered at runtime instead of during static BSP cache build. */
     bool IsDynamicVobLight = false;
@@ -398,7 +407,7 @@ struct VobLightInfo {
     float3 GetEffectivePositionWorld() const;
     XMVECTOR GetEffectivePositionWorldXM() const;
 
-    /** True for dynamic/actor/PFX lights that should not be clipped at indoor/outdoor transitions. */
+    /** True for dynamic/actor/VisualFX lights that should not be clipped at indoor/outdoor transitions. */
     bool IgnoreIndoorOutdoorLimit = false;
 
     /** True if this is an indoor-vob */
@@ -411,6 +420,7 @@ struct VobLightInfo {
     std::unique_ptr<BaseShadowedPointLight> LightShadowBuffers;
     bool DynamicShadows = false; // Whether this light should be able to have dynamic shadows
     bool UpdateShadows = false; // Whether to update this lights shadows on the next occasion
+    float PointlightShadowStrength = 1.0f;
 
     /** Position where we were rendered the last time */
     XMFLOAT3 LastRenderedPosition;

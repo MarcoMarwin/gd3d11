@@ -506,7 +506,7 @@ struct GothicRendererSettings {
         PLS_DISABLED = 0,
         PLS_STATIC_ONLY = 1,
         PLS_UPDATE_DYNAMIC = 2,
-        PLS_FULL = 3,
+        PLS_DYNAMIC_VFX = 3,
         _PLS_NUM_SETTINGS
     };
     enum E_HDRToneMap {
