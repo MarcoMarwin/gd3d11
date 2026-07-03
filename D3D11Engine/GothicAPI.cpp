@@ -1329,7 +1329,7 @@ void GothicAPI::LoadRendererWorldSettings( GothicRendererSettings& s, const char
         s.OutdoorSmallVobDrawRadius = GetPrivateProfileFloatA( "General", "OutdoorSmallVobDrawRadius", s.OutdoorSmallVobDrawRadius, ini );
         s.IndoorVobDrawRadius = GetPrivateProfileFloatA( "General", "IndoorVobDrawRadius", s.IndoorVobDrawRadius, ini );
 	    s.SkeletalMeshDrawRadius = GetPrivateProfileFloatA( "General", "SkeletalMeshDrawRadius", s.SkeletalMeshDrawRadius, ini );
-	    s.SectionDrawRadius = std::clamp( GetPrivateProfileIntA( "General", "SectionDrawRadius", s.SectionDrawRadius, ini.c_str() ), 1, 10 );
+	    s.SectionDrawRadius = static_cast<decltype(s.SectionDrawRadius)>( std::clamp<int>( static_cast<int>( GetPrivateProfileIntA( "General", "SectionDrawRadius", s.SectionDrawRadius, ini.c_str() ) ), 1, 10 ) );
     }
 
     s.RainRadiusRange = GetPrivateProfileFloatA( "Rain", "RadiusRange", s.RainRadiusRange, ini );
