@@ -692,7 +692,7 @@ void ApplyGraphicsPresets( GothicRendererSettings& s ) {
         s.WindQuality = GothicRendererSettings::EWindQuality::WIND_QUALITY_ADVANCED;
         s.HeroAffectsObjects = true;
         s.EnableOcclusionCulling = false;
-        s.EnablePointlightShadows = GothicRendererSettings::EPointLightShadowMode::PLS_DYNAMIC_VFX;
+        s.EnablePointlightShadows = GothicRendererSettings::EPointLightShadowMode::PLS_UPDATE_DYNAMIC;
         s.OutdoorSmallVobDrawRadius = 25'000.0f;
         s.SectionDrawRadius = 6;
         s.textureMaxSize = static_cast<int>(TX_QUALITY::MAX);
@@ -1046,6 +1046,9 @@ void ImGuiShim::RenderSettingsWindow()
 
             static GothicRendererSettings::EPointLightShadowMode lastEnabledPointlightShadowMode =
                 GothicRendererSettings::EPointLightShadowMode::PLS_UPDATE_DYNAMIC;
+            if ( static_cast<int>(settings.EnablePointlightShadows) > static_cast<int>(GothicRendererSettings::EPointLightShadowMode::PLS_UPDATE_DYNAMIC) ) {
+                settings.EnablePointlightShadows = GothicRendererSettings::EPointLightShadowMode::PLS_UPDATE_DYNAMIC;
+            }
             if ( settings.EnablePointlightShadows != GothicRendererSettings::EPointLightShadowMode::PLS_DISABLED ) {
                 lastEnabledPointlightShadowMode = settings.EnablePointlightShadows;
             }
@@ -1061,9 +1064,8 @@ void ImGuiShim::RenderSettingsWindow()
             ImGui::SameLine();
 
             const static std::vector<std::tuple<const char*, GothicRendererSettings::EPointLightShadowMode, const char*>> pointlightShadowModes = {
-                { "Static", GothicRendererSettings::EPointLightShadowMode::PLS_STATIC_ONLY, nullptr },
-                { "Dynamic", GothicRendererSettings::EPointLightShadowMode::PLS_UPDATE_DYNAMIC, nullptr },
-                { "Dynamic + VFX", GothicRendererSettings::EPointLightShadowMode::PLS_DYNAMIC_VFX, nullptr },
+                { "Static", GothicRendererSettings::EPointLightShadowMode::PLS_STATIC_ONLY, "Static shadows from point lights." },
+                { "Dynamic", GothicRendererSettings::EPointLightShadowMode::PLS_UPDATE_DYNAMIC, "Updates point-light shadows for moving lights and dynamic objects." },
             };
             auto displayedPointlightShadowMode = pointlightShadowsEnabled
                 ? settings.EnablePointlightShadows
@@ -1076,7 +1078,7 @@ void ImGuiShim::RenderSettingsWindow()
                 ImGui::EndCombo();
             }
             ImGui::EndDisabled();
-            ImGui::SetItemTooltip( "Selects static, dynamic, or VFX shadows." );
+            ImGui::SetItemTooltip( "Selects point-light shadow mode." );
 
             ImText( "Shadow Softness", buttonWidth ); ImGui::SameLine();
             SliderNormalizedUiStrength( "##ShadowSoftness", &settings.ShadowSoftness );

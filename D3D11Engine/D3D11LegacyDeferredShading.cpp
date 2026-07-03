@@ -90,7 +90,7 @@ XRESULT D3D11LegacyDeferredShading::DrawPointlightLights(
         plcb.PL_Outdoor = light->IsIndoorVob ? 0.0f : 1.0f;
         plcb.PL_IgnoreIndoorOutdoorLimit = light->IgnoreIndoorOutdoorLimit ? 1.0f : 0.0f;
         plcb.PL_ShadowSoftness = settings.ShadowSoftness * 2.0f;
-        plcb.PL_ShadowStrength = light->PointlightShadowStrength;
+        plcb.PL_ShadowStrength = 1.0f;
 
         float dist;
         XMStoreFloat( &dist, XMVector3Length( XMLoadFloat3( plcb.Pl_PositionWorld.toXMFLOAT3() ) - Engine::GAPI->GetCameraPositionXM() ) );

@@ -643,8 +643,11 @@ public:
     /** Builds our BspTreeVobMap */
     void BuildBspVobMapCache();
 
-    /** Resolves pointlight-shadow eligibility and one unambiguous flame anchor. */
+    /** Resolves basic runtime pointlight-shadow eligibility. */
     void ConfigurePointlightShadowSource( VobLightInfo* lightInfo ) const;
+
+    /** Resolves world flame and parent-vob pointlight associations globally. */
+    void ConfigureAllPointlightShadowSources() const;
 
     /** Returns the new node from tha base node */
     BspInfo* GetNewBspNode( zCBspBase* base );

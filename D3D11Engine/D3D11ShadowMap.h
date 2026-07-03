@@ -194,14 +194,6 @@ private:
 
     std::unique_ptr<RenderToTextureBuffer> m_dummyCubeRT;
     std::unique_ptr<D3D11ConstantBuffer> m_PointLightCB;
-    struct VfxShadowSlot {
-        VobLightInfo* Active = nullptr;
-        VobLightInfo* Pending = nullptr;
-        float Strength = 0.0f;
-        bool FadingOut = false;
-    };
-    std::array<VfxShadowSlot, 2> m_VfxShadowSlots{};
-
     Microsoft::WRL::ComPtr<ID3D11SamplerState> m_shadowmapSampler;
     int m_lastNumCascades = 0;
     std::array<CameraReplacement, MAX_CSM_CASCADES> m_CascadeCRs;

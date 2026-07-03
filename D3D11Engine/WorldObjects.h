@@ -387,13 +387,6 @@ struct VobLightInfo {
     /** True when this zCVobLight is produced by an oCVisualFX spell/effect. */
     bool IsVisualFXLight = false;
 
-    /** Stable VisualFX lights use the normal cached dynamic-shadow path; moving ones are budgeted separately. */
-    bool VisualFXShadowIsStable = false;
-    bool VisualFXShadowStabilityInitialized = false;
-    float VisualFXShadowStableTime = 0.0f;
-    XMFLOAT3 LastVisualFXShadowPosition = {};
-    float LastVisualFXShadowRange = 0.0f;
-
     /** True if this light-vob was discovered at runtime instead of during static BSP cache build. */
     bool IsDynamicVobLight = false;
 
@@ -420,7 +413,7 @@ struct VobLightInfo {
     std::unique_ptr<BaseShadowedPointLight> LightShadowBuffers;
     bool DynamicShadows = false; // Whether this light should be able to have dynamic shadows
     bool UpdateShadows = false; // Whether to update this lights shadows on the next occasion
-    float PointlightShadowStrength = 1.0f;
+
 
     /** Position where we were rendered the last time */
     XMFLOAT3 LastRenderedPosition;

@@ -393,9 +393,10 @@ D3D11TiledDeferredShading::CullResult D3D11TiledDeferredShading::CullLights(
             }
         }
 
-        // Shadowed lights need a tiled slot (assigned earlier in DrawPointlightShadows).
+        // A missing shadow slot must never suppress the light itself. Render it
+        // unshadowed until a slot becomes available again.
         if ( hasShadow && pl->GetTiledSlot() < 0 ) {
-            continue;
+            hasShadow = false;
         }
 
         if ( result.TiledLightCount >= MAX_TILED_LIGHTS )
@@ -436,7 +437,7 @@ D3D11TiledDeferredShading::CullResult D3D11TiledDeferredShading::CullLights(
         tl.Range = lightRange;
         tl.Color = XMFLOAT4( lightColor.x, lightColor.y, lightColor.z, lightColor.w );
         tl.PositionWorld = XMFLOAT3( posWorld.x, posWorld.y, posWorld.z );
-        tl.ShadowStrength = light->PointlightShadowStrength;
+        tl.ShadowStrength = 1.0f;
         tl.IsIndoor = light->Vob && light->Vob->IsIndoorVob() ? 1.0f : 0.0f;
         tl.IgnoreIndoorOutdoorLimit = light->IgnoreIndoorOutdoorLimit ? 1.0f : 0.0f;
         tl.ShadowSoftness = settings.ShadowSoftness * 2.0f;

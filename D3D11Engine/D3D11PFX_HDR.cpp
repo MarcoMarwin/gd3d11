@@ -50,19 +50,22 @@ const LPMConstantsBuffer& GetLPMConstants() {
     if ( initialized )
         return constants;
 
-    FfxFloat32x3 saturation = { 0.0f, 0.0f, 0.0f };
+    // Gothic's adapted frame maps average luminance to 18% gray. Keep the
+    // matching 16.0 HDR maximum / 4-stop exposure and use LPM's official
+    // look controls for stronger separation without changing scene exposure.
+    FfxFloat32x3 saturation = { 0.08f, 0.08f, 0.08f };
     FfxFloat32x3 crosstalk = { 1.0f, 1.0f, 1.0f };
 
     ActiveLPMSetupTarget = &constants;
     FfxCalculateLpmConsts(
-        FFX_FALSE,
+        FFX_TRUE,
         LPM_CONFIG_709_709,
         LPM_COLORS_709_709,
         0.0f,
         16.0f,
         4.0f,
-        0.0f,
-        1.0f,
+        0.18f,
+        1.15f,
         saturation,
         crosstalk );
     ActiveLPMSetupTarget = nullptr;

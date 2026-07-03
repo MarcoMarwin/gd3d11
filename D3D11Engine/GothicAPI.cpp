@@ -4324,7 +4324,7 @@ void GothicAPI::CollectVisibleVobs(
                 vi->VisibleInFrame = true;
 
                 // Update regular dynamic lights inside the active shadow radius.
-                if ( !vi->IsVisualFXLight && vi->AllowsPointlightShadows ) {
+                if ( vi->AllowsPointlightShadows ) {
                     if ( RendererState.RendererSettings.EnablePointlightShadows >= GothicRendererSettings::PLS_UPDATE_DYNAMIC && !vi->Vob->IsStatic() ) {
                         // Now check for distances, etc
                         float lightCameraDist;
@@ -4794,6 +4794,7 @@ void GothicAPI::ConfigurePointlightShadowSource( VobLightInfo* lightInfo ) const
     lightInfo->AllowsPointlightShadows = false;
     lightInfo->HasFlameAnchor = false;
     lightInfo->FlameAnchorOffset = {};
+    lightInfo->IsVisualFXLight = false;
 
     zCVobLight* light = lightInfo->Vob;
     if ( !light )
@@ -4809,173 +4810,355 @@ void GothicAPI::ConfigurePointlightShadowSource( VobLightInfo* lightInfo ) const
         return false;
     };
 
-    auto hasVisualFXParent = []( zCVob* parent ) {
-        for ( zCVob* current = parent; current; current = current->GetVobParent() ) {
-            if ( current->As<oCVisualFX>() )
-                return true;
+    for ( zCVob* current = light->GetVobParent(); current; current = current->GetVobParent() ) {
+        if ( current->As<oCVisualFX>() ) {
+            lightInfo->IsVisualFXLight = true;
+            lightInfo->AllowsPointlightShadows = true;
+            return;
         }
-        return false;
-    };
-
-    lightInfo->IsVisualFXLight = hasVisualFXParent( light->GetVobParent() );
-    if ( lightInfo->IsVisualFXLight ) {
-        lightInfo->AllowsPointlightShadows = true;
-        return;
     }
 
     zCVob* persistentParent = light->GetVobParent();
     while ( persistentParent && isLightVob( persistentParent ) )
         persistentParent = persistentParent->GetVobParent();
 
-    const bool rejectedParent = persistentParent
-        && persistentParent->As<oCNPC>();
-    if ( rejectedParent )
-        return;
+    if ( persistentParent && !persistentParent->As<oCNPC>() )
+        lightInfo->AllowsPointlightShadows = true;
+}
 
-    const bool hasPersistentParent = persistentParent != nullptr;
-    constexpr float FLAME_LIGHT_LINK_RADIUS = 150.0f;
-    constexpr float FLAME_LIGHT_LINK_RADIUS_SQ = FLAME_LIGHT_LINK_RADIUS * FLAME_LIGHT_LINK_RADIUS;
-    constexpr float DUPLICATE_FLAME_RADIUS = 50.0f;
-    constexpr float DUPLICATE_FLAME_RADIUS_SQ = DUPLICATE_FLAME_RADIUS * DUPLICATE_FLAME_RADIUS;
-    const XMVECTOR lightPosition = light->GetPositionWorldXM();
+void GothicAPI::ConfigureAllPointlightShadowSources() const {
+    constexpr float LINK_RADIUS = 150.0f;
+    constexpr float LINK_RADIUS_SQ = LINK_RADIUS * LINK_RADIUS;
+    const size_t INVALID_INDEX = static_cast<size_t>(-1);
 
-    struct FlameCandidate {
-        zCVob* Vob = nullptr;
-        bool IsParticle = false;
-    };
-
-    std::vector<FlameCandidate> parentFlames;
-    std::vector<FlameCandidate> nearbyFlames;
-
-    auto belongsToPersistentParent = [&]( zCVob* flameVob ) {
-        if ( !persistentParent )
+    auto isLightVob = []( zCVob* vob ) {
+        if ( !vob )
             return false;
-        zCVob* current = flameVob;
-        for ( int depth = 0; current && depth < 64; ++depth ) {
-            if ( current == persistentParent )
+        for ( zCClassDef* classDef = reinterpret_cast<zCObject*>(vob)->_GetClassDef(); classDef; classDef = classDef->baseClassDef ) {
+            if ( strcmp( classDef->className.ToChar(), "zCVobLight" ) == 0 )
                 return true;
-            current = current->GetVobParent();
         }
         return false;
     };
+    auto hasVisualFXAncestor = []( zCVob* vob ) {
+        for ( zCVob* current = vob ? vob->GetVobParent() : nullptr; current; current = current->GetVobParent() ) {
+            if ( current->As<oCVisualFX>() )
+                return true;
+        }
+        return false;
+    };
+    auto getPersistentParent = [&isLightVob]( zCVob* vob ) {
+        zCVob* parent = vob ? vob->GetVobParent() : nullptr;
+        while ( parent && isLightVob( parent ) )
+            parent = parent->GetVobParent();
+        return parent;
+    };
+    auto distanceSq = []( const XMFLOAT3& left, const XMFLOAT3& right ) {
+        return XMVectorGetX( XMVector3LengthSq( XMLoadFloat3( &left ) - XMLoadFloat3( &right ) ) );
+    };
+    auto isAncestorOrSame = []( zCVob* possibleAncestor, zCVob* vob ) {
+        if ( !possibleAncestor || !vob )
+            return false;
+        for ( zCVob* current = vob; current; current = current->GetVobParent() ) {
+            if ( current == possibleAncestor )
+                return true;
+        }
+        return false;
+    };
+    auto parentsRelated = [&isAncestorOrSame]( zCVob* first, zCVob* second ) {
+        return first && second
+            && (isAncestorOrSame( first, second ) || isAncestorOrSame( second, first ));
+    };
 
-    auto addFlame = [&]( zCVob* flameVob, bool isParticle ) {
-        if ( !flameVob || !flameVob->GetShowVisual() )
+    struct LightRecord {
+        VobLightInfo* Info = nullptr;
+        zCVob* Parent = nullptr;
+        XMFLOAT3 Position = {};
+    };
+    std::vector<LightRecord> lights;
+    lights.reserve( VobLightMap.size() );
+
+    for ( const auto& lightEntry : VobLightMap ) {
+        VobLightInfo* info = lightEntry.second;
+        ConfigurePointlightShadowSource( info );
+        if ( !info || !info->Vob || info->IsVisualFXLight )
+            continue;
+
+        info->AllowsPointlightShadows = false;
+        info->HasFlameAnchor = false;
+        info->FlameAnchorOffset = {};
+
+        zCVob* parent = getPersistentParent( info->Vob );
+        if ( parent && parent->As<oCNPC>() )
+            parent = nullptr;
+
+        LightRecord record;
+        record.Info = info;
+        record.Parent = parent;
+        XMStoreFloat3( &record.Position, info->Vob->GetPositionWorldXM() );
+        lights.push_back( record );
+    }
+
+    struct FlameVisual {
+        zCVob* Vob = nullptr;
+        XMFLOAT3 Position = {};
+        bool IsParticle = false;
+    };
+    struct FlameGroup {
+        zCVob* Parent = nullptr;
+        std::vector<FlameVisual> Particles;
+        std::vector<FlameVisual> Decals;
+    };
+    std::vector<FlameGroup> flameGroups;
+
+    auto addFlame = [&]( zCVob* flameVob, bool isParticle, std::string identity ) {
+        if ( !flameVob || !flameVob->GetShowVisual() || hasVisualFXAncestor( flameVob ) )
+            return;
+        if ( !IsFlameVisualName( std::move( identity ) ) )
             return;
 
-        const bool parentAssociated = belongsToPersistentParent( flameVob );
-        if ( !parentAssociated
-            && XMVectorGetX( XMVector3LengthSq( flameVob->GetPositionWorldXM() - lightPosition ) ) > FLAME_LIGHT_LINK_RADIUS_SQ ) {
-            return;
+        zCVob* parent = getPersistentParent( flameVob );
+        if ( !parent )
+            parent = flameVob;
+
+        auto groupIt = std::find_if( flameGroups.begin(), flameGroups.end(), [parent]( const FlameGroup& group ) {
+            return group.Parent == parent;
+        } );
+        if ( groupIt == flameGroups.end() ) {
+            flameGroups.push_back( {} );
+            groupIt = std::prev( flameGroups.end() );
+            groupIt->Parent = parent;
         }
 
-        std::vector<FlameCandidate>& candidates = parentAssociated ? parentFlames : nearbyFlames;
-        auto existing = std::find_if( candidates.begin(), candidates.end(), [flameVob]( const FlameCandidate& candidate ) {
-            return candidate.Vob == flameVob;
-        } );
-        if ( existing == candidates.end() )
-            candidates.push_back( { flameVob, isParticle } );
+        FlameVisual flame;
+        flame.Vob = flameVob;
+        flame.IsParticle = isParticle;
+        XMStoreFloat3( &flame.Position, flameVob->GetPositionWorldXM() );
+        (isParticle ? groupIt->Particles : groupIt->Decals).push_back( flame );
     };
 
     for ( zCVob* particleVob : ParticleEffectVobs ) {
-        if ( !particleVob || !particleVob->GetShowVisual() )
+        if ( !particleVob || !particleVob->GetVisual() )
             continue;
         zCVisual* visual = particleVob->GetVisual();
-        if ( !visual )
-            continue;
         zCParticleFX* particle = reinterpret_cast<zCParticleFX*>(visual);
         zCParticleEmitter* emitter = particle->GetEmitter();
-        if ( !emitter )
-            continue;
 
-        std::string flameIdentity = visual->GetObjectName();
-        if ( zCTexture* texture = emitter->GetBaseVisTexture() ) {
-            flameIdentity += " ";
-            flameIdentity += texture->GetNameWithoutExt();
-        }
-        if ( zTParticle* firstParticle = particle->GetFirstParticle() ) {
-            if ( zCTexture* texture = emitter->GetVisTexture( firstParticle ) ) {
-                flameIdentity += " ";
-                flameIdentity += texture->GetNameWithoutExt();
+        std::string identity = visual->GetObjectName();
+        identity += " ";
+        identity += particleVob->GetName();
+        if ( emitter ) {
+            if ( zCTexture* texture = emitter->GetBaseVisTexture() ) {
+                identity += " ";
+                identity += texture->GetNameWithoutExt();
+            }
+            if ( zTParticle* firstParticle = particle->GetFirstParticle() ) {
+                if ( zCTexture* texture = emitter->GetVisTexture( firstParticle ) ) {
+                    identity += " ";
+                    identity += texture->GetNameWithoutExt();
+                }
             }
         }
-        if ( IsFlameVisualName( std::move( flameIdentity ) ) )
-            addFlame( particleVob, true );
+        addFlame( particleVob, true, std::move( identity ) );
     }
 
     for ( zCVob* decalVob : DecalVobs ) {
-        if ( !decalVob || !decalVob->GetShowVisual() )
+        if ( !decalVob || !decalVob->GetVisual() )
             continue;
         zCVisual* visual = decalVob->GetVisual();
-        if ( !visual )
-            continue;
         zCDecal* decal = reinterpret_cast<zCDecal*>(visual);
         DecalSettings* settings = decal->GetDecalSettings();
         zCMaterial* material = settings ? settings->DecalMaterial : nullptr;
         zCTexture* texture = material ? material->GetTexture() : nullptr;
-        std::string flameIdentity = visual->GetObjectName();
+
+        std::string identity = visual->GetObjectName();
+        identity += " ";
+        identity += decalVob->GetName();
         if ( texture ) {
-            flameIdentity += " ";
-            flameIdentity += texture->GetNameWithoutExt();
+            identity += " ";
+            identity += texture->GetNameWithoutExt();
         }
-        if ( IsFlameVisualName( std::move( flameIdentity ) ) )
-            addFlame( decalVob, false );
+        addFlame( decalVob, false, std::move( identity ) );
     }
 
-    const std::vector<FlameCandidate>& associatedFlames = !parentFlames.empty() ? parentFlames : nearbyFlames;
-    lightInfo->AllowsPointlightShadows = hasPersistentParent || !associatedFlames.empty();
+    struct ResolvedFlameGroup {
+        zCVob* Parent = nullptr;
+        bool IsMultiFlame = false;
+        XMFLOAT3 Anchor = {};
+        std::vector<XMFLOAT3> Positions;
+        std::vector<zCVob*> Vobs;
+    };
+    std::vector<ResolvedFlameGroup> resolvedFlames;
+    resolvedFlames.reserve( flameGroups.size() );
 
-    // A PFX and TGA at nearly the same position represent one visible flame.
-    // Pair only unlike types so separate candles of the same type remain distinct.
-    struct FlamePair {
-        size_t First = 0;
-        size_t Second = 0;
-        float DistanceSq = 0.0f;
+    for ( const FlameGroup& group : flameGroups ) {
+        ResolvedFlameGroup resolved;
+        resolved.Parent = group.Parent;
+        resolved.IsMultiFlame = group.Particles.size() > 1 || group.Decals.size() > 1;
+        for ( const FlameVisual& flame : group.Particles ) {
+            resolved.Positions.push_back( flame.Position );
+            resolved.Vobs.push_back( flame.Vob );
+        }
+        for ( const FlameVisual& flame : group.Decals ) {
+            resolved.Positions.push_back( flame.Position );
+            resolved.Vobs.push_back( flame.Vob );
+        }
+
+        // One TGA and one PFX represent the same visible flame; the TGA position wins.
+        if ( !resolved.IsMultiFlame ) {
+            if ( group.Decals.size() == 1 )
+                resolved.Anchor = group.Decals.front().Position;
+            else if ( group.Particles.size() == 1 )
+                resolved.Anchor = group.Particles.front().Position;
+            else
+                continue;
+        }
+        resolvedFlames.push_back( std::move( resolved ) );
+    }
+
+    std::vector<bool> blockedByMultiFlame( lights.size(), false );
+    for ( const ResolvedFlameGroup& group : resolvedFlames ) {
+        if ( !group.IsMultiFlame )
+            continue;
+        for ( size_t lightIndex = 0; lightIndex < lights.size(); ++lightIndex ) {
+            for ( const XMFLOAT3& flamePosition : group.Positions ) {
+                if ( distanceSq( lights[lightIndex].Position, flamePosition ) <= LINK_RADIUS_SQ ) {
+                    blockedByMultiFlame[lightIndex] = true;
+                    lights[lightIndex].Info->AllowsPointlightShadows = true;
+                    break;
+                }
+            }
+        }
+    }
+
+    auto lightIsRelatedToFlameGroup = [&]( const LightRecord& light, const ResolvedFlameGroup& group ) {
+        if ( parentsRelated( light.Parent, group.Parent ) )
+            return true;
+        for ( zCVob* flameVob : group.Vobs ) {
+            if ( isAncestorOrSame( light.Info->Vob, flameVob ) || isAncestorOrSame( flameVob, light.Info->Vob ) )
+                return true;
+        }
+        return false;
     };
 
-    std::vector<FlamePair> duplicatePairs;
-    for ( size_t first = 0; first < associatedFlames.size(); ++first ) {
-        for ( size_t second = first + 1; second < associatedFlames.size(); ++second ) {
-            if ( associatedFlames[first].IsParticle == associatedFlames[second].IsParticle )
-                continue;
-            const float distanceSq = XMVectorGetX( XMVector3LengthSq(
-                associatedFlames[first].Vob->GetPositionWorldXM() - associatedFlames[second].Vob->GetPositionWorldXM() ) );
-            if ( distanceSq <= DUPLICATE_FLAME_RADIUS_SQ )
-                duplicatePairs.push_back( { first, second, distanceSq } );
+    std::vector<std::vector<size_t>> flameClaims( lights.size() );
+    for ( size_t groupIndex = 0; groupIndex < resolvedFlames.size(); ++groupIndex ) {
+        const ResolvedFlameGroup& group = resolvedFlames[groupIndex];
+        if ( group.IsMultiFlame )
+            continue;
+
+        for ( int staticKind = 0; staticKind < 2; ++staticKind ) {
+            size_t bestLight = INVALID_INDEX;
+            float bestDistanceSq = LINK_RADIUS_SQ;
+            bool bestIsRelated = false;
+            for ( size_t lightIndex = 0; lightIndex < lights.size(); ++lightIndex ) {
+                if ( blockedByMultiFlame[lightIndex] )
+                    continue;
+                if ( static_cast<int>(lights[lightIndex].Info->Vob->IsStatic()) != staticKind )
+                    continue;
+
+                const float candidateDistanceSq = distanceSq( lights[lightIndex].Position, group.Anchor );
+                if ( candidateDistanceSq > LINK_RADIUS_SQ )
+                    continue;
+                const bool candidateIsRelated = lightIsRelatedToFlameGroup( lights[lightIndex], group );
+                if ( bestLight == INVALID_INDEX
+                    || (candidateIsRelated && !bestIsRelated)
+                    || (candidateIsRelated == bestIsRelated && candidateDistanceSq < bestDistanceSq) ) {
+                    bestDistanceSq = candidateDistanceSq;
+                    bestLight = lightIndex;
+                    bestIsRelated = candidateIsRelated;
+                }
+            }
+            if ( bestLight != INVALID_INDEX )
+                flameClaims[bestLight].push_back( groupIndex );
         }
     }
-    std::sort( duplicatePairs.begin(), duplicatePairs.end(), []( const FlamePair& left, const FlamePair& right ) {
-        return left.DistanceSq < right.DistanceSq;
-    } );
 
-    std::vector<bool> clustered( associatedFlames.size(), false );
-    std::vector<XMFLOAT3> flameClusters;
-    flameClusters.reserve( associatedFlames.size() );
+    std::vector<bool> resolvedByFlame( lights.size(), false );
+    auto assignAnchor = [&]( LightRecord& light, const XMFLOAT3& anchor ) {
+        light.Info->AllowsPointlightShadows = true;
+        light.Info->HasFlameAnchor = true;
+        XMStoreFloat3( &light.Info->FlameAnchorOffset, XMLoadFloat3( &anchor ) - XMLoadFloat3( &light.Position ) );
+    };
 
-    for ( const FlamePair& pair : duplicatePairs ) {
-        if ( clustered[pair.First] || clustered[pair.Second] )
+    for ( size_t lightIndex = 0; lightIndex < lights.size(); ++lightIndex ) {
+        if ( blockedByMultiFlame[lightIndex] ) {
+            resolvedByFlame[lightIndex] = true;
             continue;
-        const size_t decalIndex = associatedFlames[pair.First].IsParticle ? pair.Second : pair.First;
-        XMFLOAT3 storedPosition;
-        XMStoreFloat3( &storedPosition, associatedFlames[decalIndex].Vob->GetPositionWorldXM() );
-        flameClusters.push_back( storedPosition );
-        clustered[pair.First] = true;
-        clustered[pair.Second] = true;
+        }
+        if ( flameClaims[lightIndex].empty() )
+            continue;
+
+        resolvedByFlame[lightIndex] = true;
+        lights[lightIndex].Info->AllowsPointlightShadows = true;
+        if ( flameClaims[lightIndex].size() == 1 )
+            assignAnchor( lights[lightIndex], resolvedFlames[flameClaims[lightIndex].front()].Anchor );
+        // Multiple independent flames claim this light: keep the authored position.
     }
 
-    for ( size_t index = 0; index < associatedFlames.size(); ++index ) {
-        if ( clustered[index] )
+    struct ParentAnchor {
+        zCVob* Parent = nullptr;
+        XMFLOAT3 Position = {};
+    };
+    std::vector<ParentAnchor> parentAnchors;
+
+    auto parentContainsFlame = [&]( zCVob* parent ) {
+        return std::any_of( resolvedFlames.begin(), resolvedFlames.end(), [parent]( const ResolvedFlameGroup& group ) {
+            return group.Parent == parent;
+        } );
+    };
+
+    for ( size_t lightIndex = 0; lightIndex < lights.size(); ++lightIndex ) {
+        if ( resolvedByFlame[lightIndex] || !lights[lightIndex].Parent || parentContainsFlame( lights[lightIndex].Parent ) )
             continue;
-        XMFLOAT3 storedPosition;
-        XMStoreFloat3( &storedPosition, associatedFlames[index].Vob->GetPositionWorldXM() );
-        flameClusters.push_back( storedPosition );
+
+        auto anchorIt = std::find_if( parentAnchors.begin(), parentAnchors.end(), [&]( const ParentAnchor& anchor ) {
+            return anchor.Parent == lights[lightIndex].Parent;
+        } );
+        if ( anchorIt == parentAnchors.end() ) {
+            ParentAnchor anchor;
+            anchor.Parent = lights[lightIndex].Parent;
+            anchor.Position = lights[lightIndex].Position;
+            parentAnchors.push_back( anchor );
+        } else {
+            XMFLOAT3 parentPosition;
+            XMStoreFloat3( &parentPosition, lights[lightIndex].Parent->GetPositionWorldXM() );
+            if ( distanceSq( lights[lightIndex].Position, parentPosition ) < distanceSq( anchorIt->Position, parentPosition ) )
+                anchorIt->Position = lights[lightIndex].Position;
+        }
     }
 
-    // One spatial flame cluster is unambiguous. Multiple separated clusters keep
-    // the authored light-vob position, which remains the best aggregate source.
-    if ( flameClusters.size() == 1 ) {
-        XMStoreFloat3( &lightInfo->FlameAnchorOffset, XMLoadFloat3( &flameClusters.front() ) - lightPosition );
-        lightInfo->HasFlameAnchor = true;
+    struct ParentClaim {
+        size_t ParentIndex = INVALID_INDEX;
+        float DistanceSq = FLT_MAX;
+    };
+    std::vector<ParentClaim> parentClaims( lights.size() );
+
+    for ( size_t parentIndex = 0; parentIndex < parentAnchors.size(); ++parentIndex ) {
+        const ParentAnchor& anchor = parentAnchors[parentIndex];
+        for ( int staticKind = 0; staticKind < 2; ++staticKind ) {
+            size_t bestLight = INVALID_INDEX;
+            float bestDistanceSq = LINK_RADIUS_SQ;
+            for ( size_t lightIndex = 0; lightIndex < lights.size(); ++lightIndex ) {
+                if ( resolvedByFlame[lightIndex] )
+                    continue;
+                if ( static_cast<int>(lights[lightIndex].Info->Vob->IsStatic()) != staticKind )
+                    continue;
+                const float candidateDistanceSq = distanceSq( lights[lightIndex].Position, anchor.Position );
+                if ( candidateDistanceSq <= bestDistanceSq ) {
+                    bestDistanceSq = candidateDistanceSq;
+                    bestLight = lightIndex;
+                }
+            }
+            if ( bestLight != INVALID_INDEX && bestDistanceSq < parentClaims[bestLight].DistanceSq )
+                parentClaims[bestLight] = { parentIndex, bestDistanceSq };
+        }
+    }
+
+    for ( size_t lightIndex = 0; lightIndex < lights.size(); ++lightIndex ) {
+        if ( parentClaims[lightIndex].ParentIndex == INVALID_INDEX )
+            continue;
+        assignAnchor( lights[lightIndex], parentAnchors[parentClaims[lightIndex].ParentIndex].Position );
     }
 }
 /** Helper function for going through the bsp-tree */
@@ -5050,7 +5233,6 @@ void GothicAPI::BuildBspVobMapCacheHelper( zCBspBase* base ) {
             if ( vit == VobLightMap.end() ) {
                 VobLightInfo* vi = new VobLightInfo;
                 vi->Vob = vob;
-                ConfigurePointlightShadowSource( vi );
                 VobLightMap[vob] = vi;
                 // Shadow resources are created lazily when this eligible light becomes visible.
 
@@ -5123,6 +5305,10 @@ void BspLeafLinearCache::Clear() {
 void GothicAPI::BuildBspVobMapCache() {
     ZoneScopedN( "GothicAPI::BuildBspVobMapCache" );
     BuildBspVobMapCacheHelper( LoadedWorldInfo->BspTree->GetRootNode() );
+
+    // Resolve all flame and parent-vob associations after the complete world is known.
+    ConfigureAllPointlightShadowSources();
+
     BuildBspLeafLinearCache();
 }
 
@@ -5656,7 +5842,11 @@ XRESULT GothicAPI::LoadMenuSettings( const std::string& file ) {
             GetPrivateProfileIntA( "Shadows", "ShadowFilterMode",
                 static_cast<int>(ds.ShadowFilterMode), ini.c_str() ));
         s.ShadowMapSize = GetPrivateProfileIntA( "Shadows", "ShadowMapSize", ds.ShadowMapSize, ini.c_str() );
-        s.EnablePointlightShadows = GothicRendererSettings::EPointLightShadowMode( GetPrivateProfileIntA( "Shadows", "PointlightShadows", GothicRendererSettings::EPointLightShadowMode::PLS_STATIC_ONLY, ini.c_str() ) );
+        int pointlightShadowMode = GetPrivateProfileIntA( "Shadows", "PointlightShadows", GothicRendererSettings::EPointLightShadowMode::PLS_STATIC_ONLY, ini.c_str() );
+        pointlightShadowMode = std::clamp( pointlightShadowMode,
+            static_cast<int>(GothicRendererSettings::EPointLightShadowMode::PLS_DISABLED),
+            static_cast<int>(GothicRendererSettings::EPointLightShadowMode::PLS_UPDATE_DYNAMIC) );
+        s.EnablePointlightShadows = static_cast<GothicRendererSettings::EPointLightShadowMode>(pointlightShadowMode);
         s.WorldShadowRangeScale = GetPrivateProfileFloatA( "Shadows", "WorldShadowRangeScale", ds.WorldShadowRangeScale, ini );
         s.NumShadowCascades = GetPrivateProfileIntA( "Shadows", "NumShadowCascades", ds.NumShadowCascades, ini.c_str() );
         s.ShadowCascadePCFLimit = GetPrivateProfileIntA( "Shadows", "ShadowCascadePCFLimit", ds.ShadowCascadePCFLimit, ini.c_str() );

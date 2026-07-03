@@ -955,7 +955,7 @@ XRESULT D3D11ShadowMap::DrawPointlightShadows( std::vector<VobLightInfo*>& light
     }
 
     if ( settings.EnablePointlightShadows <= 0 ) {
-        m_VfxShadowSlots = {};
+
         return XR_SUCCESS;
     }
     
@@ -970,179 +970,8 @@ XRESULT D3D11ShadowMap::DrawPointlightShadows( std::vector<VobLightInfo*>& light
     const XMVECTOR cameraPositionXm = Engine::GAPI->GetCameraPositionXM();
     bool partialShadowUpdate = settings.PartialDynamicShadowUpdates;
     const bool staticOnlyMode = settings.EnablePointlightShadows == GothicRendererSettings::PLS_STATIC_ONLY;
-    const bool dynamicVfxMode = settings.EnablePointlightShadows == GothicRendererSettings::PLS_DYNAMIC_VFX;
+    const bool dynamicMode = settings.EnablePointlightShadows >= GothicRendererSettings::PLS_UPDATE_DYNAMIC;
 
-    const float frameTimeSec = std::clamp( Engine::GAPI->GetFrameTimeSec(), 0.0f, 0.1f );
-    constexpr float VFX_STABLE_SECONDS = 1.0f;
-    constexpr float VFX_STABLE_MOVE_EPSILON_SQ = 16.0f;
-    constexpr float VFX_STABLE_RANGE_EPSILON = 1.0f;
-
-    for ( VobLightInfo* light : lights ) {
-        if ( !light || !light->IsVisualFXLight || !light->Vob )
-            continue;
-
-        const XMVECTOR position = light->GetEffectivePositionWorldXM();
-        const float range = light->Vob->GetLightRange();
-        if ( !light->VisualFXShadowStabilityInitialized ) {
-            XMStoreFloat3( &light->LastVisualFXShadowPosition, position );
-            light->LastVisualFXShadowRange = range;
-            light->VisualFXShadowStableTime = 0.0f;
-            light->VisualFXShadowIsStable = !light->IsDynamicVobLight || light->Vob->IsStatic();
-            light->VisualFXShadowStabilityInitialized = true;
-            continue;
-        }
-
-        const XMVECTOR lastPosition = XMLoadFloat3( &light->LastVisualFXShadowPosition );
-        const float movedSq = XMVectorGetX( XMVector3LengthSq( position - lastPosition ) );
-        const bool changed = movedSq > VFX_STABLE_MOVE_EPSILON_SQ
-            || std::abs( range - light->LastVisualFXShadowRange ) > VFX_STABLE_RANGE_EPSILON;
-        if ( changed ) {
-            light->VisualFXShadowStableTime = 0.0f;
-            light->VisualFXShadowIsStable = false;
-            XMStoreFloat3( &light->LastVisualFXShadowPosition, position );
-            light->LastVisualFXShadowRange = range;
-        } else if ( !light->VisualFXShadowIsStable ) {
-            light->VisualFXShadowStableTime += frameTimeSec;
-            if ( light->VisualFXShadowStableTime >= VFX_STABLE_SECONDS )
-                light->VisualFXShadowIsStable = true;
-        }
-
-        if ( !light->IsDynamicVobLight || light->Vob->IsStatic() )
-            light->VisualFXShadowIsStable = true;
-    }
-
-    struct VfxShadowCandidate {
-        VobLightInfo* Light;
-        float Score;
-    };
-    std::array<VfxShadowCandidate, 2> vfxCandidates = {
-        VfxShadowCandidate{ nullptr, -1.0f }, VfxShadowCandidate{ nullptr, -1.0f }
-    };
-    const float maxVfxShadowDistance = std::max( settings.VisualFXDrawRadius, 0.0f );
-    const float maxVfxShadowDistanceSq = maxVfxShadowDistance * maxVfxShadowDistance;
-    const auto isEligibleBudgetedVfxLight = [&cameraPositionXm, maxVfxShadowDistanceSq]( VobLightInfo* light ) {
-        if ( !light || !light->IsVisualFXLight || light->VisualFXShadowIsStable || !light->Vob->IsEnabled() || !light->VisibleInFrame )
-            return false;
-        const float range = light->Vob->GetLightRange();
-        const float distanceSq = XMVectorGetX( XMVector3LengthSq( light->GetEffectivePositionWorldXM() - cameraPositionXm ) );
-        return range > 15.0f && distanceSq <= maxVfxShadowDistanceSq;
-    };
-
-    if ( dynamicVfxMode ) {
-        for ( VobLightInfo* light : lights ) {
-            if ( !isEligibleBudgetedVfxLight( light ) )
-                continue;
-
-            const float range = light->Vob->GetLightRange();
-            const float distanceSq = XMVectorGetX( XMVector3LengthSq( light->GetEffectivePositionWorldXM() - cameraPositionXm ) );
-            const float4 color( light->Vob->GetLightColor() );
-            const float brightness = std::max( color.x * 0.2126f + color.y * 0.7152f + color.z * 0.0722f, 0.05f );
-            float score = range * brightness / std::max( std::sqrt( distanceSq ), 1.0f );
-            const bool alreadyActive = std::any_of( m_VfxShadowSlots.begin(), m_VfxShadowSlots.end(), [light]( const VfxShadowSlot& slot ) {
-                return slot.Active == light;
-            } );
-            if ( alreadyActive )
-                score *= 1.2f;
-
-            if ( score > vfxCandidates[0].Score ) {
-                vfxCandidates[1] = vfxCandidates[0];
-                vfxCandidates[0] = { light, score };
-            } else if ( score > vfxCandidates[1].Score ) {
-                vfxCandidates[1] = { light, score };
-            }
-        }
-    }
-    const std::array<VobLightInfo*, 2> desiredVfxLights = {
-        vfxCandidates[0].Light, vfxCandidates[1].Light
-    };
-    if ( !dynamicVfxMode ) {
-        m_VfxShadowSlots = {};
-    } else {
-        constexpr float VFX_SHADOW_FADE_SECONDS = 0.5f;
-        const float fadeStep = std::clamp( Engine::GAPI->GetFrameTimeSec(), 0.0f, 0.1f ) / VFX_SHADOW_FADE_SECONDS;
-        std::array<bool, 2> desiredClaimed = { false, false };
-
-        for ( VfxShadowSlot& slot : m_VfxShadowSlots ) {
-            if ( slot.Active && (std::find( lights.begin(), lights.end(), slot.Active ) == lights.end()
-                || !isEligibleBudgetedVfxLight( slot.Active )) ) {
-                slot.Active->PointlightShadowStrength = 0.0f;
-                slot = {};
-            }
-        }
-
-        for ( VfxShadowSlot& slot : m_VfxShadowSlots ) {
-            for ( size_t desiredIndex = 0; desiredIndex < desiredVfxLights.size(); ++desiredIndex ) {
-                if ( slot.Active && slot.Active == desiredVfxLights[desiredIndex] ) {
-                    desiredClaimed[desiredIndex] = true;
-                    slot.Pending = nullptr;
-                    slot.FadingOut = false;
-                }
-            }
-        }
-
-        for ( VfxShadowSlot& slot : m_VfxShadowSlots ) {
-            const bool activeStillDesired = slot.Active
-                && std::find( desiredVfxLights.begin(), desiredVfxLights.end(), slot.Active ) != desiredVfxLights.end();
-            if ( activeStillDesired )
-                continue;
-
-            VobLightInfo* replacement = nullptr;
-            for ( size_t desiredIndex = 0; desiredIndex < desiredVfxLights.size(); ++desiredIndex ) {
-                if ( !desiredClaimed[desiredIndex] && desiredVfxLights[desiredIndex] ) {
-                    replacement = desiredVfxLights[desiredIndex];
-                    desiredClaimed[desiredIndex] = true;
-                    break;
-                }
-            }
-            slot.Pending = replacement;
-            if ( slot.Active ) {
-                slot.FadingOut = true;
-            } else if ( slot.Pending ) {
-                slot.Active = slot.Pending;
-                slot.Pending = nullptr;
-                slot.Strength = 0.0f;
-                slot.FadingOut = false;
-            }
-        }
-
-        for ( VfxShadowSlot& slot : m_VfxShadowSlots ) {
-            if ( !slot.Active )
-                continue;
-
-            if ( slot.FadingOut ) {
-                slot.Strength = std::max( slot.Strength - fadeStep, 0.0f );
-                slot.Active->PointlightShadowStrength = slot.Strength;
-                if ( slot.Strength <= 0.0f ) {
-                    slot.Active->UpdateShadows = false;
-                    if ( D3D11PointLight* pl = dynamic_cast<D3D11PointLight*>(slot.Active->LightShadowBuffers.get()) ) {
-                        pl->ClearTiledSlot();
-                        pl->ReleaseShadowMap();
-                    }
-                    slot.Active = slot.Pending;
-                    slot.Pending = nullptr;
-                    slot.Strength = 0.0f;
-                    slot.FadingOut = false;
-                }
-            } else {
-                slot.Strength = std::min( slot.Strength + fadeStep, 1.0f );
-            }
-
-            if ( slot.Active )
-                slot.Active->PointlightShadowStrength = slot.Strength;
-        }
-    }
-
-    for ( VobLightInfo* light : lights ) {
-        if ( !light || !light->IsVisualFXLight )
-            continue;
-        if ( light->VisualFXShadowIsStable )
-            light->PointlightShadowStrength = 1.0f;
-    }
-    const auto isSelectedVfxLight = [this]( const VobLightInfo* light ) {
-        return std::any_of( m_VfxShadowSlots.begin(), m_VfxShadowSlots.end(), [light]( const VfxShadowSlot& slot ) {
-            return slot.Active == light;
-        } );
-    };
     // Draw pointlight shadows
     std::list<VobLightInfo*> importantUpdates;
 
@@ -1151,14 +980,12 @@ XRESULT D3D11ShadowMap::DrawPointlightShadows( std::vector<VobLightInfo*>& light
     const bool isTiledShadingEnabled = m_TiledDeferred && settings.EnableTiledLighting;
     const int requiredShadowMapKind = isTiledShadingEnabled ? 1 : 0;
     for ( auto const& light : lights ) {
-        if ( !light->Vob->IsEnabled() || !light->VisibleInFrame ) {
+        if ( !light || !light->Vob || !light->Vob->IsEnabled() || !light->VisibleInFrame ) {
             continue;
         }
-        const bool selectedVfxLight = dynamicVfxMode && light->IsVisualFXLight && !light->VisualFXShadowIsStable && isSelectedVfxLight( light );
-        const bool stableVfxLight = light->IsVisualFXLight && light->VisualFXShadowIsStable
-            && settings.EnablePointlightShadows >= GothicRendererSettings::PLS_UPDATE_DYNAMIC;
-        const bool regularShadowLight = light->AllowsPointlightShadows && (!light->IsVisualFXLight || stableVfxLight);
-        if ( !regularShadowLight && !selectedVfxLight ) {
+        const bool visualFxShadowsAllowed = !light->IsVisualFXLight || dynamicMode;
+        const bool regularShadowLight = light->AllowsPointlightShadows && visualFxShadowsAllowed;
+        if ( !regularShadowLight ) {
             light->UpdateShadows = false;
             if ( D3D11PointLight* pl = dynamic_cast<D3D11PointLight*>(light->LightShadowBuffers.get()) ) {
                 pl->ClearTiledSlot();
@@ -1169,7 +996,7 @@ XRESULT D3D11ShadowMap::DrawPointlightShadows( std::vector<VobLightInfo*>& light
         // Create resources only when an eligible light is actually visible.
         if ( !light->LightShadowBuffers ) {
             BaseShadowedPointLight* bpl;
-            graphicsEngine->CreateShadowedPointLight( &bpl, light, selectedVfxLight || light->IsDynamicVobLight || (light->IsVisualFXLight && !light->VisualFXShadowIsStable) );
+            graphicsEngine->CreateShadowedPointLight( &bpl, light, light->IsDynamicVobLight || light->IsVisualFXLight || !light->Vob->IsStatic() );
             light->LightShadowBuffers.reset( bpl );
             light->UpdateShadows = true;
         }
@@ -1190,7 +1017,7 @@ XRESULT D3D11ShadowMap::DrawPointlightShadows( std::vector<VobLightInfo*>& light
                 // desiredResolution = 256; // High res for close lights
             }
 
-            bool inShadowRange = selectedVfxLight || d < distMaxShadowSq;
+            bool inShadowRange = d < distMaxShadowSq;
             if ( inShadowRange ) {
                 // Acquire memory if it doesn't have it (or resolution changed)
                 if ( !pl->HasShadowMap( requiredShadowMapKind ) || pl->GetShadowMapResolution() != desiredResolution ) {
@@ -1218,8 +1045,7 @@ XRESULT D3D11ShadowMap::DrawPointlightShadows( std::vector<VobLightInfo*>& light
                     light->UpdateShadows = true; // Force an immediate render this frame
                 }
 
-                if ( selectedVfxLight )
-                    light->UpdateShadows = true;
+
                 bool needsUpdate = pl->NeedsUpdate();
                 bool isInited = pl->IsInited();
 
