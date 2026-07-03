@@ -391,6 +391,13 @@ struct VobLightInfo {
     /** True when this light is attached to a persistent world vob or belongs to a nearby flame visual. */
     bool AllowsPointlightShadows = false;
 
+    /** Optional offset to one unambiguous associated flame. Multiple flames keep the original light position. */
+    bool HasFlameAnchor = false;
+    XMFLOAT3 FlameAnchorOffset = {};
+
+    float3 GetEffectivePositionWorld() const;
+    XMVECTOR GetEffectivePositionWorldXM() const;
+
     /** True for dynamic/actor/PFX lights that should not be clipped at indoor/outdoor transitions. */
     bool IgnoreIndoorOutdoorLimit = false;
 

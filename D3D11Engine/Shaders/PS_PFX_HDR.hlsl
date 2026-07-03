@@ -26,5 +26,9 @@ float4 PSMain(PS_INPUT Input) : SV_TARGET
 #endif
 
     float3 bloom = TX_Bloom.Sample(SS_Linear, Input.vTexcoord).rgb * HDR_BloomStrength;
-    return float4(pow(saturate(toneMapped * (1.0f - bloom) + bloom), 1.8f), 1.0f);
+    float3 composed = saturate(toneMapped * (1.0f - bloom) + bloom);
+#if USE_TONEMAP == 0
+    composed = pow(composed, 1.8f);
+#endif
+    return float4(composed, 1.0f);
 }

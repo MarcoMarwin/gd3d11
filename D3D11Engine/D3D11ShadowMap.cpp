@@ -989,16 +989,16 @@ XRESULT D3D11ShadowMap::DrawPointlightShadows( std::vector<VobLightInfo*>& light
             }
             continue;
         }
-        // Create shadowmap in case we should have one but haven't got it yet
-        if ( !light->LightShadowBuffers && light->UpdateShadows ) {
+        // Create resources only when an eligible light is actually visible.
+        if ( !light->LightShadowBuffers ) {
             BaseShadowedPointLight* bpl;
-            // assume this is a dynamic light
-            graphicsEngine->CreateShadowedPointLight( &bpl, light, /*dynamic light*/ true );
-            light->LightShadowBuffers.reset(bpl);
+            graphicsEngine->CreateShadowedPointLight( &bpl, light, light->IsDynamicVobLight );
+            light->LightShadowBuffers.reset( bpl );
+            light->UpdateShadows = true;
         }
 
         if ( D3D11PointLight* pl = dynamic_cast<D3D11PointLight*>(light->LightShadowBuffers.get()) ) {
-            const float d = XMVectorGetX( XMVector3LengthSq( light->Vob->GetPositionWorldXM() - cameraPositionXm ) );
+            const float d = XMVectorGetX( XMVector3LengthSq( light->GetEffectivePositionWorldXM() - cameraPositionXm ) );
             float range = light->Vob->GetLightRange();
             const float rangeSq = range * range;
 

@@ -130,6 +130,10 @@ struct HDRSettingsConstantBuffer {
     float HDR_BloomStrength;
 };
 
+struct LPMConstantsBuffer {
+    uint32_t LPM_Ctl[24][4];
+};
+
 struct ViewportInfoConstantBuffer {
     float2 VPI_ViewportSize;
     float2 VPI_pad;

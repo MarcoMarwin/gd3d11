@@ -700,7 +700,6 @@ struct GothicRendererSettings {
         HeroAffectsObjects = true;
         HeroAffectsObjectsStrength = 1.0f;
         EnablePointlightShadows = PLS_UPDATE_DYNAMIC;
-        MinLightShadowUpdateRange = 300.0f;
         PartialDynamicShadowUpdates = true;
         EnableTiledLighting = false;
         RendererMode = RM_Deferred;
@@ -879,7 +878,6 @@ struct GothicRendererSettings {
     bool SortRenderQueue;
     bool DrawThreaded;
     EPointLightShadowMode EnablePointlightShadows;
-    float MinLightShadowUpdateRange;
     bool PartialDynamicShadowUpdates;
     bool EnableTiledLighting;
     E_RendererMode RendererMode;

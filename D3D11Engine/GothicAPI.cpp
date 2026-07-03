@@ -4315,8 +4315,6 @@ void GothicAPI::CollectVisibleVobs(
             // sort back to front
             std::sort( TransparencyVobs.begin(), TransparencyVobs.end(), CompareGhostDistance );
         }
-
-        float minDynamicUpdateLightRange = Engine::GAPI->GetRendererState().RendererSettings.MinLightShadowUpdateRange;
     
         for ( auto vi : renderQueue.lights ) {
             if ( vi->Vob->IsEnabled() /*&& vob->GetShowVisual()*/ ) {
@@ -4328,8 +4326,8 @@ void GothicAPI::CollectVisibleVobs(
                         || (RendererState.RendererSettings.EnablePointlightShadows >= GothicRendererSettings::PLS_UPDATE_DYNAMIC && !vi->Vob->IsStatic()) ) {
                         // Now check for distances, etc
                         float lightCameraDist;
-                        XMStoreFloat( &lightCameraDist, XMVector3Length( cameraPosition - vi->Vob->GetPositionWorldXM() ) );
-                        if ( vi->Vob->GetLightRange() > minDynamicUpdateLightRange && lightCameraDist < vi->Vob->GetLightRange() * 1.5f )
+                        XMStoreFloat( &lightCameraDist, XMVector3Length( cameraPosition - vi->GetEffectivePositionWorldXM() ) );
+                        if ( lightCameraDist < vi->Vob->GetLightRange() * 1.5f )
                             vi->UpdateShadows = true;
                     }
                 }
@@ -4786,22 +4784,74 @@ static void CVVH_AddNotDrawnVobToList(
     }
 }
 
-bool GothicAPI::HasNearbyFlameVisual( zCVobLight* light ) const {
-    if ( !light )
-        return false;
+void GothicAPI::ConfigurePointlightShadowSource( VobLightInfo* lightInfo ) const {
+    if ( !lightInfo )
+        return;
 
+    lightInfo->AllowsPointlightShadows = false;
+    lightInfo->HasFlameAnchor = false;
+    lightInfo->FlameAnchorOffset = {};
+
+    zCVobLight* light = lightInfo->Vob;
+    if ( !light )
+        return;
+
+    auto isLightVob = []( zCVob* vob ) {
+        if ( !vob )
+            return false;
+        for ( zCClassDef* classDef = reinterpret_cast<zCObject*>(vob)->_GetClassDef(); classDef; classDef = classDef->baseClassDef ) {
+            if ( strcmp( classDef->className.ToChar(), "zCVobLight" ) == 0 )
+                return true;
+        }
+        return false;
+    };
+
+    zCVob* persistentParent = light->GetVobParent();
+    while ( persistentParent && isLightVob( persistentParent ) )
+        persistentParent = persistentParent->GetVobParent();
+
+    const bool rejectedParent = persistentParent
+        && (persistentParent->As<oCNPC>() || persistentParent->As<oCVisualFX>());
+    if ( rejectedParent )
+        return;
+
+    const bool hasPersistentParent = persistentParent != nullptr;
     constexpr float FLAME_LIGHT_LINK_RADIUS = 150.0f;
     constexpr float FLAME_LIGHT_LINK_RADIUS_SQ = FLAME_LIGHT_LINK_RADIUS * FLAME_LIGHT_LINK_RADIUS;
     const XMVECTOR lightPosition = light->GetPositionWorldXM();
 
-    auto isNearby = [&]( zCVob* flameVob ) {
-        if ( !flameVob || !flameVob->GetShowVisual() )
+    std::vector<zCVob*> parentFlames;
+    std::vector<zCVob*> nearbyFlames;
+
+    auto belongsToPersistentParent = [&]( zCVob* flameVob ) {
+        if ( !persistentParent )
             return false;
-        return XMVectorGetX( XMVector3LengthSq( flameVob->GetPositionWorldXM() - lightPosition ) ) <= FLAME_LIGHT_LINK_RADIUS_SQ;
+        zCVob* current = flameVob;
+        for ( int depth = 0; current && depth < 64; ++depth ) {
+            if ( current == persistentParent )
+                return true;
+            current = current->GetVobParent();
+        }
+        return false;
+    };
+
+    auto addFlame = [&]( zCVob* flameVob ) {
+        if ( !flameVob || !flameVob->GetShowVisual() )
+            return;
+
+        const bool parentAssociated = belongsToPersistentParent( flameVob );
+        if ( !parentAssociated
+            && XMVectorGetX( XMVector3LengthSq( flameVob->GetPositionWorldXM() - lightPosition ) ) > FLAME_LIGHT_LINK_RADIUS_SQ ) {
+            return;
+        }
+
+        std::vector<zCVob*>& candidates = parentAssociated ? parentFlames : nearbyFlames;
+        if ( std::find( candidates.begin(), candidates.end(), flameVob ) == candidates.end() )
+            candidates.push_back( flameVob );
     };
 
     for ( zCVob* particleVob : ParticleEffectVobs ) {
-        if ( !isNearby( particleVob ) )
+        if ( !particleVob || !particleVob->GetShowVisual() )
             continue;
         zCVisual* visual = particleVob->GetVisual();
         if ( !visual )
@@ -4817,11 +4867,11 @@ bool GothicAPI::HasNearbyFlameVisual( zCVobLight* light ) const {
                 flameVisual = flameVisual || IsFlameVisualName( texture->GetNameWithoutExt() );
         }
         if ( flameVisual )
-            return true;
+            addFlame( particleVob );
     }
 
     for ( zCVob* decalVob : DecalVobs ) {
-        if ( !isNearby( decalVob ) )
+        if ( !decalVob || !decalVob->GetShowVisual() )
             continue;
         zCVisual* visual = decalVob->GetVisual();
         if ( !visual )
@@ -4831,27 +4881,21 @@ bool GothicAPI::HasNearbyFlameVisual( zCVobLight* light ) const {
         zCMaterial* material = settings ? settings->DecalMaterial : nullptr;
         zCTexture* texture = material ? material->GetTexture() : nullptr;
         if ( IsFlameVisualName( visual->GetObjectName() )
-            || (texture && IsFlameVisualName( texture->GetNameWithoutExt() )) )
-            return true;
+            || (texture && IsFlameVisualName( texture->GetNameWithoutExt() )) ) {
+            addFlame( decalVob );
+        }
     }
 
-    return false;
-}
+    const std::vector<zCVob*>& associatedFlames = !parentFlames.empty() ? parentFlames : nearbyFlames;
+    lightInfo->AllowsPointlightShadows = hasPersistentParent || !associatedFlames.empty();
 
-bool GothicAPI::AllowsPointlightShadowSource( zCVobLight* light ) const {
-    if ( !light )
-        return false;
-
-    if ( zCVob* parent = light->GetVobParent() ) {
-        // Actor- and spell-attached lights are transient effects, not persistent world lamps.
-        if ( parent->As<oCNPC>() || parent->As<oCVisualFX>() )
-            return false;
-        return true;
+    // A single flame is an unambiguous source. With no flame or multiple flames,
+    // the authored light-vob position remains the best aggregate source.
+    if ( associatedFlames.size() == 1 ) {
+        XMStoreFloat3( &lightInfo->FlameAnchorOffset, associatedFlames.front()->GetPositionWorldXM() - lightPosition );
+        lightInfo->HasFlameAnchor = true;
     }
-
-    return HasNearbyFlameVisual( light );
 }
-
 /** Helper function for going through the bsp-tree */
 void GothicAPI::BuildBspVobMapCacheHelper( zCBspBase* base ) {
     if ( !base )
@@ -4924,18 +4968,9 @@ void GothicAPI::BuildBspVobMapCacheHelper( zCBspBase* base ) {
             if ( vit == VobLightMap.end() ) {
                 VobLightInfo* vi = new VobLightInfo;
                 vi->Vob = vob;
-                vi->AllowsPointlightShadows = AllowsPointlightShadowSource( vob );
+                ConfigurePointlightShadowSource( vi );
                 VobLightMap[vob] = vi;
-
-                float minDynamicUpdateLightRange = Engine::GAPI->GetRendererState().RendererSettings.MinLightShadowUpdateRange;
-                if ( vi->AllowsPointlightShadows
-                    && RendererState.RendererSettings.EnablePointlightShadows >= GothicRendererSettings::PLS_STATIC_ONLY
-                    && vi->Vob->GetLightRange() > minDynamicUpdateLightRange ) {
-                    // Create shadowcubemap, if wanted
-                    BaseShadowedPointLight* bpl;
-                    Engine::GraphicsEngine->CreateShadowedPointLight( &bpl, vi );
-                    vi->LightShadowBuffers.reset(bpl);
-                }
+                // Shadow resources are created lazily when this eligible light becomes visible.
 
                 vi->IsIndoorVob = vob->IsIndoorVob();
             }
@@ -6337,7 +6372,7 @@ static void CollectLeafVobs(
                     vi->Vob = vob;
                     vi->IsPFXVobLight = PFXVobLight;
                     vi->IsDynamicVobLight = true;
-                    vi->AllowsPointlightShadows = Engine::GAPI->AllowsPointlightShadowSource( vob );
+                    Engine::GAPI->ConfigurePointlightShadowSource( vi );
                     vi->IgnoreIndoorOutdoorLimit = true;
                     vi->UpdateShadows = !PFXVobLight && vi->AllowsPointlightShadows;
                     vit = VobLightMap.emplace( vob, vi ).first;

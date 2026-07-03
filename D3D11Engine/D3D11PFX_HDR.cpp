@@ -11,6 +11,57 @@
 #include "ConstantBufferStructs.h"
 #include "GothicAPI.h"
 
+#include <cmath>
+
+#define FFX_CPU
+#include "include/FidelityFX/gpu/ffx_core.h"
+
+static LPMConstantsBuffer* ActiveLPMSetupTarget = nullptr;
+
+static void LpmSetupOut( uint32_t index, uint32_t* values ) {
+    if ( ActiveLPMSetupTarget == nullptr || index >= 24 )
+        return;
+
+    for ( uint32_t component = 0; component < 4; ++component )
+        ActiveLPMSetupTarget->LPM_Ctl[index][component] = values[component];
+}
+
+#include "include/FidelityFX/gpu/lpm/ffx_lpm.h"
+#undef FFX_CPU
+
+namespace {
+const LPMConstantsBuffer& GetLPMConstants() {
+    static LPMConstantsBuffer constants = {};
+    static bool initialized = false;
+    if ( initialized )
+        return constants;
+
+    FfxFloat32x3 saturation = { 0.0f, 0.0f, 0.0f };
+    FfxFloat32x3 crosstalk = { 1.0f, 1.0f, 1.0f };
+
+    ActiveLPMSetupTarget = &constants;
+    FfxCalculateLpmConsts(
+        FFX_FALSE,
+        LPM_CONFIG_709_709,
+        LPM_COLORS_709_709,
+        0.0f,
+        16.0f,
+        4.0f,
+        0.0f,
+        1.0f,
+        saturation,
+        crosstalk );
+    ActiveLPMSetupTarget = nullptr;
+    initialized = true;
+    return constants;
+}
+
+void BindLPMConstants( D3D11PShader* shader ) {
+    if ( Engine::GAPI->GetRendererState().RendererSettings.HDRToneMap == GothicRendererSettings::E_HDRToneMap::LPMToneMap )
+        shader->GetBuffer( "LPM_Constants" ).Update( &GetLPMConstants() ).Bind();
+}
+}
+
 const int LUM_SIZE = 512;
 
 D3D11PFX_HDR::D3D11PFX_HDR( D3D11PfxRenderer* rnd ) : D3D11PFX_Effect( rnd ) {
@@ -70,12 +121,13 @@ XRESULT D3D11PFX_HDR::Render( ID3D11RenderTargetView* output, ID3D11ShaderResour
     auto hps = engine->GetShaderManager().GetPShader( PShaderID::PS_PFX_HDR );
     hps->Apply();
 
-    HDRSettingsConstantBuffer hcb;
+    HDRSettingsConstantBuffer hcb = {};
     hcb.HDR_LumWhite = Engine::GAPI->GetRendererState().RendererSettings.HDRLumWhite;
     hcb.HDR_MiddleGray = Engine::GAPI->GetRendererState().RendererSettings.HDRMiddleGray;
     hcb.HDR_Threshold = Engine::GAPI->GetRendererState().RendererSettings.BloomThreshold;
     hcb.HDR_BloomStrength = Engine::GAPI->GetRendererState().RendererSettings.BloomStrength;
     hps->GetBuffer( "HDR_Settings" ).Update( &hcb ).Bind();
+    BindLPMConstants( hps.get() );
 
     FxRenderer->CopyTextureToRTV( tempBuffer->GetShaderResView(), output, engine->GetResolution(), true );
 
@@ -99,11 +151,12 @@ void D3D11PFX_HDR::CreateBloom( RenderToTextureBuffer* lum, RenderToTextureBuffe
 	auto tonemapPS = engine->GetShaderManager().GetPShader( PShaderID::PS_PFX_Tonemap );
 	tonemapPS->Apply();
 
-	HDRSettingsConstantBuffer hcb;
+	HDRSettingsConstantBuffer hcb = {};
 	hcb.HDR_LumWhite = Engine::GAPI->GetRendererState().RendererSettings.HDRLumWhite;
 	hcb.HDR_MiddleGray = Engine::GAPI->GetRendererState().RendererSettings.HDRMiddleGray;
 	hcb.HDR_Threshold = Engine::GAPI->GetRendererState().RendererSettings.BloomThreshold;
 	tonemapPS->GetBuffer( "HDR_Settings" ).Update( &hcb ).Bind();
+	BindLPMConstants( tonemapPS.get() );
 
 	lum->BindToPixelShader( engine->GetContext().Get(), 1 );
 	FxRenderer->CopyTextureToRTV( engine->GetHDRBackBuffer().GetShaderResView(), bloomTempBuffer->GetRenderTargetView(), dsRes, true );

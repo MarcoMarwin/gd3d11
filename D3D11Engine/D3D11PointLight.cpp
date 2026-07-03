@@ -21,7 +21,7 @@ D3D11PointLight::D3D11PointLight( VobLightInfo* info, bool dynamicLight ) {
     // some lights don't seem to be in here!
     Engine::GAPI->VobLightMap[info->Vob] = info;
 
-    XMStoreFloat3( &LastUpdatePosition, LightInfo->Vob->GetPositionWorldXM() );
+    XMStoreFloat3( &LastUpdatePosition, LightInfo->GetEffectivePositionWorldXM() );
 
     m_DepthCubemap = nullptr;
     m_StaticDepthCubemap = nullptr;
@@ -201,7 +201,7 @@ void D3D11PointLight::RenderStaticShadowPass( RenderToDepthStencilBuffer& target
     }
 
     const unsigned int staticCasterMask = SHADOW_CASTER_WORLD | SHADOW_CASTER_VOBS | SHADOW_CASTER_MOBS;
-    engine->RenderShadowCube( LightInfo->Vob->GetPositionWorldXM(), range, target, nullptr, nullptr, false, LightInfo->IsIndoorVob, false,
+    engine->RenderShadowCube( LightInfo->GetEffectivePositionWorldXM(), range, target, nullptr, nullptr, false, LightInfo->IsIndoorVob, false,
         &VobCache, &SkeletalVobCache, wc, clearDepth, staticCasterMask );
 }
 
@@ -210,7 +210,7 @@ void D3D11PointLight::RenderAnimatedShadowPass( RenderToDepthStencilBuffer& targ
     const float range = LightInfo->Vob->GetLightRange();
 
     const unsigned int animatedCasterMask = SHADOW_CASTER_ANIMATED;
-    engine->RenderShadowCube( LightInfo->Vob->GetPositionWorldXM(), range, target, nullptr, nullptr, false, LightInfo->IsIndoorVob, false,
+    engine->RenderShadowCube( LightInfo->GetEffectivePositionWorldXM(), range, target, nullptr, nullptr, false, LightInfo->IsIndoorVob, false,
         nullptr, nullptr, nullptr, clearDepth, animatedCasterMask );
 }
 
@@ -235,7 +235,7 @@ void D3D11PointLight::InitResources() {
 
     // Generate worldmesh cache if we aren't a dynamically added light
     if ( !DynamicLight ) {
-        WorldConverter::WorldMeshCollectPolyRange( LightInfo->Vob->GetPositionWorld(), LightInfo->Vob->GetLightRange(), Engine::GAPI->GetWorldSections(), WorldMeshCache );
+        WorldConverter::WorldMeshCollectPolyRange( LightInfo->GetEffectivePositionWorld(), LightInfo->Vob->GetLightRange(), Engine::GAPI->GetWorldSections(), WorldMeshCache );
         std::ranges::sort(WorldMeshCache, []( const auto& a, const auto& b ) {
             return std::tie(a.first.Material, a.first.Texture) < std::tie(b.first.Material, b.first.Texture);
         });
@@ -263,7 +263,7 @@ bool D3D11PointLight::NeedsUpdate() {
     }
 
     FXMVECTOR lastPos = XMLoadFloat3( &LastUpdatePosition );
-    const bool moved = !XMVector3Equal( LightInfo->Vob->GetPositionWorldXM(), lastPos );
+    const bool moved = !XMVector3Equal( LightInfo->GetEffectivePositionWorldXM(), lastPos );
 
     if ( shadowMode == GothicRendererSettings::PLS_STATIC_ONLY ) {
         return moved || !m_StaticShadowReady || NotYetDrawn();
@@ -310,7 +310,7 @@ void D3D11PointLight::RenderCubemap( bool forceUpdate, D3D11ConstantBuffer* View
     D3D11GraphicsEngine* engine = reinterpret_cast<D3D11GraphicsEngine*>(Engine::GraphicsEngine); // TODO: Remove and use newer system!
 
     FXMVECTOR xmlastPos = XMLoadFloat3( &LastUpdatePosition );
-    const bool moved = !XMVector3Equal( LightInfo->Vob->GetPositionWorldXM(), xmlastPos );
+    const bool moved = !XMVector3Equal( LightInfo->GetEffectivePositionWorldXM(), xmlastPos );
 
     if ( moved ) {
         // Position changed, refresh our caches
@@ -331,7 +331,7 @@ void D3D11PointLight::RenderCubemap( bool forceUpdate, D3D11ConstantBuffer* View
             return; // Don't update when we don't need to
     }
 
-    FXMVECTOR vEyePt = LightInfo->Vob->GetPositionWorldXM();
+    FXMVECTOR vEyePt = LightInfo->GetEffectivePositionWorldXM();
     //vEyePt += XMVectorSet(0, 1, 0, 0) * 20.0f; // Move lightsource out of the ground or other objects (torches!)
     // TODO: Move the actual lightsource up too!
 
@@ -447,7 +447,7 @@ void D3D11PointLight::RenderFullCubemap() {
         wc = nullptr;
     }
 
-    engine->RenderShadowCube( LightInfo->Vob->GetPositionWorldXM(), LightInfo->Vob->GetLightRange(), *activeTarget,
+    engine->RenderShadowCube( LightInfo->GetEffectivePositionWorldXM(), LightInfo->Vob->GetLightRange(), *activeTarget,
         nullptr, nullptr, false, LightInfo->IsIndoorVob, false, &VobCache, &SkeletalVobCache, wc, true, SHADOW_CASTER_ALL );
 }
 
@@ -496,7 +496,7 @@ void D3D11PointLight::RenderCubemapFace( const XMFLOAT4X4& view, const XMFLOAT4X
         return;
 
     D3D11GraphicsEngine* engine = reinterpret_cast<D3D11GraphicsEngine*>(Engine::GraphicsEngine); // TODO: Remove and use newer system!
-    auto lightPos = LightInfo->Vob->GetPositionWorldXM();
+    auto lightPos = LightInfo->GetEffectivePositionWorldXM();
     float range = LightInfo->Vob->GetLightRange();
     
     CameraReplacement cr;
@@ -523,7 +523,7 @@ void D3D11PointLight::RenderCubemapFace( const XMFLOAT4X4& view, const XMFLOAT4X
     // Draw cubemap face
     Microsoft::WRL::ComPtr<ID3D11RenderTargetView> debugRTV = engine->GetDummyCubeRT() != nullptr ? engine->GetDummyCubeRT()->GetRTVCubemapFace( faceIdx ) : nullptr;
     auto _ = engine->RecordGraphicsEvent( GE_NAME( "RenderFullCubemap->RenderCubemapFace" ) );
-    engine->RenderShadowCube( LightInfo->Vob->GetPositionWorldXM(), range, *m_DepthCubemap, m_DepthCubemap->GetDSVCubemapFace( faceIdx ).Get(), debugRTV.Get(), false );
+    engine->RenderShadowCube( LightInfo->GetEffectivePositionWorldXM(), range, *m_DepthCubemap, m_DepthCubemap->GetDSVCubemapFace( faceIdx ).Get(), debugRTV.Get(), false );
 
     //Engine::GAPI->GetRendererState().RendererSettings.DrawSkeletalMeshes = oldDrawSkel;
 

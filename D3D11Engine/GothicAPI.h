@@ -643,8 +643,8 @@ public:
     /** Builds our BspTreeVobMap */
     void BuildBspVobMapCache();
 
-    /** Returns whether this existing world light may allocate and update pointlight shadows. */
-    bool AllowsPointlightShadowSource( zCVobLight* light ) const;
+    /** Resolves pointlight-shadow eligibility and one unambiguous flame anchor. */
+    void ConfigurePointlightShadowSource( VobLightInfo* lightInfo ) const;
 
     /** Returns the new node from tha base node */
     BspInfo* GetNewBspNode( zCBspBase* base );
@@ -874,7 +874,6 @@ private:
     /** Cleans empty BSPNodes */
     void CleanBSPNodes();
 
-    bool HasNearbyFlameVisual( zCVobLight* light ) const;
 
     /** Helper function for going through the bsp-tree */
     void BuildBspVobMapCacheHelper( zCBspBase* base );

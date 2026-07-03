@@ -8,6 +8,22 @@
 #include "zCTexture.h"
 #include "D3D11_Helpers.h"
 
+XMVECTOR VobLightInfo::GetEffectivePositionWorldXM() const {
+    if ( !Vob )
+        return XMVectorZero();
+
+    XMVECTOR position = Vob->GetPositionWorldXM();
+    if ( HasFlameAnchor )
+        position += XMLoadFloat3( &FlameAnchorOffset );
+    return position;
+}
+
+float3 VobLightInfo::GetEffectivePositionWorld() const {
+    XMFLOAT3 position;
+    XMStoreFloat3( &position, GetEffectivePositionWorldXM() );
+    return float3( position );
+}
+
 
 /** Updates the vobs constantbuffer */
 void VobInfo::UpdateVobConstantBuffer(VS_ExConstantBuffer_PerInstance& cb) {

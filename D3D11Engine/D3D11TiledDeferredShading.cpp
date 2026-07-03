@@ -405,7 +405,7 @@ D3D11TiledDeferredShading::CullResult D3D11TiledDeferredShading::CullLights(
 
         float4 lightColor = float4( vob->GetLightColor() );
         float lightRange = vob->GetLightRange();
-        float3 posWorld = vob->GetPositionWorld();
+        float3 posWorld = light->GetEffectivePositionWorld();
 
         // Distance fade
         float dist;
