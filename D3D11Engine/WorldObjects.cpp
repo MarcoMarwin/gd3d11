@@ -4,6 +4,7 @@
 #include "Engine.h"
 #include "BaseGraphicsEngine.h"
 #include "zCVob.h"
+#include "zCVobLight.h"
 #include "zCMaterial.h"
 #include "zCTexture.h"
 #include "D3D11_Helpers.h"

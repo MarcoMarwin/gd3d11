@@ -16,6 +16,14 @@
 #define FFX_CPU
 #include "include/FidelityFX/gpu/ffx_core.h"
 
+// FidelityFX LPM still uses the legacy unprefixed CPU helper names.
+#define opAAddOneF3 ffxOpAAddOneF3
+#define opACpyF3 ffxOpACpyF3
+#define opAMulF3 ffxOpAMulF3
+#define opAMulOneF3 ffxOpAMulOneF3
+#define opARcpF3 ffxOpARcpF3
+#define packHalf2x16 ffxPackHalf2x16
+
 static LPMConstantsBuffer* ActiveLPMSetupTarget = nullptr;
 
 static void LpmSetupOut( uint32_t index, uint32_t* values ) {
@@ -27,6 +35,12 @@ static void LpmSetupOut( uint32_t index, uint32_t* values ) {
 }
 
 #include "include/FidelityFX/gpu/lpm/ffx_lpm.h"
+#undef packHalf2x16
+#undef opARcpF3
+#undef opAMulOneF3
+#undef opAMulF3
+#undef opACpyF3
+#undef opAAddOneF3
 #undef FFX_CPU
 
 namespace {
