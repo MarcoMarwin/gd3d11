@@ -5129,7 +5129,7 @@ void GothicAPI::ConfigureAllPointlightShadowSources() const {
     }
 
     struct ParentClaim {
-        size_t ParentIndex = INVALID_INDEX;
+        size_t ParentIndex = static_cast<size_t>(-1);
         float DistanceSq = FLT_MAX;
     };
     std::vector<ParentClaim> parentClaims( lights.size() );
