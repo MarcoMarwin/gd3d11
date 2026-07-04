@@ -13,6 +13,8 @@ SamplerState SS_samMirror : register( s1 );
 Texture2D	TX_Texture0 : register( t0 );
 Texture2D	TX_Texture1 : register( t1 );
 Texture2D	TX_Texture2 : register( t2 );
+Texture2D	TX_RainCloudBase : register( t3 );
+Texture2D	TX_RainCloudDetail : register( t4 );
 
 
 //--------------------------------------------------------------------------------------
@@ -67,10 +69,52 @@ float3 ApplyMoonTexture(float3 worldPosition)
     return moonTexture.rgb * moonMask;
 }
 
+float4 RenderRainCloudDeck(float3 worldPosition)
+{
+	float3 skyDirection = normalize(worldPosition - AC_SpherePosition);
+	float projectionScale = min(4.0f, rcp(max(skyDirection.y, 0.16f)));
+	float2 cloudPlane = skyDirection.xz * projectionScale;
+
+	float2 lowWind = float2(0.00016f, 0.00009f) * AC_Time;
+	float2 highWind = float2(-0.00007f, 0.00012f) * AC_Time;
+	float2 baseUV = float2(0.17f, 0.43f) + cloudPlane * 0.105f + lowWind;
+	float2 warpUV = float2(0.61f, 0.29f) + cloudPlane * 0.31f + highWind;
+	float2 warp = float2(
+		TX_RainCloudDetail.Sample(SS_Linear, warpUV).r,
+		TX_RainCloudDetail.Sample(SS_Linear, warpUV * 0.93f + float2(0.37f, 0.61f)).r) - 0.5f;
+	float2 warpedUV = baseUV + warp * 0.075f;
+
+	float lowLayer = TX_RainCloudBase.Sample(SS_Linear, warpedUV).r;
+	float2 rotatedPlane = float2(-cloudPlane.y, cloudPlane.x);
+	float highLayer = TX_RainCloudBase.Sample(
+		SS_Linear, float2(0.73f, 0.11f) + rotatedPlane * 0.071f + highWind).r;
+	float detail = TX_RainCloudDetail.Sample(
+		SS_Linear, warpedUV * 3.2f - lowWind * 1.7f + float2(0.19f, 0.47f)).r;
+	float density = saturate(lowLayer * 0.61f + highLayer * 0.39f + (detail - 0.5f) * 0.34f);
+
+	float lightPlanarLength = max(length(AC_LightPos.xz), 0.001f);
+	float2 lightPlanarDirection = AC_LightPos.xz / lightPlanarLength;
+	float lightProbe = TX_RainCloudBase.Sample(
+		SS_Linear, warpedUV + lightPlanarDirection * 0.018f).r;
+	float relief = saturate(0.46f + (density - lightProbe) * 2.1f + (detail - 0.5f) * 0.22f);
+
+	float dayWeight = saturate(AC_LightPos.y * 4.0f + 0.10f);
+	float3 dayCloud = lerp(float3(0.10f, 0.12f, 0.14f), float3(0.37f, 0.40f, 0.43f), relief);
+	float3 nightCloud = lerp(float3(0.008f, 0.013f, 0.027f), float3(0.055f, 0.072f, 0.115f), relief);
+	float3 cloudColor = lerp(nightCloud, dayCloud, dayWeight);
+	cloudColor += float3(0.16f, 0.22f, 0.34f) * AC_MoonVisibility * relief * 0.08f;
+
+	float opacity = saturate(0.82f + density * 0.22f);
+	return float4(cloudColor, opacity);
+}
 // Pixel Shader
 //--------------------------------------------------------------------------------------
 float4 PSMain( PS_INPUT Input ) : SV_TARGET
 {
+	float skyDomeY = normalize(Input.vWorldPosition - AC_SpherePosition).y;
+	if (skyDomeY < 0.0f)
+		return float4(0.0f, 0.0f, 0.0f, 1.0f);
+
 	float3 atmoColor = ApplyAtmosphericScatteringSky(Input.vWorldPosition) * 2.0f;
 	
 	float4 clouds = TX_Texture0.Sample(SS_Linear, 0.5f + Input.vWorldPosition.xz / 200000.0f + frac(AC_Time * 0.001f));
@@ -85,7 +129,15 @@ float4 PSMain( PS_INPUT Input ) : SV_TARGET
 	
 	atmoColor += ApplyMoonTexture(Input.vWorldPosition);
 
-	atmoColor = lerp(atmoColor, clouds.rgb, clouds.a * 0.4f);
+	float rainCloudWeight = smoothstep(0.02f, 0.55f, saturate(AC_RainFXWeight));
+	float clearCloudWeight = 1.0f - rainCloudWeight * 0.85f;
+	atmoColor = lerp(atmoColor, clouds.rgb, clouds.a * 0.4f * clearCloudWeight);
+
+	[branch] if (rainCloudWeight > 0.001f)
+	{
+		float4 rainClouds = RenderRainCloudDeck(Input.vWorldPosition);
+		atmoColor = lerp(atmoColor, rainClouds.rgb, rainClouds.a * rainCloudWeight);
+	}
 	
 	// Apply stars
 	atmoColor += night * 0.4f;

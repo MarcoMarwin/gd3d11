@@ -34,7 +34,8 @@ float GetToneMapExposure(Texture2D lumTex, SamplerState samplerState, float midd
 
 float HDRToneMapBlend()
 {
-    return saturate((HDR_ToneMapStrength - 1.0f) / 9.0f);
+    float legacyToneMapStrength = HDR_ToneMapStrength * 7.5f;
+    return saturate((legacyToneMapStrength - 1.0f) / 9.0f);
 }
 
 float3 LPMToneMap(float3 vColor, Texture2D lumTex, SamplerState samplerState)

@@ -18,7 +18,7 @@ extern bool FeatureLevel10Compatibility;
 
 namespace {
 	float GetRainSkyVisibility() {
-		const float rain = std::clamp( Engine::GAPI->GetRainFXWeight(), 0.0f, 1.0f );
+		const float rain = std::clamp( Engine::GAPI->GetSky()->GetAtmosphereCB().AC_RainFXWeight, 0.0f, 1.0f );
 		const float transition = std::clamp( (rain - 0.05f) / 0.60f, 0.0f, 1.0f );
 		const float smoothOcclusion = transition * transition * (3.0f - 2.0f * transition);
 		return 1.0f - smoothOcclusion;

@@ -361,15 +361,18 @@ float4 PSMain(PS_INPUT Input) : SV_TARGET
             sun) + specColored;
     }
 
-	float sssSunWeight = saturate((AC_LightPos.y + 0.08f) * 3.0f);
+	float sssSunWeight = saturate((AC_LightPos.y + 0.08f) * 3.0f) * GetRainSkyVisibility();
+	float sssMoonWeight = AC_MoonVisibility * 0.12f;
+	float sssLightWeight = max(sssSunWeight, sssMoonWeight);
+	float3 sssLightColor = AC_LightPos.y <= 0.0f ? float3(0.42f, 0.56f, 1.0f) : lightColor.rgb;
 	float vegetationMask = vegetationMaterial * saturate(diffuse.g * 1.25f - diffuse.r * 0.45f - diffuse.b * 0.25f);
-	if (AC_EnableSSS > 0.5f && sssSunWeight > 0.001f && vegetationMask > 0.001f) {
+	if (AC_EnableSSS > 0.5f && sssLightWeight > 0.001f && vegetationMask > 0.001f) {
 		float backlight = saturate(dot(normalize(SQ_LightDirectionVS), -V));
 		float rimBacklight = pow(backlight, 2.0f);
 		float sssShadow = lerp(0.55f, 1.0f, saturate(shadow));
 		float sssVertexGate = lerp(0.35f, 1.0f, saturate(vertLighting * 1.5f));
 		float sss = rimBacklight * AC_SSSIntensity * 2.8f * sssShadow * sssVertexGate;
-		litPixel += diffuse.rgb * lightColor.rgb * sss * sssSunWeight * vegetationMask;
+		litPixel += diffuse.rgb * sssLightColor * sss * sssLightWeight * vegetationMask;
 	}
 	
     float f = 1.0f - saturate(dot(normal, V));

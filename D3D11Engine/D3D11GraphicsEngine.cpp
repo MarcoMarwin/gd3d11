@@ -2504,7 +2504,7 @@ XRESULT  D3D11GraphicsEngine::DrawSkeletalVertexNormals( SkeletalVobInfo* vi,
 
     VS_ExConstantBuffer_PerInstanceSkeletal cb2;
     cb2.World = world;
-    color.w = (vi && vi->Vob && vi->Vob->IsIndoorVob()) ? 0.05f : 1.0f;
+    color.w = 1.0f;
     cb2.PI_ModelColor = color;
     cb2.PI_ModelFatness = fatness;
 
@@ -2581,7 +2581,7 @@ XRESULT D3D11GraphicsEngine::DrawSkeletalMesh( SkeletalVobInfo* vi,
 
     VS_ExConstantBuffer_PerInstanceSkeletal cb2;
     cb2.World = world;
-    color.w = (vi && vi->Vob && vi->Vob->IsIndoorVob()) ? 0.05f : 1.0f;
+    color.w = 1.0f;
     cb2.PI_ModelColor = color;
     cb2.PI_ModelFatness = fatness;
     // Set PrevWorld for motion vectors (use current world if no previous is available)
@@ -2718,7 +2718,7 @@ XRESULT D3D11GraphicsEngine::DrawSkeletalMesh_Layered( SkeletalVobInfo* vi,
     VS_ExConstantBuffer_PerInstanceSkeletal cb2;
     cb2.World = world;
     cb2.PrevWorld = world;
-    color.w = (vi && vi->Vob && vi->Vob->IsIndoorVob()) ? 0.05f : 1.0f;
+    color.w = 1.0f;
     cb2.PI_ModelColor = color;
     cb2.PI_ModelFatness = fatness;
     ActiveVS->GetBuffer("Matrices_PerInstances").Update( &cb2 ).Bind();
@@ -3177,7 +3177,7 @@ void D3D11GraphicsEngine::DrawSkeletalMeshVobs(
                     }
                 }
             }
-            modelColor.w = vi->Vob->IsIndoorVob() ? 0.05f : 1.0f;
+            modelColor.w = 1.0f;
 
             if ( updateState ) {
                 if ( vi->LastAniUpdateFrame != now ) {
@@ -3213,7 +3213,7 @@ void D3D11GraphicsEngine::DrawSkeletalMeshVobs(
                     VS_ExConstantBuffer_PerInstanceSkeletal cb2;
                     cb2.World = world;
                     auto maskedColor = color;
-                    maskedColor.w = vi->Vob->IsIndoorVob() ? 0.05f : 1.0f;
+                    maskedColor.w = 1.0f;
                     cb2.PI_ModelColor = maskedColor;
                     cb2.PI_ModelFatness = fatness;
                     // Set PrevWorld for motion vectors (use current world if no previous is available)
@@ -3373,7 +3373,7 @@ void D3D11GraphicsEngine::DrawSkeletalMeshVobs(
             auto vi = data.VobInfo;
             auto model = data.Model;
             auto modelColor = data.ModelColor;
-            modelColor.w = (vi && vi->Vob && vi->Vob->IsIndoorVob()) ? 0.05f : 1.0f;
+            modelColor.w = 1.0f;
             auto transforms = std::span( &BoneTransformCache[data.BoneIdx], data.NumBones );
             auto fatness = data.Fatness;
             auto& world = data.World;
@@ -4126,7 +4126,8 @@ XRESULT D3D11GraphicsEngine::OnStartWorldRendering() {
     bool compositionHeightFog = (rendererState.RendererSettings.DrawFog && isOutdoor);
     bool compositionContactShadows = rendererState.RendererSettings.EnableContactShadows && rendererState.RendererSettings.ContactShadowStrength > 0.0f;
     bool compositionSSGI = rendererState.RendererSettings.EnableScreenSpaceGI && rendererState.RendererSettings.ScreenSpaceGIStrength > 0.0f;
-    bool compositionNeedsDepth = compositionHeightFog || compositionContactShadows || compositionSSGI;
+    bool compositionNeedsGeometry = compositionContactShadows || compositionSSGI;
+    bool compositionNeedsDepth = compositionHeightFog || compositionNeedsGeometry;
     bool compositionActive = compositionGodRays || compositionNeedsDepth;
 
     const bool fsr3UpscalingActive = GetDevice()->GetFeatureLevel() >= D3D_FEATURE_LEVEL_11_0
@@ -4535,10 +4536,13 @@ XRESULT D3D11GraphicsEngine::OnStartWorldRendering() {
     if ( compositionActive ) {
         graph.AddPass( RG_PASS_NAME("PostFX Composition"), [&]( RGBuilder& builder, RenderPass& pass ) {
             builder.Read( backBufferHandle );
+            if ( compositionNeedsGeometry ) {
+                builder.Read( normalsResource );
+            }
             builder.Write( backBufferHandle );
 
-            pass.m_executeCallback = [this, backBufferHandle, compositionNeedsDepth,
-                                      &compositionGodRaysSRV](const RenderGraph& graph) {
+            pass.m_executeCallback = [this, backBufferHandle, normalsResource, compositionNeedsDepth, compositionNeedsGeometry,
+                                      compositionHeightFog, &compositionGodRaysSRV](const RenderGraph& graph) {
                 TracyD3D11ZoneCGX( "D3D11GraphicsEngine::PostFX Composition" );
 
                 auto backBuffer = graph.GetPhysicalTexture(backBufferHandle);
@@ -4548,12 +4552,16 @@ XRESULT D3D11GraphicsEngine::OnStartWorldRendering() {
 
                 // Gather SRVs for composition
                 ID3D11ShaderResourceView* depthSRV = compositionNeedsDepth ? GetDepthBuffer()->GetShaderResView().Get() : nullptr;
+                auto normalsTexture = compositionNeedsGeometry ? graph.GetPhysicalTexture(normalsResource) : nullptr;
+                ID3D11ShaderResourceView* normalsSRV = normalsTexture ? normalsTexture->GetShaderResView().Get() : nullptr;
 
                 PfxRenderer->RenderPostFXComposition(
                     backBuffer->GetRenderTargetView().Get(),
                     tempBuffer->GetShaderResView().Get(),
                     compositionGodRaysSRV,
-                    depthSRV );
+                    depthSRV,
+                    normalsSRV,
+                    compositionHeightFog );
 
                 GetContext()->PSSetSamplers( 0, 1, DefaultSamplerState.GetAddressOf() );
             };
@@ -8264,7 +8272,7 @@ XRESULT D3D11GraphicsEngine::DrawSky() {
     SetupVS_ExMeshDrawCall();
     SetupVS_ExConstantBuffer();
 
-    ID3D11ShaderResourceView* srvs[3]{};
+    ID3D11ShaderResourceView* srvs[5]{};
     // Apply sky texture
     D3D11Texture* cloudsTex = Engine::GAPI->GetSky()->GetCloudTexture();
     if ( cloudsTex ) {
@@ -8279,6 +8287,16 @@ XRESULT D3D11GraphicsEngine::DrawSky() {
     D3D11Texture* moonTex = sky->GetMoonTexture();
     if ( moonTex ) {
         srvs[2] = moonTex->GetShaderResourceView().Get();
+    }
+
+    D3D11Texture* rainCloudBaseTex = sky->GetRainCloudBaseTexture();
+    if ( rainCloudBaseTex ) {
+        srvs[3] = rainCloudBaseTex->GetShaderResourceView().Get();
+    }
+
+    D3D11Texture* rainCloudDetailTex = sky->GetRainCloudDetailTexture();
+    if ( rainCloudDetailTex ) {
+        srvs[4] = rainCloudDetailTex->GetShaderResourceView().Get();
     }
     GetContext()->PSSetShaderResources( 0, std::size( srvs ), srvs);
 

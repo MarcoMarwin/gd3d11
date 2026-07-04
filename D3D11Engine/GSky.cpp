@@ -124,6 +124,16 @@ XRESULT GSky::LoadSkyResources() {
     XLE( CloudTexture->Init( "system\\GD3D11\\Textures\\SkyDay.dds" ) );
 #endif
 
+    D3D11Texture* rainCloudBaseTex;
+    XLE( Engine::GraphicsEngine->CreateTexture( &rainCloudBaseTex ) );
+    RainCloudBaseTexture.reset( rainCloudBaseTex );
+    XLE( RainCloudBaseTexture->Init( "system\\GD3D11\\Textures\\RainCloudBase.dds" ) );
+
+    D3D11Texture* rainCloudDetailTex;
+    XLE( Engine::GraphicsEngine->CreateTexture( &rainCloudDetailTex ) );
+    RainCloudDetailTexture.reset( rainCloudDetailTex );
+    XLE( RainCloudDetailTexture->Init( "system\\GD3D11\\Textures\\RainCloudDetail.dds" ) );
+
     D3D11Texture* nightTex;
     XLE( Engine::GraphicsEngine->CreateTexture( &nightTex ) );
     NightTexture.reset( nightTex );
@@ -252,6 +262,62 @@ XRESULT GSky::RenderSky() {
     }
 
     XMFLOAT3 camPos = Engine::GAPI->GetCameraPosition();
+
+    // Gothic's rain controller can pulse while rain is stopping. Keep all atmospheric
+    // consumers on one rate-limited value so distant scenery cannot change color in one frame.
+    const float rawAtmosphericRain = std::clamp( Engine::GAPI->GetRainFXWeight(), 0.0f, 1.0f );
+    const DWORD atmosphericRainNow = GetTickCount();
+    if ( !AtmosphericRainInitialized ) {
+        AtmosphericRainWeight = rawAtmosphericRain;
+        AtmosphericRainInitialized = true;
+    } else {
+        const float deltaSeconds = std::min( (atmosphericRainNow - AtmosphericRainLastUpdateMs) * 0.001f, 0.1f );
+        constexpr float ATMOSPHERIC_RAIN_TRANSITION_RATE = 1.0f / 60.0f;
+
+        if ( !AtmosphericRainReleasing ) {
+            if ( rawAtmosphericRain + 0.02f < AtmosphericRainWeight ) {
+                if ( AtmosphericRainDropStartMs == 0 ) {
+                    AtmosphericRainDropStartMs = atmosphericRainNow;
+                } else if ( atmosphericRainNow - AtmosphericRainDropStartMs >= 250 ) {
+                    AtmosphericRainReleasing = true;
+                    AtmosphericRainDropStartMs = 0;
+                }
+            } else {
+                AtmosphericRainDropStartMs = 0;
+            }
+
+            // While rain is active or a possible drop is being debounced, only a
+            // stronger rain signal may move the atmospheric state.
+            if ( !AtmosphericRainReleasing && rawAtmosphericRain > AtmosphericRainWeight ) {
+                AtmosphericRainWeight += std::min(
+                    rawAtmosphericRain - AtmosphericRainWeight, ATMOSPHERIC_RAIN_TRANSITION_RATE * deltaSeconds );
+            }
+        }
+
+        if ( AtmosphericRainReleasing ) {
+            // Once rain shutdown is confirmed, the atmosphere may only move toward
+            // clear weather. Late controller pulses cannot darken it again.
+            if ( rawAtmosphericRain < AtmosphericRainWeight ) {
+                AtmosphericRainWeight -= std::min(
+                    AtmosphericRainWeight - rawAtmosphericRain, ATMOSPHERIC_RAIN_TRANSITION_RATE * deltaSeconds );
+            }
+            if ( AtmosphericRainWeight < 0.0001f ) {
+                AtmosphericRainWeight = 0.0f;
+            }
+
+            if ( AtmosphericRainWeight == 0.0f && rawAtmosphericRain <= 0.01f ) {
+                if ( AtmosphericRainSettledStartMs == 0 ) {
+                    AtmosphericRainSettledStartMs = atmosphericRainNow;
+                } else if ( atmosphericRainNow - AtmosphericRainSettledStartMs >= 1500 ) {
+                    AtmosphericRainReleasing = false;
+                    AtmosphericRainSettledStartMs = 0;
+                }
+            } else {
+                AtmosphericRainSettledStartMs = 0;
+            }
+        }
+    }
+    AtmosphericRainLastUpdateMs = atmosphericRainNow;
     XMFLOAT3 LightDir = {};
     XMFLOAT3 MoonDir = {};
 
@@ -287,7 +353,7 @@ XRESULT GSky::RenderSky() {
     AtmosphereCB.AC_LightPos = LightDir;
     AtmosphereCB.AC_MoonPos = MoonDir;
     const float moonFade = std::clamp( MoonDir.y / 0.12f, 0.0f, 1.0f );
-    const float rainLightFade = 1.0f - std::clamp( Engine::GAPI->GetRainFXWeight() * 2.0f, 0.0f, 1.0f );
+    const float rainLightFade = 1.0f - std::clamp( AtmosphericRainWeight * 2.0f, 0.0f, 1.0f );
     AtmosphereCB.AC_MoonVisibility = moonFade * moonFade * (3.0f - 2.0f * moonFade) * rainLightFade;
 
     XMVECTOR lightDirVec = XMVector3Normalize( XMLoadFloat3( &LightDir ) );
@@ -340,7 +406,7 @@ XRESULT GSky::RenderSky() {
     } else {
         AtmosphereCB.AC_SceneWettness = Engine::GAPI->GetSceneWetness();
     }
-    AtmosphereCB.AC_RainFXWeight = Engine::GAPI->GetRainFXWeight();
+    AtmosphereCB.AC_RainFXWeight = AtmosphericRainWeight;
     AtmosphereCB.AC_EnableSSR = Engine::GAPI->GetRendererState().RendererSettings.EnableSSR ? 1.0f : 0.0f;
     AtmosphereCB.AC_EnableSSS = Engine::GAPI->GetRendererState().RendererSettings.EnableSSS ? 1.0f : 0.0f;
     AtmosphereCB.AC_SSRStrength = Engine::GAPI->GetRendererState().RendererSettings.SSRStrength * 0.72f;
@@ -433,7 +499,7 @@ XMFLOAT3 GSky::GetMainLightDirection() const {
 float GSky::GetMainLightVisibility() const {
     const XMFLOAT3 direction = GetMainLightDirection();
     const float fade = std::clamp( (direction.y - 0.015f) / 0.12f, 0.0f, 1.0f );
-    const float rainLightFade = 1.0f - std::clamp( Engine::GAPI->GetRainFXWeight() * 2.0f, 0.0f, 1.0f );
+    const float rainLightFade = 1.0f - std::clamp( AtmosphericRainWeight * 2.0f, 0.0f, 1.0f );
     return fade * fade * (3.0f - 2.0f * fade) * rainLightFade;
 }
 

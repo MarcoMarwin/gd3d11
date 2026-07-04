@@ -109,6 +109,11 @@ struct HeightfogConstantBuffer {
     float2 HF_Pad3;
 };
 
+struct CompositionControlConstantBuffer {
+    float CC_HeightFogEnabled;
+    float3 CC_Pad;
+};
+
 struct LumAdaptConstantBuffer {
     float LC_DeltaTime;
     float3 LC_Pad;

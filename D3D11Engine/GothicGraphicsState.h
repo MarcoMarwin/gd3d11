@@ -622,7 +622,7 @@ struct GothicRendererSettings {
 
         HDRLumWhite = 11.2f;
         HDRMiddleGray = 0.8f;
-        HDRToneMapStrength = 10.0f;
+        HDRToneMapStrength = 1.0f; // UI-normalized: 1.0 equals the former slider value 7.5.
         BloomThreshold = 0.9f;
 
         WireframeVobs = false;

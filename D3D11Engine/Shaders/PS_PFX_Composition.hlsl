@@ -7,6 +7,9 @@
 #if COMPOSE_HEIGHTFOG || COMPOSE_CONTACT_SHADOWS || COMPOSE_SSGI
 #include <AtmosphericScattering.h>
 #endif
+#if COMPOSE_CONTACT_SHADOWS || COMPOSE_SSGI
+#include "DS_Defines.h"
+#endif
 #if COMPOSE_HEIGHTFOG
 #include "DepthReconstruction.h"
 #endif
@@ -33,6 +36,12 @@ cbuffer PFXBuffer : register( b0 )
     float2 HF_ProjAB;
     float2 HF_Pad3;
 };
+
+cbuffer CompositionControl : register( b2 )
+{
+    float CC_HeightFogEnabled;
+    float3 CC_Pad;
+};
 #endif
 
 //--------------------------------------------------------------------------------------
@@ -48,6 +57,10 @@ Texture2D TX_GodRays : register( t1 );
 
 #if COMPOSE_HEIGHTFOG || COMPOSE_CONTACT_SHADOWS || COMPOSE_SSGI
 Texture2D TX_Depth : register( t2 );
+#endif
+
+#if COMPOSE_CONTACT_SHADOWS || COMPOSE_SSGI
+Texture2D TX_Normals : register( t3 );
 #endif
 
 //--------------------------------------------------------------------------------------
@@ -89,6 +102,7 @@ float FogDither(float2 pixelPosition)
 float4 ComputeHeightFog( float2 texcoord, float2 pixelPosition )
 {
     float expDepth = TX_Depth.Sample( SS_Linear, texcoord ).r;
+    float skyPixel = 1.0f - step(0.00001f, expDepth);
     float3 position = VSPositionFromDepth( expDepth, texcoord );
     position = mul( float4( position, 1 ), HF_InvView ).xyz;
     float3 posOriginal = position;
@@ -117,8 +131,9 @@ float4 ComputeHeightFog( float2 texcoord, float2 pixelPosition )
 	float dayDarknessFactor = max(1.0f, 2.0f - max(0.0f, AC_LightPos.y));
 	float darknessFactor = lerp(dayDarknessFactor, 2.5f, nightTimeBlend);
 	float maxFogOpacity = lerp(1.0f, 0.85f, nightTimeBlend);
+	float skyRainFogAttenuation = lerp(1.0f, 0.42f, skyPixel * activeWeatherFog);
 
-	return float4(saturate(color / darknessFactor), ditheredFog * maxFogOpacity);
+	return float4(saturate(color / darknessFactor), ditheredFog * maxFogOpacity * skyRainFogAttenuation);
 }
 #endif
 
@@ -149,6 +164,11 @@ float2 GetScreenPixelSize(float2 uv)
     return max(abs(ddx(uv)) + abs(ddy(uv)), float2(1.0f / 3840.0f, 1.0f / 2160.0f));
 }
 
+float3 GetViewNormal(float2 uv)
+{
+    return DecodeNormalGBuffer(TX_Normals.SampleLevel(SS_Linear, saturate(uv), 0).xy);
+}
+
 float DepthSimilarity(float centerDepth, float sampleDepth, float nearScale, float farScale)
 {
     float depthScale = max(centerDepth, 0.00008f);
@@ -164,13 +184,13 @@ float ComputeContactShadow(float2 uv, float centerDepth)
 {
     float geom = IsGeometryPixel(centerDepth);
     float2 px = GetScreenPixelSize(uv);
+    float3 centerNormal = GetViewNormal(uv);
 
     float2 projectedLight = AC_LightScreenPos.xy - uv;
     float projectedLen = length(projectedLight);
     float2 fallbackDir = normalize(float2(AC_LightPos.x, -AC_LightPos.z) + float2(0.001f, -0.001f));
     float2 lightDir = projectedLen > 0.03f ? projectedLight / projectedLen : fallbackDir;
 
-    // Suppress silhouette outlines: contact shadows should live on locally coherent surfaces.
     float localSurface = 0.0f;
     localSurface += DepthSimilarity(centerDepth, GetDepthRaw(uv + float2( px.x, 0.0f)), 0.04f, 0.22f);
     localSurface += DepthSimilarity(centerDepth, GetDepthRaw(uv + float2(-px.x, 0.0f)), 0.04f, 0.22f);
@@ -181,21 +201,23 @@ float ComputeContactShadow(float2 uv, float centerDepth)
     float shadow = 0.0f;
     float weightSum = 0.0001f;
     [unroll]
-    for (int i = 1; i <= 7; ++i)
+    for (int i = 1; i <= 10; ++i)
     {
         float fi = (float)i;
-        float2 suv = uv + lightDir * px * (fi * 2.25f + fi * fi * 0.35f);
+        float sampleRadius = fi * 1.55f + fi * fi * 0.22f;
+        float2 suv = uv + lightDir * px * sampleRadius;
         float sd = GetDepthRaw(suv);
+        float3 sampleNormal = GetViewNormal(suv);
 
-        // Reverse-Z: a larger sampled depth is closer to the camera and can occlude this pixel.
         float delta = sd - centerDepth;
         float depthScale = max(centerDepth, 0.00008f);
-        float minDelta = max(depthScale * 0.025f, 0.000018f);
-        float maxDelta = max(depthScale * 0.28f, 0.00032f);
-        float occluder = smoothstep(minDelta, maxDelta, delta) * (1.0f - smoothstep(maxDelta, maxDelta * 3.5f, delta));
+        float minDelta = max(depthScale * 0.014f, 0.000012f);
+        float maxDelta = max(depthScale * 0.19f, 0.00024f);
+        float occluder = smoothstep(minDelta, maxDelta, delta) * (1.0f - smoothstep(maxDelta, maxDelta * 4.0f, delta));
         occluder *= IsGeometryPixel(sd);
+        occluder *= saturate(dot(centerNormal, sampleNormal) * 1.35f);
 
-        float weight = 1.0f - fi * 0.09f;
+        float weight = saturate(1.0f - fi * 0.075f);
         shadow += occluder * weight;
         weightSum += weight;
     }
@@ -203,7 +225,7 @@ float ComputeContactShadow(float2 uv, float centerDepth)
     shadow = saturate(shadow / weightSum) * localSurface;
     float lightVisibility = saturate(AC_LightScreenPos.z + 0.65f);
     float strength = saturate(AC_ContactShadowStrength);
-    return 1.0f - shadow * geom * lightVisibility * strength * 0.62f;
+    return 1.0f - shadow * geom * lightVisibility * strength * 0.70f;
 }
 #endif
 
@@ -212,35 +234,44 @@ float3 ComputeScreenSpaceGILight(float2 uv, float centerDepth, float3 baseColor)
 {
     float geom = IsGeometryPixel(centerDepth);
     float2 px = GetScreenPixelSize(uv);
+    float3 centerNormal = GetViewNormal(uv);
     float3 bounce = 0.0f;
     float weightSum = 0.0001f;
-    const float2 dirs[8] = {
+    const float2 dirs[12] = {
         float2( 1.0f,  0.0f), float2(-1.0f,  0.0f),
         float2( 0.0f,  1.0f), float2( 0.0f, -1.0f),
         float2( 0.707f,  0.707f), float2(-0.707f, -0.707f),
-        float2( 0.707f, -0.707f), float2(-0.707f,  0.707f)
+        float2( 0.707f, -0.707f), float2(-0.707f,  0.707f),
+        float2( 0.924f,  0.383f), float2(-0.924f, -0.383f),
+        float2( 0.383f, -0.924f), float2(-0.383f,  0.924f)
     };
 
     [unroll]
-    for (int i = 0; i < 8; ++i)
+    for (int i = 0; i < 12; ++i)
     {
-        float2 suvNear = saturate(uv + dirs[i] * px * 6.0f);
-        float2 suvFar = saturate(uv + dirs[i] * px * 14.0f);
+        float radiusA = (i < 8) ? 5.0f : 10.0f;
+        float radiusB = radiusA * 2.6f;
+        float2 suvNear = saturate(uv + dirs[i] * px * radiusA);
+        float2 suvFar = saturate(uv + dirs[i] * px * radiusB);
         float sd0 = GetDepthRaw(suvNear);
         float sd1 = GetDepthRaw(suvFar);
-        float w0 = DepthSimilarity(centerDepth, sd0, 0.10f, 0.75f);
-        float w1 = DepthSimilarity(centerDepth, sd1, 0.18f, 1.15f) * 0.55f;
-        bounce += TX_Backbuffer.SampleLevel(SS_Linear, suvNear, 0).rgb * w0;
-        bounce += TX_Backbuffer.SampleLevel(SS_Linear, suvFar, 0).rgb * w1;
+        float3 n0 = GetViewNormal(suvNear);
+        float3 n1 = GetViewNormal(suvFar);
+        float facing0 = saturate(0.35f + dot(centerNormal, n0) * 0.65f);
+        float facing1 = saturate(0.35f + dot(centerNormal, n1) * 0.65f);
+        float w0 = DepthSimilarity(centerDepth, sd0, 0.08f, 0.55f) * facing0;
+        float w1 = DepthSimilarity(centerDepth, sd1, 0.16f, 1.05f) * facing1 * 0.55f;
+        float3 c0 = TX_Backbuffer.SampleLevel(SS_Linear, suvNear, 0).rgb;
+        float3 c1 = TX_Backbuffer.SampleLevel(SS_Linear, suvFar, 0).rgb;
+        bounce += c0 * w0 + c1 * w1;
         weightSum += w0 + w1;
     }
 
     bounce /= weightSum;
-
-    // This is intentionally a conservative screen-space indirect light/bleed, not fake bloom-only.
-    float3 chromaBleed = max(bounce - baseColor * 0.18f, 0.0f);
-    float3 softLift = bounce * saturate(1.0f - dot(baseColor, float3(0.2126f, 0.7152f, 0.0722f))) * 0.10f;
-    return (chromaBleed * 0.72f + softLift) * saturate(AC_ScreenSpaceGIStrength) * geom * 0.72f;
+    float baseLuma = dot(baseColor, float3(0.2126f, 0.7152f, 0.0722f));
+    float3 diffuseBounce = max(bounce - baseColor * 0.08f, 0.0f);
+    float3 softIrradiance = bounce * saturate(1.0f - baseLuma) * 0.16f;
+    return (diffuseBounce * 0.48f + softIrradiance) * saturate(AC_ScreenSpaceGIStrength) * geom;
 }
 #endif
 
@@ -266,11 +297,14 @@ float4 PSMain( PS_INPUT Input ) : SV_TARGET
 #endif
 
 #if COMPOSE_HEIGHTFOG
-    float4 fog = ComputeHeightFog( Input.vTexcoord, Input.vPosition.xy );
-    color.rgb = lerp( color.rgb, fog.rgb, fog.a );
-    float nightTimeBlend = smoothstep(0.0f, 1.0f, saturate(-AC_LightPos.y * 4.0f));
-    float ditherStrength = lerp(1.0f, 2.5f, nightTimeBlend) / 255.0f;
-    color.rgb = saturate(color.rgb + FogDither(Input.vPosition.xy) * fog.a * ditherStrength);
+    [branch] if ( CC_HeightFogEnabled > 0.5f )
+    {
+        float4 fog = ComputeHeightFog( Input.vTexcoord, Input.vPosition.xy );
+        color.rgb = lerp( color.rgb, fog.rgb, fog.a );
+        float nightTimeBlend = smoothstep(0.0f, 1.0f, saturate(-AC_LightPos.y * 4.0f));
+        float ditherStrength = lerp(1.0f, 2.5f, nightTimeBlend) / 255.0f;
+        color.rgb = saturate(color.rgb + FogDither(Input.vPosition.xy) * fog.a * ditherStrength);
+    }
 #endif
 
 #if COMPOSE_GODRAYS

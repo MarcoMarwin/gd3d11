@@ -647,7 +647,7 @@ public:
     void ConfigurePointlightShadowSource( VobLightInfo* lightInfo ) const;
 
     /** Resolves world flame and parent-vob pointlight associations globally. */
-    void ConfigureAllPointlightShadowSources() const;
+    void ConfigureAllPointlightShadowSources();
 
     /** Returns the new node from tha base node */
     BspInfo* GetNewBspNode( zCBspBase* base );
@@ -965,6 +965,7 @@ private:
 public:
     // temporarily, to allow CollectVisibleVobsHelper to be templated for inlining optimizations
     gtl::flat_hash_map<zCVobLight*, VobLightInfo*> VobLightMap;
+    gtl::flat_hash_set<VobLightInfo*> TransitionSafeLights;
     // Exposed for CollectLeafVobs/CollectVisibleVobsWithLeafCache (file-static helpers)
     BspLeafLinearCache LeafLinearCache;
 private:

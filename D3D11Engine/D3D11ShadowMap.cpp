@@ -35,7 +35,7 @@ struct DirectionalLightState {
 static DirectionalLightState GetDirectionalLightState() {
     GSky* sky = Engine::GAPI->GetSky();
     const auto& settings = Engine::GAPI->GetRendererState().RendererSettings;
-    const float rain = std::clamp( Engine::GAPI->GetRainFXWeight(), 0.0f, 1.0f );
+    const float rain = std::clamp( sky->GetAtmosphereCB().AC_RainFXWeight, 0.0f, 1.0f );
 
     DirectionalLightState state = {};
     state.Direction = sky->GetMainLightDirection();

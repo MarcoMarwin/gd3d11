@@ -1072,6 +1072,7 @@ void GothicAPI::ResetVobs() {
     Engine::GAPI->LeaveResourceCriticalSection();
     // Delete light vobs, those depend on world sections and load stuff in the background.
     // by deleting them first we block the thread until the destructor finished
+    TransitionSafeLights.clear();
     for ( auto const& it : VobLightMap ) {
         Engine::GraphicsEngine->OnVobRemovedFromWorld( it.first );
         delete it.second;
@@ -2268,7 +2269,12 @@ void GothicAPI::OnRemovedVob( zCVob* vob, zCWorld* world ) {
             vlit.second->LightShadowBuffers->OnVobRemovedFromWorld( svi );
     }
 
-    VobLightInfo* li = VobLightMap[static_cast<zCVobLight*>(vob)];
+    VobLightInfo* li = nullptr;
+    const auto lightIt = VobLightMap.find( static_cast<zCVobLight*>(vob) );
+    if ( lightIt != VobLightMap.end() ) {
+        li = lightIt->second;
+        TransitionSafeLights.erase( li );
+    }
 
     // Erase it from the particle-effect list
     auto pit = std::find( ParticleEffectVobs.begin(), ParticleEffectVobs.end(), vob );
@@ -4825,7 +4831,8 @@ void GothicAPI::ConfigurePointlightShadowSource( VobLightInfo* lightInfo ) const
         lightInfo->AllowsPointlightShadows = true;
 }
 
-void GothicAPI::ConfigureAllPointlightShadowSources() const {
+void GothicAPI::ConfigureAllPointlightShadowSources() {
+    TransitionSafeLights.clear();
     constexpr float LINK_RADIUS = 150.0f;
     constexpr float LINK_RADIUS_SQ = LINK_RADIUS * LINK_RADIUS;
     const size_t INVALID_INDEX = static_cast<size_t>(-1);
@@ -4880,7 +4887,16 @@ void GothicAPI::ConfigureAllPointlightShadowSources() const {
     for ( const auto& lightEntry : VobLightMap ) {
         VobLightInfo* info = lightEntry.second;
         ConfigurePointlightShadowSource( info );
-        if ( !info || !info->Vob || info->IsVisualFXLight )
+        if ( !info || !info->Vob )
+            continue;
+
+        zCVob* transitionParent = getPersistentParent( info->Vob );
+        const bool parentActorLight = transitionParent && transitionParent->As<oCNPC>() != nullptr;
+        info->IgnoreIndoorOutdoorLimit = info->IsDynamicVobLight || info->IsVisualFXLight || parentActorLight;
+        if ( info->IsDynamicVobLight || info->IsVisualFXLight ) {
+            TransitionSafeLights.insert( info );
+        }
+        if ( info->IsVisualFXLight )
             continue;
 
         info->AllowsPointlightShadows = false;
@@ -5645,7 +5661,8 @@ XRESULT GothicAPI::SaveMenuSettings( const std::string& file ) {
     WritePrivateProfileStringA( "General", "EnableFog", std::to_string( s.DrawFog ? TRUE : FALSE ).c_str(), ini.c_str() );
     WritePrivateProfileStringA( "General", "FogRange", float_to_string( s.FogRange , 2).c_str(), ini.c_str() );
     WritePrivateProfileStringA( "General", "EnableHDR", std::to_string( s.EnableHDR ? TRUE : FALSE ).c_str(), ini.c_str() );
-    WritePrivateProfileStringA( "General", "HDRToneMapStrength", float_to_string( s.HDRToneMapStrength, 0 ).c_str(), ini.c_str() );
+    WritePrivateProfileStringA( "General", "HDRToneMapStrength", float_to_string( s.HDRToneMapStrength, 2 ).c_str(), ini.c_str() );
+    WritePrivateProfileStringA( "General", "HDRToneMapStrengthNormalized", "1", ini.c_str() );
     WritePrivateProfileStringA( "General", "EnableDebugLog", std::to_string( s.EnableDebugLog ? TRUE : FALSE ).c_str(), ini.c_str() );
     WritePrivateProfileStringA( "General", "EnableAutoupdates", std::to_string( s.EnableAutoupdates ? TRUE : FALSE ).c_str(), ini.c_str() );
     WritePrivateProfileStringA( "General", "EnableGodRays", std::to_string( s.EnableGodRays ? TRUE : FALSE ).c_str(), ini.c_str() );
@@ -5774,16 +5791,22 @@ XRESULT GothicAPI::LoadMenuSettings( const std::string& file ) {
         s.FogRange = GetPrivateProfileFloatA( "General", "FogRange", ds.FogRange, ini.c_str() );
         s.AtmosphericScattering = GetPrivateProfileBoolA( "General", "AtmosphericScattering", ds.AtmosphericScattering, ini );
         s.EnableHDR = GetPrivateProfileBoolA( "General", "EnableHDR", ds.EnableHDR, ini );
-        s.HDRToneMapStrength = std::clamp( GetPrivateProfileFloatA( "General", "HDRToneMapStrength", ds.HDRToneMapStrength, ini ), 1.0f, 10.0f );
+        const bool normalizedHDRToneMapStrength = GetPrivateProfileBoolA( "General", "HDRToneMapStrengthNormalized", false, ini );
+        const float defaultStoredHDRToneMapStrength = normalizedHDRToneMapStrength ? ds.HDRToneMapStrength : 7.5f;
+        float storedHDRToneMapStrength = GetPrivateProfileFloatA( "General", "HDRToneMapStrength", defaultStoredHDRToneMapStrength, ini );
+        if ( !normalizedHDRToneMapStrength ) {
+            storedHDRToneMapStrength /= 7.5f;
+        }
+        s.HDRToneMapStrength = std::clamp( storedHDRToneMapStrength, 0.0f, 2.0f );
         s.EnableDebugLog = GetPrivateProfileBoolA( "General", "EnableDebugLog", ds.EnableDebugLog, ini );
         s.EnableAutoupdates = GetPrivateProfileBoolA( "General", "EnableAutoupdates", ds.EnableAutoupdates, ini );
         s.EnableGodRays = GetPrivateProfileBoolA( "General", "EnableGodRays", ds.EnableGodRays, ini );
-        s.GodRayStrength = std::clamp( GetPrivateProfileFloatA( "General", "GodRayStrength", ds.GodRayStrength, ini ), 0.01f, 2.0f );
+        s.GodRayStrength = std::clamp( GetPrivateProfileFloatA( "General", "GodRayStrength", ds.GodRayStrength, ini ), 0.0f, 2.0f );
         s.EnableDoF = GetPrivateProfileBoolA( "General", "EnableDoF", ds.EnableDoF, ini );
         s.DoFGaussBlur = GetPrivateProfileBoolA( "General", "DoFGaussBlur", ds.DoFGaussBlur, ini );
         s.DoFFocusDistance = std::clamp( GetPrivateProfileFloatA( "General", "DoFFocusDistance", ds.DoFFocusDistance, ini ), 0.0f, 30000.0f );
         s.DoFFocusRange = GetPrivateProfileFloatA( "General", "DoFFocusRange", ds.DoFFocusRange, ini );
-        s.DoFBokehRadius = std::clamp( GetPrivateProfileFloatA( "General", "DoFBokehRadius", ds.DoFBokehRadius, ini ), 0.035f, 7.0f );
+        s.DoFBokehRadius = std::clamp( GetPrivateProfileFloatA( "General", "DoFBokehRadius", ds.DoFBokehRadius, ini ), 0.0f, 7.0f );
         s.DoFMaxBlur = GetPrivateProfileFloatA( "General", "DoFMaxBlur", ds.DoFMaxBlur, ini );
         s.DoFNearBlurDistance = std::clamp( GetPrivateProfileFloatA( "General", "DoFNearBlurDistance", ds.DoFNearBlurDistance, ini ), 0.0f, 1000.0f );
         s.DoFNearBlurStrength = std::clamp( GetPrivateProfileFloatA( "General", "DoFNearBlurStrength", ds.DoFNearBlurStrength, ini ), 0.0f, 2.0f );
@@ -5799,16 +5822,16 @@ XRESULT GothicAPI::LoadMenuSettings( const std::string& file ) {
         s.SunLightStrength = GetPrivateProfileFloatA( "General", "SunLightStrength", ds.SunLightStrength, ini );
         s.DrawG1ForestPortals = GetPrivateProfileBoolA( "General", "DrawG1ForestPortals", ds.DrawG1ForestPortals, ini );
         s.DrawRainThroughTransformFeedback = GetPrivateProfileBoolA( "General", "DrawRainThroughTransformFeedback", ds.DrawRainThroughTransformFeedback, ini );
-        s.SSRStrength = std::clamp( GetPrivateProfileFloatA( "General", "SSRStrength", ds.SSRStrength, ini ), 0.01f, 2.0f );
+        s.SSRStrength = std::clamp( GetPrivateProfileFloatA( "General", "SSRStrength", ds.SSRStrength, ini ), 0.0f, 2.0f );
         s.WaterCubemapStrength = ds.WaterCubemapStrength;
         s.EnableContactShadows = GetPrivateProfileBoolA( "General", "EnableContactShadows", ds.EnableContactShadows, ini );
-        s.ContactShadowStrength = std::clamp( GetPrivateProfileFloatA( "General", "ContactShadowStrength", ds.ContactShadowStrength, ini ), 0.01f, 2.0f );
+        s.ContactShadowStrength = std::clamp( GetPrivateProfileFloatA( "General", "ContactShadowStrength", ds.ContactShadowStrength, ini ), 0.0f, 2.0f );
         s.EnableScreenSpaceGI = GetPrivateProfileBoolA( "General", "EnableScreenSpaceGI", ds.EnableScreenSpaceGI, ini );
-        s.ScreenSpaceGIStrength = std::clamp( GetPrivateProfileFloatA( "General", "ScreenSpaceGIStrength", ds.ScreenSpaceGIStrength, ini ), 0.01f, 2.0f );
+        s.ScreenSpaceGIStrength = std::clamp( GetPrivateProfileFloatA( "General", "ScreenSpaceGIStrength", ds.ScreenSpaceGIStrength, ini ), 0.0f, 2.0f );
         s.EnableParticleLighting = GetPrivateProfileBoolA( "General", "EnableParticleLighting", ds.EnableParticleLighting, ini );
-        s.ParticleLightingStrength = std::clamp( GetPrivateProfileFloatA( "General", "ParticleLightingStrength", ds.ParticleLightingStrength, ini ), 0.01f, 2.0f );
+        s.ParticleLightingStrength = std::clamp( GetPrivateProfileFloatA( "General", "ParticleLightingStrength", ds.ParticleLightingStrength, ini ), 0.0f, 2.0f );
         s.EnableSSS = GetPrivateProfileBoolA( "General", "EnableSSS", ds.EnableSSS, ini );
-        s.SSSIntensity = std::clamp( GetPrivateProfileFloatA( "General", "SSSIntensity", ds.SSSIntensity, ini ), 0.0075f, 1.5f );
+        s.SSSIntensity = std::clamp( GetPrivateProfileFloatA( "General", "SSSIntensity", ds.SSSIntensity, ini ), 0.0f, 1.5f );
 
         /*
         * Draw-distance is Loaded on a per World basis using LoadRendererWorldSettings
@@ -5840,7 +5863,7 @@ XRESULT GothicAPI::LoadMenuSettings( const std::string& file ) {
         else if ( s.ShadowMapSize <= 2048 ) s.ShadowMapSize = 2048;
         else if ( s.ShadowMapSize <= 4096 ) s.ShadowMapSize = 4096;
         else s.ShadowMapSize = 8192;
-        s.PointlightShadowMapSize = s.ShadowMapSize >= 8192 ? 512 : (s.ShadowMapSize >= 4096 ? 256 : 128);
+        s.PointlightShadowMapSize = s.ShadowMapSize >= 4096 ? 256 : 128;
         s.EnablePointlightShadows = GothicRendererSettings::EPointLightShadowMode::PLS_UPDATE_DYNAMIC;
         s.WorldShadowRangeScale = GetPrivateProfileFloatA( "Shadows", "WorldShadowRangeScale", ds.WorldShadowRangeScale, ini );
         s.NumShadowCascades = GetPrivateProfileIntA( "Shadows", "NumShadowCascades", ds.NumShadowCascades, ini.c_str() );
@@ -5850,7 +5873,7 @@ XRESULT GothicAPI::LoadMenuSettings( const std::string& file ) {
         s.SmoothShadowCameraUpdate = GetPrivateProfileBoolA( "Shadows", "SmoothCameraUpdate", ds.SmoothShadowCameraUpdate, ini );
         s.SmoothShadowFrequency = GetPrivateProfileFloatA( "Shadows", "SmoothShadowFrequency", ds.SmoothShadowFrequency, ini );
         s.ShadowStrength = GetPrivateProfileFloatA( "Shadows", "ShadowStrength", ds.ShadowStrength, ini );
-        s.ShadowSoftness = std::clamp( GetPrivateProfileFloatA( "Shadows", "ShadowSoftness", ds.ShadowSoftness, ini ), 0.01f, 2.0f );
+        s.ShadowSoftness = std::clamp( GetPrivateProfileFloatA( "Shadows", "ShadowSoftness", ds.ShadowSoftness, ini ), 0.0f, 2.0f );
         s.ShadowAOStrength = GetPrivateProfileFloatA( "Shadows", "ShadowAOStrength", ds.ShadowAOStrength, ini );
         s.WorldAOStrength = GetPrivateProfileFloatA( "Shadows", "WorldAOStrength", ds.WorldAOStrength, ini );
 
@@ -5884,7 +5907,7 @@ XRESULT GothicAPI::LoadMenuSettings( const std::string& file ) {
         // ....
 
         s.WindQuality = GetPrivateProfileIntA( "Display", "WindQuality", 0, ini.c_str() );
-        s.GlobalWindStrength = std::clamp( GetPrivateProfileFloatA( "Display", "WindStrength", ds.GlobalWindStrength, ini ), 0.01f, 2.0f );
+        s.GlobalWindStrength = std::clamp( GetPrivateProfileFloatA( "Display", "WindStrength", ds.GlobalWindStrength, ini ), 0.0f, 2.0f );
         s.EnableWaterAnimation = GetPrivateProfileBoolA( "Display", "WaterWaveAnimation", ds.EnableWaterAnimation, ini );
         s.HeroAffectsObjects = GetPrivateProfileBoolA( "Display", "HeroAffectsObjects", ds.HeroAffectsObjects, ini );
         s.HeroAffectsObjectsStrength = 1.0f; // Fixed effect strength; F11 exposes this feature as a simple toggle.
@@ -5908,7 +5931,17 @@ XRESULT GothicAPI::LoadMenuSettings( const std::string& file ) {
         s.AoMode = storedAoMode == static_cast<int>(AOMode::AO_NONE)
             ? AOMode::AO_NONE
             : AOMode::AO_XEGTAO;
-        s.AOStrength = std::clamp( GetPrivateProfileFloatA( "AO", "Strength", ds.AOStrength, ini ), 0.01f, 2.0f );
+        s.AOStrength = std::clamp( GetPrivateProfileFloatA( "AO", "Strength", ds.AOStrength, ini ), 0.0f, 2.0f );
+
+        if ( !s.EnableHDR ) s.HDRToneMapStrength = 0.0f;
+        if ( !s.EnableGodRays ) s.GodRayStrength = 0.0f;
+        if ( !s.EnableDoF ) s.DoFBokehRadius = 0.0f;
+        if ( !s.EnableSSR || !s.EnableWaterAnimation ) s.SSRStrength = 0.0f;
+        if ( !s.EnableContactShadows ) s.ContactShadowStrength = 0.0f;
+        if ( !s.EnableScreenSpaceGI ) s.ScreenSpaceGIStrength = 0.0f;
+        if ( !s.EnableSSS ) s.SSSIntensity = 0.0f;
+        if ( s.WindQuality == GothicRendererSettings::EWindQuality::WIND_QUALITY_NONE ) s.GlobalWindStrength = 0.0f;
+        if ( s.AoMode == AOMode::AO_NONE ) s.AOStrength = 0.0f;
         const int xegtaoQuality = static_cast<int>(GetPrivateProfileIntA( "XeGTAO", "Quality", ds.XegtaoSettings.QualityLevel, ini.c_str() ));
         const int xegtaoDenoise = static_cast<int>(GetPrivateProfileIntA( "XeGTAO", "DenoisePasses", ds.XegtaoSettings.DenoisePasses, ini.c_str() ));
         s.XegtaoSettings.QualityLevel = std::clamp( xegtaoQuality, 0, 3 );
@@ -6637,6 +6670,7 @@ static void CollectLeafVobs(
                     vi->IgnoreIndoorOutdoorLimit = true;
                     vi->UpdateShadows = !vi->IsVisualFXLight && vi->AllowsPointlightShadows;
                     vit = VobLightMap.emplace( vob, vi ).first;
+                    Engine::GAPI->TransitionSafeLights.insert( vi );
 
                     // Create shadow-buffers for these lights since it was dynamically added to the world
                     if ( !vi->IsVisualFXLight && vi->AllowsPointlightShadows && rendererSettings.EnablePointlightShadows >= GothicRendererSettings::PLS_STATIC_ONLY ) {
@@ -6663,6 +6697,7 @@ static void CollectLeafVobs(
                     vi->UpdateShadows = true;
                 }
                 vi->IgnoreIndoorOutdoorLimit = vi->IsDynamicVobLight || vi->IsVisualFXLight || parentActorLight;
+
                 vi->IsIndoorVob = vob->IsIndoorVob();
                 if ( !visitor->Visit( vi ) ) continue;
                 ctx.queue->PushLightVob( vi );
@@ -6988,5 +7023,37 @@ void GothicAPI::CollectVisibleVobs( const RndCullContext& ctx ) {
         }
     }
 
+    if ( ctx.drawFlags.CollectLights && ctx.drawFlags.EnableDynamicLighting ) {
+        const float visualFXDrawRadius = ctx.drawDistances.VisualFX;
+        for ( VobLightInfo* vi : TransitionSafeLights ) {
+            if ( !vi || !vi->Vob || !vi->IgnoreIndoorOutdoorLimit ) {
+                continue;
+            }
+            if ( !vi->IsDynamicVobLight && !vi->IsVisualFXLight ) {
+                continue;
+            }
+            if ( !vi->Vob->IsEnabled() ) {
+                continue;
+            }
+            const float lightCameraDist = XMVectorGetX( XMVector3Length( camPos - vi->GetEffectivePositionWorldXM() ) );
+            if ( lightCameraDist + vi->Vob->GetLightRange() >= visualFXDrawRadius ) {
+                continue;
+            }
+            BoundingSphere lightSphere;
+            lightSphere.Center = vi->GetEffectivePositionWorld();
+            lightSphere.Radius = vi->Vob->GetLightRange();
+            if ( cullingEnabled && !ctx.frustum.Intersects( lightSphere ) ) {
+                continue;
+            }
+            if ( !bspVobVisitor.Visit( vi ) ) {
+                continue;
+            }
+            vi->IsIndoorVob = vi->Vob->IsIndoorVob();
+            vi->AllowsPointlightShadows = vi->AllowsPointlightShadows || vi->IsVisualFXLight;
+            vi->UpdateShadows = vi->AllowsPointlightShadows
+                && RendererState.RendererSettings.EnablePointlightShadows >= GothicRendererSettings::PLS_UPDATE_DYNAMIC;
+            ctx.queue->PushLightVob( vi );
+        }
+    }
     bspVobVisitor.ClearForReuse();
 }

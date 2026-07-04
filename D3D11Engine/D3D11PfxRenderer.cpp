@@ -348,7 +348,9 @@ XRESULT D3D11PfxRenderer::RenderPostFXComposition(
     ID3D11RenderTargetView* outputRTV,
     ID3D11ShaderResourceView* backbufferSRV,
     ID3D11ShaderResourceView* godraysSRV,
-    ID3D11ShaderResourceView* depthSRV ) {
+    ID3D11ShaderResourceView* depthSRV,
+    ID3D11ShaderResourceView* normalsSRV,
+    bool compositionHeightFog ) {
 
     D3D11GraphicsEngine* engine = reinterpret_cast<D3D11GraphicsEngine*>(Engine::GraphicsEngine);
     auto& context = engine->GetContext();
@@ -362,8 +364,13 @@ XRESULT D3D11PfxRenderer::RenderPostFXComposition(
     // Update constant buffers for inline heightfog and lightweight screen-space atmosphere effects.
     auto& settings = Engine::GAPI->GetRendererState().RendererSettings;
     GSky* sky = Engine::GAPI->GetSky();
-    const bool needsAtmosphere = settings.DrawFog || (settings.EnableContactShadows && settings.ContactShadowStrength > 0.0f) || (settings.EnableScreenSpaceGI && settings.ScreenSpaceGIStrength > 0.0f);
+    const bool needsAtmosphere = compositionHeightFog || (settings.EnableContactShadows && settings.ContactShadowStrength > 0.0f) || (settings.EnableScreenSpaceGI && settings.ScreenSpaceGIStrength > 0.0f);
     if ( settings.DrawFog ) {
+        CompositionControlConstantBuffer control = {};
+        control.CC_HeightFogEnabled = compositionHeightFog ? 1.0f : 0.0f;
+        compositionPS->GetBuffer( "CompositionControl" ).Update( &control ).Bind();
+    }
+    if ( compositionHeightFog ) {
         HeightfogConstantBuffer cb;
         {
             auto& proj = Engine::GAPI->GetProjectionMatrix();
@@ -413,7 +420,7 @@ XRESULT D3D11PfxRenderer::RenderPostFXComposition(
         cb.HF_FogHeight = height;
         cb.HF_ProjAB = float2( Engine::GAPI->GetProjectionMatrix()._33, Engine::GAPI->GetProjectionMatrix()._34 );
 
-        float rain = Engine::GAPI->GetRainFXWeight();
+        float rain = sky ? sky->GetAtmosphereCB().AC_RainFXWeight : Engine::GAPI->GetRainFXWeight();
         float rainFogColorWeight = std::min( 1.0f, rain * 2.0f );
         if ( sky ) {
             float daylightRainFog = std::max( 0.0f, std::min( 1.0f, (sky->GetAtmosphereCB().AC_LightPos.y + 0.05f) * 4.0f ) );
@@ -442,9 +449,9 @@ XRESULT D3D11PfxRenderer::RenderPostFXComposition(
     // Bind output RTV (no depth)
     context->OMSetRenderTargets( 1, &outputRTV, nullptr );
 
-    // Bind SRVs: t0=backbuffer, t1=GodRays, t2=Depth
-    ID3D11ShaderResourceView* srvs[3] = { backbufferSRV, godraysSRV, depthSRV };
-    context->PSSetShaderResources( 0, 3, srvs );
+    // Bind SRVs: t0=backbuffer, t1=GodRays, t2=Depth, t3=Normals
+    ID3D11ShaderResourceView* srvs[4] = { backbufferSRV, godraysSRV, depthSRV, normalsSRV };
+    context->PSSetShaderResources( 0, 4, srvs );
 
     // No blending - direct overwrite
     Engine::GAPI->GetRendererState().BlendState.SetDefault();
@@ -457,8 +464,8 @@ XRESULT D3D11PfxRenderer::RenderPostFXComposition(
     DrawFullScreenQuad();
 
     // Unbind SRVs
-    ID3D11ShaderResourceView* nullSRVs[3] = { nullptr, nullptr, nullptr };
-    context->PSSetShaderResources( 0, 3, nullSRVs );
+    ID3D11ShaderResourceView* nullSRVs[4] = { nullptr, nullptr, nullptr, nullptr };
+    context->PSSetShaderResources( 0, 4, nullSRVs );
 
     // Restore default states
     Engine::GAPI->GetRendererState().DepthState.DepthBufferCompareFunc =

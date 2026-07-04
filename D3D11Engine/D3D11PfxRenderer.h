@@ -74,7 +74,9 @@ public:
     XRESULT RenderPostFXComposition( ID3D11RenderTargetView* outputRTV,
                                      ID3D11ShaderResourceView* backbufferSRV,
                                      ID3D11ShaderResourceView* godraysSRV,
-                                     ID3D11ShaderResourceView* depthSRV );
+                                     ID3D11ShaderResourceView* depthSRV,
+                                     ID3D11ShaderResourceView* normalsSRV,
+                                     bool compositionHeightFog );
 
     XRESULT RenderXeGTAO( ID3D11ShaderResourceView* depthSRV,
                             ID3D11ShaderResourceView* normalsSRV,

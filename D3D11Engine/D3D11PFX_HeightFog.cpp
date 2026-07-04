@@ -96,7 +96,7 @@ XRESULT D3D11PFX_HeightFog::Render( RenderToTextureBuffer* fxbuffer ) {
 	GSky* sky = Engine::GAPI->GetSky();
 
 	// Modify fog when raining
-	float rain = Engine::GAPI->GetRainFXWeight();
+	float rain = sky ? sky->GetAtmosphereCB().AC_RainFXWeight : Engine::GAPI->GetRainFXWeight();
 	float rainFogColorWeight = std::min( 1.0f, rain * 2.0f );
 	if ( sky ) {
 		float daylightRainFog = std::max( 0.0f, std::min( 1.0f, (sky->GetAtmosphereCB().AC_LightPos.y + 0.05f) * 4.0f ) );
