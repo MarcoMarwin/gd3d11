@@ -5645,6 +5645,7 @@ XRESULT GothicAPI::SaveMenuSettings( const std::string& file ) {
     WritePrivateProfileStringA( "General", "EnableFog", std::to_string( s.DrawFog ? TRUE : FALSE ).c_str(), ini.c_str() );
     WritePrivateProfileStringA( "General", "FogRange", float_to_string( s.FogRange , 2).c_str(), ini.c_str() );
     WritePrivateProfileStringA( "General", "EnableHDR", std::to_string( s.EnableHDR ? TRUE : FALSE ).c_str(), ini.c_str() );
+    WritePrivateProfileStringA( "General", "HDRToneMapStrength", float_to_string( s.HDRToneMapStrength, 0 ).c_str(), ini.c_str() );
     WritePrivateProfileStringA( "General", "EnableDebugLog", std::to_string( s.EnableDebugLog ? TRUE : FALSE ).c_str(), ini.c_str() );
     WritePrivateProfileStringA( "General", "EnableAutoupdates", std::to_string( s.EnableAutoupdates ? TRUE : FALSE ).c_str(), ini.c_str() );
     WritePrivateProfileStringA( "General", "EnableGodRays", std::to_string( s.EnableGodRays ? TRUE : FALSE ).c_str(), ini.c_str() );
@@ -5718,6 +5719,7 @@ XRESULT GothicAPI::SaveMenuSettings( const std::string& file ) {
     WritePrivateProfileStringA( "Shadows", "EnableShadows", std::to_string( s.EnableShadows ? TRUE : FALSE ).c_str(), ini.c_str() );
     WritePrivateProfileStringA( "Shadows", "ShadowFilterMode", std::to_string( static_cast<int>(s.ShadowFilterMode) ).c_str(), ini.c_str() );
     WritePrivateProfileStringA( "Shadows", "ShadowMapSize", std::to_string( s.ShadowMapSize ).c_str(), ini.c_str() );
+    WritePrivateProfileStringA( "Shadows", "PointlightShadowMapSize", std::to_string( s.PointlightShadowMapSize ).c_str(), ini.c_str() );
     WritePrivateProfileStringA( "Shadows", "WorldShadowRangeScale", std::to_string( s.WorldShadowRangeScale ).c_str(), ini.c_str() );
     WritePrivateProfileStringA( "Shadows", "NumShadowCascades", std::to_string( s.NumShadowCascades ).c_str(), ini.c_str() );
     WritePrivateProfileStringA( "Shadows", "ShadowCascadePCFLimit", std::to_string( s.ShadowCascadePCFLimit ).c_str(), ini.c_str() );
@@ -5772,6 +5774,7 @@ XRESULT GothicAPI::LoadMenuSettings( const std::string& file ) {
         s.FogRange = GetPrivateProfileFloatA( "General", "FogRange", ds.FogRange, ini.c_str() );
         s.AtmosphericScattering = GetPrivateProfileBoolA( "General", "AtmosphericScattering", ds.AtmosphericScattering, ini );
         s.EnableHDR = GetPrivateProfileBoolA( "General", "EnableHDR", ds.EnableHDR, ini );
+        s.HDRToneMapStrength = std::clamp( GetPrivateProfileFloatA( "General", "HDRToneMapStrength", ds.HDRToneMapStrength, ini ), 1.0f, 10.0f );
         s.EnableDebugLog = GetPrivateProfileBoolA( "General", "EnableDebugLog", ds.EnableDebugLog, ini );
         s.EnableAutoupdates = GetPrivateProfileBoolA( "General", "EnableAutoupdates", ds.EnableAutoupdates, ini );
         s.EnableGodRays = GetPrivateProfileBoolA( "General", "EnableGodRays", ds.EnableGodRays, ini );
@@ -5830,9 +5833,14 @@ XRESULT GothicAPI::LoadMenuSettings( const std::string& file ) {
         }
 
         static XMFLOAT3 defaultLightDirection = XMFLOAT3( 1, 1, 1 );
-        s.EnableShadows = GetPrivateProfileBoolA( "Shadows", "EnableShadows", ds.EnableShadows, ini );
+        s.EnableShadows = true;
         s.ShadowFilterMode = GothicRendererSettings::E_ShadowFilterMode::SHADOW_FILTER_SIMPLE;
         s.ShadowMapSize = GetPrivateProfileIntA( "Shadows", "ShadowMapSize", ds.ShadowMapSize, ini.c_str() );
+        if ( s.ShadowMapSize <= 1024 ) s.ShadowMapSize = 1024;
+        else if ( s.ShadowMapSize <= 2048 ) s.ShadowMapSize = 2048;
+        else if ( s.ShadowMapSize <= 4096 ) s.ShadowMapSize = 4096;
+        else s.ShadowMapSize = 8192;
+        s.PointlightShadowMapSize = s.ShadowMapSize >= 8192 ? 512 : (s.ShadowMapSize >= 4096 ? 256 : 128);
         s.EnablePointlightShadows = GothicRendererSettings::EPointLightShadowMode::PLS_UPDATE_DYNAMIC;
         s.WorldShadowRangeScale = GetPrivateProfileFloatA( "Shadows", "WorldShadowRangeScale", ds.WorldShadowRangeScale, ini );
         s.NumShadowCascades = GetPrivateProfileIntA( "Shadows", "NumShadowCascades", ds.NumShadowCascades, ini.c_str() );
@@ -6650,6 +6658,10 @@ static void CollectLeafVobs(
                     parentActorLight = parent->As<oCNPC>() != nullptr;
                 }
                 vi->IsVisualFXLight = vi->IsVisualFXLight || hasVisualFXParent( vob->GetVobParent() );
+                if ( vi->IsVisualFXLight ) {
+                    vi->AllowsPointlightShadows = true;
+                    vi->UpdateShadows = true;
+                }
                 vi->IgnoreIndoorOutdoorLimit = vi->IsDynamicVobLight || vi->IsVisualFXLight || parentActorLight;
                 vi->IsIndoorVob = vob->IsIndoorVob();
                 if ( !visitor->Visit( vi ) ) continue;

@@ -128,6 +128,9 @@ struct HDRSettingsConstantBuffer {
     float HDR_LumWhite;
     float HDR_Threshold;
     float HDR_BloomStrength;
+
+    float HDR_ToneMapStrength;
+    float3 HDR_Pad;
 };
 
 struct LPMConstantsBuffer {
@@ -181,8 +184,8 @@ struct DS_ScreenQuadConstantBuffer {
     float SQ_WorldAOStrength;
     float SQ_ShadowSoftness;
     uint32_t SQ_FrameIndex;
-    float SQ_LightSize;
     float2 SQ_JitterOffset;
+    float SQ_Pad0;
 
     // Shadow atlas: per-cascade UV rect (xy = offset, zw = scale)
     // Used when SHADOW_ATLAS is enabled (Feature Level 10 path)

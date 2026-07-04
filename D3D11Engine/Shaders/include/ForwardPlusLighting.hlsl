@@ -6,7 +6,7 @@
 //
 // Expected defines (set by ConstructShaderMakroList):
 //   MAX_CSM_CASCADES, NUM_CSM_CASCADES, CSM_PCF_LIMIT
-//   SHD_ENABLE, SHD_FILTER_16TAP_PCF, SHD_FILTER_PCSS, SHADOW_ATLAS
+//   SHD_ENABLE, SHD_FILTER_16TAP_PCF, SHADOW_ATLAS
 //   FP_USE_SHADOW_MASK
 //
 // Expected resources already declared by the including shader:
@@ -27,9 +27,6 @@
 #define CSM_PCF_LIMIT 3
 #endif
 
-#ifndef SHD_FILTER_PCSS
-#define SHD_FILTER_PCSS 0
-#endif
 
 #ifndef SHADOW_ATLAS
 #define SHADOW_ATLAS 0
@@ -56,8 +53,8 @@ cbuffer FP_ScreenQuadConstantBuffer : register( b4 )
     float SQ_WorldAOStrength;
     float SQ_ShadowSoftness;
     uint SQ_FrameIndex;
-    float SQ_LightSize;
-    float2 SQ_JitterOffset; // Unused here; keeps CPU/shader layout parity.
+    float2 SQ_JitterOffset;
+    float SQ_Pad0; // Unused here; keeps CPU/shader layout parity.
     float4 SQ_CascadeAtlasRect[MAX_CSM_CASCADES];
 };
 

@@ -536,13 +536,11 @@ struct GothicRendererSettings {
     };
 
     enum E_GraphicsPreset {
-        GRAPHICS_CUSTOM,
-        GRAPHICS_VERY_LOW,
-        GRAPHICS_LOW,
-        GRAPHICS_MEDIUM,
-        GRAPHICS_HIGH,
-        GRAPHICS_VERY_HIGH,
-        GRAPHICS_ULTRA
+        GRAPHICS_CUSTOM = 0,
+        GRAPHICS_LOW = 2,
+        GRAPHICS_MEDIUM = 3,
+        GRAPHICS_HIGH = 4,
+        GRAPHICS_VERY_HIGH = 5
     };
 
     enum E_Upscaler {
@@ -557,7 +555,6 @@ struct GothicRendererSettings {
     enum E_ShadowFilterMode {
         SHADOW_FILTER_DISABLED = 0,
         SHADOW_FILTER_SIMPLE = 1,
-        SHADOW_FILTER_PCSS = 2,
     };
 
     enum E_RendererMode {
@@ -625,6 +622,7 @@ struct GothicRendererSettings {
 
         HDRLumWhite = 11.2f;
         HDRMiddleGray = 0.8f;
+        HDRToneMapStrength = 10.0f;
         BloomThreshold = 0.9f;
 
         WireframeVobs = false;
@@ -642,6 +640,7 @@ struct GothicRendererSettings {
 
         textureMaxSize = 16384;
         ShadowMapSize = 2048;
+        PointlightShadowMapSize = 128;
         WorldShadowRangeScale = 1.0f;
         NumShadowCascades = 3; // looks OK and performance friendly
         ShadowCascadePCFLimit = 1;
@@ -651,7 +650,6 @@ struct GothicRendererSettings {
         ShadowAOStrength = 0.50f;
         WorldAOStrength = 0.50f;
         ShadowSoftness = 1.0f; // 1.0 = default softness, higher = softer shadows
-        PCSSLightSize = 0.140f; // Shadow-UV light radius used by PCSS blocker search
 
         BloomStrength = 1.0f;
         GlobalWindStrength = 1.0f; // UI-normalized: 1.0 maps to the former effective 2.0 wind strength.
@@ -891,6 +889,7 @@ struct GothicRendererSettings {
     float GammaValue;
     float BrightnessValue;
     int ShadowMapSize;
+    int PointlightShadowMapSize;
     int textureMaxSize;
 
     float GlobalWindStrength;
@@ -908,6 +907,7 @@ struct GothicRendererSettings {
     float TesselationRange;
     float HDRLumWhite;
     float HDRMiddleGray;
+    float HDRToneMapStrength;
     float BloomThreshold;
     float BloomStrength;
     float GothicUIScale;
@@ -918,7 +918,6 @@ struct GothicRendererSettings {
     float ShadowAOStrength;
     float WorldAOStrength;
     float ShadowSoftness;
-    float PCSSLightSize;
 
     float GodRayDecay;
     float GodRayWeight;

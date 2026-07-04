@@ -142,6 +142,7 @@ XRESULT D3D11PFX_HDR::Render( ID3D11RenderTargetView* output, ID3D11ShaderResour
     hcb.HDR_MiddleGray = Engine::GAPI->GetRendererState().RendererSettings.HDRMiddleGray;
     hcb.HDR_Threshold = Engine::GAPI->GetRendererState().RendererSettings.BloomThreshold;
     hcb.HDR_BloomStrength = Engine::GAPI->GetRendererState().RendererSettings.BloomStrength;
+    hcb.HDR_ToneMapStrength = Engine::GAPI->GetRendererState().RendererSettings.HDRToneMapStrength;
     hps->GetBuffer( "HDR_Settings" ).Update( &hcb ).Bind();
     BindLPMConstants( hps.get() );
 
@@ -171,6 +172,8 @@ void D3D11PFX_HDR::CreateBloom( RenderToTextureBuffer* lum, RenderToTextureBuffe
 	hcb.HDR_LumWhite = Engine::GAPI->GetRendererState().RendererSettings.HDRLumWhite;
 	hcb.HDR_MiddleGray = Engine::GAPI->GetRendererState().RendererSettings.HDRMiddleGray;
 	hcb.HDR_Threshold = Engine::GAPI->GetRendererState().RendererSettings.BloomThreshold;
+	hcb.HDR_BloomStrength = Engine::GAPI->GetRendererState().RendererSettings.BloomStrength;
+	hcb.HDR_ToneMapStrength = Engine::GAPI->GetRendererState().RendererSettings.HDRToneMapStrength;
 	tonemapPS->GetBuffer( "HDR_Settings" ).Update( &hcb ).Bind();
 	BindLPMConstants( tonemapPS.get() );
 

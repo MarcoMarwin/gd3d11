@@ -304,7 +304,7 @@ XRESULT D3D11ShaderManager::Init() {
 
         list.push_back( {"SHD_ENABLE",           s.EnableShadows ? "1" : "0"} );
         list.push_back( {"SHD_FILTER_16TAP_PCF", (s.ShadowFilterMode >= GothicRendererSettings::SHADOW_FILTER_SIMPLE) ? "1" : "0"} );
-        list.push_back( {"SHD_FILTER_PCSS",      "0"} );
+
         list.push_back( {"MAX_CSM_CASCADES",     TO_LITERAL(MAX_CSM_CASCADES)} );
         list.push_back( {"NUM_CSM_CASCADES",     sNums[std::clamp<size_t>(s.NumShadowCascades, 1, MAX_CSM_CASCADES)]} );
         list.push_back( {"CSM_PCF_LIMIT",        sNums[std::clamp<size_t>(s.ShadowCascadePCFLimit, 0, MAX_CSM_CASCADES)]} );
@@ -313,9 +313,6 @@ XRESULT D3D11ShaderManager::Init() {
         // Stable full-quality kernels avoid visible stippling on animated characters.
         // Do not rely on temporal AA to reconstruct deliberately undersampled shadows.
         list.push_back( {"SHD_BLUE_NOISE",       "0"} );
-        list.push_back( {"PCSS_BLOCKER_TAPS",     "16"} );
-        list.push_back( {"PCSS_FILTER_TAPS_NEAR", "32"} );
-        list.push_back( {"PCSS_FILTER_TAPS_FAR",  "16"} );
         list.push_back( {"PCF_FILTER_TAPS_NEAR",  "16"} );
         list.push_back( {"PCF_FILTER_TAPS_FAR",   "8"} );
     };

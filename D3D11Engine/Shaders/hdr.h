@@ -7,6 +7,8 @@ cbuffer HDR_Settings : register(b0)
     float HDR_LumWhite;
     float HDR_Threshold;
     float HDR_BloomStrength;
+    float HDR_ToneMapStrength;
+    float3 HDR_Pad;
 };
 
 #define FFX_GPU
@@ -30,11 +32,16 @@ float GetToneMapExposure(Texture2D lumTex, SamplerState samplerState, float midd
     return clamp(middleGray / fLumAvg, minimumExposure, maximumExposure);
 }
 
+float HDRToneMapBlend()
+{
+    return saturate((HDR_ToneMapStrength - 1.0f) / 9.0f);
+}
+
 float3 LPMToneMap(float3 vColor, Texture2D lumTex, SamplerState samplerState)
 {
     FfxFloat32x3 color = max(vColor * GetToneMapExposure(lumTex, samplerState, 0.18f, 0.75f, 2.25f), 0.0f);
     LpmFilter(color.r, color.g, color.b,
         FFX_TRUE, FFX_FALSE, FFX_FALSE, FFX_FALSE, FFX_FALSE, FFX_FALSE);
-    return saturate(color);
+    return lerp(saturate(vColor), saturate(color), HDRToneMapBlend());
 }
 #endif

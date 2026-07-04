@@ -14,7 +14,6 @@ struct RenderToDepthStencilBuffer;
 constexpr uint32_t MAX_TILED_LIGHTS = 1024;
 
 constexpr uint32_t MAX_SHADOW_CUBEMAPS = 128;
-constexpr uint32_t SHADOW_CUBE_SIZE = 128; // Must match POINTLIGHT_SHADOWMAP_SIZE
 
 struct TiledPointLight {
     DirectX::XMFLOAT3 PositionView;
@@ -68,13 +67,13 @@ public:
     bool IsShadowArrayCreated() const { return m_ShadowArrayCreated; }
 
     // Shadow cubemap array slot management
-    int AllocateSlot();
+    int AllocateSlot( uint32_t shadowCubeSize );
     void FreeSlot( int slot );
     RenderToDepthStencilBuffer* GetSlotTarget( int slot );
 
 private:
     void EnsureBuffers( uint32_t numTilesX, uint32_t numTilesY );
-    void EnsureShadowArray();
+    void EnsureShadowArray( uint32_t shadowCubeSize );
 
     Microsoft::WRL::ComPtr<ID3D11Device1> m_device;
     Microsoft::WRL::ComPtr<ID3D11DeviceContext1> m_context;
@@ -104,6 +103,7 @@ private:
     std::array<Microsoft::WRL::ComPtr<ID3D11DepthStencilView>, MAX_SHADOW_CUBEMAPS> m_SlotDSVs;
     std::array<std::unique_ptr<RenderToDepthStencilBuffer>, MAX_SHADOW_CUBEMAPS> m_SlotViews;
     bool m_ShadowArrayCreated = false;
+    uint32_t m_ShadowCubeSize = 0;
 
     uint32_t m_lastNumTilesX = 0;
     uint32_t m_lastNumTilesY = 0;

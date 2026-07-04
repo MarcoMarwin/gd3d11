@@ -33,6 +33,8 @@ extern IMGUI_IMPL_API LRESULT ImGui_ImplWin32_WndProcHandler( HWND hWnd, UINT ms
 extern float* ShadowMapLambda;
 extern float* ShadowMapBias;
 
+void SyncGraphicsPresetSelection( GothicRendererSettings& s );
+
 enum class TX_QUALITY : uint16_t {
     VeryLow = 128,
     Low = 256,
@@ -389,11 +391,10 @@ void ImGuiShim::RenderLoop()
     }
 
     if ( memcmp( &oldSettings, &Engine::GAPI->GetRendererState().RendererSettings, sizeof( GothicRendererSettings ) ) != 0 ) {
-        if ( oldSettings.GraphicsPreset == Engine::GAPI->GetRendererState().RendererSettings.GraphicsPreset ) {
-            Engine::GAPI->GetRendererState().RendererSettings.GraphicsPreset = GothicRendererSettings::E_GraphicsPreset::GRAPHICS_CUSTOM;
-        }
+        auto& currentSettings = Engine::GAPI->GetRendererState().RendererSettings;
+        SyncGraphicsPresetSelection( currentSettings );
         if ( FeatureLevel10Compatibility ) {
-            ApplyFeatureLevel10Downgrades( Engine::GAPI->GetRendererState().RendererSettings );
+            ApplyFeatureLevel10Downgrades( currentSettings );
         }
     }
     //if ( DemoVisible )
@@ -600,8 +601,140 @@ namespace
         return std::clamp( static_cast<int>(std::round(OBJECT_DRAW_DISTANCE_UI_MIN + t * (OBJECT_DRAW_DISTANCE_UI_MAX - OBJECT_DRAW_DISTANCE_UI_MIN))),
             OBJECT_DRAW_DISTANCE_UI_MIN, OBJECT_DRAW_DISTANCE_UI_MAX );
     }
+
+    int PointlightShadowSizeForWorldShadowSize( int worldShadowSize ) {
+        if ( worldShadowSize >= 8192 ) return 512;
+        if ( worldShadowSize >= 4096 ) return 256;
+        return 128;
+    }
+
+    int NormalizeShadowMapSize( int value ) {
+        if ( value <= 1024 ) return 1024;
+        if ( value <= 2048 ) return 2048;
+        if ( value <= 4096 ) return 4096;
+        return 8192;
+    }
+
+    int NormalizePointlightShadowMapSize( int value ) {
+        if ( value <= 128 ) return 128;
+        if ( value <= 256 ) return 256;
+        return 512;
+    }
 }
-void ApplyGraphicsPresets( GothicRendererSettings& s ) {
+struct GraphicsPresetComparable {
+    int AntiAliasingMode;
+    int Upscaler;
+    int ResolutionScalePercent;
+    int textureMaxSize;
+    int ShadowMapSize;
+    int PointlightShadowMapSize;
+    float ShadowSoftness;
+    int AoMode;
+    bool EnableContactShadows;
+    bool EnableScreenSpaceGI;
+    bool EnableSSS;
+    bool EnableDoF;
+    bool AllowNormalmaps;
+    bool EnableParallaxOcclusionMapping;
+    int WindQuality;
+    bool HeroAffectsObjects;
+    bool EnableSSR;
+    bool EnableWaterAnimation;
+    bool EnableGodRays;
+    bool EnableRain;
+    bool LimitLightIntesity;
+    bool EnableOcclusionCulling;
+    int OutdoorSmallVobDrawDistance;
+    int SectionDrawRadius;
+    float SharpenFactor;
+    float AOStrength;
+    float ContactShadowStrength;
+    float ScreenSpaceGIStrength;
+    float SSSIntensity;
+    float DoFBokehRadius;
+    float GodRayStrength;
+    float SSRStrength;
+    float GlobalWindStrength;
+    float HeroAffectsObjectsStrength;
+};
+
+GraphicsPresetComparable MakeGraphicsPresetComparable( const GothicRendererSettings& s ) {
+    return {
+        static_cast<int>(s.AntiAliasingMode),
+        static_cast<int>(s.Upscaler),
+        s.ResolutionScalePercent,
+        s.textureMaxSize,
+        NormalizeShadowMapSize( s.ShadowMapSize ),
+        NormalizePointlightShadowMapSize( s.PointlightShadowMapSize ),
+        s.ShadowSoftness,
+        static_cast<int>(s.AoMode),
+        s.EnableContactShadows,
+        s.EnableScreenSpaceGI,
+        s.EnableSSS,
+        s.EnableDoF,
+        s.AllowNormalmaps,
+        s.EnableParallaxOcclusionMapping,
+        s.WindQuality,
+        s.HeroAffectsObjects,
+        s.EnableSSR,
+        s.EnableWaterAnimation,
+        s.EnableGodRays,
+        s.EnableRain,
+        s.LimitLightIntesity,
+        s.EnableOcclusionCulling,
+        ObjectDrawDistanceMetersToUi( s.OutdoorSmallVobDrawRadius ),
+        s.SectionDrawRadius,
+        s.SharpenFactor,
+        s.AOStrength,
+        s.ContactShadowStrength,
+        s.ScreenSpaceGIStrength,
+        s.SSSIntensity,
+        s.DoFBokehRadius,
+        s.GodRayStrength,
+        s.SSRStrength,
+        s.GlobalWindStrength,
+        s.HeroAffectsObjectsStrength
+    };
+}
+
+bool GraphicsPresetComparableEqual( const GraphicsPresetComparable& a, const GraphicsPresetComparable& b ) {
+    return a.AntiAliasingMode == b.AntiAliasingMode
+        && a.Upscaler == b.Upscaler
+        && a.ResolutionScalePercent == b.ResolutionScalePercent
+        && a.textureMaxSize == b.textureMaxSize
+        && a.ShadowMapSize == b.ShadowMapSize
+        && a.PointlightShadowMapSize == b.PointlightShadowMapSize
+        && a.ShadowSoftness == b.ShadowSoftness
+        && a.AoMode == b.AoMode
+        && a.EnableContactShadows == b.EnableContactShadows
+        && a.EnableScreenSpaceGI == b.EnableScreenSpaceGI
+        && a.EnableSSS == b.EnableSSS
+        && a.EnableDoF == b.EnableDoF
+        && a.AllowNormalmaps == b.AllowNormalmaps
+        && a.EnableParallaxOcclusionMapping == b.EnableParallaxOcclusionMapping
+        && a.WindQuality == b.WindQuality
+        && a.HeroAffectsObjects == b.HeroAffectsObjects
+        && a.EnableSSR == b.EnableSSR
+        && a.EnableWaterAnimation == b.EnableWaterAnimation
+        && a.EnableGodRays == b.EnableGodRays
+        && a.EnableRain == b.EnableRain
+        && a.LimitLightIntesity == b.LimitLightIntesity
+        && a.EnableOcclusionCulling == b.EnableOcclusionCulling
+        && a.OutdoorSmallVobDrawDistance == b.OutdoorSmallVobDrawDistance
+        && a.SectionDrawRadius == b.SectionDrawRadius
+        && a.SharpenFactor == b.SharpenFactor
+        && a.AOStrength == b.AOStrength
+        && a.ContactShadowStrength == b.ContactShadowStrength
+        && a.ScreenSpaceGIStrength == b.ScreenSpaceGIStrength
+        && a.SSSIntensity == b.SSSIntensity
+        && a.DoFBokehRadius == b.DoFBokehRadius
+        && a.GodRayStrength == b.GodRayStrength
+        && a.SSRStrength == b.SSRStrength
+        && a.GlobalWindStrength == b.GlobalWindStrength
+        && a.HeroAffectsObjectsStrength == b.HeroAffectsObjectsStrength;
+}
+
+void ApplyGraphicsPresets( GothicRendererSettings& s, bool applyRuntimeUpdates = true ) {
     const auto preset = s.GraphicsPreset;
     if ( preset == GothicRendererSettings::E_GraphicsPreset::GRAPHICS_CUSTOM ) {
         return;
@@ -610,6 +743,7 @@ void ApplyGraphicsPresets( GothicRendererSettings& s ) {
     // Presets own visible quality/performance settings, while display mode,
     // resolution, VSync/FPS limit, HDR, brightness and contrast stay personal.
     s.EnableShadows = true;
+    s.EnablePointlightShadows = GothicRendererSettings::PLS_UPDATE_DYNAMIC;
     s.EnableSSR = true;
     s.EnableWaterAnimation = true;
     s.EnableGodRays = true;
@@ -714,12 +848,47 @@ void ApplyGraphicsPresets( GothicRendererSettings& s ) {
         return;
     }
 
+    s.ShadowMapSize = NormalizeShadowMapSize( s.ShadowMapSize );
+    s.PointlightShadowMapSize = PointlightShadowSizeForWorldShadowSize( s.ShadowMapSize );
+
     if (FeatureLevel10Compatibility) {
         ApplyFeatureLevel10Downgrades(s);
     }
 
-    Engine::GAPI->UpdateTextureMaxSize();
-    Engine::GraphicsEngine->ReloadShaders( ShaderCategory::Other );
+    if ( applyRuntimeUpdates ) {
+        Engine::GAPI->UpdateTextureMaxSize();
+        Engine::GraphicsEngine->ReloadShaders( ShaderCategory::Other );
+    }
+}
+
+void SyncGraphicsPresetSelection( GothicRendererSettings& s ) {
+    if ( s.GraphicsPreset != GothicRendererSettings::GRAPHICS_CUSTOM ) {
+        GothicRendererSettings expected = s;
+        expected.GraphicsPreset = s.GraphicsPreset;
+        ApplyGraphicsPresets( expected, false );
+        if ( GraphicsPresetComparableEqual( MakeGraphicsPresetComparable( s ), MakeGraphicsPresetComparable( expected ) ) ) {
+            return;
+        }
+    }
+
+    const GothicRendererSettings::E_GraphicsPreset presets[] = {
+        GothicRendererSettings::GRAPHICS_LOW,
+        GothicRendererSettings::GRAPHICS_MEDIUM,
+        GothicRendererSettings::GRAPHICS_HIGH,
+        GothicRendererSettings::GRAPHICS_VERY_HIGH,
+    };
+
+    for ( auto preset : presets ) {
+        GothicRendererSettings expected = s;
+        expected.GraphicsPreset = preset;
+        ApplyGraphicsPresets( expected, false );
+        if ( GraphicsPresetComparableEqual( MakeGraphicsPresetComparable( s ), MakeGraphicsPresetComparable( expected ) ) ) {
+            s.GraphicsPreset = preset;
+            return;
+        }
+    }
+
+    s.GraphicsPreset = GothicRendererSettings::GRAPHICS_CUSTOM;
 }
 namespace
 {
@@ -735,9 +904,19 @@ namespace
 
     void FixupSettings( GothicRendererSettings& s ) {
         s.FixupUpscalingSettings();
+        const int presetValue = static_cast<int>(s.GraphicsPreset);
+        if ( presetValue == 1 ) {
+            s.GraphicsPreset = GothicRendererSettings::GRAPHICS_LOW;
+        } else if ( presetValue > static_cast<int>(GothicRendererSettings::GRAPHICS_VERY_HIGH) ) {
+            s.GraphicsPreset = GothicRendererSettings::GRAPHICS_VERY_HIGH;
+        }
         s.LimitLightIntesity = true;
+        s.EnableShadows = true;
         s.ShadowFilterMode = GothicRendererSettings::E_ShadowFilterMode::SHADOW_FILTER_SIMPLE;
         s.EnablePointlightShadows = GothicRendererSettings::EPointLightShadowMode::PLS_UPDATE_DYNAMIC;
+        s.ShadowMapSize = NormalizeShadowMapSize( s.ShadowMapSize );
+        s.PointlightShadowMapSize = NormalizePointlightShadowMapSize( s.PointlightShadowMapSize );
+        s.HDRToneMapStrength = std::clamp( s.HDRToneMapStrength, 1.0f, 10.0f );
         s.OutdoorSmallVobDrawRadius = ObjectDrawDistanceUiToMeters( ObjectDrawDistanceMetersToUi( s.OutdoorSmallVobDrawRadius ) );
         s.ForceFOV = false;
         s.FOVHoriz = 100.0f;
@@ -851,7 +1030,7 @@ void ImGuiShim::RenderSettingsWindow()
             {"Low", GothicRendererSettings::E_GraphicsPreset::GRAPHICS_LOW},
             {"Medium", GothicRendererSettings::E_GraphicsPreset::GRAPHICS_MEDIUM},
             {"High", GothicRendererSettings::E_GraphicsPreset::GRAPHICS_HIGH},
-            {"Very High", GothicRendererSettings::E_GraphicsPreset::GRAPHICS_VERY_HIGH},
+            {"Extreme", GothicRendererSettings::E_GraphicsPreset::GRAPHICS_VERY_HIGH},
         };
 
         ImGui::TextUnformatted("Graphics Preset"); ImGui::SameLine();
@@ -1009,39 +1188,24 @@ void ImGuiShim::RenderSettingsWindow()
 
 
             ImGui::SetItemTooltip( "Selects fullscreen or windowed display mode." );
-            const static std::vector<std::pair<const char*, int>> shadowMapSizesMax = {
-                {"Very Low", 512},
+            const static std::vector<std::pair<const char*, int>> shadowMapSizes = {
                 {"Low", 1024},
                 {"Medium", 2048},
                 {"High", 4096},
-                {"Very High", 8192},
-                {"Ultra High", 16384},
+                {"Extreme", 8192},
             };
-            const static std::vector<std::pair<const char*, int>> shadowMapSizesDxFeature10 = {
-                {"Very Low", 512},
-                {"Low", 1024},
-                {"Medium", 2048},
-                {"High", 4096},
-                {"Very High", 8192},
-            };
-            const std::vector<std::pair<const char*, int>>& shadowMapSizes = FeatureLevel10Compatibility
-                ? shadowMapSizesDxFeature10
-                : shadowMapSizesMax;
 
-            ImText( "World Shadows", { buttonWidth.x - ImGui::GetFrameHeight() - style.ItemSpacing.x, buttonWidth.y } ); ImGui::SameLine();
-            if ( ImGui::Checkbox( "##Enable World Shadows", &settings.EnableShadows ) ) {
-                shadersToReload |= ShaderCategory::LightsAndShadows;
-            }
-            ImGui::SetItemTooltip( "Enables shadows from the sun and moon." );
-            ImGui::SameLine();
-            ImGui::BeginDisabled( !settings.EnableShadows );
-            if ( ImComboBoxC( "##WorldShadowQuality", shadowMapSizes, &settings.ShadowMapSize, [&shadersToReload]{
+            settings.EnableShadows = true;
+            settings.ShadowMapSize = NormalizeShadowMapSize( settings.ShadowMapSize );
+            settings.PointlightShadowMapSize = NormalizePointlightShadowMapSize( settings.PointlightShadowMapSize );
+            ImText( "Shadow Quality", buttonWidth ); ImGui::SameLine();
+            if ( ImComboBoxC( "##ShadowQuality", shadowMapSizes, &settings.ShadowMapSize, [&settings, &shadersToReload]{
+                settings.PointlightShadowMapSize = PointlightShadowSizeForWorldShadowSize( settings.ShadowMapSize );
                 shadersToReload |= ShaderCategory::LightsAndShadows;
             } ) ) {
                 ImGui::EndCombo();
             }
-            ImGui::EndDisabled();
-            ImGui::SetItemTooltip( "Controls sun and moon shadow quality." );
+            ImGui::SetItemTooltip( "Controls sun, moon, and point-light shadow quality." );
 
             ImText( "Shadow Softness", buttonWidth ); ImGui::SameLine();
             SliderNormalizedUiStrength( "##ShadowSoftness", &settings.ShadowSoftness );
@@ -1066,6 +1230,21 @@ void ImGuiShim::RenderSettingsWindow()
             ImText( "Brightness", buttonWidth ); ImGui::SameLine();
             SliderDisplayTuningStrength( "##Brightness", &settings.BrightnessValue );
             ImGui::SetItemTooltip( "Adjusts display brightness." );
+
+            ImText( "HDR Tone Mapping", { buttonWidth.x - ImGui::GetFrameHeight() - style.ItemSpacing.x, buttonWidth.y } ); ImGui::SameLine();
+            if ( ImGui::Checkbox( "##Enable HDR Tone Mapping", &settings.EnableHDR ) ) {
+                shadersToReload |= ShaderCategory::Tonemapping;
+            }
+            ImGui::SetItemTooltip( "Enables richer HDR tone mapping." );
+            ImGui::SameLine();
+            ImGui::BeginDisabled( !settings.EnableHDR );
+            int hdrToneMapStrength = std::clamp( static_cast<int>(std::round( settings.HDRToneMapStrength )), 1, 10 );
+            if ( ImGui::SliderInt( "##HDRToneMapStrength", &hdrToneMapStrength, 1, 10, "%d", ImGuiSliderFlags_AlwaysClamp ) ) {
+                settings.HDRToneMapStrength = static_cast<float>(hdrToneMapStrength);
+                shadersToReload |= ShaderCategory::Tonemapping;
+            }
+            ImGui::EndDisabled();
+            ImGui::SetItemTooltip( "Controls tone-mapping strength." );
 
             ImGui::PopItemWidth();
 
@@ -1255,20 +1434,12 @@ void ImGuiShim::RenderSettingsWindow()
             ImGui::Checkbox( "##Enable Occlusion Culling", &settings.EnableOcclusionCulling );
             ImGui::SetItemTooltip( "Skips world geometry hidden behind other objects." );
 
-            ImText( "HDR Tone Mapping", { buttonWidth.x - ImGui::GetFrameHeight() - style.ItemSpacing.x, buttonWidth.y } ); ImGui::SameLine();
-            if ( ImGui::Checkbox( "##Enable HDR Tone Mapping", &settings.EnableHDR ) ) {
-                shadersToReload |= ShaderCategory::Tonemapping;
-            }
-            ImGui::SetItemTooltip( "Enables AMD LPM tone mapping." );
 
             ImGui::EndGroup();
         }
 
         ImGui::Spacing();
-        const float footerButtonWidth = (ImGui::GetContentRegionAvail().x - style.ItemSpacing.x * 2.0f) / 3.0f;
-        const bool resetToDefaults = ImGui::Button( "Reset to Defaults", ImVec2( footerButtonWidth, footerHeight ) );
-        ImGui::SetItemTooltip( "Restores the default renderer settings." );
-        ImGui::SameLine();
+        const float footerButtonWidth = (ImGui::GetContentRegionAvail().x - style.ItemSpacing.x) / 2.0f;
         const bool cancelled = ImGui::Button( "Cancel", ImVec2( footerButtonWidth, footerHeight ) );
         ImGui::SetItemTooltip( "Discard changes made since opening the F11 menu." );
         ImGui::SameLine();
@@ -1282,16 +1453,7 @@ void ImGuiShim::RenderSettingsWindow()
             ImGui::SetItemTooltip("Save settings.\nCTRL+Click to save just for the current world.");
         }
         
-        if ( resetToDefaults ) {
-            settings.SetDefault();
-            FixupSettings( settings );
-            if ( FeatureLevel10Compatibility ) {
-                ApplyFeatureLevel10Downgrades( settings );
-            }
-            Engine::GAPI->UpdateTextureMaxSize();
-            Engine::GraphicsEngine->TriggerResize( settings.LoadedResolution );
-            shadersToReload = ShaderCategory::All;
-        } else if ( cancelled ) {
+        if ( cancelled ) {
             CancelSettingsEdit();
             shadersToReload = ShaderCategory::None;
             Engine::GraphicsEngine->OnUIEvent( BaseGraphicsEngine::UI_ClosedSettings );

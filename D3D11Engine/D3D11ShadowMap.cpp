@@ -1013,17 +1013,14 @@ XRESULT D3D11ShadowMap::DrawPointlightShadows( std::vector<VobLightInfo*>& light
         if ( D3D11PointLight* pl = dynamic_cast<D3D11PointLight*>(light->LightShadowBuffers.get()) ) {
             const float d = XMVectorGetX( XMVector3LengthSq( light->GetEffectivePositionWorldXM() - cameraPositionXm ) );
             float range = light->Vob->GetLightRange();
-            const float rangeSq = range * range;
 
-            float distVeryCloseSq = (range * 0.8f) * (range * 0.8f);
             float distMaxShadowSq = (range * 9.0f) * (range * 9.0f); // Fade out entirely after this
 
-            // pick shadow resolution based on distance.
-            int desiredResolution = SHADOW_CUBE_SIZE; // Fallback / far distance
-            if ( d < distVeryCloseSq && !staticOnlyMode ) {
+            // Preset-controlled point-light shadow resolution. In dynamic mode
+            // visible eligible lights update every frame so actor/VFX shadows do not lag.
+            int desiredResolution = std::clamp( settings.PointlightShadowMapSize, 64, 512 );
+            if ( dynamicMode && !staticOnlyMode ) {
                 light->UpdateShadows = true;
-                // for now, keep all lights/shadows the same size, otherwise they change their "volume"
-                // desiredResolution = 256; // High res for close lights
             }
 
             bool inShadowRange = d < distMaxShadowSq;
@@ -1033,13 +1030,9 @@ XRESULT D3D11ShadowMap::DrawPointlightShadows( std::vector<VobLightInfo*>& light
                     pl->ClearTiledSlot();
                     pl->ReleaseShadowMap();
 
-                    // Try tiled slot for small (64x64) lights when tiled lighting is active
+                    // Try tiled slot when tiled lighting is active.
                     if ( isTiledShadingEnabled ) {
-                        if ( desiredResolution != SHADOW_CUBE_SIZE ) {
-                            light->UpdateShadows = false;
-                            continue; // should never happen, as we currently only use one resolution, but just in case, don't try to put bigger shadowmaps into tiled slots
-                        }
-                        int slot = m_TiledDeferred->AllocateSlot();
+                        int slot = m_TiledDeferred->AllocateSlot( static_cast<uint32_t>(desiredResolution) );
                         if ( slot >= 0 ) {
                             pl->SetTiledSlot( slot, m_TiledDeferred->GetSlotTarget( slot ), m_TiledDeferred.get() );
                             pl->SetCurrentResolution( desiredResolution );
@@ -1426,8 +1419,6 @@ DS_ScreenQuadConstantBuffer D3D11ShadowMap::FillSunCSMConstantBuffer() const {
     scb.SQ_ShadowAOStrength = settings.ShadowAOStrength;
     scb.SQ_WorldAOStrength = settings.WorldAOStrength;
     scb.SQ_ShadowSoftness = settings.ShadowSoftness * 2.0f;
-    scb.SQ_LightSize = std::clamp( settings.PCSSLightSize, 0.005f, 0.5f );
-
     if ( auto bspTree = Engine::GAPI->GetLoadedWorldInfo()->BspTree )
         if ( bspTree->GetBspTreeMode() == zBSP_MODE_INDOOR ) {
 #if BUILD_GOTHIC_1_08k
@@ -1541,8 +1532,6 @@ XRESULT D3D11ShadowMap::DrawWorldLights()
     scb.SQ_ShadowAOStrength = settings.ShadowAOStrength;
     scb.SQ_WorldAOStrength = settings.WorldAOStrength;
     scb.SQ_ShadowSoftness = settings.ShadowSoftness * 2.0f;
-    scb.SQ_LightSize = std::clamp( settings.PCSSLightSize, 0.005f, 0.5f );
-
     // Modify lightsettings when indoor
     if ( auto bspTree = Engine::GAPI->GetLoadedWorldInfo()->BspTree )
         if ( bspTree->GetBspTreeMode() == zBSP_MODE_INDOOR ) {

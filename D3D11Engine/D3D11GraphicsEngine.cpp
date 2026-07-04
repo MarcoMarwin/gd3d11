@@ -941,7 +941,7 @@ XRESULT D3D11GraphicsEngine::Init() {
     SetDebugName( LinearSamplerState.Get(), "LinearSamplerState" );
 
     samplerDesc.Filter = D3D11_FILTER_COMPARISON_MIN_MAG_MIP_LINEAR;
-    //TODO: NVidia PCSS
+
     // samplerDesc.Filter = D3D11_FILTER_MIN_MAG_MIP_POINT;
     samplerDesc.ComparisonFunc = D3D11_COMPARISON_LESS_EQUAL;
     // Shadow sampler and shadowmap resources moved into D3D11ShadowMap

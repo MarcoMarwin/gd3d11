@@ -262,10 +262,36 @@ PS_OUTPUT PSMain( PS_INPUT Input )
 	float3 reflect_vecSmall = reflect(-viewDirection, normalize(distortionSmall.xzy * float3(1,10,1)));
 	float cos_spec = clamp(dot(reflect_vecSmall, -AC_LightPos.xyz * float3(1,1,1)), 0, 1);
 	float sun_spot = pow(cos_spec, 500.0f) * 0.5f;
-	// If water SSR has found opaque scene geometry, let that reflection win over the procedural sun glint.
-	// This only attenuates the added sun spot and leaves the SSR trace/blend itself untouched.
-	float sunSpotSSRBlock = saturate(ssrBaseWeight * ssrHitValid * 1.35f);
-	sun_spot *= 1.0f - sunSpotSSRBlock;
+	// If screen-space water reflection has found opaque geometry, let that reflection win over the procedural sun glint.
+	// A short light-direction occlusion trace keeps the sun spot stable when terrain sits between water and sun.
+	float sunSpotSSRBlock = saturate(max(ssrBaseWeight, ssrHitQuality * 0.75f) * ssrHitValid * 1.85f);
+	float sunSpotOcclusion = 0.0f;
+	if (waterSSRActive && sun_spot > 0.0001f)
+	{
+		float3 sunRayDir = normalize(-AC_LightPos.xyz);
+		float3 sunRayPos = Input.vWorldPosition;
+		float sunRayStep = 180.0f;
+		[loop]
+		for (int si = 0; si < 10; si++)
+		{
+			sunRayPos += sunRayDir * sunRayStep;
+			float4 sunProj = mul(float4(sunRayPos, 1.0f), RI_ViewProj);
+			sunProj.xyz /= sunProj.w;
+			float2 sunUV = sunProj.xy * float2(0.5f, -0.5f) + 0.5f;
+			if (sunUV.x < 0.0f || sunUV.x > 1.0f || sunUV.y < 0.0f || sunUV.y > 1.0f || sunProj.z < 0.0f || sunProj.z > 1.0f)
+				break;
+			float sunDepth = TX_Depth.SampleLevel(SS_Linear, sunUV, 0).r;
+			float sunSceneZ = RI_Projection._43 / (sunDepth - RI_Projection._33);
+			float sunDepthDiff = sunProj.w - sunSceneZ;
+			if (sunDepthDiff > 0.0f && sunDepthDiff < sunRayStep * 3.0f)
+			{
+				sunSpotOcclusion = 1.0f;
+				break;
+			}
+			sunRayStep *= 1.35f;
+		}
+	}
+	sun_spot *= 1.0f - saturate(sunSpotSSRBlock + sunSpotOcclusion * 0.85f);
 	color.rgb += lerp(sunColor * sun_spot, float3(0.0f, 0.0f, 0.0f), step(step(0.0f, AC_LightPos.y) * Input.vDiffuse.y, 0.5f));
 
 	//darken / lighten water based on the day / night cycle

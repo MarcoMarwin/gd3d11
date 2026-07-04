@@ -13,33 +13,16 @@
 #define CSM_PCF_LIMIT 3
 #endif
 
-#ifndef SHD_FILTER_PCSS
-#define SHD_FILTER_PCSS 0
-#endif
 
 #ifndef SHADOW_ATLAS
 #define SHADOW_ATLAS 0
 #endif
 
-#ifndef PCSS_BLOCKER_SEARCH_TEXEL_CAP
-#define PCSS_BLOCKER_SEARCH_TEXEL_CAP 24
-#endif
 
 #ifndef SHD_BLUE_NOISE
 #define SHD_BLUE_NOISE 0
 #endif
 
-#ifndef PCSS_BLOCKER_TAPS
-#define PCSS_BLOCKER_TAPS 8
-#endif
-
-#ifndef PCSS_FILTER_TAPS_NEAR
-#define PCSS_FILTER_TAPS_NEAR 8
-#endif
-
-#ifndef PCSS_FILTER_TAPS_FAR
-#define PCSS_FILTER_TAPS_FAR 4
-#endif
 
 #ifndef PCF_FILTER_TAPS_NEAR
 #define PCF_FILTER_TAPS_NEAR 8
@@ -117,41 +100,6 @@ static const float2 g_PoissonDisk16[16] = {
     float2( 0.14383161f, -0.14100790f)
 };
 
-// 32-tap Poisson disk for high quality PCSS
-static const float2 g_PoissonDisk32[32] = {
-    float2(-0.94201624f, -0.39906216f),
-    float2( 0.94558609f, -0.76890725f),
-    float2(-0.09418410f, -0.92938870f),
-    float2( 0.34495938f,  0.29387760f),
-    float2(-0.91588581f,  0.45771432f),
-    float2(-0.81544232f, -0.87912464f),
-    float2(-0.38277543f,  0.27676845f),
-    float2( 0.97484398f,  0.75648379f),
-    float2( 0.44323325f, -0.97511554f),
-    float2( 0.53742981f, -0.47373420f),
-    float2(-0.26496911f, -0.41893023f),
-    float2( 0.79197514f,  0.19090188f),
-    float2(-0.24188840f,  0.99706507f),
-    float2(-0.81409955f,  0.91437590f),
-    float2( 0.19984126f,  0.78641367f),
-    float2( 0.14383161f, -0.14100790f),
-    float2(-0.47609370f, -0.71680200f),
-    float2( 0.67239900f,  0.46110100f),
-    float2(-0.70447400f,  0.04610860f),
-    float2( 0.26049600f, -0.73073100f),
-    float2( 0.08472460f,  0.47360000f),
-    float2(-0.52309600f,  0.71053100f),
-    float2( 0.73020300f, -0.18908300f),
-    float2(-0.16124800f,  0.16425900f),
-    float2( 0.42027400f,  0.89780800f),
-    float2(-0.89168800f, -0.14594500f),
-    float2( 0.58721500f, -0.80065300f),
-    float2(-0.30896500f, -0.18259200f),
-    float2( 0.17058400f, -0.39880500f),
-    float2(-0.62198700f, -0.49556300f),
-    float2( 0.86741400f,  0.00426336f),
-    float2(-0.04244530f,  0.71893100f)
-};
 
 // 8-tap Poisson disk for medium quality / distant cascades
 static const float2 g_PoissonDisk8[8] = {
@@ -239,54 +187,6 @@ float2x2 GetPoissonRotationMatrixR(float2 screenPos, out float rawNoise)
     return GetPoissonRotationMatrixRForCascade(screenPos, 0, rawNoise);
 }
 
-//--------------------------------------------------------------------------------------
-// PCSS: Blocker search - find average depth of blocking texels
-// Uses non-comparison sampler to read raw depth values
-//--------------------------------------------------------------------------------------
-#if SHD_FILTER_PCSS
-void FindBlockers(out float avgBlockerDepth, out float numBlockers,
-                  float2 uv, float zReceiver, float searchRadius,
-                  int cascadeIndex, float2x2 rotMat, float2 screenPos)
-{
-    float blockerSum = 0.0f;
-    numBlockers = 0.0f;
-    int startIdx = GetBlueNoiseStartIndex(screenPos, cascadeIndex, 16, 5);
-
-    [unroll]
-    for (int i = 0; i < PCSS_BLOCKER_TAPS; ++i)
-    {
-        int sampleIdx = (startIdx + i * 5) & 15;
-        float2 offset = mul(rotMat, g_PoissonDisk16[sampleIdx]) * searchRadius;
-        float shadowMapDepth = SampleShadowMapLevel(uv + offset, cascadeIndex);
-
-        if (shadowMapDepth < zReceiver)
-        {
-            blockerSum += shadowMapDepth;
-            numBlockers += 1.0f;
-        }
-    }
-    avgBlockerDepth = blockerSum / max(numBlockers, 1.0f);
-}
-
-// PCSS: Estimate penumbra width and return filter radius
-float EstimatePCSSFilterRadius(float2 uv, float zReceiver, int cascadeIndex,
-                               float lightSize, float2x2 rotMat, float texelSize, float2 screenPos)
-{
-    // Cap search radius in texel units to keep blocker search cost predictable.
-    float searchRadius = min(lightSize, texelSize * PCSS_BLOCKER_SEARCH_TEXEL_CAP);
-    
-    float avgBlockerDepth = 0.0f;
-    float numBlockers = 0.0f;
-    FindBlockers(avgBlockerDepth, numBlockers, uv, zReceiver, searchRadius, cascadeIndex, rotMat, screenPos);
-
-    if (numBlockers < 1.0f)
-        return -1.0f; // No blockers found - fully lit
-
-    float penumbraWidth = (zReceiver - avgBlockerDepth) * lightSize;
-    
-    return clamp(penumbraWidth, texelSize * 0.5f, texelSize * 32.0f);
-}
-#endif
 
 #if SHADOW_ATLAS
 float IsInShadow(float3 wsPosition, Texture2D shadowmapAtlas, SamplerComparisonState samplerState)
@@ -414,64 +314,7 @@ float SampleCascadeShadowSoft(float4 vShadowSamplingPos, float2 projectedTexCoor
     // softness of 1.0 = default, < 1.0 = sharper, > 1.0 = softer
     float filterRadius = texelSize * softness;
 
-#if SHD_FILTER_PCSS
-    // PCSS: Percentage-Closer Soft Shadows
-    // Variable-width PCF based on blocker distance for contact-hardening shadows
-    // Use SQ_ShadowSoftness directly (not distance-scaled 'softness') because
-    // PCSS inherently handles distance-based penumbra via the blocker depth difference.
-    {
-        float noiseVal;
-        float2x2 rotMat = GetPoissonRotationMatrixRForCascade(screenPos, cascadeIndex, noiseVal);
-        float zReceiver = vShadowSamplingPos.z - bias;
-        
-        float pcssRadius = EstimatePCSSFilterRadius(projectedTexCoords.xy, zReceiver,
-            cascadeIndex, SQ_LightSize, rotMat, texelSize, screenPos);
-        pcssRadius *= SQ_ShadowSoftness;
-
-        if (pcssRadius < 0.0f)
-        {
-            shadow = 1.0f;
-        }
-        else
-        {
-            float sum = 0.0f;
-
-            if (cascadeIndex < 2) { // You could also change this to CSM_PCF_LIMIT
-                // some dithering to reduce the visible "shears" of the noise
-                float radiusJitter = lerp(0.85f, 1.15f, noiseVal);
-                float finalRadius = pcssRadius * radiusJitter;
-                int startIdx = GetBlueNoiseStartIndex(screenPos, cascadeIndex, 32, 11);
-                
-                [unroll]
-                for (int i = 0; i < PCSS_FILTER_TAPS_NEAR; i++)
-                {
-                    int sampleIdx = (startIdx + i * 9) & 31;
-                    float2 offset = mul(rotMat, g_PoissonDisk32[sampleIdx]) * finalRadius;
-                    
-                    sum += SampleShadowMapCmp(
-                        projectedTexCoords.xy + offset, cascadeIndex,
-                        zReceiver);
-                }
-                shadow = sum / (float)max(PCSS_FILTER_TAPS_NEAR, 1);
-            } else {
-                float radiusJitter = lerp(0.95f, 1.05f, noiseVal);
-                float finalRadius = pcssRadius * radiusJitter;
-                int startIdx = GetBlueNoiseStartIndex(screenPos, cascadeIndex, 16, 17);
-                
-                [unroll]
-                for (int i = 0; i < PCSS_FILTER_TAPS_FAR; i++)
-                {
-                    int sampleIdx = (startIdx + i * 5) & 15;
-                    float2 offset = mul(rotMat, g_PoissonDisk16[sampleIdx]) * finalRadius;
-                    sum += SampleShadowMapCmp(
-                        projectedTexCoords.xy + offset, cascadeIndex,
-                        zReceiver);
-                }
-                shadow = sum / (float)max(PCSS_FILTER_TAPS_FAR, 1);
-            }
-        }
-    }
-#elif SHD_FILTER_16TAP_PCF
+#if SHD_FILTER_16TAP_PCF
 #if NUM_CSM_CASCADES <= 1
     // Single cascade - use near cascade quality profile.
     float2x2 rotMat = GetPoissonRotationMatrixForCascade(screenPos, cascadeIndex);

@@ -85,13 +85,25 @@ void D3D11TiledDeferredShading::Init(
     // Shadow cube array is lazy-created on first AllocateSlot() to save memory when shadows are off
 }
 
-void D3D11TiledDeferredShading::EnsureShadowArray() {
-    if ( m_ShadowArrayCreated ) return;
+void D3D11TiledDeferredShading::EnsureShadowArray( uint32_t shadowCubeSize ) {
+    shadowCubeSize = std::clamp<uint32_t>( shadowCubeSize, 64, 512 );
+    if ( m_ShadowArrayCreated && m_ShadowCubeSize == shadowCubeSize ) return;
+
+    if ( m_ShadowArrayCreated && m_ShadowCubeSize != shadowCubeSize ) {
+        m_SlotInUse.reset();
+        for ( auto& dsv : m_SlotDSVs ) dsv.Reset();
+        for ( auto& view : m_SlotViews ) view.reset();
+        m_ShadowCubeArraySRV.Reset();
+        m_ShadowCubeArray.Reset();
+        m_ShadowArrayCreated = false;
+    }
+
+    m_ShadowCubeSize = shadowCubeSize;
 
     // TextureCubeArray as depth render target + shader resource (no copies needed)
     D3D11_TEXTURE2D_DESC desc = {};
-    desc.Width = SHADOW_CUBE_SIZE;
-    desc.Height = SHADOW_CUBE_SIZE;
+    desc.Width = shadowCubeSize;
+    desc.Height = shadowCubeSize;
     desc.MipLevels = 1;
     desc.ArraySize = MAX_SHADOW_CUBEMAPS * 6;
     desc.Format = DXGI_FORMAT_R16_TYPELESS;
@@ -146,14 +158,14 @@ void D3D11TiledDeferredShading::EnsureShadowArray() {
         // View wrapper for RenderShadowCube() interface (uses GetSizeX() and GetDepthStencilView())
         m_SlotViews[slot] = std::make_unique<RenderToDepthStencilBuffer>(
             m_ShadowCubeArray, m_SlotDSVs[slot], nullptr,
-            SHADOW_CUBE_SIZE, SHADOW_CUBE_SIZE );
+            shadowCubeSize, shadowCubeSize );
     }
 
     m_ShadowArrayCreated = true;
 }
 
-int D3D11TiledDeferredShading::AllocateSlot() {
-    EnsureShadowArray();
+int D3D11TiledDeferredShading::AllocateSlot( uint32_t shadowCubeSize ) {
+    EnsureShadowArray( shadowCubeSize );
     for ( uint32_t i = 0; i < MAX_SHADOW_CUBEMAPS; i++ ) {
         if ( !m_SlotInUse[i] ) {
             m_SlotInUse[i] = true;
@@ -405,6 +417,11 @@ D3D11TiledDeferredShading::CullResult D3D11TiledDeferredShading::CullLights(
         vob->DoAnimation();
 
         float4 lightColor = float4( vob->GetLightColor() );
+        if ( !light->AllowsPointlightShadows && !light->IsDynamicVobLight && !light->IsVisualFXLight ) {
+            lightColor.x *= 0.35f;
+            lightColor.y *= 0.35f;
+            lightColor.z *= 0.35f;
+        }
         float lightRange = vob->GetLightRange();
         float3 posWorld = light->GetEffectivePositionWorld();
 
