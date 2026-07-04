@@ -7040,7 +7040,7 @@ void GothicAPI::CollectVisibleVobs( const RndCullContext& ctx ) {
                 continue;
             }
             BoundingSphere lightSphere;
-            lightSphere.Center = vi->GetEffectivePositionWorld();
+            XMStoreFloat3( &lightSphere.Center, vi->GetEffectivePositionWorldXM() );
             lightSphere.Radius = vi->Vob->GetLightRange();
             if ( cullingEnabled && !ctx.frustum.Intersects( lightSphere ) ) {
                 continue;
