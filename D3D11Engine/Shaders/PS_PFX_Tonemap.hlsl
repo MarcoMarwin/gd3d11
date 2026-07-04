@@ -18,11 +18,7 @@ struct PS_INPUT
 float4 PSMain(PS_INPUT Input) : SV_TARGET
 {
     float3 HDRColor = TX_Scene.Sample(SS_Linear, Input.vTexcoord).rgb;
-#if USE_TONEMAP == 0
-    float3 toneMapped = ToneMap_Simple(HDRColor, TX_Lum, SS_Linear);
-#else
     float3 toneMapped = LPMToneMap(HDRColor, TX_Lum, SS_Linear);
-#endif
 
     toneMapped = max(toneMapped - HDR_Threshold, 0.0f);
     return float4(toneMapped, 1.0f);

@@ -74,8 +74,7 @@ const LPMConstantsBuffer& GetLPMConstants() {
 }
 
 void BindLPMConstants( D3D11PShader* shader ) {
-    if ( Engine::GAPI->GetRendererState().RendererSettings.HDRToneMap == GothicRendererSettings::E_HDRToneMap::LPMToneMap )
-        shader->GetBuffer( "LPM_Constants" ).Update( &GetLPMConstants() ).Bind();
+    shader->GetBuffer( "LPM_Constants" ).Update( &GetLPMConstants() ).Bind();
 }
 }
 

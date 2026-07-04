@@ -1326,7 +1326,7 @@ void GothicAPI::LoadRendererWorldSettings( GothicRendererSettings& s, const char
     if ( !GMPModeActive ) {
 	    s.VisualFXDrawRadius = GetPrivateProfileFloatA( "General", "VisualFXDrawRadius", s.VisualFXDrawRadius, ini );
 	    s.OutdoorVobDrawRadius = GetPrivateProfileFloatA( "General", "OutdoorVobDrawRadius", s.OutdoorVobDrawRadius, ini );
-        s.OutdoorSmallVobDrawRadius = GetPrivateProfileFloatA( "General", "OutdoorSmallVobDrawRadius", s.OutdoorSmallVobDrawRadius, ini );
+        s.OutdoorSmallVobDrawRadius = std::clamp( GetPrivateProfileFloatA( "General", "OutdoorSmallVobDrawRadius", s.OutdoorSmallVobDrawRadius, ini ), 5000.0f, 25000.0f );
         s.IndoorVobDrawRadius = GetPrivateProfileFloatA( "General", "IndoorVobDrawRadius", s.IndoorVobDrawRadius, ini );
 	    s.SkeletalMeshDrawRadius = GetPrivateProfileFloatA( "General", "SkeletalMeshDrawRadius", s.SkeletalMeshDrawRadius, ini );
 	    s.SectionDrawRadius = static_cast<decltype(s.SectionDrawRadius)>( std::clamp<int>( static_cast<int>( GetPrivateProfileIntA( "General", "SectionDrawRadius", s.SectionDrawRadius, ini.c_str() ) ), 1, 10 ) );
@@ -4323,16 +4323,15 @@ void GothicAPI::CollectVisibleVobs(
             if ( vi->Vob->IsEnabled() /*&& vob->GetShowVisual()*/ ) {
                 vi->VisibleInFrame = true;
 
-                // Update regular dynamic lights inside the active shadow radius.
-                if ( vi->AllowsPointlightShadows ) {
-                    if ( RendererState.RendererSettings.EnablePointlightShadows >= GothicRendererSettings::PLS_UPDATE_DYNAMIC && !vi->Vob->IsStatic() ) {
-                        // Now check for distances, etc
-                        float lightCameraDist;
-                        XMStoreFloat( &lightCameraDist, XMVector3Length( cameraPosition - vi->GetEffectivePositionWorldXM() ) );
-                        // Match the allocation radius so small lights are not starved by the third-person camera offset.
-                        if ( lightCameraDist < vi->Vob->GetLightRange() * 9.0f )
-                            vi->UpdateShadows = true;
-                    }
+                // Dynamic mode updates every visible, eligible point-light shadow in the active radius.
+                // Ineligible ambience lights stay excluded by AllowsPointlightShadows.
+                if ( vi->AllowsPointlightShadows
+                    && RendererState.RendererSettings.EnablePointlightShadows >= GothicRendererSettings::PLS_UPDATE_DYNAMIC ) {
+                    float lightCameraDist;
+                    XMStoreFloat( &lightCameraDist, XMVector3Length( cameraPosition - vi->GetEffectivePositionWorldXM() ) );
+                    // Match the allocation radius so small lights are not starved by the third-person camera offset.
+                    if ( lightCameraDist < vi->Vob->GetLightRange() * 9.0f )
+                        vi->UpdateShadows = true;
                 }
             }
         }
@@ -5646,7 +5645,6 @@ XRESULT GothicAPI::SaveMenuSettings( const std::string& file ) {
     WritePrivateProfileStringA( "General", "EnableFog", std::to_string( s.DrawFog ? TRUE : FALSE ).c_str(), ini.c_str() );
     WritePrivateProfileStringA( "General", "FogRange", float_to_string( s.FogRange , 2).c_str(), ini.c_str() );
     WritePrivateProfileStringA( "General", "EnableHDR", std::to_string( s.EnableHDR ? TRUE : FALSE ).c_str(), ini.c_str() );
-    WritePrivateProfileStringA( "General", "HDRToneMap", std::to_string( s.HDRToneMap ).c_str(), ini.c_str() );
     WritePrivateProfileStringA( "General", "EnableDebugLog", std::to_string( s.EnableDebugLog ? TRUE : FALSE ).c_str(), ini.c_str() );
     WritePrivateProfileStringA( "General", "EnableAutoupdates", std::to_string( s.EnableAutoupdates ? TRUE : FALSE ).c_str(), ini.c_str() );
     WritePrivateProfileStringA( "General", "EnableGodRays", std::to_string( s.EnableGodRays ? TRUE : FALSE ).c_str(), ini.c_str() );
@@ -5708,7 +5706,6 @@ XRESULT GothicAPI::SaveMenuSettings( const std::string& file ) {
     WritePrivateProfileStringA( "Display", "StretchWindow", std::to_string( s.StretchWindow ? TRUE : FALSE ).c_str(), ini.c_str() );
     WritePrivateProfileStringA( "Display", "UIScale", std::to_string( s.GothicUIScale ).c_str(), ini.c_str() );
     WritePrivateProfileStringA( "Display", "Rain", std::to_string( s.EnableRain ? TRUE : FALSE ).c_str(), ini.c_str() );
-    WritePrivateProfileStringA( "Display", "LimitLightIntesity", std::to_string( s.LimitLightIntesity ? TRUE : FALSE ).c_str(), ini.c_str() );
     WritePrivateProfileStringA( "Display", "TiledLighting", std::to_string( s.EnableTiledLighting ? TRUE : FALSE ).c_str(), ini.c_str() );
     WritePrivateProfileStringA( "Display", "RendererMode", std::to_string( static_cast<int>(s.RendererMode) ).c_str(), ini.c_str() );
     WritePrivateProfileStringA( "Display", "WindQuality", std::to_string( s.WindQuality ).c_str(), ini.c_str() );
@@ -5775,10 +5772,6 @@ XRESULT GothicAPI::LoadMenuSettings( const std::string& file ) {
         s.FogRange = GetPrivateProfileFloatA( "General", "FogRange", ds.FogRange, ini.c_str() );
         s.AtmosphericScattering = GetPrivateProfileBoolA( "General", "AtmosphericScattering", ds.AtmosphericScattering, ini );
         s.EnableHDR = GetPrivateProfileBoolA( "General", "EnableHDR", ds.EnableHDR, ini );
-        const int savedHDRToneMap = GetPrivateProfileIntA( "General", "HDRToneMap", ds.HDRToneMap, ini.c_str() );
-        s.HDRToneMap = savedHDRToneMap == GothicRendererSettings::E_HDRToneMap::LPMToneMap
-            ? GothicRendererSettings::E_HDRToneMap::LPMToneMap
-            : GothicRendererSettings::E_HDRToneMap::ToneMap_Simple;
         s.EnableDebugLog = GetPrivateProfileBoolA( "General", "EnableDebugLog", ds.EnableDebugLog, ini );
         s.EnableAutoupdates = GetPrivateProfileBoolA( "General", "EnableAutoupdates", ds.EnableAutoupdates, ini );
         s.EnableGodRays = GetPrivateProfileBoolA( "General", "EnableGodRays", ds.EnableGodRays, ini );
@@ -5831,22 +5824,16 @@ XRESULT GothicAPI::LoadMenuSettings( const std::string& file ) {
         // override INI settings with GMP minimum values.
         if ( GMPModeActive ) {
             s.OutdoorVobDrawRadius = std::max( 20000.f, s.OutdoorVobDrawRadius );
-            s.OutdoorSmallVobDrawRadius = std::max( 20000.f, s.OutdoorSmallVobDrawRadius );
+            s.OutdoorSmallVobDrawRadius = std::clamp( s.OutdoorSmallVobDrawRadius, 20000.0f, 25000.0f );
             s.SectionDrawRadius = std::max( 3, s.SectionDrawRadius );
             s.EnableHDR = false;
         }
 
         static XMFLOAT3 defaultLightDirection = XMFLOAT3( 1, 1, 1 );
         s.EnableShadows = GetPrivateProfileBoolA( "Shadows", "EnableShadows", ds.EnableShadows, ini );
-        s.ShadowFilterMode = static_cast<GothicRendererSettings::E_ShadowFilterMode>(
-            GetPrivateProfileIntA( "Shadows", "ShadowFilterMode",
-                static_cast<int>(ds.ShadowFilterMode), ini.c_str() ));
+        s.ShadowFilterMode = GothicRendererSettings::E_ShadowFilterMode::SHADOW_FILTER_SIMPLE;
         s.ShadowMapSize = GetPrivateProfileIntA( "Shadows", "ShadowMapSize", ds.ShadowMapSize, ini.c_str() );
-        int pointlightShadowMode = GetPrivateProfileIntA( "Shadows", "PointlightShadows", GothicRendererSettings::EPointLightShadowMode::PLS_STATIC_ONLY, ini.c_str() );
-        pointlightShadowMode = std::clamp( pointlightShadowMode,
-            static_cast<int>(GothicRendererSettings::EPointLightShadowMode::PLS_DISABLED),
-            static_cast<int>(GothicRendererSettings::EPointLightShadowMode::PLS_UPDATE_DYNAMIC) );
-        s.EnablePointlightShadows = static_cast<GothicRendererSettings::EPointLightShadowMode>(pointlightShadowMode);
+        s.EnablePointlightShadows = GothicRendererSettings::EPointLightShadowMode::PLS_UPDATE_DYNAMIC;
         s.WorldShadowRangeScale = GetPrivateProfileFloatA( "Shadows", "WorldShadowRangeScale", ds.WorldShadowRangeScale, ini );
         s.NumShadowCascades = GetPrivateProfileIntA( "Shadows", "NumShadowCascades", ds.NumShadowCascades, ini.c_str() );
         s.ShadowCascadePCFLimit = GetPrivateProfileIntA( "Shadows", "ShadowCascadePCFLimit", ds.ShadowCascadePCFLimit, ini.c_str() );
@@ -5879,7 +5866,7 @@ XRESULT GothicAPI::LoadMenuSettings( const std::string& file ) {
         s.StretchWindow = GetPrivateProfileBoolA( "Display", "StretchWindow", ds.StretchWindow, ini );
         s.GothicUIScale = GetPrivateProfileFloatA( "Display", "UIScale", 1.0f, ini );
         s.EnableRain = GetPrivateProfileBoolA( "Display", "Rain", ds.EnableRain, ini );
-        s.LimitLightIntesity = GetPrivateProfileBoolA( "Display", "LimitLightIntesity", ds.LimitLightIntesity, ini );
+        s.LimitLightIntesity = true;
 
         // s.EnableTiledLighting = GetPrivateProfileBoolA( "Display", "TiledLighting", s.EnableTiledLighting, ini );
         // s.RendererMode = static_cast<GothicRendererSettings::E_RendererMode>(GetPrivateProfileIntA( "Display", "RendererMode", s.RendererMode, ini.c_str() ) );

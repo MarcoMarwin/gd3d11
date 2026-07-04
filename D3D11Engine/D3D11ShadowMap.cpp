@@ -943,17 +943,26 @@ XRESULT D3D11ShadowMap::DrawPointlightShadows( std::vector<VobLightInfo*>& light
 
     auto& settings = Engine::GAPI->GetRendererState().RendererSettings;
 
-    // Release any resources of not visible lights
+    // Release resources for disabled lights. Keep transition-safe dynamic/VFX lights
+    // alive for brief indoor/outdoor visibility hiccups so their shadows do not pop.
     for ( auto& it : Engine::GAPI->VobLightMap ) {
-        if ( it.second->LightShadowBuffers
-            && (!it.second->Vob->IsEnabled() || !it.second->VisibleInFrame) ) {
-            if ( D3D11PointLight* pl = dynamic_cast<D3D11PointLight*>(it.second->LightShadowBuffers.get()) ) {
+        VobLightInfo* info = it.second;
+        if ( !info || !info->LightShadowBuffers || !info->Vob ) {
+            continue;
+        }
+
+        const bool vobDisabled = !info->Vob->IsEnabled();
+        const bool temporarilyOutOfFrame = !info->VisibleInFrame;
+        const bool keepAcrossPortalTransition = temporarilyOutOfFrame
+            && info->IgnoreIndoorOutdoorLimit
+            && (info->IsDynamicVobLight || info->IsVisualFXLight);
+        if ( vobDisabled || (temporarilyOutOfFrame && !keepAcrossPortalTransition) ) {
+            if ( D3D11PointLight* pl = dynamic_cast<D3D11PointLight*>(info->LightShadowBuffers.get()) ) {
                 pl->ClearTiledSlot();
                 pl->ReleaseShadowMap();
             }
         }
     }
-
     if ( settings.EnablePointlightShadows <= 0 ) {
 
         return XR_SUCCESS;
@@ -996,7 +1005,7 @@ XRESULT D3D11ShadowMap::DrawPointlightShadows( std::vector<VobLightInfo*>& light
         // Create resources only when an eligible light is actually visible.
         if ( !light->LightShadowBuffers ) {
             BaseShadowedPointLight* bpl;
-            graphicsEngine->CreateShadowedPointLight( &bpl, light, light->IsDynamicVobLight || light->IsVisualFXLight || !light->Vob->IsStatic() );
+            graphicsEngine->CreateShadowedPointLight( &bpl, light, dynamicMode );
             light->LightShadowBuffers.reset( bpl );
             light->UpdateShadows = true;
         }

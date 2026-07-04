@@ -580,6 +580,27 @@ void ApplyFeatureLevel10Downgrades(GothicRendererSettings& s) {
     }
 }
 
+namespace
+{
+    constexpr float OBJECT_DRAW_DISTANCE_MIN_KM = 5.0f;
+    constexpr float OBJECT_DRAW_DISTANCE_MAX_KM = 25.0f;
+    constexpr int OBJECT_DRAW_DISTANCE_UI_MIN = 1;
+    constexpr int OBJECT_DRAW_DISTANCE_UI_MAX = 10;
+
+    float ObjectDrawDistanceUiToMeters( int value ) {
+        const int clamped = std::clamp( value, OBJECT_DRAW_DISTANCE_UI_MIN, OBJECT_DRAW_DISTANCE_UI_MAX );
+        const float t = static_cast<float>(clamped - OBJECT_DRAW_DISTANCE_UI_MIN)
+            / static_cast<float>(OBJECT_DRAW_DISTANCE_UI_MAX - OBJECT_DRAW_DISTANCE_UI_MIN);
+        return (OBJECT_DRAW_DISTANCE_MIN_KM + t * (OBJECT_DRAW_DISTANCE_MAX_KM - OBJECT_DRAW_DISTANCE_MIN_KM)) * 1000.0f;
+    }
+
+    int ObjectDrawDistanceMetersToUi( float meters ) {
+        const float km = std::clamp( meters / 1000.0f, OBJECT_DRAW_DISTANCE_MIN_KM, OBJECT_DRAW_DISTANCE_MAX_KM );
+        const float t = (km - OBJECT_DRAW_DISTANCE_MIN_KM) / (OBJECT_DRAW_DISTANCE_MAX_KM - OBJECT_DRAW_DISTANCE_MIN_KM);
+        return std::clamp( static_cast<int>(std::round(OBJECT_DRAW_DISTANCE_UI_MIN + t * (OBJECT_DRAW_DISTANCE_UI_MAX - OBJECT_DRAW_DISTANCE_UI_MIN))),
+            OBJECT_DRAW_DISTANCE_UI_MIN, OBJECT_DRAW_DISTANCE_UI_MAX );
+    }
+}
 void ApplyGraphicsPresets( GothicRendererSettings& s ) {
     const auto preset = s.GraphicsPreset;
     if ( preset == GothicRendererSettings::E_GraphicsPreset::GRAPHICS_CUSTOM ) {
@@ -612,22 +633,20 @@ void ApplyGraphicsPresets( GothicRendererSettings& s ) {
     case GothicRendererSettings::GRAPHICS_LOW:
         s.AntiAliasingMode = GothicRendererSettings::E_AntiAliasingMode::AA_FSR;
         s.Upscaler = GothicRendererSettings::E_Upscaler::UPSCALER_FSR_3;
-        s.ResolutionScalePercent = 50;
+        s.ResolutionScalePercent = 66;
         s.SharpenFactor = 1.0f;
         s.ShadowMapSize = 1024;
-        s.ShadowFilterMode = GothicRendererSettings::SHADOW_FILTER_DISABLED;
-        s.AoMode = AOMode::AO_NONE;
+        s.AoMode = AOMode::AO_XEGTAO;
         s.EnableContactShadows = false;
         s.EnableScreenSpaceGI = false;
-        s.EnableSSS = false;
+        s.EnableSSS = true;
         s.EnableDoF = false;
         s.AllowNormalmaps = false;
         s.EnableParallaxOcclusionMapping = true;
-        s.WindQuality = GothicRendererSettings::EWindQuality::WIND_QUALITY_NONE;
-        s.HeroAffectsObjects = false;
+        s.WindQuality = GothicRendererSettings::EWindQuality::WIND_QUALITY_ADVANCED;
+        s.HeroAffectsObjects = true;
         s.EnableOcclusionCulling = true;
-        s.EnablePointlightShadows = GothicRendererSettings::EPointLightShadowMode::PLS_STATIC_ONLY;
-        s.OutdoorSmallVobDrawRadius = 10'000.0f;
+        s.OutdoorSmallVobDrawRadius = ObjectDrawDistanceUiToMeters( 1 );
         s.SectionDrawRadius = 3;
         s.textureMaxSize = static_cast<int>(TX_QUALITY::High);
         break;
@@ -637,7 +656,6 @@ void ApplyGraphicsPresets( GothicRendererSettings& s ) {
         s.ResolutionScalePercent = 75;
         s.SharpenFactor = 1.0f;
         s.ShadowMapSize = 2048;
-        s.ShadowFilterMode = GothicRendererSettings::SHADOW_FILTER_SIMPLE;
         s.AoMode = AOMode::AO_XEGTAO;
         s.EnableContactShadows = true;
         s.EnableScreenSpaceGI = true;
@@ -648,8 +666,7 @@ void ApplyGraphicsPresets( GothicRendererSettings& s ) {
         s.WindQuality = GothicRendererSettings::EWindQuality::WIND_QUALITY_ADVANCED;
         s.HeroAffectsObjects = true;
         s.EnableOcclusionCulling = true;
-        s.EnablePointlightShadows = GothicRendererSettings::EPointLightShadowMode::PLS_UPDATE_DYNAMIC;
-        s.OutdoorSmallVobDrawRadius = 15'000.0f;
+        s.OutdoorSmallVobDrawRadius = ObjectDrawDistanceUiToMeters( 3 );
         s.SectionDrawRadius = 4;
         s.textureMaxSize = static_cast<int>(TX_QUALITY::MAX);
         break;
@@ -659,7 +676,6 @@ void ApplyGraphicsPresets( GothicRendererSettings& s ) {
         s.ResolutionScalePercent = 100;
         s.SharpenFactor = 1.0f;
         s.ShadowMapSize = 4096;
-        s.ShadowFilterMode = GothicRendererSettings::SHADOW_FILTER_SIMPLE;
         s.AoMode = AOMode::AO_XEGTAO;
         s.EnableContactShadows = true;
         s.EnableScreenSpaceGI = true;
@@ -670,8 +686,7 @@ void ApplyGraphicsPresets( GothicRendererSettings& s ) {
         s.WindQuality = GothicRendererSettings::EWindQuality::WIND_QUALITY_ADVANCED;
         s.HeroAffectsObjects = true;
         s.EnableOcclusionCulling = false;
-        s.EnablePointlightShadows = GothicRendererSettings::EPointLightShadowMode::PLS_UPDATE_DYNAMIC;
-        s.OutdoorSmallVobDrawRadius = 20'000.0f;
+        s.OutdoorSmallVobDrawRadius = ObjectDrawDistanceUiToMeters( 6 );
         s.SectionDrawRadius = 5;
         s.textureMaxSize = static_cast<int>(TX_QUALITY::MAX);
         break;
@@ -681,7 +696,6 @@ void ApplyGraphicsPresets( GothicRendererSettings& s ) {
         s.ResolutionScalePercent = 100;
         s.SharpenFactor = 1.0f;
         s.ShadowMapSize = 8192;
-        s.ShadowFilterMode = GothicRendererSettings::SHADOW_FILTER_PCSS;
         s.AoMode = AOMode::AO_XEGTAO;
         s.EnableContactShadows = true;
         s.EnableScreenSpaceGI = true;
@@ -692,8 +706,7 @@ void ApplyGraphicsPresets( GothicRendererSettings& s ) {
         s.WindQuality = GothicRendererSettings::EWindQuality::WIND_QUALITY_ADVANCED;
         s.HeroAffectsObjects = true;
         s.EnableOcclusionCulling = false;
-        s.EnablePointlightShadows = GothicRendererSettings::EPointLightShadowMode::PLS_UPDATE_DYNAMIC;
-        s.OutdoorSmallVobDrawRadius = 25'000.0f;
+        s.OutdoorSmallVobDrawRadius = ObjectDrawDistanceUiToMeters( 8 );
         s.SectionDrawRadius = 6;
         s.textureMaxSize = static_cast<int>(TX_QUALITY::MAX);
         break;
@@ -718,13 +731,14 @@ namespace
             || s.AntiAliasingMode == GothicRendererSettings::E_AntiAliasingMode::AA_FSR3
             || (s.AntiAliasingMode == GothicRendererSettings::E_AntiAliasingMode::AA_FSR && IsFSRUpscaler( s.Upscaler ));
     }
+
+
     void FixupSettings( GothicRendererSettings& s ) {
         s.FixupUpscalingSettings();
-        if ( s.HDRToneMap != GothicRendererSettings::E_HDRToneMap::ToneMap_Simple
-            && s.HDRToneMap != GothicRendererSettings::E_HDRToneMap::LPMToneMap ) {
-            s.HDRToneMap = GothicRendererSettings::E_HDRToneMap::ToneMap_Simple;
-        }
-
+        s.LimitLightIntesity = true;
+        s.ShadowFilterMode = GothicRendererSettings::E_ShadowFilterMode::SHADOW_FILTER_SIMPLE;
+        s.EnablePointlightShadows = GothicRendererSettings::EPointLightShadowMode::PLS_UPDATE_DYNAMIC;
+        s.OutdoorSmallVobDrawRadius = ObjectDrawDistanceUiToMeters( ObjectDrawDistanceMetersToUi( s.OutdoorSmallVobDrawRadius ) );
         s.ForceFOV = false;
         s.FOVHoriz = 100.0f;
         s.FOVVert = 100.0f;
@@ -996,19 +1010,19 @@ void ImGuiShim::RenderSettingsWindow()
 
             ImGui::SetItemTooltip( "Selects fullscreen or windowed display mode." );
             const static std::vector<std::pair<const char*, int>> shadowMapSizesMax = {
-                {"very low", 512},
-                {"low", 1024},
-                {"medium", 2048},
-                {"high", 4096},
-                {"very high", 8192},
-                {"ultra high", 16384},
+                {"Very Low", 512},
+                {"Low", 1024},
+                {"Medium", 2048},
+                {"High", 4096},
+                {"Very High", 8192},
+                {"Ultra High", 16384},
             };
             const static std::vector<std::pair<const char*, int>> shadowMapSizesDxFeature10 = {
-                {"very low", 512},
-                {"low", 1024},
-                {"medium", 2048},
-                {"high", 4096},
-                {"very high", 8192},
+                {"Very Low", 512},
+                {"Low", 1024},
+                {"Medium", 2048},
+                {"High", 4096},
+                {"Very High", 8192},
             };
             const std::vector<std::pair<const char*, int>>& shadowMapSizes = FeatureLevel10Compatibility
                 ? shadowMapSizesDxFeature10
@@ -1029,66 +1043,15 @@ void ImGuiShim::RenderSettingsWindow()
             ImGui::EndDisabled();
             ImGui::SetItemTooltip( "Controls sun and moon shadow quality." );
 
-            static std::vector<std::pair<const char*, GothicRendererSettings::E_ShadowFilterMode>> shadowFilterModes = {
-                {"Disabled", GothicRendererSettings::E_ShadowFilterMode::SHADOW_FILTER_DISABLED},
-                {"Simple", GothicRendererSettings::E_ShadowFilterMode::SHADOW_FILTER_SIMPLE},
-                {"PCSS", GothicRendererSettings::E_ShadowFilterMode::SHADOW_FILTER_PCSS},
-            };
-            ImText( "Shadow Filtering", buttonWidth ); ImGui::SameLine();
-            ImGui::BeginDisabled( !settings.EnableShadows );
-            if ( ImComboBoxC( "##ShadowFiltering", shadowFilterModes, &settings.ShadowFilterMode, [&shadersToReload]() {
-                shadersToReload |= ShaderCategory::LightsAndShadows;
-                } ) ) {
-                ImGui::EndCombo();
-            }
-            ImGui::EndDisabled();
-            ImGui::SetItemTooltip( "Selects the world-shadow filtering method." );
-
-            static GothicRendererSettings::EPointLightShadowMode lastEnabledPointlightShadowMode =
-                GothicRendererSettings::EPointLightShadowMode::PLS_UPDATE_DYNAMIC;
-            if ( static_cast<int>(settings.EnablePointlightShadows) > static_cast<int>(GothicRendererSettings::EPointLightShadowMode::PLS_UPDATE_DYNAMIC) ) {
-                settings.EnablePointlightShadows = GothicRendererSettings::EPointLightShadowMode::PLS_UPDATE_DYNAMIC;
-            }
-            if ( settings.EnablePointlightShadows != GothicRendererSettings::EPointLightShadowMode::PLS_DISABLED ) {
-                lastEnabledPointlightShadowMode = settings.EnablePointlightShadows;
-            }
-            bool pointlightShadowsEnabled = settings.EnablePointlightShadows != GothicRendererSettings::EPointLightShadowMode::PLS_DISABLED;
-
-            ImText( "Pointlight Shadows", { buttonWidth.x - ImGui::GetFrameHeight() - style.ItemSpacing.x, buttonWidth.y } ); ImGui::SameLine();
-            if ( ImGui::Checkbox( "##Enable Pointlight Shadows", &pointlightShadowsEnabled ) ) {
-                settings.EnablePointlightShadows = pointlightShadowsEnabled
-                    ? lastEnabledPointlightShadowMode
-                    : GothicRendererSettings::EPointLightShadowMode::PLS_DISABLED;
-            }
-            ImGui::SetItemTooltip( "Enables shadows from point lights." );
-            ImGui::SameLine();
-
-            const static std::vector<std::tuple<const char*, GothicRendererSettings::EPointLightShadowMode, const char*>> pointlightShadowModes = {
-                { "Static", GothicRendererSettings::EPointLightShadowMode::PLS_STATIC_ONLY, "Static shadows from point lights." },
-                { "Dynamic", GothicRendererSettings::EPointLightShadowMode::PLS_UPDATE_DYNAMIC, "Updates point-light shadows for moving lights and dynamic objects." },
-            };
-            auto displayedPointlightShadowMode = pointlightShadowsEnabled
-                ? settings.EnablePointlightShadows
-                : lastEnabledPointlightShadowMode;
-            ImGui::BeginDisabled( !pointlightShadowsEnabled );
-            if ( ImComboBoxCT( "##PointlightShadowMode", pointlightShadowModes, &displayedPointlightShadowMode, [&settings, &displayedPointlightShadowMode] {
-                settings.EnablePointlightShadows = displayedPointlightShadowMode;
-                lastEnabledPointlightShadowMode = displayedPointlightShadowMode;
-                } ) ) {
-                ImGui::EndCombo();
-            }
-            ImGui::EndDisabled();
-            ImGui::SetItemTooltip( "Selects point-light shadow mode." );
-
             ImText( "Shadow Softness", buttonWidth ); ImGui::SameLine();
             SliderNormalizedUiStrength( "##ShadowSoftness", &settings.ShadowSoftness );
             ImGui::SetItemTooltip( "Controls world and point-light shadow softness." );
 
 
-            float objectDrawDistance = settings.OutdoorSmallVobDrawRadius / 1000.0f;
+            int objectDrawDistance = ObjectDrawDistanceMetersToUi( settings.OutdoorSmallVobDrawRadius );
             ImText( "Object Draw Distance", buttonWidth ); ImGui::SameLine();
-            if ( ImGui::SliderFloat( "##OutdoorSmallVobDrawRadius", &objectDrawDistance, 1.f, 100.0f, "%.0f", ImGuiSliderFlags_::ImGuiSliderFlags_ClampOnInput ) ) {
-                settings.OutdoorSmallVobDrawRadius = static_cast<float>(objectDrawDistance * 1000.0f);
+            if ( ImGui::SliderInt( "##OutdoorSmallVobDrawRadius", &objectDrawDistance, OBJECT_DRAW_DISTANCE_UI_MIN, OBJECT_DRAW_DISTANCE_UI_MAX, "%d", ImGuiSliderFlags_::ImGuiSliderFlags_ClampOnInput ) ) {
+                settings.OutdoorSmallVobDrawRadius = ObjectDrawDistanceUiToMeters( objectDrawDistance );
             }
             ImGui::SetItemTooltip( "Controls the draw distance of small objects and vegetation." );
 
@@ -1104,24 +1067,6 @@ void ImGuiShim::RenderSettingsWindow()
             SliderDisplayTuningStrength( "##Brightness", &settings.BrightnessValue );
             ImGui::SetItemTooltip( "Adjusts display brightness." );
 
-            ImText( "HDR", { buttonWidth.x - ImGui::GetFrameHeight() - style.ItemSpacing.x, buttonWidth.y } ); ImGui::SameLine();
-            ImGui::Checkbox( "##Enable HDR", &settings.EnableHDR );
-            ImGui::SetItemTooltip( "Enables HDR tone mapping." );
-            ImGui::SameLine();
-
-            static const std::vector<std::pair<const char*, GothicRendererSettings::E_HDRToneMap>> toneMappingModes = {
-                { "Legacy", GothicRendererSettings::E_HDRToneMap::ToneMap_Simple },
-                { "LPM", GothicRendererSettings::E_HDRToneMap::LPMToneMap },
-            };
-            ImGui::BeginDisabled( !settings.EnableHDR );
-            ImGui::SetNextItemWidth( standardComboWidth );
-            if ( ImComboBoxC( "##HDRToneMapping", toneMappingModes, &settings.HDRToneMap, [&shadersToReload] {
-                shadersToReload |= ShaderCategory::Tonemapping;
-            } ) ) {
-                ImGui::EndCombo();
-            }
-            ImGui::EndDisabled();
-            ImGui::SetItemTooltip( "Selects the HDR tone-mapping curve." );
             ImGui::PopItemWidth();
 
             ImGui::EndGroup();
@@ -1305,12 +1250,16 @@ void ImGuiShim::RenderSettingsWindow()
             ImText( "Enable Rain", { buttonWidth.x - ImGui::GetFrameHeight() - style.ItemSpacing.x, buttonWidth.y } ); ImGui::SameLine();
             ImGui::Checkbox( "##Enable Rain", &settings.EnableRain );
             ImGui::SetItemTooltip( "Enables rain particles and wet-ground effects." );
-            ImText( "Limit Light Intensity", { buttonWidth.x - ImGui::GetFrameHeight() - style.ItemSpacing.x, buttonWidth.y } ); ImGui::SameLine();
-            ImGui::Checkbox( "##Limit Light Intensity", &settings.LimitLightIntesity );
-            ImGui::SetItemTooltip( "Limits the maximum intensity of point lights." );
+
             ImText( "Occlusion Culling", { buttonWidth.x - ImGui::GetFrameHeight() - style.ItemSpacing.x, buttonWidth.y } ); ImGui::SameLine();
             ImGui::Checkbox( "##Enable Occlusion Culling", &settings.EnableOcclusionCulling );
             ImGui::SetItemTooltip( "Skips world geometry hidden behind other objects." );
+
+            ImText( "HDR Tone Mapping", { buttonWidth.x - ImGui::GetFrameHeight() - style.ItemSpacing.x, buttonWidth.y } ); ImGui::SameLine();
+            if ( ImGui::Checkbox( "##Enable HDR Tone Mapping", &settings.EnableHDR ) ) {
+                shadersToReload |= ShaderCategory::Tonemapping;
+            }
+            ImGui::SetItemTooltip( "Enables AMD LPM tone mapping." );
 
             ImGui::EndGroup();
         }

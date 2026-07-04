@@ -508,11 +508,6 @@ struct GothicRendererSettings {
         PLS_UPDATE_DYNAMIC = 2,
         _PLS_NUM_SETTINGS
     };
-    enum E_HDRToneMap {
-        // Preserve the established INI values while exposing only supported modes.
-        ToneMap_Simple = 4,
-        LPMToneMap = 6,
-    };
     enum EWindQuality {
         WIND_QUALITY_NONE = 0,
         WIND_QUALITY_ADVANCED,
@@ -588,7 +583,6 @@ struct GothicRendererSettings {
         DrawFog = true;
         FogRange = SWITCH_ENGINE12(1.0f, 3.0f);
         EnableHDR = false;
-        HDRToneMap = E_HDRToneMap::ToneMap_Simple;
         ReplaceSunDirection = false;
         AtmosphericScattering = true; // Use original sky
         ShowSkeletalVertexNormals = false;
@@ -671,7 +665,7 @@ struct GothicRendererSettings {
 
         EnableShadows = true;
         ThreadedShadowCulling = false;
-        EnableVSync = true;
+        EnableVSync = false;
         DoZPrepass = false;
         SortRenderQueue = false;
         DrawThreaded = false;
@@ -831,7 +825,6 @@ struct GothicRendererSettings {
     bool DrawG1ForestPortals;
     bool DrawRainThroughTransformFeedback;
     bool EnableHDR;
-    E_HDRToneMap HDRToneMap;
     bool EnableVSync;
     bool FastShadows;
     bool ReplaceSunDirection;

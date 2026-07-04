@@ -260,9 +260,12 @@ PS_OUTPUT PSMain( PS_INPUT Input )
 	float3 sunColor = lerp(sunOrange, 1.0f, AC_LightPos.y) * 5.0f;
 
 	float3 reflect_vecSmall = reflect(-viewDirection, normalize(distortionSmall.xzy * float3(1,10,1)));
-
 	float cos_spec = clamp(dot(reflect_vecSmall, -AC_LightPos.xyz * float3(1,1,1)), 0, 1);
 	float sun_spot = pow(cos_spec, 500.0f) * 0.5f;
+	// If water SSR has found opaque scene geometry, let that reflection win over the procedural sun glint.
+	// This only attenuates the added sun spot and leaves the SSR trace/blend itself untouched.
+	float sunSpotSSRBlock = saturate(ssrBaseWeight * ssrHitValid * 1.35f);
+	sun_spot *= 1.0f - sunSpotSSRBlock;
 	color.rgb += lerp(sunColor * sun_spot, float3(0.0f, 0.0f, 0.0f), step(step(0.0f, AC_LightPos.y) * Input.vDiffuse.y, 0.5f));
 
 	//darken / lighten water based on the day / night cycle

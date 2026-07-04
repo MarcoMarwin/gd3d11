@@ -36,10 +36,11 @@ float PSMain( PS_INPUT Input ) : SV_TARGET
 	float fLastLum = TX_LumLast.SampleLevel(SS_Linear, float2(0.5f, 0.5f), 9).r;
 	float fCurrentLum = TX_LumCurrent.SampleLevel(SS_Linear, float2(0.5f, 0.5f), 9).r;
 
-	// Adapt the luminance using Pattanaik's technique
-	const float fTau = 0.5f;
+	// Adapt the luminance using Pattanaik's technique. Bright scenes darken more slowly to avoid visible exposure pumping.
+	const float fBrightSceneTau = 0.25f;
+	const float fDarkSceneTau = 0.45f;
+	float fTau = fCurrentLum > fLastLum ? fBrightSceneTau : fDarkSceneTau;
 	float fAdaptedLum = fLastLum + (fCurrentLum - fLastLum) * (1 - exp(-LC_DeltaTime * fTau));
-	
-	return clamp(fAdaptedLum, 0, 32.0f); 
-}
 
+	return clamp(fAdaptedLum, 0, 32.0f);
+}
