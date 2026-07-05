@@ -187,3 +187,9 @@ Kurze, append-only Dokumentation der von Codex gepushten Renderer-Builds.
 - Contact Shadows/SSGI: Screen-Space-Licht in einen eigenen Trace- und Temporalpass ausgelagert. Contact Shadows sind wasser-/normalgefiltert und begrenzt; SSGI nutzt stabile hemisphaerische Strahlen, History-Reprojection, Depth-Validation und Neighborhood-Clamping gegen flackernde Striche und punktfoermige Artefakte.
 - UserSettings.ini: Welt-/Menueeinstellungen werden fuer den Build auf sichtbare F11-Werte begrenzt; versteckte Kirides-/Advanced-Optionen und alte Gamma/Brightness-Schluessel werden beim Speichern entfernt. Display-Tuning bleibt ausschliesslich ueber `DisplayContrast` und `DisplayBrightness` erhalten.
 - Pruefung: alte Base-/Detail-Referenzen und unbenutzte Detaildatei entfernt; DDS-Format, Abmessungen, Mip-Anzahl und Randkontinuitaet kontrolliert; Atmosphaeren-, Pointlight-, Tiled-, Forward+-, Composition- und Screen-Space-Lighting-Shader statisch auf Ressourcen-, Register-, Klammer- und Praeprozessor-Konsistenz geprueft; Occlusion-Flags, Rendergraph-Aufrufer und UserSettings-Lese-/Speicherpfade mit Kirides 17.9.7/Nightly abgeglichen; `git diff --check` sauber. Kein lokaler HLSL-Compiler und kein vollstaendiger lokaler C++-Build vorhanden.
+
+## Build 094 (CI-Korrektur)
+
+- CI-Korrektur: Default-Renderer-Settings in LoadMenuSettings vor die optionale UserSettings-Dateipruefung gezogen, damit der anschliessende Reset versteckter Kirides-/Advanced-Werte in jedem Pfad auf den gueltigen Default-Snapshot ds zugreifen kann.
+- Inhaltlich keine weiteren Renderer-, Shader- oder Ingame-Aenderungen gegenueber Build 093.
+- Pruefung: gemeldete Release_G1_12f-Compilerstellen, Deklarationsgueltigkeit im gesamten Funktionspfad und git diff --check statisch kontrolliert; kein vollstaendiger lokaler C++-Build.
