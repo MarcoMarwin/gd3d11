@@ -7,13 +7,11 @@
 #include "Toolbox.h"
 #include "zCCamera.h"
 
-// Conservative occlusion settings. The goal is stable rendering first, saved draw calls second.
-// A single invisible query result is not enough to hide BSP leaves, because camera motion and
-// one-frame GPU latency otherwise cause visible world rebuild/pop-in during fast turns.
-const unsigned int VISIBLE_RECHECK_FRAME_DELAY = 2;
-const unsigned int INVISIBLE_CONFIRM_FRAME_COUNT = 2;
-const unsigned int VISIBLE_GRACE_FRAME_COUNT = 3;
-const unsigned int FAST_CAMERA_GRACE_FRAME_COUNT = 6;
+// Large VOBs and lights bypass occlusion collection; these timings can be stricter for small VOBs/mobs.
+const unsigned int VISIBLE_RECHECK_FRAME_DELAY = 1;
+const unsigned int INVISIBLE_CONFIRM_FRAME_COUNT = 1;
+const unsigned int VISIBLE_GRACE_FRAME_COUNT = 1;
+const unsigned int FAST_CAMERA_GRACE_FRAME_COUNT = 3;
 const float FAST_CAMERA_MOVE_DISTANCE = 350.0f;
 const float FAST_CAMERA_TURN_DOT = 0.80f;
 

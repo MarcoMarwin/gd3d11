@@ -4121,6 +4121,7 @@ XRESULT D3D11GraphicsEngine::OnStartWorldRendering() {
 
     // Shared state for the PostFX composition pass
     ID3D11ShaderResourceView* compositionGodRaysSRV = nullptr;
+    ID3D11ShaderResourceView* compositionScreenSpaceLightingSRV = nullptr;
     bool isOutdoor = Engine::GAPI->GetLoadedWorldInfo()->BspTree->GetBspTreeMode() == zBSP_MODE_OUTDOOR;
     bool compositionGodRays = (rendererState.RendererSettings.EnableGodRays && isOutdoor);
     bool compositionHeightFog = (rendererState.RendererSettings.DrawFog && isOutdoor);
@@ -4533,6 +4534,40 @@ XRESULT D3D11GraphicsEngine::OnStartWorldRendering() {
             });
         }
     }
+    if ( compositionNeedsGeometry ) {
+        graph.AddPass( RG_PASS_NAME("Screen-Space Lighting"), [&]( RGBuilder& builder, RenderPass& pass ) {
+            builder.Read( backBufferHandle );
+            builder.Read( normalsResource );
+            builder.Read( waterMaskResource );
+            builder.Read( velocityBufferHandle );
+
+            pass.m_executeCallback = [this, backBufferHandle, normalsResource, waterMaskResource, velocityBufferHandle,
+                                      &compositionScreenSpaceLightingSRV]( const RenderGraph& graph ) {
+                TracyD3D11ZoneCGX( "D3D11GraphicsEngine::Screen-Space Lighting" );
+
+                auto backBuffer = graph.GetPhysicalTexture( backBufferHandle );
+                auto normalsTexture = graph.GetPhysicalTexture( normalsResource );
+                auto waterMaskTexture = graph.GetPhysicalTexture( waterMaskResource );
+                auto velocityTexture = graph.GetPhysicalTexture( velocityBufferHandle );
+                if ( !backBuffer || !normalsTexture || !waterMaskTexture ) {
+                    compositionScreenSpaceLightingSRV = nullptr;
+                    return;
+                }
+
+                auto tempBuffer = PfxRenderer->GetTempBuffer();
+                GetContext()->CopyResource( tempBuffer->GetTexture().Get(), backBuffer->GetTexture().Get() );
+
+                PfxRenderer->RenderScreenSpaceLighting(
+                    tempBuffer->GetShaderResView().Get(),
+                    GetDepthBuffer()->GetShaderResView().Get(),
+                    normalsTexture->GetShaderResView().Get(),
+                    waterMaskTexture->GetShaderResView().Get(),
+                    velocityTexture ? velocityTexture->GetShaderResView().Get() : nullptr,
+                    &compositionScreenSpaceLightingSRV );
+                GetContext()->PSSetSamplers( 0, 1, DefaultSamplerState.GetAddressOf() );
+            };
+        } );
+    }
     // PostFX Composition pass merges enabled atmospheric and lighting effects in one full-screen blit.
     if ( compositionActive ) {
         graph.AddPass( RG_PASS_NAME("PostFX Composition"), [&]( RGBuilder& builder, RenderPass& pass ) {
@@ -4544,7 +4579,7 @@ XRESULT D3D11GraphicsEngine::OnStartWorldRendering() {
             builder.Write( backBufferHandle );
 
             pass.m_executeCallback = [this, backBufferHandle, normalsResource, compositionNeedsDepth, compositionNeedsGeometry,
-                                      compositionHeightFog, waterMaskResource, &compositionGodRaysSRV](const RenderGraph& graph) {
+                                      compositionHeightFog, waterMaskResource, &compositionGodRaysSRV, &compositionScreenSpaceLightingSRV](const RenderGraph& graph) {
                 TracyD3D11ZoneCGX( "D3D11GraphicsEngine::PostFX Composition" );
 
                 auto backBuffer = graph.GetPhysicalTexture(backBufferHandle);
@@ -4566,6 +4601,7 @@ XRESULT D3D11GraphicsEngine::OnStartWorldRendering() {
                     depthSRV,
                     normalsSRV,
                     waterMaskSRV,
+                    compositionScreenSpaceLightingSRV,
                     compositionHeightFog );
 
                 GetContext()->PSSetSamplers( 0, 1, DefaultSamplerState.GetAddressOf() );
@@ -6880,6 +6916,8 @@ void XM_CALLCONV D3D11GraphicsEngine::DrawWorldAroundForWorldShadow( FXMVECTOR p
             ctx.drawFlags.EnableOcclusionCulling = false; // shadows do not use the players view frustum for culling, so occlusion culling would be inaccurate and cause popping.
             ctx.drawFlags.CullVobs = rs.DebugSettings.Culling.CullVobs;
             ctx.drawFlags.CollectIndoorVobs = true;
+            ctx.drawFlags.CollectLargeVobs = true;
+            ctx.drawFlags.CollectSmallVobs = true;
             ctx.drawFlags.CollectMobs = true;
             ctx.drawFlags.CollectLights = true;
             Engine::GAPI->CollectVisibleVobs( ctx );
@@ -8277,7 +8315,7 @@ XRESULT D3D11GraphicsEngine::DrawSky() {
     SetupVS_ExMeshDrawCall();
     SetupVS_ExConstantBuffer();
 
-    ID3D11ShaderResourceView* srvs[5]{};
+    ID3D11ShaderResourceView* srvs[4]{};
     // Apply sky texture
     D3D11Texture* cloudsTex = Engine::GAPI->GetSky()->GetCloudTexture();
     if ( cloudsTex ) {
@@ -8294,14 +8332,9 @@ XRESULT D3D11GraphicsEngine::DrawSky() {
         srvs[2] = moonTex->GetShaderResourceView().Get();
     }
 
-    D3D11Texture* rainCloudBaseTex = sky->GetRainCloudBaseTexture();
-    if ( rainCloudBaseTex ) {
-        srvs[3] = rainCloudBaseTex->GetShaderResourceView().Get();
-    }
-
-    D3D11Texture* rainCloudDetailTex = sky->GetRainCloudDetailTexture();
-    if ( rainCloudDetailTex ) {
-        srvs[4] = rainCloudDetailTex->GetShaderResourceView().Get();
+    D3D11Texture* rainCloudTex = sky->GetRainCloudTexture();
+    if ( rainCloudTex ) {
+        srvs[3] = rainCloudTex->GetShaderResourceView().Get();
     }
     GetContext()->PSSetShaderResources( 0, std::size( srvs ), srvs);
 

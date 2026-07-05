@@ -168,7 +168,7 @@ float3 FP_ComputePointLighting(
             
         lightDir /= distance;
 
-        float ndl = max( 0, dot( lightDir, normal ) );
+        float ndl = PLS_ComputePointLightNdl( lightDir, normal, light.PositionWorld, wsPosition, wsNormal );
         
         // instead of pow(..., 1.2f) we use a fast quadratic-like approach.
         float falloff = PLS_ComputeRangeFalloff( distance, light.Range );

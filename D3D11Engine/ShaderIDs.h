@@ -100,6 +100,8 @@ enum class PShaderID : size_t {
     PS_PFX_SkyVelocity,
     PS_PFX_CAS,
     PS_PFX_Composition,
+    PS_PFX_ScreenSpaceLightingTrace,
+    PS_PFX_ScreenSpaceLightingTemporal,
     PS_PFX_WetGroundSSR,
     PS_FP_Diffuse,
     PS_FP_DiffuseNormalmapped,

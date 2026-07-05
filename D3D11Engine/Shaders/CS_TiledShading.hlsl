@@ -132,7 +132,7 @@ void CSMain( uint3 groupID : SV_GroupID, uint3 threadID : SV_GroupThreadID, uint
 
         lightDir /= distance;
 
-        float ndl = max( 0, dot( lightDir, normal ) );
+        float ndl = PLS_ComputePointLightNdl( lightDir, normal, light.PositionWorld, wsPosition, wsNormal );
         float falloff = PLS_ComputeRangeFalloff( distance, light.Range );
 
         float3 H = normalize( lightDir + V );

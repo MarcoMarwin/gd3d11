@@ -131,7 +131,7 @@ float4 PSMain( PS_INPUT Input ) : SV_TARGET
 	lightDir /= distance; // Normalize the direction
 	
 	// Do some simple NdL-Lighting
-	float ndl = max(0, dot(lightDir, normal));
+	float ndl = PLS_ComputePointLightNdl(lightDir, normal, Pl_PositionWorld, wsPosition, wsNormal);
 	
 	// Apply dynamic shadow
 	float shadow = PLS_SampleShadowCube(TX_ShadowCube, SS_Comp, wsPosition, wsNormal, Pl_PositionWorld, PL_Range, PL_ShadowSoftness);

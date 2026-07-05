@@ -124,15 +124,10 @@ XRESULT GSky::LoadSkyResources() {
     XLE( CloudTexture->Init( "system\\GD3D11\\Textures\\SkyDay.dds" ) );
 #endif
 
-    D3D11Texture* rainCloudBaseTex;
-    XLE( Engine::GraphicsEngine->CreateTexture( &rainCloudBaseTex ) );
-    RainCloudBaseTexture.reset( rainCloudBaseTex );
-    XLE( RainCloudBaseTexture->Init( "system\\GD3D11\\Textures\\RainCloudBase.dds" ) );
-
-    D3D11Texture* rainCloudDetailTex;
-    XLE( Engine::GraphicsEngine->CreateTexture( &rainCloudDetailTex ) );
-    RainCloudDetailTexture.reset( rainCloudDetailTex );
-    XLE( RainCloudDetailTexture->Init( "system\\GD3D11\\Textures\\RainCloudDetail.dds" ) );
+    D3D11Texture* rainCloudTex;
+    XLE( Engine::GraphicsEngine->CreateTexture( &rainCloudTex ) );
+    RainCloudTexture.reset( rainCloudTex );
+    XLE( RainCloudTexture->Init( "system\\GD3D11\\Textures\\RainCloud.dds" ) );
 
     D3D11Texture* nightTex;
     XLE( Engine::GraphicsEngine->CreateTexture( &nightTex ) );

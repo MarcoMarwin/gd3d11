@@ -48,6 +48,24 @@ float PLS_ComputeRangeFalloff( float distance, float lightRange )
     return normalizedDist * (normalizedDist * 0.2f + 0.8f);
 }
 
+float PLS_ComputePointLightNdl(
+    float3 lightDirVS,
+    float3 normalVS,
+    float3 lightPosWorld,
+    float3 wsPosition,
+    float3 wsNormal )
+{
+    float ndl = saturate( dot( lightDirVS, normalVS ) );
+
+    // A torch lying almost on the floor is physically above the visible flame,
+    // but Gothic's light vob can sit close to the ground plane. Give upward
+    // surfaces a small local wrap so they still receive warm light.
+    float floorMask = smoothstep( 0.58f, 0.86f, wsNormal.y );
+    float nearFloorLight = 1.0f - smoothstep( 18.0f, 120.0f, abs( lightPosWorld.y - wsPosition.y ) );
+    float floorWrap = floorMask * nearFloorLight * 0.34f;
+    return max( ndl, floorWrap );
+}
+
 float PLS_ApplyShadowDistanceFade( float finalShadow, float normalizedDist )
 {
     // Keep fade-out for mostly lit samples, but preserve strong occlusion to avoid wall bleed.

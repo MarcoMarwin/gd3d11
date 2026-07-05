@@ -63,6 +63,8 @@ struct RndCullContext {
         bool EnableOcclusionCulling;
         bool CullVobs;
         bool CollectIndoorVobs;
+        bool CollectLargeVobs;
+        bool CollectSmallVobs;
         bool CollectMobs;
         bool CollectLights;
     } drawFlags;
@@ -322,10 +324,12 @@ public:
     /** Sets the per mod & per world renderersettings which can be persisted */
     void LoadRendererWorldSettings( GothicRendererSettings& s );
     void LoadRendererWorldSettings( GothicRendererSettings& s, const char* iniFile );
+    void LoadRendererMenuWorldSettings( GothicRendererSettings& s, const char* iniFile );
 
     /** Persists the per mod & per world renderersettings */
     void SaveRendererWorldSettings( const GothicRendererSettings& s );
     void SaveRendererWorldSettings( const GothicRendererSettings& s, const char* iniFile );
+    void SaveRendererMenuWorldSettings( const GothicRendererSettings& s, const char* iniFile );
 
     /** Called to update the multi thread resource manager state */
     void UpdateMTResourceManager();

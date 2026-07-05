@@ -1576,7 +1576,7 @@ void ImGuiShim::RenderSettingsWindow()
             if ( (ImGui::GetIO().KeyCtrl || hasWorldSettings) && isInWorld ) {
                 Engine::GAPI->SaveRendererWorldSettings( settings );
             } else {
-                Engine::GAPI->SaveRendererWorldSettings( settings, MENU_SETTINGS_FILE);
+                Engine::GAPI->SaveRendererMenuWorldSettings( settings, MENU_SETTINGS_FILE );
             }
             Engine::GAPI->SaveMenuSettings( MENU_SETTINGS_FILE );
         }

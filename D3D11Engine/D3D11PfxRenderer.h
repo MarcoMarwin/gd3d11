@@ -70,6 +70,13 @@ public:
                                     ID3D11ShaderResourceView* normals,
                                     ID3D11ShaderResourceView** outGodRaysSRV );
 
+    XRESULT RenderScreenSpaceLighting( ID3D11ShaderResourceView* sceneSRV,
+                                        ID3D11ShaderResourceView* depthSRV,
+                                        ID3D11ShaderResourceView* normalsSRV,
+                                        ID3D11ShaderResourceView* waterMaskSRV,
+                                        ID3D11ShaderResourceView* velocitySRV,
+                                        ID3D11ShaderResourceView** outLightingSRV );
+
     /** Renders the PostFX composition pass. */
     XRESULT RenderPostFXComposition( ID3D11RenderTargetView* outputRTV,
                                      ID3D11ShaderResourceView* backbufferSRV,
@@ -77,6 +84,7 @@ public:
                                      ID3D11ShaderResourceView* depthSRV,
                                      ID3D11ShaderResourceView* normalsSRV,
                                      ID3D11ShaderResourceView* waterMaskSRV,
+                                     ID3D11ShaderResourceView* screenSpaceLightingSRV,
                                      bool compositionHeightFog );
 
     XRESULT RenderXeGTAO( ID3D11ShaderResourceView* depthSRV,
@@ -120,5 +128,10 @@ private:
     std::unique_ptr<D3D11PFX_FSR3> PFX_FSR3;
     std::unique_ptr<D3D11PFX_XeGTAO> PFX_XeGTAO;
     std::unique_ptr<TexturePool> m_texturePool;
+    std::unique_ptr<RenderToTextureBuffer> ScreenSpaceLightingHistory[2];
+    std::unique_ptr<RenderToTextureBuffer> ScreenSpaceLightingDepthHistory[2];
+    bool ScreenSpaceLightingHistoryValid = false;
+    uint32_t ScreenSpaceLightingHistoryIndex = 0;
+    uint32_t ScreenSpaceLightingFrameIndex = 0;
     std::unique_ptr<DepthStencilPool> m_depthStencilPool;
 };

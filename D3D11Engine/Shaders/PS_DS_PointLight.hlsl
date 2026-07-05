@@ -158,7 +158,7 @@ float4 PSMain( PS_INPUT Input ) : SV_TARGET
 	lightDir /= distance; // Normalize the direction
 	
 	// Do some simple NdL-Lighting
-	float ndl = max(0, dot(lightDir, normal));
+	float ndl = PLS_ComputePointLightNdl(lightDir, normal, Pl_PositionWorld, wsPosition, wsNormal);
 	
 	// Compute range falloff
 	float falloff = PLS_ComputeRangeFalloff(distance, PL_Range);

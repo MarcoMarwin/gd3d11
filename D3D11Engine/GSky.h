@@ -72,9 +72,8 @@ public:
     /** Returns the cloud texture */
     D3D11Texture* GetCloudTexture();
 
-    /** Returns the rain-cloud density textures. */
-    D3D11Texture* GetRainCloudBaseTexture() { return RainCloudBaseTexture.get(); }
-    D3D11Texture* GetRainCloudDetailTexture() { return RainCloudDetailTexture.get(); }
+    /** Returns the rain-cloud density texture. */
+    D3D11Texture* GetRainCloudTexture() { return RainCloudTexture.get(); }
 
     /** Returns the night texture */
     D3D11Texture* GetNightTexture();
@@ -110,8 +109,7 @@ protected:
     std::vector<D3D11Texture*> SkyTextures;
 
     std::unique_ptr<D3D11Texture> CloudTexture;
-    std::unique_ptr<D3D11Texture> RainCloudBaseTexture;
-    std::unique_ptr<D3D11Texture> RainCloudDetailTexture;
+    std::unique_ptr<D3D11Texture> RainCloudTexture;
     std::unique_ptr<D3D11Texture> NightTexture;
     std::unique_ptr<D3D11Texture> MoonTexture;
 

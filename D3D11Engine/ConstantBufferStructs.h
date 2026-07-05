@@ -109,6 +109,25 @@ struct HeightfogConstantBuffer {
     float2 HF_Pad3;
 };
 
+
+struct ScreenSpaceLightingConstantBuffer {
+    float4 SSL_ProjParams;
+    XMFLOAT4X4 SSL_Projection;
+    XMFLOAT4X4 SSL_View;
+    XMFLOAT4X4 SSL_InvView;
+
+    float2 SSL_InvResolution;
+    float SSL_ContactStrength;
+    float SSL_GIStrength;
+
+    XMFLOAT3 SSL_LightDirectionVS;
+    float SSL_FrameIndex;
+
+    float SSL_EnableContact;
+    float SSL_EnableGI;
+    float SSL_HistoryValid;
+    float SSL_Pad;
+};
 struct CompositionControlConstantBuffer {
     float CC_HeightFogEnabled;
     float CC_Pad0;

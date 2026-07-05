@@ -1249,8 +1249,8 @@ void GothicAPI::OnWorldLoaded() {
         RendererState.RendererSettings.SetupNewWorldSpecificValues();
     }
 
-    // first load the global defaults, then the world specific ones
-    LoadRendererWorldSettings( RendererState.RendererSettings, MENU_SETTINGS_FILE );
+    // First load the F11-visible global draw-distance preset values, then true world-specific overrides.
+    LoadRendererMenuWorldSettings( RendererState.RendererSettings, MENU_SETTINGS_FILE );
     LoadRendererWorldSettings( RendererState.RendererSettings );
 
     // Reset wetness
@@ -1340,6 +1340,9 @@ void GothicAPI::LoadRendererWorldSettings( GothicRendererSettings& s, const char
     s.RainSunLightStrength = GetPrivateProfileFloatA( "Rain", "SunLightStrength", s.RainSunLightStrength, ini );
     GetPrivateProfileRGB( "Rain", "FogColor", s.RainFogColor, ini );
     s.RainFogDensity = GetPrivateProfileFloatA( "Rain", "FogDensity", s.RainFogDensity, ini );
+    if ( s.RainFogDensity > 0.00049f && s.RainFogDensity < 0.00051f ) {
+        s.RainFogDensity = 0.00078f;
+    }
 
     s.ReplaceSunDirection = GetPrivateProfileBoolA( "Atmoshpere", "ReplaceSunDirection", s.ReplaceSunDirection, ini );
 
@@ -1352,6 +1355,25 @@ void GothicAPI::LoadRendererWorldSettings( GothicRendererSettings& s, const char
     );
 
     GetPrivateProfileArray("Atmoshpere", "LightDirection", &aS.LightDirection.x, 3, &aS.LightDirection.x, ini);
+}
+
+void GothicAPI::LoadRendererMenuWorldSettings( GothicRendererSettings& s, const char* iniFile ) {
+    if ( !Toolbox::FileExists( iniFile ) ) {
+        return;
+    }
+
+    const std::string ini = iniFile;
+    s.GraphicsPreset = static_cast<GothicRendererSettings::E_GraphicsPreset>(
+        GetPrivateProfileIntA( "General", "GraphicsPreset", static_cast<int>(s.GraphicsPreset), ini.c_str() ) );
+
+    if ( !GMPModeActive ) {
+        s.OutdoorSmallVobDrawRadius = std::clamp(
+            GetPrivateProfileFloatA( "General", "OutdoorSmallVobDrawRadius", s.OutdoorSmallVobDrawRadius, ini ),
+            5000.0f, 25000.0f );
+        s.SectionDrawRadius = static_cast<decltype(s.SectionDrawRadius)>( std::clamp<int>(
+            static_cast<int>( GetPrivateProfileIntA( "General", "SectionDrawRadius", s.SectionDrawRadius, ini.c_str() ) ),
+            1, 10 ) );
+    }
 }
 
 void GothicAPI::SaveRendererWorldSettings( const GothicRendererSettings& s )
@@ -1425,6 +1447,24 @@ void GothicAPI::SaveRendererWorldSettings( const GothicRendererSettings& s, cons
     WritePrivateProfileStringA( "Atmoshpere", "LightDirectionZ", nullptr, ini.c_str() );
 }
 
+void GothicAPI::SaveRendererMenuWorldSettings( const GothicRendererSettings& s, const char* iniFile ) {
+    const std::string ini = iniFile;
+
+    WritePrivateProfileStringA( "General", "GraphicsPreset", std::to_string( static_cast<int>(s.GraphicsPreset) ).c_str(), ini.c_str() );
+    WritePrivateProfileStringA( "General", "OutdoorSmallVobDrawRadius", std::to_string( s.OutdoorSmallVobDrawRadius ).c_str(), ini.c_str() );
+    WritePrivateProfileStringA( "General", "SectionDrawRadius", std::to_string( s.SectionDrawRadius ).c_str(), ini.c_str() );
+
+    const char* hiddenGeneralKeys[] = {
+        "VisualFXDrawRadius", "OutdoorVobDrawRadius", "IndoorVobDrawRadius", "SkeletalMeshDrawRadius"
+    };
+    for ( const char* key : hiddenGeneralKeys ) {
+        WritePrivateProfileStringA( "General", key, nullptr, ini.c_str() );
+    }
+
+    WritePrivateProfileStringA( "Fog", nullptr, nullptr, ini.c_str() );
+    WritePrivateProfileStringA( "Atmoshpere", nullptr, nullptr, ini.c_str() );
+    WritePrivateProfileStringA( "Rain", nullptr, nullptr, ini.c_str() );
+}
 /** Goes through the given zCTree and registers all found vobs */
 void GothicAPI::TraverseVobTree( zCTree<zCVob>* tree ) {
     // Iterate through the nodes
@@ -4241,6 +4281,8 @@ void GothicAPI::CollectVisibleVobs(
     ctx.drawFlags.EnableOcclusionCulling = RendererState.RendererSettings.EnableOcclusionCulling;
     ctx.drawFlags.CullVobs = RendererState.RendererSettings.DebugSettings.Culling.CullVobs;
     ctx.drawFlags.CollectIndoorVobs = true;
+    ctx.drawFlags.CollectLargeVobs = true;
+    ctx.drawFlags.CollectSmallVobs = true;
     ctx.drawFlags.CollectMobs = true;
     ctx.drawFlags.CollectLights = true;
     CollectVisibleVobs( ctx );
@@ -5751,6 +5793,41 @@ XRESULT GothicAPI::SaveMenuSettings( const std::string& file ) {
     WritePrivateProfileStringA( "Debug", "ForceFeatureLevel10", std::to_string( s.DebugSettings.FeatureSet.ForceFeatureLevel10 ? TRUE : FALSE ).c_str(), ini.c_str() );
     WritePrivateProfileStringA( "Debug", "EnableDriverExtensions", std::to_string( s.DebugSettings.FeatureSet.EnableDriverExtensions ? TRUE : FALSE ).c_str(), ini.c_str() );
 
+    const char* hiddenUserGeneralKeys[] = {
+        "AtmosphericScattering", "EnableDebugLog", "EnableAutoupdates", "DoFGaussBlur",
+        "DoFFocusDistance", "DoFFocusRange", "DoFMaxBlur", "DoFNearBlurDistance",
+        "DoFNearBlurStrength", "ParallaxOcclusionStrength", "AllowNumpadKeys",
+        "EnableInactiveFpsLock", "MultiThreadResourceManager", "CompressBackBuffer",
+        "AnimateStaticVobs", "DrawWorldSectionIntersections", "SunLightStrength",
+        "DrawG1ForestPortals", "DrawRainThroughTransformFeedback", "EnableParticleLighting",
+        "ParticleLightingStrength", "SharpeningMode"
+    };
+    for ( const char* key : hiddenUserGeneralKeys ) {
+        WritePrivateProfileStringA( "General", key, nullptr, ini.c_str() );
+    }
+
+    const char* hiddenDisplayKeys[] = {
+        "ForceFOV", "FOVHoriz", "FOVVert", "Gamma", "Brightness", "HDR_Monitor", "UIScale",
+        "TiledLighting", "RendererMode", "HeroAffectsObjectsStrength"
+    };
+    for ( const char* key : hiddenDisplayKeys ) {
+        WritePrivateProfileStringA( "Display", key, nullptr, ini.c_str() );
+    }
+
+    const char* hiddenShadowKeys[] = {
+        "EnableShadows", "ShadowFilterMode", "PointlightShadowMapSize", "WorldShadowRangeScale",
+        "NumShadowCascades", "ShadowCascadePCFLimit", "ShadowFrustumCullingMode",
+        "PointlightShadows", "EnableDynamicLighting", "SmoothCameraUpdate", "SmoothShadowFrequency",
+        "ShadowStrength", "ShadowAOStrength", "WorldAOStrength"
+    };
+    for ( const char* key : hiddenShadowKeys ) {
+        WritePrivateProfileStringA( "Shadows", key, nullptr, ini.c_str() );
+    }
+
+    WritePrivateProfileStringA( "SMAA", nullptr, nullptr, ini.c_str() );
+    WritePrivateProfileStringA( "XeGTAO", nullptr, nullptr, ini.c_str() );
+    WritePrivateProfileStringA( "FontRendering", nullptr, nullptr, ini.c_str() );
+    WritePrivateProfileStringA( "Debug", nullptr, nullptr, ini.c_str() );
     return XR_SUCCESS;
 }
 
@@ -6028,6 +6105,46 @@ XRESULT GothicAPI::LoadMenuSettings( const std::string& file ) {
         s.ChangeWindowPreset = 0;
     }
 
+    s.AtmosphericScattering = ds.AtmosphericScattering;
+    s.EnableDebugLog = ds.EnableDebugLog;
+    s.EnableAutoupdates = ds.EnableAutoupdates;
+    s.DoFGaussBlur = ds.DoFGaussBlur;
+    s.DoFFocusDistance = ds.DoFFocusDistance;
+    s.DoFFocusRange = ds.DoFFocusRange;
+    s.DoFMaxBlur = ds.DoFMaxBlur;
+    s.DoFNearBlurDistance = ds.DoFNearBlurDistance;
+    s.DoFNearBlurStrength = ds.DoFNearBlurStrength;
+    s.ParallaxOcclusionStrength = ds.ParallaxOcclusionStrength;
+    s.AllowNumpadKeys = ds.AllowNumpadKeys;
+    s.EnableInactiveFpsLock = ds.EnableInactiveFpsLock;
+    s.MTResoureceManager = ds.MTResoureceManager;
+    s.CompressBackBuffer = ds.CompressBackBuffer;
+    s.AnimateStaticVobs = ds.AnimateStaticVobs;
+    s.DrawSectionIntersections = ds.DrawSectionIntersections;
+    s.SunLightStrength = ds.SunLightStrength;
+    s.DrawG1ForestPortals = ds.DrawG1ForestPortals;
+    s.DrawRainThroughTransformFeedback = ds.DrawRainThroughTransformFeedback;
+    s.WaterCubemapStrength = ds.WaterCubemapStrength;
+    s.EnableParticleLighting = ds.EnableParticleLighting;
+    s.ParticleLightingStrength = ds.ParticleLightingStrength;
+    s.WorldShadowRangeScale = ds.WorldShadowRangeScale;
+    s.NumShadowCascades = ds.NumShadowCascades;
+    s.ShadowCascadePCFLimit = ds.ShadowCascadePCFLimit;
+    s.ShadowFrustumCullingMode = ds.ShadowFrustumCullingMode;
+    s.EnableDynamicLighting = ds.EnableDynamicLighting;
+    s.SmoothShadowCameraUpdate = ds.SmoothShadowCameraUpdate;
+    s.SmoothShadowFrequency = ds.SmoothShadowFrequency;
+    s.ShadowStrength = ds.ShadowStrength;
+    s.ShadowAOStrength = ds.ShadowAOStrength;
+    s.WorldAOStrength = ds.WorldAOStrength;
+    s.HDR_Monitor = ds.HDR_Monitor;
+    s.GothicUIScale = ds.GothicUIScale;
+    s.HeroAffectsObjectsStrength = 1.0f;
+    s.XegtaoSettings = ds.XegtaoSettings;
+    s.EnableCustomFontRendering = ds.EnableCustomFontRendering;
+    s.DebugSettings.FeatureSet = ds.DebugSettings.FeatureSet;
+    s.SharpeningMode = ds.SharpeningMode;
+    s.SharpenFactor = s.GetIsTAAEnabled() ? 1.0f : 0.2f;
     s.FixupUpscalingSettings();
 
     return XR_SUCCESS;
@@ -6594,6 +6711,8 @@ static void CollectLeafVobs(
     const float visualFXDrawRadiusSq = ctx.drawDistancesSq.VisualFX;
     const FXMVECTOR cameraPosition = XMLoadFloat3( &ctx.cameraPosition );
     const bool collectIndoorVobs = ctx.drawFlags.CollectIndoorVobs;
+    const bool collectLargeVobs = ctx.drawFlags.CollectLargeVobs;
+    const bool collectSmallVobs = ctx.drawFlags.CollectSmallVobs;
     const bool collectMobs = ctx.drawFlags.CollectMobs;
     const bool collectLights = ctx.drawFlags.CollectLights;
     const auto& rendererSettings = Engine::GAPI->GetRendererState().RendererSettings;
@@ -6610,11 +6729,11 @@ static void CollectLeafVobs(
             CVVH_AddNotDrawnVobToList( listA, vobIndoorDistSq, ctx, clipResult, visitor );
         }
 
-        if ( leafDistSq < vobOutdoorSmallDistSq ) {
+        if ( collectSmallVobs && leafDistSq < vobOutdoorSmallDistSq ) {
             CVVH_AddNotDrawnVobToList( listB, vobOutdoorSmallDistSq, ctx, clipResult, visitor );
         }
 
-        if ( leafDistSq < vobOutdoorDistSq ) {
+        if ( collectLargeVobs && leafDistSq < vobOutdoorDistSq ) {
             CVVH_AddNotDrawnVobToList( listC, vobOutdoorDistSq, ctx, clipResult, visitor );
         }
     }
@@ -6929,37 +7048,58 @@ void GothicAPI::CollectVisibleVobs( const RndCullContext& ctx ) {
 
     thread_local BspTreeVobVisitor bspVobVisitor{};
 
-    // Use the flat SIMD leaf cache when available (perspective frustum + cache built at world load).
-    // Falls back to the pointer-chasing recursive tree walk for sphere/OBB frustums (shadow cubemaps,
-    // orthographic shadow maps) or before the first world is loaded.
+    auto collectTree = [&]( const RndCullContext& collectCtx ) {
 #ifdef __AVX2__
-    if ( LeafLinearCache.Count > 0 && ctx.frustum.UsesPlaneFrustum() ) {
-        ZoneScopedN( "GothicAPI::CollectVisibleVobsWithLeafCache" );
-        CollectVisibleVobsWithLeafCache( ctx, &bspVobVisitor );
-        ZoneText( "vobs", std::size( "vobs" ) - 1 );
-        ZoneValue( bspVobVisitor.GetSeenVobs() );
-        ZoneText( "mobs", std::size( "mobs" ) - 1 );
-        ZoneValue( bspVobVisitor.GetSeenMobs() );
-        ZoneText( "lights", std::size( "lights" ) - 1 );
-        ZoneValue( bspVobVisitor.GetSeenLights() );
-    } else
+        if ( LeafLinearCache.Count > 0 && collectCtx.frustum.UsesPlaneFrustum() ) {
+            ZoneScopedN( "GothicAPI::CollectVisibleVobsWithLeafCache" );
+            CollectVisibleVobsWithLeafCache( collectCtx, &bspVobVisitor );
+        } else
 #endif
-    {
-        ZoneScopedN( "GothicAPI::CollectVisibleVobsHelper" );
-        // Recursively go through the tree and draw all nodes
-        CollectVisibleVobsHelper( root, root->OriginalNode->BBox3D,
-            ctx,
-            &bspVobVisitor,
-            ContainmentType::INTERSECTS,
-            Engine::GAPI->GetLoadedWorldInfo()->BspTree->GetRootNode()->BBox3D.Max.y
-        );
-        ZoneText( "vobs", std::size( "vobs" ) - 1 );
-        ZoneValue( bspVobVisitor.GetSeenVobs() );
-        ZoneText( "mobs", std::size( "mobs" ) - 1 );
-        ZoneValue( bspVobVisitor.GetSeenMobs() );
-        ZoneText( "lights", std::size( "lights" ) - 1 );
-        ZoneValue( bspVobVisitor.GetSeenLights() );
+        {
+            ZoneScopedN( "GothicAPI::CollectVisibleVobsHelper" );
+            CollectVisibleVobsHelper( root, root->OriginalNode->BBox3D,
+                collectCtx,
+                &bspVobVisitor,
+                ContainmentType::INTERSECTS,
+                Engine::GAPI->GetLoadedWorldInfo()->BspTree->GetRootNode()->BBox3D.Max.y
+            );
+        }
+    };
+
+    if ( ctx.drawFlags.EnableOcclusionCulling
+        && ctx.stage == RenderStage::STAGE_DRAW_WORLD
+        && ctx.drawFlags.DrawVOBs ) {
+        RndCullContext stableCtx = ctx;
+        stableCtx.drawFlags.EnableOcclusionCulling = false;
+        stableCtx.drawFlags.CollectIndoorVobs = ctx.drawFlags.CollectIndoorVobs;
+        stableCtx.drawFlags.CollectLargeVobs = true;
+        stableCtx.drawFlags.CollectSmallVobs = false;
+        stableCtx.drawFlags.CollectMobs = false;
+        stableCtx.drawFlags.CollectLights = ctx.drawFlags.CollectLights;
+        collectTree( stableCtx );
+
+        RndCullContext occludedSmallCtx = ctx;
+        occludedSmallCtx.drawFlags.CollectIndoorVobs = false;
+        occludedSmallCtx.drawFlags.CollectLargeVobs = false;
+        occludedSmallCtx.drawFlags.CollectSmallVobs = true;
+        occludedSmallCtx.drawFlags.CollectMobs = ctx.drawFlags.CollectMobs;
+        occludedSmallCtx.drawFlags.CollectLights = false;
+        collectTree( occludedSmallCtx );
+    } else {
+        RndCullContext singlePassCtx = ctx;
+        if ( !singlePassCtx.drawFlags.CollectLargeVobs && !singlePassCtx.drawFlags.CollectSmallVobs ) {
+            singlePassCtx.drawFlags.CollectLargeVobs = true;
+            singlePassCtx.drawFlags.CollectSmallVobs = true;
+        }
+        collectTree( singlePassCtx );
     }
+
+    ZoneText( "vobs", std::size( "vobs" ) - 1 );
+    ZoneValue( bspVobVisitor.GetSeenVobs() );
+    ZoneText( "mobs", std::size( "mobs" ) - 1 );
+    ZoneValue( bspVobVisitor.GetSeenMobs() );
+    ZoneText( "lights", std::size( "lights" ) - 1 );
+    ZoneValue( bspVobVisitor.GetSeenLights() );
 
     FXMVECTOR camPos = XMLoadFloat3( &ctx.cameraPosition );
     const float vobIndoorDist = ctx.drawDistances.IndoorVobs;
@@ -6969,15 +7109,12 @@ void GothicAPI::CollectVisibleVobs( const RndCullContext& ctx ) {
     bool collectIndoor = ctx.stage != RenderStage::STAGE_DRAW_SHADOWS;
     auto cullingEnabled = RendererState.RendererSettings.DebugSettings.Culling.CullVobs;
 
-    // Add visible dynamically added vobs
     if ( RendererState.RendererSettings.DrawVOBs ) {
         float dist;
         for ( VobInfo* it : DynamicallyAddedVobs ) {
             if ( !bspVobVisitor.Visit( it ) ) continue;
 
-            // Get distance to this vob
             XMStoreFloat( &dist, XMVector3Length( camPos - it->Vob->GetPositionWorldXM() ) );
-            // Draw, if in range
             if ( it->VisualInfo && (
                 (dist < vobIndoorDist && it->IsIndoorVob && collectIndoor)
                 || (!it->IsIndoorVob && (

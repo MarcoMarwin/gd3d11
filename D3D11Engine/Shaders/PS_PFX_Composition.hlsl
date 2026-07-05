@@ -72,6 +72,7 @@ Texture2D TX_Depth : register( t2 );
 #if COMPOSE_CONTACT_SHADOWS || COMPOSE_SSGI
 Texture2D TX_Normals : register( t3 );
 Texture2D TX_WaterMask : register( t4 );
+Texture2D TX_ScreenSpaceLighting : register( t5 );
 #endif
 
 //--------------------------------------------------------------------------------------
@@ -142,7 +143,7 @@ float4 ComputeHeightFog( float2 texcoord, float2 pixelPosition )
 	float dayDarknessFactor = max(1.0f, 2.0f - max(0.0f, AC_LightPos.y));
 	float darknessFactor = lerp(dayDarknessFactor, 2.5f, nightTimeBlend);
 	float maxFogOpacity = lerp(1.0f, 0.85f, nightTimeBlend);
-	float skyRainFogAttenuation = lerp(1.0f, 0.42f, skyPixel * activeWeatherFog);
+	float skyRainFogAttenuation = lerp(1.0f, 0.54f, skyPixel * activeWeatherFog);
 
 	return float4(saturate(color / darknessFactor), ditheredFog * maxFogOpacity * skyRainFogAttenuation);
 }
@@ -377,15 +378,15 @@ float4 PSMain( PS_INPUT Input ) : SV_TARGET
     // Composition order: HeightFog and screen-space lighting, then GodRays.
 
 #if COMPOSE_CONTACT_SHADOWS || COMPOSE_SSGI
-    float compositionDepth = GetDepthRaw(Input.vTexcoord);
+    float4 screenSpaceLighting = TX_ScreenSpaceLighting.SampleLevel( SS_Linear, Input.vTexcoord, 0 );
 #endif
 
 #if COMPOSE_CONTACT_SHADOWS
-    color.rgb *= ComputeContactShadow(Input.vTexcoord, compositionDepth);
+    color.rgb *= 1.0f - saturate( screenSpaceLighting.a );
 #endif
 
 #if COMPOSE_SSGI
-    color.rgb += ComputeScreenSpaceGILight(Input.vTexcoord, compositionDepth, color.rgb);
+    color.rgb += max( screenSpaceLighting.rgb, 0.0f );
 #endif
 
 #if COMPOSE_HEIGHTFOG
