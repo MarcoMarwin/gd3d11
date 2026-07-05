@@ -157,7 +157,7 @@ Kurze, append-only Dokumentation der von Codex gepushten Renderer-Builds.
 - Inhaltlich keine weiteren Renderer-Aenderungen gegenueber Build 089.
 - Pruefung: gemeldete Compilerstelle, alle weiteren Aufrufer von `GetEffectivePositionWorld`, Typgrenzen und `git diff --check` statisch kontrolliert; kein vollstaendiger lokaler C++-Build.
 
-## Build 090 (Stabilitaets- und Darstellungsfixes)
+## Build 091 (Stabilitaets- und Darstellungsfixes)
 
 - VFX-/Fackelstabilitaet: zusaetzlichen rohen Transition-Light-Container entfernt; Inventarentfernung prueft nun das konkrete Vob. Dynamische am NPC getragene sowie echte VisualFX-Lichter bleiben wie die Handfackel ueber die autoritative Light-Map sichtbar und schattenberechtigt.
 - Pointlights/NPCs: Indoor-Kennbit fuer Skeletal-GBuffer-Pixel wiederhergestellt, ohne die sichtbare NPC-Farbe oder atmosphaerische Lichtstaerke abzuschwaechen.
