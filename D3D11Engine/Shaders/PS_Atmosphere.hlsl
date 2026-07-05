@@ -72,49 +72,46 @@ float3 ApplyMoonTexture(float3 worldPosition)
 float4 RenderRainCloudDeck(float3 worldPosition)
 {
 	float3 skyDirection = normalize(worldPosition - AC_SpherePosition);
-	float projectionScale = min(4.0f, rcp(max(skyDirection.y, 0.16f)));
-	float2 cloudPlane = skyDirection.xz * projectionScale;
+	float horizonMask = smoothstep(0.0f, 0.065f, skyDirection.y);
+	float2 cloudPlane = skyDirection.xz / max(skyDirection.y, 0.075f);
 
-	float2 lowWind = float2(0.00016f, 0.00009f) * AC_Time;
-	float2 highWind = float2(-0.00007f, 0.00012f) * AC_Time;
-	float2 baseUV = float2(0.17f, 0.43f) + cloudPlane * 0.105f + lowWind;
-	float2 warpUV = float2(0.61f, 0.29f) + cloudPlane * 0.31f + highWind;
-	float2 warp = float2(
-		TX_RainCloudDetail.Sample(SS_Linear, warpUV).r,
-		TX_RainCloudDetail.Sample(SS_Linear, warpUV * 0.93f + float2(0.37f, 0.61f)).r) - 0.5f;
-	float2 warpedUV = baseUV + warp * 0.075f;
+	// The upper deck is Gothic's seamless cloud texture. It is world anchored and moves slowly.
+	float2 upperWind = float2(0.000035f, 0.000018f) * AC_Time;
+	float2 upperParallax = AC_WorldCameraPos.xz * 0.0000015f;
+	float2 upperUV = cloudPlane * 0.055f + upperWind + upperParallax + float2(0.17f, 0.43f);
+	float3 upperSample = TX_RainCloudBase.Sample(SS_Linear, upperUV).rgb;
+	float upperLuma = dot(upperSample, float3(0.2126f, 0.7152f, 0.0722f));
+	float upperRelief = saturate((upperLuma - 0.18f) * 2.8f);
 
-	float lowLayer = TX_RainCloudBase.Sample(SS_Linear, warpedUV).r;
-	float2 rotatedPlane = float2(-cloudPlane.y, cloudPlane.x);
-	float highLayer = TX_RainCloudBase.Sample(
-		SS_Linear, float2(0.73f, 0.11f) + rotatedPlane * 0.071f + highWind).r;
-	float detail = TX_RainCloudDetail.Sample(
-		SS_Linear, warpedUV * 3.2f - lowWind * 1.7f + float2(0.19f, 0.47f)).r;
-	float density = saturate(lowLayer * 0.61f + highLayer * 0.39f + (detail - 0.5f) * 0.34f);
-
-	float lightPlanarLength = max(length(AC_LightPos.xz), 0.001f);
-	float2 lightPlanarDirection = AC_LightPos.xz / lightPlanarLength;
-	float lightProbe = TX_RainCloudBase.Sample(
-		SS_Linear, warpedUV + lightPlanarDirection * 0.018f).r;
-	float relief = saturate(0.46f + (density - lightProbe) * 2.1f + (detail - 0.5f) * 0.22f);
+	// The transparent detail texture forms a lower bank. Faster drift and stronger camera
+	// parallax separate it visibly from the high deck without changing the clear-weather sky.
+	float2 lowerWind = float2(0.000105f, -0.000052f) * AC_Time;
+	float2 lowerParallax = AC_WorldCameraPos.xz * 0.0000045f;
+	float2 lowerPlane = float2(cloudPlane.x * 0.67f, cloudPlane.y);
+	float2 lowerUV = frac(lowerPlane * 0.028f + lowerWind + lowerParallax + float2(0.31f, 0.12f));
+	float4 lowerSample = TX_RainCloudDetail.Sample(SS_Linear, lowerUV);
+	float lowerAlpha = smoothstep(0.03f, 0.72f, lowerSample.a) * horizonMask;
+	float lowerLuma = dot(lowerSample.rgb, float3(0.2126f, 0.7152f, 0.0722f));
+	float lowerRelief = saturate((lowerLuma - 0.12f) * 2.2f);
 
 	float dayWeight = saturate(AC_LightPos.y * 4.0f + 0.10f);
-	float3 dayCloud = lerp(float3(0.10f, 0.12f, 0.14f), float3(0.37f, 0.40f, 0.43f), relief);
-	float3 nightCloud = lerp(float3(0.008f, 0.013f, 0.027f), float3(0.055f, 0.072f, 0.115f), relief);
-	float3 cloudColor = lerp(nightCloud, dayCloud, dayWeight);
-	cloudColor += float3(0.16f, 0.22f, 0.34f) * AC_MoonVisibility * relief * 0.08f;
+	float3 upperDay = lerp(float3(0.075f, 0.085f, 0.095f), float3(0.40f, 0.42f, 0.44f), upperRelief);
+	float3 lowerDay = lerp(float3(0.055f, 0.062f, 0.072f), float3(0.34f, 0.36f, 0.39f), lowerRelief);
+	float3 upperNight = lerp(float3(0.006f, 0.010f, 0.020f), float3(0.050f, 0.064f, 0.095f), upperRelief);
+	float3 lowerNight = lerp(float3(0.004f, 0.007f, 0.014f), float3(0.040f, 0.052f, 0.080f), lowerRelief);
+	float3 upperColor = lerp(upperNight, upperDay, dayWeight);
+	float3 lowerColor = lerp(lowerNight, lowerDay, dayWeight);
+	lowerColor += float3(0.12f, 0.16f, 0.25f) * AC_MoonVisibility * lowerRelief * 0.08f;
 
-	float opacity = saturate(0.82f + density * 0.22f);
+	float upperOpacity = saturate((0.84f + upperRelief * 0.13f) * horizonMask);
+	float3 cloudColor = lerp(upperColor, lowerColor, lowerAlpha * 0.86f);
+	float opacity = saturate(upperOpacity + lowerAlpha * (1.0f - upperOpacity));
 	return float4(cloudColor, opacity);
 }
 // Pixel Shader
 //--------------------------------------------------------------------------------------
 float4 PSMain( PS_INPUT Input ) : SV_TARGET
 {
-	float skyDomeY = normalize(Input.vWorldPosition - AC_SpherePosition).y;
-	if (skyDomeY < 0.0f)
-		return float4(0.0f, 0.0f, 0.0f, 1.0f);
-
 	float3 atmoColor = ApplyAtmosphericScatteringSky(Input.vWorldPosition) * 2.0f;
 	
 	float4 clouds = TX_Texture0.Sample(SS_Linear, 0.5f + Input.vWorldPosition.xz / 200000.0f + frac(AC_Time * 0.001f));

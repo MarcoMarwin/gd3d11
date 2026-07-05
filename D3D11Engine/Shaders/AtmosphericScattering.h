@@ -193,7 +193,8 @@ float3 ApplyAtmosphericScatteringGround(float3 worldPosition, float3 in_color, b
 		v3SamplePoint += v3SampleRay;
 	}
 	// Suppress daytime atmospheric in-scattering during rain, as in the established renderer path.
-	v3FrontColor *= 1.0f - saturate(AC_SceneWettness);
+	// Distant-world color follows the monotonic atmospheric rain envelope, not wet-ground persistence.
+	v3FrontColor *= 1.0f - saturate(AC_RainFXWeight);
 	
 	// Finally, scale the Mie and Rayleigh colors and set up the varying variables for the pixel shader.
 	float3 c0 = v3FrontColor * (vInvWavelength * AC_KrESun + AC_KmESun);

@@ -965,7 +965,6 @@ private:
 public:
     // temporarily, to allow CollectVisibleVobsHelper to be templated for inlining optimizations
     gtl::flat_hash_map<zCVobLight*, VobLightInfo*> VobLightMap;
-    gtl::flat_hash_set<VobLightInfo*> TransitionSafeLights;
     // Exposed for CollectLeafVobs/CollectVisibleVobsWithLeafCache (file-static helpers)
     BspLeafLinearCache LeafLinearCache;
 private:

@@ -35,7 +35,8 @@ float GetToneMapExposure(Texture2D lumTex, SamplerState samplerState, float midd
 float HDRToneMapBlend()
 {
     float legacyToneMapStrength = HDR_ToneMapStrength * 7.5f;
-    return saturate((legacyToneMapStrength - 1.0f) / 9.0f);
+    // Preserve the former 7.5 setting while allowing the 10..15 range to keep increasing.
+    return max(0.0f, (legacyToneMapStrength - 1.0f) / 9.0f);
 }
 
 float3 LPMToneMap(float3 vColor, Texture2D lumTex, SamplerState samplerState)
@@ -43,6 +44,6 @@ float3 LPMToneMap(float3 vColor, Texture2D lumTex, SamplerState samplerState)
     FfxFloat32x3 color = max(vColor * GetToneMapExposure(lumTex, samplerState, 0.18f, 0.75f, 2.25f), 0.0f);
     LpmFilter(color.r, color.g, color.b,
         FFX_TRUE, FFX_FALSE, FFX_FALSE, FFX_FALSE, FFX_FALSE, FFX_FALSE);
-    return lerp(saturate(vColor), saturate(color), HDRToneMapBlend());
+    return saturate(lerp(saturate(vColor), saturate(color), HDRToneMapBlend()));
 }
 #endif

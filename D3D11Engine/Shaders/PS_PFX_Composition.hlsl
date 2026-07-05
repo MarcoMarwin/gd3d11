@@ -37,10 +37,20 @@ cbuffer PFXBuffer : register( b0 )
     float2 HF_Pad3;
 };
 
+#endif
+
+#if COMPOSE_HEIGHTFOG || COMPOSE_CONTACT_SHADOWS || COMPOSE_SSGI
 cbuffer CompositionControl : register( b2 )
 {
     float CC_HeightFogEnabled;
-    float3 CC_Pad;
+    float CC_Pad0;
+    float2 CC_InvResolution;
+
+    float4 CC_ProjParams;
+    matrix CC_Projection;
+
+    float3 CC_LightDirectionVS;
+    float CC_Pad;
 };
 #endif
 
@@ -159,9 +169,11 @@ float IsGeometryPixel(float depth)
     return step(0.000001f, depth);
 }
 
-float2 GetScreenPixelSize(float2 uv)
+float3 ReconstructViewPosition(float2 uv, float depth)
 {
-    return max(abs(ddx(uv)) + abs(ddy(uv)), float2(1.0f / 3840.0f, 1.0f / 2160.0f));
+    float viewZ = CC_ProjParams.z / (depth - CC_ProjParams.w);
+    float2 ndc = float2(uv.x * 2.0f - 1.0f, 1.0f - uv.y * 2.0f);
+    return float3(ndc.x * viewZ * CC_ProjParams.x, ndc.y * viewZ * CC_ProjParams.y, viewZ);
 }
 
 float3 GetViewNormal(float2 uv)
@@ -169,109 +181,159 @@ float3 GetViewNormal(float2 uv)
     return DecodeNormalGBuffer(TX_Normals.SampleLevel(SS_Linear, saturate(uv), 0).xy);
 }
 
-float DepthSimilarity(float centerDepth, float sampleDepth, float nearScale, float farScale)
+float2 ProjectViewPosition(float3 viewPosition, out float valid)
 {
-    float depthScale = max(centerDepth, 0.00008f);
-    float delta = abs(sampleDepth - centerDepth);
-    float nearLimit = max(depthScale * nearScale, 0.000015f);
-    float farLimit = max(depthScale * farScale, 0.00018f);
-    return (1.0f - smoothstep(nearLimit, farLimit, delta)) * IsGeometryPixel(sampleDepth);
+    float4 clip = mul(float4(viewPosition, 1.0f), CC_Projection);
+    valid = step(0.001f, clip.w);
+    float2 uv = clip.xy / max(clip.w, 0.001f) * float2(0.5f, -0.5f) + 0.5f;
+    valid *= step(0.0f, uv.x) * step(uv.x, 1.0f) * step(0.0f, uv.y) * step(uv.y, 1.0f);
+    return uv;
+}
+
+float InterleavedGradientNoise(float2 pixel)
+{
+    return frac(52.9829189f * frac(dot(pixel, float2(0.06711056f, 0.00583715f))));
+}
+
+bool TraceViewSpaceRay(
+    float3 rayOrigin,
+    float3 rayDirection,
+    float maxDistance,
+    int stepCount,
+    float jitter,
+    out float2 hitUV,
+    out float hitDistance)
+{
+    hitUV = 0.0f;
+    hitDistance = maxDistance;
+    float previousDelta = -1.0f;
+
+    [loop]
+    for (int stepIndex = 0; stepIndex < 12; ++stepIndex)
+    {
+        if (stepIndex >= stepCount)
+            break;
+
+        float normalizedStep = ((float)stepIndex + 1.0f + jitter * 0.65f) / ((float)stepCount + 0.65f);
+        float travel = maxDistance * normalizedStep * normalizedStep;
+        float3 rayPosition = rayOrigin + rayDirection * travel;
+        if (rayPosition.z <= 1.0f)
+            break;
+
+        float valid;
+        float2 rayUV = ProjectViewPosition(rayPosition, valid);
+        if (valid < 0.5f)
+            break;
+
+        float sceneDepth = GetDepthRaw(rayUV);
+        if (IsGeometryPixel(sceneDepth) < 0.5f)
+        {
+            previousDelta = -1.0f;
+            continue;
+        }
+
+        float sceneZ = ReconstructViewPosition(rayUV, sceneDepth).z;
+        float depthDelta = rayPosition.z - sceneZ;
+        float thickness = max(8.0f, travel * 0.085f);
+        bool crossedSurface = depthDelta > 2.0f && depthDelta < thickness;
+        bool crossedBetweenSteps = previousDelta < 0.0f && depthDelta >= 0.0f && depthDelta < thickness * 1.5f;
+        if (crossedSurface || crossedBetweenSteps)
+        {
+            hitUV = rayUV;
+            hitDistance = travel;
+            return true;
+        }
+        previousDelta = depthDelta;
+    }
+    return false;
 }
 #endif
 
 #if COMPOSE_CONTACT_SHADOWS
 float ComputeContactShadow(float2 uv, float centerDepth)
 {
-    float geom = IsGeometryPixel(centerDepth);
-    float2 px = GetScreenPixelSize(uv);
-    float3 centerNormal = GetViewNormal(uv);
+    if (IsGeometryPixel(centerDepth) < 0.5f)
+        return 1.0f;
 
-    float2 projectedLight = AC_LightScreenPos.xy - uv;
-    float projectedLen = length(projectedLight);
-    float2 fallbackDir = normalize(float2(AC_LightPos.x, -AC_LightPos.z) + float2(0.001f, -0.001f));
-    float2 lightDir = projectedLen > 0.03f ? projectedLight / projectedLen : fallbackDir;
+    float3 viewPosition = ReconstructViewPosition(uv, centerDepth);
+    float3 viewNormal = GetViewNormal(uv);
+    float3 directionToLight = normalize(CC_LightDirectionVS);
+    float surfaceFacing = saturate(dot(viewNormal, directionToLight));
+    if (surfaceFacing <= 0.001f)
+        return 1.0f;
 
-    float localSurface = 0.0f;
-    localSurface += DepthSimilarity(centerDepth, GetDepthRaw(uv + float2( px.x, 0.0f)), 0.04f, 0.22f);
-    localSurface += DepthSimilarity(centerDepth, GetDepthRaw(uv + float2(-px.x, 0.0f)), 0.04f, 0.22f);
-    localSurface += DepthSimilarity(centerDepth, GetDepthRaw(uv + float2(0.0f,  px.y)), 0.04f, 0.22f);
-    localSurface += DepthSimilarity(centerDepth, GetDepthRaw(uv + float2(0.0f, -px.y)), 0.04f, 0.22f);
-    localSurface = saturate(localSurface * 0.25f);
+    float jitter = InterleavedGradientNoise(floor(uv / CC_InvResolution));
+    float maxDistance = clamp(viewPosition.z * 0.035f, 180.0f, 900.0f);
+    float2 hitUV;
+    float hitDistance;
+    bool hit = TraceViewSpaceRay(
+        viewPosition + viewNormal * 7.0f,
+        directionToLight,
+        maxDistance,
+        12,
+        jitter,
+        hitUV,
+        hitDistance);
 
-    float shadow = 0.0f;
-    float weightSum = 0.0001f;
-    [unroll]
-    for (int i = 1; i <= 10; ++i)
-    {
-        float fi = (float)i;
-        float sampleRadius = fi * 1.55f + fi * fi * 0.22f;
-        float2 suv = uv + lightDir * px * sampleRadius;
-        float sd = GetDepthRaw(suv);
-        float3 sampleNormal = GetViewNormal(suv);
+    if (!hit)
+        return 1.0f;
 
-        float delta = sd - centerDepth;
-        float depthScale = max(centerDepth, 0.00008f);
-        float minDelta = max(depthScale * 0.014f, 0.000012f);
-        float maxDelta = max(depthScale * 0.19f, 0.00024f);
-        float occluder = smoothstep(minDelta, maxDelta, delta) * (1.0f - smoothstep(maxDelta, maxDelta * 4.0f, delta));
-        occluder *= IsGeometryPixel(sd);
-        occluder *= saturate(dot(centerNormal, sampleNormal) * 1.35f);
-
-        float weight = saturate(1.0f - fi * 0.075f);
-        shadow += occluder * weight;
-        weightSum += weight;
-    }
-
-    shadow = saturate(shadow / weightSum) * localSurface;
-    float lightVisibility = saturate(AC_LightScreenPos.z + 0.65f);
-    float strength = saturate(AC_ContactShadowStrength);
-    return 1.0f - shadow * geom * lightVisibility * strength * 0.70f;
+    float distanceFade = 1.0f - smoothstep(maxDistance * 0.18f, maxDistance, hitDistance);
+    float shadow = surfaceFacing * distanceFade * min(AC_ContactShadowStrength, 2.0f) * 0.72f;
+    return 1.0f - saturate(shadow);
 }
 #endif
 
 #if COMPOSE_SSGI
 float3 ComputeScreenSpaceGILight(float2 uv, float centerDepth, float3 baseColor)
 {
-    float geom = IsGeometryPixel(centerDepth);
-    float2 px = GetScreenPixelSize(uv);
-    float3 centerNormal = GetViewNormal(uv);
-    float3 bounce = 0.0f;
-    float weightSum = 0.0001f;
-    const float2 dirs[12] = {
-        float2( 1.0f,  0.0f), float2(-1.0f,  0.0f),
-        float2( 0.0f,  1.0f), float2( 0.0f, -1.0f),
-        float2( 0.707f,  0.707f), float2(-0.707f, -0.707f),
-        float2( 0.707f, -0.707f), float2(-0.707f,  0.707f),
-        float2( 0.924f,  0.383f), float2(-0.924f, -0.383f),
-        float2( 0.383f, -0.924f), float2(-0.383f,  0.924f)
-    };
+    if (IsGeometryPixel(centerDepth) < 0.5f)
+        return 0.0f;
+
+    float3 viewPosition = ReconstructViewPosition(uv, centerDepth);
+    float3 viewNormal = GetViewNormal(uv);
+    float3 helperAxis = abs(viewNormal.z) < 0.98f ? float3(0.0f, 0.0f, 1.0f) : float3(0.0f, 1.0f, 0.0f);
+    float3 tangent = normalize(cross(helperAxis, viewNormal));
+    float3 bitangent = normalize(cross(viewNormal, tangent));
+    float rotation = InterleavedGradientNoise(floor(uv / CC_InvResolution)) * 6.2831853f;
+    float maxDistance = clamp(viewPosition.z * 0.16f, 650.0f, 3600.0f);
+    float3 indirectRadiance = 0.0f;
 
     [unroll]
-    for (int i = 0; i < 12; ++i)
+    for (int rayIndex = 0; rayIndex < 6; ++rayIndex)
     {
-        float radiusA = (i < 8) ? 5.0f : 10.0f;
-        float radiusB = radiusA * 2.6f;
-        float2 suvNear = saturate(uv + dirs[i] * px * radiusA);
-        float2 suvFar = saturate(uv + dirs[i] * px * radiusB);
-        float sd0 = GetDepthRaw(suvNear);
-        float sd1 = GetDepthRaw(suvFar);
-        float3 n0 = GetViewNormal(suvNear);
-        float3 n1 = GetViewNormal(suvFar);
-        float facing0 = saturate(0.35f + dot(centerNormal, n0) * 0.65f);
-        float facing1 = saturate(0.35f + dot(centerNormal, n1) * 0.65f);
-        float w0 = DepthSimilarity(centerDepth, sd0, 0.08f, 0.55f) * facing0;
-        float w1 = DepthSimilarity(centerDepth, sd1, 0.16f, 1.05f) * facing1 * 0.55f;
-        float3 c0 = TX_Backbuffer.SampleLevel(SS_Linear, suvNear, 0).rgb;
-        float3 c1 = TX_Backbuffer.SampleLevel(SS_Linear, suvFar, 0).rgb;
-        bounce += c0 * w0 + c1 * w1;
-        weightSum += w0 + w1;
+        float sequence = frac(0.31f + (float)rayIndex * 0.6180339f);
+        float cosTheta = lerp(0.24f, 0.88f, sequence);
+        float sinTheta = sqrt(saturate(1.0f - cosTheta * cosTheta));
+        float phi = rotation + (float)rayIndex * 1.0471976f;
+        float3 rayDirection = normalize(
+            tangent * (cos(phi) * sinTheta) +
+            bitangent * (sin(phi) * sinTheta) +
+            viewNormal * cosTheta);
+
+        float2 hitUV;
+        float hitDistance;
+        if (TraceViewSpaceRay(
+                viewPosition + viewNormal * 9.0f,
+                rayDirection,
+                maxDistance,
+                10,
+                frac(sequence + rotation),
+                hitUV,
+                hitDistance))
+        {
+            float3 hitNormal = GetViewNormal(hitUV);
+            float receiverCosine = saturate(dot(viewNormal, rayDirection));
+            float emitterCosine = saturate(dot(hitNormal, -rayDirection));
+            float distanceWeight = 1.0f / (1.0f + 3.0f * hitDistance / maxDistance);
+            float3 sourceRadiance = min(TX_Backbuffer.SampleLevel(SS_Linear, hitUV, 0).rgb, float3(12.0f, 12.0f, 12.0f));
+            indirectRadiance += sourceRadiance * receiverCosine * emitterCosine * distanceWeight;
+        }
     }
 
-    bounce /= weightSum;
     float baseLuma = dot(baseColor, float3(0.2126f, 0.7152f, 0.0722f));
-    float3 diffuseBounce = max(bounce - baseColor * 0.08f, 0.0f);
-    float3 softIrradiance = bounce * saturate(1.0f - baseLuma) * 0.16f;
-    return (diffuseBounce * 0.48f + softIrradiance) * saturate(AC_ScreenSpaceGIStrength) * geom;
+    float energyControl = rcp(1.0f + baseLuma * 0.18f);
+    return indirectRadiance * (1.0f / 6.0f) * min(AC_ScreenSpaceGIStrength, 2.0f) * 0.62f * energyControl;
 }
 #endif
 

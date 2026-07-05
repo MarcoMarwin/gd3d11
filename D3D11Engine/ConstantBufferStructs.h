@@ -111,7 +111,14 @@ struct HeightfogConstantBuffer {
 
 struct CompositionControlConstantBuffer {
     float CC_HeightFogEnabled;
-    float3 CC_Pad;
+    float CC_Pad0;
+    float2 CC_InvResolution;
+
+    float4 CC_ProjParams;
+    XMFLOAT4X4 CC_Projection;
+
+    XMFLOAT3 CC_LightDirectionVS;
+    float CC_Pad;
 };
 
 struct LumAdaptConstantBuffer {

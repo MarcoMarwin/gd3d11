@@ -64,43 +64,6 @@ struct PS_INPUT
 //--------------------------------------------------------------------------------------
 // Pixel Shader
 //--------------------------------------------------------------------------------------
-float TraceWaterLightOcclusion(float3 rayOrigin, float3 rayDirection)
-{
-	float3 rayPosition = rayOrigin + rayDirection * 45.0f;
-	float rayStep = 120.0f;
-	float occlusion = 0.0f;
-	float4 rayClip = mul(float4(rayPosition, 1.0f), RI_ViewProj);
-	float4 rayClipDirection = mul(float4(rayDirection, 0.0f), RI_ViewProj);
-
-	[loop]
-	for (int sampleIndex = 0; sampleIndex < 14; sampleIndex++)
-	{
-		rayClip += rayClipDirection * rayStep;
-		float4 rayProj = rayClip;
-		rayProj.xyz /= rayProj.w;
-		float2 rayUV = rayProj.xy * float2(0.5f, -0.5f) + 0.5f;
-		if (rayUV.x < 0.0f || rayUV.x > 1.0f || rayUV.y < 0.0f || rayUV.y > 1.0f || rayProj.z < 0.0f || rayProj.z > 1.0f)
-		{
-			rayStep *= 1.45f;
-			continue;
-		}
-
-		float sceneDepth = TX_Depth.SampleLevel(SS_Linear, rayUV, 0).r;
-		float sceneZ = RI_Projection._43 / (sceneDepth - RI_Projection._33);
-		float depthDifference = rayProj.w - sceneZ;
-		float occluderWindow = max(90.0f, rayStep * 3.5f);
-		if (depthDifference > -45.0f && depthDifference < occluderWindow)
-		{
-			float sampleOcclusion = 1.0f - smoothstep(
-				occluderWindow * 0.45f, occluderWindow, max(depthDifference, 0.0f));
-			occlusion = max(occlusion, sampleOcclusion);
-			if (occlusion > 0.92f)
-				break;
-		}
-		rayStep *= 1.35f;
-	}
-	return occlusion;
-}
 struct PS_OUTPUT
 {
 	float4 color : SV_TARGET0;
@@ -304,10 +267,9 @@ PS_OUTPUT PSMain( PS_INPUT Input )
 	sun_spot *= sunVisibility;
 	// If screen-space water reflection has found opaque geometry, let that reflection win over procedural light glints.
 	float sunSpotSSRBlock = saturate(max(ssrBaseWeight, ssrHitQuality * 0.75f) * ssrHitValid * 1.85f);
-	float sunSpotOcclusion = (waterSSRActive && sun_spot > 0.0001f && sunSpotSSRBlock < 1.0f)
-		? TraceWaterLightOcclusion(Input.vWorldPosition, normalize(-AC_LightPos.xyz))
-		: 0.0f;
-	sun_spot *= 1.0f - saturate(sunSpotSSRBlock + sunSpotOcclusion * 0.85f);
+	// Camera-depth rays cannot determine world-space sun visibility: foreground geometry
+	// must not cut a glint on water behind it. SSR alone masks reflected scene geometry.
+	sun_spot *= 1.0f - sunSpotSSRBlock;
 	color.rgb += sunColor * sun_spot;
 
 	float moonVisibility = saturate(AC_MoonVisibility) * saturate((-AC_LightPos.y + 0.08f) * 2.0f) * saturate(Input.vDiffuse.y) * weatherLightVisibility;
@@ -315,10 +277,7 @@ PS_OUTPUT PSMain( PS_INPUT Input )
 	float3 moonRayDir = moonLightVec / max(length(moonLightVec), 0.001f);
 	float moonCosSpec = clamp(dot(reflect_vecSmall, moonRayDir), 0, 1);
 	float moon_spot = pow(moonCosSpec, 360.0f) * 0.22f * moonVisibility;
-	float moonSpotOcclusion = (waterSSRActive && moon_spot > 0.00001f && sunSpotSSRBlock < 1.0f)
-		? TraceWaterLightOcclusion(Input.vWorldPosition, moonRayDir)
-		: 0.0f;
-	moon_spot *= 1.0f - saturate(sunSpotSSRBlock + moonSpotOcclusion * 0.85f);
+	moon_spot *= 1.0f - sunSpotSSRBlock;
 	float3 moonColor = float3(0.58f, 0.66f, 1.0f) * 1.15f;
 	color.rgb += moonColor * moon_spot;
 

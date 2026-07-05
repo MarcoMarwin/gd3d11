@@ -1072,7 +1072,6 @@ void GothicAPI::ResetVobs() {
     Engine::GAPI->LeaveResourceCriticalSection();
     // Delete light vobs, those depend on world sections and load stuff in the background.
     // by deleting them first we block the thread until the destructor finished
-    TransitionSafeLights.clear();
     for ( auto const& it : VobLightMap ) {
         Engine::GraphicsEngine->OnVobRemovedFromWorld( it.first );
         delete it.second;
@@ -2273,7 +2272,6 @@ void GothicAPI::OnRemovedVob( zCVob* vob, zCWorld* world ) {
     const auto lightIt = VobLightMap.find( static_cast<zCVobLight*>(vob) );
     if ( lightIt != VobLightMap.end() ) {
         li = lightIt->second;
-        TransitionSafeLights.erase( li );
     }
 
     // Erase it from the particle-effect list
@@ -4827,12 +4825,11 @@ void GothicAPI::ConfigurePointlightShadowSource( VobLightInfo* lightInfo ) const
     while ( persistentParent && isLightVob( persistentParent ) )
         persistentParent = persistentParent->GetVobParent();
 
-    if ( persistentParent && !persistentParent->As<oCNPC>() )
+    if ( persistentParent && (!persistentParent->As<oCNPC>() || lightInfo->IsDynamicVobLight) )
         lightInfo->AllowsPointlightShadows = true;
 }
 
 void GothicAPI::ConfigureAllPointlightShadowSources() {
-    TransitionSafeLights.clear();
     constexpr float LINK_RADIUS = 150.0f;
     constexpr float LINK_RADIUS_SQ = LINK_RADIUS * LINK_RADIUS;
     const size_t INVALID_INDEX = static_cast<size_t>(-1);
@@ -4893,10 +4890,8 @@ void GothicAPI::ConfigureAllPointlightShadowSources() {
         zCVob* transitionParent = getPersistentParent( info->Vob );
         const bool parentActorLight = transitionParent && transitionParent->As<oCNPC>() != nullptr;
         info->IgnoreIndoorOutdoorLimit = info->IsDynamicVobLight || info->IsVisualFXLight || parentActorLight;
-        if ( info->IsDynamicVobLight || info->IsVisualFXLight ) {
-            TransitionSafeLights.insert( info );
-        }
-        if ( info->IsVisualFXLight )
+        const bool actorCarriedDynamicLight = info->IsDynamicVobLight && parentActorLight;
+        if ( info->IsVisualFXLight || actorCarriedDynamicLight )
             continue;
 
         info->AllowsPointlightShadows = false;
@@ -6670,7 +6665,6 @@ static void CollectLeafVobs(
                     vi->IgnoreIndoorOutdoorLimit = true;
                     vi->UpdateShadows = !vi->IsVisualFXLight && vi->AllowsPointlightShadows;
                     vit = VobLightMap.emplace( vob, vi ).first;
-                    Engine::GAPI->TransitionSafeLights.insert( vi );
 
                     // Create shadow-buffers for these lights since it was dynamically added to the world
                     if ( !vi->IsVisualFXLight && vi->AllowsPointlightShadows && rendererSettings.EnablePointlightShadows >= GothicRendererSettings::PLS_STATIC_ONLY ) {
@@ -6687,12 +6681,21 @@ static void CollectLeafVobs(
                     }
                     return false;
                 };
-                bool parentActorLight = false;
-                if ( zCVob* parent = vob->GetVobParent() ) {
-                    parentActorLight = parent->As<oCNPC>() != nullptr;
-                }
+                auto isLightVob = []( zCVob* candidate ) {
+                    if ( !candidate )
+                        return false;
+                    for ( zCClassDef* classDef = reinterpret_cast<zCObject*>(candidate)->_GetClassDef(); classDef; classDef = classDef->baseClassDef ) {
+                        if ( strcmp( classDef->className.ToChar(), "zCVobLight" ) == 0 )
+                            return true;
+                    }
+                    return false;
+                };
+                zCVob* persistentParent = vob->GetVobParent();
+                while ( persistentParent && isLightVob( persistentParent ) )
+                    persistentParent = persistentParent->GetVobParent();
+                const bool parentActorLight = persistentParent && persistentParent->As<oCNPC>() != nullptr;
                 vi->IsVisualFXLight = vi->IsVisualFXLight || hasVisualFXParent( vob->GetVobParent() );
-                if ( vi->IsVisualFXLight ) {
+                if ( vi->IsVisualFXLight || (vi->IsDynamicVobLight && parentActorLight) ) {
                     vi->AllowsPointlightShadows = true;
                     vi->UpdateShadows = true;
                 }
@@ -7025,7 +7028,8 @@ void GothicAPI::CollectVisibleVobs( const RndCullContext& ctx ) {
 
     if ( ctx.drawFlags.CollectLights && ctx.drawFlags.EnableDynamicLighting ) {
         const float visualFXDrawRadius = ctx.drawDistances.VisualFX;
-        for ( VobLightInfo* vi : TransitionSafeLights ) {
+        for ( const auto& lightEntry : VobLightMap ) {
+            VobLightInfo* vi = lightEntry.second;
             if ( !vi || !vi->Vob || !vi->IgnoreIndoorOutdoorLimit ) {
                 continue;
             }

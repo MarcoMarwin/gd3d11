@@ -156,3 +156,15 @@ Kurze, append-only Dokumentation der von Codex gepushten Renderer-Builds.
 - CI-Korrektur: VFX-Fallback-Bounding-Sphere speichert die effektive Lichtposition nun explizit per `XMStoreFloat3` in `DirectX::XMFLOAT3`; damit ist die in Release_G1_12f gemeldete ungueltige Zuweisung von `float3` behoben.
 - Inhaltlich keine weiteren Renderer-Aenderungen gegenueber Build 089.
 - Pruefung: gemeldete Compilerstelle, alle weiteren Aufrufer von `GetEffectivePositionWorld`, Typgrenzen und `git diff --check` statisch kontrolliert; kein vollstaendiger lokaler C++-Build.
+
+## Build 090 (Stabilitaets- und Darstellungsfixes)
+
+- VFX-/Fackelstabilitaet: zusaetzlichen rohen Transition-Light-Container entfernt; Inventarentfernung prueft nun das konkrete Vob. Dynamische am NPC getragene sowie echte VisualFX-Lichter bleiben wie die Handfackel ueber die autoritative Light-Map sichtbar und schattenberechtigt.
+- Pointlights/NPCs: Indoor-Kennbit fuer Skeletal-GBuffer-Pixel wiederhergestellt, ohne die sichtbare NPC-Farbe oder atmosphaerische Lichtstaerke abzuschwaechen.
+- Screen-Space-Licht: bisherigen Nachbarschaftsfilter ersetzt. SSGI verfolgt sechs hemisphaerische View-Space-Strahlen mit Depth-Treffern und sammelt sichtbare Ein-Bounce-Radiance; Contact Shadows verfolgen kurze View-Space-Sichtstrahlen zur aktiven Sonne beziehungsweise zum Mond. Nur High und Extreme aktivieren beide Effekte.
+- Regen/Wetter: F11-Regen-Aus deaktiviert Wolkendecke und wetterabhaengige Lichtdaempfung sofort. Fernwelt/Himmel folgen einem einzigen monotonen 60-Sekunden-Wetterwert; nasse Boeden duerfen unabhaengig davon weiter trocknen.
+- Regenwolken: bereitgestellte Gothic-Base als langsam bewegte, wiederholte obere Decke integriert; transparente Detailwolke als tiefere, schneller driftende Schicht mit eigener Projektion und staerkerer Parallaxe. Unbenutzte PNG-Duplikate entfernt.
+- Sky-Boden: wirkungslosen Schwarzreturn aus Build 089 wieder entfernt; Horizont, Nachtnebel und Weltueberblendung bleiben unveraendert.
+- Wasser: fehlerhaften Kamera-Depth-Occlusion-Trace entfernt, damit Vordergrundgeometrie Sonnen- und Mondglanz auf dahinterliegendem Wasser nicht mehr zerschneidet; Regenausblendung bleibt erhalten.
+- HDR: Normwert 1,0 bleibt bei intern 7,5; die Stufen oberhalb intern 10 bis zum Maximum 15 verstaerken LPM nun weiter statt am bisherigen Blend-Limit zu saettigen.
+- Pruefung: statische Lebenszyklus-, Aufrufer-, Constant-Buffer-, Shaderregister-, Preset-, Ressourcen- und Diff-Pruefungen; kein vollstaendiger lokaler C++-/Shader-Build.

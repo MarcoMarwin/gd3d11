@@ -361,15 +361,28 @@ XRESULT D3D11PfxRenderer::RenderPostFXComposition(
     auto compositionPS = engine->GetShaderManager().GetPShader( PShaderID::PS_PFX_Composition );
     compositionPS->Apply();
 
-    // Update constant buffers for inline heightfog and lightweight screen-space atmosphere effects.
+    // Update constants shared by height fog and the view-space ray tracing effects.
     auto& settings = Engine::GAPI->GetRendererState().RendererSettings;
     GSky* sky = Engine::GAPI->GetSky();
-    const bool needsAtmosphere = compositionHeightFog || (settings.EnableContactShadows && settings.ContactShadowStrength > 0.0f) || (settings.EnableScreenSpaceGI && settings.ScreenSpaceGIStrength > 0.0f);
-    if ( settings.DrawFog ) {
-        CompositionControlConstantBuffer control = {};
-        control.CC_HeightFogEnabled = compositionHeightFog ? 1.0f : 0.0f;
-        compositionPS->GetBuffer( "CompositionControl" ).Update( &control ).Bind();
+    const bool contactShadowsActive = settings.EnableContactShadows && settings.ContactShadowStrength > 0.0f;
+    const bool screenSpaceGIActive = settings.EnableScreenSpaceGI && settings.ScreenSpaceGIStrength > 0.0f;
+    const bool needsAtmosphere = compositionHeightFog || contactShadowsActive || screenSpaceGIActive;
+    CompositionControlConstantBuffer control = {};
+    control.CC_HeightFogEnabled = compositionHeightFog ? 1.0f : 0.0f;
+    control.CC_InvResolution = float2( 1.0f / std::max( 1, res.x ), 1.0f / std::max( 1, res.y ) );
+    const XMFLOAT4X4& projection = Engine::GAPI->GetProjectionMatrix();
+    control.CC_ProjParams = float4( 1.0f / projection._11, 1.0f / projection._22, projection._43, projection._33 );
+    control.CC_Projection = projection;
+    if ( sky ) {
+        const XMFLOAT3 mainLightDirection = sky->GetMainLightDirection();
+        const XMVECTOR directionToLightVS = XMVector3Normalize( XMVector3TransformNormal(
+            XMVectorNegate( XMLoadFloat3( &mainLightDirection ) ), Engine::GAPI->GetViewMatrixXM() ) );
+        XMStoreFloat3( &control.CC_LightDirectionVS, directionToLightVS );
+    } else {
+        control.CC_LightDirectionVS = XMFLOAT3( 0.0f, 1.0f, 0.0f );
     }
+    if ( needsAtmosphere )
+        compositionPS->GetBuffer( "CompositionControl" ).Update( &control ).Bind();
     if ( compositionHeightFog ) {
         HeightfogConstantBuffer cb;
         {

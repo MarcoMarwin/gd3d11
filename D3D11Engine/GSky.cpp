@@ -265,9 +265,18 @@ XRESULT GSky::RenderSky() {
 
     // Gothic's rain controller can pulse while rain is stopping. Keep all atmospheric
     // consumers on one rate-limited value so distant scenery cannot change color in one frame.
-    const float rawAtmosphericRain = std::clamp( Engine::GAPI->GetRainFXWeight(), 0.0f, 1.0f );
+    const bool rainEnabled = Engine::GAPI->GetRendererState().RendererSettings.EnableRain;
+    const float rawAtmosphericRain = rainEnabled
+        ? std::clamp( Engine::GAPI->GetRainFXWeight(), 0.0f, 1.0f )
+        : 0.0f;
     const DWORD atmosphericRainNow = GetTickCount();
-    if ( !AtmosphericRainInitialized ) {
+    if ( !rainEnabled ) {
+        AtmosphericRainWeight = 0.0f;
+        AtmosphericRainDropStartMs = 0;
+        AtmosphericRainSettledStartMs = 0;
+        AtmosphericRainInitialized = true;
+        AtmosphericRainReleasing = false;
+    } else if ( !AtmosphericRainInitialized ) {
         AtmosphericRainWeight = rawAtmosphericRain;
         AtmosphericRainInitialized = true;
     } else {
@@ -424,8 +433,8 @@ XRESULT GSky::RenderSky() {
     AtmosphereCB.AC_EnableScreenSpaceGI = (Engine::GAPI->GetRendererState().RendererSettings.EnableScreenSpaceGI && Engine::GAPI->GetRendererState().RendererSettings.ScreenSpaceGIStrength > 0.0f) ? 1.0f : 0.0f;
     const auto& rendererSettings = Engine::GAPI->GetRendererState().RendererSettings;
     AtmosphereCB.AC_PadLightFX1 = 0.0f;
-    AtmosphereCB.AC_ContactShadowStrength = rendererSettings.ContactShadowStrength * 0.35f;
-    AtmosphereCB.AC_ScreenSpaceGIStrength = rendererSettings.ScreenSpaceGIStrength * 0.25f;
+    AtmosphereCB.AC_ContactShadowStrength = rendererSettings.ContactShadowStrength;
+    AtmosphereCB.AC_ScreenSpaceGIStrength = rendererSettings.ScreenSpaceGIStrength;
     AtmosphereCB.AC_EnableParticleLighting = rendererSettings.EnableParticleLighting ? 1.0f : 0.0f;
     AtmosphereCB.AC_ParticleLightingStrength = rendererSettings.ParticleLightingStrength * 1.5f;
     AtmosphereCB.AC_PadParticle0 = 0.0f;
