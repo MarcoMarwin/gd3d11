@@ -847,7 +847,7 @@ void ApplyGraphicsPresets( GothicRendererSettings& s, bool applyRuntimeUpdates =
     case GothicRendererSettings::GRAPHICS_MEDIUM:
         s.AntiAliasingMode = GothicRendererSettings::E_AntiAliasingMode::AA_FSR;
         s.Upscaler = GothicRendererSettings::E_Upscaler::UPSCALER_FSR_3;
-        s.ResolutionScalePercent = 75;
+        s.ResolutionScalePercent = 83;
         s.ShadowMapSize = 2048;
         s.AoMode = AOMode::AO_XEGTAO;
         s.EnableContactShadows = false;

@@ -21,7 +21,7 @@ void GInventory::OnAddVob( VobInfo* vob, zCWorld* world ) {
 /** Called when a VOB got removed from the world */
 bool GInventory::OnRemovedVob( zCVob* vob, zCWorld* world ) {
     auto it = InventoryVobs.find( world );
-    if ( it != InventoryVobs.end() && it->second && it->second->Vob == vob ) {
+    if ( it != InventoryVobs.end() ) {
         InventoryVobs.erase( it );
         return true;
     }

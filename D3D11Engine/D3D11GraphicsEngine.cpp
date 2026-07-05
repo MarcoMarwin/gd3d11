@@ -4213,10 +4213,11 @@ XRESULT D3D11GraphicsEngine::OnStartWorldRendering() {
     }
     const bool renderRainExclusionMask = rendererState.RendererSettings.EnableRain
         && Engine::GAPI->GetSceneWetness() > 1e-6f && isOutdoor;
+    const bool renderWaterMask = renderRainExclusionMask || compositionNeedsGeometry;
     const bool renderWetGroundSSR = rendererState.RendererSettings.EnableSSR
         && renderRainExclusionMask;
     RGResourceHandle waterMaskResource = RG_INVALID_HANDLE;
-    if ( renderRainExclusionMask ) {
+    if ( renderWaterMask ) {
         const auto maskSize = GetResolution();
         if ( !RainExclusionMaskBuffer
             || RainExclusionMaskBuffer->GetSizeX() != maskSize.x
@@ -4236,7 +4237,7 @@ XRESULT D3D11GraphicsEngine::OnStartWorldRendering() {
     graph.AddPass( RG_PASS_NAME("DrawWaterSurfaces"), [&]( RGBuilder& builder, RenderPass& pass ) {
         builder.Read( backBufferHandle );
         builder.Write( backBufferHandle );
-        if ( renderRainExclusionMask ) {
+        if ( renderWaterMask ) {
             builder.Write( waterMaskResource );
         }
         if ( fsr3ActiveForReactiveMask ) {
@@ -4244,10 +4245,10 @@ XRESULT D3D11GraphicsEngine::OnStartWorldRendering() {
             builder.Write( reactiveMaskResource );
         }
 
-        pass.m_executeCallback = [this, renderRainExclusionMask, waterMaskResource, fsr3ActiveForReactiveMask, reactiveMaskResource](const RenderGraph& graph) {
+        pass.m_executeCallback = [this, renderWaterMask, waterMaskResource, fsr3ActiveForReactiveMask, reactiveMaskResource](const RenderGraph& graph) {
             SetViewport( ViewportInfo( 0, 0, GetResolution() ) );
             ID3D11RenderTargetView* waterMaskRTV = nullptr;
-            if ( renderRainExclusionMask ) {
+            if ( renderWaterMask ) {
                 auto* waterMask = graph.GetPhysicalTexture( waterMaskResource );
                 const float clearMask[4] = {};
                 GetContext()->ClearRenderTargetView( waterMask->GetRenderTargetView().Get(), clearMask );
@@ -4259,7 +4260,7 @@ XRESULT D3D11GraphicsEngine::OnStartWorldRendering() {
                 fsr3ReactiveMaskRTV = fsr3Mask ? fsr3Mask->GetRenderTargetView().Get() : nullptr;
             }
             DrawWaterSurfaces( waterMaskRTV, fsr3ReactiveMaskRTV );
-            if ( renderRainExclusionMask ) {
+            if ( renderWaterMask ) {
                 DrawWaterfallMask( waterMaskRTV );
             }
         };
@@ -4538,11 +4539,12 @@ XRESULT D3D11GraphicsEngine::OnStartWorldRendering() {
             builder.Read( backBufferHandle );
             if ( compositionNeedsGeometry ) {
                 builder.Read( normalsResource );
+                builder.Read( waterMaskResource );
             }
             builder.Write( backBufferHandle );
 
             pass.m_executeCallback = [this, backBufferHandle, normalsResource, compositionNeedsDepth, compositionNeedsGeometry,
-                                      compositionHeightFog, &compositionGodRaysSRV](const RenderGraph& graph) {
+                                      compositionHeightFog, waterMaskResource, &compositionGodRaysSRV](const RenderGraph& graph) {
                 TracyD3D11ZoneCGX( "D3D11GraphicsEngine::PostFX Composition" );
 
                 auto backBuffer = graph.GetPhysicalTexture(backBufferHandle);
@@ -4554,6 +4556,8 @@ XRESULT D3D11GraphicsEngine::OnStartWorldRendering() {
                 ID3D11ShaderResourceView* depthSRV = compositionNeedsDepth ? GetDepthBuffer()->GetShaderResView().Get() : nullptr;
                 auto normalsTexture = compositionNeedsGeometry ? graph.GetPhysicalTexture(normalsResource) : nullptr;
                 ID3D11ShaderResourceView* normalsSRV = normalsTexture ? normalsTexture->GetShaderResView().Get() : nullptr;
+                auto waterMaskTexture = compositionNeedsGeometry ? graph.GetPhysicalTexture(waterMaskResource) : nullptr;
+                ID3D11ShaderResourceView* waterMaskSRV = waterMaskTexture ? waterMaskTexture->GetShaderResView().Get() : nullptr;
 
                 PfxRenderer->RenderPostFXComposition(
                     backBuffer->GetRenderTargetView().Get(),
@@ -4561,6 +4565,7 @@ XRESULT D3D11GraphicsEngine::OnStartWorldRendering() {
                     compositionGodRaysSRV,
                     depthSRV,
                     normalsSRV,
+                    waterMaskSRV,
                     compositionHeightFog );
 
                 GetContext()->PSSetSamplers( 0, 1, DefaultSamplerState.GetAddressOf() );

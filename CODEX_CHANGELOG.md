@@ -168,3 +168,11 @@ Kurze, append-only Dokumentation der von Codex gepushten Renderer-Builds.
 - Wasser: fehlerhaften Kamera-Depth-Occlusion-Trace entfernt, damit Vordergrundgeometrie Sonnen- und Mondglanz auf dahinterliegendem Wasser nicht mehr zerschneidet; Regenausblendung bleibt erhalten.
 - HDR: Normwert 1,0 bleibt bei intern 7,5; die Stufen oberhalb intern 10 bis zum Maximum 15 verstaerken LPM nun weiter statt am bisherigen Blend-Limit zu saettigen.
 - Pruefung: statische Lebenszyklus-, Aufrufer-, Constant-Buffer-, Shaderregister-, Preset-, Ressourcen- und Diff-Pruefungen; kein vollstaendiger lokaler C++-/Shader-Build.
+
+## Build 092 (Regenwolken und VFX-Rollback)
+
+- Regenwolken: Base-Projektion von einem nahezu konstanten Himmelsausschnitt auf eine klar wiederholte Dome-Projektion umgestellt; die transparente Detailbank nutzt eine dichtere, gedrehte Projektion mit schnellerer Eigenbewegung und staerkerer Parallaxe. Regennebel, Wetteruebergang, Horizont und Nachtlogik bleiben unveraendert.
+- Presets: Medium nutzt im F11-Menue fuer FSR 3 nun Render Scale High Quality statt Quality.
+- Fackel/VFX: den erfolglosen Indoor-/Outdoor-Transition-Fallback vollstaendig auf den stabilen Stand von Build 088 zurueckgestellt. Die kurze bekannte Schattenluecke an der Grenze wird bewusst akzeptiert; der zusaetzliche Frame-Light-Scan sowie die erweiterten Parent-/Remove-Sonderpfade sind entfernt.
+- Contact Shadows/SSGI: Wasser- und Wasserfallmaske auch fuer Screen-Space-Lichteffekte erzeugt und in die Composition gereicht; Wasser wird als Empfaenger und Ray-Treffer ausgeschlossen. Contact Shadows nutzen kuerzere stabilere Rays mit begrenzter Abdunklung; SSGI nutzt stabile Richtungen, Mindesttreffer und Highlight-Kompression gegen punktfoermige Artefakte.
+- Pruefung: betroffene Fackel-/VFX-Funktionen blockweise exakt mit Build 088 verglichen; Wolken-UV-Abdeckung gegen beide ausgelieferten DDS-Dateien stichprobenartig ausgewertet; Shaderstruktur, Ressourcenpfade und `git diff --check` statisch kontrolliert. Kein vollstaendiger lokaler C++-/Shader-Build.

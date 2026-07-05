@@ -73,38 +73,47 @@ float4 RenderRainCloudDeck(float3 worldPosition)
 {
 	float3 skyDirection = normalize(worldPosition - AC_SpherePosition);
 	float horizonMask = smoothstep(0.0f, 0.065f, skyDirection.y);
-	float2 cloudPlane = skyDirection.xz / max(skyDirection.y, 0.075f);
 
-	// The upper deck is Gothic's seamless cloud texture. It is world anchored and moves slowly.
-	float2 upperWind = float2(0.000035f, 0.000018f) * AC_Time;
+	// Repeat the original Gothic cloud deck across the dome instead of sampling
+	// one almost constant texture patch over the entire upper sky.
+	float2 upperWind = float2(0.00035f, 0.00018f) * AC_Time;
 	float2 upperParallax = AC_WorldCameraPos.xz * 0.0000015f;
-	float2 upperUV = cloudPlane * 0.055f + upperWind + upperParallax + float2(0.17f, 0.43f);
+	float2 upperUV = skyDirection.xz * 3.2f + upperWind + upperParallax + float2(0.17f, 0.43f);
 	float3 upperSample = TX_RainCloudBase.Sample(SS_Linear, upperUV).rgb;
 	float upperLuma = dot(upperSample, float3(0.2126f, 0.7152f, 0.0722f));
-	float upperRelief = saturate((upperLuma - 0.18f) * 2.8f);
+	float upperStructure = smoothstep(0.16f, 0.60f, upperLuma);
 
-	// The transparent detail texture forms a lower bank. Faster drift and stronger camera
-	// parallax separate it visibly from the high deck without changing the clear-weather sky.
-	float2 lowerWind = float2(0.000105f, -0.000052f) * AC_Time;
+	float2 lightPlane = normalize(AC_LightPos.xz + float2(0.001f, 0.001f));
+	float shiftedLuma = dot(
+		TX_RainCloudBase.Sample(SS_Linear, upperUV + lightPlane * 0.035f).rgb,
+		float3(0.2126f, 0.7152f, 0.0722f));
+	float upperRelief = saturate(0.48f + (upperLuma - shiftedLuma) * 4.5f);
+
+	// The transparent detail bank uses a rotated, denser projection, faster wind
+	// and stronger camera parallax so it reads as a separate lower cloud layer.
+	float2 lowerWind = float2(0.00105f, -0.00052f) * AC_Time;
 	float2 lowerParallax = AC_WorldCameraPos.xz * 0.0000045f;
-	float2 lowerPlane = float2(cloudPlane.x * 0.67f, cloudPlane.y);
-	float2 lowerUV = frac(lowerPlane * 0.028f + lowerWind + lowerParallax + float2(0.31f, 0.12f));
+	float2 lowerDirection = float2(
+		skyDirection.x * 0.67f + skyDirection.z * 0.18f,
+		skyDirection.z - skyDirection.x * 0.12f);
+	float2 lowerUV = frac(lowerDirection * 5.1f + lowerWind + lowerParallax + float2(0.31f, 0.12f));
 	float4 lowerSample = TX_RainCloudDetail.Sample(SS_Linear, lowerUV);
-	float lowerAlpha = smoothstep(0.03f, 0.72f, lowerSample.a) * horizonMask;
+	float lowerAlpha = smoothstep(0.025f, 0.68f, lowerSample.a) * horizonMask;
 	float lowerLuma = dot(lowerSample.rgb, float3(0.2126f, 0.7152f, 0.0722f));
-	float lowerRelief = saturate((lowerLuma - 0.12f) * 2.2f);
+	float lowerStructure = smoothstep(0.10f, 0.62f, lowerLuma);
 
 	float dayWeight = saturate(AC_LightPos.y * 4.0f + 0.10f);
-	float3 upperDay = lerp(float3(0.075f, 0.085f, 0.095f), float3(0.40f, 0.42f, 0.44f), upperRelief);
-	float3 lowerDay = lerp(float3(0.055f, 0.062f, 0.072f), float3(0.34f, 0.36f, 0.39f), lowerRelief);
-	float3 upperNight = lerp(float3(0.006f, 0.010f, 0.020f), float3(0.050f, 0.064f, 0.095f), upperRelief);
-	float3 lowerNight = lerp(float3(0.004f, 0.007f, 0.014f), float3(0.040f, 0.052f, 0.080f), lowerRelief);
+	float3 upperDay = lerp(float3(0.070f, 0.080f, 0.092f), float3(0.46f, 0.48f, 0.50f), upperStructure);
+	upperDay *= lerp(0.78f, 1.16f, upperRelief);
+	float3 lowerDay = lerp(float3(0.045f, 0.052f, 0.062f), float3(0.35f, 0.38f, 0.41f), lowerStructure);
+	float3 upperNight = lerp(float3(0.005f, 0.009f, 0.019f), float3(0.070f, 0.090f, 0.135f), upperStructure);
+	float3 lowerNight = lerp(float3(0.003f, 0.006f, 0.013f), float3(0.045f, 0.060f, 0.095f), lowerStructure);
 	float3 upperColor = lerp(upperNight, upperDay, dayWeight);
 	float3 lowerColor = lerp(lowerNight, lowerDay, dayWeight);
-	lowerColor += float3(0.12f, 0.16f, 0.25f) * AC_MoonVisibility * lowerRelief * 0.08f;
+	lowerColor += float3(0.12f, 0.16f, 0.25f) * AC_MoonVisibility * lowerStructure * 0.08f;
 
-	float upperOpacity = saturate((0.84f + upperRelief * 0.13f) * horizonMask);
-	float3 cloudColor = lerp(upperColor, lowerColor, lowerAlpha * 0.86f);
+	float upperOpacity = saturate((0.92f + upperStructure * 0.07f) * horizonMask);
+	float3 cloudColor = lerp(upperColor, lowerColor, lowerAlpha * 0.90f);
 	float opacity = saturate(upperOpacity + lowerAlpha * (1.0f - upperOpacity));
 	return float4(cloudColor, opacity);
 }

@@ -76,6 +76,7 @@ public:
                                      ID3D11ShaderResourceView* godraysSRV,
                                      ID3D11ShaderResourceView* depthSRV,
                                      ID3D11ShaderResourceView* normalsSRV,
+                                     ID3D11ShaderResourceView* waterMaskSRV,
                                      bool compositionHeightFog );
 
     XRESULT RenderXeGTAO( ID3D11ShaderResourceView* depthSRV,
