@@ -3384,6 +3384,7 @@ void D3D11GraphicsEngine::DrawSkeletalMeshVobs(
 
         for ( auto& data : tempVobList ) {
             auto vi = data.VobInfo;
+            const float materialClassMarker = (vi && vi->Vob && vi->Vob->GetVobType() == zVOB_TYPE_NSC) ? -1.0f : 0.0f;
             auto model = data.Model;
             auto modelColor = data.ModelColor;
             modelColor.w = (vi && vi->Vob && vi->Vob->IsIndoorVob()) ? 0.05f : 1.0f;
@@ -9468,7 +9469,8 @@ void D3D11GraphicsEngine::DrawFrameParticles(
         VDBFireAtlas->BindToPixelShader( 0 );
         EnsureTempVertexBufferSize( TempParticlesVertexBuffer,
             sizeof( ParticleInstanceInfo ) * vdbFireInstances.size() );
-        TempParticlesVertexBuffer->UpdateBuffer( vdbFireInstances.data(),
+        TempParticlesVertexBuffer->UpdateBuffer(
+            const_cast<ParticleInstanceInfo*>(vdbFireInstances.data()),
             sizeof( ParticleInstanceInfo ) * vdbFireInstances.size() );
         DrawVertexBufferInstanced( TempParticlesVertexBuffer.get(), 4,
             vdbFireInstances.size(), sizeof( ParticleInstanceInfo ) );

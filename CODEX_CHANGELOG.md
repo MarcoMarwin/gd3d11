@@ -232,3 +232,9 @@ Kurze, append-only Dokumentation der von Codex gepushten Renderer-Builds.
 - FSR 3: nur das Contact-Shadow-Raymuster und dessen temporale Alpha-Historie wurden stabilisiert, um insbesondere fernes Flackern zu reduzieren; Upscaling, Schaerfung, SSGI, Wasser und sonstige FSR-3-Pfade bleiben unveraendert.
 - Lizenzen/Paket: erforderlicher JangaFX-CC0-Hinweis kompakt in GD3D11/Licences.txt ergaenzt; ausgeliefert werden nur die beiden komprimierten Laufzeitatlanten.
 - Pruefung: Ressourcenpfade und Paketaufnahme, Atlasabmessungen/-inhalt, PFX-Zuordnung und Fallbacks, GBuffer-Marker und alle Beleuchtungsdecoder, Rendergraph-/Shaderregister-/Constant-Buffer-Bindings, Klammer-/Praeprozessorpaare und git diff --check statisch kontrolliert. Kein vollstaendiger lokaler C++-/Shader-Build.
+
+## Build 098 (CI-Korrektur)
+
+- CI-Korrektur: NPC-Materialmarker fuer per-draw Node-Attachments im gueltigen Vob-Kontext erzeugt und den unveraenderten VDB-Feuer-Instanzvektor explizit an die const-inkorrekte VertexBuffer-Upload-Schnittstelle angepasst.
+- Inhaltlich keine weiteren Renderer-, Shader- oder Ingame-Aenderungen gegenueber Build 097.
+- Pruefung: beide gemeldeten Release_G1_AVX2-Compilerstellen, Variablengueltigkeit, UpdateBuffer-Signatur, betroffene Aufrufer und git diff --check statisch kontrolliert; kein vollstaendiger lokaler C++-/Shader-Build.
