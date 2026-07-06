@@ -70,7 +70,7 @@ XRESULT D3D11PFX_GodRays::Render(
 	GodRayZoomConstantBuffer gcb = {};
 	gcb.GR_Weight = 1.0f;
 	gcb.GR_Decay = Engine::GAPI->GetRendererState().RendererSettings.GodRayDecay;
-	gcb.GR_Weight = Engine::GAPI->GetRendererState().RendererSettings.GodRayWeight * Engine::GAPI->GetRendererState().RendererSettings.GodRayStrength * GetRainSkyVisibility();
+	gcb.GR_Weight = Engine::GAPI->GetRendererState().RendererSettings.GodRayWeight * Engine::GAPI->GetRendererState().RendererSettings.GodRayStrength * Engine::GAPI->GetSky()->GetAtmosphereCB().AC_SunVisibility * GetRainSkyVisibility();
 	gcb.GR_Density = Engine::GAPI->GetRendererState().RendererSettings.GodRayDensity;
 
 	gcb.GR_Center.x = sunPosition.x / 2.0f + 0.5f;
@@ -167,7 +167,7 @@ XRESULT D3D11PFX_GodRays::RenderCS(
     GodRayZoomConstantBuffer gcb = {};
     gcb.GR_Weight = 1.0f;
     gcb.GR_Decay = Engine::GAPI->GetRendererState().RendererSettings.GodRayDecay;
-    gcb.GR_Weight = Engine::GAPI->GetRendererState().RendererSettings.GodRayWeight * Engine::GAPI->GetRendererState().RendererSettings.GodRayStrength * GetRainSkyVisibility();
+    gcb.GR_Weight = Engine::GAPI->GetRendererState().RendererSettings.GodRayWeight * Engine::GAPI->GetRendererState().RendererSettings.GodRayStrength * Engine::GAPI->GetSky()->GetAtmosphereCB().AC_SunVisibility * GetRainSkyVisibility();
     gcb.GR_Density = Engine::GAPI->GetRendererState().RendererSettings.GodRayDensity;
 
     gcb.GR_Center.x = sunPosition.x / 2.0f + 0.5f;
@@ -293,7 +293,7 @@ XRESULT D3D11PFX_GodRays::RenderToTexture(
     GodRayZoomConstantBuffer gcb = {};
     gcb.GR_Weight = 1.0f;
     gcb.GR_Decay = Engine::GAPI->GetRendererState().RendererSettings.GodRayDecay;
-    gcb.GR_Weight = Engine::GAPI->GetRendererState().RendererSettings.GodRayWeight * Engine::GAPI->GetRendererState().RendererSettings.GodRayStrength * GetRainSkyVisibility();
+    gcb.GR_Weight = Engine::GAPI->GetRendererState().RendererSettings.GodRayWeight * Engine::GAPI->GetRendererState().RendererSettings.GodRayStrength * Engine::GAPI->GetSky()->GetAtmosphereCB().AC_SunVisibility * GetRainSkyVisibility();
     gcb.GR_Density = Engine::GAPI->GetRendererState().RendererSettings.GodRayDensity;
     gcb.GR_Center.x = sunPosition.x / 2.0f + 0.5f;
     gcb.GR_Center.y = sunPosition.y / -2.0f + 0.5f;
@@ -370,7 +370,7 @@ XRESULT D3D11PFX_GodRays::RenderToTextureCS(
     GodRayZoomConstantBuffer gcb = {};
     gcb.GR_Weight = 1.0f;
     gcb.GR_Decay = Engine::GAPI->GetRendererState().RendererSettings.GodRayDecay;
-    gcb.GR_Weight = Engine::GAPI->GetRendererState().RendererSettings.GodRayWeight * Engine::GAPI->GetRendererState().RendererSettings.GodRayStrength * GetRainSkyVisibility();
+    gcb.GR_Weight = Engine::GAPI->GetRendererState().RendererSettings.GodRayWeight * Engine::GAPI->GetRendererState().RendererSettings.GodRayStrength * Engine::GAPI->GetSky()->GetAtmosphereCB().AC_SunVisibility * GetRainSkyVisibility();
     gcb.GR_Density = Engine::GAPI->GetRendererState().RendererSettings.GodRayDensity;
     gcb.GR_Center.x = sunPosition.x / 2.0f + 0.5f;
     gcb.GR_Center.y = sunPosition.y / -2.0f + 0.5f;

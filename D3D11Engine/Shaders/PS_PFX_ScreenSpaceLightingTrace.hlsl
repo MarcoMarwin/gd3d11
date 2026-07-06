@@ -85,15 +85,17 @@ float ComputeContact(float2 uv, float depth)
     float facing = saturate(dot(n, l));
     if (facing <= 0.02f) return 0.0f;
     float jitter = Hash12(floor(uv / SSL_InvResolution) + SSL_FrameIndex);
-    float maxDistance = clamp(vp.z * 0.006f, 18.0f, 120.0f);
+    float viewDistanceFade = 1.0f - smoothstep(3200.0f, 7800.0f, vp.z);
+    if (viewDistanceFade <= 0.001f) return 0.0f;
+    float maxDistance = clamp(vp.z * 0.0045f, 14.0f, 82.0f);
     float2 hitUV; float hitDistance;
-    if (!TraceRay(vp + n * 2.0f, l, maxDistance, 9, jitter, 1.5f, 0.032f, 12.0f, hitUV, hitDistance)) return 0.0f;
+    if (!TraceRay(vp + n * 1.8f, l, maxDistance, 8, jitter, 1.2f, 0.030f, 9.0f, hitUV, hitDistance)) return 0.0f;
     float3 hn = ViewNormal(hitUV);
     // Occluder normals are often nearly perpendicular on Gothic's thin geometry.
     // Keep them valid instead of suppressing the complete contact shadow.
     float normalGate = lerp(0.65f, 1.0f, saturate(dot(hn, -l)));
     float distanceFade = 1.0f - smoothstep(maxDistance * 0.22f, maxDistance, hitDistance);
-    return saturate(facing * normalGate * distanceFade * SSL_ContactStrength * 0.42f);
+    return saturate(facing * normalGate * distanceFade * viewDistanceFade * SSL_ContactStrength * 0.55f);
 }
 
 float3 ComputeGI(float2 uv, float depth, float3 baseColor)
@@ -105,7 +107,7 @@ float3 ComputeGI(float2 uv, float depth, float3 baseColor)
     float3 helper = abs(wsN.y) < 0.95f ? float3(0.0f, 1.0f, 0.0f) : float3(1.0f, 0.0f, 0.0f);
     float3 t = normalize(cross(helper, wsN));
     float3 b = normalize(cross(wsN, t));
-    float maxDistance = clamp(vp.z * 0.055f, 240.0f, 1300.0f);
+    float maxDistance = clamp(vp.z * 0.065f, 280.0f, 1700.0f);
     float3 sum = 0.0f;
     float wsum = 0.0f;
     int hitCount = 0;
@@ -113,20 +115,20 @@ float3 ComputeGI(float2 uv, float depth, float3 baseColor)
     float pixelNoise = Hash12(pixel + float2(SSL_FrameIndex * 17.0f, SSL_FrameIndex * 59.0f));
     float rotation = pixelNoise * 6.2831853f;
     [unroll]
-    for (int i = 0; i < 6; ++i) {
+    for (int i = 0; i < 8; ++i) {
         float seq = frac(pixelNoise + 0.17f + (float)i * 0.6180339f);
-        float cosTheta = lerp(0.35f, 0.82f, seq);
+        float cosTheta = lerp(0.26f, 0.84f, seq);
         float sinTheta = sqrt(saturate(1.0f - cosTheta * cosTheta));
         float phi = (float)i * 2.3999632f + rotation;
         float3 dirWS = normalize(t * (cos(phi) * sinTheta) + b * (sin(phi) * sinTheta) + wsN * cosTheta);
         float3 dirVS = normalize(mul(float4(dirWS, 0.0f), SSL_View).xyz);
         float2 hitUV; float hitDistance;
         float rayJitter = frac(pixelNoise + (float)i * 0.371f);
-        if (TraceRay(vp + n * 5.0f, dirVS, maxDistance, 8, rayJitter, 5.0f, 0.045f, 30.0f, hitUV, hitDistance)) {
+        if (TraceRay(vp + n * 4.5f, dirVS, maxDistance, 9, rayJitter, 4.0f, 0.042f, 34.0f, hitUV, hitDistance)) {
             float3 hn = ViewNormal(hitUV);
             float receiver = saturate(dot(n, dirVS));
-            float emitter = saturate(dot(hn, -dirVS));
-            float dw = 1.0f / (1.0f + 4.0f * hitDistance / maxDistance);
+            float emitter = lerp(0.35f, 1.0f, saturate(dot(hn, -dirVS)));
+            float dw = 1.0f / (1.0f + 3.0f * hitDistance / maxDistance);
             float weight = receiver * emitter * dw;
             float3 src = TX_Scene.SampleLevel(SS_Linear, hitUV, 0).rgb;
             float luma = dot(src, float3(0.2126f, 0.7152f, 0.0722f));
@@ -136,10 +138,10 @@ float3 ComputeGI(float2 uv, float depth, float3 baseColor)
             hitCount++;
         }
     }
-    if (hitCount < 2 || wsum <= 0.001f) return 0.0f;
+    if (hitCount < 1 || wsum <= 0.035f) return 0.0f;
     float baseLuma = dot(baseColor, float3(0.2126f, 0.7152f, 0.0722f));
-    float3 gi = (sum / wsum) * SSL_GIStrength * 0.22f / (1.0f + baseLuma * 0.25f);
-    return min(gi, baseColor * 0.45f + 0.18f);
+    float3 gi = (sum / wsum) * SSL_GIStrength * 0.32f / (1.0f + baseLuma * 0.22f);
+    return min(gi, baseColor * 0.55f + 0.24f);
 }
 
 float4 PSMain(PS_INPUT input) : SV_TARGET

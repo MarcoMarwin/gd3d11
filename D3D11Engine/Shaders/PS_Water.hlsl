@@ -263,7 +263,7 @@ PS_OUTPUT PSMain( PS_INPUT Input )
 	float cos_spec = clamp(dot(reflect_vecSmall, -AC_LightPos.xyz * float3(1,1,1)), 0, 1);
 	float sun_spot = pow(cos_spec, 500.0f) * 0.5f;
 	float weatherLightVisibility = GetRainSkyVisibility();
-	float sunVisibility = saturate(AC_SunVisibility) * step(0.5f, Input.vDiffuse.y) * weatherLightVisibility;
+	float sunVisibility = smoothstep(-0.04f, 0.08f, AC_LightPos.y) * weatherLightVisibility;
 	sun_spot *= sunVisibility;
 	// If screen-space water reflection has found opaque geometry, let that reflection win over procedural light glints.
 	float sunSpotSSRBlock = saturate(max(ssrBaseWeight, ssrHitQuality * 0.75f) * ssrHitValid * 1.85f);
@@ -272,7 +272,7 @@ PS_OUTPUT PSMain( PS_INPUT Input )
 	sun_spot *= 1.0f - sunSpotSSRBlock;
 	color.rgb += sunColor * sun_spot;
 
-	float moonVisibility = saturate(AC_MoonVisibility) * saturate(Input.vDiffuse.y) * weatherLightVisibility;
+	float moonVisibility = smoothstep(-0.04f, 0.08f, AC_MoonPos.y) * weatherLightVisibility;
 	float3 moonLightVec = -AC_MoonPos.xyz;
 	float3 moonRayDir = moonLightVec / max(length(moonLightVec), 0.001f);
 	float moonCosSpec = clamp(dot(reflect_vecSmall, moonRayDir), 0, 1);

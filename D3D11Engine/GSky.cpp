@@ -378,28 +378,32 @@ XRESULT GSky::RenderSky() {
     float sunTimeFade = smoothFade( LightDir.y / 0.12f );
     float moonTimeFade = smoothFade( MoonDir.y / 0.12f );
     if ( masterTime >= 0.0f ) {
-        constexpr float sunriseHour = 5.0f;
-        constexpr float sunsetHour = 19.0f;
-        constexpr float transitionHours = 2.0f / 60.0f;
+        constexpr float dawnMoonFadeStart = 4.25f; // 04:15
+        constexpr float dawnSunFadeStart = 4.50f; // 04:30
+        constexpr float duskSunFadeStart = 17.50f; // 17:30
+        constexpr float duskMoonFadeStart = 17.75f; // 17:45
+        constexpr float transitionHours = 15.0f / 60.0f;
+        const float dawnMoonFadeEnd = dawnMoonFadeStart + transitionHours;
+        const float dawnSunFadeEnd = dawnSunFadeStart + transitionHours;
+        const float duskSunFadeEnd = duskSunFadeStart + transitionHours;
+        const float duskMoonFadeEnd = duskMoonFadeStart + transitionHours;
         const float gameHour = fmodf( masterTime * 24.0f + 12.0f, 24.0f );
 
         sunTimeFade = 0.0f;
         moonTimeFade = 0.0f;
-        if ( gameHour >= sunriseHour && gameHour < sunsetHour ) {
+        if ( gameHour >= dawnSunFadeStart && gameHour < duskSunFadeEnd ) {
             sunTimeFade = 1.0f;
-            if ( gameHour < sunriseHour + transitionHours ) {
-                sunTimeFade = smoothFade( (gameHour - sunriseHour) / transitionHours );
-            } else if ( gameHour >= sunsetHour - transitionHours ) {
-                sunTimeFade = 1.0f - smoothFade(
-                    (gameHour - (sunsetHour - transitionHours)) / transitionHours );
+            if ( gameHour < dawnSunFadeEnd ) {
+                sunTimeFade = smoothFade( (gameHour - dawnSunFadeStart) / transitionHours );
+            } else if ( gameHour >= duskSunFadeStart ) {
+                sunTimeFade = 1.0f - smoothFade( (gameHour - duskSunFadeStart) / transitionHours );
             }
-        } else {
+        } else if ( gameHour >= duskMoonFadeStart || gameHour < dawnMoonFadeEnd ) {
             moonTimeFade = 1.0f;
-            if ( gameHour >= sunsetHour && gameHour < sunsetHour + transitionHours ) {
-                moonTimeFade = smoothFade( (gameHour - sunsetHour) / transitionHours );
-            } else if ( gameHour >= sunriseHour - transitionHours && gameHour < sunriseHour ) {
-                moonTimeFade = 1.0f - smoothFade(
-                    (gameHour - (sunriseHour - transitionHours)) / transitionHours );
+            if ( gameHour >= duskMoonFadeStart && gameHour < duskMoonFadeEnd ) {
+                moonTimeFade = smoothFade( (gameHour - duskMoonFadeStart) / transitionHours );
+            } else if ( gameHour >= dawnMoonFadeStart && gameHour < dawnMoonFadeEnd ) {
+                moonTimeFade = 1.0f - smoothFade( (gameHour - dawnMoonFadeStart) / transitionHours );
             }
         }
     }

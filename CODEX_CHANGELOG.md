@@ -203,3 +203,11 @@ Kurze, append-only Dokumentation der von Codex gepushten Renderer-Builds.
 - Regennebel: nur die Deckkraft auf Weltgeometrie bei gleichzeitig Nacht und aktivem Regen leicht angehoben; Wolken-/Himmelpfad, Nachtnebel und sonstige Geometrie-/Himmeluebergaenge bleiben unveraendert.
 - F11/HDR: HDR ist fuer neue Standardwerte aktiv. Deaktivierte gekoppelte Effektregler werden auch beim ersten Oeffnen konsistent auf Null dargestellt.
 - Pruefung: Projekt- und Shaderregistrierungen, Include-/Ressourcenpfade, Constant-Buffer-Layouts, Paketquellen, literal eingefuegte Escapes und `git diff --check` statisch kontrolliert. Kein lokaler HLSL-Compiler und kein vollstaendiger lokaler C++-Build vorhanden.
+## Build 095 (Dämmerung, Screen-Space-Licht und Regennebel)
+
+- Sonne/Mond: Licht, Schatten, Godrays und Backlit Vegetation nutzen getrennte 15-Minuten-Uebergaenge. Mondlicht blendet morgens 04:15-04:30 aus, Sonnenlicht 04:30-04:45 ein; abends blendet Sonnenlicht 17:30-17:45 aus und Mondlicht 17:45-18:00 ein. Schattenquellen ueberlappen nicht.
+- Himmel/Wasser: der Mondkoerper bleibt positionsbasiert sichtbar statt ueber das Lichtgewicht ausgeblendet zu werden. Sonnen- und Mond-Glints auf Wasser laufen positionsbasiert unabhaengig von den Licht-/Schatten-Fades weiter.
+- Godrays/Backlit: Godrays folgen dem Sonnenlichtgewicht inklusive Regen-Ausblendung; Backlit Vegetation folgt den vorhandenen Sonnen-/Mond-Lichtgewichten inklusive Regen-Ausblendung.
+- Contact Shadows/SSGI: SSGI sampelt breiter und verlaesslicher mit weiter gedeckelter Energie, damit mehr Flaechen subtil reagieren ohne die alten Lichtstreifen zurueckzubringen. Contact Shadows werden staerker auf Nahkontakte begrenzt und in der Ferne ausgeblendet, ohne FSR 3 selbst zu veraendern.
+- Regennebel: die Geometrie-Nebelrampe bei Regen beginnt weicher ueber eine groessere Distanz, nachts wirkt der Regennebel staerker und tagsueber bei Regen leicht. Himmel-/Wolkenpfad, FSR 3, normale Regen-Transitions und trockener Nachtnebel bleiben unveraendert.
+- Pruefung: Shader-Diff, Klammer-/Escape-Pruefungen, Screen-Space-Lighting-Constant-Buffer-Layouts, Zeitfenster-Samples und `git diff --check` statisch kontrolliert. Kein lokaler HLSL-Compiler und kein vollstaendiger lokaler C++-Build ausgefuehrt.
