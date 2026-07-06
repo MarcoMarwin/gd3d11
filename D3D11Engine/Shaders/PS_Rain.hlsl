@@ -290,7 +290,7 @@ PS_OUTPUT PSMain( PS_INPUT Input )
 	float nightRainBlend = smoothstep(0.0f, 1.0f, saturate(-sunHeight * 4.0f));
 	float verticalFade = smoothstep(0.0f, 0.18f, Input.vTexcoord.y)
 		* (1.0f - smoothstep(0.82f, 1.0f, Input.vTexcoord.y));
-	directionalLight.w *= lerp(1.0f, 0.78f, nightRainBlend) * verticalFade;
+	directionalLight.w *= lerp(1.0f, 0.62f, nightRainBlend) * verticalFade;
 #endif
 	
 	//float tx = TX_RainTextureArray.Sample(SS_Anisotropic, float3(Input.vTexcoord, 0)).r;

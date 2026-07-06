@@ -32,6 +32,7 @@ float4 NeighborhoodCurrent(float2 uv, out float4 minV, out float4 maxV)
 {
     float centerDepth = TX_Depth.SampleLevel(SS_Linear, uv, 0).r;
     float centerZ = ViewZ(centerDepth);
+    float2 centerNormal = TX_Normals.SampleLevel(SS_Linear, uv, 0).xy;
     float4 sum = 0.0f;
     float weightSum = 0.0f;
     minV = 100000.0f;
@@ -43,10 +44,14 @@ float4 NeighborhoodCurrent(float2 uv, out float4 minV, out float4 maxV)
             float2 suv = saturate(uv + float2(x, y) * SSL_InvResolution);
             float d = TX_Depth.SampleLevel(SS_Linear, suv, 0).r;
             float dz = abs(ViewZ(d) - centerZ);
-            float w = exp(-dz * 0.015f) * (x == 0 && y == 0 ? 2.0f : 1.0f);
+            float2 sampleNormal = TX_Normals.SampleLevel(SS_Linear, suv, 0).xy;
+            float normalWeight = pow(1.0f - saturate(length(centerNormal - sampleNormal) * 2.0f), 8.0f);
+            float w = exp(-dz * 0.015f) * normalWeight * (x == 0 && y == 0 ? 2.0f : 1.0f);
             float4 v = TX_Raw.SampleLevel(SS_Linear, suv, 0);
-            minV = min(minV, v);
-            maxV = max(maxV, v);
+            if (normalWeight > 0.5f) {
+                minV = min(minV, v);
+                maxV = max(maxV, v);
+            }
             sum += v * w;
             weightSum += w;
         }

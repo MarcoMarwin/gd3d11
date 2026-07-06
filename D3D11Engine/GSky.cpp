@@ -265,8 +265,18 @@ XRESULT GSky::RenderSky() {
         ? std::clamp( Engine::GAPI->GetRainFXWeight(), 0.0f, 1.0f )
         : 0.0f;
     const DWORD atmosphericRainNow = GetTickCount();
+    const bool rainManuallyEnabled = AtmosphericRainSettingInitialized
+        && rainEnabled && !AtmosphericRainSettingEnabled;
     if ( !rainEnabled ) {
         AtmosphericRainWeight = 0.0f;
+        AtmosphericRainDropStartMs = 0;
+        AtmosphericRainSettledStartMs = 0;
+        AtmosphericRainInitialized = true;
+        AtmosphericRainReleasing = false;
+    } else if ( rainManuallyEnabled ) {
+        // F11 is an explicit user override: restore the complete current weather
+        // state immediately. Natural rain changes continue through the rate limiter.
+        AtmosphericRainWeight = rawAtmosphericRain;
         AtmosphericRainDropStartMs = 0;
         AtmosphericRainSettledStartMs = 0;
         AtmosphericRainInitialized = true;
@@ -321,9 +331,12 @@ XRESULT GSky::RenderSky() {
             }
         }
     }
+    AtmosphericRainSettingEnabled = rainEnabled;
+    AtmosphericRainSettingInitialized = true;
     AtmosphericRainLastUpdateMs = atmosphericRainNow;
     XMFLOAT3 LightDir = {};
     XMFLOAT3 MoonDir = {};
+    float masterTime = -1.0f;
 
     if ( Engine::GAPI->GetRendererState().RendererSettings.ReplaceSunDirection ) {
         LightDir = Atmosphere.LightDirection;
@@ -331,6 +344,7 @@ XRESULT GSky::RenderSky() {
     } else {
         zCSkyController_Outdoor* sc = oCGame::GetGame()->_zCSession_world->GetSkyControllerOutdoor();
         if ( sc ) {
+            masterTime = sc->GetMasterTime();
             LightDir = sc->GetSunWorldPosition( Atmosphere.SkyTimeScale );
             MoonDir = sc->GetMoonWorldPosition( Atmosphere.SkyTimeScale );
             Atmosphere.LightDirection = LightDir;
@@ -356,9 +370,43 @@ XRESULT GSky::RenderSky() {
     AtmosphereCB.AC_Time = Engine::GAPI->GetTimeSeconds();
     AtmosphereCB.AC_LightPos = LightDir;
     AtmosphereCB.AC_MoonPos = MoonDir;
-    const float moonFade = std::clamp( MoonDir.y / 0.12f, 0.0f, 1.0f );
+    auto smoothFade = []( float value ) {
+        value = std::clamp( value, 0.0f, 1.0f );
+        return value * value * (3.0f - 2.0f * value);
+    };
+
+    float sunTimeFade = smoothFade( LightDir.y / 0.12f );
+    float moonTimeFade = smoothFade( MoonDir.y / 0.12f );
+    if ( masterTime >= 0.0f ) {
+        constexpr float sunriseHour = 5.0f;
+        constexpr float sunsetHour = 19.0f;
+        constexpr float transitionHours = 2.0f / 60.0f;
+        const float gameHour = fmodf( masterTime * 24.0f + 12.0f, 24.0f );
+
+        sunTimeFade = 0.0f;
+        moonTimeFade = 0.0f;
+        if ( gameHour >= sunriseHour && gameHour < sunsetHour ) {
+            sunTimeFade = 1.0f;
+            if ( gameHour < sunriseHour + transitionHours ) {
+                sunTimeFade = smoothFade( (gameHour - sunriseHour) / transitionHours );
+            } else if ( gameHour >= sunsetHour - transitionHours ) {
+                sunTimeFade = 1.0f - smoothFade(
+                    (gameHour - (sunsetHour - transitionHours)) / transitionHours );
+            }
+        } else {
+            moonTimeFade = 1.0f;
+            if ( gameHour >= sunsetHour && gameHour < sunsetHour + transitionHours ) {
+                moonTimeFade = smoothFade( (gameHour - sunsetHour) / transitionHours );
+            } else if ( gameHour >= sunriseHour - transitionHours && gameHour < sunriseHour ) {
+                moonTimeFade = 1.0f - smoothFade(
+                    (gameHour - (sunriseHour - transitionHours)) / transitionHours );
+            }
+        }
+    }
+
     const float rainLightFade = 1.0f - std::clamp( AtmosphericRainWeight * 2.0f, 0.0f, 1.0f );
-    AtmosphereCB.AC_MoonVisibility = moonFade * moonFade * (3.0f - 2.0f * moonFade) * rainLightFade;
+    AtmosphereCB.AC_SunVisibility = sunTimeFade * rainLightFade;
+    AtmosphereCB.AC_MoonVisibility = moonTimeFade * rainLightFade;
 
     XMVECTOR lightDirVec = XMVector3Normalize( XMLoadFloat3( &LightDir ) );
     const float lightDistance = std::max( 10000.0f, Engine::GAPI->GetFarPlane() );
@@ -422,13 +470,13 @@ XRESULT GSky::RenderSky() {
     AtmosphereCB.AC_NightDarkeningStart = 3000.0f;
     AtmosphereCB.AC_NightDarkeningRange = 12000.0f;
     AtmosphereCB.AC_NightDarkeningMax = 1.0f;
-    AtmosphereCB.AC_PadLightFX0 = 0.0f;
+    // AC_SunVisibility was filled together with the moon visibility above.
     AtmosphereCB.AC_WorldCameraPos = camPos;
     AtmosphereCB.AC_EnableContactShadows = (Engine::GAPI->GetRendererState().RendererSettings.EnableContactShadows && Engine::GAPI->GetRendererState().RendererSettings.ContactShadowStrength > 0.0f) ? 1.0f : 0.0f;
     AtmosphereCB.AC_EnableScreenSpaceGI = (Engine::GAPI->GetRendererState().RendererSettings.EnableScreenSpaceGI && Engine::GAPI->GetRendererState().RendererSettings.ScreenSpaceGIStrength > 0.0f) ? 1.0f : 0.0f;
     const auto& rendererSettings = Engine::GAPI->GetRendererState().RendererSettings;
     AtmosphereCB.AC_PadLightFX1 = 0.0f;
-    AtmosphereCB.AC_ContactShadowStrength = rendererSettings.ContactShadowStrength;
+    AtmosphereCB.AC_ContactShadowStrength = rendererSettings.ContactShadowStrength * GetMainLightVisibility();
     AtmosphereCB.AC_ScreenSpaceGIStrength = rendererSettings.ScreenSpaceGIStrength;
     AtmosphereCB.AC_EnableParticleLighting = rendererSettings.EnableParticleLighting ? 1.0f : 0.0f;
     AtmosphereCB.AC_ParticleLightingStrength = rendererSettings.ParticleLightingStrength * 1.5f;
@@ -487,7 +535,7 @@ D3D11Texture* GSky::GetMoonTexture() {
 }
 
 bool GSky::IsMoonLightActive() const {
-    return AtmosphereCB.AC_LightPos.y < 0.0f;
+    return AtmosphereCB.AC_MoonVisibility > AtmosphereCB.AC_SunVisibility;
 }
 
 XMFLOAT3 GSky::GetMainLightDirection() const {
@@ -501,10 +549,8 @@ XMFLOAT3 GSky::GetMainLightDirection() const {
 }
 
 float GSky::GetMainLightVisibility() const {
-    const XMFLOAT3 direction = GetMainLightDirection();
-    const float fade = std::clamp( (direction.y - 0.015f) / 0.12f, 0.0f, 1.0f );
-    const float rainLightFade = 1.0f - std::clamp( AtmosphericRainWeight * 2.0f, 0.0f, 1.0f );
-    return fade * fade * (3.0f - 2.0f * fade) * rainLightFade;
+    // The weights are mutually exclusive, so only one directional shadow map is active.
+    return std::max( AtmosphereCB.AC_SunVisibility, AtmosphereCB.AC_MoonVisibility );
 }
 
 // The scale equation calculated by Vernier's Graphical Analysis

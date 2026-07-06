@@ -579,7 +579,7 @@ struct GothicRendererSettings {
         DrawSky = true;
         DrawFog = true;
         FogRange = SWITCH_ENGINE12(1.0f, 3.0f);
-        EnableHDR = false;
+        EnableHDR = true;
         ReplaceSunDirection = false;
         AtmosphericScattering = true; // Use original sky
         ShowSkeletalVertexNormals = false;

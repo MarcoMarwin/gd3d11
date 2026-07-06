@@ -216,7 +216,12 @@ float3 FP_ComputeSunLighting(
 
     float4 lightColor = SQ_LightColor;
     float sunStrength = dot( lightColor.rgb, float3( 0.333f, 0.333f, 0.333f ) );
-    float sun = saturate( dot( normalize( SQ_LightDirectionVS ), normal ) * shadow );
+    bool moonLightActive = AC_MoonVisibility > AC_SunVisibility;
+    float mainLightVisibility = moonLightActive
+        ? saturate( AC_MoonVisibility )
+        : saturate( AC_SunVisibility );
+    float sun = saturate( dot( normalize( SQ_LightDirectionVS ), normal ) * shadow )
+        * mainLightVisibility;
 
     spec = pow( spec, specPower ) * specIntensity;
 
@@ -224,13 +229,13 @@ float3 FP_ComputeSunLighting(
     float worldAO = lerp( 1.0f, vertLighting, SQ_WorldAOStrength );
 
     float3 litPixel;
-    if ( AC_LightPos.y <= 0.0f )
+    if ( moonLightActive )
     {
         // Preserve the old night base and add only a tiny shadowed moon term.
         litPixel = diffuseColor * SQ_ShadowStrength * sunStrength * shadowAO;
 
         const float moonLightStrength = 0.14f;
-        float moonDirect = sun * AC_MoonVisibility;
+        float moonDirect = sun;
         float3 moonColor = float3( 0.42f, 0.56f, 1.0f );
         litPixel += diffuseColor * moonColor * moonLightStrength * moonDirect * worldAO;
         litPixel += spec * moonColor * (moonLightStrength * 0.25f) * moonDirect;
@@ -246,7 +251,7 @@ float3 FP_ComputeSunLighting(
             sun ) + specColored;
     }
 
-    float baselineSun = AC_LightPos.y <= 0.0f ? 0.0f : sun;
+    float baselineSun = moonLightActive ? 0.0f : sun;
     float fresnel = pow( 1.0f - saturate( dot( normal, V ) ), 10.0f );
     litPixel += lerp( fresnel * litPixel * 0.5f, 0.0f, baselineSun );
 

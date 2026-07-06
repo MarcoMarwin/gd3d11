@@ -272,7 +272,7 @@ float4 PSMain(PS_INPUT Input) : SV_TARGET
 	// CSM: Use soft cascaded shadow map with configurable softness
     float3 wsNormal = normalize(mul(float4(normal, 0.0f), SQ_InvView).xyz);
 
-    if (AC_LightPos.y > 0.0f || AC_MoonVisibility > 0.001f) // sample the active sun or moon shadow map
+    if (AC_SunVisibility > 0.001f || AC_MoonVisibility > 0.001f) // sample the single active sun or moon shadow map
 	{
         float3 wsLightDirection = normalize(mul(float4(SQ_LightDirectionVS, 0.0f), SQ_InvView).xyz);
 
@@ -327,14 +327,19 @@ float4 PSMain(PS_INPUT Input) : SV_TARGET
 	float vl = saturate(vertLighting * 2);
 	float vertAO = lerp(vl * vl, 1.0f, 0.5f);
 
-    float sun = saturate(dot(normalize(SQ_LightDirectionVS), normal) * shadow);
+    bool moonLightActive = AC_MoonVisibility > AC_SunVisibility;
+    float mainLightVisibility = moonLightActive
+        ? saturate(AC_MoonVisibility)
+        : saturate(AC_SunVisibility);
+    float sun = saturate(dot(normalize(SQ_LightDirectionVS), normal) * shadow)
+        * mainLightVisibility;
     spec = pow(spec, specPower) * specIntensity;
 
     float shadowAO = lerp(1.0f, vertLighting, SQ_ShadowAOStrength);
     float worldAO = lerp(1.0f, vertLighting, SQ_WorldAOStrength);
 
     float3 litPixel;
-    if (AC_LightPos.y <= 0.0f)
+    if (moonLightActive)
     {
         // Keep the exact pre-moon night base. Moonlight is additive only, so
         // its shadow can remove that tiny contribution but never darken the night.
@@ -345,7 +350,7 @@ float4 PSMain(PS_INPUT Input) : SV_TARGET
             + nightSpecColored;
 
         const float moonLightStrength = 0.14f;
-        float moonDirect = sun * AC_MoonVisibility;
+        float moonDirect = sun;
         float3 moonColor = float3(0.42f, 0.56f, 1.0f);
         litPixel += diffuse.rgb * moonColor * moonLightStrength * moonDirect * worldAO;
         litPixel += spec * moonColor * (moonLightStrength * 0.25f) * moonDirect;
@@ -361,10 +366,10 @@ float4 PSMain(PS_INPUT Input) : SV_TARGET
             sun) + specColored;
     }
 
-	float sssSunWeight = saturate((AC_LightPos.y + 0.08f) * 3.0f) * GetRainSkyVisibility();
+	float sssSunWeight = saturate((AC_LightPos.y + 0.08f) * 3.0f) * AC_SunVisibility * GetRainSkyVisibility();
 	float sssMoonWeight = AC_MoonVisibility * 0.12f;
 	float sssLightWeight = max(sssSunWeight, sssMoonWeight);
-	float3 sssLightColor = AC_LightPos.y <= 0.0f ? float3(0.42f, 0.56f, 1.0f) : lightColor.rgb;
+	float3 sssLightColor = moonLightActive ? float3(0.42f, 0.56f, 1.0f) : lightColor.rgb;
 	float vegetationMask = vegetationMaterial * saturate(diffuse.g * 1.25f - diffuse.r * 0.45f - diffuse.b * 0.25f);
 	if (AC_EnableSSS > 0.5f && sssLightWeight > 0.001f && vegetationMask > 0.001f) {
 		float backlight = saturate(dot(normalize(SQ_LightDirectionVS), -V));

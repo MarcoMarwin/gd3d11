@@ -977,6 +977,16 @@ namespace
         s.ShadowMapSize = NormalizeShadowMapSize( s.ShadowMapSize );
         s.PointlightShadowMapSize = NormalizePointlightShadowMapSize( s.PointlightShadowMapSize );
         s.HDRToneMapStrength = std::clamp( s.HDRToneMapStrength, 0.0f, 2.0f );
+        // Disabled coupled controls must always display their true zero effect state.
+        if ( !s.EnableHDR ) s.HDRToneMapStrength = 0.0f;
+        if ( s.AoMode == AOMode::AO_NONE ) s.AOStrength = 0.0f;
+        if ( !s.EnableContactShadows ) s.ContactShadowStrength = 0.0f;
+        if ( !s.EnableScreenSpaceGI ) s.ScreenSpaceGIStrength = 0.0f;
+        if ( !s.EnableGodRays ) s.GodRayStrength = 0.0f;
+        if ( !s.EnableSSR || !s.EnableWaterAnimation ) s.SSRStrength = 0.0f;
+        if ( !s.EnableSSS ) s.SSSIntensity = 0.0f;
+        if ( !s.EnableDoF ) s.DoFBokehRadius = 0.0f;
+        if ( s.WindQuality == GothicRendererSettings::EWindQuality::WIND_QUALITY_NONE ) s.GlobalWindStrength = 0.0f;
         s.OutdoorSmallVobDrawRadius = ObjectDrawDistanceUiToMeters( ObjectDrawDistanceMetersToUi( s.OutdoorSmallVobDrawRadius ) );
         s.ForceFOV = false;
         s.FOVHoriz = 100.0f;

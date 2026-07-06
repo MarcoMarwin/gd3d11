@@ -128,4 +128,6 @@ protected:
     DWORD AtmosphericRainSettledStartMs = 0;
     bool AtmosphericRainInitialized = false;
     bool AtmosphericRainReleasing = false;
+    bool AtmosphericRainSettingInitialized = false;
+    bool AtmosphericRainSettingEnabled = true;
 };

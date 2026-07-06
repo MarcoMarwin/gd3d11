@@ -87,11 +87,13 @@ float ComputeContact(float2 uv, float depth)
     float jitter = Hash12(floor(uv / SSL_InvResolution) + SSL_FrameIndex);
     float maxDistance = clamp(vp.z * 0.006f, 18.0f, 120.0f);
     float2 hitUV; float hitDistance;
-    if (!TraceRay(vp + n * 3.0f, l, maxDistance, 7, jitter, 2.0f, 0.028f, 10.0f, hitUV, hitDistance)) return 0.0f;
+    if (!TraceRay(vp + n * 2.0f, l, maxDistance, 9, jitter, 1.5f, 0.032f, 12.0f, hitUV, hitDistance)) return 0.0f;
     float3 hn = ViewNormal(hitUV);
-    float normalGate = smoothstep(0.05f, 0.35f, saturate(dot(hn, -l)));
-    float distanceFade = 1.0f - smoothstep(maxDistance * 0.18f, maxDistance, hitDistance);
-    return saturate(facing * normalGate * distanceFade * SSL_ContactStrength * 0.16f);
+    // Occluder normals are often nearly perpendicular on Gothic's thin geometry.
+    // Keep them valid instead of suppressing the complete contact shadow.
+    float normalGate = lerp(0.65f, 1.0f, saturate(dot(hn, -l)));
+    float distanceFade = 1.0f - smoothstep(maxDistance * 0.22f, maxDistance, hitDistance);
+    return saturate(facing * normalGate * distanceFade * SSL_ContactStrength * 0.42f);
 }
 
 float3 ComputeGI(float2 uv, float depth, float3 baseColor)
@@ -106,16 +108,21 @@ float3 ComputeGI(float2 uv, float depth, float3 baseColor)
     float maxDistance = clamp(vp.z * 0.055f, 240.0f, 1300.0f);
     float3 sum = 0.0f;
     float wsum = 0.0f;
+    int hitCount = 0;
+    float2 pixel = floor(uv / SSL_InvResolution);
+    float pixelNoise = Hash12(pixel + float2(SSL_FrameIndex * 17.0f, SSL_FrameIndex * 59.0f));
+    float rotation = pixelNoise * 6.2831853f;
     [unroll]
     for (int i = 0; i < 6; ++i) {
-        float seq = frac(0.17f + (float)i * 0.6180339f);
+        float seq = frac(pixelNoise + 0.17f + (float)i * 0.6180339f);
         float cosTheta = lerp(0.35f, 0.82f, seq);
         float sinTheta = sqrt(saturate(1.0f - cosTheta * cosTheta));
-        float phi = (float)i * 2.3999632f;
+        float phi = (float)i * 2.3999632f + rotation;
         float3 dirWS = normalize(t * (cos(phi) * sinTheta) + b * (sin(phi) * sinTheta) + wsN * cosTheta);
         float3 dirVS = normalize(mul(float4(dirWS, 0.0f), SSL_View).xyz);
         float2 hitUV; float hitDistance;
-        if (TraceRay(vp + n * 5.0f, dirVS, maxDistance, 8, seq, 5.0f, 0.045f, 30.0f, hitUV, hitDistance)) {
+        float rayJitter = frac(pixelNoise + (float)i * 0.371f);
+        if (TraceRay(vp + n * 5.0f, dirVS, maxDistance, 8, rayJitter, 5.0f, 0.045f, 30.0f, hitUV, hitDistance)) {
             float3 hn = ViewNormal(hitUV);
             float receiver = saturate(dot(n, dirVS));
             float emitter = saturate(dot(hn, -dirVS));
@@ -126,11 +133,13 @@ float3 ComputeGI(float2 uv, float depth, float3 baseColor)
             src = min(src / (1.0f + max(0.0f, luma - 1.0f) * 0.8f), float3(3.0f, 3.0f, 3.0f));
             sum += src * weight;
             wsum += weight;
+            hitCount++;
         }
     }
-    if (wsum <= 0.001f) return 0.0f;
+    if (hitCount < 2 || wsum <= 0.001f) return 0.0f;
     float baseLuma = dot(baseColor, float3(0.2126f, 0.7152f, 0.0722f));
-    return (sum / wsum) * SSL_GIStrength * 0.28f / (1.0f + baseLuma * 0.25f);
+    float3 gi = (sum / wsum) * SSL_GIStrength * 0.22f / (1.0f + baseLuma * 0.25f);
+    return min(gi, baseColor * 0.45f + 0.18f);
 }
 
 float4 PSMain(PS_INPUT input) : SV_TARGET

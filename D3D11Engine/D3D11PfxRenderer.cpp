@@ -397,6 +397,8 @@ XRESULT D3D11PfxRenderer::RenderScreenSpaceLighting(
     context->OMGetRenderTargets( 1, previousRTV.GetAddressOf(), previousDSV.GetAddressOf() );
 
     ScreenSpaceLightingConstantBuffer cb = {};
+    GSky* sky = Engine::GAPI->GetSky();
+    const float mainLightVisibility = sky ? sky->GetMainLightVisibility() : 1.0f;
     const XMFLOAT4X4& projection = Engine::GAPI->GetProjectionMatrix();
     cb.SSL_ProjParams = float4( 1.0f / projection._11, 1.0f / projection._22, projection._43, projection._33 );
     cb.SSL_Projection = projection;
@@ -404,16 +406,16 @@ XRESULT D3D11PfxRenderer::RenderScreenSpaceLighting(
     XMStoreFloat4x4( &cb.SSL_View, view );
     XMStoreFloat4x4( &cb.SSL_InvView, XMMatrixInverse( nullptr, view ) );
     cb.SSL_InvResolution = float2( 1.0f / std::max( 1, res.x ), 1.0f / std::max( 1, res.y ) );
-    cb.SSL_ContactStrength = settings.ContactShadowStrength;
+    cb.SSL_ContactStrength = settings.ContactShadowStrength * mainLightVisibility;
     cb.SSL_GIStrength = settings.ScreenSpaceGIStrength;
     cb.SSL_EnableContact = contactActive ? 1.0f : 0.0f;
     cb.SSL_EnableGI = giActive ? 1.0f : 0.0f;
     cb.SSL_HistoryValid = ScreenSpaceLightingHistoryValid ? 1.0f : 0.0f;
     cb.SSL_FrameIndex = static_cast<float>(ScreenSpaceLightingFrameIndex++ & 1023u);
-    if ( GSky* sky = Engine::GAPI->GetSky() ) {
+    if ( sky ) {
         const XMFLOAT3 mainLightDirection = sky->GetMainLightDirection();
         const XMVECTOR directionToLightVS = XMVector3Normalize( XMVector3TransformNormal(
-            XMVectorNegate( XMLoadFloat3( &mainLightDirection ) ), view ) );
+            XMLoadFloat3( &mainLightDirection ), view ) );
         XMStoreFloat3( &cb.SSL_LightDirectionVS, directionToLightVS );
     } else {
         cb.SSL_LightDirectionVS = XMFLOAT3( 0.0f, 1.0f, 0.0f );
@@ -507,7 +509,7 @@ XRESULT D3D11PfxRenderer::RenderPostFXComposition(
     if ( sky ) {
         const XMFLOAT3 mainLightDirection = sky->GetMainLightDirection();
         const XMVECTOR directionToLightVS = XMVector3Normalize( XMVector3TransformNormal(
-            XMVectorNegate( XMLoadFloat3( &mainLightDirection ) ), Engine::GAPI->GetViewMatrixXM() ) );
+            XMLoadFloat3( &mainLightDirection ), Engine::GAPI->GetViewMatrixXM() ) );
         XMStoreFloat3( &control.CC_LightDirectionVS, directionToLightVS );
     } else {
         control.CC_LightDirectionVS = XMFLOAT3( 0.0f, 1.0f, 0.0f );
