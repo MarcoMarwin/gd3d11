@@ -89,7 +89,7 @@ float4 PSMain( PS_INPUT Input ) : SV_TARGET
 	float fog = 1.0f - ComputeVolumetricFog(position, posOriginal);
 	float fogDistance = length(posOriginal - HF_CameraPosition);
 	float stableFadeEnd = max(HF_WeightZFar, 1000.0f);
-	float stableFadeStart = max(HF_WeightZNear, stableFadeEnd * 0.82f);
+	float stableFadeStart = max(HF_WeightZNear, stableFadeEnd * 0.58f);
 	float stableWorldFade = smoothstep(stableFadeStart, stableFadeEnd, fogDistance);
 	float activeWeatherFog = saturate(AC_RainFXWeight);
 	float nightTimeBlend = smoothstep(0.0f, 1.0f, saturate(-AC_LightPos.y * 4.0f))

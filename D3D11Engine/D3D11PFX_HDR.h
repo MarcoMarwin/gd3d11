@@ -11,6 +11,7 @@ public:
     /** Draws this effect to the given buffer */
     XRESULT Render( RenderToTextureBuffer* fxbuffer ) override { return XR_FAILED; };
     XRESULT Render( ID3D11RenderTargetView* output, ID3D11ShaderResourceView* backbuffer );
+    void ResetAdaptation();
 
 protected:
     /** Calcualtes the luminance */

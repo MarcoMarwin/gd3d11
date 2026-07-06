@@ -129,9 +129,7 @@ float4 ComputeHeightFog( float2 texcoord, float2 pixelPosition )
     float activeWeatherFog = saturate(AC_RainFXWeight);
 	float nightTimeBlend = smoothstep(0.0f, 1.0f, saturate(-AC_LightPos.y * 4.0f))
 		* saturate(AC_EnableNightAtmosphere);
-    float rainyGeometry = (1.0f - skyPixel) * activeWeatherFog;
-    float rainGeometryFogLift = rainyGeometry * lerp(0.025f, 0.090f, nightTimeBlend) * stableWorldFade;
-    float weatherFog = saturate(max(fog, stableWorldFade) * activeWeatherFog + rainGeometryFogLift);
+    float weatherFog = max(fog, stableWorldFade) * activeWeatherFog;
     float dryNightFog = fog * nightTimeBlend * (1.0f - activeWeatherFog);
     fog = max(weatherFog, dryNightFog);
     float fogGradientWeight = saturate(fog * (1.0f - fog) * 4.0f);
@@ -145,10 +143,10 @@ float4 ComputeHeightFog( float2 texcoord, float2 pixelPosition )
 	float dayDarknessFactor = max(1.0f, 2.0f - max(0.0f, AC_LightPos.y));
 	float darknessFactor = lerp(dayDarknessFactor, 2.5f, nightTimeBlend);
 	float maxFogOpacity = lerp(1.0f, 0.85f, nightTimeBlend);
-	// Recover rainy geometry fog without touching the sky path:
-	// distant silhouettes recede softly, while the cloud layer keeps its existing visibility.
-	float rainyNightGeometry = rainyGeometry * nightTimeBlend;
-	float geometryFogOpacity = lerp(maxFogOpacity, 0.95f, rainyNightGeometry);
+	// Recover a little rainy-night geometry fog without touching the sky path:
+	// distant silhouettes recede, while the cloud layer keeps its existing visibility.
+	float rainyNightGeometry = (1.0f - skyPixel) * activeWeatherFog * nightTimeBlend;
+	float geometryFogOpacity = lerp(maxFogOpacity, 0.91f, rainyNightGeometry);
 	float skyRainFogAttenuation = lerp(1.0f, 0.54f, skyPixel * activeWeatherFog);
 
 	return float4(saturate(color / darknessFactor), ditheredFog * geometryFogOpacity * skyRainFogAttenuation);

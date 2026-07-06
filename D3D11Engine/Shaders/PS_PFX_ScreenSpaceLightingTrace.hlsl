@@ -83,19 +83,21 @@ float ComputeContact(float2 uv, float depth)
     float3 n = ViewNormal(uv);
     float3 l = normalize(SSL_LightDirectionVS);
     float facing = saturate(dot(n, l));
-    if (facing <= 0.02f) return 0.0f;
+    if (facing <= 0.01f) return 0.0f;
     float jitter = Hash12(floor(uv / SSL_InvResolution) + SSL_FrameIndex);
-    float viewDistanceFade = 1.0f - smoothstep(3200.0f, 7800.0f, vp.z);
+    // Keep contact shadows concentrated in the stable near/mid field. The broader
+    // ray still makes the effect readable without reintroducing distant flicker.
+    float viewDistanceFade = 1.0f - smoothstep(2800.0f, 6200.0f, vp.z);
     if (viewDistanceFade <= 0.001f) return 0.0f;
-    float maxDistance = clamp(vp.z * 0.0045f, 14.0f, 82.0f);
+    float maxDistance = clamp(vp.z * 0.006f, 18.0f, 120.0f);
     float2 hitUV; float hitDistance;
-    if (!TraceRay(vp + n * 1.8f, l, maxDistance, 8, jitter, 1.2f, 0.030f, 9.0f, hitUV, hitDistance)) return 0.0f;
+    if (!TraceRay(vp + n * 2.0f, l, maxDistance, 10, jitter, 1.5f, 0.034f, 13.0f, hitUV, hitDistance)) return 0.0f;
     float3 hn = ViewNormal(hitUV);
     // Occluder normals are often nearly perpendicular on Gothic's thin geometry.
     // Keep them valid instead of suppressing the complete contact shadow.
-    float normalGate = lerp(0.65f, 1.0f, saturate(dot(hn, -l)));
-    float distanceFade = 1.0f - smoothstep(maxDistance * 0.22f, maxDistance, hitDistance);
-    return saturate(facing * normalGate * distanceFade * viewDistanceFade * SSL_ContactStrength * 0.55f);
+    float normalGate = lerp(0.72f, 1.0f, saturate(dot(hn, -l)));
+    float distanceFade = 1.0f - smoothstep(maxDistance * 0.30f, maxDistance, hitDistance);
+    return saturate(facing * normalGate * distanceFade * viewDistanceFade * SSL_ContactStrength * 0.85f);
 }
 
 float3 ComputeGI(float2 uv, float depth, float3 baseColor)

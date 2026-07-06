@@ -91,17 +91,29 @@ D3D11PFX_HDR::D3D11PFX_HDR( D3D11PfxRenderer* rnd ) : D3D11PFX_Effect( rnd ) {
 	LumBuffer3 = new RenderToTextureBuffer( engine->GetDevice().Get(), LUM_SIZE, LUM_SIZE, DXGI_FORMAT_R16_FLOAT, nullptr,
         DXGI_FORMAT_UNKNOWN, DXGI_FORMAT_UNKNOWN, static_cast<int>(log( LUM_SIZE ) / log( 2 )) );
 
-	const float clearColor[4] = { 0.f, 0.f, 0.f, 0.f };
-	engine->GetContext()->ClearRenderTargetView( LumBuffer1->GetRenderTargetView().Get(), clearColor );
-	engine->GetContext()->ClearRenderTargetView( LumBuffer2->GetRenderTargetView().Get(), clearColor );
-	engine->GetContext()->ClearRenderTargetView( LumBuffer3->GetRenderTargetView().Get(), clearColor );
-	ActiveLumBuffer = 0;
+	ResetAdaptation();
 }
 
 D3D11PFX_HDR::~D3D11PFX_HDR() {
 	delete LumBuffer1;
 	delete LumBuffer2;
 	delete LumBuffer3;
+}
+
+void D3D11PFX_HDR::ResetAdaptation() {
+    D3D11GraphicsEngine* engine = reinterpret_cast<D3D11GraphicsEngine*>(Engine::GraphicsEngine);
+    if ( !engine || !LumBuffer1 || !LumBuffer2 || !LumBuffer3 ) {
+        return;
+    }
+
+    // 18% gray produces exactly neutral exposure (1.0) in GetToneMapExposure.
+    const float neutralLuminance[4] = { 0.18f, 0.18f, 0.18f, 0.18f };
+    RenderToTextureBuffer* buffers[3] = { LumBuffer1, LumBuffer2, LumBuffer3 };
+    for ( RenderToTextureBuffer* buffer : buffers ) {
+        engine->GetContext()->ClearRenderTargetView( buffer->GetRenderTargetView().Get(), neutralLuminance );
+        engine->GetContext()->GenerateMips( buffer->GetShaderResView().Get() );
+    }
+    ActiveLumBuffer = 0;
 }
 
 /** Draws this effect to the given buffer */

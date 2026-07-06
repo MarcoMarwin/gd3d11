@@ -380,8 +380,8 @@ XRESULT GSky::RenderSky() {
     if ( masterTime >= 0.0f ) {
         constexpr float dawnMoonFadeStart = 4.25f; // 04:15
         constexpr float dawnSunFadeStart = 4.50f; // 04:30
-        constexpr float duskSunFadeStart = 17.50f; // 17:30
-        constexpr float duskMoonFadeStart = 17.75f; // 17:45
+        constexpr float duskSunFadeStart = 19.25f; // 19:15
+        constexpr float duskMoonFadeStart = 19.50f; // 19:30
         constexpr float transitionHours = 15.0f / 60.0f;
         const float dawnMoonFadeEnd = dawnMoonFadeStart + transitionHours;
         const float dawnSunFadeEnd = dawnSunFadeStart + transitionHours;
@@ -465,7 +465,7 @@ XRESULT GSky::RenderSky() {
     AtmosphereCB.AC_RainFXWeight = AtmosphericRainWeight;
     AtmosphereCB.AC_EnableSSR = Engine::GAPI->GetRendererState().RendererSettings.EnableSSR ? 1.0f : 0.0f;
     AtmosphereCB.AC_EnableSSS = Engine::GAPI->GetRendererState().RendererSettings.EnableSSS ? 1.0f : 0.0f;
-    AtmosphereCB.AC_SSRStrength = Engine::GAPI->GetRendererState().RendererSettings.SSRStrength * 0.72f;
+    AtmosphereCB.AC_SSRStrength = Engine::GAPI->GetRendererState().RendererSettings.SSRStrength * 0.84f;
     AtmosphereCB.AC_SSSIntensity = Engine::GAPI->GetRendererState().RendererSettings.SSSIntensity;
     AtmosphereCB.AC_WaterCubemapStrength = Engine::GAPI->GetRendererState().RendererSettings.WaterCubemapStrength;
     AtmosphereCB.AC_EnableNightAtmosphere = 1.0f;

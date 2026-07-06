@@ -36,6 +36,7 @@ public:
 
     /** Renders the HDR-Effect */
     XRESULT RenderHDR(ID3D11RenderTargetView* output, ID3D11ShaderResourceView* backbuffer);
+    void ResetHDRAdaptation();
 
     /** Renders the SMAA-Effect */
     XRESULT RenderSMAA(ID3D11ShaderResourceView* backbuffer);

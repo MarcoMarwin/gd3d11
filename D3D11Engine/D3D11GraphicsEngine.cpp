@@ -435,6 +435,8 @@ D3D11GraphicsEngine::D3D11GraphicsEngine() :
 }
 
 D3D11GraphicsEngine::~D3D11GraphicsEngine() {
+    // Release post-processing and its vendor contexts before D3D device teardown.
+    PfxRenderer.reset();
     GothicDepthBufferStateInfo::DeleteCachedObjects();
     GothicBlendStateInfo::DeleteCachedObjects();
     GothicRasterizerStateInfo::DeleteCachedObjects();
@@ -444,8 +446,10 @@ D3D11GraphicsEngine::~D3D11GraphicsEngine() {
     SAFE_DELETE( QuadVertexBuffer );
     SAFE_DELETE( QuadIndexBuffer );
 
-    ID3D11Debug* d3dDebug;
-    Device->QueryInterface( __uuidof(ID3D11Debug), reinterpret_cast<void**>(&d3dDebug) );
+    ID3D11Debug* d3dDebug = nullptr;
+    if ( Device ) {
+        Device->QueryInterface( __uuidof(ID3D11Debug), reinterpret_cast<void**>(&d3dDebug) );
+    }
 
     if ( d3dDebug ) {
         d3dDebug->ReportLiveDeviceObjects( D3D11_RLDO_DETAIL );

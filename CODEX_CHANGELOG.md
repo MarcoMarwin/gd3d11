@@ -211,3 +211,14 @@ Kurze, append-only Dokumentation der von Codex gepushten Renderer-Builds.
 - Contact Shadows/SSGI: SSGI sampelt breiter und verlaesslicher mit weiter gedeckelter Energie, damit mehr Flaechen subtil reagieren ohne die alten Lichtstreifen zurueckzubringen. Contact Shadows werden staerker auf Nahkontakte begrenzt und in der Ferne ausgeblendet, ohne FSR 3 selbst zu veraendern.
 - Regennebel: die Geometrie-Nebelrampe bei Regen beginnt weicher ueber eine groessere Distanz, nachts wirkt der Regennebel staerker und tagsueber bei Regen leicht. Himmel-/Wolkenpfad, FSR 3, normale Regen-Transitions und trockener Nachtnebel bleiben unveraendert.
 - Pruefung: Shader-Diff, Klammer-/Escape-Pruefungen, Screen-Space-Lighting-Constant-Buffer-Layouts, Zeitfenster-Samples und `git diff --check` statisch kontrolliert. Kein lokaler HLSL-Compiler und kein vollstaendiger lokaler C++-Build ausgefuehrt.
+
+## Build 096 (Stabilitaet, HDR, Beleuchtung und Release-Lizenzen)
+
+- Release-Lizenzen: Attributions- und Lizenztexte in einer einzigen GD3D11/Licences.txt gebuendelt; doppelte MIT-Texte, nicht ausgelieferte Komponenten und der nicht benoetigte Hinweis fuer die einzelne Regentextur entfernt. Die Paketierung entfernt zusaetzlich die separate XeGTAO-Lizenzkopie.
+- Sonne/Mond: Abendlicher Wechsel auf die korrekte Zeit 19:15-19:45 verschoben; Sonnenlicht/-schatten blenden 19:15-19:30 aus, Mondlicht/-schatten 19:30-19:45 ein. Godrays und Backlit Vegetation folgen den Lichtgewichten; Wasser-Glints bleiben unabhaengig.
+- Regennebel: Tages- und Nachtstaerke auf den Stand vor der letzten Verstaerkung zurueckgefuehrt; der weichere, laengere Distanzuebergang bleibt erhalten.
+- Contact Shadows: Nah- und Mittelbereich mit breiteren Rays, zehn Schritten und hoeherer Wirkung deutlich sichtbarer; Fernbereich endet frueher, um Flackern nicht zu verstaerken. FSR 3 selbst bleibt unveraendert.
+- Lade-/Exit-Stabilitaet: Welt-, BSP-, VobTree- und MeshManager-Zugriffe abgesichert; leere Geometrie wird ohne polys[0]-Zugriff behandelt. PostFX-/FSR-Ressourcen werden vor dem D3D-Geraet freigegeben und der optionale D3D-Debugzeiger sicher initialisiert.
+- Water Effects: sichtbarer Standard und F11-Regler bleiben bei 1,0 beziehungsweise 0,0-2,0; 1,0 entspricht nun der bisherigen Wirkung von 1,4. Wasser- und Regenboden-SSR nutzen dieselbe Normalisierung.
+- HDR: Luminanzhistorie startet und resettiert bei Welt-/Spielstandladen neutral auf 18-Prozent-Grau statt maximaler Startbelichtung. Helle und dunkle Adaption bleiben weich getrennt, erreichen das Ziel aber deutlich schneller.
+- Pruefung: gezielte Git-Diffs, Projekt-/Shaderregistrierungen, Lade-/Ressourcenlebenszyklen, Feature-Gates, Definitionen, Konfliktmarker und git diff --check statisch kontrolliert. Kein vollstaendiger lokaler C++-/Shader-Build.

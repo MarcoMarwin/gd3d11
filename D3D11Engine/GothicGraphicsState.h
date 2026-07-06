@@ -668,7 +668,7 @@ struct GothicRendererSettings {
         SortRenderQueue = false;
         DrawThreaded = false;
         EnableSSR = true;
-        SSRStrength = 1.0f; // UI-normalized: 1.0 equals the former 1.2 slider value.
+        SSRStrength = 1.0f; // UI-normalized: 1.0 equals the former 1.4 slider value.
         WaterCubemapStrength = 1.0f;
         EnableSSS = true;
         SSSIntensity = 0.75f; // UI-normalized: 1.0 maps to the intended 0.75 backlight intensity.

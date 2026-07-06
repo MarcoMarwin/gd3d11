@@ -49,6 +49,7 @@
 
 // TODO: REMOVE THIS!
 #include "D3D11GraphicsEngine.h"
+#include "D3D11PfxRenderer.h"
 #include "MeshManager.h"
 #include "ThreadPool.h"
 #include "zFILE.h"
@@ -824,7 +825,8 @@ void GothicAPI::OnWorldUpdate() {
 
     // Apply the hints for the sound system to fix voices in indoor locations being quiet
     // This was originally done in zCBspTree::Render
-    zCWorld* world = oCGame::GetGame()->_zCSession_world;
+    oCGame* game = oCGame::GetGame();
+    zCWorld* world = game ? game->_zCSession_world : nullptr;
     if ( !GMPModeActive ) {
         if ( IsCameraIndoor() ) {
             // Set mode to 2, which means we are indoors, but can see the outside
@@ -845,7 +847,8 @@ void GothicAPI::OnWorldUpdate() {
 
     // Do rain-effects
     zCSkyController_Outdoor* skyController;
-    if ( world && (skyController = world->GetSkyControllerOutdoor()) != nullptr && _canRain ) {
+    if ( world && LoadedWorldInfo && LoadedWorldInfo->BspTree
+        && (skyController = world->GetSkyControllerOutdoor()) != nullptr && _canRain ) {
         bool outdoor = (LoadedWorldInfo->BspTree->GetBspTreeMode() == zBSP_MODE_OUTDOOR);
         if ( RendererState.RendererSettings.AtmosphericScattering && outdoor ) {
             float lastMasterTime = skyController->GetLastMasterTime();
@@ -1136,6 +1139,11 @@ void GothicAPI::ResetVobs() {
 
 /** Called when the game loaded a new level */
 void GothicAPI::OnGeometryLoaded( zCBspTree* tree ) {
+    if ( !tree || !LoadedWorldInfo ) {
+        LogError() << "World geometry load skipped because required world data is unavailable.";
+        return;
+    }
+
     LogInfo() << "World loaded, getting Levelmesh now!";
     LogInfo() << " - Found " << tree->GetNumPolys() << " polygons";
     LogInfo() << "Extracting world";
@@ -1146,6 +1154,11 @@ void GothicAPI::OnGeometryLoaded( zCBspTree* tree ) {
 
     ResetWorld();
     ResetMaterialInfo();
+
+    if ( polys.empty() ) {
+        LogError() << "World geometry contains no polygons; renderer world data was cleared safely.";
+        return;
+    }
 
     bool indoorLocation = (LoadedWorldInfo->BspTree->GetBspTreeMode() == zBSP_MODE_INDOOR);
     std::string worldStr = "system\\GD3D11\\meshes\\WLD_" + LoadedWorldInfo->WorldName + ".obj";
@@ -1166,6 +1179,11 @@ void GothicAPI::OnGeometryLoaded( zCBspTree* tree ) {
 
 /** Called when the game is about to load a new level */
 void GothicAPI::OnLoadWorld( const std::string& levelName, int loadMode ) {
+    if ( !LoadedWorldInfo ) {
+        LogError() << "World load skipped because renderer world state is unavailable.";
+        return;
+    }
+
     _canClearVobsByVisual = true;
     if ( (loadMode == zWLD_LOAD_GAME_STARTUP || loadMode == zWLD_LOAD_GAME_SAVED_STAT) ) {
         if ( !levelName.empty() ) {
@@ -1186,7 +1204,9 @@ void GothicAPI::OnLoadWorld( const std::string& levelName, int loadMode ) {
         }
 
         extern MeshManager* s_MeshManager;
-        s_MeshManager->DropCaches();
+        if ( s_MeshManager ) {
+            s_MeshManager->DropCaches();
+        }
     }
 
 #ifndef PUBLIC_RELEASE
@@ -1199,6 +1219,18 @@ void GothicAPI::OnLoadWorld( const std::string& levelName, int loadMode ) {
 
 /** Called when the game is done loading the world */
 void GothicAPI::OnWorldLoaded() {
+    oCGame* game = oCGame::GetGame();
+    zCWorld* loadedWorld = game ? game->_zCSession_world : nullptr;
+    if ( !LoadedWorldInfo || !loadedWorld || !loadedWorld->GetBspTree() ) {
+        LogError() << "World finalization skipped because required world data is unavailable.";
+        return;
+    }
+
+    D3D11GraphicsEngine* graphicsEngine = static_cast<D3D11GraphicsEngine*>(Engine::GraphicsEngine);
+    if ( graphicsEngine && graphicsEngine->GetPfxRenderer() ) {
+        graphicsEngine->GetPfxRenderer()->ResetHDRAdaptation();
+    }
+
     _canRain = false;
 
     LoadCustomZENResources();
@@ -1213,11 +1245,13 @@ void GothicAPI::OnWorldLoaded() {
         s_firstLoad = false;
     }
 
-    LoadedWorldInfo->BspTree = oCGame::GetGame()->_zCSession_world->GetBspTree();
+    LoadedWorldInfo->BspTree = loadedWorld->GetBspTree();
 
     // Get all VOBs
-    zCTree<zCVob>* vobTree = oCGame::GetGame()->_zCSession_world->GetGlobalVobTree();
-    TraverseVobTree( vobTree );
+    zCTree<zCVob>* vobTree = loadedWorld->GetGlobalVobTree();
+    if ( vobTree ) {
+        TraverseVobTree( vobTree );
+    }
 
     // Build instancing cache for the static vobs for each section
     BuildStaticMeshInstancingCache();

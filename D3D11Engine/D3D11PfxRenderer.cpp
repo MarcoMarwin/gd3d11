@@ -113,7 +113,7 @@ XRESULT D3D11PfxRenderer::RenderWetGroundSSR(
     cb.WG_Wetness = Engine::GAPI->GetSceneWetness();
     const INT2 resolution = engine->GetResolution();
     cb.WG_InvResolution = float2( 1.0f / std::max( resolution.x, 1 ), 1.0f / std::max( resolution.y, 1 ) );
-    cb.WG_Strength = Engine::GAPI->GetRendererState().RendererSettings.SSRStrength * 0.72f;
+    cb.WG_Strength = Engine::GAPI->GetRendererState().RendererSettings.SSRStrength * 0.84f;
     cb.WG_Time = Engine::GAPI->GetTimeSeconds();
     cb.WG_RainFXWeight = Engine::GAPI->GetRainFXWeight();
     ps->GetBuffer( "WetGroundSSRConstantBuffer" ).Update( &cb ).Bind();
@@ -160,6 +160,12 @@ XRESULT D3D11PfxRenderer::RenderWetGroundSSR(
 /** Renders the HDR-Effect */
 XRESULT D3D11PfxRenderer::RenderHDR( ID3D11RenderTargetView* output, ID3D11ShaderResourceView* backbuffer ) {
     return FX_HDR->Render( output, backbuffer );
+}
+
+void D3D11PfxRenderer::ResetHDRAdaptation() {
+    if ( FX_HDR ) {
+        FX_HDR->ResetAdaptation();
+    }
 }
 
 /** Renders the SMAA-Effect */
