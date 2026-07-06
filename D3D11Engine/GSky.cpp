@@ -129,6 +129,11 @@ XRESULT GSky::LoadSkyResources() {
     RainCloudTexture.reset( rainCloudTex );
     XLE( RainCloudTexture->Init( "system\\GD3D11\\Textures\\RainCloud.dds" ) );
 
+    D3D11Texture* vdbCloudTex;
+    XLE( Engine::GraphicsEngine->CreateTexture( &vdbCloudTex ) );
+    VDBCloudTexture.reset( vdbCloudTex );
+    XLE( VDBCloudTexture->Init( "system\\GD3D11\\Textures\\VDBCloudAtlas.dds" ) );
+
     D3D11Texture* nightTex;
     XLE( Engine::GraphicsEngine->CreateTexture( &nightTex ) );
     NightTexture.reset( nightTex );

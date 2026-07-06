@@ -143,7 +143,8 @@ float4 PSMain( PS_INPUT Input ) : SV_TARGET
 	
 	// Get specular parameters
 	float4 gb3 = TX_SI_SP.Sample(SS_Linear, uv);
-	float specIntensity = gb3.x;
+	float specIntensity = gb3.x < -2.0f ? max(-gb3.x - 3.0f, 0.0f)
+        : (gb3.x < -0.5f ? max(-gb3.x - 1.0f, 0.0f) : gb3.x);
 	float specPower = gb3.y < 0.0f ? max(-gb3.y - 1.0f, 1.0f) : gb3.y;
 	
 	// Reconstruct VS/WS position from depth

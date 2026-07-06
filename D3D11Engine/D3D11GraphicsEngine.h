@@ -193,7 +193,7 @@ public:
     void UpdateColorSpace_SwapChain();
 
     /** Sets up texture with normalmap and fxmap for rendering */
-    bool BindTextureNRFX( zCTexture* tex, bool bindShader, bool updateMaterialInfo = true );
+    bool BindTextureNRFX( zCTexture* tex, bool bindShader, bool updateMaterialInfo = true, float materialClassMarker = 0.0f );
 
     /** Draws a skeletal mesh */
     XRESULT DrawSkeletalVertexNormals(SkeletalVobInfo* vi, const XMFLOAT4X4& world, const std::span<XMFLOAT4X4> transforms, float4 color, float fatness =
@@ -404,6 +404,7 @@ public:
     D3D11Texture* GetDistortionTexture() const { return DistortionTexture.get(); }
     D3D11Texture* GetBlueNoiseTexture() const { return BlueNoise512BGRA.get(); }
     D3D11Texture* GetWhiteTexture() const { return WhiteTexture.get(); }
+    bool HasVDBFireAtlas() const { return VDBFireAtlas && VDBFireAtlas->GetShaderResourceView().Get(); }
 
     RenderToTextureBuffer* GetVelocityBuffer() const { return VelocityBuffer.get(); }
     const std::vector<SkeletalVobInfo*>& GetFrameVisibleSkeletalVobs() const { return m_FrameGeometryCache.cachedMobs; }
@@ -493,6 +494,7 @@ protected:
     /** Sky */
     std::unique_ptr<D3D11Texture> DistortionTexture;
     std::unique_ptr<D3D11Texture> NoiseTexture;
+    std::unique_ptr<D3D11Texture> VDBFireAtlas;
     std::unique_ptr<D3D11Texture> WhiteTexture;
     std::unique_ptr<D3D11Texture> BlueNoise512BGRA;
 

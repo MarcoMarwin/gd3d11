@@ -55,7 +55,7 @@ PS_OUTPUT PSMain( PS_INPUT Input )
 	o.gb0 = color;
 	
 	// Center the UV
-	float2 uvCenter = Input.vTexcoord - 0.5f;
+	float2 uvCenter = Input.vTexcoord2 - 0.5f;
 	float weight = dot(color.rgb, float3(0.333f, 0.333f, 0.333f)) * pow(color.a, 1/4.0f);
 	weight *= 2.5f; // Scale the distortion down a bit
 	weight *= min(1.0f, Input.vPosition.z * 8.0f);

@@ -88,6 +88,34 @@ namespace {
         return name;
     }
 
+    enum class VDBFireKind {
+        None,
+        Fireplace,
+        Campfire
+    };
+
+    std::string NormalizeVisualStem( const char* rawName ) {
+        std::string name = rawName ? rawName : "";
+        name = ToLowerMaterialName( std::move( name ) );
+        const size_t slash = name.find_last_of( "\\/" );
+        if ( slash != std::string::npos )
+            name.erase( 0, slash + 1 );
+        const size_t dot = name.find_last_of( '.' );
+        if ( dot != std::string::npos )
+            name.resize( dot );
+        return name;
+    }
+
+    VDBFireKind ClassifyVDBFireVisual( zCVisual* visual ) {
+        if ( !visual )
+            return VDBFireKind::None;
+        const std::string stem = NormalizeVisualStem( visual->GetObjectName() );
+        if ( stem == "fire_hot" )
+            return VDBFireKind::Campfire;
+        if ( stem == "fire" )
+            return VDBFireKind::Fireplace;
+        return VDBFireKind::None;
+    }
     bool IsWaterfallParticleTexture( zCTexture* texture ) {
         if ( !texture )
             return false;
@@ -1612,6 +1640,7 @@ void GothicAPI::DrawWorldMeshNaive() {
 
     FrameParticleInfo.clear();
     FrameParticles.clear();
+    VDBFireInstances.clear();
     FrameMeshInstances.clear();
 
     {
@@ -3426,6 +3455,30 @@ void GothicAPI::DrawParticleFX( zCVob* source, zCParticleFX* fx, ParticleFrameDa
     // Maybe create more emitters?
     fx->CheckDependentEmitter();
 
+    D3D11GraphicsEngine* graphicsEngine = reinterpret_cast<D3D11GraphicsEngine*>(Engine::GraphicsEngine);
+    const VDBFireKind vdbFireKind = graphicsEngine && graphicsEngine->HasVDBFireAtlas()
+        ? ClassifyVDBFireVisual( source ? source->GetVisual() : nullptr )
+        : VDBFireKind::None;
+    if ( source && vdbFireKind != VDBFireKind::None ) {
+        const XMFLOAT3 sourcePosition = source->GetPositionWorld();
+        ParticleInstanceInfo fire = {};
+        fire.position = float3( sourcePosition.x, sourcePosition.y, sourcePosition.z );
+        if ( vdbFireKind == VDBFireKind::Campfire ) {
+            fire.position.y += 72.0f;
+            fire.scale = float3( 82.0f, 92.0f, 0.0f );
+        } else {
+            fire.position.y += 52.0f;
+            fire.scale = float3( 52.0f, 68.0f, 0.0f );
+        }
+        fire.color = float4( 1.0f, 1.0f, 1.0f, 1.0f );
+        fire.drawMode = 10; // Full camera-facing quad.
+        fire.velocity = float3( 0.0f, 1.0f, 0.0f );
+        fire.particleLightingScale = -1.0f;
+        const float animationTime = std::max( 0.0f, *fx->GetPrivateTotalTime() );
+        fire.atlasInfo = float3( fmodf( floorf( animationTime * 24.0f ), 32.0f ), 8.0f, 4.0f );
+        VDBFireInstances.push_back( fire );
+    }
+    bool hideNearbyFireComplete = false;
     zTParticle* pfx = fx->GetFirstParticle();
     if ( pfx ) {
         // Get texture
@@ -3444,6 +3497,7 @@ void GothicAPI::DrawParticleFX( zCVob* source, zCParticleFX* fx, ParticleFrameDa
             }
         }
 
+        hideNearbyFireComplete = ShouldHideFireCompleteDecal( source, texture );
         const bool waterfallParticle = IsWaterfallParticleTexture( texture );
         const int blendMode = static_cast<int>(fx->GetEmitter()->GetVisAlphaFunc());
         const bool emissiveParticle = !waterfallParticle && IsEmissiveParticleTexture( texture, blendMode );
@@ -3511,6 +3565,10 @@ void GothicAPI::DrawParticleFX( zCVob* source, zCParticleFX* fx, ParticleFrameDa
                 PolyStripVisuals.insert( p->PolyStrip );
             };
 
+            if ( vdbFireKind != VDBFireKind::None || hideNearbyFireComplete ) {
+                fx->UpdateParticle( p );
+                continue;
+            }
             // Generate instance info
             part.emplace_back();
             ParticleInstanceInfo& ii = part.back();
@@ -3565,6 +3623,31 @@ void GothicAPI::DrawParticleFX( zCVob* source, zCParticleFX* fx, ParticleFrameDa
     }
 }
 
+bool GothicAPI::ShouldHideFireCompleteDecal( zCVob* decalVob, zCTexture* texture ) const {
+    if ( !decalVob || !texture )
+        return false;
+
+    const std::string textureStem = NormalizeVisualStem( texture->GetNameWithoutExt().c_str() );
+    if ( textureStem.rfind( "fire_complete_a", 0 ) != 0 )
+        return false;
+
+    const XMFLOAT3 decalPosition = decalVob->GetPositionWorld();
+    constexpr float MaxDistanceSquared = 150.0f * 150.0f;
+    for ( zCVob* particleVob : ParticleEffectVobs ) {
+        if ( !particleVob || !particleVob->GetShowVisual()
+            || ClassifyVDBFireVisual( particleVob->GetVisual() ) != VDBFireKind::Fireplace ) {
+            continue;
+        }
+
+        const XMFLOAT3 firePosition = particleVob->GetPositionWorld();
+        const float dx = decalPosition.x - firePosition.x;
+        const float dy = decalPosition.y - firePosition.y;
+        const float dz = decalPosition.z - firePosition.z;
+        if ( dx * dx + dy * dy + dz * dz < MaxDistanceSquared )
+            return true;
+    }
+    return false;
+}
 /** Debugging */
 void GothicAPI::DrawTriangle( float3 pos = { 0.0f,0.0f,0.0f } ) {
     D3D11VertexBuffer* vxb;

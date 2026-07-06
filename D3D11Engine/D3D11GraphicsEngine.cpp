@@ -973,6 +973,9 @@ XRESULT D3D11GraphicsEngine::Init() {
     NoiseTexture = std::make_unique<D3D11Texture>();
     NoiseTexture->Init( "system\\GD3D11\\textures\\noise.dds" );
 
+    VDBFireAtlas = std::make_unique<D3D11Texture>();
+    VDBFireAtlas->Init( "system\\GD3D11\\textures\\VDBFireAtlas.dds" );
+
     BlueNoise512BGRA = std::make_unique<D3D11Texture>();
     BlueNoise512BGRA->Init( "system\\GD3D11\\textures\\bluenoise-rgba-512-bgra.dds" );
 
@@ -2430,7 +2433,7 @@ XRESULT D3D11GraphicsEngine::DrawVertexBufferFF( D3D11VertexBuffer* vb,
 }
 
 /** Sets up texture with normalmap and fxmap for rendering */
-bool D3D11GraphicsEngine::BindTextureNRFX( zCTexture* tex, bool bindShader, bool updateMaterialInfo ) {
+bool D3D11GraphicsEngine::BindTextureNRFX( zCTexture* tex, bool bindShader, bool updateMaterialInfo, float materialClassMarker ) {
     if ( tex->CacheIn( 0.6f ) != zRES_CACHED_IN ) {
         return false;
     }
@@ -2471,6 +2474,9 @@ bool D3D11GraphicsEngine::BindTextureNRFX( zCTexture* tex, bool bindShader, bool
 
     if ( info && GetActivePS() ) {
         auto materialBuffer = GetEffectiveMaterialBuffer( info, tex->GetSurface() );
+        if ( materialClassMarker != 0.0f ) {
+            materialBuffer.Color.w = materialClassMarker;
+        }
         auto allocation = PerObjectMaterialInfoPooledBuffer->Allocate( GetContext().Get(), &materialBuffer, sizeof( materialBuffer ) );
         UINT firstConstant = allocation.offsetInBytes / 16;
         UINT numConstants = allocation.sizeInBytes / 16;
@@ -2682,7 +2688,7 @@ XRESULT D3D11GraphicsEngine::DrawSkeletalMesh( SkeletalVobInfo* vi,
         if ( zCMaterial* mat = itm.first ) {
             zCTexture* tex;
             if ( ActivePS && (tex = mat->GetAniTexture()) != nullptr ) {
-                if ( !BindTextureNRFX( tex, (RenderingStage != DES_GHOST) ) ) {
+                if ( !BindTextureNRFX( tex, (RenderingStage != DES_GHOST), true, (vi && vi->Vob && vi->Vob->GetVobType() == zVOB_TYPE_NSC) ? -1.0f : 0.0f ) ) {
                     continue;
                 }
             }
@@ -3113,9 +3119,11 @@ void D3D11GraphicsEngine::DrawSkeletalMeshVobs(
     const bool enableShadows = Engine::GAPI->GetRendererState().RendererSettings.EnableShadows;
     const bool isMainPass = RenderingStage == DES_MAIN;
     zCTexture* lastTex = nullptr;
-    auto bindTextureForPass = [&]( zCTexture* tex ) {
-        if (tex == lastTex)
+    float lastMaterialClassMarker = 999.0f;
+    auto bindTextureForPass = [&]( zCTexture* tex, float materialClassMarker ) {
+        if (tex == lastTex && materialClassMarker == lastMaterialClassMarker)
             return true;
+        lastMaterialClassMarker = materialClassMarker;
 
         if ( isZPrepass ) {
             if (tex->CacheIn( 0.6f ) != zRES_CACHED_IN ) {
@@ -3138,7 +3146,7 @@ void D3D11GraphicsEngine::DrawSkeletalMeshVobs(
             return true;
         } else {
             lastTex = tex;
-            return BindTextureNRFX( tex, isMainPass );
+            return BindTextureNRFX( tex, isMainPass, true, materialClassMarker );
         }
     };
 
@@ -3159,6 +3167,7 @@ void D3D11GraphicsEngine::DrawSkeletalMeshVobs(
             if ( !vi->Vob->GetShowVisual() )
                 continue;
 
+            const float materialClassMarker = vi->Vob->GetVobType() == zVOB_TYPE_NSC ? -1.0f : 0.0f;
             float4 modelColor;
             if ( enableShadows ) {
                 // Let shadows do the work
@@ -3271,7 +3280,7 @@ void D3D11GraphicsEngine::DrawSkeletalMeshVobs(
                         if ( zCMaterial* mat = itm.first ) {
                             zCTexture* tex;
                             if ( wantShader && (tex = mat->GetAniTexture()) != nullptr ) {
-                                if ( !bindTextureForPass( tex ) ) {
+                                if ( !bindTextureForPass( tex, materialClassMarker ) ) {
                                     continue;
                                 }
                             }
@@ -3493,7 +3502,7 @@ void D3D11GraphicsEngine::DrawSkeletalMeshVobs(
                             for ( auto const& itm : mvi->Meshes ) {
                                 zCTexture* texture;
                                 if ( itm.first && (texture = itm.first->GetAniTexture()) != nullptr ) {
-                                    if ( !bindTextureForPass( texture ) )
+                                    if ( !bindTextureForPass( texture, materialClassMarker ) )
                                         continue;
                                 }
                                 for ( unsigned int m = 0; m < itm.second.size(); m++ ) {
@@ -4542,18 +4551,20 @@ XRESULT D3D11GraphicsEngine::OnStartWorldRendering() {
         graph.AddPass( RG_PASS_NAME("Screen-Space Lighting"), [&]( RGBuilder& builder, RenderPass& pass ) {
             builder.Read( backBufferHandle );
             builder.Read( normalsResource );
+            builder.Read( specularResource );
             builder.Read( waterMaskResource );
             builder.Read( velocityBufferHandle );
 
-            pass.m_executeCallback = [this, backBufferHandle, normalsResource, waterMaskResource, velocityBufferHandle,
+            pass.m_executeCallback = [this, backBufferHandle, normalsResource, specularResource, waterMaskResource, velocityBufferHandle,
                                       &compositionScreenSpaceLightingSRV]( const RenderGraph& graph ) {
                 TracyD3D11ZoneCGX( "D3D11GraphicsEngine::Screen-Space Lighting" );
 
                 auto backBuffer = graph.GetPhysicalTexture( backBufferHandle );
                 auto normalsTexture = graph.GetPhysicalTexture( normalsResource );
+                auto specularTexture = graph.GetPhysicalTexture( specularResource );
                 auto waterMaskTexture = graph.GetPhysicalTexture( waterMaskResource );
                 auto velocityTexture = graph.GetPhysicalTexture( velocityBufferHandle );
-                if ( !backBuffer || !normalsTexture || !waterMaskTexture ) {
+                if ( !backBuffer || !normalsTexture || !specularTexture || !waterMaskTexture ) {
                     compositionScreenSpaceLightingSRV = nullptr;
                     return;
                 }
@@ -4566,6 +4577,7 @@ XRESULT D3D11GraphicsEngine::OnStartWorldRendering() {
                     GetDepthBuffer()->GetShaderResView().Get(),
                     normalsTexture->GetShaderResView().Get(),
                     waterMaskTexture->GetShaderResView().Get(),
+                    specularTexture->GetShaderResView().Get(),
                     velocityTexture ? velocityTexture->GetShaderResView().Get() : nullptr,
                     &compositionScreenSpaceLightingSRV );
                 GetContext()->PSSetSamplers( 0, 1, DefaultSamplerState.GetAddressOf() );
@@ -7652,6 +7664,7 @@ XRESULT D3D11GraphicsEngine::DrawVOBsInstanced() {
             }
 
             MaterialInfo* lastMatInfo = nullptr;
+            float lastMaterialClassMarker = 999.0f;
 
             zCTexture* lastTex = nullptr;
             ID3D11ShaderResourceView* lastNrmTex = nullptr;
@@ -7670,6 +7683,8 @@ XRESULT D3D11GraphicsEngine::DrawVOBsInstanced() {
                     const auto* cachedVisual = &cache.vobVisuals[drawItem.VisualIndex];
                     const MeshKey& meshKey = drawItem.Mesh;
                     MeshInfo* meshInfo = drawItem.MeshEntry;
+                    const float materialClassMarker = TextureNameContainsMarker(
+                        cachedVisual->Visual->VisualName, "GRASSGROUP" ) ? -2.0f : 0.0f;
                     const bool isAlphaBlendMesh = meshKey.Material &&
                         (meshKey.Material->GetAlphaFunc() == zMAT_ALPHA_FUNC_BLEND ||
                          meshKey.Material->GetAlphaFunc() == zMAT_ALPHA_FUNC_ADD);
@@ -7785,16 +7800,19 @@ XRESULT D3D11GraphicsEngine::DrawVOBsInstanced() {
                             }
                         }
 
+                        const bool materialMarkerChanged = materialClassMarker != lastMaterialClassMarker;
                         // Wet scenes can use the distortion texture as a temporary normalmap fallback.
                         if ( lastTex != tx
                             || lastNrmTex != srv[1]
                             || lastFxTex != srv[2]
-                            || lastDispTex != srv[3] ) {
+                            || lastDispTex != srv[3]
+                            || materialMarkerChanged ) {
 
                             lastTex = tx;
                             lastNrmTex = srv[1];
                             lastFxTex = srv[2];
                             lastDispTex = srv[3];
+                            lastMaterialClassMarker = materialClassMarker;
 
                             if ( wantShader ) {
                                 GetContext()->PSSetShaderResources( 0, isZPrepass ? 1 : 3, srv );
@@ -7815,8 +7833,11 @@ XRESULT D3D11GraphicsEngine::DrawVOBsInstanced() {
                                         .Bind();
                                 }
 
-                                if ( info && !info->IsSame( lastMatInfo ) ) {
+                                if ( materialMarkerChanged || (info && !info->IsSame( lastMatInfo )) ) {
                                     auto materialBuffer = GetEffectiveMaterialBuffer( info, tx->GetSurface() );
+                                    if ( materialClassMarker != 0.0f ) {
+                                        materialBuffer.Color.w = materialClassMarker;
+                                    }
                                     auto matAllocation = PerObjectMaterialInfoPooledBuffer->Allocate( GetContext().Get(), &materialBuffer, sizeof( materialBuffer ) );
                                     UINT firstConstant = matAllocation.offsetInBytes / 16;
                                     UINT numConstants = matAllocation.sizeInBytes / 16;
@@ -8319,7 +8340,7 @@ XRESULT D3D11GraphicsEngine::DrawSky() {
     SetupVS_ExMeshDrawCall();
     SetupVS_ExConstantBuffer();
 
-    ID3D11ShaderResourceView* srvs[4]{};
+    ID3D11ShaderResourceView* srvs[5]{};
     // Apply sky texture
     D3D11Texture* cloudsTex = Engine::GAPI->GetSky()->GetCloudTexture();
     if ( cloudsTex ) {
@@ -8339,6 +8360,11 @@ XRESULT D3D11GraphicsEngine::DrawSky() {
     D3D11Texture* rainCloudTex = sky->GetRainCloudTexture();
     if ( rainCloudTex ) {
         srvs[3] = rainCloudTex->GetShaderResourceView().Get();
+    }
+
+    D3D11Texture* vdbCloudTex = sky->GetVDBCloudTexture();
+    if ( vdbCloudTex ) {
+        srvs[4] = vdbCloudTex->GetShaderResourceView().Get();
     }
     GetContext()->PSSetShaderResources( 0, std::size( srvs ), srvs);
 
@@ -8756,6 +8782,9 @@ void D3D11GraphicsEngine::DrawDecalList( const std::vector<zCVob*>& decals,
 
         zCTexture* texture = material->GetTexture();
         if ( !texture ) {
+            continue;
+        }
+        if ( Engine::GAPI->ShouldHideFireCompleteDecal( decals[i], texture ) ) {
             continue;
         }
 
@@ -9347,7 +9376,8 @@ void D3D11GraphicsEngine::DrawFrameParticles(
     RenderToTextureBuffer* bufferParticleColor,
     RenderToTextureBuffer* bufferParticleDistortion,
     RenderToTextureBuffer* bufferParticleReactiveMask ) {
-    if ( particles.empty() ) return;
+    const auto& vdbFireInstances = Engine::GAPI->GetVDBFireInstances();
+    if ( particles.empty() && vdbFireInstances.empty() ) return;
     SetDefaultStates();
 
     auto Resolution = GetResolution();
@@ -9432,6 +9462,17 @@ void D3D11GraphicsEngine::DrawFrameParticles(
         DrawVertexBufferInstanced( TempParticlesVertexBuffer.get(), 4, instances.size(), sizeof( ParticleInstanceInfo ) );
     }
 
+    // VDB fire uses the existing additive particle pass: one instanced billboard per
+    // matching PFX, animated from a compact 8x4 atlas.
+    if ( !vdbFireInstances.empty() && VDBFireAtlas && VDBFireAtlas->GetShaderResourceView().Get() ) {
+        VDBFireAtlas->BindToPixelShader( 0 );
+        EnsureTempVertexBufferSize( TempParticlesVertexBuffer,
+            sizeof( ParticleInstanceInfo ) * vdbFireInstances.size() );
+        TempParticlesVertexBuffer->UpdateBuffer( vdbFireInstances.data(),
+            sizeof( ParticleInstanceInfo ) * vdbFireInstances.size() );
+        DrawVertexBufferInstanced( TempParticlesVertexBuffer.get(), 4,
+            vdbFireInstances.size(), sizeof( ParticleInstanceInfo ) );
+    }
     // Set usual rendering for everything else. Alphablending mostly.
     SetActivePixelShader( PShaderID::PS_ParticleSimple );
     ActivePS->Apply();

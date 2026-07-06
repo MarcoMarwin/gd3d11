@@ -5,6 +5,7 @@ Texture2D TX_Scene : register( t0 );
 Texture2D TX_Depth : register( t1 );
 Texture2D TX_Normals : register( t2 );
 Texture2D TX_WaterMask : register( t3 );
+Texture2D TX_Material : register( t4 );
 
 cbuffer ScreenSpaceLightingConstantBuffer : register( b0 )
 {
@@ -20,7 +21,7 @@ cbuffer ScreenSpaceLightingConstantBuffer : register( b0 )
     float SSL_EnableContact;
     float SSL_EnableGI;
     float SSL_HistoryValid;
-    float SSL_Pad;
+    float SSL_FSR3Active;
 };
 
 struct PS_INPUT { float2 vTexcoord : TEXCOORD0; float3 vEyeRay : TEXCOORD1; float4 vPosition : SV_POSITION; };
@@ -84,20 +85,37 @@ float ComputeContact(float2 uv, float depth)
     float3 l = normalize(SSL_LightDirectionVS);
     float facing = saturate(dot(n, l));
     if (facing <= 0.01f) return 0.0f;
-    float jitter = Hash12(floor(uv / SSL_InvResolution) + SSL_FrameIndex);
-    // Keep contact shadows concentrated in the stable near/mid field. The broader
-    // ray still makes the effect readable without reintroducing distant flicker.
+
+    float materialClass = TX_Material.SampleLevel(SS_Linear, saturate(uv), 0).r;
+    float npcMaterial = (materialClass < -0.5f && materialClass > -2.0f) ? 1.0f : 0.0f;
+    float2 pixel = floor(uv / SSL_InvResolution);
+    float2 contactSeed = SSL_FSR3Active > 0.5f
+        ? pixel + float2(17.0f, 59.0f)
+        : pixel + float2(SSL_FrameIndex, SSL_FrameIndex);
+    float jitter = Hash12(contactSeed);
+
+    // Keep world contacts readable, but constrain animated NPC self-occlusion to
+    // a short, soft range so low-poly faces and neck seams cannot form hard bands.
     float viewDistanceFade = 1.0f - smoothstep(2800.0f, 6200.0f, vp.z);
     if (viewDistanceFade <= 0.001f) return 0.0f;
-    float maxDistance = clamp(vp.z * 0.006f, 18.0f, 120.0f);
+    float worldMaxDistance = clamp(vp.z * 0.006f, 18.0f, 120.0f);
+    float npcMaxDistance = clamp(vp.z * 0.002f, 7.0f, 26.0f);
+    float maxDistance = lerp(worldMaxDistance, npcMaxDistance, npcMaterial);
+    float originOffset = lerp(2.0f, 5.0f, npcMaterial);
+    float minThickness = lerp(1.5f, 2.2f, npcMaterial);
+    float thicknessScale = lerp(0.034f, 0.018f, npcMaterial);
+    float maxThickness = lerp(13.0f, 5.0f, npcMaterial);
+
     float2 hitUV; float hitDistance;
-    if (!TraceRay(vp + n * 2.0f, l, maxDistance, 10, jitter, 1.5f, 0.034f, 13.0f, hitUV, hitDistance)) return 0.0f;
+    if (!TraceRay(vp + n * originOffset, l, maxDistance, 10, jitter, minThickness, thicknessScale, maxThickness, hitUV, hitDistance)) return 0.0f;
     float3 hn = ViewNormal(hitUV);
-    // Occluder normals are often nearly perpendicular on Gothic's thin geometry.
-    // Keep them valid instead of suppressing the complete contact shadow.
-    float normalGate = lerp(0.72f, 1.0f, saturate(dot(hn, -l)));
+    float occluderFacing = saturate(dot(hn, -l));
+    float worldNormalGate = lerp(0.72f, 1.0f, occluderFacing);
+    float npcNormalGate = smoothstep(0.20f, 0.78f, occluderFacing);
+    float normalGate = lerp(worldNormalGate, npcNormalGate, npcMaterial);
     float distanceFade = 1.0f - smoothstep(maxDistance * 0.30f, maxDistance, hitDistance);
-    return saturate(facing * normalGate * distanceFade * viewDistanceFade * SSL_ContactStrength * 0.85f);
+    float npcStrength = lerp(1.0f, 0.28f, npcMaterial);
+    return saturate(facing * normalGate * distanceFade * viewDistanceFade * SSL_ContactStrength * 0.85f * npcStrength);
 }
 
 float3 ComputeGI(float2 uv, float depth, float3 baseColor)

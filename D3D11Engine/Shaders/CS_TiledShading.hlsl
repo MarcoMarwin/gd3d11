@@ -96,7 +96,8 @@ void CSMain( uint3 groupID : SV_GroupID, uint3 threadID : SV_GroupThreadID, uint
     float4 diffuse = TX_Diffuse.Load( int3( pixelCoord, 0 ) );
     float3 normal = DecodeNormalGBuffer( TX_Nrm.Load( int3( pixelCoord, 0 ) ).xy );
     float4 gb3 = TX_SI_SP.Load( int3( pixelCoord, 0 ) );
-    float specIntensity = gb3.x;
+    float specIntensity = gb3.x < -2.0f ? max(-gb3.x - 3.0f, 0.0f)
+        : (gb3.x < -0.5f ? max(-gb3.x - 1.0f, 0.0f) : gb3.x);
     float specPower = gb3.y < 0.0f ? max(-gb3.y - 1.0f, 1.0f) : gb3.y;
 
     float expDepth = TX_Depth.Load( int3( pixelCoord, 0 ) ).r;

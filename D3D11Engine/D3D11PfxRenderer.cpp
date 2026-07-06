@@ -361,6 +361,7 @@ XRESULT D3D11PfxRenderer::RenderScreenSpaceLighting(
     ID3D11ShaderResourceView* depthSRV,
     ID3D11ShaderResourceView* normalsSRV,
     ID3D11ShaderResourceView* waterMaskSRV,
+    ID3D11ShaderResourceView* materialSRV,
     ID3D11ShaderResourceView* velocitySRV,
     ID3D11ShaderResourceView** outLightingSRV ) {
 
@@ -371,7 +372,7 @@ XRESULT D3D11PfxRenderer::RenderScreenSpaceLighting(
     auto& settings = Engine::GAPI->GetRendererState().RendererSettings;
     const bool contactActive = settings.EnableContactShadows && settings.ContactShadowStrength > 0.0f;
     const bool giActive = settings.EnableScreenSpaceGI && settings.ScreenSpaceGIStrength > 0.0f;
-    if ( !sceneSRV || !depthSRV || !normalsSRV || !waterMaskSRV || (!contactActive && !giActive) ) {
+    if ( !sceneSRV || !depthSRV || !normalsSRV || !waterMaskSRV || !materialSRV || (!contactActive && !giActive) ) {
         ScreenSpaceLightingHistoryValid = false;
         return XR_SUCCESS;
     }
@@ -416,6 +417,9 @@ XRESULT D3D11PfxRenderer::RenderScreenSpaceLighting(
     cb.SSL_GIStrength = settings.ScreenSpaceGIStrength;
     cb.SSL_EnableContact = contactActive ? 1.0f : 0.0f;
     cb.SSL_EnableGI = giActive ? 1.0f : 0.0f;
+    cb.SSL_FSR3Active = (settings.AntiAliasingMode == GothicRendererSettings::AA_FSR3
+        || (settings.AntiAliasingMode == GothicRendererSettings::AA_FSR
+            && settings.Upscaler == GothicRendererSettings::UPSCALER_FSR_3)) ? 1.0f : 0.0f;
     cb.SSL_HistoryValid = ScreenSpaceLightingHistoryValid ? 1.0f : 0.0f;
     cb.SSL_FrameIndex = static_cast<float>(ScreenSpaceLightingFrameIndex++ & 1023u);
     if ( sky ) {
@@ -434,8 +438,8 @@ XRESULT D3D11PfxRenderer::RenderScreenSpaceLighting(
 
     ID3D11RenderTargetView* rawRTV = raw->GetRenderTargetView().Get();
     context->OMSetRenderTargets( 1, &rawRTV, nullptr );
-    ID3D11ShaderResourceView* traceSRVs[4] = { sceneSRV, depthSRV, normalsSRV, waterMaskSRV };
-    context->PSSetShaderResources( 0, 4, traceSRVs );
+    ID3D11ShaderResourceView* traceSRVs[5] = { sceneSRV, depthSRV, normalsSRV, waterMaskSRV, materialSRV };
+    context->PSSetShaderResources( 0, 5, traceSRVs );
     ID3D11SamplerState* sampler = engine->GetClampSamplerState();
     context->PSSetSamplers( 0, 1, &sampler );
     engine->SetDefaultStates();

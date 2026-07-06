@@ -29,6 +29,7 @@ struct VS_INPUT
     unsigned int type : TYPE;
     float3 vVelocity : VELOCITY;
     float vParticleLightingScale : LIGHTINGSCALE;
+    float3 vAtlasInfo : ATLASINFO;
 };
 
 struct VS_OUTPUT
@@ -107,7 +108,12 @@ VS_OUTPUT VSMain( VS_INPUT Input )
     Output.vPosition = mul(float4(position, 1.0f), frame.M_ViewProj);
     Output.vViewPosition = mul(float4(position, 1.0f), frame.M_View).xyz;
     Output.vDiffuse = float4(Input.vDiffuse.rgb, pow(Input.vDiffuse.a, 2.2f));
-    Output.vTexcoord = float2(tu[Input.vertexID], tv[Input.vertexID]);
+    float2 baseTexcoord = float2(tu[Input.vertexID], tv[Input.vertexID]);
+    float2 atlasGrid = max(Input.vAtlasInfo.yz, float2(1.0f, 1.0f));
+    float atlasFrame = clamp(floor(Input.vAtlasInfo.x + 0.5f), 0.0f, atlasGrid.x * atlasGrid.y - 1.0f);
+    float2 atlasCell = float2(fmod(atlasFrame, atlasGrid.x), floor(atlasFrame / atlasGrid.x));
+    Output.vTexcoord = (atlasCell + baseTexcoord) / atlasGrid;
+    Output.vTexcoord2 = baseTexcoord;
     Output.vParticleLightingScale = Input.vParticleLightingScale;
 	return Output;
 }

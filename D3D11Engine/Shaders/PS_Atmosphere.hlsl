@@ -14,6 +14,7 @@ Texture2D	TX_Texture0 : register( t0 );
 Texture2D	TX_Texture1 : register( t1 );
 Texture2D	TX_Texture2 : register( t2 );
 Texture2D	TX_RainCloud : register( t3 );
+Texture2D	TX_VDBCloudAtlas : register( t4 );
 
 
 //--------------------------------------------------------------------------------------
@@ -68,6 +69,62 @@ float3 ApplyMoonTexture(float3 worldPosition)
     return moonTexture.rgb * moonMask;
 }
 
+float VDBCloudHash(float2 cell)
+{
+    return frac(sin(dot(cell, float2(127.1f, 311.7f))) * 43758.5453f);
+}
+
+float4 SampleVDBCloudLayer(float2 planePosition, float layerScale, float2 wind, float seed)
+{
+    float2 tiledPosition = planePosition * layerScale + wind + seed;
+    float2 cell = floor(tiledPosition);
+    float2 localUV = frac(tiledPosition);
+    float shapeHash = VDBCloudHash(cell + seed * 17.0f);
+    float variant = min(9.0f, floor(shapeHash * 10.0f));
+
+    // Mirror individual cells so the ten source volumes produce substantially
+    // more silhouettes without additional samples or textures.
+    float flipHash = VDBCloudHash(cell.yx + seed * 43.0f);
+    if (flipHash > 0.5f)
+        localUV.x = 1.0f - localUV.x;
+
+    float2 atlasCell = float2(fmod(variant, 5.0f), floor(variant / 5.0f));
+    float2 atlasUV = (atlasCell + clamp(localUV, 0.002f, 0.998f)) / float2(5.0f, 2.0f);
+    return TX_VDBCloudAtlas.Sample(SS_Linear, atlasUV);
+}
+
+float4 RenderVDBClouds(float3 worldPosition)
+{
+    float3 skyDirection = normalize(worldPosition - AC_SpherePosition);
+    float horizonMask = smoothstep(-0.015f, 0.10f, skyDirection.y);
+    float projectionHeight = max(0.11f, skyDirection.y);
+    float2 cameraParallax = AC_WorldCameraPos.xz * 0.0000010f;
+    float2 planePosition = skyDirection.xz / projectionHeight * 0.20f + cameraParallax;
+
+    float2 wind0 = float2(0.000040f, 0.000017f) * AC_Time;
+    float2 wind1 = float2(-0.000021f, 0.000032f) * AC_Time;
+    float4 layer0 = SampleVDBCloudLayer(planePosition, 0.62f, wind0, 0.31f);
+    float4 layer1 = SampleVDBCloudLayer(planePosition + 1.73f, 0.94f, wind1, 0.67f);
+
+    float coverage0 = saturate(layer0.a * 1.08f);
+    float coverage1 = saturate(layer1.a * 0.72f);
+    float coverage = 1.0f - (1.0f - coverage0) * (1.0f - coverage1);
+    float3 sourceColor = (layer0.rgb * coverage0 + layer1.rgb * coverage1)
+        / max(0.001f, coverage0 + coverage1);
+    float relief = saturate(dot(sourceColor, float3(0.2126f, 0.7152f, 0.0722f)) * 1.35f);
+
+    float dayWeight = saturate(AC_LightPos.y * 4.0f + 0.12f);
+    float rainWeight = smoothstep(0.02f, 0.70f, saturate(AC_RainFXWeight));
+    float3 nightColor = lerp(float3(0.012f, 0.020f, 0.036f), float3(0.11f, 0.15f, 0.23f), relief);
+    nightColor += float3(0.10f, 0.14f, 0.24f) * AC_MoonVisibility * relief * 0.22f;
+    float3 dayColor = lerp(float3(0.40f, 0.43f, 0.48f), float3(1.02f, 1.04f, 1.06f), relief);
+    float3 rainColor = lerp(float3(0.10f, 0.12f, 0.16f), float3(0.34f, 0.38f, 0.44f), relief);
+    float3 cloudColor = lerp(nightColor, dayColor, dayWeight);
+    cloudColor = lerp(cloudColor, rainColor, rainWeight);
+
+    float opacity = coverage * horizonMask * lerp(0.52f, 0.38f, rainWeight);
+    return float4(cloudColor, saturate(opacity));
+}
 float4 RenderRainCloudDeck(float3 worldPosition)
 {
 	float3 skyDirection = normalize(worldPosition - AC_SpherePosition);
@@ -125,10 +182,11 @@ float4 PSMain( PS_INPUT Input ) : SV_TARGET
 		atmoColor = lerp(atmoColor, rainClouds.rgb, rainClouds.a * rainCloudWeight);
 	}
 	
+	float4 vdbClouds = RenderVDBClouds(Input.vWorldPosition);
+	atmoColor = lerp(atmoColor, vdbClouds.rgb, vdbClouds.a);
 	// Apply stars
 	atmoColor += night * 0.4f;
 	
 	atmoColor = saturate(atmoColor + AtmosphereDither(Input.vPosition.xy) * (GetNightWeight() * 1.5f / 255.0f));
 	return float4(atmoColor,1);
 }
-

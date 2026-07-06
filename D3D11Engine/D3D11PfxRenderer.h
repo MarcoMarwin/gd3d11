@@ -75,6 +75,7 @@ public:
                                         ID3D11ShaderResourceView* depthSRV,
                                         ID3D11ShaderResourceView* normalsSRV,
                                         ID3D11ShaderResourceView* waterMaskSRV,
+                                        ID3D11ShaderResourceView* materialSRV,
                                         ID3D11ShaderResourceView* velocitySRV,
                                         ID3D11ShaderResourceView** outLightingSRV );
 

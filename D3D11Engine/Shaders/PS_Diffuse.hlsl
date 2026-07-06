@@ -165,8 +165,11 @@ FORWARD_PLUS_PS_OUTPUT PSMain( PS_INPUT Input )
     }
 #endif
 
-	// Sun lighting
-	float3 litPixel = FP_ComputeSunLighting(wsPosition, vsPosition, nrm, color.rgb, specIntensity, specPower, shadow, vertLighting);
+	// GRASSGROUP cards use identical front/back sunlight while Backlit Vegetation is enabled.
+	float3 sunLightingNormal = nrm;
+	if (AC_EnableSSS > 0.5f && MI_Color.a < -1.5f && dot(SQ_LightDirectionVS, sunLightingNormal) < 0.0f)
+		sunLightingNormal = -sunLightingNormal;
+	float3 litPixel = FP_ComputeSunLighting(wsPosition, vsPosition, sunLightingNormal, color.rgb, specIntensity, specPower, shadow, vertLighting);
 	
 	// Atmospheric scattering
 	litPixel = ApplyAtmosphericScatteringGround(wsPosition, litPixel);
@@ -179,7 +182,9 @@ FORWARD_PLUS_PS_OUTPUT PSMain( PS_INPUT Input )
 
 	output.vColor = float4(litPixel, 1);
 	output.vNrm = EncodeNormalGBuffer(nrm);
-	output.vSI_SP = float2(specIntensity, specPower);
+	float encodedSpecIntensity = MI_Color.a < -1.5f ? -(specIntensity + 3.0f)
+		: (MI_Color.a < -0.5f ? -(specIntensity + 1.0f) : specIntensity);
+	output.vSI_SP = float2(encodedSpecIntensity, specPower);
 	output.vVelocity = CalculateVelocity(Input.vCurrClipPos, Input.vPrevClipPos);
 
 	return output;
@@ -249,14 +254,18 @@ DEFERRED_PS_OUTPUT PSMain( PS_INPUT Input ) : SV_TARGET
 	
 	output.vNrm = EncodeNormalGBuffer(nrm);
 	
-	output.vSI_SP.x = MI_SpecularIntensity * fx.r;
+	float deferredSpecIntensity = MI_SpecularIntensity * fx.r;
+	float deferredSpecPower = MI_SpecularPower * fx.g;
+	// Encode GRASSGROUP and NPC draw classes in the otherwise non-negative
+	// specular-intensity channel while preserving the existing vegetation marker.
+	output.vSI_SP.x = MI_Color.a < -1.5f ? -(deferredSpecIntensity + 3.0f)
+		: (MI_Color.a < -0.5f ? -(deferredSpecIntensity + 1.0f) : deferredSpecIntensity);
 #if ALPHATEST == 1
-	// Negative values mark alpha-tested vegetation candidates for deferred backlighting.
-	output.vSI_SP.y = -(MI_SpecularPower * fx.g + 1.0f);
+	output.vSI_SP.y = -(deferredSpecPower + 1.0f);
 #else
-	output.vSI_SP.y = MI_SpecularPower * fx.g;
+	output.vSI_SP.y = deferredSpecPower;
 #endif
-	
+
 	// Calculate velocity for motion vectors
 	// For instanced objects (VOBs, skeletal meshes), vCurrClipPos/vPrevClipPos come from VS
 	// For world mesh, these will be (0,0,0,0) resulting in zero velocity
