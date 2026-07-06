@@ -258,9 +258,9 @@ float4 PSMain(PS_INPUT Input) : SV_TARGET
 	
 	// Get specular parameters
     float4 gb3 = TX_SI_SP.Sample(SS_Linear, uv);
-    float grassGroupMaterial = gb3.x < -2.0f ? 1.0f : 0.0f;
+    float twoSidedBacklitMaterial = gb3.x < -2.0f ? 1.0f : 0.0f;
     float npcMaterial = (gb3.x < -0.5f && gb3.x > -2.0f) ? 1.0f : 0.0f;
-    float specIntensity = grassGroupMaterial > 0.5f ? max(-gb3.x - 3.0f, 0.0f)
+    float specIntensity = twoSidedBacklitMaterial > 0.5f ? max(-gb3.x - 3.0f, 0.0f)
         : (npcMaterial > 0.5f ? max(-gb3.x - 1.0f, 0.0f) : gb3.x);
     float alphaTestedMaterial = gb3.y < 0.0f ? 1.0f : 0.0f;
     float vegetationMaterial = alphaTestedMaterial * (1.0f - npcMaterial);
@@ -336,7 +336,7 @@ float4 PSMain(PS_INPUT Input) : SV_TARGET
         ? saturate(AC_MoonVisibility)
         : saturate(AC_SunVisibility);
     float directNoL = dot(normalize(SQ_LightDirectionVS), normal);
-    if (AC_EnableSSS > 0.5f && grassGroupMaterial > 0.5f)
+    if (AC_EnableSSS > 0.5f && twoSidedBacklitMaterial > 0.5f)
         directNoL = abs(directNoL);
     float sun = saturate(directNoL * shadow) * mainLightVisibility;
     spec = pow(spec, specPower) * specIntensity;
@@ -376,7 +376,7 @@ float4 PSMain(PS_INPUT Input) : SV_TARGET
 	float sssMoonWeight = AC_MoonVisibility * 0.12f;
 	float sssLightWeight = max(sssSunWeight, sssMoonWeight);
 	float3 sssLightColor = moonLightActive ? float3(0.42f, 0.56f, 1.0f) : lightColor.rgb;
-	float vegetationMask = vegetationMaterial * (1.0f - grassGroupMaterial) * saturate(diffuse.g * 1.25f - diffuse.r * 0.45f - diffuse.b * 0.25f);
+	float vegetationMask = vegetationMaterial * (1.0f - twoSidedBacklitMaterial) * saturate(diffuse.g * 1.25f - diffuse.r * 0.45f - diffuse.b * 0.25f);
 	if (AC_EnableSSS > 0.5f && sssLightWeight > 0.001f && vegetationMask > 0.001f) {
 		float backlight = saturate(dot(normalize(SQ_LightDirectionVS), -V));
 		float rimBacklight = pow(backlight, 2.0f);

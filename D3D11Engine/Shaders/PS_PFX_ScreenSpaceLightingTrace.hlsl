@@ -21,7 +21,7 @@ cbuffer ScreenSpaceLightingConstantBuffer : register( b0 )
     float SSL_EnableContact;
     float SSL_EnableGI;
     float SSL_HistoryValid;
-    float SSL_FSR3Active;
+    float SSL_Pad;
 };
 
 struct PS_INPUT { float2 vTexcoord : TEXCOORD0; float3 vEyeRay : TEXCOORD1; float4 vPosition : SV_POSITION; };
@@ -52,10 +52,10 @@ bool TraceRay(float3 origin, float3 dir, float maxDistance, int steps, float jit
     hitDistance = maxDistance;
     float prevDelta = -1.0f;
     [loop]
-    for (int i = 0; i < 10; ++i) {
+    for (int i = 0; i < 16; ++i) {
         if (i >= steps) break;
-        float t = ((float)i + 1.0f + jitter * 0.25f) / ((float)steps + 0.25f);
-        float travel = maxDistance * t * t;
+        float t = ((float)i + 1.0f + jitter * 0.12f) / ((float)steps + 0.20f);
+        float travel = maxDistance * lerp(t, t * t, 0.45f);
         float3 p = origin + dir * travel;
         if (p.z <= 1.0f) break;
         float valid;
@@ -67,7 +67,7 @@ bool TraceRay(float3 origin, float3 dir, float maxDistance, int steps, float jit
         float sceneZ = ViewPosition(uv, d).z;
         float delta = p.z - sceneZ;
         float thickness = clamp(travel * thicknessScale, minThickness, maxThickness);
-        if ((delta > minThickness * 0.5f && delta < thickness) || (prevDelta < -minThickness * 0.5f && delta >= 0.0f && delta < thickness)) {
+        if ((delta > minThickness * 0.35f && delta < thickness) || (prevDelta < -minThickness * 0.35f && delta >= -minThickness * 0.20f && delta < thickness)) {
             hitUV = uv;
             hitDistance = travel;
             return true;
@@ -89,33 +89,30 @@ float ComputeContact(float2 uv, float depth)
     float materialClass = TX_Material.SampleLevel(SS_Linear, saturate(uv), 0).r;
     float npcMaterial = (materialClass < -0.5f && materialClass > -2.0f) ? 1.0f : 0.0f;
     float2 pixel = floor(uv / SSL_InvResolution);
-    float2 contactSeed = SSL_FSR3Active > 0.5f
-        ? pixel + float2(17.0f, 59.0f)
-        : pixel + float2(SSL_FrameIndex, SSL_FrameIndex);
-    float jitter = Hash12(contactSeed);
+    float jitter = Hash12(pixel + float2(17.0f, 59.0f));
 
-    // Keep world contacts readable, but constrain animated NPC self-occlusion to
-    // a short, soft range so low-poly faces and neck seams cannot form hard bands.
-    float viewDistanceFade = 1.0f - smoothstep(2800.0f, 6200.0f, vp.z);
+    // Keep contact shadows object-readable in the near field and deterministic
+    // across frames; FSR3 then receives a stable alpha mask instead of shimmer.
+    float viewDistanceFade = 1.0f - smoothstep(2200.0f, 4200.0f, vp.z);
     if (viewDistanceFade <= 0.001f) return 0.0f;
-    float worldMaxDistance = clamp(vp.z * 0.006f, 18.0f, 120.0f);
-    float npcMaxDistance = clamp(vp.z * 0.002f, 7.0f, 26.0f);
+    float worldMaxDistance = clamp(vp.z * 0.008f, 26.0f, 150.0f);
+    float npcMaxDistance = clamp(vp.z * 0.0035f, 10.0f, 38.0f);
     float maxDistance = lerp(worldMaxDistance, npcMaxDistance, npcMaterial);
-    float originOffset = lerp(2.0f, 5.0f, npcMaterial);
-    float minThickness = lerp(1.5f, 2.2f, npcMaterial);
-    float thicknessScale = lerp(0.034f, 0.018f, npcMaterial);
-    float maxThickness = lerp(13.0f, 5.0f, npcMaterial);
+    float originOffset = lerp(1.2f, 4.0f, npcMaterial);
+    float minThickness = lerp(2.2f, 2.8f, npcMaterial);
+    float thicknessScale = lerp(0.052f, 0.026f, npcMaterial);
+    float maxThickness = lerp(22.0f, 8.0f, npcMaterial);
 
     float2 hitUV; float hitDistance;
-    if (!TraceRay(vp + n * originOffset, l, maxDistance, 10, jitter, minThickness, thicknessScale, maxThickness, hitUV, hitDistance)) return 0.0f;
+    if (!TraceRay(vp + n * originOffset, l, maxDistance, 14, jitter, minThickness, thicknessScale, maxThickness, hitUV, hitDistance)) return 0.0f;
     float3 hn = ViewNormal(hitUV);
     float occluderFacing = saturate(dot(hn, -l));
-    float worldNormalGate = lerp(0.72f, 1.0f, occluderFacing);
-    float npcNormalGate = smoothstep(0.20f, 0.78f, occluderFacing);
+    float worldNormalGate = lerp(0.68f, 1.0f, occluderFacing);
+    float npcNormalGate = lerp(0.40f, 0.92f, occluderFacing);
     float normalGate = lerp(worldNormalGate, npcNormalGate, npcMaterial);
-    float distanceFade = 1.0f - smoothstep(maxDistance * 0.30f, maxDistance, hitDistance);
-    float npcStrength = lerp(1.0f, 0.28f, npcMaterial);
-    return saturate(facing * normalGate * distanceFade * viewDistanceFade * SSL_ContactStrength * 0.85f * npcStrength);
+    float distanceFade = 1.0f - smoothstep(maxDistance * 0.38f, maxDistance, hitDistance);
+    float npcStrength = lerp(1.0f, 0.55f, npcMaterial);
+    return saturate(facing * normalGate * distanceFade * viewDistanceFade * SSL_ContactStrength * 0.88f * npcStrength);
 }
 
 float3 ComputeGI(float2 uv, float depth, float3 baseColor)

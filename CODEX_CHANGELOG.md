@@ -238,3 +238,11 @@ Kurze, append-only Dokumentation der von Codex gepushten Renderer-Builds.
 - CI-Korrektur: NPC-Materialmarker fuer per-draw Node-Attachments im gueltigen Vob-Kontext erzeugt und den unveraenderten VDB-Feuer-Instanzvektor explizit an die const-inkorrekte VertexBuffer-Upload-Schnittstelle angepasst.
 - Inhaltlich keine weiteren Renderer-, Shader- oder Ingame-Aenderungen gegenueber Build 097.
 - Pruefung: beide gemeldeten Release_G1_AVX2-Compilerstellen, Variablengueltigkeit, UpdateBuffer-Signatur, betroffene Aufrufer und git diff --check statisch kontrolliert; kein vollstaendiger lokaler C++-/Shader-Build.
+## Build 098 (Wolken, Feuer, Backlit, Contact Shadows und DoF)
+
+- VDB-Wolken: die Atlaswolken werden als mehrere kleinere, lokal vorbeiziehende und dichter dargestellte Schichten verteilt; blauer Tageshimmel und Sternenhimmel bleiben zwischen den Wolken sichtbar, Nacht- und Regenfaerbung bleiben erhalten.
+- VDB-Feuer: FIRE_HOT und FIRE werden zusaetzlich ueber den exakten Vob-Namen erkannt, damit Atlasflamme und Unterdrueckung der alten Partikel beziehungsweise nahen FIRE_COMPLETE_A*-Decals verlaesslich greifen; FIRE_MEDIUM und TORCH bleiben unveraendert.
+- Backlit Vegetation: F11 nutzt einen reinen Enabler mit festem internen Wert 0,5; ein alter INI-Staerkewert beeinflusst die Funktion nicht mehr. Identische Vorder-/Rueckseitenbeleuchtung gilt exakt fuer NW_NATURE_GRASSGROUP, OW_NATURE_BUSH_02, OW_NATURE_BUSH_03, NW_NATURE_PLANT_03, NW_KORN und OW_GRASS_WINTER.
+- Contact Shadows: der wirkungslose FSR-3-Sonderpfad wurde entfernt. Deterministisches Sampling, dichtere Ray-Schritte und robustere Nahkontakt-Toleranzen reduzieren Blickwinkel-Spruenge und FSR-3-Flackern; NPC-Kontakte bleiben sichtbar, aber gegen harte Gesichtsartefakte begrenzt.
+- Depth of Field: der F11-Staerkeregler beeinflusst nur noch die Hintergrund-/Fernunschaerfe; die Vordergrundunschaerfe behaelt ihren festen bisherigen Standardradius.
+- Pruefung: betroffene Shaderregister, Constant-Buffer-Layouts, PFX-Erkennung, F11-/INI-Pfade, doppelte Hilfsdefinitionen, literal eingefuegte Escape-Sequenzen und git diff --check statisch kontrolliert. Kein vollstaendiger lokaler C++-/Shader-Build.

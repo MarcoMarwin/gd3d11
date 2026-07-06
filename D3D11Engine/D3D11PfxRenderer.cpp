@@ -417,9 +417,6 @@ XRESULT D3D11PfxRenderer::RenderScreenSpaceLighting(
     cb.SSL_GIStrength = settings.ScreenSpaceGIStrength;
     cb.SSL_EnableContact = contactActive ? 1.0f : 0.0f;
     cb.SSL_EnableGI = giActive ? 1.0f : 0.0f;
-    cb.SSL_FSR3Active = (settings.AntiAliasingMode == GothicRendererSettings::AA_FSR3
-        || (settings.AntiAliasingMode == GothicRendererSettings::AA_FSR
-            && settings.Upscaler == GothicRendererSettings::UPSCALER_FSR_3)) ? 1.0f : 0.0f;
     cb.SSL_HistoryValid = ScreenSpaceLightingHistoryValid ? 1.0f : 0.0f;
     cb.SSL_FrameIndex = static_cast<float>(ScreenSpaceLightingFrameIndex++ & 1023u);
     if ( sky ) {

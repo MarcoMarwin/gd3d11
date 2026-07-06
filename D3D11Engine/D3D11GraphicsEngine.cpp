@@ -221,6 +221,33 @@ namespace
         return false;
     }
 
+    std::string NormalizeVisualStemForMarker( std::string name ) {
+        const size_t slash = name.find_last_of( "\\/" );
+        if ( slash != std::string::npos ) {
+            name.erase( 0, slash + 1 );
+        }
+        const size_t dot = name.find_last_of( '.' );
+        if ( dot != std::string::npos ) {
+            name.resize( dot );
+        }
+        for ( char& c : name ) {
+            if ( c >= 'a' && c <= 'z' ) {
+                c = static_cast<char>(c - 'a' + 'A');
+            }
+        }
+        return name;
+    }
+
+    bool IsTwoSidedBacklitVegetationVisual( const std::string& visualName ) {
+        const std::string stem = NormalizeVisualStemForMarker( visualName );
+        return stem == "NW_NATURE_GRASSGROUP"
+            || stem == "OW_NATURE_BUSH_02"
+            || stem == "OW_NATURE_BUSH_03"
+            || stem == "NW_NATURE_PLANT_03"
+            || stem == "NW_KORN"
+            || stem == "OW_GRASS_WINTER";
+    }
+
     bool IsWaterTextureExcludedFromSSR( zCTexture* texture ) {
         if ( !texture ) {
             return false;
@@ -7684,8 +7711,8 @@ XRESULT D3D11GraphicsEngine::DrawVOBsInstanced() {
                     const auto* cachedVisual = &cache.vobVisuals[drawItem.VisualIndex];
                     const MeshKey& meshKey = drawItem.Mesh;
                     MeshInfo* meshInfo = drawItem.MeshEntry;
-                    const float materialClassMarker = TextureNameContainsMarker(
-                        cachedVisual->Visual->VisualName, "GRASSGROUP" ) ? -2.0f : 0.0f;
+                    const float materialClassMarker = IsTwoSidedBacklitVegetationVisual(
+                        cachedVisual->Visual->VisualName ) ? -2.0f : 0.0f;
                     const bool isAlphaBlendMesh = meshKey.Material &&
                         (meshKey.Material->GetAlphaFunc() == zMAT_ALPHA_FUNC_BLEND ||
                          meshKey.Material->GetAlphaFunc() == zMAT_ALPHA_FUNC_ADD);

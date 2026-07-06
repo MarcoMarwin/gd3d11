@@ -165,7 +165,7 @@ FORWARD_PLUS_PS_OUTPUT PSMain( PS_INPUT Input )
     }
 #endif
 
-	// GRASSGROUP cards use identical front/back sunlight while Backlit Vegetation is enabled.
+	// Selected thin vegetation cards use identical front/back sunlight while Backlit Vegetation is enabled.
 	float3 sunLightingNormal = nrm;
 	if (AC_EnableSSS > 0.5f && MI_Color.a < -1.5f && dot(SQ_LightDirectionVS, sunLightingNormal) < 0.0f)
 		sunLightingNormal = -sunLightingNormal;
@@ -256,7 +256,7 @@ DEFERRED_PS_OUTPUT PSMain( PS_INPUT Input ) : SV_TARGET
 	
 	float deferredSpecIntensity = MI_SpecularIntensity * fx.r;
 	float deferredSpecPower = MI_SpecularPower * fx.g;
-	// Encode GRASSGROUP and NPC draw classes in the otherwise non-negative
+	// Encode two-sided vegetation and NPC draw classes in the otherwise non-negative
 	// specular-intensity channel while preserving the existing vegetation marker.
 	output.vSI_SP.x = MI_Color.a < -1.5f ? -(deferredSpecIntensity + 3.0f)
 		: (MI_Color.a < -0.5f ? -(deferredSpecIntensity + 1.0f) : deferredSpecIntensity);

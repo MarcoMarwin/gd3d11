@@ -126,7 +126,7 @@ struct ScreenSpaceLightingConstantBuffer {
     float SSL_EnableContact;
     float SSL_EnableGI;
     float SSL_HistoryValid;
-    float SSL_FSR3Active;
+    float SSL_Pad;
 };
 struct CompositionControlConstantBuffer {
     float CC_HeightFogEnabled;

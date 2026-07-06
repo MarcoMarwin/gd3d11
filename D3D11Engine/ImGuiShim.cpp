@@ -819,7 +819,7 @@ void ApplyGraphicsPresets( GothicRendererSettings& s, bool applyRuntimeUpdates =
     s.ScreenSpaceGIStrength = 1.0f;
     s.GodRayStrength = 1.0f;
     s.SSRStrength = 1.0f;
-    s.SSSIntensity = 0.75f;
+    s.SSSIntensity = 0.5f;
     s.DoFBokehRadius = 3.5f;
     s.GlobalWindStrength = 1.0f;
     s.ShadowSoftness = 1.0f;
@@ -910,7 +910,7 @@ void ApplyGraphicsPresets( GothicRendererSettings& s, bool applyRuntimeUpdates =
     if ( !s.EnableScreenSpaceGI ) s.ScreenSpaceGIStrength = 0.0f;
     if ( !s.EnableGodRays ) s.GodRayStrength = 0.0f;
     if ( !s.EnableSSR || !s.EnableWaterAnimation ) s.SSRStrength = 0.0f;
-    if ( !s.EnableSSS ) s.SSSIntensity = 0.0f;
+    s.SSSIntensity = s.EnableSSS ? 0.5f : 0.0f;
     if ( !s.EnableDoF ) s.DoFBokehRadius = 0.0f;
     if ( s.WindQuality == GothicRendererSettings::EWindQuality::WIND_QUALITY_NONE ) s.GlobalWindStrength = 0.0f;
 
@@ -984,7 +984,7 @@ namespace
         if ( !s.EnableScreenSpaceGI ) s.ScreenSpaceGIStrength = 0.0f;
         if ( !s.EnableGodRays ) s.GodRayStrength = 0.0f;
         if ( !s.EnableSSR || !s.EnableWaterAnimation ) s.SSRStrength = 0.0f;
-        if ( !s.EnableSSS ) s.SSSIntensity = 0.0f;
+        s.SSSIntensity = s.EnableSSS ? 0.5f : 0.0f;
         if ( !s.EnableDoF ) s.DoFBokehRadius = 0.0f;
         if ( s.WindQuality == GothicRendererSettings::EWindQuality::WIND_QUALITY_NONE ) s.GlobalWindStrength = 0.0f;
         s.OutdoorSmallVobDrawRadius = ObjectDrawDistanceUiToMeters( ObjectDrawDistanceMetersToUi( s.OutdoorSmallVobDrawRadius ) );
@@ -1488,29 +1488,25 @@ void ImGuiShim::RenderSettingsWindow()
             }
             ImGui::SetItemTooltip( "Controls water-reflection strength." );
 
-            float backlitVegetationStrength = settings.SSSIntensity / 0.75f;
             ImText( "Backlit Vegetation", { buttonWidth.x - ImGui::GetFrameHeight() - style.ItemSpacing.x, buttonWidth.y } ); ImGui::SameLine();
-            CoupledStrengthCheckbox( "##Enable Backlit Vegetation", "BacklitVegetationStrength",
-                &settings.EnableSSS, &backlitVegetationStrength, 1.0f );
-            ImGui::SetItemTooltip( "Adds soft backlighting through leaves, grass, and alpha-tested vegetation." );
-            ImGui::SameLine();
-            ImGui::SetNextItemWidth( standardComboWidth );
-            CoupledStrengthSlider( "##BacklitVegetationStrength", "BacklitVegetationStrength",
-                &settings.EnableSSS, &backlitVegetationStrength );
-            settings.SSSIntensity = backlitVegetationStrength * 0.75f;
-            ImGui::SetItemTooltip( "Controls vegetation-backlighting intensity." );
+            if ( ImGui::Checkbox( "##Enable Backlit Vegetation", &settings.EnableSSS ) ) {
+                settings.SSSIntensity = settings.EnableSSS ? 0.5f : 0.0f;
+                shadersToReload |= ShaderCategory::Other;
+            }
+            settings.SSSIntensity = settings.EnableSSS ? 0.5f : 0.0f;
+            ImGui::SetItemTooltip( "Adds soft fixed-strength backlighting through leaves and alpha-tested vegetation." );
 
             float depthOfFieldStrength = settings.DoFBokehRadius / 3.5f;
             ImText( "Depth of Field", { buttonWidth.x - ImGui::GetFrameHeight() - style.ItemSpacing.x, buttonWidth.y } ); ImGui::SameLine();
             CoupledStrengthCheckbox( "##Enable Depth of Field", "DepthOfFieldBlurStrength",
                 &settings.EnableDoF, &depthOfFieldStrength, 1.0f );
-            ImGui::SetItemTooltip( "Adds near- and far-distance camera blur." );
+            ImGui::SetItemTooltip( "Adds camera blur; the slider controls background blur only." );
             ImGui::SameLine();
             ImGui::SetNextItemWidth( standardComboWidth );
             CoupledStrengthSlider( "##DepthOfFieldBlurStrength", "DepthOfFieldBlurStrength",
                 &settings.EnableDoF, &depthOfFieldStrength );
             settings.DoFBokehRadius = depthOfFieldStrength * 3.5f;
-            ImGui::SetItemTooltip( "Controls near- and far-distance blur strength." );
+            ImGui::SetItemTooltip( "Controls background blur strength." );
 
 #if defined(BUILD_GOTHIC_2_6_fix) || (defined(BUILD_GOTHIC_1_08k) && !defined(BUILD_1_12F))
 #if defined(BUILD_GOTHIC_1_08k) && !defined(BUILD_1_12F)

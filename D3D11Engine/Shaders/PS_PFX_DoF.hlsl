@@ -41,13 +41,18 @@ float CameraDistanceFromDepth( float d, float2 texcoord )
 }
 
 
+float ComputeNearCoC( float linearDepth )
+{
+    const float nearRange = max( DoF_NearBlurDistance - DoF_NearPlane, 1.0f );
+    const float nearDepth = max( linearDepth, DoF_NearPlane );
+    return saturate( ( DoF_NearBlurDistance - nearDepth ) / nearRange )
+        * DoF_NearBlurStrength;
+}
+
 float ComputeCoC( float linearDepth, float focusDepth, float2 texcoord )
 {
     const float farCoC = saturate( ( linearDepth - focusDepth ) / DoF_FocusRange );
-    const float nearRange = max( DoF_NearBlurDistance - DoF_NearPlane, 1.0f );
-    const float nearDepth = max( linearDepth, DoF_NearPlane );
-    const float nearCoC = saturate( ( DoF_NearBlurDistance - nearDepth ) / nearRange )
-        * DoF_NearBlurStrength;
+    const float nearCoC = ComputeNearCoC( linearDepth );
     return max( farCoC, nearCoC );
 }
 
@@ -86,7 +91,12 @@ float4 PSMain( PS_INPUT Input ) : SV_TARGET
     if ( centerCoC < 0.01 )
         return float4( centerColor, 0.0 );
 
-    float blurRadius = min( centerCoC * DoF_BokehRadius, DoF_MaxBlur );
+    const float nearCoC = ComputeNearCoC( centerLinear );
+    const float nearBlurRadius = 3.5f;
+    const float nearMaxBlur = 5.25f;
+    float blurRadius = nearCoC > 0.001f
+        ? min( nearCoC * nearBlurRadius, nearMaxBlur )
+        : min( centerCoC * DoF_BokehRadius, DoF_MaxBlur );
 
 #ifdef DOF_GAUSS_BLUR
     // --- Simple Gaussian blur (16 taps) ---

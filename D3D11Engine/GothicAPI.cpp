@@ -106,15 +106,26 @@ namespace {
         return name;
     }
 
-    VDBFireKind ClassifyVDBFireVisual( zCVisual* visual ) {
-        if ( !visual )
-            return VDBFireKind::None;
-        const std::string stem = NormalizeVisualStem( visual->GetObjectName() );
+    VDBFireKind ClassifyVDBFireName( std::string rawName ) {
+        const std::string stem = NormalizeVisualStem( rawName.c_str() );
         if ( stem == "fire_hot" )
             return VDBFireKind::Campfire;
         if ( stem == "fire" )
             return VDBFireKind::Fireplace;
         return VDBFireKind::None;
+    }
+
+    VDBFireKind ClassifyVDBFireVisual( zCVisual* visual ) {
+        return visual ? ClassifyVDBFireName( visual->GetObjectName() ) : VDBFireKind::None;
+    }
+
+    VDBFireKind ClassifyVDBFireVob( zCVob* source ) {
+        if ( !source )
+            return VDBFireKind::None;
+        VDBFireKind kind = ClassifyVDBFireName( source->GetName() );
+        if ( kind != VDBFireKind::None )
+            return kind;
+        return ClassifyVDBFireVisual( source->GetVisual() );
     }
     bool IsWaterfallParticleTexture( zCTexture* texture ) {
         if ( !texture )
@@ -3457,7 +3468,7 @@ void GothicAPI::DrawParticleFX( zCVob* source, zCParticleFX* fx, ParticleFrameDa
 
     D3D11GraphicsEngine* graphicsEngine = reinterpret_cast<D3D11GraphicsEngine*>(Engine::GraphicsEngine);
     const VDBFireKind vdbFireKind = graphicsEngine && graphicsEngine->HasVDBFireAtlas()
-        ? ClassifyVDBFireVisual( source ? source->GetVisual() : nullptr )
+        ? ClassifyVDBFireVob( source )
         : VDBFireKind::None;
     if ( source && vdbFireKind != VDBFireKind::None ) {
         const XMFLOAT3 sourcePosition = source->GetPositionWorld();
@@ -3635,7 +3646,7 @@ bool GothicAPI::ShouldHideFireCompleteDecal( zCVob* decalVob, zCTexture* texture
     constexpr float MaxDistanceSquared = 150.0f * 150.0f;
     for ( zCVob* particleVob : ParticleEffectVobs ) {
         if ( !particleVob || !particleVob->GetShowVisual()
-            || ClassifyVDBFireVisual( particleVob->GetVisual() ) != VDBFireKind::Fireplace ) {
+            || ClassifyVDBFireVob( particleVob ) != VDBFireKind::Fireplace ) {
             continue;
         }
 
@@ -5838,7 +5849,6 @@ XRESULT GothicAPI::SaveMenuSettings( const std::string& file ) {
     WritePrivateProfileStringA( "General", "EnableParticleLighting", std::to_string( s.EnableParticleLighting ? TRUE : FALSE ).c_str(), ini.c_str() );
     WritePrivateProfileStringA( "General", "ParticleLightingStrength", float_to_string( s.ParticleLightingStrength, 2 ).c_str(), ini.c_str() );
     WritePrivateProfileStringA( "General", "EnableSSS", std::to_string( s.EnableSSS ? TRUE : FALSE ).c_str(), ini.c_str() );
-    WritePrivateProfileStringA( "General", "SSSIntensity", float_to_string( s.SSSIntensity, 2 ).c_str(), ini.c_str() );
 
     /*
     * Draw-distance is saved on a per World basis using SaveRendererWorldSettings
@@ -6009,7 +6019,7 @@ XRESULT GothicAPI::LoadMenuSettings( const std::string& file ) {
         s.EnableParticleLighting = GetPrivateProfileBoolA( "General", "EnableParticleLighting", ds.EnableParticleLighting, ini );
         s.ParticleLightingStrength = std::clamp( GetPrivateProfileFloatA( "General", "ParticleLightingStrength", ds.ParticleLightingStrength, ini ), 0.0f, 2.0f );
         s.EnableSSS = GetPrivateProfileBoolA( "General", "EnableSSS", ds.EnableSSS, ini );
-        s.SSSIntensity = std::clamp( GetPrivateProfileFloatA( "General", "SSSIntensity", ds.SSSIntensity, ini ), 0.0f, 1.5f );
+        s.SSSIntensity = s.EnableSSS ? 0.5f : 0.0f;
 
         /*
         * Draw-distance is Loaded on a per World basis using LoadRendererWorldSettings
@@ -6117,7 +6127,7 @@ XRESULT GothicAPI::LoadMenuSettings( const std::string& file ) {
         if ( !s.EnableSSR || !s.EnableWaterAnimation ) s.SSRStrength = 0.0f;
         if ( !s.EnableContactShadows ) s.ContactShadowStrength = 0.0f;
         if ( !s.EnableScreenSpaceGI ) s.ScreenSpaceGIStrength = 0.0f;
-        if ( !s.EnableSSS ) s.SSSIntensity = 0.0f;
+        s.SSSIntensity = s.EnableSSS ? 0.5f : 0.0f;
         if ( s.WindQuality == GothicRendererSettings::EWindQuality::WIND_QUALITY_NONE ) s.GlobalWindStrength = 0.0f;
         if ( s.AoMode == AOMode::AO_NONE ) s.AOStrength = 0.0f;
         const int xegtaoQuality = static_cast<int>(GetPrivateProfileIntA( "XeGTAO", "Quality", ds.XegtaoSettings.QualityLevel, ini.c_str() ));

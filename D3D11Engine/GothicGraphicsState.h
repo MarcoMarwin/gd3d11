@@ -671,7 +671,7 @@ struct GothicRendererSettings {
         SSRStrength = 1.0f; // UI-normalized: 1.0 equals the former 1.4 slider value.
         WaterCubemapStrength = 1.0f;
         EnableSSS = true;
-        SSSIntensity = 0.75f; // UI-normalized: 1.0 maps to the intended 0.75 backlight intensity.
+        SSSIntensity = 0.5f; // Fixed Backlit Vegetation intensity; the F11 option is an enabler.
         EnableContactShadows = true;
         ContactShadowStrength = 1.0f; // UI-normalized: 1.0 keeps the former 0.35 effect strength.
         EnableScreenSpaceGI = false;
