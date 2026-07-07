@@ -100,6 +100,11 @@ namespace {
         const size_t slash = name.find_last_of( "\\/" );
         if ( slash != std::string::npos )
             name.erase( 0, slash + 1 );
+        const size_t first = name.find_first_not_of( " \t\r\n\"'" );
+        const size_t last = name.find_last_not_of( " \t\r\n\"'" );
+        if ( first == std::string::npos )
+            return "";
+        name = name.substr( first, last - first + 1 );
         const size_t dot = name.find_last_of( '.' );
         if ( dot != std::string::npos )
             name.resize( dot );
@@ -108,7 +113,7 @@ namespace {
 
     VDBFireKind ClassifyVDBFireName( std::string rawName ) {
         const std::string stem = NormalizeVisualStem( rawName.c_str() );
-        if ( stem == "fire_hot" )
+        if ( stem == "fire_hot" || stem.find( "fire_hot" ) != std::string::npos )
             return VDBFireKind::Campfire;
         if ( stem == "fire" )
             return VDBFireKind::Fireplace;
@@ -3485,8 +3490,9 @@ void GothicAPI::DrawParticleFX( zCVob* source, zCParticleFX* fx, ParticleFrameDa
         fire.drawMode = 10; // Full camera-facing quad.
         fire.velocity = float3( 0.0f, 1.0f, 0.0f );
         fire.particleLightingScale = -1.0f;
-        const float animationTime = std::max( 0.0f, *fx->GetPrivateTotalTime() );
-        fire.atlasInfo = float3( fmodf( floorf( animationTime * 24.0f ), 32.0f ), 8.0f, 4.0f );
+        const float animationPhase = fmodf( fabsf( sourcePosition.x * 0.013f + sourcePosition.z * 0.021f ), 32.0f );
+        const float animationFrame = fmodf( Engine::GAPI->GetTimeSeconds() * 4.0f + animationPhase, 32.0f );
+        fire.atlasInfo = float3( animationFrame, 8.0f, 4.0f );
         VDBFireInstances.push_back( fire );
     }
     bool hideNearbyFireComplete = false;

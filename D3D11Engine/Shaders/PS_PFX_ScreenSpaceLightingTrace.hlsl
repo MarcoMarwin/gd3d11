@@ -88,14 +88,14 @@ float ComputeContact(float2 uv, float depth)
 
     float materialClass = TX_Material.SampleLevel(SS_Linear, saturate(uv), 0).r;
     float npcMaterial = (materialClass < -0.5f && materialClass > -2.0f) ? 1.0f : 0.0f;
-    float2 pixel = floor(uv / SSL_InvResolution);
-    float jitter = Hash12(pixel + float2(17.0f, 59.0f));
+    float contactTracePhase = 0.5f;
+    float jitter = contactTracePhase;
 
     // Keep contact shadows object-readable in the near field and deterministic
     // across frames; FSR3 then receives a stable alpha mask instead of shimmer.
-    float viewDistanceFade = 1.0f - smoothstep(2200.0f, 4200.0f, vp.z);
+    float viewDistanceFade = 1.0f - smoothstep(1200.0f, 2600.0f, vp.z);
     if (viewDistanceFade <= 0.001f) return 0.0f;
-    float worldMaxDistance = clamp(vp.z * 0.008f, 26.0f, 150.0f);
+    float worldMaxDistance = clamp(vp.z * 0.0065f, 18.0f, 105.0f);
     float npcMaxDistance = clamp(vp.z * 0.0035f, 10.0f, 38.0f);
     float maxDistance = lerp(worldMaxDistance, npcMaxDistance, npcMaterial);
     float originOffset = lerp(1.2f, 4.0f, npcMaterial);

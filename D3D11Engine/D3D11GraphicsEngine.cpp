@@ -240,12 +240,20 @@ namespace
 
     bool IsTwoSidedBacklitVegetationVisual( const std::string& visualName ) {
         const std::string stem = NormalizeVisualStemForMarker( visualName );
-        return stem == "NW_NATURE_GRASSGROUP"
-            || stem == "OW_NATURE_BUSH_02"
-            || stem == "OW_NATURE_BUSH_03"
-            || stem == "NW_NATURE_PLANT_03"
-            || stem == "NW_KORN"
-            || stem == "OW_GRASS_WINTER";
+        static constexpr const char* markers[] = {
+            "NW_NATURE_GRASSGROUP",
+            "OW_NATURE_BUSH_02",
+            "OW_NATURE_BUSH_03",
+            "NW_NATURE_PLANT_03",
+            "NW_KORN",
+            "OW_GRASS_WINTER"
+        };
+        for ( const char* marker : markers ) {
+            if ( stem.rfind( marker, 0 ) == 0 ) {
+                return true;
+            }
+        }
+        return false;
     }
 
     bool IsWaterTextureExcludedFromSSR( zCTexture* texture ) {

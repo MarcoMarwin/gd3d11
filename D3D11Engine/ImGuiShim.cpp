@@ -1488,14 +1488,6 @@ void ImGuiShim::RenderSettingsWindow()
             }
             ImGui::SetItemTooltip( "Controls water-reflection strength." );
 
-            ImText( "Backlit Vegetation", { buttonWidth.x - ImGui::GetFrameHeight() - style.ItemSpacing.x, buttonWidth.y } ); ImGui::SameLine();
-            if ( ImGui::Checkbox( "##Enable Backlit Vegetation", &settings.EnableSSS ) ) {
-                settings.SSSIntensity = settings.EnableSSS ? 0.5f : 0.0f;
-                shadersToReload |= ShaderCategory::Other;
-            }
-            settings.SSSIntensity = settings.EnableSSS ? 0.5f : 0.0f;
-            ImGui::SetItemTooltip( "Adds soft fixed-strength backlighting through leaves and alpha-tested vegetation." );
-
             float depthOfFieldStrength = settings.DoFBokehRadius / 3.5f;
             ImText( "Depth of Field", { buttonWidth.x - ImGui::GetFrameHeight() - style.ItemSpacing.x, buttonWidth.y } ); ImGui::SameLine();
             CoupledStrengthCheckbox( "##Enable Depth of Field", "DepthOfFieldBlurStrength",
@@ -1544,6 +1536,14 @@ void ImGuiShim::RenderSettingsWindow()
             }
             ImGui::SetItemTooltip( "Lets grass and wheat bend around nearby characters." );
 #endif //BUILD_GOTHIC_2_6_fix
+
+            ImText( "Backlit Vegetation", { buttonWidth.x - ImGui::GetFrameHeight() - style.ItemSpacing.x, buttonWidth.y } ); ImGui::SameLine();
+            if ( ImGui::Checkbox( "##Enable Backlit Vegetation", &settings.EnableSSS ) ) {
+                settings.SSSIntensity = settings.EnableSSS ? 0.5f : 0.0f;
+                shadersToReload |= ShaderCategory::Other;
+            }
+            settings.SSSIntensity = settings.EnableSSS ? 0.5f : 0.0f;
+            ImGui::SetItemTooltip( "Adds soft fixed-strength backlighting through leaves and alpha-tested vegetation." );
 
             ImText( "Enable Rain", { buttonWidth.x - ImGui::GetFrameHeight() - style.ItemSpacing.x, buttonWidth.y } ); ImGui::SameLine();
             ImGui::Checkbox( "##Enable Rain", &settings.EnableRain );

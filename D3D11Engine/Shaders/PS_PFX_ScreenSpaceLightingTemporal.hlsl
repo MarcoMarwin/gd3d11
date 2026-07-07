@@ -59,12 +59,39 @@ float4 NeighborhoodCurrent(float2 uv, out float4 minV, out float4 maxV)
     return sum / max(weightSum, 0.0001f);
 }
 
+float SoftContact(float2 uv, float currentAlpha)
+{
+    float centerDepth = TX_Depth.SampleLevel(SS_Linear, uv, 0).r;
+    float centerZ = ViewZ(centerDepth);
+    float2 centerNormal = TX_Normals.SampleLevel(SS_Linear, uv, 0).xy;
+    float sum = currentAlpha * 2.0f;
+    float weightSum = 2.0f;
+    [unroll]
+    for (int y = -1; y <= 1; ++y) {
+        [unroll]
+        for (int x = -1; x <= 1; ++x) {
+            if (x == 0 && y == 0) continue;
+            float2 sampleUV = saturate(uv + float2(x, y) * SSL_InvResolution * 1.75f);
+            float sampleDepth = TX_Depth.SampleLevel(SS_Linear, sampleUV, 0).r;
+            float dz = abs(ViewZ(sampleDepth) - centerZ);
+            float2 sampleNormal = TX_Normals.SampleLevel(SS_Linear, sampleUV, 0).xy;
+            float normalWeight = pow(1.0f - saturate(length(centerNormal - sampleNormal) * 1.6f), 6.0f);
+            float distWeight = (abs(x) + abs(y) == 2) ? 0.55f : 0.9f;
+            float w = exp(-dz * 0.010f) * normalWeight * distWeight;
+            sum += TX_Raw.SampleLevel(SS_Linear, sampleUV, 0).a * w;
+            weightSum += w;
+        }
+    }
+    return sum / max(weightSum, 0.0001f);
+}
+
 PS_OUTPUT PSMain(PS_INPUT input)
 {
     PS_OUTPUT output;
     float2 uv = input.vTexcoord;
     float4 minV, maxV;
     float4 current = NeighborhoodCurrent(uv, minV, maxV);
+    current.a = SoftContact(uv, current.a);
     float depth = TX_Depth.SampleLevel(SS_Linear, uv, 0).r;
     float2 velocity = TX_Velocity.SampleLevel(SS_Linear, uv, 0).rg;
     float2 prevUV = uv + velocity;
