@@ -106,7 +106,7 @@ static void CalculateCascadeMatrices(
     XMVECTOR lightDir = XMVector3Normalize( XMVectorSubtract( lookAtOrig, lightPosOrig ) );
 
     XMVECTOR upDir = upDirOrig;
-    if ( std::abs( XMVectorGetX( XMVector3Dot( lightDir, upDir ) ) ) > 0.999f ) {
+    if ( std::abs( XMVectorGetX( XMVector3Dot( lightDir, upDir ) ) ) > 0.965f ) {
         upDir = XMVectorSet( 0.0f, 0.0f, 1.0f, 0.0f );
     }
 
@@ -604,6 +604,14 @@ XRESULT D3D11ShadowMap::PrepareRender()
     const XMVECTOR lastCascadeLookAt = lastCascadeData.Position;
 
     static const XMVECTORF32 c_XM_Up = { { { 0, 1, 0, 0 } } };
+    const XMVECTOR shadowViewDir = XMVector3Normalize( XMVectorSubtract( lookAt, p ) );
+    const XMVECTOR shadowUp = std::abs( XMVectorGetX( XMVector3Dot( shadowViewDir, c_XM_Up ) ) ) > 0.965f
+        ? XMVectorSet( 0.0f, 0.0f, 1.0f, 0.0f )
+        : c_XM_Up;
+    const XMVECTOR lastCascadeViewDir = XMVector3Normalize( XMVectorSubtract( lastCascadeLookAt, lastCascadeP ) );
+    const XMVECTOR lastCascadeShadowUp = std::abs( XMVectorGetX( XMVector3Dot( lastCascadeViewDir, c_XM_Up ) ) ) > 0.965f
+        ? XMVectorSet( 0.0f, 0.0f, 1.0f, 0.0f )
+        : c_XM_Up;
 
     if ( !isOutdoor ) {
         if ( settings.EnableShadows && lastBspMode == zBSP_MODE_OUTDOOR ) {
@@ -629,13 +637,13 @@ XRESULT D3D11ShadowMap::PrepareRender()
                 const auto p = lastCascadeP;
                 const auto lookAt = lastCascadeLookAt;
 
-                XMStoreFloat4x4( &m_CascadeCRs[i].ViewReplacement, XMMatrixTranspose( XMMatrixLookAtLH( p, lookAt, c_XM_Up ) ) );
+                XMStoreFloat4x4( &m_CascadeCRs[i].ViewReplacement, XMMatrixTranspose( XMMatrixLookAtLH( p, lookAt, lastCascadeShadowUp ) ) );
                 XMStoreFloat4x4( &m_CascadeCRs[i].ProjectionReplacement, XMMatrixTranspose( XMMatrixOrthographicLH(
                     farPlane, farPlane, 1.0f, 20000.f ) ) );
                 XMStoreFloat3( &m_CascadeCRs[i].PositionReplacement, p );
                 XMStoreFloat3( &m_CascadeCRs[i].LookAtReplacement, lookAt );
             } else {
-                XMStoreFloat4x4( &m_CascadeCRs[i].ViewReplacement, XMMatrixTranspose( XMMatrixLookAtLH( p, lookAt, c_XM_Up ) ) );
+                XMStoreFloat4x4( &m_CascadeCRs[i].ViewReplacement, XMMatrixTranspose( XMMatrixLookAtLH( p, lookAt, shadowUp ) ) );
                 XMStoreFloat4x4( &m_CascadeCRs[i].ProjectionReplacement, XMMatrixTranspose( XMMatrixOrthographicLH(
                     farPlane, farPlane, 1.0f, 20000.f ) ) );
                 XMStoreFloat3( &m_CascadeCRs[i].PositionReplacement, p );
@@ -689,7 +697,7 @@ XRESULT D3D11ShadowMap::PrepareRender()
                     farPlane,
                     isLastCascade ? lastCascadeP : p,
                     isLastCascade ? lastCascadeLookAt : lookAt,
-                    c_XM_Up,
+                    isLastCascade ? lastCascadeShadowUp : shadowUp,
                     isLastCascade ? lastCascadeData.Position : WorldShadowCP,
                     GetCascadePixelSize( cascadeIdx ) );
             }

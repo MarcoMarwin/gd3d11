@@ -253,3 +253,13 @@ Kurze, append-only Dokumentation der von Codex gepushten Renderer-Builds.
 - Backlit Vegetation: der F11-Eintrag steht direkt ueber Enable Rain. Die zweitseitige Beleuchtung matcht die genannten Vegetationsnamen als Wortstamm/Prefix, etwa NW_NATURE_GRASSGROUP_01, OW_NATURE_BUSH_02*, OW_NATURE_BUSH_03*, NW_NATURE_PLANT_03*, NW_KORN* und OW_GRASS_WINTER*.
 - Contact Shadows: das pixelgebundene Contact-Jitter wurde im Contact-Shadow-Pfad entfernt, der ferne Weltgeometrie-Bereich frueher ausgeblendet und die Contact-Alpha-Maske normal-/tiefenbewusst weich gefiltert. SSGI-Sampling und FSR-3-Pfad bleiben unveraendert.
 - Pruefung: AGENTS-Regeln gelesen; gezielte Status-/Diff-/Shaderstellenpruefungen, BOM-/Zeilenumbruchkontrolle, literal eingefuegte Escape-Sequenzen und git diff --check statisch kontrolliert. Kein vollstaendiger lokaler C++-/Shader-Build.
+
+## Build 100 (Rueckbau VDB, Contact Shadows, Groundfog und Schattenstabilitaet)
+
+- VDB-Rueckbau: VDB-Wolken und VDB-Feuer vollstaendig aus Runtime-Code, Shadern, Paketdateien und Lizenzhinweisen entfernt. FIRE.PFX, FIRE_HOT.PFX und FIRE_COMPLETE_A0.TGA laufen wieder ueber die normalen Gothic-Partikel-/Decalpfade.
+- Contact Shadows: der lange richtungsbasierte Screen-Space-Trace wurde durch eine kurze, weiche und deterministische Kontaktabdunklung ersetzt, damit die unterbrochenen Muster, Blickwinkel-Spruenge und FSR-3-Flackerstellen reduziert werden.
+- Backlit Vegetation: NW_NATURE_WATERGRASS_56P als weitere Prefix-Ausnahme fuer identische Vorder-/Rueckseitenbeleuchtung ergaenzt.
+- Schatten um 12 Uhr: die Shadow-Kamera-Up-Richtung wird nahe Zenith frueher stabilisiert, ohne Sonne-/Mondzeiten oder Lichtuebergaenge zu veraendern.
+- Groundfog-PFX: GROUNDFOG-Partikel werden nicht mehr durch die zu harte PFX-BBox-Frustum-Pruefung verworfen; Draw-Radius und showVisual bleiben erhalten.
+- F11/Starttext: Startanzeige weist zusaetzlich auf F11 fuer Grafikeinstellungen hin; das F11-Fenster zeigt keine Versionsnummer mehr im Titel.
+- Pruefung: AGENTS-Regeln gelesen; gezielte VDB-Symbol-/Asset-/Lizenzpruefungen, Shaderregister-/Escape-Sequenzpruefung, relevante Git-Diffs und git diff --check statisch kontrolliert. Kein vollstaendiger lokaler C++-/Shader-Build.

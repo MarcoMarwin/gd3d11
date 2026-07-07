@@ -75,8 +75,6 @@ public:
     /** Returns the rain-cloud density texture. */
     D3D11Texture* GetRainCloudTexture() { return RainCloudTexture.get(); }
 
-    /** Returns the compact VDB cloud-shape atlas. */
-    D3D11Texture* GetVDBCloudTexture() { return VDBCloudTexture.get(); }
 
     /** Returns the night texture */
     D3D11Texture* GetNightTexture();
@@ -113,7 +111,6 @@ protected:
 
     std::unique_ptr<D3D11Texture> CloudTexture;
     std::unique_ptr<D3D11Texture> RainCloudTexture;
-    std::unique_ptr<D3D11Texture> VDBCloudTexture;
     std::unique_ptr<D3D11Texture> NightTexture;
     std::unique_ptr<D3D11Texture> MoonTexture;
 

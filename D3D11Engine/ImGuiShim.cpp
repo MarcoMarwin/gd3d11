@@ -1064,11 +1064,7 @@ void ImGuiShim::RenderSettingsWindow()
         std::round( style.ItemSpacing.y * menuScale ) );
     ImVec2 buttonWidth( labelWidth, 0 );
 
-#ifdef IS_DEV_BUILD
-    static const char* settingsLabel = "GD3D11 " VERSION_NUMBER " - (" BUILD_DATE ")";
-#else
-    static const char* settingsLabel = "GD3D11 " VERSION_NUMBER;
-#endif
+    static const char* settingsLabel = "GD3D11 Settings";
 
     ShaderCategory shadersToReload = ShaderCategory::None;
 

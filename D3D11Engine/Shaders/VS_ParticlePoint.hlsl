@@ -109,20 +109,8 @@ VS_OUTPUT VSMain( VS_INPUT Input )
     Output.vViewPosition = mul(float4(position, 1.0f), frame.M_View).xyz;
     Output.vDiffuse = float4(Input.vDiffuse.rgb, pow(Input.vDiffuse.a, 2.2f));
     float2 baseTexcoord = float2(tu[Input.vertexID], tv[Input.vertexID]);
-    bool isVDBFire = Input.vParticleLightingScale < -0.5f;
-    if (isVDBFire)
-        baseTexcoord.y = 1.0f - baseTexcoord.y;
-
-    float2 atlasGrid = max(Input.vAtlasInfo.yz, float2(1.0f, 1.0f));
-    float atlasFrameCount = max(1.0f, atlasGrid.x * atlasGrid.y);
-    float atlasFrameValue = fmod(max(Input.vAtlasInfo.x, 0.0f), atlasFrameCount);
-    float atlasFrame = floor(atlasFrameValue);
-    float atlasBlend = frac(atlasFrameValue);
-    float nextAtlasFrame = fmod(atlasFrame + 1.0f, atlasFrameCount);
-    float2 atlasCell = float2(fmod(atlasFrame, atlasGrid.x), floor(atlasFrame / atlasGrid.x));
-    float2 nextAtlasCell = float2(fmod(nextAtlasFrame, atlasGrid.x), floor(nextAtlasFrame / atlasGrid.x));
-    Output.vTexcoord = (atlasCell + baseTexcoord) / atlasGrid;
-    Output.vNormalVS = float3((nextAtlasCell + baseTexcoord) / atlasGrid, atlasBlend);
+    Output.vTexcoord = baseTexcoord;
+    Output.vNormalVS = float3(0.0f, 0.0f, 0.0f);
     Output.vTexcoord2 = baseTexcoord;
     Output.vParticleLightingScale = Input.vParticleLightingScale;
 	return Output;

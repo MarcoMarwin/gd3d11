@@ -416,8 +416,6 @@ public:
     /** Draws a zCParticleFX */
     void DrawParticleFX( zCVob* source, zCParticleFX* fx, ParticleFrameData& data );
 
-    const std::vector<ParticleInstanceInfo>& GetVDBFireInstances() const { return VDBFireInstances; }
-    bool ShouldHideFireCompleteDecal( zCVob* decalVob, zCTexture* texture ) const;
 
     /** Gets a list of visible decals */
     void GetVisibleDecalList( std::vector<zCVob*>& decals );
@@ -916,7 +914,6 @@ private:
 
     std::map<ParticleBatchKey, std::vector<ParticleInstanceInfo>> FrameParticles;
     std::map<ParticleBatchKey, ParticleRenderInfo> FrameParticleInfo;
-    std::vector<ParticleInstanceInfo> VDBFireInstances;
 
     /** Loaded game sections */
     std::map<int, std::map<int, WorldMeshSectionInfo>> WorldSections;

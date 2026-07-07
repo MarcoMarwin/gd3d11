@@ -80,41 +80,61 @@ bool TraceRay(float3 origin, float3 dir, float maxDistance, int steps, float jit
 float ComputeContact(float2 uv, float depth)
 {
     if (SSL_EnableContact < 0.5f || IsGeometry(depth) < 0.5f || WaterMask(uv) > 0.02f) return 0.0f;
+
     float3 vp = ViewPosition(uv, depth);
     float3 n = ViewNormal(uv);
-    float3 l = normalize(SSL_LightDirectionVS);
-    float facing = saturate(dot(n, l));
-    if (facing <= 0.01f) return 0.0f;
-
     float materialClass = TX_Material.SampleLevel(SS_Linear, saturate(uv), 0).r;
     float npcMaterial = (materialClass < -0.5f && materialClass > -2.0f) ? 1.0f : 0.0f;
-    float contactTracePhase = 0.5f;
-    float jitter = contactTracePhase;
 
-    // Keep contact shadows object-readable in the near field and deterministic
-    // across frames; FSR3 then receives a stable alpha mask instead of shimmer.
-    float viewDistanceFade = 1.0f - smoothstep(1200.0f, 2600.0f, vp.z);
+    // Stable contact grounding instead of a long directional screen-space ray.
+    // This deliberately avoids frame jitter and long traces so the mask stays
+    // camera-stable and does not shimmer under FSR3.
+    float viewDistanceFade = 1.0f - smoothstep(1050.0f, 2200.0f, vp.z);
     if (viewDistanceFade <= 0.001f) return 0.0f;
-    float worldMaxDistance = clamp(vp.z * 0.0065f, 18.0f, 105.0f);
-    float npcMaxDistance = clamp(vp.z * 0.0035f, 10.0f, 38.0f);
-    float maxDistance = lerp(worldMaxDistance, npcMaxDistance, npcMaterial);
-    float originOffset = lerp(1.2f, 4.0f, npcMaterial);
-    float minThickness = lerp(2.2f, 2.8f, npcMaterial);
-    float thicknessScale = lerp(0.052f, 0.026f, npcMaterial);
-    float maxThickness = lerp(22.0f, 8.0f, npcMaterial);
 
-    float2 hitUV; float hitDistance;
-    if (!TraceRay(vp + n * originOffset, l, maxDistance, 14, jitter, minThickness, thicknessScale, maxThickness, hitUV, hitDistance)) return 0.0f;
-    float3 hn = ViewNormal(hitUV);
-    float occluderFacing = saturate(dot(hn, -l));
-    float worldNormalGate = lerp(0.68f, 1.0f, occluderFacing);
-    float npcNormalGate = lerp(0.40f, 0.92f, occluderFacing);
-    float normalGate = lerp(worldNormalGate, npcNormalGate, npcMaterial);
-    float distanceFade = 1.0f - smoothstep(maxDistance * 0.38f, maxDistance, hitDistance);
-    float npcStrength = lerp(1.0f, 0.55f, npcMaterial);
-    return saturate(facing * normalGate * distanceFade * viewDistanceFade * SSL_ContactStrength * 0.88f * npcStrength);
+    float depthScale = saturate(vp.z / 1600.0f);
+    float radiusPx = lerp(3.4f, 1.45f, depthScale);
+    radiusPx = lerp(radiusPx, radiusPx * 0.72f, npcMaterial);
+    float maxDepthDelta = lerp(48.0f, 18.0f, npcMaterial) * lerp(0.85f, 1.35f, depthScale);
+    float minDepthDelta = lerp(1.4f, 2.6f, npcMaterial);
+
+    static const float2 offsets[8] = {
+        float2( 1.0f,  0.0f), float2(-1.0f,  0.0f),
+        float2( 0.0f,  1.0f), float2( 0.0f, -1.0f),
+        float2( 0.72f,  0.72f), float2(-0.72f,  0.72f),
+        float2( 0.72f, -0.72f), float2(-0.72f, -0.72f)
+    };
+
+    float occlusion = 0.0f;
+    float weightSum = 0.0f;
+    [unroll]
+    for (int i = 0; i < 8; ++i) {
+        float2 sampleUV = uv + offsets[i] * SSL_InvResolution * radiusPx;
+        float d = DepthRaw(sampleUV);
+        if (IsGeometry(d) < 0.5f || WaterMask(sampleUV) > 0.02f) continue;
+
+        float3 sp = ViewPosition(sampleUV, d);
+        float depthDelta = vp.z - sp.z;
+        float validDelta = step(minDepthDelta, depthDelta) * (1.0f - smoothstep(maxDepthDelta, maxDepthDelta * 1.35f, depthDelta));
+        if (validDelta <= 0.0f) continue;
+
+        float3 sn = ViewNormal(sampleUV);
+        float edgeWeight = 1.0f - saturate(dot(n, sn) * 0.5f + 0.5f);
+        edgeWeight = max(edgeWeight, 0.18f);
+        float contactShape = smoothstep(minDepthDelta, maxDepthDelta * 0.42f, depthDelta)
+            * (1.0f - smoothstep(maxDepthDelta * 0.58f, maxDepthDelta * 1.35f, depthDelta));
+        float radialWeight = (i < 4) ? 1.0f : 0.72f;
+        occlusion += contactShape * edgeWeight * radialWeight * validDelta;
+        weightSum += radialWeight * validDelta;
+    }
+
+    if (weightSum <= 0.001f) return 0.0f;
+
+    float3 l = normalize(SSL_LightDirectionVS);
+    float lightGate = lerp(0.58f, 1.0f, saturate(dot(n, l) * 0.5f + 0.5f));
+    float npcStrength = lerp(1.0f, 0.62f, npcMaterial);
+    return saturate((occlusion / weightSum) * lightGate * viewDistanceFade * SSL_ContactStrength * 0.78f * npcStrength);
 }
-
 float3 ComputeGI(float2 uv, float depth, float3 baseColor)
 {
     if (SSL_EnableGI < 0.5f || IsGeometry(depth) < 0.5f || WaterMask(uv) > 0.02f) return 0.0f;

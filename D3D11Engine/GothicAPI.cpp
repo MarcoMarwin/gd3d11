@@ -88,49 +88,20 @@ namespace {
         return name;
     }
 
-    enum class VDBFireKind {
-        None,
-        Fireplace,
-        Campfire
-    };
-
-    std::string NormalizeVisualStem( const char* rawName ) {
-        std::string name = rawName ? rawName : "";
-        name = ToLowerMaterialName( std::move( name ) );
-        const size_t slash = name.find_last_of( "\\/" );
-        if ( slash != std::string::npos )
-            name.erase( 0, slash + 1 );
-        const size_t first = name.find_first_not_of( " \t\r\n\"'" );
-        const size_t last = name.find_last_not_of( " \t\r\n\"'" );
-        if ( first == std::string::npos )
-            return "";
-        name = name.substr( first, last - first + 1 );
-        const size_t dot = name.find_last_of( '.' );
-        if ( dot != std::string::npos )
-            name.resize( dot );
-        return name;
-    }
-
-    VDBFireKind ClassifyVDBFireName( std::string rawName ) {
-        const std::string stem = NormalizeVisualStem( rawName.c_str() );
-        if ( stem == "fire_hot" || stem.find( "fire_hot" ) != std::string::npos )
-            return VDBFireKind::Campfire;
-        if ( stem == "fire" )
-            return VDBFireKind::Fireplace;
-        return VDBFireKind::None;
-    }
-
-    VDBFireKind ClassifyVDBFireVisual( zCVisual* visual ) {
-        return visual ? ClassifyVDBFireName( visual->GetObjectName() ) : VDBFireKind::None;
-    }
-
-    VDBFireKind ClassifyVDBFireVob( zCVob* source ) {
+    bool IsGroundFogParticleVob( zCVob* source ) {
         if ( !source )
-            return VDBFireKind::None;
-        VDBFireKind kind = ClassifyVDBFireName( source->GetName() );
-        if ( kind != VDBFireKind::None )
-            return kind;
-        return ClassifyVDBFireVisual( source->GetVisual() );
+            return false;
+
+        std::string name = source->GetName();
+        if ( zCVisual* visual = source->GetVisual() ) {
+            name += " ";
+            if ( const char* objectName = visual->GetObjectName() ) {
+                name += objectName;
+            }
+        }
+        name = ToLowerMaterialName( std::move( name ) );
+        return name.find( "groundfog" ) != std::string::npos
+            || name.find( "ground_fog" ) != std::string::npos;
     }
     bool IsWaterfallParticleTexture( zCTexture* texture ) {
         if ( !texture )
@@ -1656,7 +1627,6 @@ void GothicAPI::DrawWorldMeshNaive() {
 
     FrameParticleInfo.clear();
     FrameParticles.clear();
-    VDBFireInstances.clear();
     FrameMeshInstances.clear();
 
     {
@@ -2005,8 +1975,9 @@ void GothicAPI::GetVisibleParticleEffectsList( std::vector<zCVob*>& pfxList ) {
                 continue;
             }
 
+            const bool keepGroundFogVisible = IsGroundFogParticleVob( it );
             INT clipFlags = EGothicCullFlags::CullSides;
-            if ( sceneCam->BBox3DInFrustum( it->GetBBox(), clipFlags ) == ZTCAM_CLIPTYPE_OUT ) {
+            if ( sceneCam->BBox3DInFrustum( it->GetBBox(), clipFlags ) == ZTCAM_CLIPTYPE_OUT && !keepGroundFogVisible ) {
                 if ( auto vis = it->GetVisual() ) {
                     // Do update particle state, even if not in frustum, so that if player turns back to it, it doesn't restart.
                     auto particleFx = reinterpret_cast<zCParticleFX*>(vis);
@@ -3471,31 +3442,7 @@ void GothicAPI::DrawParticleFX( zCVob* source, zCParticleFX* fx, ParticleFrameDa
     // Maybe create more emitters?
     fx->CheckDependentEmitter();
 
-    D3D11GraphicsEngine* graphicsEngine = reinterpret_cast<D3D11GraphicsEngine*>(Engine::GraphicsEngine);
-    const VDBFireKind vdbFireKind = graphicsEngine && graphicsEngine->HasVDBFireAtlas()
-        ? ClassifyVDBFireVob( source )
-        : VDBFireKind::None;
-    if ( source && vdbFireKind != VDBFireKind::None ) {
-        const XMFLOAT3 sourcePosition = source->GetPositionWorld();
-        ParticleInstanceInfo fire = {};
-        fire.position = float3( sourcePosition.x, sourcePosition.y, sourcePosition.z );
-        if ( vdbFireKind == VDBFireKind::Campfire ) {
-            fire.position.y += 72.0f;
-            fire.scale = float3( 82.0f, 92.0f, 0.0f );
-        } else {
-            fire.position.y += 52.0f;
-            fire.scale = float3( 52.0f, 68.0f, 0.0f );
-        }
-        fire.color = float4( 1.0f, 1.0f, 1.0f, 1.0f );
-        fire.drawMode = 10; // Full camera-facing quad.
-        fire.velocity = float3( 0.0f, 1.0f, 0.0f );
-        fire.particleLightingScale = -1.0f;
-        const float animationPhase = fmodf( fabsf( sourcePosition.x * 0.013f + sourcePosition.z * 0.021f ), 32.0f );
-        const float animationFrame = fmodf( Engine::GAPI->GetTimeSeconds() * 4.0f + animationPhase, 32.0f );
-        fire.atlasInfo = float3( animationFrame, 8.0f, 4.0f );
-        VDBFireInstances.push_back( fire );
-    }
-    bool hideNearbyFireComplete = false;
+    const bool groundFogParticle = IsGroundFogParticleVob( source );
     zTParticle* pfx = fx->GetFirstParticle();
     if ( pfx ) {
         // Get texture
@@ -3514,7 +3461,6 @@ void GothicAPI::DrawParticleFX( zCVob* source, zCParticleFX* fx, ParticleFrameDa
             }
         }
 
-        hideNearbyFireComplete = ShouldHideFireCompleteDecal( source, texture );
         const bool waterfallParticle = IsWaterfallParticleTexture( texture );
         const int blendMode = static_cast<int>(fx->GetEmitter()->GetVisAlphaFunc());
         const bool emissiveParticle = !waterfallParticle && IsEmissiveParticleTexture( texture, blendMode );
@@ -3582,10 +3528,7 @@ void GothicAPI::DrawParticleFX( zCVob* source, zCParticleFX* fx, ParticleFrameDa
                 PolyStripVisuals.insert( p->PolyStrip );
             };
 
-            if ( vdbFireKind != VDBFireKind::None || hideNearbyFireComplete ) {
-                fx->UpdateParticle( p );
-                continue;
-            }
+
             // Generate instance info
             part.emplace_back();
             ParticleInstanceInfo& ii = part.back();
@@ -3613,7 +3556,7 @@ void GothicAPI::DrawParticleFX( zCVob* source, zCParticleFX* fx, ParticleFrameDa
             ii.position = p->PositionWS;
             ii.color = color;
             ii.velocity = p->Vel;
-            ii.particleLightingScale = emissiveParticle ? -1.0f : (waterfallParticle ? 0.25f : 1.0f);
+            ii.particleLightingScale = (emissiveParticle || groundFogParticle) ? -1.0f : (waterfallParticle ? 0.25f : 1.0f);
 
             if ( fx->GetEmitter()->GetVisAlignment() == 2 ) {
                 if ( zCVob* connectedVob = fx->GetConnectedVob() ) {
@@ -3640,31 +3583,7 @@ void GothicAPI::DrawParticleFX( zCVob* source, zCParticleFX* fx, ParticleFrameDa
     }
 }
 
-bool GothicAPI::ShouldHideFireCompleteDecal( zCVob* decalVob, zCTexture* texture ) const {
-    if ( !decalVob || !texture )
-        return false;
 
-    const std::string textureStem = NormalizeVisualStem( texture->GetNameWithoutExt().c_str() );
-    if ( textureStem.rfind( "fire_complete_a", 0 ) != 0 )
-        return false;
-
-    const XMFLOAT3 decalPosition = decalVob->GetPositionWorld();
-    constexpr float MaxDistanceSquared = 150.0f * 150.0f;
-    for ( zCVob* particleVob : ParticleEffectVobs ) {
-        if ( !particleVob || !particleVob->GetShowVisual()
-            || ClassifyVDBFireVob( particleVob ) != VDBFireKind::Fireplace ) {
-            continue;
-        }
-
-        const XMFLOAT3 firePosition = particleVob->GetPositionWorld();
-        const float dx = decalPosition.x - firePosition.x;
-        const float dy = decalPosition.y - firePosition.y;
-        const float dz = decalPosition.z - firePosition.z;
-        if ( dx * dx + dy * dy + dz * dz < MaxDistanceSquared )
-            return true;
-    }
-    return false;
-}
 /** Debugging */
 void GothicAPI::DrawTriangle( float3 pos = { 0.0f,0.0f,0.0f } ) {
     D3D11VertexBuffer* vxb;
@@ -6743,6 +6662,7 @@ void GothicAPI::PrintModInfo() {
     std::string version = std::string( VERSION_STRING );
     std::string gpu = Engine::GraphicsEngine->GetGraphicsDeviceName();
     PrintMessageTimed( INT2( 5, 5 ), "GD3D11 - " + version, 8000.0f );
+    PrintMessageTimed( INT2( 5, 25 ), "Press F11 for graphics settings", 8000.0f );
     PrintMessageTimed( INT2( 5, 180 ), "Device: " + gpu, 8000.0f );
 }
 

@@ -14,7 +14,6 @@ Texture2D	TX_Texture0 : register( t0 );
 Texture2D	TX_Texture1 : register( t1 );
 Texture2D	TX_Texture2 : register( t2 );
 Texture2D	TX_RainCloud : register( t3 );
-Texture2D	TX_VDBCloudAtlas : register( t4 );
 
 
 //--------------------------------------------------------------------------------------
@@ -69,76 +68,6 @@ float3 ApplyMoonTexture(float3 worldPosition)
     return moonTexture.rgb * moonMask;
 }
 
-float VDBCloudHash(float2 cell)
-{
-    return frac(sin(dot(cell, float2(127.1f, 311.7f))) * 43758.5453f);
-}
-
-float4 SampleVDBCloudLayer(float2 planePosition, float layerScale, float2 wind, float seed)
-{
-    float2 tiledPosition = planePosition * layerScale + wind + seed;
-    float2 cell = floor(tiledPosition);
-    float2 localUV = frac(tiledPosition);
-
-    float occupancyHash = VDBCloudHash(cell + seed * 11.0f);
-    float cellMask = step(0.70f, occupancyHash);
-    float shapeHash = VDBCloudHash(cell + seed * 17.0f);
-    float variant = min(9.0f, floor(shapeHash * 10.0f));
-
-    // Smaller local puffs: keep the atlas crisp and leave proper blue/star sky between clouds.
-    float2 puffUV = (localUV - 0.5f) * 1.82f + 0.5f;
-    float2 inside = step(0.0f, puffUV) * step(puffUV, 1.0f);
-    float boundsMask = inside.x * inside.y;
-    float2 edge = abs(localUV - 0.5f) * 2.0f;
-    float edgeMask = 1.0f - smoothstep(0.68f, 1.04f, length(edge * float2(0.82f, 1.0f)));
-
-    float flipHash = VDBCloudHash(cell.yx + seed * 43.0f);
-    if (flipHash > 0.5f)
-        puffUV.x = 1.0f - puffUV.x;
-
-    float2 atlasCell = float2(fmod(variant, 5.0f), floor(variant / 5.0f));
-    float2 atlasUV = (atlasCell + clamp(puffUV, 0.002f, 0.998f)) / float2(5.0f, 2.0f);
-    float4 sampleCloud = TX_VDBCloudAtlas.Sample(SS_Linear, atlasUV);
-    float sourceDensity = sampleCloud.a * smoothstep(0.04f, 0.18f, dot(sampleCloud.rgb, float3(0.2126f, 0.7152f, 0.0722f)));
-    float denseMask = smoothstep(0.22f, 0.56f, sourceDensity) * boundsMask * edgeMask * cellMask;
-    return float4(sampleCloud.rgb, saturate(denseMask));
-}
-
-float4 RenderVDBClouds(float3 worldPosition)
-{
-    float3 skyDirection = normalize(worldPosition - AC_SpherePosition);
-    float horizonMask = smoothstep(0.02f, 0.16f, skyDirection.y);
-    float projectionHeight = max(0.20f, skyDirection.y);
-    float2 cameraParallax = AC_WorldCameraPos.xz * 0.0000012f;
-    float2 planePosition = skyDirection.xz / projectionHeight * 0.56f + cameraParallax;
-
-    float2 wind0 = float2(0.000150f, 0.000055f) * AC_Time;
-    float2 wind1 = float2(-0.000095f, 0.000115f) * AC_Time;
-    float2 wind2 = float2(0.000065f, -0.000080f) * AC_Time;
-    float4 layer0 = SampleVDBCloudLayer(planePosition, 4.35f, wind0, 0.31f);
-    float4 layer1 = SampleVDBCloudLayer(planePosition + 2.41f, 6.10f, wind1, 0.67f);
-    float4 layer2 = SampleVDBCloudLayer(planePosition - 1.37f, 8.20f, wind2, 0.93f);
-
-    float coverage0 = saturate(layer0.a * 0.96f);
-    float coverage1 = saturate(layer1.a * 0.78f);
-    float coverage2 = saturate(layer2.a * 0.58f);
-    float coverage = 1.0f - (1.0f - coverage0) * (1.0f - coverage1) * (1.0f - coverage2);
-    float3 sourceColor = (layer0.rgb * coverage0 + layer1.rgb * coverage1 + layer2.rgb * coverage2)
-        / max(0.001f, coverage0 + coverage1 + coverage2);
-    float relief = saturate(dot(sourceColor, float3(0.2126f, 0.7152f, 0.0722f)) * 1.30f);
-
-    float dayWeight = saturate(AC_LightPos.y * 4.0f + 0.12f);
-    float rainWeight = smoothstep(0.02f, 0.70f, saturate(AC_RainFXWeight));
-    float3 nightColor = lerp(float3(0.012f, 0.018f, 0.032f), float3(0.095f, 0.125f, 0.180f), relief);
-    nightColor += float3(0.08f, 0.12f, 0.20f) * AC_MoonVisibility * relief * 0.18f;
-    float3 dayColor = lerp(float3(0.42f, 0.45f, 0.50f), float3(0.82f, 0.84f, 0.83f), pow(relief, 0.70f));
-    float3 rainColor = lerp(float3(0.09f, 0.11f, 0.15f), float3(0.33f, 0.37f, 0.43f), relief);
-    float3 cloudColor = lerp(nightColor, dayColor, dayWeight);
-    cloudColor = lerp(cloudColor, rainColor, rainWeight);
-
-    float opacity = saturate(coverage * horizonMask * lerp(0.94f, 0.98f, rainWeight));
-    return float4(cloudColor, opacity);
-}
 float4 RenderRainCloudDeck(float3 worldPosition)
 {
 	float3 skyDirection = normalize(worldPosition - AC_SpherePosition);
@@ -196,8 +125,6 @@ float4 PSMain( PS_INPUT Input ) : SV_TARGET
 		atmoColor = lerp(atmoColor, rainClouds.rgb, rainClouds.a * rainCloudWeight);
 	}
 	
-	float4 vdbClouds = RenderVDBClouds(Input.vWorldPosition);
-	atmoColor = lerp(atmoColor, vdbClouds.rgb, vdbClouds.a);
 	// Apply stars
 	atmoColor += night * 0.4f;
 	

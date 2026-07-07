@@ -246,7 +246,8 @@ namespace
             "OW_NATURE_BUSH_03",
             "NW_NATURE_PLANT_03",
             "NW_KORN",
-            "OW_GRASS_WINTER"
+            "OW_GRASS_WINTER",
+            "NW_NATURE_WATERGRASS_56P"
         };
         for ( const char* marker : markers ) {
             if ( stem.rfind( marker, 0 ) == 0 ) {
@@ -1007,9 +1008,6 @@ XRESULT D3D11GraphicsEngine::Init() {
 
     NoiseTexture = std::make_unique<D3D11Texture>();
     NoiseTexture->Init( "system\\GD3D11\\textures\\noise.dds" );
-
-    VDBFireAtlas = std::make_unique<D3D11Texture>();
-    VDBFireAtlas->Init( "system\\GD3D11\\textures\\VDBFireAtlas.dds" );
 
     BlueNoise512BGRA = std::make_unique<D3D11Texture>();
     BlueNoise512BGRA->Init( "system\\GD3D11\\textures\\bluenoise-rgba-512-bgra.dds" );
@@ -8398,10 +8396,6 @@ XRESULT D3D11GraphicsEngine::DrawSky() {
         srvs[3] = rainCloudTex->GetShaderResourceView().Get();
     }
 
-    D3D11Texture* vdbCloudTex = sky->GetVDBCloudTexture();
-    if ( vdbCloudTex ) {
-        srvs[4] = vdbCloudTex->GetShaderResourceView().Get();
-    }
     GetContext()->PSSetShaderResources( 0, std::size( srvs ), srvs);
 
     if ( sky->GetSkyDome() ) sky->GetSkyDome()->DrawMesh();
@@ -8818,9 +8812,6 @@ void D3D11GraphicsEngine::DrawDecalList( const std::vector<zCVob*>& decals,
 
         zCTexture* texture = material->GetTexture();
         if ( !texture ) {
-            continue;
-        }
-        if ( Engine::GAPI->ShouldHideFireCompleteDecal( decals[i], texture ) ) {
             continue;
         }
 
@@ -9412,8 +9403,7 @@ void D3D11GraphicsEngine::DrawFrameParticles(
     RenderToTextureBuffer* bufferParticleColor,
     RenderToTextureBuffer* bufferParticleDistortion,
     RenderToTextureBuffer* bufferParticleReactiveMask ) {
-    const auto& vdbFireInstances = Engine::GAPI->GetVDBFireInstances();
-    if ( particles.empty() && vdbFireInstances.empty() ) return;
+    if ( particles.empty() ) return;
     SetDefaultStates();
 
     auto Resolution = GetResolution();
@@ -9498,18 +9488,6 @@ void D3D11GraphicsEngine::DrawFrameParticles(
         DrawVertexBufferInstanced( TempParticlesVertexBuffer.get(), 4, instances.size(), sizeof( ParticleInstanceInfo ) );
     }
 
-    // VDB fire uses the existing additive particle pass: one instanced billboard per
-    // matching PFX, animated from a compact 8x4 atlas.
-    if ( !vdbFireInstances.empty() && VDBFireAtlas && VDBFireAtlas->GetShaderResourceView().Get() ) {
-        VDBFireAtlas->BindToPixelShader( 0 );
-        EnsureTempVertexBufferSize( TempParticlesVertexBuffer,
-            sizeof( ParticleInstanceInfo ) * vdbFireInstances.size() );
-        TempParticlesVertexBuffer->UpdateBuffer(
-            const_cast<ParticleInstanceInfo*>(vdbFireInstances.data()),
-            sizeof( ParticleInstanceInfo ) * vdbFireInstances.size() );
-        DrawVertexBufferInstanced( TempParticlesVertexBuffer.get(), 4,
-            vdbFireInstances.size(), sizeof( ParticleInstanceInfo ) );
-    }
     // Set usual rendering for everything else. Alphablending mostly.
     SetActivePixelShader( PShaderID::PS_ParticleSimple );
     ActivePS->Apply();

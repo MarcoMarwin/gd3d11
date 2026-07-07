@@ -43,10 +43,6 @@ float3 AdaptParticleLighting(float3 rgb, float particleLightingScale)
 float4 PSMain( PS_INPUT Input ) : SV_TARGET
 {
     float4 color = TX_Texture0.Sample(SS_Linear, Input.vTexcoord);
-    if (Input.vParticleLightingScale < -0.5f) {
-        float4 nextColor = TX_Texture0.Sample(SS_Linear, Input.vNormalVS.xy);
-        color = lerp(color, nextColor, saturate(Input.vNormalVS.z));
-    }
     color *= Input.vDiffuse;
 #ifdef USE_FFDATA
     color *= cbFFData.textureFactor;

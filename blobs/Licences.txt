@@ -852,12 +852,3 @@ may consider it more useful to permit linking proprietary applications with
 the library.  If this is what you want to do, use the GNU Lesser General
 Public License instead of this License.  But first, please read
 <http://www.gnu.org/philosophy/why-not-lgpl.html>.
-
---------------------------------------------------------------------------------
-JangaFX VDB assets (VDBFireAtlas.dds and VDBCloudAtlas.dds)
---------------------------------------------------------------------------------
-The source volume data was created with EmberGen by JangaFX and released under
-CC0 1.0 Universal (public-domain dedication). The distributed DDS atlases are
-converted derivatives containing only the runtime-relevant rendered frames.
-https://creativecommons.org/publicdomain/zero/1.0/
-https://jangafx.com/software/embergen/download/free-vdb-animations/
