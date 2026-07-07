@@ -306,7 +306,7 @@ XRESULT D3D11ShaderManager::Init() {
         const auto& s = Engine::GAPI->GetRendererState().RendererSettings;
 
         list.push_back( {"SHD_ENABLE",           s.EnableShadows ? "1" : "0"} );
-        list.push_back( {"SHD_FILTER_MSM",       (s.ShadowFilterMode == GothicRendererSettings::SHADOW_FILTER_MSM && !FeatureLevel10Compatibility) ? "1" : "0"} );
+        list.push_back( {"SHD_FILTER_MSM",       (s.ShadowFilterMode == GothicRendererSettings::SHADOW_FILTER_MSM && !FeatureLevel10Compatibility && !s.DebugSettings.FeatureSet.UseShadowAtlas) ? "1" : "0"} );
         list.push_back( {"SHD_FILTER_16TAP_PCF", (s.ShadowFilterMode != GothicRendererSettings::SHADOW_FILTER_DISABLED || FeatureLevel10Compatibility) ? "1" : "0"} );
         list.push_back( {"MAX_CSM_CASCADES",     TO_LITERAL(MAX_CSM_CASCADES)} );
         list.push_back( {"NUM_CSM_CASCADES",     sNums[std::clamp<size_t>(s.NumShadowCascades, 1, MAX_CSM_CASCADES)]} );
@@ -342,6 +342,10 @@ XRESULT D3D11ShaderManager::Init() {
         .with_category( ShaderCategory::LightsAndShadows ) );
 
     Shaders.push_back( ShaderInfo::make<PShaderID::PS_LinDepth>( "PS_LinDepth.hlsl" )  );
+    Shaders.push_back( ShaderInfo::make<PShaderID::PS_ShadowMoments>( "PS_ShadowMoments.hlsl" )
+        .with_macros( { {"ALPHATEST", "0"} } ) );
+    Shaders.push_back( ShaderInfo::make<PShaderID::PS_ShadowMomentsAlphaTest>( "PS_ShadowMoments.hlsl" )
+        .with_macros( { {"ALPHATEST", "1"} } ) );
 
     Shaders.push_back( ShaderInfo::make<PShaderID::PS_DiffuseNormalmapped>( "PS_Diffuse.hlsl" )
         .with_macros( {

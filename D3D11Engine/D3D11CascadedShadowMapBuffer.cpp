@@ -15,6 +15,11 @@ void D3D11CascadedShadowMapBuffer::Release() {
     for ( auto& dsv : m_cascadeDSVs ) {
         dsv.Reset();
     }
+    for ( auto& rtv : m_cascadeMomentRTVs ) {
+        rtv.Reset();
+    }
+    m_momentSRV.Reset();
+    m_momentTexture.Reset();
     m_srv.Reset();
     m_texture.Reset();
 }
@@ -104,6 +109,72 @@ HRESULT D3D11CascadedShadowMapBuffer::Resize( UINT size ) {
     return S_OK;
 }
 
+HRESULT D3D11CascadedShadowMapBuffer::EnsureMomentResources() {
+    if ( m_momentTexture && m_momentSRV ) {
+        return S_OK;
+    }
+    if ( !m_device || m_size == 0 || m_numCascades == 0 ) {
+        return E_FAIL;
+    }
+
+    for ( auto& rtv : m_cascadeMomentRTVs ) {
+        rtv.Reset();
+    }
+    m_momentSRV.Reset();
+    m_momentTexture.Reset();
+
+    D3D11_TEXTURE2D_DESC textureDesc = {};
+    textureDesc.Width = m_size;
+    textureDesc.Height = m_size;
+    textureDesc.MipLevels = 1;
+    textureDesc.ArraySize = m_numCascades;
+    textureDesc.Format = DXGI_FORMAT_R16G16B16A16_FLOAT;
+    textureDesc.SampleDesc.Count = 1;
+    textureDesc.Usage = D3D11_USAGE_DEFAULT;
+    textureDesc.BindFlags = D3D11_BIND_RENDER_TARGET | D3D11_BIND_SHADER_RESOURCE;
+
+    HRESULT hr = m_device->CreateTexture2D( &textureDesc, nullptr, m_momentTexture.GetAddressOf() );
+    if ( FAILED( hr ) || !m_momentTexture ) {
+        LogError() << "CascadedShadowMap::EnsureMomentResources - Failed to create MSM moment texture array";
+        return FAILED( hr ) ? hr : E_FAIL;
+    }
+    SetDebugName( m_momentTexture.Get(), "CascadedShadowMap_MomentTextureArray" );
+
+    for ( UINT i = 0; i < m_numCascades; ++i ) {
+        D3D11_RENDER_TARGET_VIEW_DESC rtvDesc = {};
+        rtvDesc.Format = DXGI_FORMAT_R16G16B16A16_FLOAT;
+        rtvDesc.ViewDimension = D3D11_RTV_DIMENSION_TEXTURE2DARRAY;
+        rtvDesc.Texture2DArray.MipSlice = 0;
+        rtvDesc.Texture2DArray.FirstArraySlice = i;
+        rtvDesc.Texture2DArray.ArraySize = 1;
+
+        hr = m_device->CreateRenderTargetView(
+            m_momentTexture.Get(), &rtvDesc, m_cascadeMomentRTVs[i].GetAddressOf() );
+        if ( FAILED( hr ) || !m_cascadeMomentRTVs[i] ) {
+            LogError() << "CascadedShadowMap::EnsureMomentResources - Failed to create MSM moment RTV for cascade " << i;
+            return FAILED( hr ) ? hr : E_FAIL;
+        }
+        SetDebugName( m_cascadeMomentRTVs[i].Get(),
+            "CascadedShadowMap_MomentRTV_Cascade" + std::to_string( i ) );
+    }
+
+    D3D11_SHADER_RESOURCE_VIEW_DESC srvDesc = {};
+    srvDesc.Format = DXGI_FORMAT_R16G16B16A16_FLOAT;
+    srvDesc.ViewDimension = D3D11_SRV_DIMENSION_TEXTURE2DARRAY;
+    srvDesc.Texture2DArray.MostDetailedMip = 0;
+    srvDesc.Texture2DArray.MipLevels = 1;
+    srvDesc.Texture2DArray.FirstArraySlice = 0;
+    srvDesc.Texture2DArray.ArraySize = m_numCascades;
+
+    hr = m_device->CreateShaderResourceView( m_momentTexture.Get(), &srvDesc, m_momentSRV.GetAddressOf() );
+    if ( FAILED( hr ) || !m_momentSRV ) {
+        LogError() << "CascadedShadowMap::EnsureMomentResources - Failed to create MSM moment SRV";
+        return FAILED( hr ) ? hr : E_FAIL;
+    }
+    SetDebugName( m_momentSRV.Get(), "CascadedShadowMap_MomentSRV" );
+    return S_OK;
+}
+
 ID3D11DepthStencilView* D3D11CascadedShadowMapBuffer::GetCascadeDSV( UINT cascadeIndex ) const {
     if ( cascadeIndex >= m_numCascades ) {
         return nullptr;
@@ -111,14 +182,30 @@ ID3D11DepthStencilView* D3D11CascadedShadowMapBuffer::GetCascadeDSV( UINT cascad
     return m_cascadeDSVs[cascadeIndex].Get();
 }
 
+ID3D11RenderTargetView* D3D11CascadedShadowMapBuffer::GetCascadeMomentRTV( UINT cascadeIndex ) const {
+    if ( cascadeIndex >= m_numCascades ) {
+        return nullptr;
+    }
+    return m_cascadeMomentRTVs[cascadeIndex].Get();
+}
+
 ID3D11ShaderResourceView* D3D11CascadedShadowMapBuffer::GetShaderResourceView() const {
     return m_srv.Get();
+}
+
+ID3D11ShaderResourceView* D3D11CascadedShadowMapBuffer::GetMomentShaderResourceView() const {
+    return m_momentSRV.Get();
 }
 
 void D3D11CascadedShadowMapBuffer::BindToPixelShader( ID3D11DeviceContext1* context, UINT slot ) const {
     if ( m_srv ) {
         context->PSSetShaderResources( slot, 1, m_srv.GetAddressOf() );
     }
+}
+
+void D3D11CascadedShadowMapBuffer::BindMomentsToPixelShader( ID3D11DeviceContext1* context, UINT slot ) const {
+    ID3D11ShaderResourceView* srv = m_momentSRV.Get();
+    context->PSSetShaderResources( slot, 1, &srv );
 }
 
 void D3D11CascadedShadowMapBuffer::BindToVertexShader( ID3D11DeviceContext1* context, UINT slot ) const {

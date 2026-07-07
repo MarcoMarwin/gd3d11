@@ -80,6 +80,8 @@ enum class PShaderID : size_t {
     PS_WaterMask,
     PS_DS_AtmosphericScattering_Rain,
     PS_LinDepth,
+    PS_ShadowMoments,
+    PS_ShadowMomentsAlphaTest,
     PS_DiffuseNormalmapped,
     PS_DiffuseNormalmappedFxMap,
     PS_DiffuseAlphaTest,

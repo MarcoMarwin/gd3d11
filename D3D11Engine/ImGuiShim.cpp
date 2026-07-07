@@ -1296,6 +1296,22 @@ void ImGuiShim::RenderSettingsWindow()
             }
             ImGui::SetItemTooltip( "Controls sun, moon, and point-light shadow quality." );
 
+            static const std::vector<std::pair<const char*, GothicRendererSettings::E_ShadowFilterMode>> shadowFilterModes = {
+                {"Simple PCF", GothicRendererSettings::E_ShadowFilterMode::SHADOW_FILTER_SIMPLE},
+                {"MSM", GothicRendererSettings::E_ShadowFilterMode::SHADOW_FILTER_MSM},
+            };
+            ImText( "Shadow Filter", buttonWidth ); ImGui::SameLine();
+            ImGui::BeginDisabled( FeatureLevel10Compatibility );
+            if ( ImComboBoxC( "##ShadowFilter", shadowFilterModes, &settings.ShadowFilterMode, [&shadersToReload] {
+                shadersToReload |= ShaderCategory::LightsAndShadows;
+            } ) ) {
+                ImGui::EndCombo();
+            }
+            ImGui::EndDisabled();
+            ImGui::SetItemTooltip( FeatureLevel10Compatibility
+                ? "Simple PCF is required in Feature Level 10 mode."
+                : "Selects simple percentage-closer filtering or moment shadow mapping." );
+
             ImText( "Shadow Softness", buttonWidth ); ImGui::SameLine();
             SliderNormalizedUiStrength( "##ShadowSoftness", &settings.ShadowSoftness );
             ImGui::SetItemTooltip( "Controls world and point-light shadow softness." );
@@ -1419,20 +1435,6 @@ void ImGuiShim::RenderSettingsWindow()
             }
             ImGui::EndDisabled();
             ImGui::SetItemTooltip( "Controls ambient-occlusion strength." );
-            bool msmShadowFilter = settings.ShadowFilterMode == GothicRendererSettings::E_ShadowFilterMode::SHADOW_FILTER_MSM;
-            ImText( "Shadow Filter MSM", { inlineToggleLabelWidth, buttonWidth.y } ); ImGui::SameLine();
-            ImGui::BeginDisabled( FeatureLevel10Compatibility );
-            if ( ImGui::Checkbox( "##Enable Shadow Filter MSM", &msmShadowFilter ) ) {
-                settings.ShadowFilterMode = msmShadowFilter
-                    ? GothicRendererSettings::E_ShadowFilterMode::SHADOW_FILTER_MSM
-                    : GothicRendererSettings::E_ShadowFilterMode::SHADOW_FILTER_SIMPLE;
-                shadersToReload |= ShaderCategory::LightsAndShadows;
-            }
-            ImGui::EndDisabled();
-            ImGui::SetItemTooltip( FeatureLevel10Compatibility
-                ? "Uses the standard shadow filter in Feature Level 10 mode."
-                : "Uses moment filtering for world shadows." );
-            ImGui::SameLine();
 
             ImText( "Contact Shadows", { inlineToggleLabelWidth, buttonWidth.y } ); ImGui::SameLine();
             if ( CoupledStrengthCheckbox( "##Enable Contact Shadows", "ContactShadowStrength",                    &settings.EnableContactShadows, &settings.ContactShadowStrength, 1.0f ) ) {

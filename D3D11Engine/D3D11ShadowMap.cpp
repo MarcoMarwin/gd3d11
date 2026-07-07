@@ -53,6 +53,35 @@ static DirectionalLightState GetDirectionalLightState() {
     return state;
 }
 
+static XMVECTOR XM_CALLCONV BuildStableShadowUp( FXMVECTOR viewDir, FXMVECTOR preferredUp ) {
+    XMVECTOR dir = XMVector3Normalize( viewDir );
+
+    XMVECTOR projectedUp = XMVectorSubtract(
+        preferredUp,
+        XMVectorScale( dir, XMVectorGetX( XMVector3Dot( preferredUp, dir ) ) ) );
+    if ( XMVectorGetX( XMVector3LengthSq( projectedUp ) ) > 1e-6f ) {
+        return XMVector3Normalize( projectedUp );
+    }
+
+    const XMVECTOR axisX = XMVectorSet( 1.0f, 0.0f, 0.0f, 0.0f );
+    const XMVECTOR axisY = XMVectorSet( 0.0f, 1.0f, 0.0f, 0.0f );
+    const XMVECTOR axisZ = XMVectorSet( 0.0f, 0.0f, 1.0f, 0.0f );
+    XMVECTOR candidate = axisX;
+    float bestDot = std::abs( XMVectorGetX( XMVector3Dot( dir, axisX ) ) );
+    const float dotY = std::abs( XMVectorGetX( XMVector3Dot( dir, axisY ) ) );
+    if ( dotY < bestDot ) {
+        candidate = axisY;
+        bestDot = dotY;
+    }
+    const float dotZ = std::abs( XMVectorGetX( XMVector3Dot( dir, axisZ ) ) );
+    if ( dotZ < bestDot ) {
+        candidate = axisZ;
+    }
+
+    XMVECTOR right = XMVector3Normalize( XMVector3Cross( candidate, dir ) );
+    return XMVector3Normalize( XMVector3Cross( dir, right ) );
+}
+
 void CalculateTemporalInterpolatedPosition(
     const XMVECTOR currentDir,
     XMVECTOR& previousDir,
@@ -105,10 +134,7 @@ static void CalculateCascadeMatrices(
 {
     XMVECTOR lightDir = XMVector3Normalize( XMVectorSubtract( lookAtOrig, lightPosOrig ) );
 
-    XMVECTOR upDir = upDirOrig;
-    if ( std::abs( XMVectorGetX( XMVector3Dot( lightDir, upDir ) ) ) > 0.965f ) {
-        upDir = XMVectorSet( 0.0f, 0.0f, 1.0f, 0.0f );
-    }
+    XMVECTOR upDir = BuildStableShadowUp( lightDir, upDirOrig );
 
     XMVECTOR frustumCenter;
 
@@ -243,7 +269,18 @@ static void CalculateCascadeMatrices(
         }
     }
 
-    const XMMATRIX crProjRepl = XMMatrixTranspose( XMMatrixOrthographicLH( 
+    // Scene bounds may become tighter than the active frustum when the sun crosses
+    // noon. Keep every receiver in front of the near plane and guarantee a valid
+    // projection interval even at the orbit's exact Z sign change.
+    orthoNear = std::min( orthoNear, minLightZ - 100.0f );
+    orthoFar = std::max( orthoFar, maxLightZ + 100.0f );
+    if ( !std::isfinite( orthoNear ) || !std::isfinite( orthoFar )
+        || orthoFar <= orthoNear + 100.0f ) {
+        orthoNear = minLightZ - 1000.0f;
+        orthoFar = maxLightZ + 5000.0f;
+    }
+
+    const XMMATRIX crProjRepl = XMMatrixTranspose( XMMatrixOrthographicLH(
         cascadeSize, cascadeSize, orthoNear, orthoFar ) );
 
     XMStoreFloat4x4( &outCR.ViewReplacement, XMMatrixTranspose( lightView ) );
@@ -436,6 +473,15 @@ void D3D11ShadowMap::BindToPixelShader( ID3D11DeviceContext1* context, UINT slot
     }
 }
 
+void D3D11ShadowMap::BindMomentsToPixelShader( ID3D11DeviceContext1* context, UINT slot ) {
+    ID3D11ShaderResourceView* nullSRV = nullptr;
+    if ( !m_useAtlas && m_cascadedShadowMap ) {
+        m_cascadedShadowMap->BindMomentsToPixelShader( context, slot );
+    } else {
+        context->PSSetShaderResources( slot, 1, &nullSRV );
+    }
+}
+
 void D3D11ShadowMap::BindSampler( ID3D11DeviceContext1* context, UINT slot ) {
     if ( m_shadowmapSampler ) context->PSSetSamplers( slot, 1, m_shadowmapSampler.GetAddressOf() );
 }
@@ -606,13 +652,9 @@ XRESULT D3D11ShadowMap::PrepareRender()
 
     static const XMVECTORF32 c_XM_Up = { { { 0, 1, 0, 0 } } };
     const XMVECTOR shadowViewDir = XMVector3Normalize( XMVectorSubtract( lookAt, p ) );
-    const XMVECTOR shadowUp = std::abs( XMVectorGetX( XMVector3Dot( shadowViewDir, c_XM_Up ) ) ) > 0.965f
-        ? XMVectorSet( 0.0f, 0.0f, 1.0f, 0.0f )
-        : c_XM_Up;
+    const XMVECTOR shadowUp = BuildStableShadowUp( shadowViewDir, c_XM_Up );
     const XMVECTOR lastCascadeViewDir = XMVector3Normalize( XMVectorSubtract( lastCascadeLookAt, lastCascadeP ) );
-    const XMVECTOR lastCascadeShadowUp = std::abs( XMVectorGetX( XMVector3Dot( lastCascadeViewDir, c_XM_Up ) ) ) > 0.965f
-        ? XMVectorSet( 0.0f, 0.0f, 1.0f, 0.0f )
-        : c_XM_Up;
+    const XMVECTOR lastCascadeShadowUp = BuildStableShadowUp( lastCascadeViewDir, c_XM_Up );
 
     if ( !isOutdoor ) {
         if ( settings.EnableShadows && lastBspMode == zBSP_MODE_OUTDOOR ) {
@@ -656,8 +698,9 @@ XRESULT D3D11ShadowMap::PrepareRender()
 
         // Increment frame counter for temporal cascade updates
         perFrameCascadeData.frameCount++;
-        bool lazyCascadeUpdate = m_useAtlas // atlas breaks when last cascade is not rendered, as we clear the atlas for the next pass.
-            ? false 
+        bool lazyCascadeUpdate = (m_useAtlas
+            || settings.ShadowFilterMode == GothicRendererSettings::SHADOW_FILTER_MSM)
+            ? false
             : settings.DebugSettings.ShadowCascades.LazyCascadeUpdate;
         const bool overheadLight = std::abs( XMVectorGetX( XMVector3Dot( shadowViewDir, c_XM_Up ) ) ) > 0.94f
             || std::abs( XMVectorGetX( XMVector3Dot( lastCascadeViewDir, c_XM_Up ) ) ) > 0.94f;
@@ -1159,6 +1202,14 @@ XRESULT D3D11ShadowMap::DrawWorldShadow( )
     auto& settings = Engine::GAPI->GetRendererState().RendererSettings;
     
     int numCascades = settings.NumShadowCascades;
+    bool useMSMMoments = !m_useAtlas
+        && !FeatureLevel10Compatibility
+        && settings.ShadowFilterMode == GothicRendererSettings::SHADOW_FILTER_MSM
+        && m_cascadedShadowMap != nullptr;
+    if ( useMSMMoments && FAILED( m_cascadedShadowMap->EnsureMomentResources() ) ) {
+        LogError() << "MSM disabled for this frame because its moment resources could not be created";
+        useMSMMoments = false;
+    }
     bool isOutdoor = Engine::GAPI->GetLoadedWorldInfo()->BspTree->GetBspTreeMode() == zBSP_MODE_OUTDOOR;
 
     if ( isOutdoor ) {
@@ -1188,6 +1239,10 @@ XRESULT D3D11ShadowMap::DrawWorldShadow( )
             renderParams.DontCull = false;
             renderParams.DSVOverwrite = GetCascadeDSV( static_cast<UINT>(cascadeIdx) );
             renderParams.DebugRTV = nullptr;
+            if ( useMSMMoments ) {
+                renderParams.MomentRTV = GetCascadeMomentRTV( static_cast<UINT>(cascadeIdx) );
+                renderParams.WriteShadowMoments = renderParams.MomentRTV.Get() != nullptr;
+            }
             renderParams.CascadeIndex = static_cast<int>(cascadeIdx);
             renderParams.CascadeSplits = m_CascadeSplits;
             renderParams.CascadeCameraReplacements = &m_CascadeCRs;
@@ -1343,10 +1398,16 @@ void D3D11ShadowMap::RenderShadowmaps( const RenderShadowmapsParams& params ) {
 
     // Clear and Bind the shadowmap
 
-    Microsoft::WRL::ComPtr<ID3D11ShaderResourceView> srv;
-    m_context->PSSetShaderResources( 3, 1, srv.GetAddressOf() );
+    ID3D11ShaderResourceView* nullShadowSRVs[12] = {};
+    m_context->PSSetShaderResources( 3, 12, nullShadowSRVs );
 
-    if ( !params.DebugRTV.Get() ) {
+    Microsoft::WRL::ComPtr<ID3D11RenderTargetView> momentRTV = params.WriteShadowMoments ? params.MomentRTV : nullptr;
+    if ( momentRTV.Get() ) {
+        ID3D11RenderTargetView* rtvs[] = { momentRTV.Get() };
+        m_context->OMSetRenderTargets( 1, rtvs, dsvOverwrite.Get() );
+        Engine::GAPI->GetRendererState().BlendState.SetDefault();
+        Engine::GAPI->GetRendererState().BlendState.ColorWritesEnabled = true;
+    } else if ( !params.DebugRTV.Get() ) {
         m_context->OMSetRenderTargets( 0, nullptr, dsvOverwrite.Get() );
         Engine::GAPI->GetRendererState().BlendState.ColorWritesEnabled = false;
     } else {
@@ -1363,6 +1424,10 @@ void D3D11ShadowMap::RenderShadowmaps( const RenderShadowmapsParams& params ) {
             Engine::GAPI->GetRendererState().RendererSettings.EnableShadows) ) {
         if ( !params.SkipClear ) {
             m_context->ClearDepthStencilView( dsvOverwrite.Get(), D3D11_CLEAR_DEPTH, 1.0f, 0 );
+            if ( momentRTV.Get() ) {
+                constexpr float clearMoments[] { 1.0f, 0.99755993f, 0.89343751f, 0.0f };
+                m_context->ClearRenderTargetView( momentRTV.Get(), clearMoments );
+            }
         }
 
         // Draw the world mesh without textures        
@@ -1376,6 +1441,10 @@ void D3D11ShadowMap::RenderShadowmaps( const RenderShadowmapsParams& params ) {
     } else if ( !params.SkipClear ) {
         m_context->ClearDepthStencilView(
             dsvOverwrite.Get(), D3D11_CLEAR_DEPTH, 1.0f, 0 );
+        if ( momentRTV.Get() ) {
+            constexpr float clearMoments[] { 1.0f, 0.99755993f, 0.89343751f, 0.0f };
+            m_context->ClearRenderTargetView( momentRTV.Get(), clearMoments );
+        }
     }
 
     // Restore state
@@ -1575,6 +1644,7 @@ XRESULT D3D11ShadowMap::DrawWorldLights()
 
     // CSM: Bind the cascade array to a single slot (Texture2DArray)
     BindToPixelShader( m_context.Get(), TX_ShadowmapArray );
+    BindMomentsToPixelShader( m_context.Get(), TX_ShadowMomentArray );
 
     if ( graphicsEngine->Effects->GetRainShadowmap() )
         graphicsEngine->Effects->GetRainShadowmap()->BindToPixelShader( m_context.Get(), TX_RainShadowmap );
@@ -1592,6 +1662,8 @@ XRESULT D3D11ShadowMap::DrawWorldLights()
     // Reset state
     static ID3D11ShaderResourceView* nullSrv[] = { nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr };
     m_context->PSSetShaderResources( 3, std::size( nullSrv ), nullSrv );
+    ID3D11ShaderResourceView* nullMomentSrv = nullptr;
+    m_context->PSSetShaderResources( TX_ShadowMomentArray, 1, &nullMomentSrv );
 
     return XR_SUCCESS;
 }

@@ -3493,8 +3493,12 @@ void GothicAPI::DrawParticleFX( zCVob* source, zCParticleFX* fx, ParticleFrameDa
 
         const bool waterfallParticle = IsWaterfallParticleTexture( texture );
         const bool groundFogParticle = IsGroundFogParticleVob( source ) || IsGroundFogParticleTexture( texture );
-        const int blendMode = static_cast<int>(fx->GetEmitter()->GetVisAlphaFunc());
-        const bool emissiveParticle = !waterfallParticle && IsEmissiveParticleTexture( texture, blendMode );
+        const int sourceBlendMode = static_cast<int>(fx->GetEmitter()->GetVisAlphaFunc());
+        const int blendMode = groundFogParticle
+            ? static_cast<int>(zRND_ALPHA_FUNC_BLEND)
+            : sourceBlendMode;
+        const bool emissiveParticle = !groundFogParticle && !waterfallParticle
+            && IsEmissiveParticleTexture( texture, sourceBlendMode );
         const ParticleBatchKey batchKey = { texture, blendMode };
 
         // Blend mode is part of the batch key because Gothic reuses particle textures

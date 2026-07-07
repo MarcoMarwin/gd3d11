@@ -80,7 +80,6 @@ bool TraceRay(float3 origin, float3 dir, float maxDistance, int steps, float jit
 float ComputeContact(float2 uv, float depth)
 {
     if (SSL_EnableContact < 0.5f || IsGeometry(depth) < 0.5f || WaterMask(uv) > 0.02f) return 0.0f;
-
     float3 vp = ViewPosition(uv, depth);
     float3 n = ViewNormal(uv);
     float3 l = normalize(SSL_LightDirectionVS);
@@ -89,53 +88,33 @@ float ComputeContact(float2 uv, float depth)
 
     float materialClass = TX_Material.SampleLevel(SS_Linear, saturate(uv), 0).r;
     float npcMaterial = (materialClass < -0.5f && materialClass > -2.0f) ? 1.0f : 0.0f;
+    float contactTracePhase = 0.5f;
+    float jitter = contactTracePhase;
 
-    float viewDistanceFade = 1.0f - smoothstep(1250.0f, 2850.0f, vp.z);
+    // Keep contact shadows object-readable in the near field and deterministic
+    // across frames; FSR3 then receives a stable alpha mask instead of shimmer.
+    float viewDistanceFade = 1.0f - smoothstep(1200.0f, 2600.0f, vp.z);
     if (viewDistanceFade <= 0.001f) return 0.0f;
-
-    float worldMaxDistance = clamp(vp.z * 0.0075f, 24.0f, 135.0f);
-    float npcMaxDistance = clamp(vp.z * 0.0040f, 12.0f, 44.0f);
+    float worldMaxDistance = clamp(vp.z * 0.0065f, 18.0f, 105.0f);
+    float npcMaxDistance = clamp(vp.z * 0.0035f, 10.0f, 38.0f);
     float maxDistance = lerp(worldMaxDistance, npcMaxDistance, npcMaterial);
-    float originOffset = lerp(1.8f, 4.2f, npcMaterial);
-    float minThickness = lerp(2.0f, 2.8f, npcMaterial);
-    float thicknessScale = lerp(0.060f, 0.030f, npcMaterial);
-    float maxThickness = lerp(28.0f, 10.0f, npcMaterial);
+    float originOffset = lerp(1.2f, 4.0f, npcMaterial);
+    float minThickness = lerp(2.2f, 2.8f, npcMaterial);
+    float thicknessScale = lerp(0.052f, 0.026f, npcMaterial);
+    float maxThickness = lerp(22.0f, 8.0f, npcMaterial);
 
-    float3 tangent = cross(l, n);
-    if (dot(tangent, tangent) < 0.0001f)
-        tangent = cross(l, float3(0.0f, 1.0f, 0.0f));
-    if (dot(tangent, tangent) < 0.0001f)
-        tangent = float3(1.0f, 0.0f, 0.0f);
-    tangent = normalize(tangent);
-
-    float pixelNoise = Hash12(floor(uv / SSL_InvResolution));
-    float3 origin = vp + n * originOffset;
-    float contact = 0.0f;
-    float weightSum = 0.0f;
-
-    [unroll]
-    for (int rayIndex = 0; rayIndex < 3; ++rayIndex) {
-        float side = (float)rayIndex - 1.0f;
-        float rayWeight = (rayIndex == 1) ? 1.0f : 0.58f;
-        float3 rayDir = normalize(l + tangent * side * lerp(0.10f, 0.055f, npcMaterial));
-        float jitter = frac(pixelNoise + (float)rayIndex * 0.37f);
-        float2 hitUV;
-        float hitDistance;
-        if (TraceRay(origin, rayDir, maxDistance, 13, jitter, minThickness, thicknessScale, maxThickness, hitUV, hitDistance)) {
-            float3 hn = ViewNormal(hitUV);
-            float occluderFacing = saturate(dot(hn, -rayDir));
-            float normalGate = lerp(0.52f, 1.0f, occluderFacing);
-            float distanceFade = 1.0f - smoothstep(maxDistance * 0.30f, maxDistance, hitDistance);
-            contact += normalGate * distanceFade * rayWeight;
-            weightSum += rayWeight;
-        }
-    }
-
-    if (weightSum <= 0.001f) return 0.0f;
-
-    float npcStrength = lerp(1.0f, 0.58f, npcMaterial);
-    return saturate((contact / weightSum) * facing * viewDistanceFade * SSL_ContactStrength * 0.95f * npcStrength);
+    float2 hitUV; float hitDistance;
+    if (!TraceRay(vp + n * originOffset, l, maxDistance, 14, jitter, minThickness, thicknessScale, maxThickness, hitUV, hitDistance)) return 0.0f;
+    float3 hn = ViewNormal(hitUV);
+    float occluderFacing = saturate(dot(hn, -l));
+    float worldNormalGate = lerp(0.68f, 1.0f, occluderFacing);
+    float npcNormalGate = lerp(0.40f, 0.92f, occluderFacing);
+    float normalGate = lerp(worldNormalGate, npcNormalGate, npcMaterial);
+    float distanceFade = 1.0f - smoothstep(maxDistance * 0.38f, maxDistance, hitDistance);
+    float npcStrength = lerp(1.0f, 0.55f, npcMaterial);
+    return saturate(facing * normalGate * distanceFade * viewDistanceFade * SSL_ContactStrength * 0.88f * npcStrength);
 }
+
 float3 ComputeGI(float2 uv, float depth, float3 baseColor)
 {
     if (SSL_EnableGI < 0.5f || IsGeometry(depth) < 0.5f || WaterMask(uv) > 0.02f) return 0.0f;

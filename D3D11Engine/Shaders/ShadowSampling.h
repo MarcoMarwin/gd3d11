@@ -36,6 +36,10 @@
 #define SHD_FILTER_MSM 0
 #endif
 
+#if SHD_FILTER_MSM && !SHADOW_ATLAS
+Texture2DArray TX_ShadowMomentArray : register(t14);
+#endif
+
 //--------------------------------------------------------------------------------------
 // Shadow map sampling helpers
 // Abstracts Texture2DArray (FL11+) vs Texture2D atlas (FL10) sampling
@@ -204,34 +208,97 @@ float SampleShadowMapDepthLitBorder(float2 cascadeUV, int cascadeIndex)
     return SampleShadowMapLevel(cascadeUV, cascadeIndex);
 }
 
-float4 ShadowDepthMoments(float depth)
+#if SHD_FILTER_MSM && !SHADOW_ATLAS
+float4 SampleShadowMomentsLitBorder(float2 cascadeUV, int cascadeIndex)
 {
-    float depth2 = depth * depth;
-    return float4(depth, depth2, depth2 * depth, depth2 * depth2);
+    if (cascadeUV.x < 0.0f || cascadeUV.x > 1.0f ||
+        cascadeUV.y < 0.0f || cascadeUV.y > 1.0f)
+    {
+        return float4(1.0f, 0.99755993f, 0.89343751f, 0.0f);
+    }
+
+    float halfTexel = 0.5f / SQ_ShadowmapSize;
+    float2 safeUV = clamp(cascadeUV, halfTexel, 1.0f - halfTexel);
+    return TX_ShadowMomentArray.SampleLevel(
+        SS_Linear, float3(safeUV, (float)cascadeIndex), 0);
+}
+#endif
+
+#if SHD_FILTER_MSM && !SHADOW_ATLAS
+float4 DecodeShadowMoments(float4 optimized)
+{
+    optimized.x -= 0.0359558848f;
+    return mul(optimized, float4x4(
+        0.2227744146f,  0.1549679261f,  0.1451988946f,  0.1631274430f,
+        0.0771972861f,  0.1394629426f,  0.2120202157f,  0.2591432266f,
+        0.7926986636f,  0.7963415838f,  0.7258694464f,  0.6539092497f,
+        0.0319417555f, -0.1722823173f, -0.2758014811f, -0.3376131734f));
 }
 
 float EstimateMSMLit(float4 moments, float receiverDepth)
 {
-    moments = saturate(moments);
+    moments = saturate(DecodeShadowMoments(moments));
     receiverDepth = saturate(receiverDepth);
 
     if (receiverDepth <= moments.x)
         return 1.0f;
 
+    // Hamburger four-moment reconstruction. A tiny bias towards a broad
+    // distribution keeps the Hankel matrix invertible on nearly flat texels.
+    moments = lerp(moments, float4(0.5f, 0.5f, 0.5f, 0.5f), 0.00003f);
+
+    float L32D22 = moments.z - moments.x * moments.y;
+    float D22 = moments.y - moments.x * moments.x;
+    float squaredDepthVariance = moments.w - moments.y * moments.y;
+    float D33D22 = squaredDepthVariance * D22 - L32D22 * L32D22;
+
+    // A single-depth texel has a singular moment matrix. The two-moment bound
+    // is the stable limiting solution for that case.
     float depthDelta = receiverDepth - moments.x;
-    float variance = max(moments.y - moments.x * moments.x, 0.00002f);
-    float vsmBound = variance / (variance + depthDelta * depthDelta);
+    float variance = max(D22, 0.00002f);
+    float vsmFallback = variance / (variance + depthDelta * depthDelta);
+    if (D22 <= 0.000001f || D33D22 <= 0.000001f)
+        return saturate(vsmFallback);
 
-    float receiverDepth2 = receiverDepth * receiverDepth;
-    float highOrderDelta = max(receiverDepth2 - moments.y, 0.0f);
-    float fourthVariance = max(moments.w - moments.y * moments.y, 0.00002f);
-    float fourthBound = fourthVariance / (fourthVariance + highOrderDelta * highOrderDelta);
+    float invD22 = rcp(D22);
+    float L32 = L32D22 * invD22;
+    float3 coefficients = float3(1.0f, receiverDepth, receiverDepth * receiverDepth);
+    coefficients.y -= moments.x;
+    coefficients.z -= moments.y + L32 * coefficients.y;
+    coefficients.y *= invD22;
+    coefficients.z *= D22 / D33D22;
+    coefficients.y -= L32 * coefficients.z;
+    coefficients.x -= dot(coefficients.yz, moments.xy);
 
-    float skew = abs(moments.z - moments.x * moments.y);
-    float skewWeight = saturate(1.0f - skew * 16.0f);
-    float momentBound = min(vsmBound, sqrt(saturate(fourthBound)) * lerp(0.92f, 1.08f, skewWeight));
+    if (abs(coefficients.z) <= 0.000001f)
+        return saturate(vsmFallback);
 
-    return saturate(momentBound);
+    float p = coefficients.y / coefficients.z;
+    float q = coefficients.x / coefficients.z;
+    float discriminant = p * p * 0.25f - q;
+    if (discriminant < 0.0f)
+        return saturate(vsmFallback);
+
+    float root = sqrt(discriminant);
+    float z1 = -p * 0.5f - root;
+    float z2 = -p * 0.5f + root;
+
+    float4 switchValue;
+    if (z2 < receiverDepth)
+        switchValue = float4(z1, receiverDepth, 1.0f, 1.0f);
+    else if (z1 < receiverDepth)
+        switchValue = float4(receiverDepth, z1, 0.0f, 1.0f);
+    else
+        switchValue = 0.0f;
+
+    float denominator = (z2 - switchValue.y) * (receiverDepth - z1);
+    if (abs(denominator) <= 0.000001f)
+        return saturate(vsmFallback);
+
+    float quotient = (switchValue.x * z2
+        - moments.x * (switchValue.x + z2) + moments.y) / denominator;
+    float shadowed = switchValue.z + switchValue.w * quotient;
+    return saturate(1.0f - shadowed);
 }
 
 float SampleCascadeShadowMSM(float4 vShadowSamplingPos, float2 projectedTexCoords,
@@ -258,14 +325,14 @@ float SampleCascadeShadowMSM(float4 vShadowSamplingPos, float2 projectedTexCoord
         float2 disk = mul(rotMat, g_PoissonDisk16[sampleIdx]);
         float2 sampleUV = projectedTexCoords + disk * filterRadius;
         float weight = saturate(1.0f - dot(disk, disk) * 0.20f);
-        float depth = SampleShadowMapDepthLitBorder(sampleUV, cascadeIndex);
-        moments += ShadowDepthMoments(depth) * weight;
+        moments += SampleShadowMomentsLitBorder(sampleUV, cascadeIndex) * weight;
         weightSum += weight;
     }
 
     moments /= max(weightSum, 0.0001f);
     return EstimateMSMLit(moments, vShadowSamplingPos.z - bias);
 }
+#endif
 
 #if SHADOW_ATLAS
 float IsInShadow(float3 wsPosition, Texture2D shadowmapAtlas, SamplerComparisonState samplerState)
@@ -393,7 +460,7 @@ float SampleCascadeShadowSoft(float4 vShadowSamplingPos, float2 projectedTexCoor
     // softness of 1.0 = default, < 1.0 = sharper, > 1.0 = softer
     float filterRadius = texelSize * softness;
 
-#if SHD_FILTER_MSM
+#if SHD_FILTER_MSM && !SHADOW_ATLAS
     return SampleCascadeShadowMSM(vShadowSamplingPos, projectedTexCoords, cascadeIndex, bias, screenPos, softness);
 #elif SHD_FILTER_16TAP_PCF
 #if NUM_CSM_CASCADES <= 1

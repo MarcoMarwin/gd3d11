@@ -150,8 +150,9 @@ void D3D11ForwardPlusRenderer::AddGeometryPasses(
                 ID3D11ShaderResourceView* depthSRV = depthCopy ? depthCopy->GetShaderResView().Get() : nullptr;
                 context->PSSetShaderResources( 2, 1, &depthSRV );
 
-                // Bind CSM shadow map at t3 and comparison sampler at s2
+                // Bind CSM depth and MSM moments plus the comparison sampler.
                 shadowMaps->BindToPixelShader( context.Get(), 3 );
+                shadowMaps->BindMomentsToPixelShader( context.Get(), 14 );
                 shadowMaps->BindSampler( context.Get(), 2 );
 
                 engine.GetBlueNoiseTexture()->BindToPixelShader( 8 );
@@ -178,6 +179,7 @@ void D3D11ForwardPlusRenderer::AddGeometryPasses(
                 context->PSSetShaderResources( 2, 1, s_nullSRVs );
                 context->PSSetShaderResources( 3, 1, s_nullSRVs );
                 context->PSSetShaderResources( 8, 1, s_nullSRVs );
+                context->PSSetShaderResources( 14, 1, s_nullSRVs );
             };
         } );
     }
@@ -275,8 +277,9 @@ void D3D11ForwardPlusRenderer::AddGeometryPasses(
             }
             m_TileConstantBuffer->BindToPixelShader( 5 );
              
-            // --- Bind CSM shadow map at t3 ---
+            // --- Bind CSM depth at t3 and MSM moments at t14 ---
             shadowMaps->BindToPixelShader( context.Get(), 3 );
+            shadowMaps->BindMomentsToPixelShader( context.Get(), 14 );
             shadowMaps->BindSampler( context.Get(), 2 );
 
             engine.GetBlueNoiseTexture()->BindToPixelShader( 6 );
@@ -321,6 +324,7 @@ void D3D11ForwardPlusRenderer::AddGeometryPasses(
             context->PSSetShaderResources( 6, 1, s_nullSRVs );
             context->PSSetShaderResources( 8, 4, s_nullSRVs );
             context->PSSetShaderResources( 12, 1, s_nullSRVs );
+            context->PSSetShaderResources( 14, 1, s_nullSRVs );
 
             // Restore default depth comparison
             depthState.SetDefault();

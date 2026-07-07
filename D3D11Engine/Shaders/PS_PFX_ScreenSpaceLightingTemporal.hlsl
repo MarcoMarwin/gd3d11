@@ -64,19 +64,19 @@ float SoftContact(float2 uv, float currentAlpha)
     float centerDepth = TX_Depth.SampleLevel(SS_Linear, uv, 0).r;
     float centerZ = ViewZ(centerDepth);
     float2 centerNormal = TX_Normals.SampleLevel(SS_Linear, uv, 0).xy;
-    float sum = currentAlpha * 2.0f;
-    float weightSum = 2.0f;
+    float sum = currentAlpha * 1.75f;
+    float weightSum = 1.75f;
     [unroll]
     for (int y = -1; y <= 1; ++y) {
         [unroll]
         for (int x = -1; x <= 1; ++x) {
             if (x == 0 && y == 0) continue;
-            float2 sampleUV = saturate(uv + float2(x, y) * SSL_InvResolution * 1.75f);
+            float2 sampleUV = saturate(uv + float2(x, y) * SSL_InvResolution * 2.0f);
             float sampleDepth = TX_Depth.SampleLevel(SS_Linear, sampleUV, 0).r;
             float dz = abs(ViewZ(sampleDepth) - centerZ);
             float2 sampleNormal = TX_Normals.SampleLevel(SS_Linear, sampleUV, 0).xy;
             float normalWeight = pow(1.0f - saturate(length(centerNormal - sampleNormal) * 1.6f), 6.0f);
-            float distWeight = (abs(x) + abs(y) == 2) ? 0.55f : 0.9f;
+            float distWeight = (abs(x) + abs(y) == 2) ? 0.60f : 0.95f;
             float w = exp(-dz * 0.010f) * normalWeight * distWeight;
             sum += TX_Raw.SampleLevel(SS_Linear, sampleUV, 0).a * w;
             weightSum += w;
