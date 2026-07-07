@@ -64,23 +64,24 @@ float SoftContact(float2 uv, float currentAlpha)
     float centerDepth = TX_Depth.SampleLevel(SS_Linear, uv, 0).r;
     float centerZ = ViewZ(centerDepth);
     float2 centerNormal = TX_Normals.SampleLevel(SS_Linear, uv, 0).xy;
-    float sum = currentAlpha * 1.75f;
-    float weightSum = 1.75f;
+    float sum = currentAlpha * 1.25f;
+    float weightSum = 1.25f;
+    static const float2 offsets[4] = {
+        float2(-1.0f, 0.0f),
+        float2(1.0f, 0.0f),
+        float2(0.0f, -1.0f),
+        float2(0.0f, 1.0f)
+    };
     [unroll]
-    for (int y = -1; y <= 1; ++y) {
-        [unroll]
-        for (int x = -1; x <= 1; ++x) {
-            if (x == 0 && y == 0) continue;
-            float2 sampleUV = saturate(uv + float2(x, y) * SSL_InvResolution * 2.0f);
-            float sampleDepth = TX_Depth.SampleLevel(SS_Linear, sampleUV, 0).r;
-            float dz = abs(ViewZ(sampleDepth) - centerZ);
-            float2 sampleNormal = TX_Normals.SampleLevel(SS_Linear, sampleUV, 0).xy;
-            float normalWeight = pow(1.0f - saturate(length(centerNormal - sampleNormal) * 1.6f), 6.0f);
-            float distWeight = (abs(x) + abs(y) == 2) ? 0.60f : 0.95f;
-            float w = exp(-dz * 0.010f) * normalWeight * distWeight;
-            sum += TX_Raw.SampleLevel(SS_Linear, sampleUV, 0).a * w;
-            weightSum += w;
-        }
+    for (int i = 0; i < 4; ++i) {
+        float2 sampleUV = saturate(uv + offsets[i] * SSL_InvResolution * 2.0f);
+        float sampleDepth = TX_Depth.SampleLevel(SS_Linear, sampleUV, 0).r;
+        float dz = abs(ViewZ(sampleDepth) - centerZ);
+        float2 sampleNormal = TX_Normals.SampleLevel(SS_Linear, sampleUV, 0).xy;
+        float normalWeight = pow(1.0f - saturate(length(centerNormal - sampleNormal) * 1.6f), 6.0f);
+        float w = exp(-dz * 0.010f) * normalWeight * 0.95f;
+        sum += TX_Raw.SampleLevel(SS_Linear, sampleUV, 0).a * w;
+        weightSum += w;
     }
     return sum / max(weightSum, 0.0001f);
 }
@@ -91,21 +92,40 @@ PS_OUTPUT PSMain(PS_INPUT input)
     float2 uv = input.vTexcoord;
     float4 minV, maxV;
     float4 current = NeighborhoodCurrent(uv, minV, maxV);
-    current.a = SoftContact(uv, current.a);
+    [branch]
+    if (SSL_EnableContact > 0.5f)
+        current.a = SoftContact(uv, current.a);
+    else
+        current.a = 0.0f;
     float depth = TX_Depth.SampleLevel(SS_Linear, uv, 0).r;
     float2 velocity = TX_Velocity.SampleLevel(SS_Linear, uv, 0).rg;
     float2 prevUV = uv + velocity;
     float valid = SSL_HistoryValid;
     valid *= step(0.0f, prevUV.x) * step(prevUV.x, 1.0f) * step(0.0f, prevUV.y) * step(prevUV.y, 1.0f);
     float prevDepth = TX_PrevDepth.SampleLevel(SS_Linear, saturate(prevUV), 0).r;
-    float depthDiff = abs(ViewZ(depth) - ViewZ(prevDepth));
-    valid *= 1.0f - smoothstep(40.0f, 180.0f, depthDiff);
+    float currentViewZ = ViewZ(depth);
+    float depthDiff = abs(currentViewZ - ViewZ(prevDepth));
+    float depthThreshold = max(12.0f, abs(currentViewZ) * 0.02f);
+    valid *= 1.0f - smoothstep(depthThreshold, depthThreshold * 4.0f, depthDiff);
+
+    float2 centerNormal = TX_Normals.SampleLevel(SS_Linear, uv, 0).xy;
+    float2 reprojectedNormal = TX_Normals.SampleLevel(SS_Linear, saturate(prevUV), 0).xy;
+    valid *= 1.0f - smoothstep(0.10f, 0.35f, length(centerNormal - reprojectedNormal));
+
     float4 history = TX_History.SampleLevel(SS_Linear, saturate(prevUV), 0);
-    float clampMargin = lerp(0.04f, 0.02f, saturate(SSL_FSR3Active));
-    history = clamp(history, minV - clampMargin, maxV + clampMargin);
+    float fsr3 = saturate(SSL_FSR3Active);
+    float colorClampMargin = lerp(0.08f, 0.12f, fsr3);
+    history.rgb = clamp(history.rgb, minV.rgb - colorClampMargin, maxV.rgb + colorClampMargin);
+    float contactClampMargin = lerp(0.06f, 0.16f, fsr3);
+    history.a = clamp(history.a, minV.a - contactClampMargin, maxV.a + contactClampMargin);
+
     float motion = saturate(length(velocity) * 240.0f);
-    float historyWeight = lerp(0.86f, 0.45f, motion) * valid;
-    float contactHistoryWeight = historyWeight * lerp(1.0f, 0.45f, saturate(SSL_FSR3Active));
+    float historyWeight = lerp(0.92f, 0.55f, motion) * valid;
+    float contactDelta = abs(current.a - history.a);
+    float contactStability = 1.0f - smoothstep(0.05f, 0.30f, contactDelta);
+    float contactBaseWeight = lerp(0.90f, 0.60f, motion) * valid;
+    float fsr3Retention = lerp(0.72f, 0.90f, contactStability);
+    float contactHistoryWeight = contactBaseWeight * lerp(1.0f, fsr3Retention, fsr3);
     output.Lighting.rgb = lerp(current.rgb, history.rgb, historyWeight);
     output.Lighting.a = lerp(current.a, history.a, contactHistoryWeight);
     output.Lighting.rgb = max(output.Lighting.rgb, 0.0f);

@@ -336,8 +336,11 @@ float4 PSMain(PS_INPUT Input) : SV_TARGET
         ? saturate(AC_MoonVisibility)
         : saturate(AC_SunVisibility);
     float directNoL = dot(normalize(SQ_LightDirectionVS), normal);
-    if (AC_EnableSSS > 0.5f && twoSidedBacklitMaterial > 0.5f)
-        directNoL = abs(directNoL);
+    if (AC_EnableSSS > 0.5f && twoSidedBacklitMaterial > 0.5f) {
+        float geometricContour = pow(1.0f - saturate(abs(dot(normal, V))), 2.5f);
+        directNoL = saturate(directNoL)
+            + saturate(-directNoL) * geometricContour * saturate(AC_SSSIntensity) * 0.70f;
+    }
     float sun = saturate(directNoL * shadow) * mainLightVisibility;
     spec = pow(spec, specPower) * specIntensity;
 

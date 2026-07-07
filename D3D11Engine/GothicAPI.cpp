@@ -94,6 +94,9 @@ namespace {
             || name.find( "ground_fog" ) != std::string::npos
             || name.find( "lavafog" ) != std::string::npos
             || name.find( "waterfog" ) != std::string::npos
+            || name.find( "firesmoke" ) != std::string::npos
+            || name.find( "watersmoke" ) != std::string::npos
+            || name.find( "groundsmoke" ) != std::string::npos
             || name.find( "mist" ) != std::string::npos
             || name.find( "nebel" ) != std::string::npos
             || name.find( "dunst" ) != std::string::npos
@@ -3494,9 +3497,7 @@ void GothicAPI::DrawParticleFX( zCVob* source, zCParticleFX* fx, ParticleFrameDa
         const bool waterfallParticle = IsWaterfallParticleTexture( texture );
         const bool groundFogParticle = IsGroundFogParticleVob( source ) || IsGroundFogParticleTexture( texture );
         const int sourceBlendMode = static_cast<int>(fx->GetEmitter()->GetVisAlphaFunc());
-        const int blendMode = groundFogParticle
-            ? static_cast<int>(zRND_ALPHA_FUNC_BLEND)
-            : sourceBlendMode;
+        const int blendMode = sourceBlendMode;
         const bool emissiveParticle = !groundFogParticle && !waterfallParticle
             && IsEmissiveParticleTexture( texture, sourceBlendMode );
         const ParticleBatchKey batchKey = { texture, blendMode };
@@ -3587,6 +3588,12 @@ void GothicAPI::DrawParticleFX( zCVob* source, zCParticleFX* fx, ParticleFrameDa
             }
 
             color.w = std::max( color.w, 0.0f );
+            if ( groundFogParticle ) {
+                // The particle VS gamma-encodes alpha for legacy effects. Undo it
+                // here only for translucent ground fog so its original linear
+                // emitter opacity survives the shader path.
+                color.w = std::pow( color.w, 1.0f / 2.2f );
+            }
 
             ii.position = p->PositionWS;
             ii.color = color;

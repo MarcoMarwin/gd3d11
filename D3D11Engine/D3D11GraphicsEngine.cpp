@@ -89,34 +89,6 @@ struct SkyVelocityConstantBuffer {
     XMFLOAT2 JitterOffset;
     XMFLOAT2 Padding;
 };
-static bool IsNoonWorldShadowCullingRisk() {
-    auto game = oCGame::GetGame();
-    if ( !game || !game->_zCSession_world ) {
-        return false;
-    }
-
-    zCSkyController_Outdoor* skyController = game->_zCSession_world->GetSkyControllerOutdoor();
-    if ( !skyController ) {
-        return false;
-    }
-
-    const float masterTime = skyController->GetMasterTime();
-    if ( !std::isfinite( masterTime ) ) {
-        return false;
-    }
-
-    const float gameHour = std::fmod( masterTime * 24.0f + 12.0f, 24.0f );
-    const float minutesFromNoon = std::abs( gameHour * 60.0f - 12.0f * 60.0f );
-    if ( minutesFromNoon > 1.0f ) {
-        return false;
-    }
-
-    if ( auto sky = Engine::GAPI->GetSky() ) {
-        return std::abs( sky->GetAtmosphereCB().AC_LightPos.y ) > 0.92f;
-    }
-    return true;
-}
-
 static void UpdateCharacterInteractionPositions( VS_ExConstantBuffer_Wind& windBuff ) {
     for ( int i = 0; i < MAX_CHARACTER_INTERACTION_INFLUENCERS; ++i ) {
         windBuff.interactionPositions[i] = float4( 0, 0, 0, 0 );
@@ -6966,8 +6938,7 @@ void XM_CALLCONV D3D11GraphicsEngine::DrawWorldAroundForWorldShadow( FXMVECTOR p
 
     Frustum relaxedWorldShadowFrustum;
     const Frustum* worldMeshShadowFrustum = currentFrustum;
-    const bool relaxWorldShadowCulling = !enableCulling
-        || (params.CascadeIndex != -1 && IsNoonWorldShadowCullingRisk());
+    const bool relaxWorldShadowCulling = !enableCulling;
     if ( relaxWorldShadowCulling ) {
         relaxedWorldShadowFrustum = Frustum::AlwaysContainingFrustum();
         worldMeshShadowFrustum = &relaxedWorldShadowFrustum;

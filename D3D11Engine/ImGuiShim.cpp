@@ -421,6 +421,28 @@ void ImGuiShim::RenderLoop()
 {
     ImGui_ImplDX11_NewFrame();
     ImGui_ImplWin32_NewFrame();
+
+    // Keep the settings UI at a stable physical size when the game resolution
+    // changes. Mouse coordinates use the same virtual canvas, so the smooth OS
+    // cursor and ImGui hit targets remain aligned.
+    if ( SettingsVisible && OutputWindow ) {
+        RECT clientRect = {};
+        POINT cursorPos = {};
+        if ( GetClientRect( OutputWindow, &clientRect )
+            && GetCursorPos( &cursorPos )
+            && ScreenToClient( OutputWindow, &cursorPos ) ) {
+            const float clientWidth = static_cast<float>( std::max<LONG>( 1, clientRect.right - clientRect.left ) );
+            const float clientHeight = static_cast<float>( std::max<LONG>( 1, clientRect.bottom - clientRect.top ) );
+            const float uiScale = std::max( 0.01f, std::min( clientWidth / 1920.0f, clientHeight / 1080.0f ) );
+            const INT2 backbuffer = Engine::GraphicsEngine->GetBackbufferResolution();
+            ImGuiIO& io = ImGui::GetIO();
+            io.DisplaySize = ImVec2( clientWidth / uiScale, clientHeight / uiScale );
+            io.DisplayFramebufferScale = ImVec2(
+                static_cast<float>( std::max( 1, backbuffer.x ) ) / io.DisplaySize.x,
+                static_cast<float>( std::max( 1, backbuffer.y ) ) / io.DisplaySize.y );
+            io.AddMousePosEvent( cursorPos.x / uiScale, cursorPos.y / uiScale );
+        }
+    }
     ImGui::NewFrame();
 
     // Keep the F11 settings cursor on the OS cursor path; an ImGui-drawn cursor only updates with game frames.
@@ -1042,20 +1064,14 @@ void ImGuiShim::RenderSettingsWindow()
     IM_ASSERT( ImGui::GetCurrentContext() != NULL && "Missing Dear ImGui context!" );
     IMGUI_CHECKVERSION();
 
-    auto windowSize = CurrentResolution;
-    // Get the center point of the screen, then shift the window by 50% of its size in both directions.
-    // TIP: Don't use ImGui::GetMainViewport for framebuffer sizes since GD3D11 can undersample or oversample the game.
-    // Use whatever the resolution is spit out instead.
+    const ImVec2 displaySize = ImGui::GetIO().DisplaySize;
+    const INT2 windowSize(
+        std::max( 1, static_cast<int>( std::round( displaySize.x ) ) ),
+        std::max( 1, static_cast<int>( std::round( displaySize.y ) ) ) );
     auto& style = ImGui::GetStyle();
     const float framebufferWidth = static_cast<float>( windowSize.x );
     const float framebufferHeight = static_cast<float>( windowSize.y );
-    // Keep the F11 menu usable at low output resolutions such as 800x600.
-    // The layout is intentionally still two-column, but fixed widths and font
-    // scale shrink together and the window is capped to the visible framebuffer.
-    const float menuScale = std::clamp(
-        std::min( (framebufferWidth - 40.0f) / 1080.0f, (framebufferHeight - 40.0f) / 680.0f ),
-        0.65f,
-        1.0f );
+    const float menuScale = 1.0f;
     const float labelWidth = std::round( 275.0f * menuScale );
     const float controlWidth = std::round( 250.0f * menuScale );
     const float footerHeight = std::round( 30.0f * menuScale );
@@ -1089,7 +1105,7 @@ void ImGuiShim::RenderSettingsWindow()
             ImVec2( 0.5f, 0.5f ) );
     }
     if ( ImGui::Begin( settingsLabel, nullptr, ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoTitleBar ) ) {
-        ImGui::SetWindowFontScale( menuScale );
+        ImGui::SetWindowFontScale( 1.0f );
         if ( centerSettingsWindow ) {
             const ImVec2 actualWindowSize = ImGui::GetWindowSize();
             ImGui::SetWindowPos( ImVec2(
