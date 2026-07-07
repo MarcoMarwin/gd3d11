@@ -272,3 +272,13 @@ Kurze, append-only Dokumentation der von Codex gepushten Renderer-Builds.
 - 12-Uhr-Schatten: Shadow-Kamera-Pullback und Cascade-Update nahe Zenith stabilisiert, damit die Sonnen-Schattenmap um Punkt 12 Uhr nicht kurz ausfaellt.
 - TAA/Velocity: der Depth-Motion-Vector-Fallback nutzt nun dieselbe Reprojektionskonvention wie Geometry- und Sky-Velocities (`previousUV - currentUV`). Der normale MRT-Velocity-/FSR3-Pfad bleibt unveraendert.
 - Pruefung: AGENTS-Regeln gelesen; Buildnummer aus outputs ermittelt; gezielte Shader-/Konventionspruefung, Diffkontrolle, BOM-/Escape-Sequenzpruefung und git diff --check statisch kontrolliert. Kein vollstaendiger lokaler C++-/Shader-Build.
+
+## Build 102 (MSM-Pipeline, Shadow-/PFX-Korrekturen und F11-Feinschliff)
+
+- MSM: echte Moment-Shadow-Map-Pipeline mit optimierter 4-Moment-Kodierung, separaten Moment-Ressourcen, per-Cascade-Mips und lazy Cascade Updates nach valider Erstbefuellung integriert. Shadow Quality bleibt unabhaengig vom Filter und erlaubt auch Extreme/8192 mit MSM.
+- MSM-Korrektur: Receiver vor dem ersten Moment werden wieder explizit als beleuchtet bewertet, damit Licht und Schatten nicht invertiert wirken und der Singular-Fallback keine hellen Flaechen abdunkelt.
+- 12-Uhr-Schatten: den wirkungslosen Projektions-Clamp entfernt und stattdessen die World-Mesh-Shadow-Culling-Entscheidung im kritischen Noon-Fenster entschaerft, passend zur beobachteten Beschraenkung auf Weltgeometrie.
+- Groundfog-PFX: Build-099-Texturinterpolation fuer nebelartige Partikel wiederhergestellt, damit grossflaechige Groundfog-/Rauch-PFX ueber Wasser wieder sichtbar werden.
+- Contact Shadows: F11-Layout korrigiert, steile/vertikale Flaechen weniger hart ausgeschlossen und die FSR3-History fuer Contact-Alpha enger geklemmt, um Nachziehen und Flackern zu reduzieren.
+- F11: Shadow Filter sauber ueber Shadow Softness platziert, Titelbalken entfernt und Settings-Cursor auf den OS-Cursorpfad gelegt, damit er nicht mit niedriger Render-FPS mitruckelt.
+- Pruefung: AGENTS-Regeln gelesen; gezielte Shader-, UI-, Workflow-/Buildnummer-, Diff- und Praeprozessorpruefungen sowie git diff --check statisch kontrolliert. Kein vollstaendiger lokaler C++-/Shader-Build.

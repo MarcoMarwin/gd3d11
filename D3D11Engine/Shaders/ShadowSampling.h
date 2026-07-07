@@ -248,6 +248,11 @@ float EstimateMSMLit(float4 moments, float receiverDepth)
     moments = saturate(DecodeShadowMoments(moments));
     receiverDepth = saturate(receiverDepth);
 
+    // If the receiver is in front of the first stored moment, it cannot be occluded.
+    // Without this guard the singular-moment fallback darkens lit surfaces.
+    if (receiverDepth <= moments.x)
+        return 1.0f;
+
     // Hamburger four-moment reconstruction. A tiny bias towards a broad
     // distribution keeps the Hankel matrix invertible on nearly flat texels.
     moments = lerp(moments, float4(0.5f, 0.5f, 0.5f, 0.5f), 0.00003f);
