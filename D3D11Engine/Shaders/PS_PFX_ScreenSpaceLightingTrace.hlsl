@@ -21,7 +21,7 @@ cbuffer ScreenSpaceLightingConstantBuffer : register( b0 )
     float SSL_EnableContact;
     float SSL_EnableGI;
     float SSL_HistoryValid;
-    float SSL_Pad;
+    float SSL_FSR3Active;
 };
 
 struct PS_INPUT { float2 vTexcoord : TEXCOORD0; float3 vEyeRay : TEXCOORD1; float4 vPosition : SV_POSITION; };
@@ -83,8 +83,9 @@ float ComputeContact(float2 uv, float depth)
     float3 vp = ViewPosition(uv, depth);
     float3 n = ViewNormal(uv);
     float3 l = normalize(SSL_LightDirectionVS);
-    float facing = saturate(dot(n, l));
-    if (facing <= 0.01f) return 0.0f;
+    float nl = dot(n, l);
+    if (nl <= -0.20f) return 0.0f;
+    float facing = saturate(nl * 0.85f + 0.15f);
 
     float materialClass = TX_Material.SampleLevel(SS_Linear, saturate(uv), 0).r;
     float npcMaterial = (materialClass < -0.5f && materialClass > -2.0f) ? 1.0f : 0.0f;

@@ -211,6 +211,7 @@ private:
     std::array<std::unique_ptr<D3D11RenderQueue>, MAX_CSM_CASCADES> m_RenderQueues;
     std::vector<float> m_CascadeSplits;
     std::array<bool, MAX_CSM_CASCADES> m_ShouldUpdateCascade;
+    bool m_MSMomentDataValid = false;
     XMFLOAT3 m_WorldShadowPos;
 
     std::unique_ptr<D3D11TiledDeferredShading> m_TiledDeferred;

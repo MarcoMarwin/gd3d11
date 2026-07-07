@@ -423,7 +423,9 @@ void ImGuiShim::RenderLoop()
     ImGui_ImplWin32_NewFrame();
     ImGui::NewFrame();
 
-    ImGui::GetIO().MouseDrawCursor = GetIsActive() && INT2( ImGui::GetMainViewport()->Size.x, ImGui::GetMainViewport()->Size.y ) != Engine::GraphicsEngine->GetResolution();
+    // Keep the F11 settings cursor on the OS cursor path; an ImGui-drawn cursor only updates with game frames.
+    ImGui::GetIO().MouseDrawCursor = !SettingsVisible && GetIsActive()
+        && INT2( ImGui::GetMainViewport()->Size.x, ImGui::GetMainViewport()->Size.y ) != Engine::GraphicsEngine->GetResolution();
 
     static zSTRING GDX_IMGUI_BEGINFRAME = "GDX_IMGUI_BEGINFRAME";
     static zSTRING GDX_IMGUI_ENDFRAME = "GDX_IMGUI_ENDFRAME";
@@ -1068,7 +1070,7 @@ void ImGuiShim::RenderSettingsWindow()
         std::round( style.ItemSpacing.y * menuScale ) );
     ImVec2 buttonWidth( labelWidth, 0 );
 
-    static const char* settingsLabel = "GD3D11 Settings";
+    static const char* settingsLabel = "##GD3D11Settings";
 
     ShaderCategory shadersToReload = ShaderCategory::None;
 
@@ -1086,7 +1088,7 @@ void ImGuiShim::RenderSettingsWindow()
             ImGuiCond_Always,
             ImVec2( 0.5f, 0.5f ) );
     }
-    if ( ImGui::Begin( settingsLabel, nullptr, ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoResize ) ) {
+    if ( ImGui::Begin( settingsLabel, nullptr, ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoTitleBar ) ) {
         ImGui::SetWindowFontScale( menuScale );
         if ( centerSettingsWindow ) {
             const ImVec2 actualWindowSize = ImGui::GetWindowSize();
@@ -1294,7 +1296,9 @@ void ImGuiShim::RenderSettingsWindow()
             } ) ) {
                 ImGui::EndCombo();
             }
-            ImGui::SetItemTooltip( "Controls sun, moon, and point-light shadow quality." );
+            ImGui::SetItemTooltip( settings.ShadowFilterMode == GothicRendererSettings::E_ShadowFilterMode::SHADOW_FILTER_MSM && settings.ShadowMapSize >= 8192
+                ? "Controls sun, moon, and point-light shadow quality. MSM Extreme is very VRAM and bandwidth intensive."
+                : "Controls sun, moon, and point-light shadow quality." );
 
             static const std::vector<std::pair<const char*, GothicRendererSettings::E_ShadowFilterMode>> shadowFilterModes = {
                 {"Simple PCF", GothicRendererSettings::E_ShadowFilterMode::SHADOW_FILTER_SIMPLE},
@@ -1302,7 +1306,9 @@ void ImGuiShim::RenderSettingsWindow()
             };
             ImText( "Shadow Filter", buttonWidth ); ImGui::SameLine();
             ImGui::BeginDisabled( FeatureLevel10Compatibility );
-            if ( ImComboBoxC( "##ShadowFilter", shadowFilterModes, &settings.ShadowFilterMode, [&shadersToReload] {
+            if ( ImComboBoxC( "##ShadowFilter", shadowFilterModes, &settings.ShadowFilterMode, [&settings, &shadersToReload] {
+                settings.ShadowMapSize = NormalizeShadowMapSize( settings.ShadowMapSize );
+                settings.PointlightShadowMapSize = PointlightShadowSizeForWorldShadowSize( settings.ShadowMapSize );
                 shadersToReload |= ShaderCategory::LightsAndShadows;
             } ) ) {
                 ImGui::EndCombo();
@@ -1436,8 +1442,9 @@ void ImGuiShim::RenderSettingsWindow()
             ImGui::EndDisabled();
             ImGui::SetItemTooltip( "Controls ambient-occlusion strength." );
 
-            ImText( "Contact Shadows", { inlineToggleLabelWidth, buttonWidth.y } ); ImGui::SameLine();
-            if ( CoupledStrengthCheckbox( "##Enable Contact Shadows", "ContactShadowStrength",                    &settings.EnableContactShadows, &settings.ContactShadowStrength, 1.0f ) ) {
+            ImText( "Contact Shadows", { buttonWidth.x - ImGui::GetFrameHeight() - style.ItemSpacing.x, buttonWidth.y } ); ImGui::SameLine();
+            if ( CoupledStrengthCheckbox( "##Enable Contact Shadows", "ContactShadowStrength",
+                    &settings.EnableContactShadows, &settings.ContactShadowStrength, 1.0f ) ) {
                 shadersToReload |= ShaderCategory::Other;
             }
             ImGui::SetItemTooltip( "Adds short screen-space shadows at object contact points." );

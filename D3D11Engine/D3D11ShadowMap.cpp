@@ -269,17 +269,6 @@ static void CalculateCascadeMatrices(
         }
     }
 
-    // Scene bounds may become tighter than the active frustum when the sun crosses
-    // noon. Keep every receiver in front of the near plane and guarantee a valid
-    // projection interval even at the orbit's exact Z sign change.
-    orthoNear = std::min( orthoNear, minLightZ - 100.0f );
-    orthoFar = std::max( orthoFar, maxLightZ + 100.0f );
-    if ( !std::isfinite( orthoNear ) || !std::isfinite( orthoFar )
-        || orthoFar <= orthoNear + 100.0f ) {
-        orthoNear = minLightZ - 1000.0f;
-        orthoFar = maxLightZ + 5000.0f;
-    }
-
     const XMMATRIX crProjRepl = XMMatrixTranspose( XMMatrixOrthographicLH(
         cascadeSize, cascadeSize, orthoNear, orthoFar ) );
 
@@ -657,6 +646,7 @@ XRESULT D3D11ShadowMap::PrepareRender()
     const XMVECTOR lastCascadeShadowUp = BuildStableShadowUp( lastCascadeViewDir, c_XM_Up );
 
     if ( !isOutdoor ) {
+        m_MSMomentDataValid = false;
         if ( settings.EnableShadows && lastBspMode == zBSP_MODE_OUTDOOR ) {
             // Clear all cascade DSVs
             if ( m_useAtlas && m_shadowAtlas ) {
@@ -698,10 +688,19 @@ XRESULT D3D11ShadowMap::PrepareRender()
 
         // Increment frame counter for temporal cascade updates
         perFrameCascadeData.frameCount++;
-        bool lazyCascadeUpdate = (m_useAtlas
-            || settings.ShadowFilterMode == GothicRendererSettings::SHADOW_FILTER_MSM)
-            ? false
-            : settings.DebugSettings.ShadowCascades.LazyCascadeUpdate;
+        const bool useMSM = !m_useAtlas
+            && !FeatureLevel10Compatibility
+            && settings.ShadowFilterMode == GothicRendererSettings::SHADOW_FILTER_MSM;
+        if ( !useMSM ) {
+            m_MSMomentDataValid = false;
+        }
+        const bool msmNeedsFullRefresh = useMSM
+            && (!m_MSMomentDataValid
+                || !m_cascadedShadowMap
+                || !m_cascadedShadowMap->HasMomentResources( static_cast<UINT>(numCascades) ));
+        bool lazyCascadeUpdate = !m_useAtlas
+            && !msmNeedsFullRefresh
+            && settings.DebugSettings.ShadowCascades.LazyCascadeUpdate;
         const bool overheadLight = std::abs( XMVectorGetX( XMVector3Dot( shadowViewDir, c_XM_Up ) ) ) > 0.94f
             || std::abs( XMVectorGetX( XMVector3Dot( lastCascadeViewDir, c_XM_Up ) ) ) > 0.94f;
         if ( overheadLight ) {
@@ -1206,7 +1205,7 @@ XRESULT D3D11ShadowMap::DrawWorldShadow( )
         && !FeatureLevel10Compatibility
         && settings.ShadowFilterMode == GothicRendererSettings::SHADOW_FILTER_MSM
         && m_cascadedShadowMap != nullptr;
-    if ( useMSMMoments && FAILED( m_cascadedShadowMap->EnsureMomentResources() ) ) {
+    if ( useMSMMoments && FAILED( m_cascadedShadowMap->EnsureMomentResources( static_cast<UINT>(numCascades) ) ) ) {
         LogError() << "MSM disabled for this frame because its moment resources could not be created";
         useMSMMoments = false;
     }
@@ -1258,6 +1257,16 @@ XRESULT D3D11ShadowMap::DrawWorldShadow( )
 
             Engine::GAPI->SetCameraReplacementPtr( nullptr );
             m_RenderQueues[cascadeIdx]->Reset();
+        }
+
+        if ( useMSMMoments ) {
+            for ( int cascadeIdx = 0; cascadeIdx < numCascades; ++cascadeIdx ) {
+                if ( m_ShouldUpdateCascade[cascadeIdx] ) {
+                    m_cascadedShadowMap->GenerateMomentMips(
+                        m_context.Get(), static_cast<UINT>(cascadeIdx) );
+                }
+            }
+            m_MSMomentDataValid = true;
         }
     }
 

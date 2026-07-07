@@ -418,6 +418,8 @@ XRESULT D3D11PfxRenderer::RenderScreenSpaceLighting(
     cb.SSL_EnableContact = contactActive ? 1.0f : 0.0f;
     cb.SSL_EnableGI = giActive ? 1.0f : 0.0f;
     cb.SSL_HistoryValid = ScreenSpaceLightingHistoryValid ? 1.0f : 0.0f;
+    cb.SSL_FSR3Active = (settings.Upscaler == GothicRendererSettings::UPSCALER_FSR_3
+        && settings.AntiAliasingMode == GothicRendererSettings::AA_FSR) ? 1.0f : 0.0f;
     cb.SSL_FrameIndex = static_cast<float>(ScreenSpaceLightingFrameIndex++ & 1023u);
     if ( sky ) {
         const XMFLOAT3 mainLightDirection = sky->GetMainLightDirection();
@@ -453,6 +455,8 @@ XRESULT D3D11PfxRenderer::RenderScreenSpaceLighting(
     auto temporalPS = engine->GetShaderManager().GetPShader( PShaderID::PS_PFX_ScreenSpaceLightingTemporal );
     temporalPS->Apply();
     cb.SSL_HistoryValid = ScreenSpaceLightingHistoryValid ? 1.0f : 0.0f;
+    cb.SSL_FSR3Active = (settings.Upscaler == GothicRendererSettings::UPSCALER_FSR_3
+        && settings.AntiAliasingMode == GothicRendererSettings::AA_FSR) ? 1.0f : 0.0f;
     temporalPS->GetBuffer( "ScreenSpaceLightingConstantBuffer" ).Update( &cb ).Bind();
 
     ID3D11RenderTargetView* temporalRTVs[2] = {

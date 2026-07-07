@@ -205,11 +205,13 @@ float SampleShadowMapDepthLitBorder(float2 cascadeUV, int cascadeIndex)
         return 1.0f;
     }
 
-    return SampleShadowMapLevel(cascadeUV, cascadeIndex);
+    float halfTexel = 0.5f / SQ_ShadowmapSize;
+    float2 safeUV = clamp(cascadeUV, halfTexel, 1.0f - halfTexel);
+    return SampleShadowMapLevel(safeUV, cascadeIndex);
 }
 
 #if SHD_FILTER_MSM && !SHADOW_ATLAS
-float4 SampleShadowMomentsLitBorder(float2 cascadeUV, int cascadeIndex)
+float4 SampleShadowMomentsLitBorder(float2 cascadeUV, int cascadeIndex, float mipLevel)
 {
     if (cascadeUV.x < 0.0f || cascadeUV.x > 1.0f ||
         cascadeUV.y < 0.0f || cascadeUV.y > 1.0f)
@@ -220,7 +222,7 @@ float4 SampleShadowMomentsLitBorder(float2 cascadeUV, int cascadeIndex)
     float halfTexel = 0.5f / SQ_ShadowmapSize;
     float2 safeUV = clamp(cascadeUV, halfTexel, 1.0f - halfTexel);
     return TX_ShadowMomentArray.SampleLevel(
-        SS_Linear, float3(safeUV, (float)cascadeIndex), 0);
+        SS_Linear, float3(safeUV, (float)cascadeIndex), mipLevel);
 }
 #endif
 
@@ -235,13 +237,16 @@ float4 DecodeShadowMoments(float4 optimized)
         0.0319417555f, -0.1722823173f, -0.2758014811f, -0.3376131734f));
 }
 
+float ReduceMSMLightBleeding(float litProbability)
+{
+    const float bleedReduction = 0.04f;
+    return saturate((litProbability - bleedReduction) / (1.0f - bleedReduction));
+}
+
 float EstimateMSMLit(float4 moments, float receiverDepth)
 {
     moments = saturate(DecodeShadowMoments(moments));
     receiverDepth = saturate(receiverDepth);
-
-    if (receiverDepth <= moments.x)
-        return 1.0f;
 
     // Hamburger four-moment reconstruction. A tiny bias towards a broad
     // distribution keeps the Hankel matrix invertible on nearly flat texels.
@@ -258,7 +263,7 @@ float EstimateMSMLit(float4 moments, float receiverDepth)
     float variance = max(D22, 0.00002f);
     float vsmFallback = variance / (variance + depthDelta * depthDelta);
     if (D22 <= 0.000001f || D33D22 <= 0.000001f)
-        return saturate(vsmFallback);
+        return ReduceMSMLightBleeding(vsmFallback);
 
     float invD22 = rcp(D22);
     float L32 = L32D22 * invD22;
@@ -271,13 +276,13 @@ float EstimateMSMLit(float4 moments, float receiverDepth)
     coefficients.x -= dot(coefficients.yz, moments.xy);
 
     if (abs(coefficients.z) <= 0.000001f)
-        return saturate(vsmFallback);
+        return ReduceMSMLightBleeding(vsmFallback);
 
     float p = coefficients.y / coefficients.z;
     float q = coefficients.x / coefficients.z;
     float discriminant = p * p * 0.25f - q;
     if (discriminant < 0.0f)
-        return saturate(vsmFallback);
+        return ReduceMSMLightBleeding(vsmFallback);
 
     float root = sqrt(discriminant);
     float z1 = -p * 0.5f - root;
@@ -293,12 +298,75 @@ float EstimateMSMLit(float4 moments, float receiverDepth)
 
     float denominator = (z2 - switchValue.y) * (receiverDepth - z1);
     if (abs(denominator) <= 0.000001f)
-        return saturate(vsmFallback);
+        return ReduceMSMLightBleeding(vsmFallback);
 
     float quotient = (switchValue.x * z2
         - moments.x * (switchValue.x + z2) + moments.y) / denominator;
     float shadowed = switchValue.z + switchValue.w * quotient;
-    return saturate(1.0f - shadowed);
+    return ReduceMSMLightBleeding(1.0f - shadowed);
+}
+
+float SampleMSMBlockerDepth(float2 cascadeUV, int cascadeIndex)
+{
+    if (cascadeUV.x < 0.0f || cascadeUV.x > 1.0f ||
+        cascadeUV.y < 0.0f || cascadeUV.y > 1.0f)
+    {
+        return 1.0f;
+    }
+
+    int shadowSize = max((int)SQ_ShadowmapSize, 1);
+    int2 pixel = clamp(int2(cascadeUV * (float)shadowSize),
+        int2(0, 0), int2(shadowSize - 1, shadowSize - 1));
+    return TX_ShadowmapArray.Load(int4(pixel, cascadeIndex, 0)).r;
+}
+
+float GetMSMCascadeWorldTexelSize(int cascadeIndex)
+{
+    matrix shadowViewProj = SQ_ShadowViewProj[cascadeIndex];
+    float shadowScaleX = length(float3(shadowViewProj[0][0], shadowViewProj[1][0], shadowViewProj[2][0]));
+    float shadowScaleY = length(float3(shadowViewProj[0][1], shadowViewProj[1][1], shadowViewProj[2][1]));
+    float worldSpanX = (shadowScaleX > 1e-6f) ? (2.0f / shadowScaleX) : 0.0f;
+    float worldSpanY = (shadowScaleY > 1e-6f) ? (2.0f / shadowScaleY) : 0.0f;
+    return 0.5f * (worldSpanX + worldSpanY) / max(SQ_ShadowmapSize, 1.0f);
+}
+
+float GetMSMCascadeWorldDepthSpan(int cascadeIndex)
+{
+    matrix shadowViewProj = SQ_ShadowViewProj[cascadeIndex];
+    float depthScale = length(float3(
+        shadowViewProj[0][2], shadowViewProj[1][2], shadowViewProj[2][2]));
+    return (depthScale > 1e-7f) ? rcp(depthScale) : 1.0f;
+}
+
+void FindMSMBlockers(float2 uv, float receiverDepth, int cascadeIndex,
+                     float searchRadius, float2x2 rotMat, float2 screenPos,
+                     out float averageBlockerDepth, out float blockerCount)
+{
+    float blockerDepthSum = 0.0f;
+    blockerCount = 0.0f;
+
+    float centerDepth = SampleMSMBlockerDepth(uv, cascadeIndex);
+    if (centerDepth < receiverDepth)
+    {
+        blockerDepthSum += centerDepth;
+        blockerCount += 1.0f;
+    }
+
+    int startIdx = GetBlueNoiseStartIndex(screenPos, cascadeIndex, 16, 47);
+    [unroll]
+    for (int i = 0; i < 6; ++i)
+    {
+        int sampleIdx = (startIdx + i * 5) & 15;
+        float2 disk = mul(rotMat, g_PoissonDisk16[sampleIdx]);
+        float blockerDepth = SampleMSMBlockerDepth(uv + disk * searchRadius, cascadeIndex);
+        if (blockerDepth < receiverDepth)
+        {
+            blockerDepthSum += blockerDepth;
+            blockerCount += 1.0f;
+        }
+    }
+
+    averageBlockerDepth = blockerDepthSum / max(blockerCount, 1.0f);
 }
 
 float SampleCascadeShadowMSM(float4 vShadowSamplingPos, float2 projectedTexCoords,
@@ -311,26 +379,46 @@ float SampleCascadeShadowMSM(float4 vShadowSamplingPos, float2 projectedTexCoord
     }
 
     float texelSize = 1.0f / SQ_ShadowmapSize;
-    float filterRadius = texelSize * max(0.75f, softness * 1.15f);
+    float receiverDepth = saturate(vShadowSamplingPos.z - bias);
+    float baseRadiusTexels = max(0.75f, softness * 0.90f);
+    float searchRadiusTexels = clamp(2.0f + softness * 2.0f, 3.0f, 12.0f);
     float2x2 rotMat = GetPoissonRotationMatrixForCascade(screenPos, cascadeIndex);
-    int startIdx = GetBlueNoiseStartIndex(screenPos, cascadeIndex, 16, 41);
+    float centerLit = EstimateMSMLit(
+        SampleShadowMomentsLitBorder(projectedTexCoords, cascadeIndex, 0.0f),
+        receiverDepth);
 
-    float4 moments = 0.0f;
-    float weightSum = 0.0f;
+    float averageBlockerDepth;
+    float blockerCount;
+    FindMSMBlockers(projectedTexCoords, receiverDepth, cascadeIndex,
+        searchRadiusTexels * texelSize, rotMat, screenPos,
+        averageBlockerDepth, blockerCount);
+    if (blockerCount <= 0.0f)
+        return centerLit;
 
-    [unroll]
-    for (int i = 0; i < 16; ++i)
+    float filterRadiusTexels = baseRadiusTexels;
+    if (blockerCount > 0.0f)
     {
-        int sampleIdx = (startIdx + i * 5) & 15;
-        float2 disk = mul(rotMat, g_PoissonDisk16[sampleIdx]);
-        float2 sampleUV = projectedTexCoords + disk * filterRadius;
-        float weight = saturate(1.0f - dot(disk, disk) * 0.20f);
-        moments += SampleShadowMomentsLitBorder(sampleUV, cascadeIndex) * weight;
-        weightSum += weight;
+        float worldDepthSeparation = max(receiverDepth - averageBlockerDepth, 0.0f)
+            * GetMSMCascadeWorldDepthSpan(cascadeIndex);
+        float worldTexelSize = max(GetMSMCascadeWorldTexelSize(cascadeIndex), 0.001f);
+        float separationInTexels = worldDepthSeparation / worldTexelSize;
+        float penumbraGrowth = separationInTexels * 0.035f * max(softness, 0.5f);
+        filterRadiusTexels = clamp(baseRadiusTexels + penumbraGrowth,
+            baseRadiusTexels, 24.0f);
     }
+    // MSM is filterable, but the core query has to remain authoritative.
+    // Broad mips are only blended into actual penumbras, so umbrae do not wash out.
+    float momentMip = clamp(log2(max(filterRadiusTexels, 1.0f)) - 1.25f, 0.0f, 4.0f);
+    if (momentMip <= 0.001f)
+        return centerLit;
 
-    moments /= max(weightSum, 0.0001f);
-    return EstimateMSMLit(moments, vShadowSamplingPos.z - bias);
+    float filteredLit = EstimateMSMLit(
+        SampleShadowMomentsLitBorder(projectedTexCoords, cascadeIndex, momentMip),
+        receiverDepth);
+    float penumbraBlend = saturate((filterRadiusTexels - baseRadiusTexels) / 8.0f);
+    float corePreservation = saturate((0.35f - centerLit) / 0.35f);
+    float lit = lerp(centerLit, filteredLit, penumbraBlend);
+    return lerp(lit, min(lit, centerLit), corePreservation);
 }
 #endif
 

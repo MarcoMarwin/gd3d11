@@ -89,6 +89,33 @@ struct SkyVelocityConstantBuffer {
     XMFLOAT2 JitterOffset;
     XMFLOAT2 Padding;
 };
+static bool IsNoonWorldShadowCullingRisk() {
+    auto game = oCGame::GetGame();
+    if ( !game || !game->_zCSession_world ) {
+        return false;
+    }
+
+    zCSkyController_Outdoor* skyController = game->_zCSession_world->GetSkyControllerOutdoor();
+    if ( !skyController ) {
+        return false;
+    }
+
+    const float masterTime = skyController->GetMasterTime();
+    if ( !std::isfinite( masterTime ) ) {
+        return false;
+    }
+
+    const float gameHour = std::fmod( masterTime * 24.0f + 12.0f, 24.0f );
+    const float minutesFromNoon = std::abs( gameHour * 60.0f - 12.0f * 60.0f );
+    if ( minutesFromNoon > 1.0f ) {
+        return false;
+    }
+
+    if ( auto sky = Engine::GAPI->GetSky() ) {
+        return std::abs( sky->GetAtmosphereCB().AC_LightPos.y ) > 0.92f;
+    }
+    return true;
+}
 
 static void UpdateCharacterInteractionPositions( VS_ExConstantBuffer_Wind& windBuff ) {
     for ( int i = 0; i < MAX_CHARACTER_INTERACTION_INFLUENCERS; ++i ) {
@@ -6937,6 +6964,15 @@ void XM_CALLCONV D3D11GraphicsEngine::DrawWorldAroundForWorldShadow( FXMVECTOR p
         currentFrustum = &alwaysContainingFrustum;
     }
 
+    Frustum relaxedWorldShadowFrustum;
+    const Frustum* worldMeshShadowFrustum = currentFrustum;
+    const bool relaxWorldShadowCulling = !enableCulling
+        || (params.CascadeIndex != -1 && IsNoonWorldShadowCullingRisk());
+    if ( relaxWorldShadowCulling ) {
+        relaxedWorldShadowFrustum = Frustum::AlwaysContainingFrustum();
+        worldMeshShadowFrustum = &relaxedWorldShadowFrustum;
+    }
+
     if ( Engine::GAPI->GetRendererState().RendererSettings.DrawWorldMesh ) {
         TracyD3D11ZoneCGX( "Shadows::DrawWorldMesh" );
         auto _1 = RecordGraphicsEvent( GE_NAME( "Shadows::DrawWorldMesh" ) );
@@ -6944,7 +6980,7 @@ void XM_CALLCONV D3D11GraphicsEngine::DrawWorldAroundForWorldShadow( FXMVECTOR p
 
         static thread_local std::vector<WorldMeshSectionInfo*> visibleSections;
         visibleSections.clear();
-        Engine::GAPI->CollectVisibleSections( visibleSections, currentFrustum, false );
+        Engine::GAPI->CollectVisibleSections( visibleSections, worldMeshShadowFrustum, false );
 
         if ( Engine::GAPI->GetRendererState().RendererSettings.DebugSettings.FeatureSet.UseMDI ) {
             MeshInfo* wrappedWorldMesh = Engine::GAPI->GetWrappedWorldMesh();
@@ -6953,12 +6989,12 @@ void XM_CALLCONV D3D11GraphicsEngine::DrawWorldAroundForWorldShadow( FXMVECTOR p
                 && wrappedWorldMesh->MeshIndexBuffer
                 && wrappedWorldMesh->MeshShadowIndexBuffer
                 ) {
-                ShadowPass_DrawWorldMesh_Indirect( visibleSections, currentFrustum, writeShadowMoments );
+                ShadowPass_DrawWorldMesh_Indirect( visibleSections, worldMeshShadowFrustum, writeShadowMoments );
             } else {
-                ShadowPass_DrawWorldMesh( visibleSections, currentFrustum, writeShadowMoments );
+                ShadowPass_DrawWorldMesh( visibleSections, worldMeshShadowFrustum, writeShadowMoments );
             }
         } else {
-            ShadowPass_DrawWorldMesh( visibleSections, currentFrustum, writeShadowMoments );
+            ShadowPass_DrawWorldMesh( visibleSections, worldMeshShadowFrustum, writeShadowMoments );
         }
     }
 

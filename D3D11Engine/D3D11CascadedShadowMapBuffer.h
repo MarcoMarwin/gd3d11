@@ -33,7 +33,7 @@ public:
     HRESULT Resize( UINT size );
 
     /** Lazily allocate the four-moment texture array used by MSM. */
-    HRESULT EnsureMomentResources();
+    HRESULT EnsureMomentResources( UINT activeCascades );
 
     /**
      * Get the depth stencil view for a specific cascade slice.
@@ -64,6 +64,12 @@ public:
     /** Bind the MSM moment texture array to a pixel shader slot. */
     void BindMomentsToPixelShader( ID3D11DeviceContext1* context, UINT slot ) const;
 
+    /** Return whether all moment resources for the active cascades are initialized. */
+    bool HasMomentResources( UINT activeCascades ) const;
+
+    /** Build the filtered moment mip chain for one updated cascade slice. */
+    void GenerateMomentMips( ID3D11DeviceContext1* context, UINT cascadeIndex ) const;
+
     /**
      * Bind the texture array to a vertex shader slot.
      * @param context Device context
@@ -91,6 +97,8 @@ private:
     Microsoft::WRL::ComPtr<ID3D11Texture2D> m_momentTexture;
     Microsoft::WRL::ComPtr<ID3D11ShaderResourceView> m_momentSRV;
     std::array<Microsoft::WRL::ComPtr<ID3D11RenderTargetView>, MAX_CSM_CASCADES> m_cascadeMomentRTVs;
+    std::array<Microsoft::WRL::ComPtr<ID3D11ShaderResourceView>, MAX_CSM_CASCADES> m_cascadeMomentSRVs;
+    UINT m_momentNumCascades = 0;
 
     UINT m_size;
     UINT m_numCascades;

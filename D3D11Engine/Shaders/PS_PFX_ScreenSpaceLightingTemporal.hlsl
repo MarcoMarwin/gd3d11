@@ -20,7 +20,7 @@ cbuffer ScreenSpaceLightingConstantBuffer : register( b0 )
     float SSL_EnableContact;
     float SSL_EnableGI;
     float SSL_HistoryValid;
-    float SSL_Pad;
+    float SSL_FSR3Active;
 };
 
 struct PS_INPUT { float2 vTexcoord : TEXCOORD0; float3 vEyeRay : TEXCOORD1; float4 vPosition : SV_POSITION; };
@@ -101,10 +101,13 @@ PS_OUTPUT PSMain(PS_INPUT input)
     float depthDiff = abs(ViewZ(depth) - ViewZ(prevDepth));
     valid *= 1.0f - smoothstep(40.0f, 180.0f, depthDiff);
     float4 history = TX_History.SampleLevel(SS_Linear, saturate(prevUV), 0);
-    history = clamp(history, minV - 0.04f, maxV + 0.04f);
+    float clampMargin = lerp(0.04f, 0.02f, saturate(SSL_FSR3Active));
+    history = clamp(history, minV - clampMargin, maxV + clampMargin);
     float motion = saturate(length(velocity) * 240.0f);
     float historyWeight = lerp(0.86f, 0.45f, motion) * valid;
-    output.Lighting = lerp(current, history, historyWeight);
+    float contactHistoryWeight = historyWeight * lerp(1.0f, 0.45f, saturate(SSL_FSR3Active));
+    output.Lighting.rgb = lerp(current.rgb, history.rgb, historyWeight);
+    output.Lighting.a = lerp(current.a, history.a, contactHistoryWeight);
     output.Lighting.rgb = max(output.Lighting.rgb, 0.0f);
     output.Lighting.a = saturate(output.Lighting.a);
     output.Depth = float4(depth, depth, depth, depth);
