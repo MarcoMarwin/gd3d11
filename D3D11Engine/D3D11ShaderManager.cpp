@@ -306,8 +306,8 @@ XRESULT D3D11ShaderManager::Init() {
         const auto& s = Engine::GAPI->GetRendererState().RendererSettings;
 
         list.push_back( {"SHD_ENABLE",           s.EnableShadows ? "1" : "0"} );
-        list.push_back( {"SHD_FILTER_16TAP_PCF", (s.ShadowFilterMode >= GothicRendererSettings::SHADOW_FILTER_SIMPLE) ? "1" : "0"} );
-
+        list.push_back( {"SHD_FILTER_MSM",       (s.ShadowFilterMode == GothicRendererSettings::SHADOW_FILTER_MSM && !FeatureLevel10Compatibility) ? "1" : "0"} );
+        list.push_back( {"SHD_FILTER_16TAP_PCF", (s.ShadowFilterMode != GothicRendererSettings::SHADOW_FILTER_DISABLED || FeatureLevel10Compatibility) ? "1" : "0"} );
         list.push_back( {"MAX_CSM_CASCADES",     TO_LITERAL(MAX_CSM_CASCADES)} );
         list.push_back( {"NUM_CSM_CASCADES",     sNums[std::clamp<size_t>(s.NumShadowCascades, 1, MAX_CSM_CASCADES)]} );
         list.push_back( {"CSM_PCF_LIMIT",        sNums[std::clamp<size_t>(s.ShadowCascadePCFLimit, 0, MAX_CSM_CASCADES)]} );

@@ -555,6 +555,7 @@ struct GothicRendererSettings {
     enum E_ShadowFilterMode {
         SHADOW_FILTER_DISABLED = 0,
         SHADOW_FILTER_SIMPLE = 1,
+        SHADOW_FILTER_MSM = 2,
     };
 
     enum E_RendererMode {

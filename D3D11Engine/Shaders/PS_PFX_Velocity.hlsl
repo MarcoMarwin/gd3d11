@@ -73,7 +73,7 @@ float2 CalculateVelocity(float2 texCoord, float depth) {
     float2 prevUV = ProjectToPreviousFrame(worldPos);
 
     // Calculate velocity in unjittered space
-    return currentUV - prevUV;
+    return prevUV - currentUV;
 }
 
 // 3x3 velocity dilation kernel

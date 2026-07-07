@@ -199,7 +199,8 @@ static void CalculateCascadeMatrices(
     // --- Dynamic Pullback Calculation ---
     // Calculate how directly overhead the light is. 
     // 1.0 = straight down (noon), 0.0 = completely horizontal (horizon)
-    float lightDotUp = std::abs( XMVectorGetX( XMVector3Dot( lightDir, upDirOrig ) ) );
+    const XMVECTOR worldUpForPullback = XMVectorSet( 0.0f, 1.0f, 0.0f, 0.0f );
+    float lightDotUp = std::abs( XMVectorGetX( XMVector3Dot( lightDir, worldUpForPullback ) ) );
     lightDotUp = std::max( lightDotUp, 0.05f ); // Prevent division by zero near the horizon
 
     // Assuming a max shadow caster height of ~6000 units (60 meters) above the frustum.
@@ -658,6 +659,11 @@ XRESULT D3D11ShadowMap::PrepareRender()
         bool lazyCascadeUpdate = m_useAtlas // atlas breaks when last cascade is not rendered, as we clear the atlas for the next pass.
             ? false 
             : settings.DebugSettings.ShadowCascades.LazyCascadeUpdate;
+        const bool overheadLight = std::abs( XMVectorGetX( XMVector3Dot( shadowViewDir, c_XM_Up ) ) ) > 0.94f
+            || std::abs( XMVectorGetX( XMVector3Dot( lastCascadeViewDir, c_XM_Up ) ) ) > 0.94f;
+        if ( overheadLight ) {
+            lazyCascadeUpdate = false;
+        }
 
         Frustum playerFrustum = Frustum::AlwaysContainingFrustum();
         if ( auto cam = (zCCamera*)oCGame::GetGame()->_zCSession_camera ) {

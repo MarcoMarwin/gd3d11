@@ -88,6 +88,28 @@ namespace {
         return name;
     }
 
+    bool IsGroundFogName( std::string name ) {
+        name = ToLowerMaterialName( std::move( name ) );
+        const bool hasFogMarker = name.find( "groundfog" ) != std::string::npos
+            || name.find( "ground_fog" ) != std::string::npos
+            || name.find( "lavafog" ) != std::string::npos
+            || name.find( "waterfog" ) != std::string::npos
+            || name.find( "mist" ) != std::string::npos
+            || name.find( "nebel" ) != std::string::npos
+            || name.find( "dunst" ) != std::string::npos
+            || name.find( "fog" ) != std::string::npos;
+        if ( !hasFogMarker )
+            return false;
+
+        return name.find( "fireball" ) == std::string::npos
+            && name.find( "spell" ) == std::string::npos
+            && name.find( "magic" ) == std::string::npos;
+    }
+
+    bool IsGroundFogParticleTexture( zCTexture* texture ) {
+        return texture && IsGroundFogName( texture->GetNameWithoutExt() );
+    }
+
     bool IsGroundFogParticleVob( zCVob* source ) {
         if ( !source )
             return false;
@@ -98,10 +120,16 @@ namespace {
             if ( const char* objectName = visual->GetObjectName() ) {
                 name += objectName;
             }
+            if ( zCParticleFX* particle = reinterpret_cast<zCParticleFX*>(visual) ) {
+                if ( zCParticleEmitter* emitter = particle->GetEmitter() ) {
+                    if ( zCTexture* texture = emitter->GetBaseVisTexture() ) {
+                        name += " ";
+                        name += texture->GetNameWithoutExt();
+                    }
+                }
+            }
         }
-        name = ToLowerMaterialName( std::move( name ) );
-        return name.find( "groundfog" ) != std::string::npos
-            || name.find( "ground_fog" ) != std::string::npos;
+        return IsGroundFogName( std::move( name ) );
     }
     bool IsWaterfallParticleTexture( zCTexture* texture ) {
         if ( !texture )
@@ -121,6 +149,9 @@ namespace {
             return false;
 
         const std::string name = ToLowerMaterialName( texture->GetNameWithoutExt() );
+        // Fog PFX may use additive blending in Gothic data, but should stay soft scene fog.
+        if ( IsGroundFogName( name ) )
+            return false;
         // FIRESMOKE+ADD is Gothic's LAVAFOG, not an emissive flame.
         return name.find( "firesmoke" ) == std::string::npos;
     }
@@ -1970,12 +2001,12 @@ void GothicAPI::GetVisibleParticleEffectsList( std::vector<zCVob*>& pfxList ) {
         const XMVECTOR vVfxRangeSq = XMVectorReplicate( RendererState.RendererSettings.VisualFXDrawRadius * RendererState.RendererSettings.VisualFXDrawRadius );
 
         for ( auto const& it : ParticleEffectVobs ) {
-            if ( XMVector3Greater( XMVector3LengthSq( it->GetPositionWorldXM() - camPos ), vVfxRangeSq ) ) {
+            const bool keepGroundFogVisible = IsGroundFogParticleVob( it );
+            if ( XMVector3Greater( XMVector3LengthSq( it->GetPositionWorldXM() - camPos ), vVfxRangeSq ) && !keepGroundFogVisible ) {
                 // too far? It's ok for particles to not update and restart.
                 continue;
             }
 
-            const bool keepGroundFogVisible = IsGroundFogParticleVob( it );
             INT clipFlags = EGothicCullFlags::CullSides;
             if ( sceneCam->BBox3DInFrustum( it->GetBBox(), clipFlags ) == ZTCAM_CLIPTYPE_OUT && !keepGroundFogVisible ) {
                 if ( auto vis = it->GetVisual() ) {
@@ -3442,7 +3473,6 @@ void GothicAPI::DrawParticleFX( zCVob* source, zCParticleFX* fx, ParticleFrameDa
     // Maybe create more emitters?
     fx->CheckDependentEmitter();
 
-    const bool groundFogParticle = IsGroundFogParticleVob( source );
     zTParticle* pfx = fx->GetFirstParticle();
     if ( pfx ) {
         // Get texture
@@ -3462,6 +3492,7 @@ void GothicAPI::DrawParticleFX( zCVob* source, zCParticleFX* fx, ParticleFrameDa
         }
 
         const bool waterfallParticle = IsWaterfallParticleTexture( texture );
+        const bool groundFogParticle = IsGroundFogParticleVob( source ) || IsGroundFogParticleTexture( texture );
         const int blendMode = static_cast<int>(fx->GetEmitter()->GetVisAlphaFunc());
         const bool emissiveParticle = !waterfallParticle && IsEmissiveParticleTexture( texture, blendMode );
         const ParticleBatchKey batchKey = { texture, blendMode };
@@ -3556,7 +3587,7 @@ void GothicAPI::DrawParticleFX( zCVob* source, zCParticleFX* fx, ParticleFrameDa
             ii.position = p->PositionWS;
             ii.color = color;
             ii.velocity = p->Vel;
-            ii.particleLightingScale = (emissiveParticle || groundFogParticle) ? -1.0f : (waterfallParticle ? 0.25f : 1.0f);
+            ii.particleLightingScale = groundFogParticle ? 0.0f : (emissiveParticle ? -1.0f : (waterfallParticle ? 0.25f : 1.0f));
 
             if ( fx->GetEmitter()->GetVisAlignment() == 2 ) {
                 if ( zCVob* connectedVob = fx->GetConnectedVob() ) {
@@ -5970,7 +6001,10 @@ XRESULT GothicAPI::LoadMenuSettings( const std::string& file ) {
 
         static XMFLOAT3 defaultLightDirection = XMFLOAT3( 1, 1, 1 );
         s.EnableShadows = true;
-        s.ShadowFilterMode = GothicRendererSettings::E_ShadowFilterMode::SHADOW_FILTER_SIMPLE;
+        s.ShadowFilterMode = static_cast<GothicRendererSettings::E_ShadowFilterMode>(std::clamp<int>(
+            GetPrivateProfileIntA( "Shadows", "ShadowFilterMode", static_cast<int>(ds.ShadowFilterMode), ini.c_str() ),
+            static_cast<int>(GothicRendererSettings::E_ShadowFilterMode::SHADOW_FILTER_SIMPLE),
+            static_cast<int>(GothicRendererSettings::E_ShadowFilterMode::SHADOW_FILTER_MSM) ));
         s.ShadowMapSize = GetPrivateProfileIntA( "Shadows", "ShadowMapSize", ds.ShadowMapSize, ini.c_str() );
         if ( s.ShadowMapSize <= 1024 ) s.ShadowMapSize = 1024;
         else if ( s.ShadowMapSize <= 2048 ) s.ShadowMapSize = 2048;

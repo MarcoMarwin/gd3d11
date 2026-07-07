@@ -32,6 +32,10 @@
 #define PCF_FILTER_TAPS_FAR 4
 #endif
 
+#ifndef SHD_FILTER_MSM
+#define SHD_FILTER_MSM 0
+#endif
+
 //--------------------------------------------------------------------------------------
 // Shadow map sampling helpers
 // Abstracts Texture2DArray (FL11+) vs Texture2D atlas (FL10) sampling
@@ -76,6 +80,7 @@ float SampleShadowMapLevel(float2 cascadeUV, int cascadeIndex)
     return TX_ShadowmapArray.SampleLevel(SS_Linear, float3(cascadeUV, (float)cascadeIndex), 0).r;
 }
 #endif
+
 
 //--------------------------------------------------------------------------------------
 // High-quality Poisson disk for shadow sampling
@@ -187,6 +192,80 @@ float2x2 GetPoissonRotationMatrixR(float2 screenPos, out float rawNoise)
     return GetPoissonRotationMatrixRForCascade(screenPos, 0, rawNoise);
 }
 
+
+float SampleShadowMapDepthLitBorder(float2 cascadeUV, int cascadeIndex)
+{
+    if (cascadeUV.x < 0.0f || cascadeUV.x > 1.0f ||
+        cascadeUV.y < 0.0f || cascadeUV.y > 1.0f)
+    {
+        return 1.0f;
+    }
+
+    return SampleShadowMapLevel(cascadeUV, cascadeIndex);
+}
+
+float4 ShadowDepthMoments(float depth)
+{
+    float depth2 = depth * depth;
+    return float4(depth, depth2, depth2 * depth, depth2 * depth2);
+}
+
+float EstimateMSMLit(float4 moments, float receiverDepth)
+{
+    moments = saturate(moments);
+    receiverDepth = saturate(receiverDepth);
+
+    if (receiverDepth <= moments.x)
+        return 1.0f;
+
+    float depthDelta = receiverDepth - moments.x;
+    float variance = max(moments.y - moments.x * moments.x, 0.00002f);
+    float vsmBound = variance / (variance + depthDelta * depthDelta);
+
+    float receiverDepth2 = receiverDepth * receiverDepth;
+    float highOrderDelta = max(receiverDepth2 - moments.y, 0.0f);
+    float fourthVariance = max(moments.w - moments.y * moments.y, 0.00002f);
+    float fourthBound = fourthVariance / (fourthVariance + highOrderDelta * highOrderDelta);
+
+    float skew = abs(moments.z - moments.x * moments.y);
+    float skewWeight = saturate(1.0f - skew * 16.0f);
+    float momentBound = min(vsmBound, sqrt(saturate(fourthBound)) * lerp(0.92f, 1.08f, skewWeight));
+
+    return saturate(momentBound);
+}
+
+float SampleCascadeShadowMSM(float4 vShadowSamplingPos, float2 projectedTexCoords,
+                             int cascadeIndex, float bias, float2 screenPos, float softness)
+{
+    if (projectedTexCoords.x < 0.0f || projectedTexCoords.x > 1.0f ||
+        projectedTexCoords.y < 0.0f || projectedTexCoords.y > 1.0f)
+    {
+        return 1.0f;
+    }
+
+    float texelSize = 1.0f / SQ_ShadowmapSize;
+    float filterRadius = texelSize * max(0.75f, softness * 1.15f);
+    float2x2 rotMat = GetPoissonRotationMatrixForCascade(screenPos, cascadeIndex);
+    int startIdx = GetBlueNoiseStartIndex(screenPos, cascadeIndex, 16, 41);
+
+    float4 moments = 0.0f;
+    float weightSum = 0.0f;
+
+    [unroll]
+    for (int i = 0; i < 16; ++i)
+    {
+        int sampleIdx = (startIdx + i * 5) & 15;
+        float2 disk = mul(rotMat, g_PoissonDisk16[sampleIdx]);
+        float2 sampleUV = projectedTexCoords + disk * filterRadius;
+        float weight = saturate(1.0f - dot(disk, disk) * 0.20f);
+        float depth = SampleShadowMapDepthLitBorder(sampleUV, cascadeIndex);
+        moments += ShadowDepthMoments(depth) * weight;
+        weightSum += weight;
+    }
+
+    moments /= max(weightSum, 0.0001f);
+    return EstimateMSMLit(moments, vShadowSamplingPos.z - bias);
+}
 
 #if SHADOW_ATLAS
 float IsInShadow(float3 wsPosition, Texture2D shadowmapAtlas, SamplerComparisonState samplerState)
@@ -314,7 +393,9 @@ float SampleCascadeShadowSoft(float4 vShadowSamplingPos, float2 projectedTexCoor
     // softness of 1.0 = default, < 1.0 = sharper, > 1.0 = softer
     float filterRadius = texelSize * softness;
 
-#if SHD_FILTER_16TAP_PCF
+#if SHD_FILTER_MSM
+    return SampleCascadeShadowMSM(vShadowSamplingPos, projectedTexCoords, cascadeIndex, bias, screenPos, softness);
+#elif SHD_FILTER_16TAP_PCF
 #if NUM_CSM_CASCADES <= 1
     // Single cascade - use near cascade quality profile.
     float2x2 rotMat = GetPoissonRotationMatrixForCascade(screenPos, cascadeIndex);

@@ -263,3 +263,12 @@ Kurze, append-only Dokumentation der von Codex gepushten Renderer-Builds.
 - Groundfog-PFX: GROUNDFOG-Partikel werden nicht mehr durch die zu harte PFX-BBox-Frustum-Pruefung verworfen; Draw-Radius und showVisual bleiben erhalten.
 - F11/Starttext: Startanzeige weist zusaetzlich auf F11 fuer Grafikeinstellungen hin; das F11-Fenster zeigt keine Versionsnummer mehr im Titel.
 - Pruefung: AGENTS-Regeln gelesen; gezielte VDB-Symbol-/Asset-/Lizenzpruefungen, Shaderregister-/Escape-Sequenzpruefung, relevante Git-Diffs und git diff --check statisch kontrolliert. Kein vollstaendiger lokaler C++-/Shader-Build.
+
+## Build 101 (MSM-Testfilter, Shadow-/PFX-Fixes und Velocity-Fallback)
+
+- Schattenfilter: MSM als testbarer Shadow-Filter-Modus ergaenzt und im F11-Menue als eigener Enabler eingebunden; Standard bleibt der bisherige einfache Schattenfilter.
+- Contact Shadows: sichtbare raybasierte Contact-Shadow-Wirkung aus Build 099 wiederhergestellt und mit deterministischen Mehrfachrays stabilisiert, damit harte Unterbrechungen reduziert werden ohne die Funktion praktisch auszublenden.
+- Groundfog-PFX: GROUNDFOG- und nebelartige additive PFX werden breiter erkannt, nicht durch die normale Distanz-/Frustum-Logik verworfen und bleiben ohne unpassende Partikelbeleuchtung sichtbar.
+- 12-Uhr-Schatten: Shadow-Kamera-Pullback und Cascade-Update nahe Zenith stabilisiert, damit die Sonnen-Schattenmap um Punkt 12 Uhr nicht kurz ausfaellt.
+- TAA/Velocity: der Depth-Motion-Vector-Fallback nutzt nun dieselbe Reprojektionskonvention wie Geometry- und Sky-Velocities (`previousUV - currentUV`). Der normale MRT-Velocity-/FSR3-Pfad bleibt unveraendert.
+- Pruefung: AGENTS-Regeln gelesen; Buildnummer aus outputs ermittelt; gezielte Shader-/Konventionspruefung, Diffkontrolle, BOM-/Escape-Sequenzpruefung und git diff --check statisch kontrolliert. Kein vollstaendiger lokaler C++-/Shader-Build.

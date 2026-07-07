@@ -972,7 +972,11 @@ namespace
         }
         s.LimitLightIntesity = true;
         s.EnableShadows = true;
-        s.ShadowFilterMode = GothicRendererSettings::E_ShadowFilterMode::SHADOW_FILTER_SIMPLE;
+        if ( static_cast<int>(s.ShadowFilterMode) < static_cast<int>(GothicRendererSettings::E_ShadowFilterMode::SHADOW_FILTER_SIMPLE)
+            || static_cast<int>(s.ShadowFilterMode) > static_cast<int>(GothicRendererSettings::E_ShadowFilterMode::SHADOW_FILTER_MSM)
+            || (FeatureLevel10Compatibility && s.ShadowFilterMode == GothicRendererSettings::E_ShadowFilterMode::SHADOW_FILTER_MSM) ) {
+            s.ShadowFilterMode = GothicRendererSettings::E_ShadowFilterMode::SHADOW_FILTER_SIMPLE;
+        }
         s.EnablePointlightShadows = GothicRendererSettings::EPointLightShadowMode::PLS_UPDATE_DYNAMIC;
         s.ShadowMapSize = NormalizeShadowMapSize( s.ShadowMapSize );
         s.PointlightShadowMapSize = NormalizePointlightShadowMapSize( s.PointlightShadowMapSize );
@@ -1415,9 +1419,23 @@ void ImGuiShim::RenderSettingsWindow()
             }
             ImGui::EndDisabled();
             ImGui::SetItemTooltip( "Controls ambient-occlusion strength." );
-            ImText( "Contact Shadows", { buttonWidth.x - ImGui::GetFrameHeight() - style.ItemSpacing.x, buttonWidth.y } ); ImGui::SameLine();
-            if ( CoupledStrengthCheckbox( "##Enable Contact Shadows", "ContactShadowStrength",
-                    &settings.EnableContactShadows, &settings.ContactShadowStrength, 1.0f ) ) {
+            bool msmShadowFilter = settings.ShadowFilterMode == GothicRendererSettings::E_ShadowFilterMode::SHADOW_FILTER_MSM;
+            ImText( "Shadow Filter MSM", { inlineToggleLabelWidth, buttonWidth.y } ); ImGui::SameLine();
+            ImGui::BeginDisabled( FeatureLevel10Compatibility );
+            if ( ImGui::Checkbox( "##Enable Shadow Filter MSM", &msmShadowFilter ) ) {
+                settings.ShadowFilterMode = msmShadowFilter
+                    ? GothicRendererSettings::E_ShadowFilterMode::SHADOW_FILTER_MSM
+                    : GothicRendererSettings::E_ShadowFilterMode::SHADOW_FILTER_SIMPLE;
+                shadersToReload |= ShaderCategory::LightsAndShadows;
+            }
+            ImGui::EndDisabled();
+            ImGui::SetItemTooltip( FeatureLevel10Compatibility
+                ? "Uses the standard shadow filter in Feature Level 10 mode."
+                : "Uses moment filtering for world shadows." );
+            ImGui::SameLine();
+
+            ImText( "Contact Shadows", { inlineToggleLabelWidth, buttonWidth.y } ); ImGui::SameLine();
+            if ( CoupledStrengthCheckbox( "##Enable Contact Shadows", "ContactShadowStrength",                    &settings.EnableContactShadows, &settings.ContactShadowStrength, 1.0f ) ) {
                 shadersToReload |= ShaderCategory::Other;
             }
             ImGui::SetItemTooltip( "Adds short screen-space shadows at object contact points." );
