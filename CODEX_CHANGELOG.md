@@ -282,3 +282,14 @@ Kurze, append-only Dokumentation der von Codex gepushten Renderer-Builds.
 - Contact Shadows: F11-Layout korrigiert, steile/vertikale Flaechen weniger hart ausgeschlossen und die FSR3-History fuer Contact-Alpha enger geklemmt, um Nachziehen und Flackern zu reduzieren.
 - F11: Shadow Filter sauber ueber Shadow Softness platziert, Titelbalken entfernt und Settings-Cursor auf den OS-Cursorpfad gelegt, damit er nicht mit niedriger Render-FPS mitruckelt.
 - Pruefung: AGENTS-Regeln gelesen; gezielte Shader-, UI-, Workflow-/Buildnummer-, Diff- und Praeprozessorpruefungen sowie git diff --check statisch kontrolliert. Kein vollstaendiger lokaler C++-/Shader-Build.
+
+## Build 102 (Schatten-, PFX-, UI- und Screen-Space-Korrekturen)
+
+- 12-Uhr-Schatten: den wirkungslosen Noon-Culling-Sonderfall entfernt und die Welt-Kaskadenprojektion auf den stabilen Kirides-17.9.7-Pfad mit festem Tiefenbereich und Texel-Snapping zurueckgefuehrt.
+- Groundfog-PFX: eindeutige Groundfog-/Fog-Smoke-Effekte behalten ihren originalen Blendmodus und lineare Emitter-Deckkraft; die allgemeine Nachtabdunklung normaler Partikel bleibt unveraendert.
+- F11/Maus: aufloesungsunabhaengige virtuelle Menueflaeche eingefuehrt und OS-Mauskoordinaten auf dieselbe Flaeche abgebildet, damit Groesse und Trefferposition nach Aufloesungswechseln stabil bleiben.
+- Contact Shadows: FSR3-History tiefen-/normalvalidiert, Contact-Raymarch und Softfilter ressourcenschonender ausgelegt und wirkungslose Traces frueh beendet.
+- SSGI: vier rotierende Low-Discrepancy-Strahlen mit temporaler Akkumulation ersetzen acht zufaellige Strahlen; Reichweitengewichtung und Energiebegrenzung reduzieren breite Lichtlecks bei deutlich weniger Raytests.
+- Backlit Vegetation: vollstaendig aufgehellte Rueckseiten durch konturbetonte, nach innen abklingende Lichttransmission ersetzt.
+- Offene Ingame-Grenzen: 12-Uhr-Weltschatten und Groundfog-PFX muessen im Spiel bestaetigt werden; SSGI und Contact Shadows sind getrennt auf Bildruhe, duenne Occluder und Leistung zu vergleichen.
+- Pruefung: Referenzpfade gegen Kirides 17.9.7 abgeglichen; Aufrufer, Shaderregister, Constant-Buffer-Layouts, Optionen, Ressourcenpfade, Escape-Sequenzen und git diff --check statisch kontrolliert. Kein vollstaendiger lokaler C++-Build.
