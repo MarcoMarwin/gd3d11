@@ -4,6 +4,7 @@
 #include "D3D11PFX_FSR3.h"
 #include <VersionHelpers.h>
 #include <ShellScalingApi.h>
+#include <windowsx.h>
 
 #include "zCParser.h"
 #include <map>
@@ -45,6 +46,46 @@ enum class TX_QUALITY : uint16_t {
 };
 
 namespace {
+    bool GetSettingsUiGeometry( HWND window, float& clientWidth, float& clientHeight, float& uiScale, POINT* cursorPos = nullptr )
+    {
+        RECT clientRect = {};
+        if ( !window || !GetClientRect( window, &clientRect ) ) {
+            return false;
+        }
+
+        clientWidth = static_cast<float>( std::max<LONG>( 1, clientRect.right - clientRect.left ) );
+        clientHeight = static_cast<float>( std::max<LONG>( 1, clientRect.bottom - clientRect.top ) );
+        uiScale = std::max( 0.01f, std::min( clientWidth / 1920.0f, clientHeight / 1080.0f ) );
+
+        if ( cursorPos && (!GetCursorPos( cursorPos ) || !ScreenToClient( window, cursorPos )) ) {
+            return false;
+        }
+        return true;
+    }
+
+    bool IsMouseActionMessage( UINT msg )
+    {
+        switch ( msg ) {
+            case WM_LBUTTONDOWN:
+            case WM_LBUTTONUP:
+            case WM_LBUTTONDBLCLK:
+            case WM_RBUTTONDOWN:
+            case WM_RBUTTONUP:
+            case WM_RBUTTONDBLCLK:
+            case WM_MBUTTONDOWN:
+            case WM_MBUTTONUP:
+            case WM_MBUTTONDBLCLK:
+            case WM_XBUTTONDOWN:
+            case WM_XBUTTONUP:
+            case WM_XBUTTONDBLCLK:
+            case WM_MOUSEWHEEL:
+            case WM_MOUSEHWHEEL:
+                return true;
+            default:
+                return false;
+        }
+    }
+
     void ApplyGD3D11DarkStyle()
     {
         ImGuiStyle& style = ImGui::GetStyle();
@@ -426,14 +467,11 @@ void ImGuiShim::RenderLoop()
     // changes. Mouse coordinates use the same virtual canvas, so the smooth OS
     // cursor and ImGui hit targets remain aligned.
     if ( SettingsVisible && OutputWindow ) {
-        RECT clientRect = {};
         POINT cursorPos = {};
-        if ( GetClientRect( OutputWindow, &clientRect )
-            && GetCursorPos( &cursorPos )
-            && ScreenToClient( OutputWindow, &cursorPos ) ) {
-            const float clientWidth = static_cast<float>( std::max<LONG>( 1, clientRect.right - clientRect.left ) );
-            const float clientHeight = static_cast<float>( std::max<LONG>( 1, clientRect.bottom - clientRect.top ) );
-            const float uiScale = std::max( 0.01f, std::min( clientWidth / 1920.0f, clientHeight / 1080.0f ) );
+        float clientWidth = 0.0f;
+        float clientHeight = 0.0f;
+        float uiScale = 1.0f;
+        if ( GetSettingsUiGeometry( OutputWindow, clientWidth, clientHeight, uiScale, &cursorPos ) ) {
             const INT2 backbuffer = Engine::GraphicsEngine->GetBackbufferResolution();
             ImGuiIO& io = ImGui::GetIO();
             io.DisplaySize = ImVec2( clientWidth / uiScale, clientHeight / uiScale );
@@ -521,6 +559,20 @@ LRESULT ImGuiShim::OnWindowMessage( HWND hWnd, UINT msg, WPARAM wParam, LPARAM l
 {
     if ( Initiated && GetIsActive() )
     {
+        // Queue the virtual F11 position before actions so ImGui never
+        // evaluates a click with the Win32 backend's physical coordinates.
+        if ( SettingsVisible && IsMouseActionMessage( msg ) ) {
+            float clientWidth = 0.0f;
+            float clientHeight = 0.0f;
+            float uiScale = 1.0f;
+            if ( GetSettingsUiGeometry( hWnd, clientWidth, clientHeight, uiScale ) ) {
+                POINT eventPos = { GET_X_LPARAM( lParam ), GET_Y_LPARAM( lParam ) };
+                if ( msg == WM_MOUSEWHEEL || msg == WM_MOUSEHWHEEL ) {
+                    ScreenToClient( hWnd, &eventPos );
+                }
+                ImGui::GetIO().AddMousePosEvent( eventPos.x / uiScale, eventPos.y / uiScale );
+            }
+        }
         return ImGui_ImplWin32_WndProcHandler( hWnd, msg, wParam, lParam );
     }
     return 0;
@@ -1131,7 +1183,7 @@ void ImGuiShim::RenderSettingsWindow()
             }
         }
 
-        ImGui::TextUnformatted("Graphics Preset"); ImGui::SameLine();
+        ImText( "Graphics Preset", buttonWidth ); ImGui::SameLine();
         
         ImGui::PushItemWidth( controlWidth );
         if ( ImGui::BeginCombo( "##GraphicsPreset", graphicsPresetPreview ) ) {
@@ -1274,19 +1326,21 @@ void ImGuiShim::RenderSettingsWindow()
             }
             ImGui::SetItemTooltip( "Controls the maximum texture resolution." );
 
-            ImText( "Display Mode [*]", buttonWidth );
-            ImGui::SetItemTooltip( "Selects fullscreen or windowed display mode." );
+            ImText( "Display Mode [Restart]", buttonWidth );
+            ImGui::SetItemTooltip( "Selects the display mode used after restarting the game." );
             ImGui::SameLine();
 
-            static auto displayModeState = InterpretWindowMode( settings );
+            auto displayModeState = settings.ChangeWindowPreset
+                ? static_cast<WindowModes>(settings.ChangeWindowPreset)
+                : InterpretWindowMode( settings );
             static std::vector<std::tuple<const char*, WindowModes, const char*>> DisplayEnums = {
                 { "Fullscreen Borderless", WindowModes::WINDOW_MODE_FULLSCREEN_BORDERLESS, nullptr },
-                { "Fullscreen Lowlatency [*]", WindowModes::WINDOW_MODE_FULLSCREEN_LOWLATENCY, nullptr },
-                { "Fullscreen Exclusive [*]", WindowModes::WINDOW_MODE_FULLSCREEN_EXCLUSIVE, nullptr },
+                { "Fullscreen Lowlatency", WindowModes::WINDOW_MODE_FULLSCREEN_LOWLATENCY, nullptr },
+                { "Fullscreen Exclusive", WindowModes::WINDOW_MODE_FULLSCREEN_EXCLUSIVE, nullptr },
                 { "Windowed", WindowModes::WINDOW_MODE_WINDOWED, nullptr},
             };
             
-            if ( ImComboBoxCT( "##DisplayMode", DisplayEnums, &displayModeState, [&settings] {
+            if ( ImComboBoxCT( "##DisplayMode", DisplayEnums, &displayModeState, [&settings, &displayModeState] {
                 // selected
                 settings.ChangeWindowPreset = displayModeState;
                 } ) ) {
@@ -1294,7 +1348,7 @@ void ImGuiShim::RenderSettingsWindow()
             }
 
 
-            ImGui::SetItemTooltip( "Selects fullscreen or windowed display mode." );
+            ImGui::SetItemTooltip( "Selects the display mode used after restarting the game." );
             const static std::vector<std::pair<const char*, int>> shadowMapSizes = {
                 {"Low", 1024},
                 {"Medium", 2048},

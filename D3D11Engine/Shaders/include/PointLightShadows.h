@@ -87,7 +87,7 @@ float PLS_ComputeBacklitTransmissionWeight(
     float exceptionCore = back * lerp( 0.25f, 0.75f, rim );
     float materialCore = vegetationCore * saturate(vegetationBacklitMask)
         + exceptionCore * saturate(twoSidedBacklitMaterial);
-    return materialCore * saturate(shadowGate) * saturate(sssEnabled) * saturate(sssIntensity) * lightScale;
+    return saturate(materialCore * saturate(shadowGate) * saturate(sssEnabled) * saturate(sssIntensity) * lightScale);
 }
 float PLS_ComputePointLightNdl(
     float3 lightDirVS,
@@ -169,7 +169,10 @@ float3 PLS_ComputePointLightLightingBacklit(
     float transmission = PLS_ComputeBacklitTransmissionWeight(
         lightDirVS, normalVS, viewDirVS, 1.0f, vegetationBacklitMask,
         twoSidedBacklitMaterial, sssEnabled, sssIntensity, lightScale );
-    return lighting + diffuseColor * lightColor * falloff * transmission;
+    float3 transmissionLighting = diffuseColor * lightColor * falloff * transmission;
+    float3 additiveLighting = lighting + transmissionLighting;
+    float3 boundedExceptionLighting = max(lighting, transmissionLighting);
+    return lerp(additiveLighting, boundedExceptionLighting, saturate(twoSidedBacklitMaterial));
 }
 
 void PLS_PrepareShadowSampling(

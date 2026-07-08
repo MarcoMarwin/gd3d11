@@ -268,7 +268,10 @@ float3 FP_ComputeSunLighting(
             vegetationBacklitMask, twoSidedBacklitMaterial,
             AC_EnableSSS, AC_SSSIntensity, 2.4f * sssLightWeight );
         float3 sssLightColor = moonLightActive ? float3( 0.42f, 0.56f, 1.0f ) : lightColor.rgb;
-        litPixel += diffuseColor * sssLightColor * sss;
+        float3 transmissionLighting = diffuseColor * sssLightColor * sss;
+        float3 additiveLighting = litPixel + transmissionLighting;
+        float3 boundedExceptionLighting = max(litPixel, transmissionLighting);
+        litPixel = lerp(additiveLighting, boundedExceptionLighting, saturate(twoSidedBacklitMaterial));
     }
 
     float baselineSun = moonLightActive ? 0.0f : sun;

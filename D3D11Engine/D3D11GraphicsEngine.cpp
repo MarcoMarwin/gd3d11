@@ -329,30 +329,6 @@ namespace
         return a.size() == b.size() && std::equal( a.begin(), a.end(), b.begin() );
     }
 
-    void ApplyWindowMode(GothicRendererSettings& s) {
-        // Only used for runtime changes, changes from/to exclusive fullscreen are not supported
-        switch ( s.ChangeWindowPreset ) {
-            case WINDOW_MODE_FULLSCREEN_EXCLUSIVE:
-                // Fullscreen Exclusive is not supported for runtime changes!
-            case WINDOW_MODE_FULLSCREEN_BORDERLESS: {
-                s.DisplayFlip = true;
-                s.LowLatency = false;
-                s.StretchWindow = true;
-                break;
-            }
-            case WINDOW_MODE_FULLSCREEN_LOWLATENCY: {
-                s.DisplayFlip = true;
-                s.LowLatency = true;
-                s.StretchWindow = true;
-                break;
-            }
-            case WINDOW_MODE_WINDOWED: {
-                s.DisplayFlip = true;
-                s.StretchWindow = false;
-                break;
-            }
-        }
-    }
 
     void PrintD3DFeatureLevel( D3D_FEATURE_LEVEL lvl ) {
         std::map<D3D_FEATURE_LEVEL, std::string> dxFeatureLevelsMap = {
@@ -1378,17 +1354,20 @@ XRESULT D3D11GraphicsEngine::OnResize( INT2 newSize ) {
         SetWindowPos( OutputWindow, nullptr, 0, 0, desktopRect.right, desktopRect.bottom,
                       SWP_SHOWWINDOW | SWP_FRAMECHANGED );
     } else {
-        RECT desktopRect;
-        GetClientRect( GetDesktopWindow(), &desktopRect );
+        ApplyWindowStyle(OutputWindow, WindowModes::WINDOW_MODE_WINDOWED);
 
-        auto isFullScreenWindow = bbres.x == desktopRect.right && bbres.y == desktopRect.bottom;
-        ApplyWindowStyle(OutputWindow, isFullScreenWindow ? WindowModes::WINDOW_MODE_FULLSCREEN_BORDERLESS : WindowModes::WINDOW_MODE_WINDOWED);
+        RECT windowSize = { 0, 0, bbres.x, bbres.y };
+        const DWORD style = static_cast<DWORD>(GetWindowLongPtr( OutputWindow, GWL_STYLE ));
+        const DWORD exStyle = static_cast<DWORD>(GetWindowLongPtr( OutputWindow, GWL_EXSTYLE ));
+        AdjustWindowRectEx( &windowSize, style, FALSE, exStyle );
+        const int outerWidth = windowSize.right - windowSize.left;
+        const int outerHeight = windowSize.bottom - windowSize.top;
 
         RECT rect;
-        if ( GetWindowRect( OutputWindow, &rect ) && !isFullScreenWindow ) {
-            SetWindowPos( OutputWindow, nullptr, rect.left, rect.top, bbres.x, bbres.y, SWP_SHOWWINDOW | SWP_FRAMECHANGED );
+        if ( GetWindowRect( OutputWindow, &rect ) ) {
+            SetWindowPos( OutputWindow, nullptr, rect.left, rect.top, outerWidth, outerHeight, SWP_SHOWWINDOW | SWP_FRAMECHANGED );
         } else {
-            SetWindowPos( OutputWindow, nullptr, 0, 0, bbres.x, bbres.y, SWP_SHOWWINDOW | SWP_FRAMECHANGED );
+            SetWindowPos( OutputWindow, nullptr, 0, 0, outerWidth, outerHeight, SWP_SHOWWINDOW | SWP_FRAMECHANGED );
         }
     }
 #endif
@@ -1414,7 +1393,7 @@ XRESULT D3D11GraphicsEngine::OnResize( INT2 newSize ) {
         };
 
         m_swapchainflip = Engine::GAPI->GetRendererState().RendererSettings.DisplayFlip;
-        if ( m_swapchainflip ) {
+        if ( m_swapchainflip && Engine::GAPI->GetRendererState().RendererSettings.StretchWindow ) {
             ApplyWindowStyle(OutputWindow, WindowModes::WINDOW_MODE_FULLSCREEN_BORDERLESS);
         }
 
@@ -1455,9 +1434,10 @@ XRESULT D3D11GraphicsEngine::OnResize( INT2 newSize ) {
         m_lowlatency = Engine::GAPI->GetRendererState().RendererSettings.LowLatency;
         if ( FAILED( Device.As( &pDXGIDevice3 ) ) // DXGI 1.3 required
             || swapEffect == DXGI_SWAP_EFFECT::DXGI_SWAP_EFFECT_DISCARD ) { // Doesn't work with fullscreen exclusive on D3D11
-            LogWarn() << "DXGI 1.3 not supported! HR: " << std::hex << hr;
+            LogWarn() << "Low-latency display mode is unavailable; using regular borderless mode.";
 
             m_lowlatency = false;
+            Engine::GAPI->GetRendererState().RendererSettings.LowLatency = false;
         }
 
         if ( m_lowlatency ) {
@@ -1505,13 +1485,6 @@ XRESULT D3D11GraphicsEngine::OnResize( INT2 newSize ) {
         // XLE( Engine::AntTweakBar->Init() );
 
         Engine::ImGuiHandle->Init( OutputWindow, GetDevice(), GetContext() );
-
-        wrl::ComPtr<IDXGISwapChain2> swapChain2;
-        if ( m_lowlatency && SUCCEEDED( SwapChain.As( &swapChain2 ) ) ) {
-            frameLatencyWaitableObject = swapChain2->GetFrameLatencyWaitableObject();
-            ZoneScopedN( "OnResize::frameLatencyWaitableObject" );
-            WaitForSingleObjectEx( frameLatencyWaitableObject, INFINITE, true );
-        }
     } else {
         LogInfo() << "Resizing swapchain  (Format: DXGI_FORMAT_SWAPCHAIN )";
         GetContext()->ClearState();
@@ -1519,6 +1492,23 @@ XRESULT D3D11GraphicsEngine::OnResize( INT2 newSize ) {
         if ( FAILED( hr ) ) {
             LogError() << "Failed to resize swapchain! HRESULT: " << std::hex << hr;
             return XR_FAILED;
+        }
+    }
+
+    if ( m_lowlatency ) {
+        wrl::ComPtr<IDXGISwapChain2> swapChain2;
+        if ( SUCCEEDED( SwapChain.As( &swapChain2 ) )
+            && SUCCEEDED( swapChain2->SetMaximumFrameLatency( 1 ) ) ) {
+            m_ConfiguredMaximumFrameLatency = 1;
+            frameLatencyWaitableObject = swapChain2->GetFrameLatencyWaitableObject();
+        }
+        if ( frameLatencyWaitableObject ) {
+            ZoneScopedN( "OnResize::frameLatencyWaitableObject" );
+            WaitForSingleObjectEx( frameLatencyWaitableObject, INFINITE, true );
+        } else {
+            LogWarn() << "Low-latency waitable object is unavailable; using regular borderless mode.";
+            m_lowlatency = false;
+            Engine::GAPI->GetRendererState().RendererSettings.LowLatency = false;
         }
     }
 
@@ -1632,8 +1622,6 @@ XRESULT D3D11GraphicsEngine::OnBeginFrame() {
     FrameMarkStart( beginFrameEventName );
 
     auto& rendererState = Engine::GAPI->GetRendererState();
-    static WindowModes lastWindowMode = ImGuiShim::InterpretWindowMode(rendererState.RendererSettings);
-    WindowModes currentWindowMode = (WindowModes)rendererState.RendererSettings.ChangeWindowPreset;
 
     static int s_oldResolutionScalePercent = rendererState.RendererSettings.ResolutionScalePercent;
 
@@ -1642,24 +1630,7 @@ XRESULT D3D11GraphicsEngine::OnBeginFrame() {
 
     if (NewResolution != Resolution) {
         OnResize(NewResolution);
-    } else if ( currentWindowMode && lastWindowMode != currentWindowMode) {
-        // only allow changing to display-flip modes, prevent change from flip to exclusive and vice versa
-        if ( rendererState.RendererSettings.DisplayFlip && currentWindowMode == WindowModes::WINDOW_MODE_FULLSCREEN_EXCLUSIVE ) {
-            lastWindowMode = currentWindowMode;
-            // do nothing, prevent change
-            // user will have to restart game to switch from flip to exclusive fullscreen
-        } else if ( !rendererState.RendererSettings.DisplayFlip && currentWindowMode != WindowModes::WINDOW_MODE_FULLSCREEN_EXCLUSIVE ) {
-            lastWindowMode = currentWindowMode;
-            // do nothing, prevent change
-            // user will have to restart game to switch from exclusive to flip
-        } else {
-            ApplyWindowMode( rendererState.RendererSettings );
 
-            lastWindowMode = currentWindowMode;
-            auto oldResolution = Resolution;
-            Resolution = INT2( 0, 0 ); // force resize
-            OnResize( oldResolution );
-        }
     } else if ( rendererState.RendererSettings.ResolutionScalePercent != s_oldResolutionScalePercent ) {
         RecreateBuffers();
         s_oldResolutionScalePercent = rendererState.RendererSettings.ResolutionScalePercent;

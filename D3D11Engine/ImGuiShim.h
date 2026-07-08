@@ -43,17 +43,14 @@ public:
 
     static WindowModes InterpretWindowMode( const GothicRendererSettings& s ) {
 
-        if ( s.DisplayFlip && s.LowLatency && s.StretchWindow ) {
-            return WINDOW_MODE_FULLSCREEN_LOWLATENCY;
+        if ( !s.StretchWindow ) {
+            return WINDOW_MODE_WINDOWED;
         }
-        if ( s.DisplayFlip && !s.LowLatency && s.StretchWindow ) {
-            return WINDOW_MODE_FULLSCREEN_BORDERLESS;
-        }
-        if ( !s.DisplayFlip && s.StretchWindow ) {
+        if ( !s.DisplayFlip ) {
             return WINDOW_MODE_FULLSCREEN_EXCLUSIVE;
         }
-        if ( s.DisplayFlip && !s.StretchWindow ) {
-            return WINDOW_MODE_WINDOWED;
+        if ( s.LowLatency ) {
+            return WINDOW_MODE_FULLSCREEN_LOWLATENCY;
         }
         return WINDOW_MODE_FULLSCREEN_BORDERLESS;
     }

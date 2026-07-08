@@ -35,16 +35,17 @@ struct PS_INPUT
 
 float4 PackShadowMoments(float depth)
 {
-    depth = saturate(depth);
-    float depth2 = depth * depth;
-    float4 moments = float4(depth, depth2, depth2 * depth, depth2 * depth2);
-    float4 optimized = mul(moments, float4x4(
-        -2.07224649f,  13.79488572f,  0.105877704f,   9.79240621f,
-        32.23703778f, -59.46839757f, -1.907746631f, -33.76521106f,
-       -68.57107460f,  82.03597503f,  9.349655511f,  47.94560966f,
-        39.37032741f, -35.36490326f, -6.654349074f, -23.97280482f));
-    optimized.x += 0.0359558848f;
-    return optimized;
+    // Improved 64-bit MSM: signed depth plus the sparse quantization transform
+    // from Peters et al. reduces quantization noise and costs less than 4x4 mul.
+    float z = saturate(depth) * 2.0f - 1.0f;
+    float z2 = z * z;
+    float z3 = z2 * z;
+    float z4 = z2 * z2;
+    return float4(
+        0.5f + 1.5f * z - 2.0f * z3,
+        4.0f * z2 - 4.0f * z4,
+        0.5f + 0.8660254038f * z - 0.3849001795f * z3,
+        0.5f * z2 + 0.5f * z4);
 }
 
 float4 PSMain(PS_INPUT input) : SV_TARGET0

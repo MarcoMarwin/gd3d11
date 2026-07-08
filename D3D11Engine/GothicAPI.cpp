@@ -6162,6 +6162,7 @@ XRESULT GothicAPI::LoadMenuSettings( const std::string& file ) {
             case WINDOW_MODE_FULLSCREEN_EXCLUSIVE:
             {
                 s.DisplayFlip = false;
+                s.LowLatency = false;
                 s.StretchWindow = true;
                 zSTRING section( "VIDEO" ); zSTRING defValue( "0" );
                 zCOption::GetOptions()->WriteString( section, "zStartupWindowed", defValue );
@@ -6174,6 +6175,8 @@ XRESULT GothicAPI::LoadMenuSettings( const std::string& file ) {
                 s.DisplayFlip = true;
                 s.LowLatency = false;
                 s.StretchWindow = true;
+                zSTRING section( "VIDEO" ); zSTRING defValue( "0" );
+                zCOption::GetOptions()->WriteString( section, "zStartupWindowed", defValue );
                 WritePrivateProfileStringA( "Display", "DisplayFlip", "1", ini.c_str() );
                 WritePrivateProfileStringA( "Display", "LowLatency", "0", ini.c_str() );
                 WritePrivateProfileStringA( "Display", "StretchWindow", "1", ini.c_str() );
@@ -6183,6 +6186,8 @@ XRESULT GothicAPI::LoadMenuSettings( const std::string& file ) {
                 s.DisplayFlip = true;
                 s.LowLatency = true;
                 s.StretchWindow = true;
+                zSTRING section( "VIDEO" ); zSTRING defValue( "0" );
+                zCOption::GetOptions()->WriteString( section, "zStartupWindowed", defValue );
                 WritePrivateProfileStringA( "Display", "DisplayFlip", "1", ini.c_str() );
                 WritePrivateProfileStringA( "Display", "LowLatency", "1", ini.c_str() );
                 WritePrivateProfileStringA( "Display", "StretchWindow", "1", ini.c_str() );
@@ -6190,10 +6195,11 @@ XRESULT GothicAPI::LoadMenuSettings( const std::string& file ) {
             }
             case WINDOW_MODE_WINDOWED: {
                 s.DisplayFlip = true;
+                s.LowLatency = false;
                 s.StretchWindow = false;
                 zSTRING section( "VIDEO" ); zSTRING defValue( "1" );
                 zCOption::GetOptions()->WriteString( section, "zStartupWindowed", defValue );
-                WritePrivateProfileStringA( "Display", "DisplayFlip", "0", ini.c_str() );
+                WritePrivateProfileStringA( "Display", "DisplayFlip", "1", ini.c_str() );
                 WritePrivateProfileStringA( "Display", "LowLatency", "0", ini.c_str() );
                 WritePrivateProfileStringA( "Display", "StretchWindow", "0", ini.c_str() );
                 break;
@@ -6707,8 +6713,8 @@ void GothicAPI::PrintModInfo() {
     std::string version = std::string( VERSION_STRING );
     std::string gpu = Engine::GraphicsEngine->GetGraphicsDeviceName();
     PrintMessageTimed( INT2( 5, 5 ), "GD3D11 - " + version, 8000.0f );
-    PrintMessageTimed( INT2( 5, 25 ), "Press F11 for graphics settings", 8000.0f );
     PrintMessageTimed( INT2( 5, 180 ), "Device: " + gpu, 8000.0f );
+    PrintMessageTimed( INT2( 5, 355 ), "Press F11 for graphics settings", 8000.0f );
 }
 
 /** Returns the current weight of the rain-fx. The bigger value of ours and gothics is returned. */

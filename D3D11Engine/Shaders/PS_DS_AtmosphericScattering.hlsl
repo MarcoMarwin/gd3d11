@@ -385,7 +385,10 @@ float4 PSMain(PS_INPUT Input) : SV_TARGET
 			mainLightDir, normal, V, sssShadow * sssVertexGate,
 			vegetationMask, twoSidedBacklitMaterial,
 			AC_EnableSSS, AC_SSSIntensity, 2.4f * sssLightWeight);
-		litPixel += diffuse.rgb * sssLightColor * sss;
+		float3 transmissionLighting = diffuse.rgb * sssLightColor * sss;
+		float3 additiveLighting = litPixel + transmissionLighting;
+		float3 boundedExceptionLighting = max(litPixel, transmissionLighting);
+		litPixel = lerp(additiveLighting, boundedExceptionLighting, saturate(twoSidedBacklitMaterial));
 	}
 	
     float f = 1.0f - saturate(dot(normal, V));

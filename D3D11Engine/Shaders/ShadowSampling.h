@@ -216,7 +216,7 @@ float4 SampleShadowMomentsLitBorder(float2 cascadeUV, int cascadeIndex)
     if (cascadeUV.x < 0.0f || cascadeUV.x > 1.0f ||
         cascadeUV.y < 0.0f || cascadeUV.y > 1.0f)
     {
-        return float4(1.0f, 0.99755993f, 0.89343751f, 0.0f);
+        return float4(0.0f, 0.0f, 0.9811252243f, 1.0f);
     }
 
     float halfTexel = 0.5f / SQ_ShadowmapSize;
@@ -227,20 +227,22 @@ float4 SampleShadowMomentsLitBorder(float2 cascadeUV, int cascadeIndex)
 
 float4 DecodeShadowMoments(float4 optimized)
 {
-    optimized.x -= 0.0359558848f;
-    return mul(optimized, float4x4(
-        0.2227744146f,  0.1549679261f,  0.1451988946f,  0.1631274430f,
-        0.0771972861f,  0.1394629426f,  0.2120202157f,  0.2591432266f,
-        0.7926986636f,  0.7963415838f,  0.7258694464f,  0.6539092497f,
-        0.0319417555f, -0.1722823173f, -0.2758014811f, -0.3376131734f));
+    // Inverse of the sparse signed-depth transform used by PS_ShadowMoments.
+    float odd0 = optimized.x - 0.5f;
+    float odd1 = (optimized.z - 0.5f) * 0.5773502692f;
+    float b1 = 3.0f * odd1 - odd0 / 3.0f;
+    float b3 = (9.0f * odd1 - 3.0f * odd0) * 0.25f;
+    float b2 = optimized.w + optimized.y * 0.125f;
+    float b4 = optimized.w - optimized.y * 0.125f;
+    return float4(b1, b2, b3, b4);
 }
 
-float EstimateMSMLit(float4 optimizedMoments, float receiverDepth)
+float EstimateMSMLit(float4 decodedMoments, float receiverDepth)
 {
     // Hamburger 4MSM from Peters/Klein. The moment bias makes the Hankel
     // matrix positive definite after 16-bit quantization and filtering.
-    float4 b = lerp(DecodeShadowMoments(optimizedMoments), float4(0.5f, 0.5f, 0.5f, 0.5f), 0.00003f);
-    float z0 = saturate(receiverDepth);
+    float4 b = lerp(decodedMoments, float4(0.0f, 0.628f, 0.0f, 0.628f), 0.00006f);
+    float z0 = clamp(receiverDepth, -1.0f, 1.0f);
 
     float L32D22 = mad(-b.x, b.y, b.z);
     float D22 = max(mad(-b.x, b.x, b.y), 1e-7f);
@@ -275,7 +277,18 @@ float EstimateMSMLit(float4 optimizedMoments, float receiverDepth)
     float quotient = (switchValue.x * z2
         - b.x * (switchValue.x + z2) + b.y) / denominator;
     float shadowIntensity = saturate(switchValue.z + switchValue.w * quotient);
+    // The reference implementation removes the faint final two percent of
+    // light leaking before converting shadow intensity back to visibility.
+    shadowIntensity = saturate(shadowIntensity / 0.98f);
     return 1.0f - shadowIntensity;
+}
+
+float GetMSMCascadeWorldDepthSpan(int cascadeIndex)
+{
+    matrix shadowViewProj = SQ_ShadowViewProj[cascadeIndex];
+    float depthScale = length(float3(
+        shadowViewProj[0][2], shadowViewProj[1][2], shadowViewProj[2][2]));
+    return (depthScale > 1e-7f) ? rcp(depthScale) : 1.0f;
 }
 
 float SampleCascadeShadowMSM(float4 vShadowSamplingPos, float2 projectedTexCoords,
@@ -288,6 +301,7 @@ float SampleCascadeShadowMSM(float4 vShadowSamplingPos, float2 projectedTexCoord
     }
 
     float receiverDepth = saturate(vShadowSamplingPos.z - bias);
+    float signedReceiverDepth = receiverDepth * 2.0f - 1.0f;
     float hardShadow = SampleShadowMapCmp(projectedTexCoords, cascadeIndex, vShadowSamplingPos.z - bias);
 
     // The leftmost F11 softness step means hard shadows. Do not force a moment
@@ -306,7 +320,17 @@ float SampleCascadeShadowMSM(float4 vShadowSamplingPos, float2 projectedTexCoord
         SampleShadowMomentsLitBorder(projectedTexCoords + float2( offset.x, -offset.y), cascadeIndex) +
         SampleShadowMomentsLitBorder(projectedTexCoords + float2(-offset.x,  offset.y), cascadeIndex) +
         SampleShadowMomentsLitBorder(projectedTexCoords + float2( offset.x,  offset.y), cascadeIndex);
-    return lerp(hardShadow, EstimateMSMLit(optimizedMoments * 0.25f, receiverDepth), momentWeight);
+    float4 decodedMoments = DecodeShadowMoments(optimizedMoments * 0.25f);
+    float msmLit = EstimateMSMLit(decodedMoments, signedReceiverDepth);
+
+    // A wide moment kernel may leak light into short-range contact shadows.
+    // Keep the hardware comparison authoritative near the blocker and release
+    // it smoothly as receiver/blocker separation grows into a real penumbra.
+    float worldDepthSeparation = max(signedReceiverDepth - decodedMoments.x, 0.0f)
+        * (0.5f * GetMSMCascadeWorldDepthSpan(cascadeIndex));
+    float contactRelease = smoothstep(15.0f, 150.0f, worldDepthSeparation);
+    float contactPreservedLit = lerp(min(msmLit, hardShadow), msmLit, contactRelease);
+    return lerp(hardShadow, contactPreservedLit, momentWeight);
 }
 #endif
 #if SHADOW_ATLAS

@@ -84,8 +84,8 @@ float ComputeContact(float2 uv, float depth)
     float3 n = ViewNormal(uv);
     float3 l = normalize(SSL_LightDirectionVS);
     float nl = dot(n, l);
-    if (nl <= -0.20f) return 0.0f;
-    float facing = saturate(nl * 0.85f + 0.15f);
+    if (nl <= 0.02f) return 0.0f;
+    float facing = smoothstep(0.02f, 0.30f, nl);
 
     float materialClass = TX_Material.SampleLevel(SS_Linear, saturate(uv), 0).r;
     float npcMaterial = (materialClass < -0.5f && materialClass > -2.0f) ? 1.0f : 0.0f;
