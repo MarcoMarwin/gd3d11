@@ -304,13 +304,10 @@ float SampleCascadeShadowMSM(float4 vShadowSamplingPos, float2 projectedTexCoord
     float signedReceiverDepth = receiverDepth * 2.0f - 1.0f;
     float hardShadow = SampleShadowMapCmp(projectedTexCoords, cascadeIndex, vShadowSamplingPos.z - bias);
 
-    // The leftmost F11 softness step means hard shadows. Do not force a moment
-    // footprint there: it blurs detail and costs four moment reads for no benefit.
-    float momentWeight = saturate((softness - 0.10f) / 0.30f);
-    if (momentWeight <= 0.0f)
-        return hardShadow;
-
-    float filterRadius = max(softness * 0.55f, 0.0f) / SQ_ShadowmapSize;
+    // MSM stays active even at the leftmost softness step. A tiny footprint gives
+    // stable moment antialiasing without turning the zero-softness setting mushy.
+    float momentWeight = lerp(0.38f, 1.0f, smoothstep(0.0f, 0.24f, softness));
+    float filterRadius = (0.18f + softness * 0.92f) / SQ_ShadowmapSize;
     float2 offset = float2(filterRadius, filterRadius);
 
     // Four bilinear moment reads form a stable separable box footprint. This

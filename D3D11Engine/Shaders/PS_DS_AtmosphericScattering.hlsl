@@ -338,7 +338,11 @@ float4 PSMain(PS_INPUT Input) : SV_TARGET
         : saturate(AC_SunVisibility);
     float3 mainLightDir = normalize(SQ_LightDirectionVS);
     float directNoL = PLS_ComputeThinBacklitNdl(mainLightDir, normal, twoSidedBacklitMaterial * AC_EnableSSS);
-    float sun = saturate(directNoL * shadow) * mainLightVisibility;
+    float frontDirect = saturate(dot(mainLightDir, normal));
+    float backTransmissionDirect = max(directNoL - frontDirect, 0.0f) * saturate(twoSidedBacklitMaterial * AC_EnableSSS);
+    float sunBacklitShadowBypass = PLS_ComputeBacklitShadowBypass(mainLightDir, normal, twoSidedBacklitMaterial, AC_EnableSSS);
+    float directShadow = lerp(shadow, 1.0f, sunBacklitShadowBypass);
+    float sun = saturate(frontDirect * directShadow + backTransmissionDirect) * mainLightVisibility;
     spec = pow(spec, specPower) * specIntensity;
 
     float shadowAO = lerp(1.0f, vertLighting, SQ_ShadowAOStrength);
@@ -379,7 +383,7 @@ float4 PSMain(PS_INPUT Input) : SV_TARGET
 	float vegetationMask = PLS_ComputeBacklitVegetationMask(diffuse.rgb, vegetationMaterial, twoSidedBacklitMaterial);
 	float materialBacklitMask = max(vegetationMask, twoSidedBacklitMaterial);
 	if (AC_EnableSSS > 0.5f && sssLightWeight > 0.001f && materialBacklitMask > 0.001f) {
-		float sssShadow = lerp(0.55f, 1.0f, saturate(shadow));
+		float sssShadow = lerp(lerp(0.55f, 1.0f, saturate(shadow)), 1.0f, saturate(twoSidedBacklitMaterial));
 		float sssVertexGate = lerp(0.35f, 1.0f, saturate(vertLighting * 1.5f));
 		float sss = PLS_ComputeBacklitTransmissionWeight(
 			mainLightDir, normal, V, sssShadow * sssVertexGate,

@@ -54,7 +54,8 @@ float PLS_ComputeBacklitVegetationMask(
     float twoSidedBacklitMaterial )
 {
     float greenLeafMask = saturate( diffuseColor.g * 1.25f - diffuseColor.r * 0.45f - diffuseColor.b * 0.25f );
-    return alphaTestedMaterial * (1.0f - saturate(twoSidedBacklitMaterial)) * greenLeafMask;
+    float greenDominanceMask = saturate( (diffuseColor.g - max(diffuseColor.r, diffuseColor.b)) * 1.8f + 0.10f );
+    return alphaTestedMaterial * (1.0f - saturate(twoSidedBacklitMaterial)) * max(greenLeafMask, greenDominanceMask);
 }
 
 float PLS_ComputeThinBacklitNdl(
@@ -68,6 +69,18 @@ float PLS_ComputeThinBacklitNdl(
     float backTransmission = back * back * 0.25f;
     float twoSided = saturate( max( front, backBase ) + backTransmission );
     return lerp( front, twoSided, saturate(twoSidedBacklitMaterial) );
+}
+
+float PLS_ComputeBacklitShadowBypass(
+    float3 lightDirVS,
+    float3 normalVS,
+    float twoSidedBacklitMaterial,
+    float sssEnabled )
+{
+    float front = saturate( dot( lightDirVS, normalVS ) );
+    float back = saturate( dot( lightDirVS, -normalVS ) );
+    float backSide = smoothstep( 0.04f, 0.32f, back - front );
+    return saturate( twoSidedBacklitMaterial * sssEnabled * backSide );
 }
 
 float PLS_ComputeBacklitTransmissionWeight(
@@ -87,7 +100,8 @@ float PLS_ComputeBacklitTransmissionWeight(
     float exceptionCore = back * lerp( 0.25f, 0.75f, rim );
     float materialCore = vegetationCore * saturate(vegetationBacklitMask)
         + exceptionCore * saturate(twoSidedBacklitMaterial);
-    return saturate(materialCore * saturate(shadowGate) * saturate(sssEnabled) * saturate(sssIntensity) * lightScale);
+    float transmissionShadowGate = lerp(saturate(shadowGate), 1.0f, saturate(twoSidedBacklitMaterial));
+    return saturate(materialCore * transmissionShadowGate * saturate(sssEnabled) * saturate(sssIntensity) * lightScale);
 }
 float PLS_ComputePointLightNdl(
     float3 lightDirVS,

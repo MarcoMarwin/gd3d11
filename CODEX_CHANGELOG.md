@@ -315,3 +315,11 @@ Kurze, append-only Dokumentation der von Codex gepushten Renderer-Builds.
 - FSR3/Wind: instanzierte Vegetation schreibt Motion Vectors mit der vorherigen Windphase, damit starker Regenwind weniger History-Schlieren erzeugt.
 - 12-Uhr-Weltschatten: Weltgeometrie im Sonnen-Shadowpass wird nicht mehr zusaetzlich gegen das Kaskaden-Frustum verworfen; VOB-/NPC-Culling bleibt unveraendert.
 - Pruefung: AGENTS-Regeln gelesen; gezielte MSM-, Backlit-, Wind-CBuffer-, Weltmesh-Shadow-Culling- und Aufruferpruefungen sowie git diff --check statisch kontrolliert. Kein vollstaendiger lokaler C++-/Shader-Build.
+## Build 106 (MSM, Backlit Vegetation, Contact Shadows und Oillamp-Schatten)
+
+- MSM: der Filter bleibt auch bei Shadow Softness ganz links im MSM-Pfad aktiv und nutzt dort einen sehr kleinen Momenten-Footprint statt eines Hard-/Simple-Fallbacks; hoehere Softness-Werte skalieren den Momentenfilter staerker.
+- Backlit Vegetation: Rueckseiten-Transmission ignoriert normale Schattenstreifen nur auf der Rueckseite, Vorderseiten-Schatten bleiben normal. Die allgemeine Vegetationsmaske wurde breiter gefasst, damit Baumlaub wieder sichtbarer auf dem Niveau der aelteren Backlit-Wirkung bleibt, aber mit reduzierter interner Staerke 0,5.
+- Contact Shadows und FSR3: Contact-History ist von der Farb-History getrennt und bleibt auch bei FSR3 Native AA stabiler, nicht nur bei Render Scale unter 100 Prozent.
+- Indoor-Pointlights: NW_CITY_OILLAMP_01.3DS-Oillamps duerfen analog zu Flammen je das naechste statische und dynamische Licht bis 150 Einheiten als schattenberechtigt verankern; der Schattenursprung wird auf den Oillamp-Mittelpunkt plus 50 Hoeheneinheiten gezogen.
+- Offene Ingame-Grenzen: Oillamp-Lichtzuordnung, MSM-Bildruhe bei niedriger Softness, Backlit-Wirkung auf normale Baeume und FSR3-Contact-Stabilitaet sollten im Spiel final gegengeprueft werden.
+- Pruefung: Buildnummer aus outputs ermittelt; AGENTS-Regeln gelesen; gezielte Status-, Diff-, Shader-/Binding-, Oillamp-Anker- und git diff --check-Pruefungen statisch kontrolliert. Kein vollstaendiger lokaler C++-/Shader-Build.

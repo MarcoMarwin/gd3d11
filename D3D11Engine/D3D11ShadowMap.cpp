@@ -708,8 +708,7 @@ XRESULT D3D11ShadowMap::PrepareRender()
         perFrameCascadeData.frameCount++;
         const bool useMSM = !m_useAtlas
             && !FeatureLevel10Compatibility
-            && settings.ShadowFilterMode == GothicRendererSettings::SHADOW_FILTER_MSM
-            && settings.ShadowSoftness > 0.10f;
+            && settings.ShadowFilterMode == GothicRendererSettings::SHADOW_FILTER_MSM;
         if ( !useMSM ) {
             m_MSMomentDataValid = false;
         }
@@ -1223,7 +1222,6 @@ XRESULT D3D11ShadowMap::DrawWorldShadow( )
     bool useMSMMoments = !m_useAtlas
         && !FeatureLevel10Compatibility
         && settings.ShadowFilterMode == GothicRendererSettings::SHADOW_FILTER_MSM
-        && settings.ShadowSoftness > 0.10f
         && m_cascadedShadowMap != nullptr;
     if ( useMSMMoments && FAILED( m_cascadedShadowMap->EnsureMomentResources( static_cast<UINT>(numCascades) ) ) ) {
         LogError() << "MSM disabled for this frame because its moment resources could not be created";

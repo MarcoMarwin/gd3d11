@@ -184,7 +184,8 @@ float3 FP_ComputePointLighting(
         if ( light.ShadowCubeIndex >= 0 && any(lighting > 0.001f) )
         {
             float shadow = PLS_SampleShadowCubeArray( FP_ShadowCubeArray, SS_Comp, wsPosition, wsNormal, light.PositionWorld, light.Range, light.ShadowCubeIndex, light.ShadowSoftness );
-            lighting *= lerp(1.0f, shadow, saturate(light.ShadowStrength));
+            float backlitShadowBypass = PLS_ComputeBacklitShadowBypass(lightDir, normal, twoSidedBacklitMaterial, AC_EnableSSS);
+            lighting *= lerp(1.0f, shadow, saturate(light.ShadowStrength) * (1.0f - backlitShadowBypass));
         }
 
         float indoorPixel = diffuseColor.a < 0.5f ? 1.0f : 0.0f;
@@ -225,8 +226,12 @@ float3 FP_ComputeSunLighting(
         ? saturate( AC_MoonVisibility )
         : saturate( AC_SunVisibility );
     float3 mainLightDir = normalize( SQ_LightDirectionVS );
-    float sun = saturate( PLS_ComputeThinBacklitNdl( mainLightDir, normal, twoSidedBacklitMaterial * AC_EnableSSS ) * shadow )
-        * mainLightVisibility;
+    float frontDirect = saturate(dot(mainLightDir, normal));
+    float thinDirect = PLS_ComputeThinBacklitNdl(mainLightDir, normal, twoSidedBacklitMaterial * AC_EnableSSS);
+    float backTransmissionDirect = max(thinDirect - frontDirect, 0.0f) * saturate(twoSidedBacklitMaterial * AC_EnableSSS);
+    float sunBacklitShadowBypass = PLS_ComputeBacklitShadowBypass(mainLightDir, normal, twoSidedBacklitMaterial, AC_EnableSSS);
+    float directShadow = lerp(shadow, 1.0f, sunBacklitShadowBypass);
+    float sun = saturate(frontDirect * directShadow + backTransmissionDirect) * mainLightVisibility;
 
     spec = pow( spec, specPower ) * specIntensity;
 
@@ -261,7 +266,7 @@ float3 FP_ComputeSunLighting(
     float sssLightWeight = max( sssSunWeight, sssMoonWeight );
     float materialBacklitMask = max( vegetationBacklitMask, twoSidedBacklitMaterial );
     if ( AC_EnableSSS > 0.5f && sssLightWeight > 0.001f && materialBacklitMask > 0.001f ) {
-        float sssShadow = lerp( 0.55f, 1.0f, saturate( shadow ) );
+        float sssShadow = lerp(lerp( 0.55f, 1.0f, saturate( shadow ) ), 1.0f, saturate(twoSidedBacklitMaterial));
         float sssVertexGate = lerp( 0.35f, 1.0f, saturate( vertLighting * 1.5f ) );
         float sss = PLS_ComputeBacklitTransmissionWeight(
             mainLightDir, normal, V, sssShadow * sssVertexGate,

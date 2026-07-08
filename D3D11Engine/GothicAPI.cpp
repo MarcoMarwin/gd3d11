@@ -180,6 +180,25 @@ namespace {
             && name.find( "fog" ) == std::string::npos;
     }
 
+    bool IsOilLampShadowAnchorName( std::string name ) {
+        name = ToLowerMaterialName( std::move( name ) );
+        auto hasNameToken = [&name]( const char* token ) {
+            const std::string needle = token;
+            size_t pos = name.find( needle );
+            while ( pos != std::string::npos ) {
+                const size_t end = pos + needle.size();
+                const bool startBoundary = pos == 0 || !::isalnum( static_cast<unsigned char>(name[pos - 1]) );
+                const bool endBoundary = end == name.size() || !::isalnum( static_cast<unsigned char>(name[end]) );
+                if ( startBoundary && endBoundary )
+                    return true;
+                pos = name.find( needle, pos + 1 );
+            }
+            return false;
+        };
+        return hasNameToken( "nw_city_oillamp_01.3ds" )
+            || hasNameToken( "nw_city_oillamp_01" );
+    }
+
     void ApplyMaterialCompatibility( MaterialInfo::Buffer& buffer, int version ) {
         if ( version < 2 && buffer.DisplacementFactor == 0.0f ) {
             buffer.DisplacementFactor = 0.7f;
@@ -5232,6 +5251,78 @@ void GothicAPI::ConfigureAllPointlightShadowSources() const {
         // Multiple independent flames claim this light: keep the authored position.
     }
 
+    struct OilLampAnchor {
+        zCVob* Vob = nullptr;
+        XMFLOAT3 Position = {};
+        XMFLOAT3 ShadowAnchor = {};
+    };
+    std::vector<OilLampAnchor> oilLampAnchors;
+
+    for ( const auto& vobEntry : VobMap ) {
+        VobInfo* vobInfo = vobEntry.second;
+        if ( !vobInfo || !vobInfo->Vob || !vobInfo->Vob->GetShowVisual() || hasVisualFXAncestor( vobInfo->Vob ) )
+            continue;
+
+        std::string identity;
+        if ( vobInfo->VisualInfo )
+            identity += vobInfo->VisualInfo->VisualName;
+        if ( zCVisual* visual = vobInfo->Vob->GetVisual() ) {
+            identity += " ";
+            if ( const char* objectName = visual->GetObjectName() )
+                identity += objectName;
+        }
+        identity += " ";
+        identity += vobInfo->Vob->GetName();
+        if ( !IsOilLampShadowAnchorName( std::move( identity ) ) )
+            continue;
+
+        const zTBBox3D bbox = vobInfo->Vob->GetBBox();
+        XMFLOAT3 midpoint;
+        XMStoreFloat3( &midpoint, 0.5f * (XMLoadFloat3( &bbox.Min ) + XMLoadFloat3( &bbox.Max )) );
+
+        OilLampAnchor anchor;
+        anchor.Vob = vobInfo->Vob;
+        anchor.Position = midpoint;
+        anchor.ShadowAnchor = midpoint;
+        anchor.ShadowAnchor.y += 50.0f;
+        oilLampAnchors.push_back( anchor );
+    }
+
+    std::vector<std::vector<size_t>> oilLampClaims( lights.size() );
+    for ( size_t oilLampIndex = 0; oilLampIndex < oilLampAnchors.size(); ++oilLampIndex ) {
+        const OilLampAnchor& oilLamp = oilLampAnchors[oilLampIndex];
+        for ( int staticKind = 0; staticKind < 2; ++staticKind ) {
+            size_t bestLight = INVALID_INDEX;
+            float bestDistanceSq = LINK_RADIUS_SQ;
+            for ( size_t lightIndex = 0; lightIndex < lights.size(); ++lightIndex ) {
+                if ( resolvedByFlame[lightIndex] )
+                    continue;
+                if ( static_cast<int>(lights[lightIndex].Info->Vob->IsStatic()) != staticKind )
+                    continue;
+
+                const float candidateDistanceSq = distanceSq( lights[lightIndex].Position, oilLamp.Position );
+                if ( candidateDistanceSq <= bestDistanceSq ) {
+                    bestDistanceSq = candidateDistanceSq;
+                    bestLight = lightIndex;
+                }
+            }
+            if ( bestLight != INVALID_INDEX )
+                oilLampClaims[bestLight].push_back( oilLampIndex );
+        }
+    }
+
+    std::vector<bool> resolvedByVisualAnchor = resolvedByFlame;
+    for ( size_t lightIndex = 0; lightIndex < lights.size(); ++lightIndex ) {
+        if ( oilLampClaims[lightIndex].empty() )
+            continue;
+
+        resolvedByVisualAnchor[lightIndex] = true;
+        lights[lightIndex].Info->AllowsPointlightShadows = true;
+        if ( oilLampClaims[lightIndex].size() == 1 )
+            assignAnchor( lights[lightIndex], oilLampAnchors[oilLampClaims[lightIndex].front()].ShadowAnchor );
+        // Multiple independent oillamps claim this light: keep the authored position.
+    }
+
     struct ParentAnchor {
         zCVob* Parent = nullptr;
         XMFLOAT3 Position = {};
@@ -5245,7 +5336,7 @@ void GothicAPI::ConfigureAllPointlightShadowSources() const {
     };
 
     for ( size_t lightIndex = 0; lightIndex < lights.size(); ++lightIndex ) {
-        if ( resolvedByFlame[lightIndex] || !lights[lightIndex].Parent || parentContainsFlame( lights[lightIndex].Parent ) )
+        if ( resolvedByVisualAnchor[lightIndex] || !lights[lightIndex].Parent || parentContainsFlame( lights[lightIndex].Parent ) )
             continue;
 
         auto anchorIt = std::find_if( parentAnchors.begin(), parentAnchors.end(), [&]( const ParentAnchor& anchor ) {
@@ -5276,7 +5367,7 @@ void GothicAPI::ConfigureAllPointlightShadowSources() const {
             size_t bestLight = INVALID_INDEX;
             float bestDistanceSq = LINK_RADIUS_SQ;
             for ( size_t lightIndex = 0; lightIndex < lights.size(); ++lightIndex ) {
-                if ( resolvedByFlame[lightIndex] )
+                if ( resolvedByVisualAnchor[lightIndex] )
                     continue;
                 if ( static_cast<int>(lights[lightIndex].Info->Vob->IsStatic()) != staticKind )
                     continue;

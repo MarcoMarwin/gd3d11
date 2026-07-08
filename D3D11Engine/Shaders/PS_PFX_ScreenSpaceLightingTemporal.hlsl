@@ -100,32 +100,38 @@ PS_OUTPUT PSMain(PS_INPUT input)
     float depth = TX_Depth.SampleLevel(SS_Linear, uv, 0).r;
     float2 velocity = TX_Velocity.SampleLevel(SS_Linear, uv, 0).rg;
     float2 prevUV = uv + velocity;
+    float fsr3 = saturate(SSL_FSR3Active);
     float valid = SSL_HistoryValid;
     valid *= step(0.0f, prevUV.x) * step(prevUV.x, 1.0f) * step(0.0f, prevUV.y) * step(prevUV.y, 1.0f);
+    float colorValid = valid;
+    float contactValid = valid;
     float prevDepth = TX_PrevDepth.SampleLevel(SS_Linear, saturate(prevUV), 0).r;
     float currentViewZ = ViewZ(depth);
     float depthDiff = abs(currentViewZ - ViewZ(prevDepth));
     float depthThreshold = max(12.0f, abs(currentViewZ) * 0.02f);
-    valid *= 1.0f - smoothstep(depthThreshold, depthThreshold * 4.0f, depthDiff);
+    colorValid *= 1.0f - smoothstep(depthThreshold, depthThreshold * 4.0f, depthDiff);
+    float contactDepthThreshold = lerp(depthThreshold, max(28.0f, abs(currentViewZ) * 0.05f), fsr3);
+    contactValid *= 1.0f - smoothstep(contactDepthThreshold, contactDepthThreshold * 5.0f, depthDiff);
 
     float2 centerNormal = TX_Normals.SampleLevel(SS_Linear, uv, 0).xy;
     float2 reprojectedNormal = TX_Normals.SampleLevel(SS_Linear, saturate(prevUV), 0).xy;
-    valid *= 1.0f - smoothstep(0.10f, 0.35f, length(centerNormal - reprojectedNormal));
+    float normalDiff = length(centerNormal - reprojectedNormal);
+    colorValid *= 1.0f - smoothstep(0.10f, 0.35f, normalDiff);
+    contactValid *= 1.0f - smoothstep(lerp(0.10f, 0.18f, fsr3), lerp(0.35f, 0.58f, fsr3), normalDiff);
 
     float4 history = TX_History.SampleLevel(SS_Linear, saturate(prevUV), 0);
-    float fsr3 = saturate(SSL_FSR3Active);
     float colorClampMargin = lerp(0.08f, 0.12f, fsr3);
     history.rgb = clamp(history.rgb, minV.rgb - colorClampMargin, maxV.rgb + colorClampMargin);
     float contactClampMargin = lerp(0.06f, 0.16f, fsr3);
     history.a = clamp(history.a, minV.a - contactClampMargin, maxV.a + contactClampMargin);
 
     float motion = saturate(length(velocity) * 240.0f);
-    float historyWeight = lerp(0.92f, 0.55f, motion) * valid;
+    float historyWeight = lerp(0.92f, 0.55f, motion) * colorValid;
     float contactDelta = abs(current.a - history.a);
     float contactStability = 1.0f - smoothstep(0.05f, 0.30f, contactDelta);
-    float contactBaseWeight = lerp(0.90f, 0.60f, motion) * valid;
-    float fsr3Retention = lerp(0.72f, 0.90f, contactStability);
-    float contactHistoryWeight = contactBaseWeight * lerp(1.0f, fsr3Retention, fsr3);
+    float contactMotionWeight = lerp(lerp(0.90f, 0.60f, motion), lerp(0.94f, 0.78f, motion), fsr3);
+    float fsr3Retention = lerp(0.84f, 0.95f, contactStability);
+    float contactHistoryWeight = contactMotionWeight * contactValid * lerp(1.0f, fsr3Retention, fsr3);
     output.Lighting.rgb = lerp(current.rgb, history.rgb, historyWeight);
     output.Lighting.a = lerp(current.a, history.a, contactHistoryWeight);
     output.Lighting.rgb = max(output.Lighting.rgb, 0.0f);
