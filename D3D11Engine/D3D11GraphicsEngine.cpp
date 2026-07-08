@@ -6295,6 +6295,8 @@ void XM_CALLCONV D3D11GraphicsEngine::DrawWorldAround_Layered(
 
     UpdateRenderStates();
 
+    auto enableCulling = Engine::GAPI->GetRendererState().RendererSettings.IsShadowFrustumCullingEnabled();
+
     bool colorWritesEnabled =
         Engine::GAPI->GetRendererState().BlendState.ColorWritesEnabled;
     float alphaRef = Engine::GAPI->GetRendererState().GraphicsState.FF_AlphaRef;
@@ -6936,13 +6938,11 @@ void XM_CALLCONV D3D11GraphicsEngine::DrawWorldAroundForWorldShadow( FXMVECTOR p
         currentFrustum = &alwaysContainingFrustum;
     }
 
-    Frustum relaxedWorldShadowFrustum;
-    const Frustum* worldMeshShadowFrustum = currentFrustum;
-    const bool relaxWorldShadowCulling = !enableCulling;
-    if ( relaxWorldShadowCulling ) {
-        relaxedWorldShadowFrustum = Frustum::AlwaysContainingFrustum();
-        worldMeshShadowFrustum = &relaxedWorldShadowFrustum;
-    }
+    // World geometry is already reduced by section collection. A cascade frustum
+    // edge-case around sun zenith can reject only worldmesh while VOB/NPC casters
+    // still render, so keep worldmesh shadow culling conservative here.
+    Frustum relaxedWorldShadowFrustum = Frustum::AlwaysContainingFrustum();
+    const Frustum* worldMeshShadowFrustum = &relaxedWorldShadowFrustum;
 
     if ( Engine::GAPI->GetRendererState().RendererSettings.DrawWorldMesh ) {
         TracyD3D11ZoneCGX( "Shadows::DrawWorldMesh" );
@@ -7455,8 +7455,10 @@ void D3D11GraphicsEngine::ApplyWindProps( VS_ExConstantBuffer_Wind& windBuff ) {
         * settings.GlobalWindStrength
         * 2.0f;
 
+    const float prevWindGlobalTime = WindGlobalTime;
     WindGlobalTime += dt * (1.5f * (1.0f + rainWeight * (rainMaxSpeedMultiplier - 1.0f)));
     windBuff.globalTime = WindGlobalTime;
+    windBuff.prevGlobalTime = prevWindGlobalTime;
 }
 
 /** Draws the static vobs instanced */

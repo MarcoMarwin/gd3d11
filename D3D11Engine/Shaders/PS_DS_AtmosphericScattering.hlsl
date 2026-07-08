@@ -337,7 +337,7 @@ float4 PSMain(PS_INPUT Input) : SV_TARGET
         ? saturate(AC_MoonVisibility)
         : saturate(AC_SunVisibility);
     float3 mainLightDir = normalize(SQ_LightDirectionVS);
-    float directNoL = PLS_ComputeThinBacklitNdl(mainLightDir, normal, twoSidedBacklitMaterial);
+    float directNoL = PLS_ComputeThinBacklitNdl(mainLightDir, normal, twoSidedBacklitMaterial * AC_EnableSSS);
     float sun = saturate(directNoL * shadow) * mainLightVisibility;
     spec = pow(spec, specPower) * specIntensity;
 

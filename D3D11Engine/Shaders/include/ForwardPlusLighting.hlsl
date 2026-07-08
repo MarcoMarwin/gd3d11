@@ -168,7 +168,7 @@ float3 FP_ComputePointLighting(
             
         lightDir /= distance;
 
-        float ndl = PLS_ComputePointLightNdlBacklit( lightDir, normal, light.PositionWorld, wsPosition, wsNormal, twoSidedBacklitMaterial );
+        float ndl = PLS_ComputePointLightNdlBacklit( lightDir, normal, light.PositionWorld, wsPosition, wsNormal, twoSidedBacklitMaterial, AC_EnableSSS );
         
         // instead of pow(..., 1.2f) we use a fast quadratic-like approach.
         float falloff = PLS_ComputeRangeFalloff( distance, light.Range );
@@ -225,7 +225,7 @@ float3 FP_ComputeSunLighting(
         ? saturate( AC_MoonVisibility )
         : saturate( AC_SunVisibility );
     float3 mainLightDir = normalize( SQ_LightDirectionVS );
-    float sun = saturate( PLS_ComputeThinBacklitNdl( mainLightDir, normal, twoSidedBacklitMaterial ) * shadow )
+    float sun = saturate( PLS_ComputeThinBacklitNdl( mainLightDir, normal, twoSidedBacklitMaterial * AC_EnableSSS ) * shadow )
         * mainLightVisibility;
 
     spec = pow( spec, specPower ) * specIntensity;

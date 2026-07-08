@@ -288,7 +288,15 @@ float SampleCascadeShadowMSM(float4 vShadowSamplingPos, float2 projectedTexCoord
     }
 
     float receiverDepth = saturate(vShadowSamplingPos.z - bias);
-    float filterRadius = max(softness * 0.65f, 0.35f) / SQ_ShadowmapSize;
+    float hardShadow = SampleShadowMapCmp(projectedTexCoords, cascadeIndex, vShadowSamplingPos.z - bias);
+
+    // The leftmost F11 softness step means hard shadows. Do not force a moment
+    // footprint there: it blurs detail and costs four moment reads for no benefit.
+    float momentWeight = saturate((softness - 0.10f) / 0.30f);
+    if (momentWeight <= 0.0f)
+        return hardShadow;
+
+    float filterRadius = max(softness * 0.55f, 0.0f) / SQ_ShadowmapSize;
     float2 offset = float2(filterRadius, filterRadius);
 
     // Four bilinear moment reads form a stable separable box footprint. This
@@ -298,7 +306,7 @@ float SampleCascadeShadowMSM(float4 vShadowSamplingPos, float2 projectedTexCoord
         SampleShadowMomentsLitBorder(projectedTexCoords + float2( offset.x, -offset.y), cascadeIndex) +
         SampleShadowMomentsLitBorder(projectedTexCoords + float2(-offset.x,  offset.y), cascadeIndex) +
         SampleShadowMomentsLitBorder(projectedTexCoords + float2( offset.x,  offset.y), cascadeIndex);
-    return EstimateMSMLit(optimizedMoments * 0.25f, receiverDepth);
+    return lerp(hardShadow, EstimateMSMLit(optimizedMoments * 0.25f, receiverDepth), momentWeight);
 }
 #endif
 #if SHADOW_ATLAS

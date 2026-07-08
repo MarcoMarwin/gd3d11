@@ -18,7 +18,8 @@ cbuffer WindParams : register(b1)
      float globalTime;
      float minHeight;
      float maxHeight;
-     float2 padding0;
+     float prevGlobalTime;
+     float padding0;
      float4 interactionPositions[MAX_CHARACTER_INTERACTION_INFLUENCERS];
      float characterInteractionStrength;
      float3 padding1;
@@ -213,8 +214,9 @@ VS_OUTPUT VSMain( VS_INPUT Input )
 {
     VS_OUTPUT Output;
             
-    // Base vertex position (local)
+    // Base vertex positions (local). Previous uses the previous wind phase for motion vectors.
     float3 position = Input.vPosition;
+    float3 prevPosition = Input.vPosition;
 
     float localMinHeight = minHeight;
     float localMaxHeight = maxHeight;
@@ -229,7 +231,9 @@ VS_OUTPUT VSMain( VS_INPUT Input )
     if (Input.InstanceWind.y > 0)
     {
         // CHARACTER INTERACTION MOVING BUSHES SHADER
-        position += CalculateActorInteractionInfluence(position, localMinHeight, localMaxHeight, Input.InstanceWorldMatrix);
+        float3 interactionOffset = CalculateActorInteractionInfluence(position, localMinHeight, localMaxHeight, Input.InstanceWorldMatrix);
+        position += interactionOffset;
+        prevPosition += interactionOffset;
     }
 #endif
     
@@ -242,13 +246,23 @@ VS_OUTPUT VSMain( VS_INPUT Input )
         float heightRange = max(localMaxHeight - localMinHeight, 0.001);
         float vertexHeightNorm = saturate((Input.vPosition.y - localMinHeight) / heightRange);
 
-        // Apply wind
+        // Apply current and previous wind phases so FSR/TAA receive vegetation motion vectors.
+        float3 windDirection = normalize(windDir);
         position += ApplyTreeWind(
             Input.vPosition,
-            normalize(windDir),
+            windDirection,
             vertexHeightNorm,
             globalTime,
             Input.InstanceWorldMatrix,
+            localMaxHeight,
+            Input.InstanceWind.x
+        );
+        prevPosition += ApplyTreeWind(
+            Input.vPosition,
+            windDirection,
+            vertexHeightNorm,
+            prevGlobalTime,
+            Input.InstancePrevWorldMatrix,
             localMaxHeight,
             Input.InstanceWind.x
         );
@@ -259,7 +273,7 @@ VS_OUTPUT VSMain( VS_INPUT Input )
     float3 worldPos = mul(float4(position, 1.0), Input.InstanceWorldMatrix).xyz;
     
     // Calculate previous world position for motion vectors
-    float3 prevWorldPos = mul(float4(position, 1.0), Input.InstancePrevWorldMatrix).xyz;
+    float3 prevWorldPos = mul(float4(prevPosition, 1.0), Input.InstancePrevWorldMatrix).xyz;
 
     Output.vPosition = mul(float4(worldPos, 1.0), frame.M_ViewProj);
     Output.vTexcoord = Input.vTex1;

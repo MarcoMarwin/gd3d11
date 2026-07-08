@@ -308,3 +308,10 @@ Kurze, append-only Dokumentation der von Codex gepushten Renderer-Builds.
 - Backlit Vegetation: gemeinsamer Transmissionspfad fuer Sonne/Mond, Forward+/Deferred-/Tiled-Pointlights und dynamisch schattierte Pointlights; benannte Ausnahmen nutzen dieselbe konturbetonte Durchleuchtung statt einfacher Rueckseitenaufhellung.
 - F11/Presets: Standard bleibt SSGI aus und Contact Shadows an. Presets setzen Low beide aus, Medium/High Contact Shadows an und SSGI aus, Extreme beide an.
 - Pruefung: AGENTS-Regeln gelesen; Defaultwerte, Presetzuordnung, Shader-/Aufruferpfade, betroffene Diffs und git diff --check statisch kontrolliert. Kein vollstaendiger lokaler C++-/Shader-Build.
+## Build 105 (MSM-Hard-Softness, Backlit-Gate und Wind-Motion)
+
+- MSM: bei Shadow Softness ganz links wird kein Momentfilter und keine Moment-Erzeugung mehr genutzt; der Pfad faellt auf direkten Shadow-Compare zurueck, damit harte Schatten Simple-naeher und guenstiger bleiben.
+- Backlit Vegetation: Sonnen-/Mondlicht, Forward+, Deferred-, Tiled- und dynamisch schattierte Pointlights koppeln die Rueckseiten-/Ausnahme-Durchleuchtung vollstaendig an den F11-Schalter Backlit Vegetation.
+- FSR3/Wind: instanzierte Vegetation schreibt Motion Vectors mit der vorherigen Windphase, damit starker Regenwind weniger History-Schlieren erzeugt.
+- 12-Uhr-Weltschatten: Weltgeometrie im Sonnen-Shadowpass wird nicht mehr zusaetzlich gegen das Kaskaden-Frustum verworfen; VOB-/NPC-Culling bleibt unveraendert.
+- Pruefung: AGENTS-Regeln gelesen; gezielte MSM-, Backlit-, Wind-CBuffer-, Weltmesh-Shadow-Culling- und Aufruferpruefungen sowie git diff --check statisch kontrolliert. Kein vollstaendiger lokaler C++-/Shader-Build.

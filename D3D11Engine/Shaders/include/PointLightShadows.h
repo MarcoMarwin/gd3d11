@@ -121,10 +121,11 @@ float PLS_ComputePointLightNdlBacklit(
     float3 lightPosWorld,
     float3 wsPosition,
     float3 wsNormal,
-    float twoSidedBacklitMaterial )
+    float twoSidedBacklitMaterial,
+    float sssEnabled )
 {
     float ndl = PLS_ComputePointLightNdl( lightDirVS, normalVS, lightPosWorld, wsPosition, wsNormal );
-    float thinNdl = PLS_ComputeThinBacklitNdl( lightDirVS, normalVS, twoSidedBacklitMaterial );
+    float thinNdl = PLS_ComputeThinBacklitNdl( lightDirVS, normalVS, twoSidedBacklitMaterial * saturate(sssEnabled) );
     return max( ndl, thinNdl );
 }
 
