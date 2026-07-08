@@ -293,3 +293,11 @@ Kurze, append-only Dokumentation der von Codex gepushten Renderer-Builds.
 - Backlit Vegetation: vollstaendig aufgehellte Rueckseiten durch konturbetonte, nach innen abklingende Lichttransmission ersetzt.
 - Offene Ingame-Grenzen: 12-Uhr-Weltschatten und Groundfog-PFX muessen im Spiel bestaetigt werden; SSGI und Contact Shadows sind getrennt auf Bildruhe, duenne Occluder und Leistung zu vergleichen.
 - Pruefung: Referenzpfade gegen Kirides 17.9.7 abgeglichen; Aufrufer, Shaderregister, Constant-Buffer-Layouts, Optionen, Ressourcenpfade, Escape-Sequenzen und git diff --check statisch kontrolliert. Kein vollstaendiger lokaler C++-Build.
+## Build 103 (MSM-, Noon-, Partikel- und Ressourcen-Korrekturen)
+
+- MSM: Moment-Mip-Footprints an den tatsaechlichen Filterdurchmesser gekoppelt, damit das sichtbare Shadowmap-Texelraster bei weichen Schatten reduziert wird.
+- 12-Uhr-Weltschatten: Kaskaden wieder aus den echten Kamera-Frustum-Slices mit stabilem Texel-Snapping und dynamischen Tiefengrenzen aufgebaut; Weltgeometrie wird am exakten Zenith zweiseitig in die Shadowmap geschrieben.
+- Partikel und Backlit: die normale Partikelbeleuchtung einschliesslich bestehender Tag-/Nachtabdunklung gilt wieder fuer Groundfog; die benannten Vegetationsausnahmen verwenden wieder die funktionierende identische Vorder-/Rueckseitenbeleuchtung.
+- Ressourcen: optimierte RainCloud.dds uebernommen, ungenutzte VDB-Atlasdaten aus dem Partikel-Instanzlayout entfernt (60 statt 72 Byte) und den leeren fuenften Sky-SRV-Slot entfernt.
+- Offene Ingame-Grenzen: MSM-Bildruhe, 12-Uhr-Weltschatten, Groundfog-Nachtabdunklung und Backlit-Ausnahmen muessen im Spiel bestaetigt werden.
+- Pruefung: DDS-Format, Abmessungen, Mip-Anzahl und Quellhash kontrolliert; CPU-/Shader-Partikellayout, Sky-Bindings, betroffene Shaderpfade und git diff --check statisch geprueft. Kein vollstaendiger lokaler C++-/Shader-Build.

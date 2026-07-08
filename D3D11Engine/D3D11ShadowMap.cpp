@@ -126,49 +126,164 @@ static void CalculateCascadeMatrices(
     size_t cascadeIdx,
     size_t numCascades,
     float farPlane,
-    FXMVECTOR lightPos,
-    FXMVECTOR lookAt,
-    FXMVECTOR upDir,
-    GXMVECTOR shadowCameraPos,
+    FXMVECTOR lightPosOrig,
+    FXMVECTOR lookAtOrig,
+    FXMVECTOR upDirOrig,
+    GXMVECTOR shadowCameraPosFallback,
     UINT shadowMapSize )
 {
-    (void)playerFrustum;
+    XMVECTOR lightDir = XMVector3Normalize( XMVectorSubtract( lookAtOrig, lightPosOrig ) );
 
-    // Keep the stable 17.9.7 cascade geometry. The later dynamic light-space
-    // depth fitting can collapse the world projection when the sun is overhead.
-    float splitRatio = splits[cascadeIdx + 1] / splits[numCascades];
-    float cascadeSize = farPlane * std::sqrt( splitRatio );
-    cascadeSize = std::max( cascadeSize, 500.0f );
-    constexpr float sizeQuantization = 64.0f;
-    cascadeSize = std::ceil( cascadeSize / sizeQuantization ) * sizeQuantization;
+    XMVECTOR upDir = upDirOrig;
+    if ( std::abs( XMVectorGetX( XMVector3Dot( lightDir, upDir ) ) ) > 0.965f ) {
+        upDir = XMVectorSet( 0.0f, 0.0f, 1.0f, 0.0f );
+    }
 
-    XMMATRIX lightView = XMMatrixLookAtLH( lightPos, lookAt, upDir );
-    float texelSize = cascadeSize / static_cast<float>( shadowMapSize );
-    float snapSize = texelSize * 2.0f;
+    XMVECTOR frustumCenter;
 
-    XMVECTOR originalOrigin = XMVector3Transform( shadowCameraPos, lightView );
-    XMFLOAT3 snappedOriginF;
-    XMStoreFloat3( &snappedOriginF, originalOrigin );
-    snappedOriginF.x = std::floor( snappedOriginF.x / snapSize ) * snapSize;
-    snappedOriginF.y = std::floor( snappedOriginF.y / snapSize ) * snapSize;
+    float splitNear = splits[cascadeIdx];
+    float splitFar = splits[cascadeIdx + 1];
 
-    XMVECTOR snapOffset = XMVectorSubtract( XMLoadFloat3( &snappedOriginF ), originalOrigin );
-    XMFLOAT3 snapOffsetF;
-    XMStoreFloat3( &snapOffsetF, snapOffset );
-    XMMATRIX snappedLightView = XMMatrixMultiply(
-        lightView, XMMatrixTranslation( snapOffsetF.x, snapOffsetF.y, 0.0f ) );
+    if ( !playerFrustum.IsValid() || !playerFrustum.SupportsCulling() ) {
+        LogError() << "ShadowMap: Invalid Player Frustum!";
+    }
 
-    constexpr float orthoNear = 1.0f;
-    constexpr float orthoFar = 20000.0f;
-    XMStoreFloat4x4( &outCR.ViewReplacement, XMMatrixTranspose( snappedLightView ) );
-    XMStoreFloat4x4( &outCR.ProjectionReplacement, XMMatrixTranspose(
-        XMMatrixOrthographicLH( cascadeSize, cascadeSize, orthoNear, orthoFar ) ) );
+    auto corners = playerFrustum.GetSliceCorners( splitNear, splitFar );
+
+    // Calculate the OPTIMAL center of the frustum slice for a minimal bounding sphere
+    XMVECTOR nearCenter = XMVectorZero();
+    for ( int i = 0; i < 4; ++i ) nearCenter = XMVectorAdd( nearCenter, XMLoadFloat3( &corners[i] ) );
+    nearCenter = XMVectorScale( nearCenter, 0.25f );
+
+    XMVECTOR farCenter = XMVectorZero();
+    for ( int i = 4; i < 8; ++i ) farCenter = XMVectorAdd( farCenter, XMLoadFloat3( &corners[i] ) );
+    farCenter = XMVectorScale( farCenter, 0.25f );
+
+    XMVECTOR viewDir = XMVector3Normalize( XMVectorSubtract( farCenter, nearCenter ) );
+    float L = XMVectorGetX( XMVector3Length( XMVectorSubtract( farCenter, nearCenter ) ) );
+
+    float nearRadiusSq = XMVectorGetX( XMVector3LengthSq( XMVectorSubtract( XMLoadFloat3( &corners[0] ), nearCenter ) ) );
+    float farRadiusSq = XMVectorGetX( XMVector3LengthSq( XMVectorSubtract( XMLoadFloat3( &corners[4] ), farCenter ) ) );
+
+    // Slide the center along the view axis to the exact point where Near and Far distances equal out
+    float optimalX = (L * L + farRadiusSq - nearRadiusSq) / (2.0f * L);
+    optimalX = std::clamp( optimalX, 0.0f, L );
+
+    frustumCenter = XMVectorAdd( nearCenter, XMVectorScale( viewDir, optimalX ) );
+
+    // Calculate the true bounding sphere radius covering all corners
+    float invariantRadius = 0.0f;
+    for ( int i = 0; i < 8; ++i ) {
+        XMVECTOR corner = XMLoadFloat3( &corners[i] );
+        XMVECTOR distVec = XMVector3Length( XMVectorSubtract( corner, frustumCenter ) );
+        invariantRadius = std::max( invariantRadius, XMVectorGetX( distVec ) );
+    }
+
+    // Round the radius to fixed increments to prevent floating-point micro-scaling
+    // which can happen due to slight FOV/Aspect ratio rounding.
+    invariantRadius = std::ceil( invariantRadius * 16.0f ) / 16.0f;
+    float radius = invariantRadius;
+
+    float cascadeSize = invariantRadius * 2.0f;
+
+    float texelSize = cascadeSize / static_cast<float>(shadowMapSize);
+
+    // Establish a GLOBAL, unmoving light-space grid by using the World Origin (0,0,0)
+    // By anchoring to XMVectorZero(), the grid never shifts as the player moves.
+    XMMATRIX tempLightView = XMMatrixLookToLH( XMVectorZero(), lightDir, upDir );
+
+    // Transform the moving frustum center into this global light-space grid
+    XMVECTOR centerLS = XMVector3TransformCoord( frustumCenter, tempLightView );
+
+    // Snap the X and Y coordinates to the exact size of a shadow texel.
+    float snappedX = std::floor( XMVectorGetX( centerLS ) / texelSize ) * texelSize;
+    float snappedY = std::floor( XMVectorGetY( centerLS ) / texelSize ) * texelSize;
+    float centerZ = XMVectorGetZ( centerLS );
+
+    XMVECTOR snappedCenterLS = XMVectorSet( snappedX, snappedY, centerZ, 1.0f );
+
+    // Transform the snapped center back into world-space
+    XMMATRIX tempLightViewInv = XMMatrixInverse( nullptr, tempLightView );
+    XMVECTOR snappedCenterWorld = XMVector3TransformCoord( snappedCenterLS, tempLightViewInv );
+
+    // -----------------------------------------------------------
+
+    // Build the final light view matrix looking at the snapped center
+    float pullBackDistance = std::max( 10000.0f, radius * 2.0f );
+    XMVECTOR lightPos = XMVectorSubtract( snappedCenterWorld, XMVectorScale( lightDir, pullBackDistance ) );
+    XMMATRIX lightView = XMMatrixLookToLH( lightPos, lightDir, upDir );
+
+    // Z-Bounds (Clipping against Scene to prevent overdraw)
+
+    // Find the exact Light-Space Z-bounds of the frustum slice
+    float minLightZ = FLT_MAX;
+    float maxLightZ = -FLT_MAX;
+    for ( const auto& corner : corners ) {
+        XMVECTOR vLS = XMVector3TransformCoord( XMLoadFloat3( &corner ), lightView );
+        float z = XMVectorGetZ( vLS );
+        minLightZ = std::min( minLightZ, z );
+        maxLightZ = std::max( maxLightZ, z );
+    }
+
+    // --- Dynamic Pullback Calculation ---
+    // Calculate how directly overhead the light is.
+    // 1.0 = straight down (noon), 0.0 = completely horizontal (horizon)
+    const XMVECTOR worldUpForPullback = XMVectorSet( 0.0f, 1.0f, 0.0f, 0.0f );
+    float lightDotUp = std::abs( XMVectorGetX( XMVector3Dot( lightDir, worldUpForPullback ) ) );
+    lightDotUp = std::max( lightDotUp, 0.05f ); // Prevent division by zero near the horizon
+
+    // Assuming a max shadow caster height of ~6000 units (60 meters) above the frustum.
+    // The shallower the angle, the longer the shadow, so we increase the pullback.
+    float dynamicPullback = 4000.0f / lightDotUp;
+
+    // Clamp to sensible extremes:
+    // Min ~2000 units (high noon, just enough for tall objects directly overhead)
+    // Max ~15000 units (sunset, catching long shadows from distant mountains)
+    dynamicPullback = std::clamp( dynamicPullback, 2000.0f, 15000.0f );
+
+    float orthoNear = std::max( 1.0f, minLightZ - dynamicPullback );
+    float orthoFar = maxLightZ + 5000.0f;
+
+    // --- Scene Bounds Optimization ---
+    if ( auto worldInfo = Engine::GAPI->GetLoadedWorldInfo() ) {
+        if ( auto bspTree = worldInfo->BspTree ) {
+            zTBBox3D sceneBox = bspTree->GetRootNode()->BBox3D;
+            std::array<XMFLOAT3, 8> sceneCorners = {
+                XMFLOAT3( sceneBox.Min.x, sceneBox.Min.y, sceneBox.Min.z ), XMFLOAT3( sceneBox.Max.x, sceneBox.Min.y, sceneBox.Min.z ),
+                XMFLOAT3( sceneBox.Min.x, sceneBox.Max.y, sceneBox.Min.z ), XMFLOAT3( sceneBox.Max.x, sceneBox.Max.y, sceneBox.Min.z ),
+                XMFLOAT3( sceneBox.Min.x, sceneBox.Min.y, sceneBox.Max.z ), XMFLOAT3( sceneBox.Max.x, sceneBox.Min.y, sceneBox.Max.z ),
+                XMFLOAT3( sceneBox.Min.x, sceneBox.Max.y, sceneBox.Max.z ), XMFLOAT3( sceneBox.Max.x, sceneBox.Max.y, sceneBox.Max.z )
+            };
+
+            float sceneMinZ = FLT_MAX;
+            float sceneMaxZ = -FLT_MAX;
+            for ( const auto& corner : sceneCorners ) {
+                XMVECTOR vLS = XMVector3TransformCoord( XMLoadFloat3( &corner ), lightView );
+                float z = XMVectorGetZ( vLS );
+                sceneMinZ = std::min( sceneMinZ, z );
+                sceneMaxZ = std::max( sceneMaxZ, z );
+            }
+
+            // Pushes the near plane further back if the scene geometry requires it
+            orthoNear = std::min( orthoNear, sceneMinZ - 100.0f );
+
+            // Tighten Far Plane so we don't shoot miles past the level boundaries when looking down
+            orthoFar = std::min( orthoFar, sceneMaxZ + 500.0f );
+        }
+    }
+
+    const XMMATRIX crProjRepl = XMMatrixTranspose( XMMatrixOrthographicLH(
+        cascadeSize, cascadeSize, orthoNear, orthoFar ) );
+
+    XMStoreFloat4x4( &outCR.ViewReplacement, XMMatrixTranspose( lightView ) );
+    XMStoreFloat4x4( &outCR.ProjectionReplacement, crProjRepl );
     XMStoreFloat3( &outCR.PositionReplacement, lightPos );
+
+    XMVECTOR lookAt = XMVectorAdd( lightPos, lightDir );
     XMStoreFloat3( &outCR.LookAtReplacement, lookAt );
 
-    const float cullingMargin = texelSize * 2.0f;
-    outCR.frustum.BuildOrthographic(
-        snappedLightView,
+    float cullingMargin = texelSize * 2.0f;
+    outCR.frustum.BuildOrthographic( lightView,
         cascadeSize + cullingMargin,
         cascadeSize + cullingMargin,
         orthoNear,

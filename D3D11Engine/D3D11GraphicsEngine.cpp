@@ -6944,6 +6944,18 @@ void XM_CALLCONV D3D11GraphicsEngine::DrawWorldAroundForWorldShadow( FXMVECTOR p
         worldMeshShadowFrustum = &relaxedWorldShadowFrustum;
     }
 
+    const auto worldMeshCullMode = Engine::GAPI->GetRendererState().RasterizerState.CullMode;
+    const XMFLOAT3 mainLightDirection = sky->GetMainLightDirection();
+    const bool disableWorldMeshCullAtZenith =
+        Engine::GAPI->GetRendererState().RendererSettings.DrawWorldMesh
+        && params.CascadeIndex != -1
+        && std::abs( mainLightDirection.y ) >= 0.99995f;
+    if ( disableWorldMeshCullAtZenith ) {
+        Engine::GAPI->GetRendererState().RasterizerState.CullMode =
+            GothicRasterizerStateInfo::CM_CULL_NONE;
+        Engine::GAPI->GetRendererState().RasterizerState.SetDirty();
+        UpdateRenderStates();
+    }
     if ( Engine::GAPI->GetRendererState().RendererSettings.DrawWorldMesh ) {
         TracyD3D11ZoneCGX( "Shadows::DrawWorldMesh" );
         auto _1 = RecordGraphicsEvent( GE_NAME( "Shadows::DrawWorldMesh" ) );
@@ -6969,6 +6981,11 @@ void XM_CALLCONV D3D11GraphicsEngine::DrawWorldAroundForWorldShadow( FXMVECTOR p
         }
     }
 
+    if ( disableWorldMeshCullAtZenith ) {
+        Engine::GAPI->GetRendererState().RasterizerState.CullMode = worldMeshCullMode;
+        Engine::GAPI->GetRendererState().RasterizerState.SetDirty();
+        UpdateRenderStates();
+    }
     if ( Engine::GAPI->GetRendererState().RendererSettings.DrawVOBs ) {
         ZoneScopedN( "Shadows::DrawVOBs" );
 
@@ -8423,7 +8440,7 @@ XRESULT D3D11GraphicsEngine::DrawSky() {
     SetupVS_ExMeshDrawCall();
     SetupVS_ExConstantBuffer();
 
-    ID3D11ShaderResourceView* srvs[5]{};
+    ID3D11ShaderResourceView* srvs[4]{};
     // Apply sky texture
     D3D11Texture* cloudsTex = Engine::GAPI->GetSky()->GetCloudTexture();
     if ( cloudsTex ) {

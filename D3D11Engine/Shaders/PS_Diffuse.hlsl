@@ -165,18 +165,11 @@ FORWARD_PLUS_PS_OUTPUT PSMain( PS_INPUT Input )
     }
 #endif
 
-	// Selected thin vegetation transmits sunlight mainly through the alpha
-	// contour. The geometric rim is a weaker fallback for opaque card edges.
-	float backlightTransmission = 0.0f;
-	if (AC_EnableSSS > 0.5f && MI_Color.a < -1.5f) {
-		float alphaThreshold = saturate(FF_AlphaRef);
-		float alphaBand = max(fwidth(color.a) * 3.0f, 0.035f);
-		float alphaContour = 1.0f - smoothstep(alphaThreshold, alphaThreshold + alphaBand, color.a);
-		float3 viewDirection = normalize(-vsPosition);
-		float geometricContour = pow(1.0f - saturate(abs(dot(nrm, viewDirection))), 2.5f);
-		backlightTransmission = saturate(max(alphaContour, geometricContour * 0.35f) * AC_SSSIntensity);
-	}
-	float3 litPixel = FP_ComputeSunLighting(wsPosition, vsPosition, nrm, color.rgb, specIntensity, specPower, shadow, vertLighting, backlightTransmission);
+	// Selected thin vegetation cards use identical front/back sunlight while Backlit Vegetation is enabled.
+	float3 sunLightingNormal = nrm;
+	if (AC_EnableSSS > 0.5f && MI_Color.a < -1.5f && dot(SQ_LightDirectionVS, sunLightingNormal) < 0.0f)
+		sunLightingNormal = -sunLightingNormal;
+	float3 litPixel = FP_ComputeSunLighting(wsPosition, vsPosition, sunLightingNormal, color.rgb, specIntensity, specPower, shadow, vertLighting);
 	
 	// Atmospheric scattering
 	litPixel = ApplyAtmosphericScatteringGround(wsPosition, litPixel);

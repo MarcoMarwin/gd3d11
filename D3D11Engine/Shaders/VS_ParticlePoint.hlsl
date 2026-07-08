@@ -29,7 +29,6 @@ struct VS_INPUT
     unsigned int type : TYPE;
     float3 vVelocity : VELOCITY;
     float vParticleLightingScale : LIGHTINGSCALE;
-    float3 vAtlasInfo : ATLASINFO;
 };
 
 struct VS_OUTPUT

@@ -388,8 +388,11 @@ float SampleCascadeShadowMSM(float4 vShadowSamplingPos, float2 projectedTexCoord
     float baseRadiusTexels = max(0.75f, softness * 0.90f);
     float searchRadiusTexels = clamp(2.0f + softness * 2.0f, 3.0f, 12.0f);
     float2x2 rotMat = GetPoissonRotationMatrixForCascade(screenPos, cascadeIndex);
+    // A mip footprint covers approximately 2^mip texels. Use the filter
+    // diameter so the moment query removes the underlying texel grid.
+    float baseMomentMip = clamp(log2(max(baseRadiusTexels * 2.0f, 1.0f)), 0.0f, 4.0f);
     float centerLit = EstimateMSMLit(
-        SampleShadowMomentsLitBorder(projectedTexCoords, cascadeIndex, 0.0f),
+        SampleShadowMomentsLitBorder(projectedTexCoords, cascadeIndex, baseMomentMip),
         receiverDepth);
 
     float averageBlockerDepth;
@@ -413,8 +416,8 @@ float SampleCascadeShadowMSM(float4 vShadowSamplingPos, float2 projectedTexCoord
     }
     // MSM is filterable, but the core query has to remain authoritative.
     // Broad mips are only blended into actual penumbras, so umbrae do not wash out.
-    float momentMip = clamp(log2(max(filterRadiusTexels, 1.0f)) - 1.25f, 0.0f, 4.0f);
-    if (momentMip <= 0.001f)
+    float momentMip = clamp(log2(max(filterRadiusTexels * 2.0f, 1.0f)), baseMomentMip, 4.0f);
+    if (momentMip <= baseMomentMip + 0.001f)
         return centerLit;
 
     float filteredLit = EstimateMSMLit(

@@ -51,9 +51,8 @@ struct ParticleInstanceInfo {
     int drawMode; // 0 = billboard, 1 = y-locked billboard, 2 = y-plane, 3 = velo aligned
     float3 velocity;
     float particleLightingScale = 1.0f;
-    float3 atlasInfo = float3( 0.0f, 1.0f, 1.0f ); // frame, columns, rows
 };
-static_assert( sizeof( ParticleInstanceInfo ) == 72, "Particle input layout must match VS_ParticlePoint" );
+static_assert( sizeof( ParticleInstanceInfo ) == 60, "Particle input layout must match VS_ParticlePoint" );
 
 /** Mutable per-particle data, updated every frame by the advance CS/VS. */
 struct RainParticleDynamic {

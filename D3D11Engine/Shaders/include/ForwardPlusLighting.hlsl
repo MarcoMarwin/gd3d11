@@ -207,7 +207,7 @@ float3 FP_ComputePointLighting(
 float3 FP_ComputeSunLighting(
     float3 wsPosition, float3 vsPosition, float3 normal,
     float3 diffuseColor, float specIntensity, float specPower,
-    float shadow, float vertLighting, float backlightTransmission )
+    float shadow, float vertLighting )
 {
     float3 V = normalize( -vsPosition );
     float3 H = normalize( SQ_LightDirectionVS + V );
@@ -220,9 +220,7 @@ float3 FP_ComputeSunLighting(
     float mainLightVisibility = moonLightActive
         ? saturate( AC_MoonVisibility )
         : saturate( AC_SunVisibility );
-    float directNoL = dot( normalize( SQ_LightDirectionVS ), normal );
-    float transmittedNoL = saturate( -directNoL ) * saturate( backlightTransmission );
-    float sun = saturate( max( saturate( directNoL ), transmittedNoL ) * shadow )
+    float sun = saturate( dot( normalize( SQ_LightDirectionVS ), normal ) * shadow )
         * mainLightVisibility;
 
     spec = pow( spec, specPower ) * specIntensity;
