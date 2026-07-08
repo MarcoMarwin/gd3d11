@@ -140,7 +140,7 @@ float ComputeIndoorDoorFloorBleed(float indoorPixel, float3 wsPosition, float3 w
 float3 FP_ComputePointLighting(
     float3 wsPosition, float3 vsPosition, float3 normal,
     float4 diffuseColor, float specIntensity, float specPower,
-    float2 screenPos )
+    float2 screenPos, float twoSidedBacklitMaterial, float vegetationBacklitMask )
 {
     uint tileX = (uint)screenPos.x / FP_TILE_SIZE;
     uint tileY = (uint)screenPos.y / FP_TILE_SIZE;
@@ -168,14 +168,17 @@ float3 FP_ComputePointLighting(
             
         lightDir /= distance;
 
-        float ndl = PLS_ComputePointLightNdl( lightDir, normal, light.PositionWorld, wsPosition, wsNormal );
+        float ndl = PLS_ComputePointLightNdlBacklit( lightDir, normal, light.PositionWorld, wsPosition, wsNormal, twoSidedBacklitMaterial );
         
         // instead of pow(..., 1.2f) we use a fast quadratic-like approach.
         float falloff = PLS_ComputeRangeFalloff( distance, light.Range );
 
         float3 H = normalize( lightDir + V );
         float spec = PLS_CalcBlinnPhongLighting( normal, H );
-        float3 lighting = PLS_ComputePointLightLighting( diffuseColor.rgb, light.Color.rgb, ndl, falloff, spec, specIntensity, specPower, specMod );
+        float3 lighting = PLS_ComputePointLightLightingBacklit(
+            diffuseColor.rgb, light.Color.rgb, ndl, falloff, spec, specIntensity, specPower, specMod,
+            lightDir, normal, V, vegetationBacklitMask, twoSidedBacklitMaterial,
+            AC_EnableSSS, AC_SSSIntensity, 0.42f );
 
         // Don't fetch shadows if the light contribution is effectively zero.
         if ( light.ShadowCubeIndex >= 0 && any(lighting > 0.001f) )
@@ -207,7 +210,8 @@ float3 FP_ComputePointLighting(
 float3 FP_ComputeSunLighting(
     float3 wsPosition, float3 vsPosition, float3 normal,
     float3 diffuseColor, float specIntensity, float specPower,
-    float shadow, float vertLighting )
+    float shadow, float vertLighting,
+    float twoSidedBacklitMaterial, float vegetationBacklitMask )
 {
     float3 V = normalize( -vsPosition );
     float3 H = normalize( SQ_LightDirectionVS + V );
@@ -220,7 +224,8 @@ float3 FP_ComputeSunLighting(
     float mainLightVisibility = moonLightActive
         ? saturate( AC_MoonVisibility )
         : saturate( AC_SunVisibility );
-    float sun = saturate( dot( normalize( SQ_LightDirectionVS ), normal ) * shadow )
+    float3 mainLightDir = normalize( SQ_LightDirectionVS );
+    float sun = saturate( PLS_ComputeThinBacklitNdl( mainLightDir, normal, twoSidedBacklitMaterial ) * shadow )
         * mainLightVisibility;
 
     spec = pow( spec, specPower ) * specIntensity;
@@ -249,6 +254,21 @@ float3 FP_ComputeSunLighting(
             diffuseColor * SQ_ShadowStrength * sunStrength * shadowAO,
             diffuseColor * lightColor.rgb * lightColor.a * worldAO,
             sun ) + specColored;
+    }
+
+    float sssSunWeight = saturate( (AC_LightPos.y + 0.08f) * 3.0f ) * AC_SunVisibility * GetRainSkyVisibility();
+    float sssMoonWeight = AC_MoonVisibility * 0.12f;
+    float sssLightWeight = max( sssSunWeight, sssMoonWeight );
+    float materialBacklitMask = max( vegetationBacklitMask, twoSidedBacklitMaterial );
+    if ( AC_EnableSSS > 0.5f && sssLightWeight > 0.001f && materialBacklitMask > 0.001f ) {
+        float sssShadow = lerp( 0.55f, 1.0f, saturate( shadow ) );
+        float sssVertexGate = lerp( 0.35f, 1.0f, saturate( vertLighting * 1.5f ) );
+        float sss = PLS_ComputeBacklitTransmissionWeight(
+            mainLightDir, normal, V, sssShadow * sssVertexGate,
+            vegetationBacklitMask, twoSidedBacklitMaterial,
+            AC_EnableSSS, AC_SSSIntensity, 2.4f * sssLightWeight );
+        float3 sssLightColor = moonLightActive ? float3( 0.42f, 0.56f, 1.0f ) : lightColor.rgb;
+        litPixel += diffuseColor * sssLightColor * sss;
     }
 
     float baselineSun = moonLightActive ? 0.0f : sun;

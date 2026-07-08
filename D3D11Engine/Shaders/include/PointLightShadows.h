@@ -48,6 +48,47 @@ float PLS_ComputeRangeFalloff( float distance, float lightRange )
     return normalizedDist * (normalizedDist * 0.2f + 0.8f);
 }
 
+float PLS_ComputeBacklitVegetationMask(
+    float3 diffuseColor,
+    float alphaTestedMaterial,
+    float twoSidedBacklitMaterial )
+{
+    float greenLeafMask = saturate( diffuseColor.g * 1.25f - diffuseColor.r * 0.45f - diffuseColor.b * 0.25f );
+    return alphaTestedMaterial * (1.0f - saturate(twoSidedBacklitMaterial)) * greenLeafMask;
+}
+
+float PLS_ComputeThinBacklitNdl(
+    float3 lightDirVS,
+    float3 normalVS,
+    float twoSidedBacklitMaterial )
+{
+    float front = saturate( dot( lightDirVS, normalVS ) );
+    float back = saturate( dot( lightDirVS, -normalVS ) );
+    float backBase = back * 0.55f;
+    float backTransmission = back * back * 0.25f;
+    float twoSided = saturate( max( front, backBase ) + backTransmission );
+    return lerp( front, twoSided, saturate(twoSidedBacklitMaterial) );
+}
+
+float PLS_ComputeBacklitTransmissionWeight(
+    float3 lightDirVS,
+    float3 normalVS,
+    float3 viewDirVS,
+    float shadowGate,
+    float vegetationBacklitMask,
+    float twoSidedBacklitMaterial,
+    float sssEnabled,
+    float sssIntensity,
+    float lightScale )
+{
+    float back = saturate( dot( lightDirVS, -normalVS ) );
+    float rim = pow( 1.0f - saturate( abs( dot( normalVS, viewDirVS ) ) ), 2.0f );
+    float vegetationCore = back * back * lerp( 0.35f, 1.0f, rim );
+    float exceptionCore = back * lerp( 0.25f, 0.75f, rim );
+    float materialCore = vegetationCore * saturate(vegetationBacklitMask)
+        + exceptionCore * saturate(twoSidedBacklitMaterial);
+    return materialCore * saturate(shadowGate) * saturate(sssEnabled) * saturate(sssIntensity) * lightScale;
+}
 float PLS_ComputePointLightNdl(
     float3 lightDirVS,
     float3 normalVS,
@@ -74,6 +115,19 @@ float PLS_ApplyShadowDistanceFade( float finalShadow, float normalizedDist )
     return lerp( finalShadow, 1.0f, fadeWeight );
 }
 
+float PLS_ComputePointLightNdlBacklit(
+    float3 lightDirVS,
+    float3 normalVS,
+    float3 lightPosWorld,
+    float3 wsPosition,
+    float3 wsNormal,
+    float twoSidedBacklitMaterial )
+{
+    float ndl = PLS_ComputePointLightNdl( lightDirVS, normalVS, lightPosWorld, wsPosition, wsNormal );
+    float thinNdl = PLS_ComputeThinBacklitNdl( lightDirVS, normalVS, twoSidedBacklitMaterial );
+    return max( ndl, thinNdl );
+}
+
 float3 PLS_ComputePointLightLighting(
     float3 diffuseColor,
     float3 lightColor,
@@ -89,6 +143,32 @@ float3 PLS_ComputePointLightLighting(
 
     float3 color = saturate( falloff * ndl * lightColor );
     return color * diffuseColor + specColored;
+}
+
+float3 PLS_ComputePointLightLightingBacklit(
+    float3 diffuseColor,
+    float3 lightColor,
+    float ndl,
+    float falloff,
+    float spec,
+    float specIntensity,
+    float specPower,
+    float specMod,
+    float3 lightDirVS,
+    float3 normalVS,
+    float3 viewDirVS,
+    float vegetationBacklitMask,
+    float twoSidedBacklitMaterial,
+    float sssEnabled,
+    float sssIntensity,
+    float lightScale )
+{
+    float3 lighting = PLS_ComputePointLightLighting(
+        diffuseColor, lightColor, ndl, falloff, spec, specIntensity, specPower, specMod );
+    float transmission = PLS_ComputeBacklitTransmissionWeight(
+        lightDirVS, normalVS, viewDirVS, 1.0f, vegetationBacklitMask,
+        twoSidedBacklitMaterial, sssEnabled, sssIntensity, lightScale );
+    return lighting + diffuseColor * lightColor * falloff * transmission;
 }
 
 void PLS_PrepareShadowSampling(

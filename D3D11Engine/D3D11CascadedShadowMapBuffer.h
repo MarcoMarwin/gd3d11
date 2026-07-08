@@ -67,9 +67,6 @@ public:
     /** Return whether all moment resources for the active cascades are initialized. */
     bool HasMomentResources( UINT activeCascades ) const;
 
-    /** Build the filtered moment mip chain for one updated cascade slice. */
-    void GenerateMomentMips( ID3D11DeviceContext1* context, UINT cascadeIndex ) const;
-
     /**
      * Bind the texture array to a vertex shader slot.
      * @param context Device context

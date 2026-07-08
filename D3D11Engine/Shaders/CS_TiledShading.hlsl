@@ -1,5 +1,6 @@
 #include "DS_Defines.h"
 #include "DepthReconstruction.h"
+#include <AtmosphericScattering.h>
 #include "include/PointLightShadows.h"
 
 #define TILE_SIZE 16
@@ -96,9 +97,12 @@ void CSMain( uint3 groupID : SV_GroupID, uint3 threadID : SV_GroupThreadID, uint
     float4 diffuse = TX_Diffuse.Load( int3( pixelCoord, 0 ) );
     float3 normal = DecodeNormalGBuffer( TX_Nrm.Load( int3( pixelCoord, 0 ) ).xy );
     float4 gb3 = TX_SI_SP.Load( int3( pixelCoord, 0 ) );
-    float specIntensity = gb3.x < -2.0f ? max(-gb3.x - 3.0f, 0.0f)
+    float twoSidedBacklitMaterial = gb3.x < -2.0f ? 1.0f : 0.0f;
+    float specIntensity = twoSidedBacklitMaterial > 0.5f ? max(-gb3.x - 3.0f, 0.0f)
         : (gb3.x < -0.5f ? max(-gb3.x - 1.0f, 0.0f) : gb3.x);
-    float specPower = gb3.y < 0.0f ? max(-gb3.y - 1.0f, 1.0f) : gb3.y;
+    float alphaTestedMaterial = gb3.y < 0.0f ? 1.0f : 0.0f;
+    float vegetationBacklitMask = PLS_ComputeBacklitVegetationMask(diffuse.rgb, alphaTestedMaterial, twoSidedBacklitMaterial);
+    float specPower = alphaTestedMaterial > 0.5f ? max(-gb3.y - 1.0f, 1.0f) : gb3.y;
 
     float expDepth = TX_Depth.Load( int3( pixelCoord, 0 ) ).r;
     float3 vsPosition = VSPositionFromDepth( expDepth, pixelCoord );
@@ -133,12 +137,15 @@ void CSMain( uint3 groupID : SV_GroupID, uint3 threadID : SV_GroupThreadID, uint
 
         lightDir /= distance;
 
-        float ndl = PLS_ComputePointLightNdl( lightDir, normal, light.PositionWorld, wsPosition, wsNormal );
+        float ndl = PLS_ComputePointLightNdlBacklit( lightDir, normal, light.PositionWorld, wsPosition, wsNormal, twoSidedBacklitMaterial );
         float falloff = PLS_ComputeRangeFalloff( distance, light.Range );
 
         float3 H = normalize( lightDir + V );
         float spec = PLS_CalcBlinnPhongLighting( normal, H );
-        float3 lighting = PLS_ComputePointLightLighting( diffuse.rgb, light.Color.rgb, ndl, falloff, spec, specIntensity, specPower, specMod );
+        float3 lighting = PLS_ComputePointLightLightingBacklit(
+            diffuse.rgb, light.Color.rgb, ndl, falloff, spec, specIntensity, specPower, specMod,
+            lightDir, normal, V, vegetationBacklitMask, twoSidedBacklitMaterial,
+            AC_EnableSSS, AC_SSSIntensity, 0.42f );
 
         // Apply shadow if this light has a shadow cubemap and contribution is non-negligible
         if ( light.ShadowCubeIndex >= 0 && any( lighting > 0.001f ) ) {

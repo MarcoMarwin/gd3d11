@@ -137,13 +137,13 @@ HRESULT D3D11CascadedShadowMapBuffer::EnsureMomentResources( UINT activeCascades
     D3D11_TEXTURE2D_DESC textureDesc = {};
     textureDesc.Width = m_size;
     textureDesc.Height = m_size;
-    textureDesc.MipLevels = 6;
+    textureDesc.MipLevels = 1;
     textureDesc.ArraySize = activeCascades;
     textureDesc.Format = DXGI_FORMAT_R16G16B16A16_UNORM;
     textureDesc.SampleDesc.Count = 1;
     textureDesc.Usage = D3D11_USAGE_DEFAULT;
     textureDesc.BindFlags = D3D11_BIND_RENDER_TARGET | D3D11_BIND_SHADER_RESOURCE;
-    textureDesc.MiscFlags = D3D11_RESOURCE_MISC_GENERATE_MIPS;
+    textureDesc.MiscFlags = 0;
 
     HRESULT hr = m_device->CreateTexture2D( &textureDesc, nullptr, m_momentTexture.GetAddressOf() );
     if ( FAILED( hr ) || !m_momentTexture ) {
@@ -173,7 +173,7 @@ HRESULT D3D11CascadedShadowMapBuffer::EnsureMomentResources( UINT activeCascades
         cascadeSrvDesc.Format = DXGI_FORMAT_R16G16B16A16_UNORM;
         cascadeSrvDesc.ViewDimension = D3D11_SRV_DIMENSION_TEXTURE2DARRAY;
         cascadeSrvDesc.Texture2DArray.MostDetailedMip = 0;
-        cascadeSrvDesc.Texture2DArray.MipLevels = UINT( -1 );
+        cascadeSrvDesc.Texture2DArray.MipLevels = 1;
         cascadeSrvDesc.Texture2DArray.FirstArraySlice = i;
         cascadeSrvDesc.Texture2DArray.ArraySize = 1;
         hr = m_device->CreateShaderResourceView(
@@ -190,7 +190,7 @@ HRESULT D3D11CascadedShadowMapBuffer::EnsureMomentResources( UINT activeCascades
     srvDesc.Format = DXGI_FORMAT_R16G16B16A16_UNORM;
     srvDesc.ViewDimension = D3D11_SRV_DIMENSION_TEXTURE2DARRAY;
     srvDesc.Texture2DArray.MostDetailedMip = 0;
-    srvDesc.Texture2DArray.MipLevels = UINT( -1 );
+    srvDesc.Texture2DArray.MipLevels = 1;
     srvDesc.Texture2DArray.FirstArraySlice = 0;
     srvDesc.Texture2DArray.ArraySize = activeCascades;
 
@@ -253,15 +253,6 @@ bool D3D11CascadedShadowMapBuffer::HasMomentResources( UINT activeCascades ) con
         }
     }
     return true;
-}
-
-void D3D11CascadedShadowMapBuffer::GenerateMomentMips( ID3D11DeviceContext1* context, UINT cascadeIndex ) const {
-    if ( !context || cascadeIndex >= m_momentNumCascades || !m_cascadeMomentSRVs[cascadeIndex] ) {
-        return;
-    }
-
-    context->OMSetRenderTargets( 0, nullptr, nullptr );
-    context->GenerateMips( m_cascadeMomentSRVs[cascadeIndex].Get() );
 }
 
 void D3D11CascadedShadowMapBuffer::BindToVertexShader( ID3D11DeviceContext1* context, UINT slot ) const {

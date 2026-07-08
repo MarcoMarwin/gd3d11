@@ -301,3 +301,10 @@ Kurze, append-only Dokumentation der von Codex gepushten Renderer-Builds.
 - Ressourcen: optimierte RainCloud.dds uebernommen, ungenutzte VDB-Atlasdaten aus dem Partikel-Instanzlayout entfernt (60 statt 72 Byte) und den leeren fuenften Sky-SRV-Slot entfernt.
 - Offene Ingame-Grenzen: MSM-Bildruhe, 12-Uhr-Weltschatten, Groundfog-Nachtabdunklung und Backlit-Ausnahmen muessen im Spiel bestaetigt werden.
 - Pruefung: DDS-Format, Abmessungen, Mip-Anzahl und Quellhash kontrolliert; CPU-/Shader-Partikellayout, Sky-Bindings, betroffene Shaderpfade und git diff --check statisch geprueft. Kein vollstaendiger lokaler C++-/Shader-Build.
+## Build 104 (MSM-, Noon-, Backlit- und Preset-Korrekturen)
+
+- MSM: Moment-Sampling auf direkte 4-Moment-Auswertung ohne grobe Moment-Mips/Blocker-Mip-Suche zurueckgefuehrt, damit der Filter weniger pixelig und leichter wird.
+- 12-Uhr-Weltschatten: wirkungslosen World-Mesh-Culling-Sonderfall entfernt und die Shadow-Kamera/Kaskadenprojektion am Zenith stabilisiert, ohne sichtbare Sonnen-/Mondbeleuchtung umzubiegen.
+- Backlit Vegetation: gemeinsamer Transmissionspfad fuer Sonne/Mond, Forward+/Deferred-/Tiled-Pointlights und dynamisch schattierte Pointlights; benannte Ausnahmen nutzen dieselbe konturbetonte Durchleuchtung statt einfacher Rueckseitenaufhellung.
+- F11/Presets: Standard bleibt SSGI aus und Contact Shadows an. Presets setzen Low beide aus, Medium/High Contact Shadows an und SSGI aus, Extreme beide an.
+- Pruefung: AGENTS-Regeln gelesen; Defaultwerte, Presetzuordnung, Shader-/Aufruferpfade, betroffene Diffs und git diff --check statisch kontrolliert. Kein vollstaendiger lokaler C++-/Shader-Build.

@@ -3,6 +3,7 @@
 //--------------------------------------------------------------------------------------
 #include <DS_Defines.h>
 #include "DepthReconstruction.h"
+#include <AtmosphericScattering.h>
 #include "include/PointLightShadows.h"
 
 cbuffer DS_PointLightConstantBuffer : register( b0 )
@@ -106,9 +107,12 @@ float4 PSMain( PS_INPUT Input ) : SV_TARGET
 	
 	// Get specular parameters
 	float4 gb3 = TX_SI_SP.Sample(SS_Linear, uv);
-	float specIntensity = gb3.x < -2.0f ? max(-gb3.x - 3.0f, 0.0f)
+	float twoSidedBacklitMaterial = gb3.x < -2.0f ? 1.0f : 0.0f;
+	float specIntensity = twoSidedBacklitMaterial > 0.5f ? max(-gb3.x - 3.0f, 0.0f)
         : (gb3.x < -0.5f ? max(-gb3.x - 1.0f, 0.0f) : gb3.x);
-	float specPower = gb3.y < 0.0f ? max(-gb3.y - 1.0f, 1.0f) : gb3.y;
+	float alphaTestedMaterial = gb3.y < 0.0f ? 1.0f : 0.0f;
+	float vegetationBacklitMask = PLS_ComputeBacklitVegetationMask(diffuse.rgb, alphaTestedMaterial, twoSidedBacklitMaterial);
+	float specPower = alphaTestedMaterial > 0.5f ? max(-gb3.y - 1.0f, 1.0f) : gb3.y;
 	
 	// Reconstruct VS World Position from depth
 	float expDepth = TX_Depth.Sample(SS_Linear, uv).r;
@@ -132,7 +136,7 @@ float4 PSMain( PS_INPUT Input ) : SV_TARGET
 	lightDir /= distance; // Normalize the direction
 	
 	// Do some simple NdL-Lighting
-	float ndl = PLS_ComputePointLightNdl(lightDir, normal, Pl_PositionWorld, wsPosition, wsNormal);
+	float ndl = PLS_ComputePointLightNdlBacklit(lightDir, normal, Pl_PositionWorld, wsPosition, wsNormal, twoSidedBacklitMaterial);
 	
 	// Apply dynamic shadow
 	float shadow = PLS_SampleShadowCube(TX_ShadowCube, SS_Comp, wsPosition, wsNormal, Pl_PositionWorld, PL_Range, PL_ShadowSoftness);
@@ -149,7 +153,10 @@ float4 PSMain( PS_INPUT Input ) : SV_TARGET
 	float3 H = normalize(lightDir + V);
 	float spec = PLS_CalcBlinnPhongLighting(normal, H);
 	float specMod = PLS_ComputeSpecMod(diffuse.rgb);
-	float3 lighting = PLS_ComputePointLightLighting(diffuse.rgb, PL_Color.rgb, ndl, falloff, spec, specIntensity, specPower, specMod);
+	float3 lighting = PLS_ComputePointLightLightingBacklit(
+		diffuse.rgb, PL_Color.rgb, ndl, falloff, spec, specIntensity, specPower, specMod,
+		lightDir, normal, V, vegetationBacklitMask, twoSidedBacklitMaterial,
+		AC_EnableSSS, AC_SSSIntensity, 0.42f);
 	
 	lighting *= lerp(1.0f, shadow, saturate(PL_ShadowStrength));
 	

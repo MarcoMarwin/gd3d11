@@ -59,6 +59,7 @@ Texture2D TX_ShadowBlueNoise : register(t8);
 Texture2D TX_RainExclusionMask : register(t9);
 
 #include "ShadowSampling.h"
+#include "include/PointLightShadows.h"
 
 
 //--------------------------------------------------------------------------------------
@@ -335,9 +336,8 @@ float4 PSMain(PS_INPUT Input) : SV_TARGET
     float mainLightVisibility = moonLightActive
         ? saturate(AC_MoonVisibility)
         : saturate(AC_SunVisibility);
-    float directNoL = dot(normalize(SQ_LightDirectionVS), normal);
-    if (AC_EnableSSS > 0.5f && twoSidedBacklitMaterial > 0.5f)
-        directNoL = abs(directNoL);
+    float3 mainLightDir = normalize(SQ_LightDirectionVS);
+    float directNoL = PLS_ComputeThinBacklitNdl(mainLightDir, normal, twoSidedBacklitMaterial);
     float sun = saturate(directNoL * shadow) * mainLightVisibility;
     spec = pow(spec, specPower) * specIntensity;
 
@@ -376,14 +376,16 @@ float4 PSMain(PS_INPUT Input) : SV_TARGET
 	float sssMoonWeight = AC_MoonVisibility * 0.12f;
 	float sssLightWeight = max(sssSunWeight, sssMoonWeight);
 	float3 sssLightColor = moonLightActive ? float3(0.42f, 0.56f, 1.0f) : lightColor.rgb;
-	float vegetationMask = vegetationMaterial * (1.0f - twoSidedBacklitMaterial) * saturate(diffuse.g * 1.25f - diffuse.r * 0.45f - diffuse.b * 0.25f);
-	if (AC_EnableSSS > 0.5f && sssLightWeight > 0.001f && vegetationMask > 0.001f) {
-		float backlight = saturate(dot(normalize(SQ_LightDirectionVS), -V));
-		float rimBacklight = pow(backlight, 2.0f);
+	float vegetationMask = PLS_ComputeBacklitVegetationMask(diffuse.rgb, vegetationMaterial, twoSidedBacklitMaterial);
+	float materialBacklitMask = max(vegetationMask, twoSidedBacklitMaterial);
+	if (AC_EnableSSS > 0.5f && sssLightWeight > 0.001f && materialBacklitMask > 0.001f) {
 		float sssShadow = lerp(0.55f, 1.0f, saturate(shadow));
 		float sssVertexGate = lerp(0.35f, 1.0f, saturate(vertLighting * 1.5f));
-		float sss = rimBacklight * AC_SSSIntensity * 2.8f * sssShadow * sssVertexGate;
-		litPixel += diffuse.rgb * sssLightColor * sss * sssLightWeight * vegetationMask;
+		float sss = PLS_ComputeBacklitTransmissionWeight(
+			mainLightDir, normal, V, sssShadow * sssVertexGate,
+			vegetationMask, twoSidedBacklitMaterial,
+			AC_EnableSSS, AC_SSSIntensity, 2.4f * sssLightWeight);
+		litPixel += diffuse.rgb * sssLightColor * sss;
 	}
 	
     float f = 1.0f - saturate(dot(normal, V));

@@ -9,6 +9,7 @@
 #include "D3D11_Helpers.h"
 #include "zCVobLight.h"
 #include "GMesh.h"
+#include "GSky.h"
 
 XRESULT D3D11LegacyDeferredShading::DrawPointlightLights(
     std::vector<VobLightInfo*>& lights,
@@ -32,6 +33,10 @@ XRESULT D3D11LegacyDeferredShading::DrawPointlightLights(
     auto psPointLightDynShadow = graphicsEngine->GetShaderManager().GetPShader( PShaderID::PS_DS_PointLightDynShadow );
     auto plBuf = psPointLight->GetBuffer( "DS_PointLightConstantBuffer" );
     auto plDynBuf = psPointLightDynShadow->GetBuffer( "DS_PointLightConstantBuffer" );
+    if ( GSky* sky = Engine::GAPI->GetSky() ) {
+        auto& atmoCB = sky->GetAtmosphereCB();
+        psPointLight->GetBuffer( "Atmosphere" ).Update( &atmoCB ).Bind();
+    }
 
     Engine::GAPI->GetRendererState().BlendState.SetAdditiveBlending();
     if ( settings.LimitLightIntesity ) {

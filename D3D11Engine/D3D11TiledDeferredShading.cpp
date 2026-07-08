@@ -11,6 +11,7 @@
 #include "D3D11_Helpers.h"
 #include "RenderToTextureBuffer.h"
 #include "zCVobLight.h"
+#include "GSky.h"
 
 using namespace DirectX;
 using Microsoft::WRL::ComPtr;
@@ -297,6 +298,10 @@ XRESULT D3D11TiledDeferredShading::DrawPointlightLights(
         XMStoreFloat4x4( &shadeCB.InvView, XMMatrixInverse( nullptr, viewRaw ) );
 
         csTiledShading->GetBuffer( "TiledShadingConstantBuffer" ).Update( &shadeCB ).Bind();
+        if ( GSky* sky = Engine::GAPI->GetSky() ) {
+            auto& atmoCB = sky->GetAtmosphereCB();
+            csTiledShading->GetBuffer( "Atmosphere" ).Update( &atmoCB ).Bind();
+        }
 
         // Bind GBuffer SRVs to CS
         context->CSSetShaderResources( 0, 1, color.GetShaderResView().GetAddressOf() );

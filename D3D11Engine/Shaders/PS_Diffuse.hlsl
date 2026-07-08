@@ -165,11 +165,13 @@ FORWARD_PLUS_PS_OUTPUT PSMain( PS_INPUT Input )
     }
 #endif
 
-	// Selected thin vegetation cards use identical front/back sunlight while Backlit Vegetation is enabled.
-	float3 sunLightingNormal = nrm;
-	if (AC_EnableSSS > 0.5f && MI_Color.a < -1.5f && dot(SQ_LightDirectionVS, sunLightingNormal) < 0.0f)
-		sunLightingNormal = -sunLightingNormal;
-	float3 litPixel = FP_ComputeSunLighting(wsPosition, vsPosition, sunLightingNormal, color.rgb, specIntensity, specPower, shadow, vertLighting);
+	float twoSidedBacklitMaterial = MI_Color.a < -1.5f ? 1.0f : 0.0f;
+	float alphaTestedMaterial = 0.0f;
+#if ALPHATEST == 1
+	alphaTestedMaterial = 1.0f;
+#endif
+	float vegetationBacklitMask = PLS_ComputeBacklitVegetationMask(color.rgb, alphaTestedMaterial, twoSidedBacklitMaterial);
+	float3 litPixel = FP_ComputeSunLighting(wsPosition, vsPosition, nrm, color.rgb, specIntensity, specPower, shadow, vertLighting, twoSidedBacklitMaterial, vegetationBacklitMask);
 	
 	// Atmospheric scattering
 	litPixel = ApplyAtmosphericScatteringGround(wsPosition, litPixel);
@@ -177,7 +179,7 @@ FORWARD_PLUS_PS_OUTPUT PSMain( PS_INPUT Input )
 	// Point lights, only when close enough
 	if (pixelDistZ < 6000.0f) 
 	{
-		litPixel += FP_ComputePointLighting(wsPosition, vsPosition, nrm, float4(color.rgb, Input.vDiffuse.a), specIntensity, specPower, Input.vPosition.xy);
+		litPixel += FP_ComputePointLighting(wsPosition, vsPosition, nrm, float4(color.rgb, Input.vDiffuse.a), specIntensity, specPower, Input.vPosition.xy, twoSidedBacklitMaterial, vegetationBacklitMask);
 	}
 
 	output.vColor = float4(litPixel, 1);
