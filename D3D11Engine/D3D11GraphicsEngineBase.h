@@ -8,7 +8,6 @@ class D3D11BlendStateInfo;
 class D3D11RasterizerStateInfo;
 class D3D11PShader;
 class D3D11VShader;
-class D3D11HDShader;
 class D3D11Texture;
 class D3D11GShader;
 
@@ -119,7 +118,6 @@ public:
     /** Sets the active pixel shader object */
     XRESULT SetActivePixelShader( PShaderID shader ) override;
     XRESULT SetActiveVertexShader( VShaderID shader ) override;
-    virtual XRESULT SetActiveHDShader( HDShaderID shader );
     virtual XRESULT SetActiveGShader( GShaderID shader );
     //virtual int MeasureString(std::string str, zFont* zFont);
 
@@ -179,7 +177,6 @@ protected:
 
     std::shared_ptr<D3D11VShader> ActiveVS;
     std::shared_ptr<D3D11PShader> ActivePS;
-    std::shared_ptr<D3D11HDShader> ActiveHDS;
     std::shared_ptr<D3D11GShader> ActiveGS;
 
     /** FixedFunction-State render states */

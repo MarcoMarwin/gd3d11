@@ -325,9 +325,6 @@
     <ClInclude Include="MeshModifier.h">
       <Filter>Engine\GAPI</Filter>
     </ClInclude>
-    <ClInclude Include="D3D11HDShader.h">
-      <Filter>Engine\D3D11</Filter>
-    </ClInclude>
     <ClInclude Include="win32ClipboardWrapper.h">
       <Filter>Librarys</Filter>
     </ClInclude>
@@ -890,9 +887,6 @@
     </ClCompile>
     <ClCompile Include="MeshModifier.cpp">
       <Filter>Engine\GAPI</Filter>
-    </ClCompile>
-    <ClCompile Include="D3D11HDShader.cpp">
-      <Filter>Engine\D3D11</Filter>
     </ClCompile>
     <ClCompile Include="win32ClipboardWrapper.cpp">
       <Filter>Librarys</Filter>

@@ -47,9 +47,6 @@ public:
     /** Binds this texture to a pixelshader */
     XRESULT BindToVertexShader( int slot );
 
-    /** Binds this texture to a domainshader */
-    XRESULT BindToDomainShader( int slot );
-
     /** Returns the texture-object */
     const Microsoft::WRL::ComPtr<ID3D11Texture2D>& GetTextureObject() { return Texture; }
 

@@ -8,7 +8,6 @@ class BaseConstantBuffer;
 class BaseLineRenderer;
 class BasePShader;
 class BaseVShader;
-class BaseHDShader;
 class BaseGShader;
 
 struct VobInfo;
@@ -75,8 +74,7 @@ struct PipelineState
 	{
 		SS_VERTEX,
 		SS_PIXEL,
-		SS_GEOMETRY,
-		SS_HULLDOMAIN
+		SS_GEOMETRY
 	};
 
 	PipelineState()

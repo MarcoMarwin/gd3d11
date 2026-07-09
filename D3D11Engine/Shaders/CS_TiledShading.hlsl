@@ -150,8 +150,7 @@ void CSMain( uint3 groupID : SV_GroupID, uint3 threadID : SV_GroupThreadID, uint
         // Apply shadow if this light has a shadow cubemap and contribution is non-negligible
         if ( light.ShadowCubeIndex >= 0 && any( lighting > 0.001f ) ) {
             float shadow = PLS_SampleShadowCubeArray( TX_ShadowCubeArray, SS_Comp, wsPosition, wsNormal, light.PositionWorld, light.Range, light.ShadowCubeIndex, light.ShadowSoftness );
-            float backlitShadowBypass = PLS_ComputeBacklitShadowBypass(lightDir, normal, twoSidedBacklitMaterial, AC_EnableSSS);
-            lighting *= lerp(1.0f, shadow, saturate(light.ShadowStrength) * (1.0f - backlitShadowBypass));
+            lighting *= lerp(1.0f, shadow, saturate(light.ShadowStrength));
         }
 
         float indoorPixel = diffuse.a < 0.5f ? 1.0f : 0.0f;

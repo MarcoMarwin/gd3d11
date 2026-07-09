@@ -32,9 +32,6 @@ public:
      */
     HRESULT Resize( UINT size );
 
-    /** Lazily allocate the four-moment texture array used by MSM. */
-    HRESULT EnsureMomentResources( UINT activeCascades );
-
     /**
      * Get the depth stencil view for a specific cascade slice.
      * @param cascadeIndex Index of the cascade (0 to numCascades-1)
@@ -42,17 +39,11 @@ public:
      */
     ID3D11DepthStencilView* GetCascadeDSV( UINT cascadeIndex ) const;
 
-    /** Get the render target view for the MSM moment texture of a specific cascade. */
-    ID3D11RenderTargetView* GetCascadeMomentRTV( UINT cascadeIndex ) const;
-
     /**
      * Get the shader resource view for the entire texture array.
      * Use this in shaders with Texture2DArray.
      */
     ID3D11ShaderResourceView* GetShaderResourceView() const;
-
-    /** Get the shader resource view for the MSM moment texture array. */
-    ID3D11ShaderResourceView* GetMomentShaderResourceView() const;
 
     /**
      * Bind the texture array to a pixel shader slot.
@@ -60,12 +51,6 @@ public:
      * @param slot Shader resource slot
      */
     void BindToPixelShader( ID3D11DeviceContext1* context, UINT slot ) const;
-
-    /** Bind the MSM moment texture array to a pixel shader slot. */
-    void BindMomentsToPixelShader( ID3D11DeviceContext1* context, UINT slot ) const;
-
-    /** Return whether all moment resources for the active cascades are initialized. */
-    bool HasMomentResources( UINT activeCascades ) const;
 
     /**
      * Bind the texture array to a vertex shader slot.
@@ -90,12 +75,6 @@ private:
     Microsoft::WRL::ComPtr<ID3D11Texture2D> m_texture;
     Microsoft::WRL::ComPtr<ID3D11ShaderResourceView> m_srv;
     std::array<Microsoft::WRL::ComPtr<ID3D11DepthStencilView>, MAX_CSM_CASCADES> m_cascadeDSVs;
-
-    Microsoft::WRL::ComPtr<ID3D11Texture2D> m_momentTexture;
-    Microsoft::WRL::ComPtr<ID3D11ShaderResourceView> m_momentSRV;
-    std::array<Microsoft::WRL::ComPtr<ID3D11RenderTargetView>, MAX_CSM_CASCADES> m_cascadeMomentRTVs;
-    std::array<Microsoft::WRL::ComPtr<ID3D11ShaderResourceView>, MAX_CSM_CASCADES> m_cascadeMomentSRVs;
-    UINT m_momentNumCascades = 0;
 
     UINT m_size;
     UINT m_numCascades;

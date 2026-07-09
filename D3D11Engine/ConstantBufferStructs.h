@@ -69,6 +69,12 @@ struct BlurConstantBuffer {
     float4 B_ColorMod;
 };
 
+struct BloomCombineConstantBuffer {
+    float BC_BaseWeight;
+    float BC_WideWeight;
+    float2 BC_Pad;
+};
+
 struct DepthOfFieldConstantBuffer {
     float DoF_FocusDistance;
     float DoF_FocusRange;
@@ -216,7 +222,7 @@ struct DS_ScreenQuadConstantBuffer {
     float SQ_ShadowSoftness;
     uint32_t SQ_FrameIndex;
     float2 SQ_JitterOffset;
-    float SQ_Pad0;
+    float SQ_LightSize;
 
     // Shadow atlas: per-cascade UV rect (xy = offset, zw = scale)
     // Used when SHADOW_ATLAS is enabled (Feature Level 10 path)
@@ -323,15 +329,6 @@ struct GrassConstantBuffer {
     float3 G_Pad1;
 };
 
-struct DefaultHullShaderConstantBuffer {
-    float H_EdgesPerScreenHeight;
-    float H_Proj11;
-    float H_GlobalTessFactor;
-    float H_FarPlane;
-    float2 H_ScreenResolution;
-    float2 h_pad2;
-};
-
 struct CubemapGSConstantBuffer {
     XMFLOAT4X4 PCR_View[6]; // View matrices for cube map rendering
     XMFLOAT4X4 PCR_ViewProj[6];
@@ -343,19 +340,6 @@ struct ParticleGSInfoConstantBuffer {
     float PGS_RainHeight;
     float PGS_Pad;
     float2 PGS_RainScale;
-};
-
-struct PNAENConstantBuffer {
-    XMFLOAT4X4    f4x4Projection;           // Projection matrix 
-    float4      f4Eye;                    // Eye 
-    float4      f4TessFactors;            // Tessellation factors 
-                                            // x=Edge  
-    float4      f4ViewportScale;          // The X and Y half  
-                                            // resolution, 0, 0 
-    INT4       adaptive;                 // Should use adaptive  
-                                            // tessellation 
-    INT4       clipping;                 // Should run clipping  
-                                            // tests. 
 };
 
 struct RefractionInfoConstantBuffer {

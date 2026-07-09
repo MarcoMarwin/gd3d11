@@ -181,8 +181,6 @@ void D3D11OcclusionQuerry::BeginOcclusionPass() {
 
     // Unbind not needed shaders
     g->GetContext()->PSSetShader( nullptr, nullptr, 0 );
-    g->GetContext()->HSSetShader( nullptr, nullptr, 0 );
-    g->GetContext()->DSSetSamplers( 0, 0, nullptr );
 }
 
 /** Ends the occlusion-checks */

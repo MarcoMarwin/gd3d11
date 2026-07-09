@@ -17,7 +17,7 @@ protected:
     /** Calcualtes the luminance */
     RenderToTextureBuffer* CalcLuminance();
 
-    /** Blurs the backbuffer and puts the result into TempBufferDS4_1*/
+    /** Builds the multi-resolution bloom pyramid into TempBufferDS4_1 */
     void CreateBloom( RenderToTextureBuffer* lum, RenderToTextureBuffer* bloomTempBuffer );
 
     RenderToTextureBuffer* LumBuffer1;

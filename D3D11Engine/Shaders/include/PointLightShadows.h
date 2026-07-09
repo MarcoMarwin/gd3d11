@@ -71,17 +71,6 @@ float PLS_ComputeThinBacklitNdl(
     return lerp( front, twoSided, saturate(twoSidedBacklitMaterial) );
 }
 
-float PLS_ComputeBacklitShadowBypass(
-    float3 lightDirVS,
-    float3 normalVS,
-    float twoSidedBacklitMaterial,
-    float sssEnabled )
-{
-    float front = saturate( dot( lightDirVS, normalVS ) );
-    float back = saturate( dot( lightDirVS, -normalVS ) );
-    float backSide = smoothstep( 0.04f, 0.32f, back - front );
-    return saturate( twoSidedBacklitMaterial * sssEnabled * backSide );
-}
 
 float PLS_ComputeBacklitTransmissionWeight(
     float3 lightDirVS,
@@ -96,12 +85,12 @@ float PLS_ComputeBacklitTransmissionWeight(
 {
     float back = saturate( dot( lightDirVS, -normalVS ) );
     float rim = pow( 1.0f - saturate( abs( dot( normalVS, viewDirVS ) ) ), 2.0f );
-    float vegetationCore = back * back * lerp( 0.35f, 1.0f, rim );
+    float viewBacklight = saturate( dot( lightDirVS, -viewDirVS ) );
+    float vegetationCore = viewBacklight * viewBacklight;
     float exceptionCore = back * lerp( 0.25f, 0.75f, rim );
     float materialCore = vegetationCore * saturate(vegetationBacklitMask)
         + exceptionCore * saturate(twoSidedBacklitMaterial);
-    float transmissionShadowGate = lerp(saturate(shadowGate), 1.0f, saturate(twoSidedBacklitMaterial));
-    return saturate(materialCore * transmissionShadowGate * saturate(sssEnabled) * saturate(sssIntensity) * lightScale);
+    return saturate(materialCore * saturate(shadowGate) * saturate(sssEnabled) * saturate(sssIntensity) * lightScale);
 }
 float PLS_ComputePointLightNdl(
     float3 lightDirVS,

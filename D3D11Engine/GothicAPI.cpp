@@ -6106,7 +6106,10 @@ XRESULT GothicAPI::LoadMenuSettings( const std::string& file ) {
         s.ShadowFilterMode = static_cast<GothicRendererSettings::E_ShadowFilterMode>(std::clamp<int>(
             GetPrivateProfileIntA( "Shadows", "ShadowFilterMode", static_cast<int>(ds.ShadowFilterMode), ini.c_str() ),
             static_cast<int>(GothicRendererSettings::E_ShadowFilterMode::SHADOW_FILTER_SIMPLE),
-            static_cast<int>(GothicRendererSettings::E_ShadowFilterMode::SHADOW_FILTER_MSM) ));
+            static_cast<int>(GothicRendererSettings::E_ShadowFilterMode::SHADOW_FILTER_PCSS) ));
+        if ( FeatureLevel10Compatibility && s.ShadowFilterMode == GothicRendererSettings::E_ShadowFilterMode::SHADOW_FILTER_PCSS ) {
+            s.ShadowFilterMode = GothicRendererSettings::E_ShadowFilterMode::SHADOW_FILTER_SIMPLE;
+        }
         s.ShadowMapSize = GetPrivateProfileIntA( "Shadows", "ShadowMapSize", ds.ShadowMapSize, ini.c_str() );
         if ( s.ShadowMapSize <= 1024 ) s.ShadowMapSize = 1024;
         else if ( s.ShadowMapSize <= 2048 ) s.ShadowMapSize = 2048;
@@ -6147,13 +6150,9 @@ XRESULT GothicAPI::LoadMenuSettings( const std::string& file ) {
         s.GothicUIScale = GetPrivateProfileFloatA( "Display", "UIScale", 1.0f, ini );
         s.EnableRain = GetPrivateProfileBoolA( "Display", "Rain", ds.EnableRain, ini );
         s.LimitLightIntesity = true;
-
-        // s.EnableTiledLighting = GetPrivateProfileBoolA( "Display", "TiledLighting", s.EnableTiledLighting, ini );
-        // s.RendererMode = static_cast<GothicRendererSettings::E_RendererMode>(GetPrivateProfileIntA( "Display", "RendererMode", s.RendererMode, ini.c_str() ) );
-        // Force these two experimental settings OFF
+        // Forward+/tiled lighting is still experimental; keep the shipped path deferred.
         s.EnableTiledLighting = false;
         s.RendererMode = GothicRendererSettings::E_RendererMode::RM_Deferred;
-        // ....
 
         s.WindQuality = GetPrivateProfileIntA( "Display", "WindQuality", 0, ini.c_str() );
         s.GlobalWindStrength = std::clamp( GetPrivateProfileFloatA( "Display", "WindStrength", ds.GlobalWindStrength, ini ), 0.0f, 2.0f );
@@ -6199,7 +6198,7 @@ XRESULT GothicAPI::LoadMenuSettings( const std::string& file ) {
 
         s.EnableCustomFontRendering = GetPrivateProfileBoolA( "FontRendering", "Enable", ds.EnableCustomFontRendering, ini );
         s.DebugSettings.FeatureSet.UseShadowAtlas = GetPrivateProfileBoolA( "Debug", "UseShadowAtlas", ds.DebugSettings.FeatureSet.UseShadowAtlas, ini );
-        s.DebugSettings.FeatureSet.UseScreenSpaceShadowMask = GetPrivateProfileBoolA( "Debug", "UseScreenSpaceShadowMask", ds.DebugSettings.FeatureSet.UseScreenSpaceShadowMask, ini );
+        s.DebugSettings.FeatureSet.UseScreenSpaceShadowMask = false; // Forward+ shadow-mask path is incomplete and disabled with deferred rendering.
         s.DebugSettings.FeatureSet.ForceFeatureLevel10 = GetPrivateProfileBoolA( "Debug", "ForceFeatureLevel10", ds.DebugSettings.FeatureSet.ForceFeatureLevel10, ini );
         s.DebugSettings.FeatureSet.EnableDriverExtensions = GetPrivateProfileBoolA( "Debug", "EnableDriverExtensions", ds.DebugSettings.FeatureSet.EnableDriverExtensions, ini );
 

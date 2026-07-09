@@ -12,8 +12,6 @@ public:
     /** Binds the buffer */
     D3D11ConstantBuffer* BindToVertexShader( int slot );
     D3D11ConstantBuffer* BindToPixelShader( int slot );
-    D3D11ConstantBuffer* BindToDomainShader( int slot );
-    D3D11ConstantBuffer* BindToHullShader( int slot );
     D3D11ConstantBuffer* BindToGeometryShader( int slot );
     D3D11ConstantBuffer* BindToComputeShader( int slot );
 

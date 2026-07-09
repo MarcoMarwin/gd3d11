@@ -479,16 +479,6 @@ void D3D11ShadowMap::BindToPixelShader( ID3D11DeviceContext1* context, UINT slot
         if ( m_cascadedShadowMap ) m_cascadedShadowMap->BindToPixelShader( context, slot );
     }
 }
-
-void D3D11ShadowMap::BindMomentsToPixelShader( ID3D11DeviceContext1* context, UINT slot ) {
-    ID3D11ShaderResourceView* nullSRV = nullptr;
-    if ( !m_useAtlas && m_cascadedShadowMap ) {
-        m_cascadedShadowMap->BindMomentsToPixelShader( context, slot );
-    } else {
-        context->PSSetShaderResources( slot, 1, &nullSRV );
-    }
-}
-
 void D3D11ShadowMap::BindSampler( ID3D11DeviceContext1* context, UINT slot ) {
     if ( m_shadowmapSampler ) context->PSSetSamplers( slot, 1, m_shadowmapSampler.GetAddressOf() );
 }
@@ -664,7 +654,6 @@ XRESULT D3D11ShadowMap::PrepareRender()
     const XMVECTOR lastCascadeShadowUp = BuildStableShadowUp( lastCascadeViewDir, c_XM_Up );
 
     if ( !isOutdoor ) {
-        m_MSMomentDataValid = false;
         if ( settings.EnableShadows && lastBspMode == zBSP_MODE_OUTDOOR ) {
             // Clear all cascade DSVs
             if ( m_useAtlas && m_shadowAtlas ) {
@@ -706,18 +695,7 @@ XRESULT D3D11ShadowMap::PrepareRender()
 
         // Increment frame counter for temporal cascade updates
         perFrameCascadeData.frameCount++;
-        const bool useMSM = !m_useAtlas
-            && !FeatureLevel10Compatibility
-            && settings.ShadowFilterMode == GothicRendererSettings::SHADOW_FILTER_MSM;
-        if ( !useMSM ) {
-            m_MSMomentDataValid = false;
-        }
-        const bool msmNeedsFullRefresh = useMSM
-            && (!m_MSMomentDataValid
-                || !m_cascadedShadowMap
-                || !m_cascadedShadowMap->HasMomentResources( static_cast<UINT>(numCascades) ));
         bool lazyCascadeUpdate = !m_useAtlas
-            && !msmNeedsFullRefresh
             && settings.DebugSettings.ShadowCascades.LazyCascadeUpdate;
         const bool overheadLight = std::abs( XMVectorGetX( XMVector3Dot( shadowViewDir, c_XM_Up ) ) ) > 0.94f
             || std::abs( XMVectorGetX( XMVector3Dot( lastCascadeViewDir, c_XM_Up ) ) ) > 0.94f;
@@ -1219,14 +1197,6 @@ XRESULT D3D11ShadowMap::DrawWorldShadow( )
     auto& settings = Engine::GAPI->GetRendererState().RendererSettings;
     
     int numCascades = settings.NumShadowCascades;
-    bool useMSMMoments = !m_useAtlas
-        && !FeatureLevel10Compatibility
-        && settings.ShadowFilterMode == GothicRendererSettings::SHADOW_FILTER_MSM
-        && m_cascadedShadowMap != nullptr;
-    if ( useMSMMoments && FAILED( m_cascadedShadowMap->EnsureMomentResources( static_cast<UINT>(numCascades) ) ) ) {
-        LogError() << "MSM disabled for this frame because its moment resources could not be created";
-        useMSMMoments = false;
-    }
     bool isOutdoor = Engine::GAPI->GetLoadedWorldInfo()->BspTree->GetBspTreeMode() == zBSP_MODE_OUTDOOR;
 
     if ( isOutdoor ) {
@@ -1256,10 +1226,6 @@ XRESULT D3D11ShadowMap::DrawWorldShadow( )
             renderParams.DontCull = false;
             renderParams.DSVOverwrite = GetCascadeDSV( static_cast<UINT>(cascadeIdx) );
             renderParams.DebugRTV = nullptr;
-            if ( useMSMMoments ) {
-                renderParams.MomentRTV = GetCascadeMomentRTV( static_cast<UINT>(cascadeIdx) );
-                renderParams.WriteShadowMoments = renderParams.MomentRTV.Get() != nullptr;
-            }
             renderParams.CascadeIndex = static_cast<int>(cascadeIdx);
             renderParams.CascadeSplits = m_CascadeSplits;
             renderParams.CascadeCameraReplacements = &m_CascadeCRs;
@@ -1275,10 +1241,6 @@ XRESULT D3D11ShadowMap::DrawWorldShadow( )
 
             Engine::GAPI->SetCameraReplacementPtr( nullptr );
             m_RenderQueues[cascadeIdx]->Reset();
-        }
-
-        if ( useMSMMoments ) {
-            m_MSMomentDataValid = true;
         }
     }
 
@@ -1422,13 +1384,7 @@ void D3D11ShadowMap::RenderShadowmaps( const RenderShadowmapsParams& params ) {
     ID3D11ShaderResourceView* nullShadowSRVs[12] = {};
     m_context->PSSetShaderResources( 3, 12, nullShadowSRVs );
 
-    Microsoft::WRL::ComPtr<ID3D11RenderTargetView> momentRTV = params.WriteShadowMoments ? params.MomentRTV : nullptr;
-    if ( momentRTV.Get() ) {
-        ID3D11RenderTargetView* rtvs[] = { momentRTV.Get() };
-        m_context->OMSetRenderTargets( 1, rtvs, dsvOverwrite.Get() );
-        Engine::GAPI->GetRendererState().BlendState.SetDefault();
-        Engine::GAPI->GetRendererState().BlendState.ColorWritesEnabled = true;
-    } else if ( !params.DebugRTV.Get() ) {
+    if ( !params.DebugRTV.Get() ) {
         m_context->OMSetRenderTargets( 0, nullptr, dsvOverwrite.Get() );
         Engine::GAPI->GetRendererState().BlendState.ColorWritesEnabled = false;
     } else {
@@ -1445,10 +1401,6 @@ void D3D11ShadowMap::RenderShadowmaps( const RenderShadowmapsParams& params ) {
             Engine::GAPI->GetRendererState().RendererSettings.EnableShadows) ) {
         if ( !params.SkipClear ) {
             m_context->ClearDepthStencilView( dsvOverwrite.Get(), D3D11_CLEAR_DEPTH, 1.0f, 0 );
-            if ( momentRTV.Get() ) {
-                constexpr float clearMoments[] { 0.0f, 0.0f, 0.9811252243f, 1.0f };
-                m_context->ClearRenderTargetView( momentRTV.Get(), clearMoments );
-            }
         }
 
         // Draw the world mesh without textures        
@@ -1462,10 +1414,6 @@ void D3D11ShadowMap::RenderShadowmaps( const RenderShadowmapsParams& params ) {
     } else if ( !params.SkipClear ) {
         m_context->ClearDepthStencilView(
             dsvOverwrite.Get(), D3D11_CLEAR_DEPTH, 1.0f, 0 );
-        if ( momentRTV.Get() ) {
-            constexpr float clearMoments[] { 0.0f, 0.0f, 0.9811252243f, 1.0f };
-            m_context->ClearRenderTargetView( momentRTV.Get(), clearMoments );
-        }
     }
 
     // Restore state
@@ -1526,7 +1474,8 @@ DS_ScreenQuadConstantBuffer D3D11ShadowMap::FillSunCSMConstantBuffer() const {
     scb.SQ_ShadowStrength = settings.ShadowStrength;
     scb.SQ_ShadowAOStrength = settings.ShadowAOStrength;
     scb.SQ_WorldAOStrength = settings.WorldAOStrength;
-    scb.SQ_ShadowSoftness = settings.ShadowSoftness * 2.0f;
+    scb.SQ_ShadowSoftness = settings.ShadowSoftness;
+    scb.SQ_LightSize = std::clamp( settings.PCSSLightSize, 0.005f, 0.5f );
     if ( auto bspTree = Engine::GAPI->GetLoadedWorldInfo()->BspTree )
         if ( bspTree->GetBspTreeMode() == zBSP_MODE_INDOOR ) {
 #if BUILD_GOTHIC_1_08k
@@ -1639,7 +1588,8 @@ XRESULT D3D11ShadowMap::DrawWorldLights()
     scb.SQ_ShadowStrength = settings.ShadowStrength;
     scb.SQ_ShadowAOStrength = settings.ShadowAOStrength;
     scb.SQ_WorldAOStrength = settings.WorldAOStrength;
-    scb.SQ_ShadowSoftness = settings.ShadowSoftness * 2.0f;
+    scb.SQ_ShadowSoftness = settings.ShadowSoftness;
+    scb.SQ_LightSize = std::clamp( settings.PCSSLightSize, 0.005f, 0.5f );
     // Modify lightsettings when indoor
     if ( auto bspTree = Engine::GAPI->GetLoadedWorldInfo()->BspTree )
         if ( bspTree->GetBspTreeMode() == zBSP_MODE_INDOOR ) {
@@ -1665,7 +1615,6 @@ XRESULT D3D11ShadowMap::DrawWorldLights()
 
     // CSM: Bind the cascade array to a single slot (Texture2DArray)
     BindToPixelShader( m_context.Get(), TX_ShadowmapArray );
-    BindMomentsToPixelShader( m_context.Get(), TX_ShadowMomentArray );
 
     if ( graphicsEngine->Effects->GetRainShadowmap() )
         graphicsEngine->Effects->GetRainShadowmap()->BindToPixelShader( m_context.Get(), TX_RainShadowmap );
@@ -1683,8 +1632,6 @@ XRESULT D3D11ShadowMap::DrawWorldLights()
     // Reset state
     static ID3D11ShaderResourceView* nullSrv[] = { nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr };
     m_context->PSSetShaderResources( 3, std::size( nullSrv ), nullSrv );
-    ID3D11ShaderResourceView* nullMomentSrv = nullptr;
-    m_context->PSSetShaderResources( TX_ShadowMomentArray, 1, &nullMomentSrv );
 
     return XR_SUCCESS;
 }

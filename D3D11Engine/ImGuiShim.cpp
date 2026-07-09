@@ -452,7 +452,7 @@ void ImGuiShim::Init(
 ImGuiShim::~ImGuiShim()
 {
     if ( Initiated ) {
-        ImGui_ImplWin32_Shutdown();
+        ImGui_ImplDX11_Shutdown();
         ImGui_ImplWin32_Shutdown();
         ImGui::DestroyContext();
     }
@@ -1049,8 +1049,8 @@ namespace
         s.LimitLightIntesity = true;
         s.EnableShadows = true;
         if ( static_cast<int>(s.ShadowFilterMode) < static_cast<int>(GothicRendererSettings::E_ShadowFilterMode::SHADOW_FILTER_SIMPLE)
-            || static_cast<int>(s.ShadowFilterMode) > static_cast<int>(GothicRendererSettings::E_ShadowFilterMode::SHADOW_FILTER_MSM)
-            || (FeatureLevel10Compatibility && s.ShadowFilterMode == GothicRendererSettings::E_ShadowFilterMode::SHADOW_FILTER_MSM) ) {
+            || static_cast<int>(s.ShadowFilterMode) > static_cast<int>(GothicRendererSettings::E_ShadowFilterMode::SHADOW_FILTER_PCSS)
+            || (FeatureLevel10Compatibility && s.ShadowFilterMode == GothicRendererSettings::E_ShadowFilterMode::SHADOW_FILTER_PCSS) ) {
             s.ShadowFilterMode = GothicRendererSettings::E_ShadowFilterMode::SHADOW_FILTER_SIMPLE;
         }
         s.EnablePointlightShadows = GothicRendererSettings::EPointLightShadowMode::PLS_UPDATE_DYNAMIC;
@@ -1366,13 +1366,13 @@ void ImGuiShim::RenderSettingsWindow()
             } ) ) {
                 ImGui::EndCombo();
             }
-            ImGui::SetItemTooltip( settings.ShadowFilterMode == GothicRendererSettings::E_ShadowFilterMode::SHADOW_FILTER_MSM && settings.ShadowMapSize >= 8192
-                ? "Controls sun, moon, and point-light shadow quality. MSM Extreme is very VRAM and bandwidth intensive."
+            ImGui::SetItemTooltip( settings.ShadowFilterMode == GothicRendererSettings::E_ShadowFilterMode::SHADOW_FILTER_PCSS && settings.ShadowMapSize >= 8192
+                ? "Controls sun, moon, and point-light shadow quality. PCSS Extreme is more expensive but keeps hard contacts and softer far edges."
                 : "Controls sun, moon, and point-light shadow quality." );
 
             static const std::vector<std::pair<const char*, GothicRendererSettings::E_ShadowFilterMode>> shadowFilterModes = {
                 {"Simple PCF", GothicRendererSettings::E_ShadowFilterMode::SHADOW_FILTER_SIMPLE},
-                {"MSM", GothicRendererSettings::E_ShadowFilterMode::SHADOW_FILTER_MSM},
+                {"PCSS", GothicRendererSettings::E_ShadowFilterMode::SHADOW_FILTER_PCSS},
             };
             ImText( "Shadow Filter", buttonWidth ); ImGui::SameLine();
             ImGui::BeginDisabled( FeatureLevel10Compatibility );
@@ -1386,7 +1386,7 @@ void ImGuiShim::RenderSettingsWindow()
             ImGui::EndDisabled();
             ImGui::SetItemTooltip( FeatureLevel10Compatibility
                 ? "Simple PCF is required in Feature Level 10 mode."
-                : "Selects simple percentage-closer filtering or moment shadow mapping." );
+                : "Selects simple percentage-closer filtering or PCSS contact-hardening shadows." );
 
             ImText( "Shadow Softness", buttonWidth ); ImGui::SameLine();
             SliderNormalizedUiStrength( "##ShadowSoftness", &settings.ShadowSoftness );

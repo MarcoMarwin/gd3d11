@@ -291,14 +291,7 @@ XRESULT D3D11Texture::BindToVertexShader( int slot ) {
     D3D11GraphicsEngineBase* engine = reinterpret_cast<D3D11GraphicsEngineBase*>(Engine::GraphicsEngine);
 
     engine->GetContext()->VSSetShaderResources( slot, 1, ShaderResourceView.GetAddressOf() );
-    engine->GetContext()->DSSetShaderResources( slot, 1, ShaderResourceView.GetAddressOf() );
 
-    return XR_SUCCESS;
-}
-
-/** Binds this texture to a domainshader */
-XRESULT D3D11Texture::BindToDomainShader( int slot ) {
-    reinterpret_cast<D3D11GraphicsEngineBase*>(Engine::GraphicsEngine)->GetContext()->DSSetShaderResources( slot, 1, ShaderResourceView.GetAddressOf() );
     return XR_SUCCESS;
 }
 

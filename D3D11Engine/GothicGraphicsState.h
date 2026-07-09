@@ -555,7 +555,7 @@ struct GothicRendererSettings {
     enum E_ShadowFilterMode {
         SHADOW_FILTER_DISABLED = 0,
         SHADOW_FILTER_SIMPLE = 1,
-        SHADOW_FILTER_MSM = 2,
+        SHADOW_FILTER_PCSS = 2,
     };
 
     enum E_RendererMode {
@@ -660,6 +660,7 @@ struct GothicRendererSettings {
         GammaValue = 1.0f;
 
         EnableOcclusionCulling = false;
+        PCSSLightSize = 0.140f;
         ShadowFilterMode = E_ShadowFilterMode::SHADOW_FILTER_SIMPLE;
 
         EnableShadows = true;
@@ -833,6 +834,7 @@ struct GothicRendererSettings {
     bool WireframeWorld;
     bool WireframeVobs;
     E_ShadowFilterMode ShadowFilterMode;
+    float PCSSLightSize;
     bool EnableShadows;
     bool ThreadedShadowCulling;
     int ShadowCascadePCFLimit;

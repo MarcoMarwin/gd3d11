@@ -91,7 +91,6 @@ class zCVobLight;
 class zCVob;
 struct VobLightInfo;
 class GMesh;
-class D3D11HDShader;
 class D3D11OcclusionQuerry;
 struct MeshInfo;
 struct RenderToTextureBuffer;
@@ -276,8 +275,8 @@ public:
     void DrawVobSingle( VobInfo* vob, zCCamera& camera ) override;
 
     /** Draws everything around the given position */
-    void ShadowPass_DrawWorldMesh_Indirect( const std::vector<WorldMeshSectionInfo*>& visibleSections, const Frustum* cullingFrustum = nullptr, bool keepPixelShader = false );
-    void ShadowPass_DrawWorldMesh( const std::vector<WorldMeshSectionInfo*>& visibleSections, const Frustum* cullingFrustum = nullptr, bool keepPixelShader = false );
+    void ShadowPass_DrawWorldMesh_Indirect( const std::vector<WorldMeshSectionInfo*>& visibleSections, const Frustum* cullingFrustum = nullptr );
+    void ShadowPass_DrawWorldMesh( const std::vector<WorldMeshSectionInfo*>& visibleSections, const Frustum* cullingFrustum = nullptr );
 
     void XM_CALLCONV DrawWorldAroundForWorldShadow( FXMVECTOR position, float sectionRange, const RenderShadowmapsParams& params );
     void XM_CALLCONV DrawWorldAround( FXMVECTOR position,

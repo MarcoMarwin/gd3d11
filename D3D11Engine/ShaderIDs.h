@@ -55,6 +55,7 @@ enum class PShaderID : size_t {
     PS_PFX_AOComposite,
     PS_PFX_VelocityDebug,
     PS_PFX_GaussBlur,
+    PS_PFX_BloomCombine,
     PS_PFX_Heightfog,
     PS_PFX_UnderwaterFinal,
     PS_PFX_Alpha_Blend,
@@ -80,8 +81,6 @@ enum class PShaderID : size_t {
     PS_WaterMask,
     PS_DS_AtmosphericScattering_Rain,
     PS_LinDepth,
-    PS_ShadowMoments,
-    PS_ShadowMomentsAlphaTest,
     PS_DiffuseNormalmapped,
     PS_DiffuseNormalmappedFxMap,
     PS_DiffuseAlphaTest,
@@ -119,10 +118,6 @@ enum class GShaderID : size_t {
     GS_VertexNormals,
     GS_Cubemap,
     GS_ParticleStreamOut,
-    COUNT
-};
-
-enum class HDShaderID : size_t {
     COUNT
 };
 

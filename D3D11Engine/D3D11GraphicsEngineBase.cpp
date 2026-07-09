@@ -239,11 +239,6 @@ XRESULT D3D11GraphicsEngineBase::SetActiveVertexShader( VShaderID shader ) {
     return XR_SUCCESS;
 }
 
-XRESULT D3D11GraphicsEngineBase::SetActiveHDShader( HDShaderID shader ) {
-    ActiveHDS = ShaderManager->GetHDShader( shader );
-    return XR_SUCCESS;
-}
-
 XRESULT D3D11GraphicsEngineBase::SetActiveGShader( GShaderID shader ) {
     ActiveGS = ShaderManager->GetGShader( shader );
     return XR_SUCCESS;

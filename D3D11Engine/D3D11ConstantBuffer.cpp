@@ -90,18 +90,6 @@ D3D11ConstantBuffer* D3D11ConstantBuffer::BindToPixelShader( int slot ) {
     return this;
 }
 
-D3D11ConstantBuffer* D3D11ConstantBuffer::BindToDomainShader( int slot ) {
-    reinterpret_cast<D3D11GraphicsEngineBase*>(Engine::GraphicsEngine)->GetContext()->DSSetConstantBuffers( slot, 1, Buffer.GetAddressOf() );
-    BufferDirty = false;
-    return this;
-}
-
-D3D11ConstantBuffer* D3D11ConstantBuffer::BindToHullShader( int slot ) {
-    reinterpret_cast<D3D11GraphicsEngineBase*>(Engine::GraphicsEngine)->GetContext()->HSSetConstantBuffers( slot, 1, Buffer.GetAddressOf() );
-    BufferDirty = false;
-    return this;
-}
-
 D3D11ConstantBuffer* D3D11ConstantBuffer::BindToGeometryShader( int slot ) {
     reinterpret_cast<D3D11GraphicsEngineBase*>(Engine::GraphicsEngine)->GetContext()->GSSetConstantBuffers( slot, 1, Buffer.GetAddressOf() );
     BufferDirty = false;

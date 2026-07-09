@@ -464,19 +464,20 @@ XRESULT D3D11PfxRenderer::RenderScreenSpaceLighting(
         ScreenSpaceLightingDepthHistory[writeIndex]->GetRenderTargetView().Get()
     };
     context->OMSetRenderTargets( 2, temporalRTVs, nullptr );
-    ID3D11ShaderResourceView* temporalSRVs[6] = {
+    ID3D11ShaderResourceView* temporalSRVs[7] = {
         raw->GetShaderResView().Get(),
         ScreenSpaceLightingHistoryValid ? ScreenSpaceLightingHistory[readIndex]->GetShaderResView().Get() : raw->GetShaderResView().Get(),
         depthSRV,
         normalsSRV,
         velocitySRV,
-        ScreenSpaceLightingHistoryValid ? ScreenSpaceLightingDepthHistory[readIndex]->GetShaderResView().Get() : depthSRV
+        ScreenSpaceLightingHistoryValid ? ScreenSpaceLightingDepthHistory[readIndex]->GetShaderResView().Get() : depthSRV,
+        materialSRV
     };
-    context->PSSetShaderResources( 0, 6, temporalSRVs );
+    context->PSSetShaderResources( 0, 7, temporalSRVs );
     DrawFullScreenQuad();
 
-    ID3D11ShaderResourceView* nullSRVs[6] = {};
-    context->PSSetShaderResources( 0, 6, nullSRVs );
+    ID3D11ShaderResourceView* nullSRVs[7] = {};
+    context->PSSetShaderResources( 0, 7, nullSRVs );
     context->OMSetRenderTargets( 1, previousRTV.GetAddressOf(), previousDSV.Get() );
 
     ScreenSpaceLightingHistoryIndex = writeIndex;

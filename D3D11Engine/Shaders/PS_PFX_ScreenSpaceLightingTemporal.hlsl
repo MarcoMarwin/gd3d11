@@ -5,6 +5,7 @@ Texture2D TX_Depth : register( t2 );
 Texture2D TX_Normals : register( t3 );
 Texture2D TX_Velocity : register( t4 );
 Texture2D TX_PrevDepth : register( t5 );
+Texture2D TX_Material : register( t6 );
 
 cbuffer ScreenSpaceLightingConstantBuffer : register( b0 )
 {
@@ -27,6 +28,7 @@ struct PS_INPUT { float2 vTexcoord : TEXCOORD0; float3 vEyeRay : TEXCOORD1; floa
 struct PS_OUTPUT { float4 Lighting : SV_TARGET0; float4 Depth : SV_TARGET1; };
 
 float ViewZ(float depth) { return SSL_ProjParams.z / (depth - SSL_ProjParams.w); }
+float IsAlphaTestedMaterial(float2 uv) { return TX_Material.SampleLevel(SS_Linear, saturate(uv), 0).g < 0.0f ? 1.0f : 0.0f; }
 
 float4 NeighborhoodCurrent(float2 uv, out float4 minV, out float4 maxV)
 {
@@ -61,11 +63,15 @@ float4 NeighborhoodCurrent(float2 uv, out float4 minV, out float4 maxV)
 
 float SoftContact(float2 uv, float currentAlpha)
 {
+    if (IsAlphaTestedMaterial(uv) > 0.5f)
+        return 0.0f;
+
     float centerDepth = TX_Depth.SampleLevel(SS_Linear, uv, 0).r;
     float centerZ = ViewZ(centerDepth);
     float2 centerNormal = TX_Normals.SampleLevel(SS_Linear, uv, 0).xy;
     float sum = currentAlpha * 1.25f;
     float weightSum = 1.25f;
+    float maxContact = currentAlpha;
     static const float2 offsets[4] = {
         float2(-1.0f, 0.0f),
         float2(1.0f, 0.0f),
@@ -75,15 +81,20 @@ float SoftContact(float2 uv, float currentAlpha)
     [unroll]
     for (int i = 0; i < 4; ++i) {
         float2 sampleUV = saturate(uv + offsets[i] * SSL_InvResolution * 2.0f);
+        if (IsAlphaTestedMaterial(sampleUV) > 0.5f)
+            continue;
         float sampleDepth = TX_Depth.SampleLevel(SS_Linear, sampleUV, 0).r;
         float dz = abs(ViewZ(sampleDepth) - centerZ);
         float2 sampleNormal = TX_Normals.SampleLevel(SS_Linear, sampleUV, 0).xy;
         float normalWeight = pow(1.0f - saturate(length(centerNormal - sampleNormal) * 1.6f), 6.0f);
         float w = exp(-dz * 0.010f) * normalWeight * 0.95f;
-        sum += TX_Raw.SampleLevel(SS_Linear, sampleUV, 0).a * w;
+        float sampleContact = TX_Raw.SampleLevel(SS_Linear, sampleUV, 0).a;
+        sum += sampleContact * w;
         weightSum += w;
+        maxContact = max(maxContact, sampleContact * saturate(normalWeight));
     }
-    return sum / max(weightSum, 0.0001f);
+    float filtered = sum / max(weightSum, 0.0001f);
+    return lerp(filtered, maxContact, 0.35f);
 }
 
 PS_OUTPUT PSMain(PS_INPUT input)

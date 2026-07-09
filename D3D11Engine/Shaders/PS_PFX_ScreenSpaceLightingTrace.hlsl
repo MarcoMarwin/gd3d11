@@ -29,6 +29,8 @@ struct PS_INPUT { float2 vTexcoord : TEXCOORD0; float3 vEyeRay : TEXCOORD1; floa
 float DepthRaw(float2 uv) { return TX_Depth.SampleLevel(SS_Linear, saturate(uv), 0).r; }
 float WaterMask(float2 uv) { return TX_WaterMask.SampleLevel(SS_Linear, saturate(uv), 0).r; }
 float IsGeometry(float d) { return step(0.000001f, d); }
+float4 MaterialInfo(float2 uv) { return TX_Material.SampleLevel(SS_Linear, saturate(uv), 0); }
+float IsAlphaTestedMaterial(float4 materialInfo) { return materialInfo.g < 0.0f ? 1.0f : 0.0f; }
 float3 ViewPosition(float2 uv, float depth)
 {
     float viewZ = SSL_ProjParams.z / (depth - SSL_ProjParams.w);
@@ -46,7 +48,7 @@ float2 ProjectView(float3 viewPos, out float valid)
 }
 float Hash12(float2 p) { return frac(52.9829189f * frac(dot(p, float2(0.06711056f, 0.00583715f)))); }
 
-bool TraceRay(float3 origin, float3 dir, float maxDistance, int steps, float jitter, float minThickness, float thicknessScale, float maxThickness, out float2 hitUV, out float hitDistance)
+bool TraceRay(float3 origin, float3 dir, float maxDistance, int steps, float jitter, float minThickness, float thicknessScale, float maxThickness, float rejectAlphaTestedOccluders, out float2 hitUV, out float hitDistance)
 {
     hitUV = 0.0f;
     hitDistance = maxDistance;
@@ -54,8 +56,8 @@ bool TraceRay(float3 origin, float3 dir, float maxDistance, int steps, float jit
     [loop]
     for (int i = 0; i < 16; ++i) {
         if (i >= steps) break;
-        float t = ((float)i + 1.0f + jitter * 0.12f) / ((float)steps + 0.20f);
-        float travel = maxDistance * lerp(t, t * t, 0.45f);
+        float t = ((float)i + 0.35f + jitter * 0.10f) / ((float)steps + 0.10f);
+        float travel = maxDistance * lerp(t, t * t, 0.65f);
         float3 p = origin + dir * travel;
         if (p.z <= 1.0f) break;
         float valid;
@@ -64,6 +66,7 @@ bool TraceRay(float3 origin, float3 dir, float maxDistance, int steps, float jit
         if (WaterMask(uv) > 0.02f) { prevDelta = -1.0f; continue; }
         float d = DepthRaw(uv);
         if (IsGeometry(d) < 0.5f) { prevDelta = -1.0f; continue; }
+        if (rejectAlphaTestedOccluders > 0.5f && IsAlphaTestedMaterial(MaterialInfo(uv)) > 0.5f) { prevDelta = -1.0f; continue; }
         float sceneZ = ViewPosition(uv, d).z;
         float delta = p.z - sceneZ;
         float thickness = clamp(travel * thicknessScale, minThickness, maxThickness);
@@ -80,6 +83,8 @@ bool TraceRay(float3 origin, float3 dir, float maxDistance, int steps, float jit
 float ComputeContact(float2 uv, float depth)
 {
     if (SSL_EnableContact < 0.5f || SSL_ContactStrength <= 0.001f || IsGeometry(depth) < 0.5f || WaterMask(uv) > 0.02f) return 0.0f;
+    float4 materialInfo = MaterialInfo(uv);
+    if (IsAlphaTestedMaterial(materialInfo) > 0.5f) return 0.0f;
     float3 vp = ViewPosition(uv, depth);
     float3 n = ViewNormal(uv);
     float3 l = normalize(SSL_LightDirectionVS);
@@ -87,7 +92,7 @@ float ComputeContact(float2 uv, float depth)
     if (nl <= 0.02f) return 0.0f;
     float facing = smoothstep(0.02f, 0.30f, nl);
 
-    float materialClass = TX_Material.SampleLevel(SS_Linear, saturate(uv), 0).r;
+    float materialClass = materialInfo.r;
     float npcMaterial = (materialClass < -0.5f && materialClass > -2.0f) ? 1.0f : 0.0f;
     float contactTracePhase = 0.5f;
     float jitter = contactTracePhase;
@@ -105,9 +110,8 @@ float ComputeContact(float2 uv, float depth)
     float maxThickness = lerp(22.0f, 8.0f, npcMaterial);
 
     float2 hitUV; float hitDistance;
-    // Ten samples retain the sign-crossing test for thin occluders while
-    // reducing contact-ray work by roughly 29 percent.
-    if (!TraceRay(vp + n * originOffset, l, maxDistance, 10, jitter, minThickness, thicknessScale, maxThickness, hitUV, hitDistance)) return 0.0f;
+    // Dense near-field samples make shallow tabletop contacts less view-angle dependent.
+    if (!TraceRay(vp + n * originOffset, l, maxDistance, 12, jitter, minThickness, thicknessScale, maxThickness, 1.0f, hitUV, hitDistance)) return 0.0f;
     float3 hn = ViewNormal(hitUV);
     float occluderFacing = saturate(dot(hn, -l));
     float worldNormalGate = lerp(0.68f, 1.0f, occluderFacing);
@@ -150,7 +154,7 @@ float3 ComputeGI(float2 uv, float depth, float3 baseColor)
         float3 dirVS = normalize(mul(float4(dirWS, 0.0f), SSL_View).xyz);
         float2 hitUV; float hitDistance;
         float rayJitter = frac(pixelNoise + sampleId * 0.371f);
-        if (TraceRay(vp + n * 4.5f, dirVS, maxDistance, 8, rayJitter, 4.0f, 0.042f, 34.0f, hitUV, hitDistance)) {
+        if (TraceRay(vp + n * 4.5f, dirVS, maxDistance, 8, rayJitter, 4.0f, 0.042f, 34.0f, 0.0f, hitUV, hitDistance)) {
             float3 hn = ViewNormal(hitUV);
             float receiver = saturate(dot(n, dirVS));
             float emitter = lerp(0.35f, 1.0f, saturate(dot(hn, -dirVS)));

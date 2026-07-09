@@ -1,7 +1,6 @@
 #include "D3D11CascadedShadowMapBuffer.h"
 #include "D3D11_Helpers.h"
 #include "Logger.h"
-#include <algorithm>
 
 D3D11CascadedShadowMapBuffer::D3D11CascadedShadowMapBuffer()
     : m_size( 0 )
@@ -16,15 +15,6 @@ void D3D11CascadedShadowMapBuffer::Release() {
     for ( auto& dsv : m_cascadeDSVs ) {
         dsv.Reset();
     }
-    for ( auto& rtv : m_cascadeMomentRTVs ) {
-        rtv.Reset();
-    }
-    for ( auto& srv : m_cascadeMomentSRVs ) {
-        srv.Reset();
-    }
-    m_momentSRV.Reset();
-    m_momentTexture.Reset();
-    m_momentNumCascades = 0;
     m_srv.Reset();
     m_texture.Reset();
 }
@@ -114,96 +104,6 @@ HRESULT D3D11CascadedShadowMapBuffer::Resize( UINT size ) {
     return S_OK;
 }
 
-HRESULT D3D11CascadedShadowMapBuffer::EnsureMomentResources( UINT activeCascades ) {
-    if ( !m_device || m_size == 0 || m_numCascades == 0 ) {
-        return E_FAIL;
-    }
-
-    activeCascades = std::clamp<UINT>( activeCascades, 1, m_numCascades );
-    if ( HasMomentResources( activeCascades ) ) {
-        return S_OK;
-    }
-
-    for ( auto& rtv : m_cascadeMomentRTVs ) {
-        rtv.Reset();
-    }
-    for ( auto& srv : m_cascadeMomentSRVs ) {
-        srv.Reset();
-    }
-    m_momentSRV.Reset();
-    m_momentTexture.Reset();
-    m_momentNumCascades = 0;
-
-    D3D11_TEXTURE2D_DESC textureDesc = {};
-    textureDesc.Width = m_size;
-    textureDesc.Height = m_size;
-    textureDesc.MipLevels = 1;
-    textureDesc.ArraySize = activeCascades;
-    textureDesc.Format = DXGI_FORMAT_R16G16B16A16_UNORM;
-    textureDesc.SampleDesc.Count = 1;
-    textureDesc.Usage = D3D11_USAGE_DEFAULT;
-    textureDesc.BindFlags = D3D11_BIND_RENDER_TARGET | D3D11_BIND_SHADER_RESOURCE;
-    textureDesc.MiscFlags = 0;
-
-    HRESULT hr = m_device->CreateTexture2D( &textureDesc, nullptr, m_momentTexture.GetAddressOf() );
-    if ( FAILED( hr ) || !m_momentTexture ) {
-        LogError() << "CascadedShadowMap::EnsureMomentResources - Failed to create MSM moment texture array";
-        return FAILED( hr ) ? hr : E_FAIL;
-    }
-    SetDebugName( m_momentTexture.Get(), "CascadedShadowMap_MomentTextureArray" );
-
-    for ( UINT i = 0; i < activeCascades; ++i ) {
-        D3D11_RENDER_TARGET_VIEW_DESC rtvDesc = {};
-        rtvDesc.Format = DXGI_FORMAT_R16G16B16A16_UNORM;
-        rtvDesc.ViewDimension = D3D11_RTV_DIMENSION_TEXTURE2DARRAY;
-        rtvDesc.Texture2DArray.MipSlice = 0;
-        rtvDesc.Texture2DArray.FirstArraySlice = i;
-        rtvDesc.Texture2DArray.ArraySize = 1;
-
-        hr = m_device->CreateRenderTargetView(
-            m_momentTexture.Get(), &rtvDesc, m_cascadeMomentRTVs[i].GetAddressOf() );
-        if ( FAILED( hr ) || !m_cascadeMomentRTVs[i] ) {
-            LogError() << "CascadedShadowMap::EnsureMomentResources - Failed to create MSM moment RTV for cascade " << i;
-            return FAILED( hr ) ? hr : E_FAIL;
-        }
-        SetDebugName( m_cascadeMomentRTVs[i].Get(),
-            "CascadedShadowMap_MomentRTV_Cascade" + std::to_string( i ) );
-
-        D3D11_SHADER_RESOURCE_VIEW_DESC cascadeSrvDesc = {};
-        cascadeSrvDesc.Format = DXGI_FORMAT_R16G16B16A16_UNORM;
-        cascadeSrvDesc.ViewDimension = D3D11_SRV_DIMENSION_TEXTURE2DARRAY;
-        cascadeSrvDesc.Texture2DArray.MostDetailedMip = 0;
-        cascadeSrvDesc.Texture2DArray.MipLevels = 1;
-        cascadeSrvDesc.Texture2DArray.FirstArraySlice = i;
-        cascadeSrvDesc.Texture2DArray.ArraySize = 1;
-        hr = m_device->CreateShaderResourceView(
-            m_momentTexture.Get(), &cascadeSrvDesc, m_cascadeMomentSRVs[i].GetAddressOf() );
-        if ( FAILED( hr ) || !m_cascadeMomentSRVs[i] ) {
-            LogError() << "CascadedShadowMap::EnsureMomentResources - Failed to create MSM moment SRV for cascade " << i;
-            return FAILED( hr ) ? hr : E_FAIL;
-        }
-        SetDebugName( m_cascadeMomentSRVs[i].Get(),
-            "CascadedShadowMap_MomentSRV_Cascade" + std::to_string( i ) );
-    }
-
-    D3D11_SHADER_RESOURCE_VIEW_DESC srvDesc = {};
-    srvDesc.Format = DXGI_FORMAT_R16G16B16A16_UNORM;
-    srvDesc.ViewDimension = D3D11_SRV_DIMENSION_TEXTURE2DARRAY;
-    srvDesc.Texture2DArray.MostDetailedMip = 0;
-    srvDesc.Texture2DArray.MipLevels = 1;
-    srvDesc.Texture2DArray.FirstArraySlice = 0;
-    srvDesc.Texture2DArray.ArraySize = activeCascades;
-
-    hr = m_device->CreateShaderResourceView( m_momentTexture.Get(), &srvDesc, m_momentSRV.GetAddressOf() );
-    if ( FAILED( hr ) || !m_momentSRV ) {
-        LogError() << "CascadedShadowMap::EnsureMomentResources - Failed to create MSM moment SRV";
-        return FAILED( hr ) ? hr : E_FAIL;
-    }
-    SetDebugName( m_momentSRV.Get(), "CascadedShadowMap_MomentSRV" );
-    m_momentNumCascades = activeCascades;
-    return S_OK;
-}
-
 ID3D11DepthStencilView* D3D11CascadedShadowMapBuffer::GetCascadeDSV( UINT cascadeIndex ) const {
     if ( cascadeIndex >= m_numCascades ) {
         return nullptr;
@@ -211,48 +111,14 @@ ID3D11DepthStencilView* D3D11CascadedShadowMapBuffer::GetCascadeDSV( UINT cascad
     return m_cascadeDSVs[cascadeIndex].Get();
 }
 
-ID3D11RenderTargetView* D3D11CascadedShadowMapBuffer::GetCascadeMomentRTV( UINT cascadeIndex ) const {
-    if ( cascadeIndex >= m_momentNumCascades ) {
-        return nullptr;
-    }
-    return m_cascadeMomentRTVs[cascadeIndex].Get();
-}
-
 ID3D11ShaderResourceView* D3D11CascadedShadowMapBuffer::GetShaderResourceView() const {
     return m_srv.Get();
-}
-
-ID3D11ShaderResourceView* D3D11CascadedShadowMapBuffer::GetMomentShaderResourceView() const {
-    return m_momentSRV.Get();
 }
 
 void D3D11CascadedShadowMapBuffer::BindToPixelShader( ID3D11DeviceContext1* context, UINT slot ) const {
     if ( m_srv ) {
         context->PSSetShaderResources( slot, 1, m_srv.GetAddressOf() );
     }
-}
-
-void D3D11CascadedShadowMapBuffer::BindMomentsToPixelShader( ID3D11DeviceContext1* context, UINT slot ) const {
-    ID3D11ShaderResourceView* srv = m_momentSRV.Get();
-    context->PSSetShaderResources( slot, 1, &srv );
-}
-
-bool D3D11CascadedShadowMapBuffer::HasMomentResources( UINT activeCascades ) const {
-    if ( !m_momentTexture || !m_momentSRV || m_numCascades == 0 ) {
-        return false;
-    }
-
-    activeCascades = std::clamp<UINT>( activeCascades, 1, m_numCascades );
-    if ( m_momentNumCascades != activeCascades ) {
-        return false;
-    }
-
-    for ( UINT i = 0; i < activeCascades; ++i ) {
-        if ( !m_cascadeMomentRTVs[i] || !m_cascadeMomentSRVs[i] ) {
-            return false;
-        }
-    }
-    return true;
 }
 
 void D3D11CascadedShadowMapBuffer::BindToVertexShader( ID3D11DeviceContext1* context, UINT slot ) const {

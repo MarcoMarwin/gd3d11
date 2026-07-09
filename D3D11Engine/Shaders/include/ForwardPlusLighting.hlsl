@@ -6,7 +6,7 @@
 //
 // Expected defines (set by ConstructShaderMakroList):
 //   MAX_CSM_CASCADES, NUM_CSM_CASCADES, CSM_PCF_LIMIT
-//   SHD_ENABLE, SHD_FILTER_16TAP_PCF, SHADOW_ATLAS
+//   SHD_ENABLE, SHD_FILTER_16TAP_PCF, SHD_FILTER_PCSS, SHADOW_ATLAS
 //   FP_USE_SHADOW_MASK
 //
 // Expected resources already declared by the including shader:
@@ -27,6 +27,10 @@
 #define CSM_PCF_LIMIT 3
 #endif
 
+
+#ifndef SHD_FILTER_PCSS
+#define SHD_FILTER_PCSS 0
+#endif
 
 #ifndef SHADOW_ATLAS
 #define SHADOW_ATLAS 0
@@ -54,7 +58,7 @@ cbuffer FP_ScreenQuadConstantBuffer : register( b4 )
     float SQ_ShadowSoftness;
     uint SQ_FrameIndex;
     float2 SQ_JitterOffset;
-    float SQ_Pad0; // Unused here; keeps CPU/shader layout parity.
+    float SQ_LightSize;
     float4 SQ_CascadeAtlasRect[MAX_CSM_CASCADES];
 };
 
@@ -184,8 +188,7 @@ float3 FP_ComputePointLighting(
         if ( light.ShadowCubeIndex >= 0 && any(lighting > 0.001f) )
         {
             float shadow = PLS_SampleShadowCubeArray( FP_ShadowCubeArray, SS_Comp, wsPosition, wsNormal, light.PositionWorld, light.Range, light.ShadowCubeIndex, light.ShadowSoftness );
-            float backlitShadowBypass = PLS_ComputeBacklitShadowBypass(lightDir, normal, twoSidedBacklitMaterial, AC_EnableSSS);
-            lighting *= lerp(1.0f, shadow, saturate(light.ShadowStrength) * (1.0f - backlitShadowBypass));
+            lighting *= lerp(1.0f, shadow, saturate(light.ShadowStrength));
         }
 
         float indoorPixel = diffuseColor.a < 0.5f ? 1.0f : 0.0f;
@@ -229,9 +232,7 @@ float3 FP_ComputeSunLighting(
     float frontDirect = saturate(dot(mainLightDir, normal));
     float thinDirect = PLS_ComputeThinBacklitNdl(mainLightDir, normal, twoSidedBacklitMaterial * AC_EnableSSS);
     float backTransmissionDirect = max(thinDirect - frontDirect, 0.0f) * saturate(twoSidedBacklitMaterial * AC_EnableSSS);
-    float sunBacklitShadowBypass = PLS_ComputeBacklitShadowBypass(mainLightDir, normal, twoSidedBacklitMaterial, AC_EnableSSS);
-    float directShadow = lerp(shadow, 1.0f, sunBacklitShadowBypass);
-    float sun = saturate(frontDirect * directShadow + backTransmissionDirect) * mainLightVisibility;
+    float sun = saturate((frontDirect + backTransmissionDirect) * shadow) * mainLightVisibility;
 
     spec = pow( spec, specPower ) * specIntensity;
 
@@ -266,7 +267,7 @@ float3 FP_ComputeSunLighting(
     float sssLightWeight = max( sssSunWeight, sssMoonWeight );
     float materialBacklitMask = max( vegetationBacklitMask, twoSidedBacklitMaterial );
     if ( AC_EnableSSS > 0.5f && sssLightWeight > 0.001f && materialBacklitMask > 0.001f ) {
-        float sssShadow = lerp(lerp( 0.55f, 1.0f, saturate( shadow ) ), 1.0f, saturate(twoSidedBacklitMaterial));
+        float sssShadow = lerp( 0.55f, 1.0f, saturate( shadow ) );
         float sssVertexGate = lerp( 0.35f, 1.0f, saturate( vertLighting * 1.5f ) );
         float sss = PLS_ComputeBacklitTransmissionWeight(
             mainLightDir, normal, V, sssShadow * sssVertexGate,

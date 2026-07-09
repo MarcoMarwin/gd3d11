@@ -5,7 +5,6 @@
 #include "AlignedAllocator.h"
 #include "D3D11Effect.h"
 #include "D3D11GShader.h"
-#include "D3D11HDShader.h"
 #include "D3D11LineRenderer.h"
 #include "D3D11OcclusionQuerry.h"
 #include "D3D11PShader.h"
@@ -575,8 +574,6 @@ void D3D11GraphicsEngine::CreateAndBindDefaultSampler() {
     LE( GetDevice()->CreateSamplerState( &samplerDesc, DefaultSamplerState.GetAddressOf() ) );
     GetContext()->PSSetSamplers( 0, 1, DefaultSamplerState.GetAddressOf() );
     GetContext()->VSSetSamplers( 0, 1, DefaultSamplerState.GetAddressOf() );
-    GetContext()->DSSetSamplers( 0, 1, DefaultSamplerState.GetAddressOf() );
-    GetContext()->HSSetSamplers( 0, 1, DefaultSamplerState.GetAddressOf() );
     SetDebugName( DefaultSamplerState.Get(), "DefaultSamplerState" );
 }
 
@@ -2679,14 +2676,6 @@ XRESULT D3D11GraphicsEngine::DrawSkeletalMesh( SkeletalVobInfo* vi,
         }
     }
 
-    if ( RenderingStage == DES_MAIN ) {
-        if ( ActiveHDS ) {
-            Context->DSSetShader( nullptr, nullptr, 0 );
-            Context->HSSetShader( nullptr, nullptr, 0 );
-            ActiveHDS = nullptr;
-        }
-    }
-
     for ( auto const& itm : dynamic_cast<SkeletalMeshVisualInfo*>(vi->VisualInfo)->SkeletalMeshes ) {
         if ( zCMaterial* mat = itm.first ) {
             zCTexture* tex;
@@ -2780,14 +2769,6 @@ XRESULT D3D11GraphicsEngine::DrawSkeletalMesh_Layered( SkeletalVobInfo* vi,
             // It is only to indicate that we want pixel shader(to populate gbuffer)
             // the actual shader will be activated before drawing
             ActivePS = ShaderManager->GetPShader( PShaderID::PS_LinDepth );
-        }
-    }
-
-    if ( RenderingStage == DES_MAIN ) {
-        if ( ActiveHDS ) {
-            Context->DSSetShader( nullptr, nullptr, 0 );
-            Context->HSSetShader( nullptr, nullptr, 0 );
-            ActiveHDS = nullptr;
         }
     }
 
@@ -3089,8 +3070,6 @@ void D3D11GraphicsEngine::DrawSkeletalMeshVobs(
 
     const auto now = Engine::GAPI->GetTotalTimeDW();
 
-    const bool writeShadowMoments = RenderingStage == DES_SHADOWMAP
-        && Engine::GAPI->GetRendererState().BlendState.ColorWritesEnabled;
     bool wantShader = true;
     if ( RenderingStage != DES_GHOST ) {
         bool linearDepth = (graphicsState.FF_GSwitches & GSWITCH_LINEAR_DEPTH) != 0;
@@ -3098,10 +3077,7 @@ void D3D11GraphicsEngine::DrawSkeletalMeshVobs(
             ActivePS = ShaderManager->GetPShader( PShaderID::PS_LinDepth );
             ActivePS->Apply();
         } else if ( RenderingStage == DES_SHADOWMAP) {
-            if ( writeShadowMoments ) {
-                ActivePS = ShaderManager->GetPShader( PShaderID::PS_ShadowMoments );
-                ActivePS->Apply();
-            } else if ( ActivePS ) {
+            if ( ActivePS ) {
                 Context->PSSetShader( nullptr, nullptr, 0 );
                 ActivePS = nullptr;
             }
@@ -3274,15 +3250,6 @@ void D3D11GraphicsEngine::DrawSkeletalMeshVobs(
                         LogWarn() << "SkeletalMesh has more than "
                             << NUM_MAX_BONES << " bones! (" << transforms.size() << ")Up this limit!";
                     }
-
-                    if ( RenderingStage == DES_MAIN ) {
-                        if ( ActiveHDS ) {
-                            Context->DSSetShader( nullptr, nullptr, 0 );
-                            Context->HSSetShader( nullptr, nullptr, 0 );
-                            ActiveHDS = nullptr;
-                        }
-                    }
-
                     for ( auto const& itm : dynamic_cast<SkeletalMeshVisualInfo*>(vi->VisualInfo)->SkeletalMeshes ) {
                         if ( zCMaterial* mat = itm.first ) {
                             zCTexture* tex;
@@ -3677,9 +3644,6 @@ void D3D11GraphicsEngine::DrawSkeletalMeshVobs(
             if ( linearDepth ) {
                 ActivePS = ShaderManager->GetPShader( PShaderID::PS_LinDepth );
                 ActivePS->Apply();
-            } else if ( writeShadowMoments ) {
-                ActivePS = ShaderManager->GetPShader( PShaderID::PS_ShadowMoments );
-                ActivePS->Apply();
             } else {
                 Context->PSSetShader( nullptr, nullptr, 0 );
                 ActivePS = nullptr;
@@ -3721,23 +3685,15 @@ void D3D11GraphicsEngine::DrawSkeletalMeshVobs(
                         batch.texture->GetSurface()->GetEngineTexture()->BindToPixelShader( 0 );
                         lastBatchTex = batch.texture;
                     }
-                    SetActivePixelShader( writeShadowMoments
-                        ? PShaderID::PS_ShadowMomentsAlphaTest
-                        : PShaderID::PS_DiffuseAlphaTestShadows );
+                    SetActivePixelShader( PShaderID::PS_DiffuseAlphaTestShadows );
                     if ( ActivePS.get() != lastPs ) {
                         ActivePS->Apply();
                         lastPs = ActivePS.get();
                     }
                 } else if ( lastPs != nullptr ) {
-                    if ( writeShadowMoments ) {
-                        ActivePS = ShaderManager->GetPShader( PShaderID::PS_ShadowMoments );
-                        lastPs = ActivePS.get();
-                        ActivePS->Apply();
-                    } else {
-                        ActivePS = nullptr;
-                        lastPs = nullptr;
-                        GetContext()->PSSetShader( nullptr, nullptr, 0 );
-                    }
+                    ActivePS = nullptr;
+                    lastPs = nullptr;
+                    GetContext()->PSSetShader( nullptr, nullptr, 0 );
                 }
             } else if ( wantShader && batch.texture && batch.texture != lastBatchTex ) {
                 if ( !BindTextureNRFX( batch.texture, isMainOrGhost, info != lastMaterialInfo ) ) {
@@ -5382,8 +5338,6 @@ XRESULT D3D11GraphicsEngine::DrawWorldMesh( bool noTextures ) {
     std::vector<TransparencyWorldMeshEntry> wetSSRBlockerTransparencyMeshes;
 
     GetContext()->IASetPrimitiveTopology( D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST );
-    GetContext()->DSSetShader( nullptr, nullptr, 0 );
-    GetContext()->HSSetShader( nullptr, nullptr, 0 );
 
     {
         ZoneScopedN( "DrawWorldMesh::BuildMeshList" );
@@ -6562,7 +6516,7 @@ void XM_CALLCONV D3D11GraphicsEngine::DrawWorldAround_Layered(
     }
 }
 
-void D3D11GraphicsEngine::ShadowPass_DrawWorldMesh_Indirect( const std::vector<WorldMeshSectionInfo*>& visibleSections, const Frustum* cullingFrustum, bool keepPixelShader )
+void D3D11GraphicsEngine::ShadowPass_DrawWorldMesh_Indirect( const std::vector<WorldMeshSectionInfo*>& visibleSections, const Frustum* cullingFrustum )
 {
     TracyD3D11ZoneCGX( "ShadowPass_DrawWorldMesh_Indirect" );
     auto _scopeShadowPassIndirect = RecordGraphicsEvent( GE_NAME( "ShadowPass_DrawWorldMesh_Indirect" ) );
@@ -6576,10 +6530,7 @@ void D3D11GraphicsEngine::ShadowPass_DrawWorldMesh_Indirect( const std::vector<W
         : Stub_DrawMultiIndexedInstancedIndirect;
 
     if ( Engine::GAPI->GetRendererState().RendererSettings.FastShadows && !cullingFrustum ) {
-        if ( keepPixelShader ) {
-            SetActivePixelShader( PShaderID::PS_ShadowMoments );
-            BindActivePixelShader();
-        } else if ( !linearDepth ) {
+        if ( !linearDepth ) {
             Context->PSSetShader( nullptr, nullptr, 0 );
         }
 
@@ -6658,10 +6609,7 @@ void D3D11GraphicsEngine::ShadowPass_DrawWorldMesh_Indirect( const std::vector<W
     if ( !opaqueDrawArgs.empty() ) {
         TracyD3D11ZoneCGX( "ShadowPass_DrawWorldMesh_Indirect::OpaqueSubmission" );
         auto _scopeOpaqueSubmission = RecordGraphicsEvent( GE_NAME( "ShadowPass_DrawWorldMesh_Indirect::OpaqueSubmission" ) );
-        if ( keepPixelShader ) {
-            SetActivePixelShader( PShaderID::PS_ShadowMoments );
-            BindActivePixelShader();
-        } else if ( !linearDepth ) {
+        if ( !linearDepth ) {
             Context->PSSetShader( nullptr, nullptr, 0 );
         }
 
@@ -6687,10 +6635,7 @@ void D3D11GraphicsEngine::ShadowPass_DrawWorldMesh_Indirect( const std::vector<W
         auto _scopeAlphaSubmission = RecordGraphicsEvent( GE_NAME( "ShadowPass_DrawWorldMesh_Indirect::AlphaSubmission" ) );
         std::sort( alphaMeshes.begin(), alphaMeshes.end(),
             []( const auto& a, const auto& b ) { return a.first < b.first; } );
-
-        if ( keepPixelShader ) {
-            SetActivePixelShader( PShaderID::PS_ShadowMomentsAlphaTest );
-        }
+        SetActivePixelShader( linearDepth ? PShaderID::PS_LinDepth : PShaderID::PS_DiffuseAlphaTestShadows );
         ActivePS->Apply();
         zCTexture* lastTex = nullptr;
         Context->PSSetShaderResources( 0, 3, s_nullSRVs );
@@ -6712,7 +6657,7 @@ void D3D11GraphicsEngine::ShadowPass_DrawWorldMesh_Indirect( const std::vector<W
     }
 }
 
-void D3D11GraphicsEngine::ShadowPass_DrawWorldMesh( const std::vector<WorldMeshSectionInfo*>& visibleSections, const Frustum* cullingFrustum, bool keepPixelShader )
+void D3D11GraphicsEngine::ShadowPass_DrawWorldMesh( const std::vector<WorldMeshSectionInfo*>& visibleSections, const Frustum* cullingFrustum )
 {
     TracyD3D11ZoneCGX( "ShadowPass_DrawWorldMesh" );
     auto _scopeShadowPass = RecordGraphicsEvent( GE_NAME( "ShadowPass_DrawWorldMesh" ) );
@@ -6773,10 +6718,7 @@ void D3D11GraphicsEngine::ShadowPass_DrawWorldMesh( const std::vector<WorldMeshS
     if ( !opaqueMeshes.empty() ) {
         TracyD3D11ZoneCGX( "ShadowPass_DrawWorldMesh::OpaqueSubmission" );
         auto _scopeOpaqueSubmission = RecordGraphicsEvent( GE_NAME( "ShadowPass_DrawWorldMesh::OpaqueSubmission" ) );
-        if ( keepPixelShader ) {
-            SetActivePixelShader( PShaderID::PS_ShadowMoments );
-            BindActivePixelShader();
-        } else if ( !linearDepth )  // Only unbind when not rendering linear depth
+        if ( !linearDepth )  // Only unbind when not rendering linear depth
         {
             // Unbind PS
             Context->PSSetShader( nullptr, nullptr, 0 );
@@ -6797,10 +6739,7 @@ void D3D11GraphicsEngine::ShadowPass_DrawWorldMesh( const std::vector<WorldMeshS
         // Sort by texture to minimize binding changes
         std::sort( alphaMeshes.begin(), alphaMeshes.end(),
             []( const auto& a, const auto& b ) { return a.first < b.first; } );
-
-        if ( keepPixelShader ) {
-            SetActivePixelShader( PShaderID::PS_ShadowMomentsAlphaTest );
-        }
+        SetActivePixelShader( linearDepth ? PShaderID::PS_LinDepth : PShaderID::PS_DiffuseAlphaTestShadows );
         ActivePS->Apply();
         zCTexture* lastTex = nullptr;
 
@@ -6849,10 +6788,7 @@ void XM_CALLCONV D3D11GraphicsEngine::DrawWorldAroundForWorldShadow( FXMVECTOR p
     Engine::GAPI->SetViewTransformXM( view );
 
     // Set shader
-    const bool writeShadowMoments = params.WriteShadowMoments;
-    SetActivePixelShader( writeShadowMoments
-        ? PShaderID::PS_ShadowMomentsAlphaTest
-        : PShaderID::PS_DiffuseAlphaTestShadows );
+    SetActivePixelShader( PShaderID::PS_DiffuseAlphaTestShadows );
     SetActiveVertexShader( VShaderID::VS_Ex );
 
     bool linearDepth =
@@ -6931,12 +6867,12 @@ void XM_CALLCONV D3D11GraphicsEngine::DrawWorldAroundForWorldShadow( FXMVECTOR p
                 && wrappedWorldMesh->MeshIndexBuffer
                 && wrappedWorldMesh->MeshShadowIndexBuffer
                 ) {
-                ShadowPass_DrawWorldMesh_Indirect( visibleSections, worldMeshShadowFrustum, writeShadowMoments );
+                ShadowPass_DrawWorldMesh_Indirect( visibleSections, worldMeshShadowFrustum );
             } else {
-                ShadowPass_DrawWorldMesh( visibleSections, worldMeshShadowFrustum, writeShadowMoments );
+                ShadowPass_DrawWorldMesh( visibleSections, worldMeshShadowFrustum );
             }
         } else {
-            ShadowPass_DrawWorldMesh( visibleSections, worldMeshShadowFrustum, writeShadowMoments );
+            ShadowPass_DrawWorldMesh( visibleSections, worldMeshShadowFrustum );
         }
     }
 
@@ -7061,10 +6997,7 @@ void XM_CALLCONV D3D11GraphicsEngine::DrawWorldAroundForWorldShadow( FXMVECTOR p
             LogError() << "Failed to map dynamic instancing buffer for vobs.";
         }
 
-        if ( writeShadowMoments ) {
-            SetActivePixelShader( PShaderID::PS_ShadowMoments );
-            BindActivePixelShader();
-        } else if ( !linearDepth )  // Only unbind when not rendering linear depth
+        if ( !linearDepth )  // Only unbind when not rendering linear depth
         {
             // Unbind PS
             Context->PSSetShader( nullptr, nullptr, 0 );
@@ -7092,7 +7025,7 @@ void XM_CALLCONV D3D11GraphicsEngine::DrawWorldAroundForWorldShadow( FXMVECTOR p
         GetContext()->IASetVertexBuffers( 1, 1, buffers, dynuStride, dynOffset );
 
         // Draw all vobs the player currently sees
-        D3D11PShader* currPs = writeShadowMoments ? ActivePS.get() : nullptr;
+        D3D11PShader* currPs = nullptr;
 
         size_t numMeshesToDraw = 0;
         for ( auto const& staticMeshVisual : activeVisuals ) {
@@ -7168,13 +7101,7 @@ void XM_CALLCONV D3D11GraphicsEngine::DrawWorldAroundForWorldShadow( FXMVECTOR p
                 }
 
             } else {
-                if ( writeShadowMoments ) {
-                    auto nextPs = ShaderManager->GetPShader( PShaderID::PS_ShadowMoments ).get();
-                    if ( currPs != nextPs ) {
-                        currPs = nextPs;
-                        currPs->Apply();
-                    }
-                } else if ( !linearDepth )  // Only unbind when not rendering linear depth
+                if ( !linearDepth )  // Only unbind when not rendering linear depth
                 {
                     // Unbind PS
                     if ( currPs != nullptr ) {
@@ -7957,9 +7884,6 @@ XRESULT D3D11GraphicsEngine::DrawVOBsInstanced() {
         }
 
         GetContext()->IASetPrimitiveTopology( D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST );
-        GetContext()->DSSetShader( nullptr, nullptr, 0 );
-        GetContext()->HSSetShader( nullptr, nullptr, 0 );
-        ActiveHDS = nullptr;
 
         if ( renderSettings.WireframeVobs ) {
             Engine::GAPI->GetRendererState().RasterizerState.Wireframe = false;

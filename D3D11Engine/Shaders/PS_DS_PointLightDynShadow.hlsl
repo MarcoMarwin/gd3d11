@@ -158,8 +158,7 @@ float4 PSMain( PS_INPUT Input ) : SV_TARGET
 		lightDir, normal, V, vegetationBacklitMask, twoSidedBacklitMaterial,
 		AC_EnableSSS, AC_SSSIntensity, 0.42f);
 	
-	float backlitShadowBypass = PLS_ComputeBacklitShadowBypass(lightDir, normal, twoSidedBacklitMaterial, AC_EnableSSS);
-	lighting *= lerp(1.0f, shadow, saturate(PL_ShadowStrength) * (1.0f - backlitShadowBypass));
+	lighting *= lerp(1.0f, shadow, saturate(PL_ShadowStrength));
 	
 	//lighting = GetShadow(uv);
 	

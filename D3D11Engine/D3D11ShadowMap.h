@@ -37,7 +37,6 @@ enum PS_DS_AtmosphericScatteringSlots {
     TX_Distortion = 6,
     TX_SI_SP = 7,
     TX_BlueNoise512 = 8,
-    TX_ShadowMomentArray = 14,
 };
 
 
@@ -58,10 +57,6 @@ struct RenderShadowmapsParams {
     
     // Optional debug RTV for visualization
     Microsoft::WRL::ComPtr<ID3D11RenderTargetView> DebugRTV = nullptr;
-
-    // Optional MSM moment RTV written alongside the depth shadow map.
-    Microsoft::WRL::ComPtr<ID3D11RenderTargetView> MomentRTV = nullptr;
-    bool WriteShadowMoments = false;
     
     // Cascade index (-1 = not a cascade render)
     int CascadeIndex = -1;
@@ -125,13 +120,6 @@ public:
 
     // Bind world shadowmap SRV to a pixel shader slot (binds entire cascade array)
     void BindToPixelShader( ID3D11DeviceContext1* context, UINT slot );
-
-    // Bind MSM moments SRV to a pixel shader slot (FL11 CSM path only).
-    void BindMomentsToPixelShader( ID3D11DeviceContext1* context, UINT slot );
-
-    ID3D11RenderTargetView* GetCascadeMomentRTV( UINT cascadeIndex ) {
-        return ( !m_useAtlas && m_cascadedShadowMap ) ? m_cascadedShadowMap->GetCascadeMomentRTV( cascadeIndex ) : nullptr;
-    }
 
     // Bind the shadowmap sampler to the given slot
     void BindSampler( ID3D11DeviceContext1* context, UINT slot );
@@ -211,7 +199,6 @@ private:
     std::array<std::unique_ptr<D3D11RenderQueue>, MAX_CSM_CASCADES> m_RenderQueues;
     std::vector<float> m_CascadeSplits;
     std::array<bool, MAX_CSM_CASCADES> m_ShouldUpdateCascade;
-    bool m_MSMomentDataValid = false;
     XMFLOAT3 m_WorldShadowPos;
 
     std::unique_ptr<D3D11TiledDeferredShading> m_TiledDeferred;

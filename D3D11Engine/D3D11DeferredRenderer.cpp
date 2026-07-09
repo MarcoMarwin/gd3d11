@@ -49,8 +49,6 @@ void D3D11DeferredRenderer::AddGeometryPasses( RenderGraph& graph,
             const auto& context = engine.GetContext();
             context->VSSetShaderResources( 0, 8, s_nullSRVs );
             context->PSSetShaderResources( 0, 8, s_nullSRVs );
-            context->DSSetShaderResources( 0, 8, s_nullSRVs );
-            context->HSSetShaderResources( 0, 8, s_nullSRVs );
             context->CSSetShaderResources( 0, 8, s_nullSRVs );
 
             auto normals = graph.GetPhysicalTexture( normalsResource );

@@ -34,9 +34,9 @@ cbuffer DS_ScreenQuadConstantBuffer : register( b0 )
     float SQ_WorldAOStrength;
     float SQ_ShadowSoftness;
 
-    uint   SQ_FrameIndex;
+    uint SQ_FrameIndex;
     float2 SQ_JitterOffset;
-    float SQ_Pad0;
+    float SQ_LightSize;
 
     // Shadow atlas: per-cascade UV rect (xy = offset, zw = scale)
     float4 SQ_CascadeAtlasRect[MAX_CSM_CASCADES];

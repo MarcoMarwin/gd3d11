@@ -2,7 +2,6 @@
 #include "D3D11ShaderManager.h"
 #include "D3D11VShader.h"
 #include "D3D11PShader.h"
-#include "D3D11HDShader.h"
 #include "D3D11GShader.h"
 #include "D3D11CShader.h"
 #include "D3D11ConstantBuffer.h"
@@ -40,7 +39,6 @@ extern bool haveWindAnimations;
 D3D11ShaderManager::D3D11ShaderManager()
     : VShaders( static_cast<size_t>(VShaderID::COUNT) )
     , PShaders( static_cast<size_t>(PShaderID::COUNT) )
-    , HDShaders( static_cast<size_t>(HDShaderID::COUNT) )
     , GShaders( static_cast<size_t>(GShaderID::COUNT) )
     , CShaders( static_cast<size_t>(CShaderID::COUNT) )
     , ShaderCategoriesToReloadNextFrame( ShaderCategory::None )
@@ -249,6 +247,7 @@ XRESULT D3D11ShaderManager::Init() {
     Shaders.push_back( ShaderInfo::make<PShaderID::PS_PFX_VelocityDebug>( "PS_PFX_VelocityDebug.hlsl" )  );
 
     Shaders.push_back( ShaderInfo::make<PShaderID::PS_PFX_GaussBlur>( "PS_PFX_GaussBlur.hlsl" )  );
+    Shaders.push_back( ShaderInfo::make<PShaderID::PS_PFX_BloomCombine>( "PS_PFX_BloomCombine.hlsl" )  );
 
     Shaders.push_back( ShaderInfo::make<PShaderID::PS_PFX_Heightfog>( "PS_PFX_Heightfog.hlsl" )  );
 
@@ -306,8 +305,8 @@ XRESULT D3D11ShaderManager::Init() {
         const auto& s = Engine::GAPI->GetRendererState().RendererSettings;
 
         list.push_back( {"SHD_ENABLE",           s.EnableShadows ? "1" : "0"} );
-        list.push_back( {"SHD_FILTER_MSM",       (s.ShadowFilterMode == GothicRendererSettings::SHADOW_FILTER_MSM && !FeatureLevel10Compatibility && !s.DebugSettings.FeatureSet.UseShadowAtlas) ? "1" : "0"} );
-        list.push_back( {"SHD_FILTER_16TAP_PCF", (s.ShadowFilterMode != GothicRendererSettings::SHADOW_FILTER_DISABLED || FeatureLevel10Compatibility) ? "1" : "0"} );
+        list.push_back( {"SHD_FILTER_16TAP_PCF", (s.ShadowFilterMode >= GothicRendererSettings::SHADOW_FILTER_SIMPLE) ? "1" : "0"} );
+        list.push_back( {"SHD_FILTER_PCSS",      (s.ShadowFilterMode == GothicRendererSettings::SHADOW_FILTER_PCSS && !FeatureLevel10Compatibility && !s.DebugSettings.FeatureSet.UseShadowAtlas) ? "1" : "0"} );
         list.push_back( {"MAX_CSM_CASCADES",     TO_LITERAL(MAX_CSM_CASCADES)} );
         list.push_back( {"NUM_CSM_CASCADES",     sNums[std::clamp<size_t>(s.NumShadowCascades, 1, MAX_CSM_CASCADES)]} );
         list.push_back( {"CSM_PCF_LIMIT",        sNums[std::clamp<size_t>(s.ShadowCascadePCFLimit, 0, MAX_CSM_CASCADES)]} );
@@ -315,7 +314,10 @@ XRESULT D3D11ShaderManager::Init() {
         list.push_back( {"FP_USE_SHADOW_MASK",   s.DebugSettings.FeatureSet.UseScreenSpaceShadowMask ? "1" : "0"} );
         // Stable full-quality kernels avoid visible stippling on animated characters.
         // Do not rely on temporal AA to reconstruct deliberately undersampled shadows.
-        list.push_back( {"SHD_BLUE_NOISE",       "0"} );
+        list.push_back( {"SHD_BLUE_NOISE",        "0"} );
+        list.push_back( {"PCSS_BLOCKER_TAPS",     "16"} );
+        list.push_back( {"PCSS_FILTER_TAPS_NEAR", "32"} );
+        list.push_back( {"PCSS_FILTER_TAPS_FAR",  "16"} );
         list.push_back( {"PCF_FILTER_TAPS_NEAR",  "16"} );
         list.push_back( {"PCF_FILTER_TAPS_FAR",   "8"} );
     };
@@ -342,10 +344,7 @@ XRESULT D3D11ShaderManager::Init() {
         .with_category( ShaderCategory::LightsAndShadows ) );
 
     Shaders.push_back( ShaderInfo::make<PShaderID::PS_LinDepth>( "PS_LinDepth.hlsl" )  );
-    Shaders.push_back( ShaderInfo::make<PShaderID::PS_ShadowMoments>( "PS_ShadowMoments.hlsl" )
-        .with_macros( { {"ALPHATEST", "0"} } ) );
-    Shaders.push_back( ShaderInfo::make<PShaderID::PS_ShadowMomentsAlphaTest>( "PS_ShadowMoments.hlsl" )
-        .with_macros( { {"ALPHATEST", "1"} } ) );
+
 
     Shaders.push_back( ShaderInfo::make<PShaderID::PS_DiffuseNormalmapped>( "PS_Diffuse.hlsl" )
         .with_macros( {
@@ -590,7 +589,6 @@ XRESULT D3D11ShaderManager::CompileShader( ShaderInfo& si ) {
         case ShaderType::Vertex:     return IsVShaderKnown( si.shaderIndex );
         case ShaderType::Pixel:      return IsPShaderKnown( si.shaderIndex );
         case ShaderType::Geometry:   return IsGShaderKnown( si.shaderIndex );
-        case ShaderType::HullDomain: return IsHDShaderKnown( si.shaderIndex );
         case ShaderType::Compute:    return IsCShaderKnown( si.shaderIndex );
         default: return false;
         }
@@ -706,29 +704,6 @@ XRESULT D3D11ShaderManager::CompileShader( ShaderInfo& si ) {
             }
         }
     }
-
-    // Hull/Domain shaders are handled differently, they check inside for missing file
-    if ( si.type == ShaderType::HullDomain ) {
-        // See if this is a reload
-        D3D11HDShader* hds = new D3D11HDShader();
-        if ( IsHDShaderKnown( si.shaderIndex ) ) {
-            if ( XR_SUCCESS != hds->LoadShader( ("system\\GD3D11\\Shaders\\" + si.fileName).c_str(),
-                ("system\\GD3D11\\Shaders\\" + si.fileName).c_str() ) ) {
-                LogError() << "Failed to reload shader: " << si.fileName;
-
-                delete hds;
-            } else {
-                // Compilation succeeded, switch the shader
-                UpdateHDShader( si.shaderIndex, hds );
-                si.compiledHash = newHash;
-            }
-        } else {
-            XLE( hds->LoadShader( ("system\\GD3D11\\Shaders\\" + si.fileName).c_str(),
-                ("system\\GD3D11\\Shaders\\" + si.fileName).c_str() ) );
-            UpdateHDShader( si.shaderIndex, hds );
-            si.compiledHash = newHash;
-        }
-    }
     return XR_SUCCESS;
 }
 
@@ -753,8 +728,6 @@ XRESULT D3D11ShaderManager::LoadShaders( ShaderCategory categories ) {
             shaderTypeCategory = ShaderCategory::Pixel;
         } else if ( si.type == ShaderType::Geometry ) {
             shaderTypeCategory = ShaderCategory::Geometry;
-        } else if ( si.type == ShaderType::HullDomain ) {
-            shaderTypeCategory = ShaderCategory::HullDomain;
         } else if ( si.type == ShaderType::Compute ) {
             shaderTypeCategory = ShaderCategory::Compute;
         }
@@ -803,9 +776,6 @@ XRESULT D3D11ShaderManager::DeleteShaders() {
         shader.reset();
     }
     for ( auto& shader : PShaders ) {
-        shader.reset();
-    }
-    for ( auto& shader : HDShaders ) {
         shader.reset();
     }
     for ( auto& shader : GShaders ) {

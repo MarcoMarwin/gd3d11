@@ -891,7 +891,6 @@ copy "$(OutDir)$(TargetName).pdb" "$(G1_SYSTEM_PATH)\ddraw.pdb"</Command>
     <ClInclude Include="D3D11GraphicsEngine.h" />
     <ClInclude Include="D3D11GraphicsEngineBase.h" />
     <ClInclude Include="D3D11GShader.h" />
-    <ClInclude Include="D3D11HDShader.h" />
     <ClInclude Include="D3D11IGDEXT.h" />
     <ClInclude Include="D3D11IndirectBuffer.h" />
     <ClInclude Include="D3D11LineRenderer.h" />
@@ -1139,7 +1138,6 @@ copy "$(OutDir)$(TargetName).pdb" "$(G1_SYSTEM_PATH)\ddraw.pdb"</Command>
     <ClCompile Include="D3D11GraphicsEngine.cpp" />
     <ClCompile Include="D3D11GraphicsEngineBase.cpp" />
     <ClCompile Include="D3D11GShader.cpp" />
-    <ClCompile Include="D3D11HDShader.cpp" />
     <ClCompile Include="D3D11IGDEXT.cpp" />
     <ClCompile Include="D3D11IndirectBuffer.cpp" />
     <ClCompile Include="D3D11LineRenderer.cpp" />

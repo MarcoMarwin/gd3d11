@@ -8,8 +8,7 @@ enum class ShaderType : byte
     Vertex = 1,
     Pixel = 2,
     Geometry = 3,
-    HullDomain = 4,
-    Compute = 5,
+    Compute = 4,
 };
 enum class ShaderCategory : uint32_t {
     None = 0,
@@ -18,9 +17,8 @@ enum class ShaderCategory : uint32_t {
     Vertex = 1 << 0,
     Pixel = 1 << 1,
     Geometry = 1 << 2,
-    HullDomain = 1 << 3,
-    Compute = 1 << 4,
-    AllTypes = Vertex | Pixel | Geometry | HullDomain | Compute,
+    Compute = 1 << 3,
+    AllTypes = Vertex | Pixel | Geometry | Compute,
 
     // Shader content categories
     LightsAndShadows = 1 << 8,
