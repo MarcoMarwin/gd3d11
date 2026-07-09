@@ -370,7 +370,7 @@ XRESULT D3D11PfxRenderer::RenderScreenSpaceLighting(
     }
 
     auto& settings = Engine::GAPI->GetRendererState().RendererSettings;
-    const bool contactActive = settings.EnableContactShadows && settings.ContactShadowStrength > 0.0f;
+    const bool contactActive = settings.EnableContactShadows;
     const bool giActive = settings.EnableScreenSpaceGI && settings.ScreenSpaceGIStrength > 0.0f;
     if ( !sceneSRV || !depthSRV || !normalsSRV || !waterMaskSRV || !materialSRV || (!contactActive && !giActive) ) {
         ScreenSpaceLightingHistoryValid = false;
@@ -413,7 +413,7 @@ XRESULT D3D11PfxRenderer::RenderScreenSpaceLighting(
     XMStoreFloat4x4( &cb.SSL_View, view );
     XMStoreFloat4x4( &cb.SSL_InvView, XMMatrixInverse( nullptr, view ) );
     cb.SSL_InvResolution = float2( 1.0f / std::max( 1, res.x ), 1.0f / std::max( 1, res.y ) );
-    cb.SSL_ContactStrength = settings.ContactShadowStrength * mainLightVisibility;
+    cb.SSL_ContactStrength = (contactActive ? settings.GetContactShadowFixedStrength() : 0.0f) * mainLightVisibility;
     cb.SSL_GIStrength = settings.ScreenSpaceGIStrength;
     cb.SSL_EnableContact = contactActive ? 1.0f : 0.0f;
     cb.SSL_EnableGI = giActive ? 1.0f : 0.0f;
@@ -509,7 +509,7 @@ XRESULT D3D11PfxRenderer::RenderPostFXComposition(
     // Update constants shared by height fog and the view-space ray tracing effects.
     auto& settings = Engine::GAPI->GetRendererState().RendererSettings;
     GSky* sky = Engine::GAPI->GetSky();
-    const bool contactShadowsActive = settings.EnableContactShadows && settings.ContactShadowStrength > 0.0f;
+    const bool contactShadowsActive = settings.EnableContactShadows;
     const bool screenSpaceGIActive = settings.EnableScreenSpaceGI && settings.ScreenSpaceGIStrength > 0.0f;
     const bool needsAtmosphere = compositionHeightFog || contactShadowsActive || screenSpaceGIActive;
     CompositionControlConstantBuffer control = {};

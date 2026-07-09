@@ -119,7 +119,7 @@ float ComputeContact(float2 uv, float depth)
     float normalGate = lerp(worldNormalGate, npcNormalGate, npcMaterial);
     float distanceFade = 1.0f - smoothstep(maxDistance * 0.38f, maxDistance, hitDistance);
     float npcStrength = lerp(1.0f, 0.55f, npcMaterial);
-    return saturate(facing * normalGate * distanceFade * viewDistanceFade * SSL_ContactStrength * 0.88f * npcStrength);
+    return saturate(facing * normalGate * distanceFade * viewDistanceFade * SSL_ContactStrength * npcStrength);
 }
 
 float3 ComputeGI(float2 uv, float depth, float3 baseColor)

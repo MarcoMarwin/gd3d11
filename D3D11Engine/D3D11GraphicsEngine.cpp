@@ -1206,23 +1206,9 @@ void ApplyWindowStyle(HWND window, WindowModes windowMode) {
 
 /** Get Window Mode */
 int D3D11GraphicsEngine::GetWindowMode() {
-    if ( SwapChain.Get() ) {
-        BOOL isFullscreen = 0;
-        if ( SwapChain.Get() ) SwapChain->GetFullscreenState( &isFullscreen, nullptr );
-
-        if ( isFullscreen ) {
-            return WINDOW_MODE_FULLSCREEN_EXCLUSIVE;
-        }
-    }
-
-    if ( m_swapchainflip ) {
-        if ( m_lowlatency ) {
-            return WINDOW_MODE_FULLSCREEN_LOWLATENCY;
-        } else {
-            return WINDOW_MODE_FULLSCREEN_BORDERLESS;
-        }
-    }
-    return WINDOW_MODE_WINDOWED;
+    return Engine::GAPI->GetRendererState().RendererSettings.StretchWindow
+        ? WINDOW_MODE_FULLSCREEN_BORDERLESS
+        : WINDOW_MODE_WINDOWED;
 }
 
 XRESULT D3D11GraphicsEngine::RecreateBuffers() {
@@ -1389,7 +1375,10 @@ XRESULT D3D11GraphicsEngine::OnResize( INT2 newSize ) {
             {DXGI_SWAP_EFFECT::DXGI_SWAP_EFFECT_FLIP_DISCARD, "DXGI_SWAP_EFFECT_FLIP_DISCARD"},
         };
 
-        m_swapchainflip = Engine::GAPI->GetRendererState().RendererSettings.DisplayFlip;
+        auto& displaySettings = Engine::GAPI->GetRendererState().RendererSettings;
+        displaySettings.DisplayFlip = true;
+        displaySettings.LowLatency = false;
+        m_swapchainflip = true;
         if ( m_swapchainflip && Engine::GAPI->GetRendererState().RendererSettings.StretchWindow ) {
             ApplyWindowStyle(OutputWindow, WindowModes::WINDOW_MODE_FULLSCREEN_BORDERLESS);
         }
@@ -4113,7 +4102,7 @@ XRESULT D3D11GraphicsEngine::OnStartWorldRendering() {
     bool isOutdoor = Engine::GAPI->GetLoadedWorldInfo()->BspTree->GetBspTreeMode() == zBSP_MODE_OUTDOOR;
     bool compositionGodRays = (rendererState.RendererSettings.EnableGodRays && isOutdoor);
     bool compositionHeightFog = (rendererState.RendererSettings.DrawFog && isOutdoor);
-    bool compositionContactShadows = rendererState.RendererSettings.EnableContactShadows && rendererState.RendererSettings.ContactShadowStrength > 0.0f;
+    bool compositionContactShadows = rendererState.RendererSettings.EnableContactShadows;
     bool compositionSSGI = rendererState.RendererSettings.EnableScreenSpaceGI && rendererState.RendererSettings.ScreenSpaceGIStrength > 0.0f;
     bool compositionNeedsGeometry = compositionContactShadows || compositionSSGI;
     bool compositionNeedsDepth = compositionHeightFog || compositionNeedsGeometry;

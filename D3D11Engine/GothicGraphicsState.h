@@ -563,6 +563,23 @@ struct GothicRendererSettings {
         RM_ForwardPlus = 1,
     };
 
+    float GetContactShadowFixedStrength() const {
+        const bool fsr3Active = Upscaler == E_Upscaler::UPSCALER_FSR_3
+            && (AntiAliasingMode == E_AntiAliasingMode::AA_FSR || AntiAliasingMode == E_AntiAliasingMode::AA_FSR3);
+        if ( !fsr3Active ) {
+            return 0.75f;
+        }
+
+        const int fsrScale = SnapFSRResolutionScale( ResolutionScalePercent );
+        if ( fsrScale <= 50 ) {
+            return 0.35f;
+        }
+        if ( fsrScale == 66 ) {
+            return 0.55f;
+        }
+        return 0.75f;
+    }
+
     /** Sets the default values for this struct */
     void SetDefault() {
         SectionDrawRadius = 4;
@@ -675,7 +692,6 @@ struct GothicRendererSettings {
         EnableSSS = true;
         SSSIntensity = 0.5f; // Fixed Backlit Vegetation intensity; the F11 option is an enabler.
         EnableContactShadows = true;
-        ContactShadowStrength = 1.0f; // UI-normalized: 1.0 keeps the former 0.35 effect strength.
         EnableScreenSpaceGI = false;
         ScreenSpaceGIStrength = 1.0f;
         EnableParticleLighting = true;
@@ -756,7 +772,7 @@ struct GothicRendererSettings {
         StretchWindow = true;
         SmoothShadowCameraUpdate = true;
         SmoothShadowFrequency = 500.0f;
-        DisplayFlip = false;
+        DisplayFlip = true;
         LowLatency = false;
         HDR_Monitor = false;
         EnableInactiveFpsLock = true;
@@ -854,7 +870,6 @@ struct GothicRendererSettings {
     bool EnableSSS;
     float SSSIntensity;
     bool EnableContactShadows;
-    float ContactShadowStrength;
     bool EnableScreenSpaceGI;
     float ScreenSpaceGIStrength;
     bool EnableParticleLighting;

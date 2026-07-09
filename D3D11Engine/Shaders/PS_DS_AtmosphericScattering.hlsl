@@ -281,15 +281,11 @@ float4 PSMain(PS_INPUT Input) : SV_TARGET
 	{
         float3 wsLightDirection = normalize(mul(float4(SQ_LightDirectionVS, 0.0f), SQ_InvView).xyz);
 
-        float NoL = saturate(abs(dot(wsNormal, wsLightDirection)));
-        float slopeScale = sqrt(saturate(1.0f - NoL * NoL));
-
         int cascadeIndex = GetPrimaryCascadeIndex(wsPosition);
         float texelWorldSize = GetCascadeWorldTexelSize(cascadeIndex);
 
-        const float normalBiasMultiplier = 1.5f;
-
-        float3 biasedWsPosition = wsPosition + wsNormal * (slopeScale * texelWorldSize * normalBiasMultiplier);
+        float alphaReceiverMask = smoothstep(0.05f, 0.09f, TX_RainExclusionMask.Load(int3(int2(Input.vPosition.xy), 0)).r);
+        float3 biasedWsPosition = ApplyReceiverNormalBias(wsPosition, wsNormal, wsLightDirection, texelWorldSize, alphaReceiverMask);
 
         // Use screen position for per-pixel rotation (TAA-friendly)
         shadow = ComputeCascadedShadowValueSoft(biasedWsPosition, vsPosition.z, vertLighting, 0.0f, Input.vPosition.xy);

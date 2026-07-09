@@ -792,7 +792,6 @@ struct GraphicsPresetComparable {
     int OutdoorSmallVobDrawDistance;
     int SectionDrawRadius;
     float AOStrength;
-    float ContactShadowStrength;
     float ScreenSpaceGIStrength;
     float SSSIntensity;
     float DoFBokehRadius;
@@ -827,7 +826,6 @@ GraphicsPresetComparable MakeGraphicsPresetComparable( const GothicRendererSetti
         ObjectDrawDistanceMetersToUi( s.OutdoorSmallVobDrawRadius ),
         s.SectionDrawRadius,
         s.AOStrength,
-        s.ContactShadowStrength,
         s.ScreenSpaceGIStrength,
         s.SSSIntensity,
         s.DoFBokehRadius,
@@ -862,7 +860,6 @@ bool GraphicsPresetComparableEqual( const GraphicsPresetComparable& a, const Gra
         && a.OutdoorSmallVobDrawDistance == b.OutdoorSmallVobDrawDistance
         && a.SectionDrawRadius == b.SectionDrawRadius
         && a.AOStrength == b.AOStrength
-        && a.ContactShadowStrength == b.ContactShadowStrength
         && a.ScreenSpaceGIStrength == b.ScreenSpaceGIStrength
         && a.SSSIntensity == b.SSSIntensity
         && a.DoFBokehRadius == b.DoFBokehRadius
@@ -891,7 +888,6 @@ void ApplyGraphicsPresets( GothicRendererSettings& s, bool applyRuntimeUpdates =
 
     // Reset all visible effect strengths to their normalized UI defaults.
     s.AOStrength = 1.0f;
-    s.ContactShadowStrength = 1.0f;
     s.ScreenSpaceGIStrength = 1.0f;
     s.GodRayStrength = 1.0f;
     s.SSRStrength = 1.0f;
@@ -982,8 +978,7 @@ void ApplyGraphicsPresets( GothicRendererSettings& s, bool applyRuntimeUpdates =
     }
 
     if ( s.AoMode == AOMode::AO_NONE ) s.AOStrength = 0.0f;
-    if ( !s.EnableContactShadows ) s.ContactShadowStrength = 0.0f;
-    if ( !s.EnableScreenSpaceGI ) s.ScreenSpaceGIStrength = 0.0f;
+        if ( !s.EnableScreenSpaceGI ) s.ScreenSpaceGIStrength = 0.0f;
     if ( !s.EnableGodRays ) s.GodRayStrength = 0.0f;
     if ( !s.EnableSSR || !s.EnableWaterAnimation ) s.SSRStrength = 0.0f;
     s.SSSIntensity = s.EnableSSS ? 0.5f : 0.0f;
@@ -1060,7 +1055,6 @@ namespace
         // Disabled coupled controls must always display their true zero effect state.
         if ( !s.EnableHDR ) s.HDRToneMapStrength = 0.0f;
         if ( s.AoMode == AOMode::AO_NONE ) s.AOStrength = 0.0f;
-        if ( !s.EnableContactShadows ) s.ContactShadowStrength = 0.0f;
         if ( !s.EnableScreenSpaceGI ) s.ScreenSpaceGIStrength = 0.0f;
         if ( !s.EnableGodRays ) s.GodRayStrength = 0.0f;
         if ( !s.EnableSSR || !s.EnableWaterAnimation ) s.SSRStrength = 0.0f;
@@ -1333,10 +1327,11 @@ void ImGuiShim::RenderSettingsWindow()
             auto displayModeState = settings.ChangeWindowPreset
                 ? static_cast<WindowModes>(settings.ChangeWindowPreset)
                 : InterpretWindowMode( settings );
+            if ( displayModeState != WindowModes::WINDOW_MODE_WINDOWED ) {
+                displayModeState = WindowModes::WINDOW_MODE_FULLSCREEN_BORDERLESS;
+            }
             static std::vector<std::tuple<const char*, WindowModes, const char*>> DisplayEnums = {
-                { "Fullscreen Borderless", WindowModes::WINDOW_MODE_FULLSCREEN_BORDERLESS, nullptr },
-                { "Fullscreen Lowlatency", WindowModes::WINDOW_MODE_FULLSCREEN_LOWLATENCY, nullptr },
-                { "Fullscreen Exclusive", WindowModes::WINDOW_MODE_FULLSCREEN_EXCLUSIVE, nullptr },
+                { "Fullscreen", WindowModes::WINDOW_MODE_FULLSCREEN_BORDERLESS, nullptr },
                 { "Windowed", WindowModes::WINDOW_MODE_WINDOWED, nullptr},
             };
             
@@ -1348,7 +1343,7 @@ void ImGuiShim::RenderSettingsWindow()
             }
 
 
-            ImGui::SetItemTooltip( "Selects the display mode used after restarting the game." );
+            ImGui::SetItemTooltip( "Fullscreen uses borderless fullscreen for reliable Alt-Tab behavior." );
             const static std::vector<std::pair<const char*, int>> shadowMapSizes = {
                 {"Low", 1024},
                 {"Medium", 2048},
@@ -1512,21 +1507,6 @@ void ImGuiShim::RenderSettingsWindow()
             ImGui::EndDisabled();
             ImGui::SetItemTooltip( "Controls ambient-occlusion strength." );
 
-            ImText( "Contact Shadows", { buttonWidth.x - ImGui::GetFrameHeight() - style.ItemSpacing.x, buttonWidth.y } ); ImGui::SameLine();
-            if ( CoupledStrengthCheckbox( "##Enable Contact Shadows", "ContactShadowStrength",
-                    &settings.EnableContactShadows, &settings.ContactShadowStrength, 1.0f ) ) {
-                shadersToReload |= ShaderCategory::Other;
-            }
-            ImGui::SetItemTooltip( "Adds short screen-space shadows at object contact points." );
-            ImGui::SameLine();
-            ImGui::SetNextItemWidth( standardComboWidth );
-            const bool contactShadowsBeforeSlider = settings.EnableContactShadows;
-            if ( CoupledStrengthSlider( "##ContactShadowStrength", "ContactShadowStrength",
-                    &settings.EnableContactShadows, &settings.ContactShadowStrength )
-                && contactShadowsBeforeSlider != settings.EnableContactShadows ) {
-                shadersToReload |= ShaderCategory::Other;
-            }
-            ImGui::SetItemTooltip( "Controls contact-shadow strength." );
 
             ImText( "Screen-Space GI", { buttonWidth.x - ImGui::GetFrameHeight() - style.ItemSpacing.x, buttonWidth.y } ); ImGui::SameLine();
             if ( CoupledStrengthCheckbox( "##Enable Screen-Space GI", "ScreenSpaceGIStrength",
@@ -1638,6 +1618,12 @@ void ImGuiShim::RenderSettingsWindow()
             settings.SSSIntensity = settings.EnableSSS ? 0.5f : 0.0f;
             ImGui::SetItemTooltip( "Adds soft fixed-strength backlighting through leaves and alpha-tested vegetation." );
 
+            ImText( "Contact Shadows", { buttonWidth.x - ImGui::GetFrameHeight() - style.ItemSpacing.x, buttonWidth.y } ); ImGui::SameLine();
+            if ( ImGui::Checkbox( "##Enable Contact Shadows", &settings.EnableContactShadows ) ) {
+                shadersToReload |= ShaderCategory::Other;
+            }
+            ImGui::SetItemTooltip( "Adds fixed-strength short screen-space shadows at object contact points." );
+
             ImText( "Enable Rain", { buttonWidth.x - ImGui::GetFrameHeight() - style.ItemSpacing.x, buttonWidth.y } ); ImGui::SameLine();
             ImGui::Checkbox( "##Enable Rain", &settings.EnableRain );
             ImGui::SetItemTooltip( "Enables rain particles and wet-ground effects." );
@@ -1664,6 +1650,10 @@ void ImGuiShim::RenderSettingsWindow()
         } else {
             ImGui::SetItemTooltip("Save settings.\nCTRL+Click to save just for the current world.");
         }
+        const char* versionText = VERSION_STRING;
+        const ImVec2 versionTextSize = ImGui::CalcTextSize( versionText );
+        ImGui::SetCursorPosX( std::max( ImGui::GetCursorPosX(), ImGui::GetWindowContentRegionMax().x - versionTextSize.x ) );
+        ImGui::TextDisabled( "%s", versionText );
         
         if ( cancelled ) {
             CancelSettingsEdit();

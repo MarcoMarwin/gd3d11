@@ -101,15 +101,10 @@ float PSMain( PS_INPUT Input ) : SV_TARGET
     float3 wsNormal = normalize( cross( wsDx, wsDy ) );
     float3 wsLightDirection = normalize( mul( float4( SQ_LightDirectionVS, 0.0f ), SQ_InvView ).xyz );
 
-    float NoL = saturate( abs( dot( wsNormal, wsLightDirection ) ) );
-    float slopeScale = sqrt( saturate( 1.0f - NoL * NoL ) );
-
     int cascadeIndex = GetPrimaryCascadeIndex( wsPosition );
     float texelWorldSize = GetCascadeWorldTexelSize( cascadeIndex );
 
-    const float normalBiasMultiplier = 1.5f;
-
-    float3 biasedWsPosition = wsPosition + wsNormal * (slopeScale * texelWorldSize * normalBiasMultiplier);
+    float3 biasedWsPosition = ApplyReceiverNormalBias(wsPosition, wsNormal, wsLightDirection, texelWorldSize, 0.0f);
 
     // ComputeCascadedShadowValueSoft is defined in ShadowSampling.h.
     // Pass 1.0 for vertLighting (the shadow mask carries only the cascade shadow;

@@ -108,6 +108,7 @@ FORWARD_PLUS_PS_OUTPUT PSMain( PS_INPUT Input )
 #if ALPHATEST == 1
 	DoAlphaTest(color.a);
 	output.vReactiveMask = max(output.vReactiveMask, 0.10f); // Preserve dialog reactivity; Kirides alpha-test floor.
+	output.vTransparencyAndCompositionMask = max(output.vTransparencyAndCompositionMask, 0.10f);
 #endif
 
 #if NORMALMAPPING == 1
@@ -137,22 +138,21 @@ FORWARD_PLUS_PS_OUTPUT PSMain( PS_INPUT Input )
 #if SHD_ENABLE
 	if (AC_SunVisibility > 0.001f || AC_MoonVisibility > 0.001f)
 	{
-		#if FP_USE_SHADOW_MASK
+		#if FP_USE_SHADOW_MASK && ALPHATEST != 1
 			float2 screenUV = Input.vPosition.xy / FP_ViewportSize;
 			shadow = FP_ShadowMask.SampleLevel( SS_Linear, screenUV, 0 ).r;
 		#else
 			float3 wsNormal = normalize(mul(float4(nrm, 0.0f), SQ_InvView).xyz);
 			float3 wsLightDirection = normalize(mul(float4(SQ_LightDirectionVS, 0.0f), SQ_InvView).xyz);
 
-			float NoL = saturate(abs(dot(wsNormal, wsLightDirection)));
-			float slopeScale = sqrt(saturate(1.0f - NoL * NoL));
-
 			int cascadeIndex = GetPrimaryCascadeIndex(wsPosition);
 			float texelWorldSize = GetCascadeWorldTexelSize(cascadeIndex);
 
-			const float normalBiasMultiplier = 1.5f;
-
-			float3 biasedWsPosition = wsPosition + wsNormal * (slopeScale * texelWorldSize * normalBiasMultiplier);
+			float alphaReceiverMask = 0.0f;
+		#if ALPHATEST == 1
+			alphaReceiverMask = 1.0f;
+		#endif
+			float3 biasedWsPosition = ApplyReceiverNormalBias(wsPosition, wsNormal, wsLightDirection, texelWorldSize, alphaReceiverMask);
 
 			shadow = ComputeCascadedShadowValueSoft(biasedWsPosition, vsPosition.z, vertLighting, 0.0f, Input.vPosition.xy);
 		#endif
@@ -234,6 +234,7 @@ DEFERRED_PS_OUTPUT PSMain( PS_INPUT Input ) : SV_TARGET
 	// WorldMesh can always do the alphatest
 	DoAlphaTest(color.a);
 	output.vReactiveMask = max(output.vReactiveMask, 0.10f); // Preserve dialog reactivity; Kirides alpha-test floor.
+	output.vTransparencyAndCompositionMask = max(output.vTransparencyAndCompositionMask, 0.10f);
 #endif
 	
 	// Apply normalmapping if wanted

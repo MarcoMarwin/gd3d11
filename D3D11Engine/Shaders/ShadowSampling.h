@@ -394,6 +394,24 @@ float GetCascadeWorldTexelSize(int cascadeIndex)
     return 0.5f * (worldSpanX + worldSpanY) / max(cascadeResolution, 1.0f);
 }
 
+float ComputeReceiverNormalBias(float3 wsNormal, float3 wsLightDirection, float texelWorldSize, float alphaReceiverMask)
+{
+    float NoL = saturate(abs(dot(wsNormal, wsLightDirection)));
+    float slopeScale = sqrt(saturate(1.0f - NoL * NoL));
+    float verticalReceiver = 1.0f - saturate(abs(wsNormal.y));
+    float alphaGrazingReceiver = saturate(alphaReceiverMask) *
+        smoothstep(0.65f, 0.95f, slopeScale) *
+        smoothstep(0.45f, 0.85f, verticalReceiver);
+
+    float normalBiasMultiplier = lerp(1.5f, 4.0f, alphaGrazingReceiver);
+    return slopeScale * texelWorldSize * normalBiasMultiplier;
+}
+
+float3 ApplyReceiverNormalBias(float3 wsPosition, float3 wsNormal, float3 wsLightDirection, float texelWorldSize, float alphaReceiverMask)
+{
+    return wsPosition + wsNormal * ComputeReceiverNormalBias(wsNormal, wsLightDirection, texelWorldSize, alphaReceiverMask);
+}
+
 //--------------------------------------------------------------------------------------
 // High-quality shadow sampling with configurable softness
 // Uses rotated Poisson disk for TAA-friendly results

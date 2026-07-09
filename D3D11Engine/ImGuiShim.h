@@ -46,12 +46,6 @@ public:
         if ( !s.StretchWindow ) {
             return WINDOW_MODE_WINDOWED;
         }
-        if ( !s.DisplayFlip ) {
-            return WINDOW_MODE_FULLSCREEN_EXCLUSIVE;
-        }
-        if ( s.LowLatency ) {
-            return WINDOW_MODE_FULLSCREEN_LOWLATENCY;
-        }
         return WINDOW_MODE_FULLSCREEN_BORDERLESS;
     }
 private:
