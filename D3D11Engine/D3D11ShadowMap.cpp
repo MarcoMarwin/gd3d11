@@ -6,6 +6,7 @@
 // TODO: Remove circular dependencies
 #include "D3D11Effect.h"
 #include "D3D11GShader.h"
+#include "D3D11CShader.h"
 #include "D3D11PfxRenderer.h"
 #include "D3D11ShaderManager.h"
 #include "D3D11GraphicsEngine.h"
@@ -319,6 +320,258 @@ bool D3D11ShadowMap::ShouldUseAtlas() const {
     // FL10 always needs atlas fallback. On FL11+, this can be toggled at runtime.
     return FeatureLevel10Compatibility || settings.DebugSettings.FeatureSet.UseShadowAtlas;
 }
+bool D3D11ShadowMap::ShouldUseEVSM() const {
+    const auto& settings = Engine::GAPI->GetRendererState().RendererSettings;
+    return settings.ShadowFilterMode == GothicRendererSettings::E_ShadowFilterMode::SHADOW_FILTER_EVSM
+        && !FeatureLevel10Compatibility
+        && !ShouldUseAtlas()
+        && m_cascadedShadowMap;
+}
+
+UINT D3D11ShadowMap::GetEVSMCascadeResolution( UINT cascadeIndex ) const {
+    const UINT baseResolution = m_cascadedShadowMap ? m_cascadedShadowMap->GetSize() : 0;
+    if ( baseResolution <= 2048 ) return baseResolution;
+    if ( cascadeIndex == 0 ) return baseResolution;
+    if ( cascadeIndex == 1 ) return std::max<UINT>( 2048, baseResolution / 2 );
+    return 2048;
+}
+
+void D3D11ShadowMap::ReleaseEVSMResources() {
+    if ( m_context ) {
+        ID3D11ShaderResourceView* nullSRVs[MAX_CSM_CASCADES] = {};
+        ID3D11UnorderedAccessView* nullUAVs[2] = {};
+        m_context->PSSetShaderResources( 14, MAX_CSM_CASCADES, nullSRVs );
+        m_context->CSSetShaderResources( 0, 2, nullSRVs );
+        m_context->CSSetUnorderedAccessViews( 0, 2, nullUAVs, nullptr );
+    }
+
+    for ( auto& uav : m_evsmMomentUAVs ) uav.Reset();
+    for ( auto& srv : m_evsmMomentSRVs ) srv.Reset();
+    for ( auto& texture : m_evsmMomentTextures ) texture.Reset();
+    m_evsmCascadeResolutions.fill( 0 );
+    m_evsmTemporaryUAV.Reset();
+    m_evsmTemporarySRV.Reset();
+    m_evsmTemporaryTexture.Reset();
+    m_evsmPointSampler.Reset();
+    m_evsmLinearSampler.Reset();
+    m_evsmCascadeCount = 0;
+    m_evsmFilteredSoftness = -1.0f;
+}
+
+bool D3D11ShadowMap::EnsureEVSMResources() {
+    if ( !ShouldUseEVSM() ) {
+        ReleaseEVSMResources();
+        return false;
+    }
+
+    auto& settings = Engine::GAPI->GetRendererState().RendererSettings;
+    auto* graphicsEngine = reinterpret_cast<D3D11GraphicsEngine*>( Engine::GraphicsEngine );
+    auto& shaderManager = graphicsEngine->GetShaderManager();
+    if ( !shaderManager.GetCShader( CShaderID::CS_EVSM_ConvertHorizontal )
+        || !shaderManager.GetCShader( CShaderID::CS_EVSM_Vertical ) ) {
+        LogError() << "EVSM: Compute shaders unavailable, falling back to Simple PCF";
+        settings.ShadowFilterMode = GothicRendererSettings::E_ShadowFilterMode::SHADOW_FILTER_SIMPLE;
+        shaderManager.LoadShaders( ShaderCategory::LightsAndShadows );
+        ReleaseEVSMResources();
+        return false;
+    }
+
+    const UINT cascadeCount = static_cast<UINT>(
+        std::clamp( settings.NumShadowCascades, 1, MAX_CSM_CASCADES ) );
+
+    bool resourcesMatch = m_evsmCascadeCount == cascadeCount
+        && m_evsmTemporaryTexture
+        && m_evsmTemporarySRV
+        && m_evsmTemporaryUAV
+        && m_evsmPointSampler
+        && m_evsmLinearSampler;
+
+    for ( UINT i = 0; resourcesMatch && i < cascadeCount; ++i ) {
+        resourcesMatch = m_evsmCascadeResolutions[i] == GetEVSMCascadeResolution( i )
+            && m_evsmMomentTextures[i]
+            && m_evsmMomentSRVs[i]
+            && m_evsmMomentUAVs[i];
+    }
+    if ( resourcesMatch ) return true;
+
+    ReleaseEVSMResources();
+
+    UINT formatSupport = 0;
+    const HRESULT formatHr = m_device->CheckFormatSupport(
+        DXGI_FORMAT_R16G16B16A16_FLOAT, &formatSupport );
+    if ( FAILED( formatHr )
+        || (formatSupport & D3D11_FORMAT_SUPPORT_TYPED_UNORDERED_ACCESS_VIEW) == 0 ) {
+        LogError() << "EVSM: RGBA16F UAVs unsupported, falling back to Simple PCF";
+        settings.ShadowFilterMode = GothicRendererSettings::E_ShadowFilterMode::SHADOW_FILTER_SIMPLE;
+        shaderManager.LoadShaders( ShaderCategory::LightsAndShadows );
+        return false;
+    }
+
+    D3D11_SAMPLER_DESC samplerDesc = {};
+    samplerDesc.Filter = D3D11_FILTER_MIN_MAG_MIP_POINT;
+    samplerDesc.AddressU = D3D11_TEXTURE_ADDRESS_CLAMP;
+    samplerDesc.AddressV = D3D11_TEXTURE_ADDRESS_CLAMP;
+    samplerDesc.AddressW = D3D11_TEXTURE_ADDRESS_CLAMP;
+    samplerDesc.MinLOD = 0.0f;
+    samplerDesc.MaxLOD = 0.0f;
+
+    HRESULT hr = m_device->CreateSamplerState( &samplerDesc, m_evsmPointSampler.GetAddressOf() );
+    samplerDesc.Filter = D3D11_FILTER_MIN_MAG_MIP_LINEAR;
+    if ( SUCCEEDED( hr ) ) {
+        hr = m_device->CreateSamplerState( &samplerDesc, m_evsmLinearSampler.GetAddressOf() );
+    }
+    if ( FAILED( hr ) ) LogError() << "EVSM: Failed to create filter samplers";
+
+    auto createMomentTexture = [&]( UINT resolution,
+                                    Microsoft::WRL::ComPtr<ID3D11Texture2D>& texture,
+                                    Microsoft::WRL::ComPtr<ID3D11ShaderResourceView>& srv,
+                                    Microsoft::WRL::ComPtr<ID3D11UnorderedAccessView>& uav ) -> bool {
+        D3D11_TEXTURE2D_DESC desc = {};
+        desc.Width = resolution;
+        desc.Height = resolution;
+        desc.MipLevels = 1;
+        desc.ArraySize = 1;
+        desc.Format = DXGI_FORMAT_R16G16B16A16_FLOAT;
+        desc.SampleDesc.Count = 1;
+        desc.Usage = D3D11_USAGE_DEFAULT;
+        desc.BindFlags = D3D11_BIND_SHADER_RESOURCE | D3D11_BIND_UNORDERED_ACCESS;
+
+        HRESULT createHr = m_device->CreateTexture2D( &desc, nullptr, texture.GetAddressOf() );
+        if ( FAILED( createHr ) || !texture ) return false;
+        createHr = m_device->CreateShaderResourceView( texture.Get(), nullptr, srv.GetAddressOf() );
+        if ( FAILED( createHr ) || !srv ) return false;
+        createHr = m_device->CreateUnorderedAccessView( texture.Get(), nullptr, uav.GetAddressOf() );
+        return SUCCEEDED( createHr ) && uav;
+    };
+
+    bool created = m_evsmPointSampler != nullptr && m_evsmLinearSampler != nullptr;
+    for ( UINT i = 0; created && i < cascadeCount; ++i ) {
+        const UINT resolution = GetEVSMCascadeResolution( i );
+        created = createMomentTexture(
+            resolution, m_evsmMomentTextures[i], m_evsmMomentSRVs[i], m_evsmMomentUAVs[i] );
+        if ( created ) {
+            m_evsmCascadeResolutions[i] = resolution;
+            SetDebugName( m_evsmMomentTextures[i].Get(),
+                "EVSM_Moments_Cascade" + std::to_string( i ) );
+        }
+    }
+
+    if ( created ) {
+        created = createMomentTexture(
+            GetEVSMCascadeResolution( 0 ),
+            m_evsmTemporaryTexture, m_evsmTemporarySRV, m_evsmTemporaryUAV );
+        if ( created ) SetDebugName( m_evsmTemporaryTexture.Get(), "EVSM_FilterTemporary" );
+    }
+
+    if ( !created ) {
+        ReleaseEVSMResources();
+        LogError() << "EVSM: Insufficient resources, falling back to Simple PCF";
+        settings.ShadowFilterMode = GothicRendererSettings::E_ShadowFilterMode::SHADOW_FILTER_SIMPLE;
+        shaderManager.LoadShaders( ShaderCategory::LightsAndShadows );
+        return false;
+    }
+
+    const float litMoments[4] = {
+        148.4131591f,
+        22026.465795f,
+        -0.006737947f,
+        0.00004539993f
+    };
+    for ( UINT i = 0; i < cascadeCount; ++i ) {
+        m_context->ClearUnorderedAccessViewFloat( m_evsmMomentUAVs[i].Get(), litMoments );
+    }
+
+    m_evsmCascadeCount = cascadeCount;
+    m_evsmFilteredSoftness = -1.0f;
+    LogInfo() << "EVSM: Created " << cascadeCount << " distance-scaled moment maps";
+    return true;
+}
+
+void D3D11ShadowMap::FilterCascadeToEVSM( UINT cascadeIndex ) {
+    if ( cascadeIndex >= m_evsmCascadeCount
+        || !m_cascadedShadowMap
+        || !m_evsmTemporaryUAV
+        || !m_evsmTemporarySRV
+        || !m_evsmMomentUAVs[cascadeIndex] ) return;
+
+    auto* graphicsEngine = reinterpret_cast<D3D11GraphicsEngine*>( Engine::GraphicsEngine );
+    auto convertCS = graphicsEngine->GetShaderManager().GetCShader(
+        CShaderID::CS_EVSM_ConvertHorizontal );
+    auto verticalCS = graphicsEngine->GetShaderManager().GetCShader(
+        CShaderID::CS_EVSM_Vertical );
+    if ( !convertCS || !verticalCS ) return;
+
+    struct alignas( 16 ) EVSMFilterConstants {
+        uint32_t SourceSize;
+        uint32_t DestinationSize;
+        uint32_t CascadeIndex;
+        float BlurRadius;
+    };
+
+    const auto& settings = Engine::GAPI->GetRendererState().RendererSettings;
+    EVSMFilterConstants constants = {
+        m_cascadedShadowMap->GetSize(),
+        m_evsmCascadeResolutions[cascadeIndex],
+        cascadeIndex,
+        std::clamp( settings.ShadowSoftness, 0.0f, 2.0f )
+    };
+
+    ID3D11RenderTargetView* nullRTV = nullptr;
+    m_context->OMSetRenderTargets( 1, &nullRTV, nullptr );
+
+    ID3D11ShaderResourceView* nullPSResources[MAX_CSM_CASCADES] = {};
+    m_context->PSSetShaderResources( 14, MAX_CSM_CASCADES, nullPSResources );
+
+    ID3D11ShaderResourceView* nullCSResources[2] = {};
+    ID3D11UnorderedAccessView* nullUAVs[2] = {};
+    const float litMoments[4] = {
+        148.4131591f,
+        22026.465795f,
+        -0.006737947f,
+        0.00004539993f
+    };
+    m_context->ClearUnorderedAccessViewFloat( m_evsmTemporaryUAV.Get(), litMoments );
+
+    ID3D11SamplerState* samplers[2] = {
+        m_evsmPointSampler.Get(),
+        m_evsmLinearSampler.Get()
+    };
+    m_context->CSSetSamplers( 0, 2, samplers );
+
+    convertCS->Apply();
+    convertCS->GetBuffer( "EVSMFilterConstants" ).Update( &constants ).Bind();
+    ID3D11ShaderResourceView* convertResources[2] = {
+        m_cascadedShadowMap->GetShaderResourceView(),
+        nullptr
+    };
+    ID3D11UnorderedAccessView* convertUAVs[2] = {
+        m_evsmTemporaryUAV.Get(),
+        nullptr
+    };
+    m_context->CSSetShaderResources( 0, 2, convertResources );
+    m_context->CSSetUnorderedAccessViews( 0, 2, convertUAVs, nullptr );
+    const UINT dispatchSize = constants.DestinationSize;
+    m_context->Dispatch( (dispatchSize + 7) / 8, (dispatchSize + 7) / 8, 1 );
+    m_context->CSSetUnorderedAccessViews( 0, 2, nullUAVs, nullptr );
+    m_context->CSSetShaderResources( 0, 2, nullCSResources );
+
+    verticalCS->Apply();
+    verticalCS->GetBuffer( "EVSMFilterConstants" ).Update( &constants ).Bind();
+    ID3D11ShaderResourceView* verticalResources[2] = {
+        nullptr,
+        m_evsmTemporarySRV.Get()
+    };
+    ID3D11UnorderedAccessView* verticalUAVs[2] = {
+        nullptr,
+        m_evsmMomentUAVs[cascadeIndex].Get()
+    };
+    m_context->CSSetShaderResources( 0, 2, verticalResources );
+    m_context->CSSetUnorderedAccessViews( 0, 2, verticalUAVs, nullptr );
+    m_context->Dispatch( (dispatchSize + 7) / 8, (dispatchSize + 7) / 8, 1 );
+    m_context->CSSetUnorderedAccessViews( 0, 2, nullUAVs, nullptr );
+    m_context->CSSetShaderResources( 0, 2, nullCSResources );
+    m_context->CSSetShader( nullptr, nullptr, 0 );
+}
 
 void D3D11ShadowMap::RecreateShadowSampler() {
     if ( !m_device ) return;
@@ -473,7 +726,13 @@ void D3D11ShadowMap::Resize( int size ) {
 }
 
 void D3D11ShadowMap::BindToPixelShader( ID3D11DeviceContext1* context, UINT slot ) {
-    if ( m_useAtlas ) {
+    if ( ShouldUseEVSM() && m_evsmCascadeCount > 0 ) {
+        ID3D11ShaderResourceView* momentSRVs[MAX_CSM_CASCADES] = {};
+        for ( UINT i = 0; i < m_evsmCascadeCount; ++i ) {
+            momentSRVs[i] = m_evsmMomentSRVs[i].Get();
+        }
+        context->PSSetShaderResources( 14, MAX_CSM_CASCADES, momentSRVs );
+    } else if ( m_useAtlas ) {
         if ( m_shadowAtlas ) m_shadowAtlas->BindToPixelShader( context, slot );
     } else {
         if ( m_cascadedShadowMap ) m_cascadedShadowMap->BindToPixelShader( context, slot );
@@ -503,6 +762,16 @@ XRESULT D3D11ShadowMap::PrepareRender()
             LogInfo() << "Shadowmap config changed, resizing to " << desiredSize << "x" << desiredSize;
             Resize( desiredSize );
             settings.ShadowMapSize = desiredSize;
+        }
+    }
+
+    if ( EnsureEVSMResources() ) {
+        const float currentSoftness = Engine::GAPI->GetRendererState().RendererSettings.ShadowSoftness;
+        if ( std::abs( m_evsmFilteredSoftness - currentSoftness ) > 0.0001f ) {
+            for ( UINT cascadeIndex = 0; cascadeIndex < m_evsmCascadeCount; ++cascadeIndex ) {
+                FilterCascadeToEVSM( cascadeIndex );
+            }
+            m_evsmFilteredSoftness = currentSoftness;
         }
     }
 
@@ -1238,6 +1507,9 @@ XRESULT D3D11ShadowMap::DrawWorldShadow( )
             }
 
             RenderShadowmaps( renderParams );
+            if ( ShouldUseEVSM() ) {
+                FilterCascadeToEVSM( static_cast<UINT>( cascadeIdx ) );
+            }
 
             Engine::GAPI->SetCameraReplacementPtr( nullptr );
             m_RenderQueues[cascadeIdx]->Reset();
@@ -1381,8 +1653,8 @@ void D3D11ShadowMap::RenderShadowmaps( const RenderShadowmapsParams& params ) {
 
     // Clear and Bind the shadowmap
 
-    ID3D11ShaderResourceView* nullShadowSRVs[12] = {};
-    m_context->PSSetShaderResources( 3, 12, nullShadowSRVs );
+    ID3D11ShaderResourceView* nullShadowSRVs[15] = {};
+    m_context->PSSetShaderResources( 3, 15, nullShadowSRVs );
 
     if ( !params.DebugRTV.Get() ) {
         m_context->OMSetRenderTargets( 0, nullptr, dsvOverwrite.Get() );
@@ -1461,7 +1733,14 @@ DS_ScreenQuadConstantBuffer D3D11ShadowMap::FillSunCSMConstantBuffer() const {
 
     scb.SQ_ShadowmapSize = static_cast<float>( this->GetSizeX() );
 
-    if ( m_useAtlas && m_shadowAtlas ) {
+    if ( ShouldUseEVSM() && m_evsmCascadeCount > 0 ) {
+        for ( size_t i = 0; i < MAX_CSM_CASCADES; ++i ) {
+            const float resolution = static_cast<float>(
+                m_evsmCascadeResolutions[std::min<size_t>( i, m_evsmCascadeCount - 1 )] );
+            scb.SQ_CascadeAtlasRect[i] = float4(
+                resolution, 1.0f / std::max( resolution, 1.0f ), 0.0f, 0.0f );
+        }
+    } else if ( m_useAtlas && m_shadowAtlas ) {
         for ( size_t i = 0; i < MAX_CSM_CASCADES; ++i ) {
             scb.SQ_CascadeAtlasRect[i] = m_shadowAtlas->GetCascadeUVRect( static_cast<UINT>( i ) );
         }
@@ -1571,8 +1850,15 @@ XRESULT D3D11ShadowMap::DrawWorldLights()
 
     scb.SQ_ShadowmapSize = static_cast<float>( this->GetSizeX() );
 
-    // Atlas path: fill per-cascade UV rects for shader atlas sampling
-    if ( m_useAtlas && m_shadowAtlas ) {
+    // EVSM stores per-cascade moment resolution; atlas mode stores UV rectangles.
+    if ( ShouldUseEVSM() && m_evsmCascadeCount > 0 ) {
+        for ( size_t i = 0; i < MAX_CSM_CASCADES; ++i ) {
+            const float resolution = static_cast<float>(
+                m_evsmCascadeResolutions[std::min<size_t>( i, m_evsmCascadeCount - 1 )] );
+            scb.SQ_CascadeAtlasRect[i] = float4(
+                resolution, 1.0f / std::max( resolution, 1.0f ), 0.0f, 0.0f );
+        }
+    } else if ( m_useAtlas && m_shadowAtlas ) {
         for ( size_t i = 0; i < MAX_CSM_CASCADES; ++i ) {
             scb.SQ_CascadeAtlasRect[i] = m_shadowAtlas->GetCascadeUVRect( static_cast<UINT>( i ) );
         }

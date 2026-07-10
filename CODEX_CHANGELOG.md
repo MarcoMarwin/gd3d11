@@ -332,3 +332,11 @@ Kurze, append-only Dokumentation der von Codex gepushten Renderer-Builds.
 - F11/Version: die Versionsanzeige steht oben rechts auf Preset-Hoehe, und die oeffentliche Version ist fest auf `Version 18.0` ohne Git-/Datumszusatz gesetzt.
 - Build-Pipeline: die Nightly-Build-Konfiguration gibt `18.0` als feste Versionsnummer weiter, damit der veroeffentlichte Stand stabil bleibt.
 - Pruefung: nur statische Diff-/Binding-/Aufrufer- und Shaderpfad-Kontrollen; kein lokaler Vollbau.
+
+## Build 109
+
+- Vegetation: die gestreiften Schattenartefakte auf vertikaler Alpha-Vegetation werden nur auf rueckwaertigen Vegetationsflaechen abgefangen; allgemeine Schatten auf anderen Oberflaechen bleiben erhalten.
+- Contact Shadows: die feste interne Staerke bleibt bei `0.35` fuer FSR3 und TAA, sonst bei `0.50`; der F11-Regler fuer Contact Shadows bleibt entfernt und die Option ist nur noch ein einfacher Enabler.
+- F11: Tooltiptexte wurden kurz und allgemein formuliert; Displaymodus und Versionsanzeige bleiben auf den vereinbarten sichtbaren Positionen.
+- EVSM: echter EVSM4-Filterpfad mit mehrstufigen Kaskaden und qualitativer Aufloesungsstaffelung je nach Shadow-Quality weiter integriert.
+- Pruefung: nur statische Diff-/Binding-/Aufrufer- und Shaderpfadkontrollen; kein lokaler Vollbau.

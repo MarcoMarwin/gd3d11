@@ -1044,8 +1044,8 @@ namespace
         s.LimitLightIntesity = true;
         s.EnableShadows = true;
         if ( static_cast<int>(s.ShadowFilterMode) < static_cast<int>(GothicRendererSettings::E_ShadowFilterMode::SHADOW_FILTER_SIMPLE)
-            || static_cast<int>(s.ShadowFilterMode) > static_cast<int>(GothicRendererSettings::E_ShadowFilterMode::SHADOW_FILTER_PCSS)
-            || (FeatureLevel10Compatibility && s.ShadowFilterMode == GothicRendererSettings::E_ShadowFilterMode::SHADOW_FILTER_PCSS) ) {
+            || static_cast<int>(s.ShadowFilterMode) > static_cast<int>(GothicRendererSettings::E_ShadowFilterMode::SHADOW_FILTER_EVSM)
+            || (FeatureLevel10Compatibility && s.ShadowFilterMode != GothicRendererSettings::E_ShadowFilterMode::SHADOW_FILTER_SIMPLE) ) {
             s.ShadowFilterMode = GothicRendererSettings::E_ShadowFilterMode::SHADOW_FILTER_SIMPLE;
         }
         s.EnablePointlightShadows = GothicRendererSettings::EPointLightShadowMode::PLS_UPDATE_DYNAMIC;
@@ -1366,13 +1366,12 @@ void ImGuiShim::RenderSettingsWindow()
             } ) ) {
                 ImGui::EndCombo();
             }
-            ImGui::SetItemTooltip( settings.ShadowFilterMode == GothicRendererSettings::E_ShadowFilterMode::SHADOW_FILTER_PCSS && settings.ShadowMapSize >= 8192
-                ? "Controls sun, moon, and point-light shadow quality. PCSS Extreme is more expensive but keeps hard contacts and softer far edges."
-                : "Controls sun, moon, and point-light shadow quality." );
+            ImGui::SetItemTooltip( "Controls shadow quality." );
 
             static const std::vector<std::pair<const char*, GothicRendererSettings::E_ShadowFilterMode>> shadowFilterModes = {
                 {"Simple PCF", GothicRendererSettings::E_ShadowFilterMode::SHADOW_FILTER_SIMPLE},
                 {"PCSS", GothicRendererSettings::E_ShadowFilterMode::SHADOW_FILTER_PCSS},
+                {"EVSM", GothicRendererSettings::E_ShadowFilterMode::SHADOW_FILTER_EVSM},
             };
             ImText( "Shadow Filter", buttonWidth ); ImGui::SameLine();
             ImGui::BeginDisabled( FeatureLevel10Compatibility );
@@ -1384,13 +1383,11 @@ void ImGuiShim::RenderSettingsWindow()
                 ImGui::EndCombo();
             }
             ImGui::EndDisabled();
-            ImGui::SetItemTooltip( FeatureLevel10Compatibility
-                ? "Simple PCF is required in Feature Level 10 mode."
-                : "Selects simple percentage-closer filtering or PCSS contact-hardening shadows." );
+            ImGui::SetItemTooltip( "Selects how shadows are filtered." );
 
             ImText( "Shadow Softness", buttonWidth ); ImGui::SameLine();
             SliderNormalizedUiStrength( "##ShadowSoftness", &settings.ShadowSoftness );
-            ImGui::SetItemTooltip( "Controls world and point-light shadow softness." );
+            ImGui::SetItemTooltip( "Controls shadow softness." );
 
 
             int objectDrawDistance = ObjectDrawDistanceMetersToUi( settings.OutdoorSmallVobDrawRadius );
@@ -1570,7 +1567,7 @@ void ImGuiShim::RenderSettingsWindow()
             ImText( "Depth of Field", { buttonWidth.x - ImGui::GetFrameHeight() - style.ItemSpacing.x, buttonWidth.y } ); ImGui::SameLine();
             CoupledStrengthCheckbox( "##Enable Depth of Field", "DepthOfFieldBlurStrength",
                 &settings.EnableDoF, &depthOfFieldStrength, 1.0f );
-            ImGui::SetItemTooltip( "Adds camera blur; the slider controls background blur only." );
+            ImGui::SetItemTooltip( "Enables depth-of-field blur." );
             ImGui::SameLine();
             ImGui::SetNextItemWidth( standardComboWidth );
             CoupledStrengthSlider( "##DepthOfFieldBlurStrength", "DepthOfFieldBlurStrength",
@@ -1621,7 +1618,7 @@ void ImGuiShim::RenderSettingsWindow()
                 shadersToReload |= ShaderCategory::Other;
             }
             settings.SSSIntensity = settings.EnableSSS ? 0.5f : 0.0f;
-            ImGui::SetItemTooltip( "Adds soft fixed-strength backlighting through leaves and alpha-tested vegetation." );
+            ImGui::SetItemTooltip( "Adds backlighting through leaves and other vegetation." );
 
             ImText( "Contact Shadows", { buttonWidth.x - ImGui::GetFrameHeight() - style.ItemSpacing.x, buttonWidth.y } ); ImGui::SameLine();
             if ( ImGui::Checkbox( "##Enable Contact Shadows", &settings.EnableContactShadows ) ) {
@@ -1631,7 +1628,7 @@ void ImGuiShim::RenderSettingsWindow()
 
             ImText( "Enable Rain", { buttonWidth.x - ImGui::GetFrameHeight() - style.ItemSpacing.x, buttonWidth.y } ); ImGui::SameLine();
             ImGui::Checkbox( "##Enable Rain", &settings.EnableRain );
-            ImGui::SetItemTooltip( "Enables rain particles and wet-ground effects." );
+            ImGui::SetItemTooltip( "Enables rain effects." );
 
             ImText( "Occlusion Culling", { buttonWidth.x - ImGui::GetFrameHeight() - style.ItemSpacing.x, buttonWidth.y } ); ImGui::SameLine();
             ImGui::Checkbox( "##Enable Occlusion Culling", &settings.EnableOcclusionCulling );

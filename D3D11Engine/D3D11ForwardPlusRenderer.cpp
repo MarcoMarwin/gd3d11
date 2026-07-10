@@ -176,7 +176,8 @@ void D3D11ForwardPlusRenderer::AddGeometryPasses(
                 context->PSSetShaderResources( 2, 1, s_nullSRVs );
                 context->PSSetShaderResources( 3, 1, s_nullSRVs );
                 context->PSSetShaderResources( 8, 1, s_nullSRVs );
-                context->PSSetShaderResources( 14, 1, s_nullSRVs );
+                ID3D11ShaderResourceView* nullEVSMSRVs[MAX_CSM_CASCADES] = {};
+                context->PSSetShaderResources( 14, MAX_CSM_CASCADES, nullEVSMSRVs );
             };
         } );
     }
@@ -320,7 +321,7 @@ void D3D11ForwardPlusRenderer::AddGeometryPasses(
             context->PSSetShaderResources( 6, 1, s_nullSRVs );
             context->PSSetShaderResources( 8, 4, s_nullSRVs );
             context->PSSetShaderResources( 12, 1, s_nullSRVs );
-            context->PSSetShaderResources( 14, 1, s_nullSRVs );
+            context->PSSetShaderResources( 14, MAX_CSM_CASCADES, s_nullSRVs );
 
             // Restore default depth comparison
             depthState.SetDefault();

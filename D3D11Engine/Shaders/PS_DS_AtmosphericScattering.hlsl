@@ -33,7 +33,7 @@ cbuffer DS_ScreenQuadConstantBuffer : register(b0)
     float2 SQ_JitterOffset;
     float SQ_LightSize;
 
-    // Shadow atlas: per-cascade UV rect (xy = offset, zw = scale)
+    // Cascade data: EVSM resolution in x, or atlas UV rect (xy = offset, zw = scale)
     float4 SQ_CascadeAtlasRect[MAX_CSM_CASCADES];
 };
 
@@ -46,7 +46,12 @@ SamplerComparisonState SS_Comp : register(s2);
 Texture2D TX_Diffuse : register(t0);
 Texture2D TX_Nrm : register(t1);
 Texture2D TX_Depth : register(t2);
-#if SHADOW_ATLAS
+#if SHD_FILTER_EVSM
+Texture2D<float4> TX_EVSMShadowmap0 : register(t14);
+Texture2D<float4> TX_EVSMShadowmap1 : register(t15);
+Texture2D<float4> TX_EVSMShadowmap2 : register(t16);
+Texture2D<float4> TX_EVSMShadowmap3 : register(t17);
+#elif SHADOW_ATLAS
 Texture2D TX_ShadowmapAtlas : register(t3);
 #else
 Texture2DArray TX_ShadowmapArray : register(t3);
@@ -290,7 +295,6 @@ float4 PSMain(PS_INPUT Input) : SV_TARGET
 
         // Use screen position for per-pixel rotation (TAA-friendly)
         shadow = ComputeCascadedShadowValueSoft(biasedWsPosition, vsPosition.z, vertLighting, 0.0f, Input.vPosition.xy);
-        shadow = SuppressVegetationReceiverSelfShadow(shadow, vertLighting, wsNormal, wsLightDirection, vegetationReceiverMask);
 	} else {
         // Night-time sky ambient:
         // saturate(wsNormal.y) restricts the value to [0, 1].

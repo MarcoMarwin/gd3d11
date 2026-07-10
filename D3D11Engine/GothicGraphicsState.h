@@ -556,6 +556,7 @@ struct GothicRendererSettings {
         SHADOW_FILTER_DISABLED = 0,
         SHADOW_FILTER_SIMPLE = 1,
         SHADOW_FILTER_PCSS = 2,
+        SHADOW_FILTER_EVSM = 3,
     };
 
     enum E_RendererMode {
@@ -564,8 +565,10 @@ struct GothicRendererSettings {
     };
 
     float GetContactShadowFixedStrength() const {
-        const bool fsr3Active = Upscaler == E_Upscaler::UPSCALER_FSR_3;
-        return fsr3Active ? 0.35f : 0.50f;
+        const bool temporalReconstructionActive =
+            Upscaler == E_Upscaler::UPSCALER_FSR_3
+            || AntiAliasingMode == E_AntiAliasingMode::AA_TAA;
+        return temporalReconstructionActive ? 0.35f : 0.50f;
     }
 
     /** Sets the default values for this struct */

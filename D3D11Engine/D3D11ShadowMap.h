@@ -176,8 +176,13 @@ public:
 
 private:
     bool ShouldUseAtlas() const;
+    bool ShouldUseEVSM() const;
     void RecreateShadowSampler();
     void EnsureShadowMapBackend( int size );
+    bool EnsureEVSMResources();
+    void ReleaseEVSMResources();
+    void FilterCascadeToEVSM( UINT cascadeIndex );
+    UINT GetEVSMCascadeResolution( UINT cascadeIndex ) const;
 
     void WaitShadowCullingComplete();
 
@@ -194,6 +199,19 @@ private:
     std::unique_ptr<RenderToTextureBuffer> m_dummyCubeRT;
     std::unique_ptr<D3D11ConstantBuffer> m_PointLightCB;
     Microsoft::WRL::ComPtr<ID3D11SamplerState> m_shadowmapSampler;
+
+    std::array<Microsoft::WRL::ComPtr<ID3D11Texture2D>, MAX_CSM_CASCADES> m_evsmMomentTextures;
+    std::array<Microsoft::WRL::ComPtr<ID3D11ShaderResourceView>, MAX_CSM_CASCADES> m_evsmMomentSRVs;
+    std::array<Microsoft::WRL::ComPtr<ID3D11UnorderedAccessView>, MAX_CSM_CASCADES> m_evsmMomentUAVs;
+    std::array<UINT, MAX_CSM_CASCADES> m_evsmCascadeResolutions = {};
+    Microsoft::WRL::ComPtr<ID3D11Texture2D> m_evsmTemporaryTexture;
+    Microsoft::WRL::ComPtr<ID3D11ShaderResourceView> m_evsmTemporarySRV;
+    Microsoft::WRL::ComPtr<ID3D11UnorderedAccessView> m_evsmTemporaryUAV;
+    Microsoft::WRL::ComPtr<ID3D11SamplerState> m_evsmPointSampler;
+    Microsoft::WRL::ComPtr<ID3D11SamplerState> m_evsmLinearSampler;
+    UINT m_evsmCascadeCount = 0;
+    float m_evsmFilteredSoftness = -1.0f;
+
     int m_lastNumCascades = 0;
     std::array<CameraReplacement, MAX_CSM_CASCADES> m_CascadeCRs;
     std::array<std::unique_ptr<D3D11RenderQueue>, MAX_CSM_CASCADES> m_RenderQueues;

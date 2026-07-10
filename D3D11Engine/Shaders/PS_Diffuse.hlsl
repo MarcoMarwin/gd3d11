@@ -158,7 +158,6 @@ FORWARD_PLUS_PS_OUTPUT PSMain( PS_INPUT Input )
 			float3 biasedWsPosition = ApplyReceiverNormalBias(wsPosition, wsNormal, wsLightDirection, texelWorldSize, vegetationReceiverMask);
 
 			shadow = ComputeCascadedShadowValueSoft(biasedWsPosition, vsPosition.z, vertLighting, 0.0f, Input.vPosition.xy);
-			shadow = SuppressVegetationReceiverSelfShadow(shadow, vertLighting, wsNormal, wsLightDirection, vegetationReceiverMask);
 		#endif
 	} else {
 		float3 wsNormal = normalize(mul(float4(nrm, 0.0f), SQ_InvView).xyz);

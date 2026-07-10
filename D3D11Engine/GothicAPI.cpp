@@ -6105,8 +6105,8 @@ XRESULT GothicAPI::LoadMenuSettings( const std::string& file ) {
         s.ShadowFilterMode = static_cast<GothicRendererSettings::E_ShadowFilterMode>(std::clamp<int>(
             GetPrivateProfileIntA( "Shadows", "ShadowFilterMode", static_cast<int>(ds.ShadowFilterMode), ini.c_str() ),
             static_cast<int>(GothicRendererSettings::E_ShadowFilterMode::SHADOW_FILTER_SIMPLE),
-            static_cast<int>(GothicRendererSettings::E_ShadowFilterMode::SHADOW_FILTER_PCSS) ));
-        if ( FeatureLevel10Compatibility && s.ShadowFilterMode == GothicRendererSettings::E_ShadowFilterMode::SHADOW_FILTER_PCSS ) {
+            static_cast<int>(GothicRendererSettings::E_ShadowFilterMode::SHADOW_FILTER_EVSM) ));
+        if ( FeatureLevel10Compatibility && s.ShadowFilterMode != GothicRendererSettings::E_ShadowFilterMode::SHADOW_FILTER_SIMPLE ) {
             s.ShadowFilterMode = GothicRendererSettings::E_ShadowFilterMode::SHADOW_FILTER_SIMPLE;
         }
         s.ShadowMapSize = GetPrivateProfileIntA( "Shadows", "ShadowMapSize", ds.ShadowMapSize, ini.c_str() );

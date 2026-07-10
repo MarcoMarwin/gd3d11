@@ -224,8 +224,8 @@ struct DS_ScreenQuadConstantBuffer {
     float2 SQ_JitterOffset;
     float SQ_LightSize;
 
-    // Shadow atlas: per-cascade UV rect (xy = offset, zw = scale)
-    // Used when SHADOW_ATLAS is enabled (Feature Level 10 path)
+    // Cascade data: EVSM resolution in x, or atlas UV rect (xy = offset, zw = scale)
+    // EVSM and the Feature Level 10 atlas share this layout without changing the cbuffer ABI.
     float4 SQ_CascadeAtlasRect[MAX_CSM_CASCADES];
 };
 

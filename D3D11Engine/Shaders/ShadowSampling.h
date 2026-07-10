@@ -17,6 +17,10 @@
 #define SHD_FILTER_PCSS 0
 #endif
 
+#ifndef SHD_FILTER_EVSM
+#define SHD_FILTER_EVSM 0
+#endif
+
 #ifndef SHADOW_ATLAS
 #define SHADOW_ATLAS 0
 #endif
@@ -53,34 +57,56 @@
 // Shadow map sampling helpers
 // Abstracts Texture2DArray (FL11+) vs Texture2D atlas (FL10) sampling
 //--------------------------------------------------------------------------------------
-#if SHADOW_ATLAS
-// Convert cascade-local UV [0,1] to atlas UV with clamping to prevent seam bleeding
+#if SHD_FILTER_EVSM
+float4 SampleEVSMMoments(float2 cascadeUV, int cascadeIndex)
+{
+    if (cascadeIndex <= 0) return TX_EVSMShadowmap0.SampleLevel(SS_Linear, cascadeUV, 0);
+    if (cascadeIndex == 1) return TX_EVSMShadowmap1.SampleLevel(SS_Linear, cascadeUV, 0);
+    if (cascadeIndex == 2) return TX_EVSMShadowmap2.SampleLevel(SS_Linear, cascadeUV, 0);
+    return TX_EVSMShadowmap3.SampleLevel(SS_Linear, cascadeUV, 0);
+}
+
+float EVSMChebyshevUpperBound(float2 moments, float receiver)
+{
+    if (receiver <= moments.x) return 1.0f;
+    float variance = moments.y - moments.x * moments.x;
+    float minimumVariance = max(1.0e-6f, moments.x * moments.x * 2.0e-5f);
+    variance = max(variance, minimumVariance);
+    float distanceToMean = receiver - moments.x;
+    return variance / (variance + distanceToMean * distanceToMean);
+}
+
+float SampleEVSMShadow(float2 cascadeUV, int cascadeIndex, float depth)
+{
+    const float positiveExponent = 5.0f;
+    const float negativeExponent = 5.0f;
+    float receiverDepth = saturate(depth);
+    float positiveReceiver = exp(positiveExponent * receiverDepth);
+    float negativeReceiver = -exp(-negativeExponent * receiverDepth);
+    float4 moments = SampleEVSMMoments(cascadeUV, cascadeIndex);
+    float probability = min(
+        EVSMChebyshevUpperBound(moments.xy, positiveReceiver),
+        EVSMChebyshevUpperBound(moments.zw, negativeReceiver));
+    const float lightBleedingReduction = 0.15f;
+    return saturate((probability - lightBleedingReduction) / (1.0f - lightBleedingReduction));
+}
+#elif SHADOW_ATLAS
 float2 CascadeToAtlasUV(float2 cascadeUV, int cascadeIndex)
 {
     float4 rect = SQ_CascadeAtlasRect[cascadeIndex];
     float2 atlasUV = cascadeUV * rect.zw + rect.xy;
-
-    // Clamp to cascade bounds with half-texel inset to prevent bilinear filter
-    // from sampling texels in neighboring cascades
-    // Atlas texel size = rect.zw / cascadePixelSize = 1/atlasSize (constant for all cascades)
-    // Use rect.zw / SQ_ShadowmapSize as conservative estimate (correct for cascade 0,
-    // slightly conservative for smaller cascades which is fine)
     float2 halfTexel = 0.5 * rect.zw / SQ_ShadowmapSize;
-    float2 minUV = rect.xy + halfTexel;
-    float2 maxUV = rect.xy + rect.zw - halfTexel;
-    return clamp(atlasUV, minUV, maxUV);
+    return clamp(atlasUV, rect.xy + halfTexel, rect.xy + rect.zw - halfTexel);
 }
 
 float SampleShadowMapCmp(float2 cascadeUV, int cascadeIndex, float depth)
 {
-    float2 atlasUV = CascadeToAtlasUV(cascadeUV, cascadeIndex);
-    return TX_ShadowmapAtlas.SampleCmpLevelZero(SS_Comp, atlasUV, depth);
+    return TX_ShadowmapAtlas.SampleCmpLevelZero(SS_Comp, CascadeToAtlasUV(cascadeUV, cascadeIndex), depth);
 }
 
 float SampleShadowMapLevel(float2 cascadeUV, int cascadeIndex)
 {
-    float2 atlasUV = CascadeToAtlasUV(cascadeUV, cascadeIndex);
-    return TX_ShadowmapAtlas.SampleLevel(SS_Linear, atlasUV, 0).r;
+    return TX_ShadowmapAtlas.SampleLevel(SS_Linear, CascadeToAtlasUV(cascadeUV, cascadeIndex), 0).r;
 }
 #else
 float SampleShadowMapCmp(float2 cascadeUV, int cascadeIndex, float depth)
@@ -94,6 +120,14 @@ float SampleShadowMapLevel(float2 cascadeUV, int cascadeIndex)
 }
 #endif
 
+float GetCascadeShadowResolution(int cascadeIndex)
+{
+#if SHD_FILTER_EVSM
+    return max(SQ_CascadeAtlasRect[cascadeIndex].x, 1.0f);
+#else
+    return max(SQ_ShadowmapSize, 1.0f);
+#endif
+}
 //--------------------------------------------------------------------------------------
 // High-quality Poisson disk for shadow sampling
 // Rotated per-pixel for better TAA integration and reduced banding
@@ -334,7 +368,7 @@ void GetCascadeUVAndBounds(float3 wsPosition, int cascadeIndex,
 
     // Keep a small filter-safe XY inset. Z must also lie inside this cascade;
     // otherwise selection falls through to a farther cascade instead of producing a dark band.
-    const float margin = 1.5f / SQ_ShadowmapSize;
+    const float margin = 1.5f / GetCascadeShadowResolution(cascadeIndex);
     bool isInBounds = projectedTexCoords.x > margin && projectedTexCoords.x < (1.0f - margin) &&
                       projectedTexCoords.y > margin && projectedTexCoords.y < (1.0f - margin) &&
                       vShadowSamplingPos.z >= 0.0f && vShadowSamplingPos.z <= 1.0f;
@@ -385,7 +419,7 @@ float GetCascadeWorldTexelSize(int cascadeIndex)
     float worldSpanX = (shadowScaleX > 1e-6f) ? (2.0f / shadowScaleX) : 0.0f;
     float worldSpanY = (shadowScaleY > 1e-6f) ? (2.0f / shadowScaleY) : 0.0f;
 
-    float cascadeResolution = SQ_ShadowmapSize;
+    float cascadeResolution = GetCascadeShadowResolution(cascadeIndex);
 #if SHADOW_ATLAS
     float4 atlasRect = SQ_CascadeAtlasRect[cascadeIndex];
     cascadeResolution *= max(atlasRect.z, atlasRect.w);
@@ -394,35 +428,30 @@ float GetCascadeWorldTexelSize(int cascadeIndex)
     return 0.5f * (worldSpanX + worldSpanY) / max(cascadeResolution, 1.0f);
 }
 
-float ComputeVegetationReceiverArtifactWeight(float3 wsNormal, float3 wsLightDirection, float vegetationReceiverMask)
-{
-    float NoL = saturate(abs(dot(wsNormal, wsLightDirection)));
-    float slopeScale = sqrt(saturate(1.0f - NoL * NoL));
-    float verticalReceiver = 1.0f - saturate(abs(wsNormal.y));
-    return saturate(vegetationReceiverMask) *
-        smoothstep(0.65f, 0.95f, slopeScale) *
-        smoothstep(0.45f, 0.85f, verticalReceiver);
-}
-
 float ComputeReceiverNormalBias(float3 wsNormal, float3 wsLightDirection, float texelWorldSize, float vegetationReceiverMask)
 {
     float NoL = saturate(abs(dot(wsNormal, wsLightDirection)));
     float slopeScale = sqrt(saturate(1.0f - NoL * NoL));
-    float vegetationArtifactWeight = ComputeVegetationReceiverArtifactWeight(wsNormal, wsLightDirection, vegetationReceiverMask);
-    float normalBiasMultiplier = lerp(1.5f, 4.0f, vegetationArtifactWeight);
+    float verticalReceiver = 1.0f - saturate(abs(wsNormal.y));
+    float vegetationBiasWeight = saturate(vegetationReceiverMask) *
+        smoothstep(0.65f, 0.95f, slopeScale) *
+        smoothstep(0.45f, 0.85f, verticalReceiver);
+    float normalBiasMultiplier = lerp(1.5f, 4.0f, vegetationBiasWeight);
     return slopeScale * texelWorldSize * normalBiasMultiplier;
 }
 
 float3 ApplyReceiverNormalBias(float3 wsPosition, float3 wsNormal, float3 wsLightDirection, float texelWorldSize, float vegetationReceiverMask)
 {
-    return wsPosition + wsNormal * ComputeReceiverNormalBias(wsNormal, wsLightDirection, texelWorldSize, vegetationReceiverMask);
+    float3 receiverBiasNormal = wsNormal;
+    if (vegetationReceiverMask > 0.5f && dot(wsNormal, wsLightDirection) < 0.0f)
+    {
+        receiverBiasNormal = -wsNormal;
+    }
+
+    return wsPosition + receiverBiasNormal *
+        ComputeReceiverNormalBias(wsNormal, wsLightDirection, texelWorldSize, vegetationReceiverMask);
 }
 
-float SuppressVegetationReceiverSelfShadow(float shadow, float vertLighting, float3 wsNormal, float3 wsLightDirection, float vegetationReceiverMask)
-{
-    float artifactWeight = ComputeVegetationReceiverArtifactWeight(wsNormal, wsLightDirection, vegetationReceiverMask);
-    return lerp(shadow, max(shadow, vertLighting), artifactWeight);
-}
 
 //--------------------------------------------------------------------------------------
 // High-quality shadow sampling with configurable softness
@@ -438,13 +467,17 @@ float SampleCascadeShadowSoft(float4 vShadowSamplingPos, float2 projectedTexCoor
     }
 
     float shadow = 1.0f;
-    float texelSize = 1.0f / SQ_ShadowmapSize;
+    float texelSize = 1.0f / GetCascadeShadowResolution(cascadeIndex);
 
     // Scale the filter radius based on softness setting
     // softness of 1.0 = default, < 1.0 = sharper, > 1.0 = softer
     float filterRadius = texelSize * softness;
 
-#if SHD_FILTER_PCSS
+#if SHD_FILTER_EVSM
+    shadow = SampleEVSMShadow(
+        projectedTexCoords.xy, cascadeIndex,
+        vShadowSamplingPos.z - bias);
+#elif SHD_FILTER_PCSS
     // PCSS: Percentage-Closer Soft Shadows
     // Variable-width PCF based on blocker distance for contact-hardening shadows
     // Use SQ_ShadowSoftness directly (not distance-scaled 'softness') because
