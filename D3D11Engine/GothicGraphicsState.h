@@ -564,20 +564,8 @@ struct GothicRendererSettings {
     };
 
     float GetContactShadowFixedStrength() const {
-        const bool fsr3Active = Upscaler == E_Upscaler::UPSCALER_FSR_3
-            && (AntiAliasingMode == E_AntiAliasingMode::AA_FSR || AntiAliasingMode == E_AntiAliasingMode::AA_FSR3);
-        if ( !fsr3Active ) {
-            return 0.75f;
-        }
-
-        const int fsrScale = SnapFSRResolutionScale( ResolutionScalePercent );
-        if ( fsrScale <= 50 ) {
-            return 0.35f;
-        }
-        if ( fsrScale == 66 ) {
-            return 0.55f;
-        }
-        return 0.75f;
+        const bool fsr3Active = Upscaler == E_Upscaler::UPSCALER_FSR_3;
+        return fsr3Active ? 0.35f : 0.50f;
     }
 
     /** Sets the default values for this struct */

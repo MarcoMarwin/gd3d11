@@ -1196,6 +1196,11 @@ void ImGuiShim::RenderSettingsWindow()
         }
         ImGui::SetItemTooltip( "Selects a predefined graphics configuration." );
         ImGui::PopItemWidth();
+        const char* versionText = VERSION_STRING;
+        const ImVec2 versionTextSize = ImGui::CalcTextSize( versionText );
+        ImGui::SameLine();
+        ImGui::SetCursorPosX( std::max( ImGui::GetCursorPosX(), ImGui::GetWindowContentRegionMax().x - versionTextSize.x ) );
+        ImGui::TextDisabled( "%s", versionText );
         ImGui::Separator();
 
         const float standardComboWidth = controlWidth;
@@ -1650,11 +1655,6 @@ void ImGuiShim::RenderSettingsWindow()
         } else {
             ImGui::SetItemTooltip("Save settings.\nCTRL+Click to save just for the current world.");
         }
-        const char* versionText = VERSION_STRING;
-        const ImVec2 versionTextSize = ImGui::CalcTextSize( versionText );
-        ImGui::SetCursorPosX( std::max( ImGui::GetCursorPosX(), ImGui::GetWindowContentRegionMax().x - versionTextSize.x ) );
-        ImGui::TextDisabled( "%s", versionText );
-        
         if ( cancelled ) {
             CancelSettingsEdit();
             shadersToReload = ShaderCategory::None;

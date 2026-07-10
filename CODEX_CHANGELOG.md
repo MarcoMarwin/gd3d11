@@ -203,7 +203,7 @@ Kurze, append-only Dokumentation der von Codex gepushten Renderer-Builds.
 - Regennebel: nur die Deckkraft auf Weltgeometrie bei gleichzeitig Nacht und aktivem Regen leicht angehoben; Wolken-/Himmelpfad, Nachtnebel und sonstige Geometrie-/Himmeluebergaenge bleiben unveraendert.
 - F11/HDR: HDR ist fuer neue Standardwerte aktiv. Deaktivierte gekoppelte Effektregler werden auch beim ersten Oeffnen konsistent auf Null dargestellt.
 - Pruefung: Projekt- und Shaderregistrierungen, Include-/Ressourcenpfade, Constant-Buffer-Layouts, Paketquellen, literal eingefuegte Escapes und `git diff --check` statisch kontrolliert. Kein lokaler HLSL-Compiler und kein vollstaendiger lokaler C++-Build vorhanden.
-## Build 095 (Dämmerung, Screen-Space-Licht und Regennebel)
+## Build 095 (DÃ¤mmerung, Screen-Space-Licht und Regennebel)
 
 - Sonne/Mond: Licht, Schatten, Godrays und Backlit Vegetation nutzen getrennte 15-Minuten-Uebergaenge. Mondlicht blendet morgens 04:15-04:30 aus, Sonnenlicht 04:30-04:45 ein; abends blendet Sonnenlicht 17:30-17:45 aus und Mondlicht 17:45-18:00 ein. Schattenquellen ueberlappen nicht.
 - Himmel/Wasser: der Mondkoerper bleibt positionsbasiert sichtbar statt ueber das Lichtgewicht ausgeblendet zu werden. Sonnen- und Mond-Glints auf Wasser laufen positionsbasiert unabhaengig von den Licht-/Schatten-Fades weiter.
@@ -323,3 +323,12 @@ Kurze, append-only Dokumentation der von Codex gepushten Renderer-Builds.
 - Indoor-Pointlights: NW_CITY_OILLAMP_01.3DS-Oillamps duerfen analog zu Flammen je das naechste statische und dynamische Licht bis 150 Einheiten als schattenberechtigt verankern; der Schattenursprung wird auf den Oillamp-Mittelpunkt plus 50 Hoeheneinheiten gezogen.
 - Offene Ingame-Grenzen: Oillamp-Lichtzuordnung, MSM-Bildruhe bei niedriger Softness, Backlit-Wirkung auf normale Baeume und FSR3-Contact-Stabilitaet sollten im Spiel final gegengeprueft werden.
 - Pruefung: Buildnummer aus outputs ermittelt; AGENTS-Regeln gelesen; gezielte Status-, Diff-, Shader-/Binding-, Oillamp-Anker- und git diff --check-Pruefungen statisch kontrolliert. Kein vollstaendiger lokaler C++-/Shader-Build.
+
+
+## Build 108 (Vegetation-Schatten, Contact Shadows und Versionsanzeige)
+
+- Vegetation: die Schattenbehandlung ist auf Vegetations-Receiver eingegrenzt; die stoerenden gestreiften Artefakte auf vertikaler Alpha-Vegetation werden nur dort abgefangen, nicht auf allgemeinen Oberflaechen.
+- Contact Shadows: FSR3 nutzt fest intern `0.35`, ohne FSR3 fest `0.50`; der F11-Staerkeregler ist entfernt, der Schalter bleibt als einfacher Enable-Eintrag.
+- F11/Version: die Versionsanzeige steht oben rechts auf Preset-Hoehe, und die oeffentliche Version ist fest auf `Version 18.0` ohne Git-/Datumszusatz gesetzt.
+- Build-Pipeline: die Nightly-Build-Konfiguration gibt `18.0` als feste Versionsnummer weiter, damit der veroeffentlichte Stand stabil bleibt.
+- Pruefung: nur statische Diff-/Binding-/Aufrufer- und Shaderpfad-Kontrollen; kein lokaler Vollbau.

@@ -394,22 +394,34 @@ float GetCascadeWorldTexelSize(int cascadeIndex)
     return 0.5f * (worldSpanX + worldSpanY) / max(cascadeResolution, 1.0f);
 }
 
-float ComputeReceiverNormalBias(float3 wsNormal, float3 wsLightDirection, float texelWorldSize, float alphaReceiverMask)
+float ComputeVegetationReceiverArtifactWeight(float3 wsNormal, float3 wsLightDirection, float vegetationReceiverMask)
 {
     float NoL = saturate(abs(dot(wsNormal, wsLightDirection)));
     float slopeScale = sqrt(saturate(1.0f - NoL * NoL));
     float verticalReceiver = 1.0f - saturate(abs(wsNormal.y));
-    float alphaGrazingReceiver = saturate(alphaReceiverMask) *
+    return saturate(vegetationReceiverMask) *
         smoothstep(0.65f, 0.95f, slopeScale) *
         smoothstep(0.45f, 0.85f, verticalReceiver);
+}
 
-    float normalBiasMultiplier = lerp(1.5f, 4.0f, alphaGrazingReceiver);
+float ComputeReceiverNormalBias(float3 wsNormal, float3 wsLightDirection, float texelWorldSize, float vegetationReceiverMask)
+{
+    float NoL = saturate(abs(dot(wsNormal, wsLightDirection)));
+    float slopeScale = sqrt(saturate(1.0f - NoL * NoL));
+    float vegetationArtifactWeight = ComputeVegetationReceiverArtifactWeight(wsNormal, wsLightDirection, vegetationReceiverMask);
+    float normalBiasMultiplier = lerp(1.5f, 4.0f, vegetationArtifactWeight);
     return slopeScale * texelWorldSize * normalBiasMultiplier;
 }
 
-float3 ApplyReceiverNormalBias(float3 wsPosition, float3 wsNormal, float3 wsLightDirection, float texelWorldSize, float alphaReceiverMask)
+float3 ApplyReceiverNormalBias(float3 wsPosition, float3 wsNormal, float3 wsLightDirection, float texelWorldSize, float vegetationReceiverMask)
 {
-    return wsPosition + wsNormal * ComputeReceiverNormalBias(wsNormal, wsLightDirection, texelWorldSize, alphaReceiverMask);
+    return wsPosition + wsNormal * ComputeReceiverNormalBias(wsNormal, wsLightDirection, texelWorldSize, vegetationReceiverMask);
+}
+
+float SuppressVegetationReceiverSelfShadow(float shadow, float vertLighting, float3 wsNormal, float3 wsLightDirection, float vegetationReceiverMask)
+{
+    float artifactWeight = ComputeVegetationReceiverArtifactWeight(wsNormal, wsLightDirection, vegetationReceiverMask);
+    return lerp(shadow, max(shadow, vertLighting), artifactWeight);
 }
 
 //--------------------------------------------------------------------------------------

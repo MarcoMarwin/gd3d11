@@ -127,6 +127,13 @@ FORWARD_PLUS_PS_OUTPUT PSMain( PS_INPUT Input )
 	float specIntensity = MI_SpecularIntensity * fx.r;
 	float specPower = MI_SpecularPower * fx.g;
 	float vertLighting = Input.vDiffuse.y;
+	float twoSidedBacklitMaterial = MI_Color.a < -1.5f ? 1.0f : 0.0f;
+	float alphaTestedMaterial = 0.0f;
+#if ALPHATEST == 1
+	alphaTestedMaterial = 1.0f;
+#endif
+	float vegetationBacklitMask = PLS_ComputeBacklitVegetationMask(color.rgb, alphaTestedMaterial, twoSidedBacklitMaterial);
+	float vegetationReceiverMask = max(vegetationBacklitMask, alphaTestedMaterial * twoSidedBacklitMaterial);
 
 	float3 vsPosition = Input.vViewPosition;
 	float3 wsPosition = mul(float4(vsPosition, 1), SQ_InvView).xyz;
@@ -148,13 +155,10 @@ FORWARD_PLUS_PS_OUTPUT PSMain( PS_INPUT Input )
 			int cascadeIndex = GetPrimaryCascadeIndex(wsPosition);
 			float texelWorldSize = GetCascadeWorldTexelSize(cascadeIndex);
 
-			float alphaReceiverMask = 0.0f;
-		#if ALPHATEST == 1
-			alphaReceiverMask = 1.0f;
-		#endif
-			float3 biasedWsPosition = ApplyReceiverNormalBias(wsPosition, wsNormal, wsLightDirection, texelWorldSize, alphaReceiverMask);
+			float3 biasedWsPosition = ApplyReceiverNormalBias(wsPosition, wsNormal, wsLightDirection, texelWorldSize, vegetationReceiverMask);
 
 			shadow = ComputeCascadedShadowValueSoft(biasedWsPosition, vsPosition.z, vertLighting, 0.0f, Input.vPosition.xy);
+			shadow = SuppressVegetationReceiverSelfShadow(shadow, vertLighting, wsNormal, wsLightDirection, vegetationReceiverMask);
 		#endif
 	} else {
 		float3 wsNormal = normalize(mul(float4(nrm, 0.0f), SQ_InvView).xyz);
@@ -165,12 +169,6 @@ FORWARD_PLUS_PS_OUTPUT PSMain( PS_INPUT Input )
     }
 #endif
 
-	float twoSidedBacklitMaterial = MI_Color.a < -1.5f ? 1.0f : 0.0f;
-	float alphaTestedMaterial = 0.0f;
-#if ALPHATEST == 1
-	alphaTestedMaterial = 1.0f;
-#endif
-	float vegetationBacklitMask = PLS_ComputeBacklitVegetationMask(color.rgb, alphaTestedMaterial, twoSidedBacklitMaterial);
 	float3 litPixel = FP_ComputeSunLighting(wsPosition, vsPosition, nrm, color.rgb, specIntensity, specPower, shadow, vertLighting, twoSidedBacklitMaterial, vegetationBacklitMask);
 	
 	// Atmospheric scattering

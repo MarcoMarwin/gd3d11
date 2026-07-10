@@ -26,17 +26,10 @@ runs:
       id: build
       shell: pwsh
       run: |
-        $shortHash = $env:GITHUB_SHA.Substring(0, 9)
-        if ($env:GITHUB_REF_TYPE -eq "tag") {
-          $tagOrGit = $env:GITHUB_REF_NAME
-        } else {
-          $tagOrGit = "git"
-        }
-        $isoDate = Get-Date -Format "yyyy-MM-dd"
-        $versionString = "$tagOrGit-$shortHash"
+        $versionString = "18.0"
         $outputName = [System.IO.Path]::GetFileNameWithoutExtension("${{ inputs.output-file }}")
         $outputDir = "$env:GITHUB_WORKSPACE\outputs\"
-        $Env:CL = (-join("/DVERSION_NUMBER#",'\"',$versionString,'\"', " /DBUILD_DATE#",'\"',$isoDate,'\"'))
+        $Env:CL = (-join("/DVERSION_NUMBER#",'\"',$versionString,'\"'))
         echo "CL=$Env:CL" >> $Env:GITHUB_ENV
 
         $msbuildArgs = @(

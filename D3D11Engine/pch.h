@@ -44,13 +44,10 @@
 
 using namespace DirectX;
 
-#ifndef VERSION_NUMBER
-#define VERSION_NUMBER "17.10-dev"
-#define IS_DEV_BUILD
+#ifdef VERSION_NUMBER
+#undef VERSION_NUMBER
 #endif
-#ifndef BUILD_DATE
-#define BUILD_DATE __DATE__
-#endif
+#define VERSION_NUMBER "18.0"
 
 __declspec(selectany) const char* VERSION_NUMBER_STR = VERSION_NUMBER;
 

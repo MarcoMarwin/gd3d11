@@ -266,6 +266,8 @@ float4 PSMain(PS_INPUT Input) : SV_TARGET
     float alphaTestedMaterial = gb3.y < 0.0f ? 1.0f : 0.0f;
     float vegetationMaterial = alphaTestedMaterial * (1.0f - npcMaterial);
     float specPower = alphaTestedMaterial > 0.5f ? max(-gb3.y - 1.0f, 1.0f) : gb3.y;
+	float vegetationMask = PLS_ComputeBacklitVegetationMask(diffuse.rgb, vegetationMaterial, twoSidedBacklitMaterial);
+	float vegetationReceiverMask = max(vegetationMask, alphaTestedMaterial * twoSidedBacklitMaterial);
 
 	// Reconstruct VS World Position from depth
     float3 vsPosition = VSPositionFromDepth(expDepth, uv);
@@ -284,11 +286,11 @@ float4 PSMain(PS_INPUT Input) : SV_TARGET
         int cascadeIndex = GetPrimaryCascadeIndex(wsPosition);
         float texelWorldSize = GetCascadeWorldTexelSize(cascadeIndex);
 
-        float alphaReceiverMask = smoothstep(0.05f, 0.09f, TX_RainExclusionMask.Load(int3(int2(Input.vPosition.xy), 0)).r);
-        float3 biasedWsPosition = ApplyReceiverNormalBias(wsPosition, wsNormal, wsLightDirection, texelWorldSize, alphaReceiverMask);
+        float3 biasedWsPosition = ApplyReceiverNormalBias(wsPosition, wsNormal, wsLightDirection, texelWorldSize, vegetationReceiverMask);
 
         // Use screen position for per-pixel rotation (TAA-friendly)
         shadow = ComputeCascadedShadowValueSoft(biasedWsPosition, vsPosition.z, vertLighting, 0.0f, Input.vPosition.xy);
+        shadow = SuppressVegetationReceiverSelfShadow(shadow, vertLighting, wsNormal, wsLightDirection, vegetationReceiverMask);
 	} else {
         // Night-time sky ambient:
         // saturate(wsNormal.y) restricts the value to [0, 1].
@@ -374,7 +376,6 @@ float4 PSMain(PS_INPUT Input) : SV_TARGET
 	float sssMoonWeight = AC_MoonVisibility * 0.12f;
 	float sssLightWeight = max(sssSunWeight, sssMoonWeight);
 	float3 sssLightColor = moonLightActive ? float3(0.42f, 0.56f, 1.0f) : lightColor.rgb;
-	float vegetationMask = PLS_ComputeBacklitVegetationMask(diffuse.rgb, vegetationMaterial, twoSidedBacklitMaterial);
 	float materialBacklitMask = max(vegetationMask, twoSidedBacklitMaterial);
 	if (AC_EnableSSS > 0.5f && sssLightWeight > 0.001f && materialBacklitMask > 0.001f) {
 		float sssShadow = lerp(0.55f, 1.0f, saturate(shadow));
