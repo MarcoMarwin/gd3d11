@@ -1171,12 +1171,12 @@ void ImGuiShim::RenderSettingsWindow()
             return german ? reinterpret_cast<const char*>( germanText ) : english;
         };
 
-        const std::array<std::pair<const char*, int>, 4> graphicsPresets = {
+        const std::array<std::pair<const char*, int>, 4> graphicsPresets = {{
             {Tr( "Low", u8"Niedrig" ), GothicRendererSettings::E_GraphicsPreset::GRAPHICS_LOW},
             {Tr( "Medium", u8"Mittel" ), GothicRendererSettings::E_GraphicsPreset::GRAPHICS_MEDIUM},
             {Tr( "High", u8"Hoch" ), GothicRendererSettings::E_GraphicsPreset::GRAPHICS_HIGH},
             {Tr( "Extreme", u8"Extrem" ), GothicRendererSettings::E_GraphicsPreset::GRAPHICS_VERY_HIGH},
-        };
+        }};
 
         const char* graphicsPresetPreview = Tr( "Custom", u8"Benutzerdefiniert" );
         for ( const auto& preset : graphicsPresets ) {
@@ -1234,7 +1234,7 @@ void ImGuiShim::RenderSettingsWindow()
             }
             ImGui::EndCombo();
         }
-        ImGui::SetItemTooltip( "%s", Tr( "Selects the language used by the D3D11 renderer.", u8"Wählt die Sprache des D3D11-Renderers aus." ) );
+        ImGui::SetItemTooltip( "%s", Tr( "Selects the language used by the D3D11 renderer.", u8"W\u00E4hlt die Sprache des D3D11-Renderers aus." ) );
         ImGui::PopItemWidth();
 
         const char* versionText = VERSION_STRING;
@@ -1276,12 +1276,12 @@ void ImGuiShim::RenderSettingsWindow()
             }
             ImGui::SetItemTooltip( "%s", Tr( "Changes the game output size.", u8"\u00C4ndert die Ausgabeaufl\u00F6sung des Spiels." ) );
 
-            const std::array<std::tuple<const char*, GothicRendererSettings::E_AntiAliasingMode, const char*>, 4> antiAliasing = {
+            const std::array<std::tuple<const char*, GothicRendererSettings::E_AntiAliasingMode, const char*>, 4> antiAliasing = {{
                 {Tr( "Disabled", u8"Aus" ), GothicRendererSettings::E_AntiAliasingMode::AA_NONE, nullptr },
                 {"SMAA", GothicRendererSettings::E_AntiAliasingMode::AA_SMAA, nullptr },
                 { "TAA", GothicRendererSettings::E_AntiAliasingMode::AA_TAA, Tr( "Temporal Anti-Aliasing", u8"Temporale Kantengl\u00E4ttung" ) },
                 {"FSR 3", GothicRendererSettings::E_AntiAliasingMode::AA_FSR3, "FidelityFX Super Resolution 3"},
-            };
+            }};
             {
                 ImGui::PushID( "AntiAliasingSettings" );
                 auto selectedMode = settings.AntiAliasingMode;
@@ -1314,14 +1314,14 @@ void ImGuiShim::RenderSettingsWindow()
             if ( settings.Upscaler == GothicRendererSettings::UPSCALER_FSR_3 ) {
                 settings.ResolutionScalePercent = std::clamp( settings.ResolutionScalePercent, 33, 100 );
                 // Display "levels" as typical for FSR
-                const std::array<std::pair<const char*, int>, 6> fsrLevels = {
+                const std::array<std::pair<const char*, int>, 6> fsrLevels = {{
                     { Tr( "Native AA", u8"Nativ mit AA" ), 100 },
                     { Tr( "High Quality", u8"Sehr hohe Qualit\u00E4t" ), 83 },
                     { Tr( "Quality", u8"Qualit\u00E4t" ), 75 },
                     { Tr( "Balanced", u8"Ausgeglichen" ), 66 },
                     { Tr( "Performance", u8"Leistung" ), 50 },
                     { Tr( "Ultra Performance", u8"Maximale Leistung" ), 33 },
-                };
+                }};
                 if (ImComboBox( "##ResolutionScalePercent", fsrLevels, &settings.ResolutionScalePercent ) ) {
                     ImGui::EndCombo();
                 }
@@ -1340,14 +1340,14 @@ void ImGuiShim::RenderSettingsWindow()
             }
 
             ImText( Tr( "Texture Quality", u8"Texturqualit\u00E4t" ), buttonWidth ); ImGui::SameLine();
-            const std::array<std::pair<const char*, int>, 6> QualityOptions = {
+            const std::array<std::pair<const char*, int>, 6> QualityOptions = {{
                 { Tr( "Very Low", u8"Sehr niedrig" ), static_cast<int>(TX_QUALITY::VeryLow) },
                 { Tr( "Low", u8"Niedrig" ), static_cast<int>(TX_QUALITY::Low) },
                 { Tr( "Medium", u8"Mittel" ), static_cast<int>(TX_QUALITY::Medium) },
                 { Tr( "High", u8"Hoch" ), static_cast<int>(TX_QUALITY::High) },
                 { Tr( "Very High", u8"Sehr hoch" ), static_cast<int>(TX_QUALITY::VeryHigh) },
                 { Tr( "Extreme", u8"Extrem" ), static_cast<int>(TX_QUALITY::MAX) }, // TODO: this should depend on the GPU capabilities like in the original game
-            };
+            }};
             
             if (settings.textureMaxSize > QualityOptions.back().second) {
                 settings.textureMaxSize = QualityOptions.back().second;
@@ -1376,10 +1376,10 @@ void ImGuiShim::RenderSettingsWindow()
             if ( displayModeState != WindowModes::WINDOW_MODE_WINDOWED ) {
                 displayModeState = WindowModes::WINDOW_MODE_FULLSCREEN_BORDERLESS;
             }
-            const std::array<std::tuple<const char*, WindowModes, const char*>, 2> DisplayEnums = {
+            const std::array<std::tuple<const char*, WindowModes, const char*>, 2> DisplayEnums = {{
                 { Tr( "Fullscreen", u8"Vollbild" ), WindowModes::WINDOW_MODE_FULLSCREEN_BORDERLESS, nullptr },
                 { Tr( "Windowed", u8"Fenstermodus" ), WindowModes::WINDOW_MODE_WINDOWED, nullptr},
-            };
+            }};
             
             if ( ImComboBoxCT( "##DisplayMode", DisplayEnums, &displayModeState, [&settings, &displayModeState] {
                 // selected
@@ -1390,12 +1390,12 @@ void ImGuiShim::RenderSettingsWindow()
 
 
             ImGui::SetItemTooltip( "%s", Tr( "Fullscreen fills the monitor without changing its display mode.", u8"Vollbild f\u00FCllt den Monitor ohne dessen Anzeigemodus zu \u00E4ndern." ) );
-            const std::array<std::pair<const char*, int>, 4> shadowMapSizes = {
+            const std::array<std::pair<const char*, int>, 4> shadowMapSizes = {{
                 {Tr( "Low", u8"Niedrig" ), 1024},
                 {Tr( "Medium", u8"Mittel" ), 2048},
                 {Tr( "High", u8"Hoch" ), 4096},
                 {Tr( "Extreme", u8"Extrem" ), 8192},
-            };
+            }};
 
             settings.EnableShadows = true;
             settings.ShadowMapSize = NormalizeShadowMapSize( settings.ShadowMapSize );
@@ -1518,10 +1518,10 @@ void ImGuiShim::RenderSettingsWindow()
             ImGui::SetItemTooltip( "%s", Tr( "Adds fine depth and structure to surfaces.", u8"F\u00FCgt Oberfl\u00E4chen feine Tiefe und Struktur hinzu." ) );
             ImGui::SameLine();
 
-            const std::array<std::pair<const char*, bool>, 2> surfaceDetailModes = {
+            const std::array<std::pair<const char*, bool>, 2> surfaceDetailModes = {{
                 {Tr( "Normal Maps", u8"Normalmaps" ), false},
                 {"Parallax", true},
-            };
+            }};
             ImGui::BeginDisabled( !settings.AllowNormalmaps );
             ImGui::SetNextItemWidth( standardComboWidth );
             if ( ImComboBoxC( "##SurfaceDetailMode", surfaceDetailModes, &settings.EnableParallaxOcclusionMapping, [] {} ) ) {

@@ -9,6 +9,7 @@ Kurze, append-only Dokumentation der von Codex gepushten Renderer-Builds.
 - Mod-Weltformat: Weltdateien duerfen nur noch Fog, Atmosphere und Rain setzen; der alte Atmoshpere-Schreibfehler und die entsprechende interne Benennung wurden ohne Legacy-Fallback korrigiert.
 - Dokumentation: README auf Installation, aktuelle Buildvoraussetzungen, Mod-Weltformat, Abhaengigkeiten, Lizenz und die gleichwertige Autorenliste reduziert.
 - Pruefung: statische Diff-, Aufrufer-, INI-, Symbol- und Projektkonsistenzpruefung; kein vollstaendiger lokaler C++-Build.
+- CI-Korrektur: Die lokalisierten std::array-Tabellen im F11-Menue verwenden nun die von MSVC benoetigte doppelte Aggregatklammerung.
 
 ## Build 110 (Korrekturpush)
 
