@@ -10,6 +10,7 @@ Kurze, append-only Dokumentation der von Codex gepushten Renderer-Builds.
 - Dokumentation: README auf Installation, aktuelle Buildvoraussetzungen, Mod-Weltformat, Abhaengigkeiten, Lizenz und die gleichwertige Autorenliste reduziert.
 - Pruefung: statische Diff-, Aufrufer-, INI-, Symbol- und Projektkonsistenzpruefung; kein vollstaendiger lokaler C++-Build.
 - CI-Korrektur: Die lokalisierten std::array-Tabellen im F11-Menue verwenden nun die von MSVC benoetigte doppelte Aggregatklammerung.
+- Startkorrektur: Der erste Aufloesungswechsel folgt wieder Build 109; Borderless wird erst nach vorhandener Swapchain verzerrungsfrei auf die Monitoraufloesung nachgezogen. Der Sprachwert liegt am Ende der Settings-Struktur, damit bestehende Feld-Offsets erhalten bleiben.
 
 ## Build 110 (Korrekturpush)
 

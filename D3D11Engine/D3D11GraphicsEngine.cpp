@@ -1308,27 +1308,40 @@ XRESULT D3D11GraphicsEngine::RecreateBuffers() {
 XRESULT D3D11GraphicsEngine::OnResize( INT2 newSize ) {
     HRESULT hr;
 
-    // Borderless always matches the active monitor. Lower rendering resolutions belong
-    // to Render Scale/FSR; stretching an arbitrary output aspect ratio distorts the game.
+    // Keep Gothic's first mode switch on its proven startup resolution. Borderless is
+    // moved to the monitor resolution only after the swapchain exists, then stays there.
+    const bool hadSwapChain = SwapChain.Get() != nullptr;
+    INT2 deferredBorderlessResolution = newSize;
+    bool deferBorderlessResize = false;
+    bool resizeBorderlessOutputOnly = false;
     if ( OutputWindow && Engine::GAPI->GetRendererState().RendererSettings.StretchWindow ) {
         const INT2 monitorResolution = GetBorderlessMonitorResolution( OutputWindow );
         if ( monitorResolution.x > 0 && monitorResolution.y > 0 ) {
-            newSize = monitorResolution;
+            if ( hadSwapChain ) {
+                newSize = monitorResolution;
+                resizeBorderlessOutputOnly = true;
+            } else if ( monitorResolution.x != newSize.x || monitorResolution.y != newSize.y ) {
+                deferredBorderlessResolution = monitorResolution;
+                deferBorderlessResize = true;
+            }
         }
     }
 
     NewResolution = newSize;
-    if ( memcmp( &Resolution, &newSize, sizeof( newSize ) ) == 0 && SwapChain.Get() )
+    if ( memcmp( &Resolution, &newSize, sizeof( newSize ) ) == 0 && hadSwapChain )
         return XR_SUCCESS;  // Don't resize if we don't have to
 
     Resolution = newSize;
     INT2 bbres = GetBackbufferResolution();
 
-    // TODO: Also always set/reset if player changes from Gothics UI, as settings a resolution from gothics settings breaks this.
-    zCView::SetWindowMode(
-        Resolution.x,
-        Resolution.y,
-        32 );
+    // The initial Gothic mode switch must keep the proven Build 109 resolution.
+    // A later borderless resize changes only the D3D11 output and virtual view.
+    if ( !resizeBorderlessOutputOnly ) {
+        zCView::SetWindowMode(
+            Resolution.x,
+            Resolution.y,
+            32 );
+    }
 
     zCView::SetVirtualMode(
         static_cast<int>(Resolution.x),
@@ -1337,12 +1350,6 @@ XRESULT D3D11GraphicsEngine::OnResize( INT2 newSize ) {
 
     POINT virtualSize = { 8192, 8192 };
     zCViewDraw::GetScreen().SetVirtualSize( virtualSize );
-
-    auto* game = oCGame::GetGame();
-    auto* mainCamera = game ? static_cast<zCCamera*>(game->_zCSession_camera) : nullptr;
-    if ( mainCamera ) {
-        mainCamera->UpdateViewport();
-    }
 
 #ifndef BUILD_SPACER
     BOOL isFullscreen = 0;
@@ -1548,6 +1555,10 @@ XRESULT D3D11GraphicsEngine::OnResize( INT2 newSize ) {
 
     // Engine::AntTweakBar->OnResize( newSize );
     Engine::ImGuiHandle->OnResize( newSize );
+
+    if ( deferBorderlessResize ) {
+        NewResolution = deferredBorderlessResolution;
+    }
 
     return XR_SUCCESS;
 }

@@ -989,7 +989,6 @@ struct GothicRendererSettings {
     E_AntiAliasingMode AntiAliasingMode;
     E_SharpeningMode SharpeningMode;
     E_GraphicsPreset GraphicsPreset;
-    E_D3D11Language D3D11Language;
     
     struct {
         struct {
@@ -1018,6 +1017,9 @@ struct GothicRendererSettings {
             bool ForceFeatureLevel10;
         } FeatureSet;
     } DebugSettings;
+
+    // Appended to preserve every pre-existing renderer-settings field offset.
+    E_D3D11Language D3D11Language;
 
     static int SnapFSRResolutionScale( int value ) {
         constexpr int levels[] = { 100, 83, 75, 66, 50, 33 };
