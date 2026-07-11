@@ -843,6 +843,9 @@ public:
     /** Prints a message to the screen for the given amount of time */
     void PrintMessageTimed( const INT2& position, const std::string& strMessage, float time = 3000.0f, DWORD color = 0xFFFFFFFF );
 
+    /** Returns whether the active Gothic menu uses German localization. */
+    bool IsGermanMenuLanguage();
+
     /** Prints information about the mod to the screen for a couple of seconds */
     void PrintModInfo();
 

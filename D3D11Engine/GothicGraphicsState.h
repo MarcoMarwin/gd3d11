@@ -14,6 +14,7 @@ const int GSWITCH_LINEAR_DEPTH = 16;
 const int GSWITCH_FSR3_REACTIVE = 32;
 const int GSWITCH_FSR3_DIALOG_REACTIVE = 64;
 const int GSWITCH_DISABLE_RAIN_EFFECTS = 128;
+constexpr float VISUAL_FX_DRAW_RADIUS_FIXED = 10000.0f;
 
 enum RenderStage {
     STAGE_DRAW_UNKNOWN = 0,
@@ -603,7 +604,7 @@ struct GothicRendererSettings {
         IndoorVobDrawRadius = 5000.0f;
         OutdoorVobDrawRadius = 100000.0f; // Advanced-only large-object distance; F11 presets must not override it.
         SkeletalMeshDrawRadius = 6000.0f;
-        VisualFXDrawRadius = 10000.0f;
+        VisualFXDrawRadius = VISUAL_FX_DRAW_RADIUS_FIXED;
 
 #if BUILD_SPACER_NET
         VisualFXDrawRadius = 16000.0f;

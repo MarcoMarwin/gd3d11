@@ -398,10 +398,10 @@ bool D3D11ShadowMap::EnsureEVSMResources() {
 
     UINT formatSupport = 0;
     const HRESULT formatHr = m_device->CheckFormatSupport(
-        DXGI_FORMAT_R16G16B16A16_FLOAT, &formatSupport );
+        DXGI_FORMAT_R32G32_FLOAT, &formatSupport );
     if ( FAILED( formatHr )
         || (formatSupport & D3D11_FORMAT_SUPPORT_TYPED_UNORDERED_ACCESS_VIEW) == 0 ) {
-        LogError() << "EVSM: RGBA16F UAVs unsupported, falling back to Simple PCF";
+        LogError() << "EVSM: RG32F UAVs unsupported, falling back to Simple PCF";
         settings.ShadowFilterMode = GothicRendererSettings::E_ShadowFilterMode::SHADOW_FILTER_SIMPLE;
         shaderManager.LoadShaders( ShaderCategory::LightsAndShadows );
         return false;
@@ -431,7 +431,7 @@ bool D3D11ShadowMap::EnsureEVSMResources() {
         desc.Height = resolution;
         desc.MipLevels = 1;
         desc.ArraySize = 1;
-        desc.Format = DXGI_FORMAT_R16G16B16A16_FLOAT;
+        desc.Format = DXGI_FORMAT_R32G32_FLOAT;
         desc.SampleDesc.Count = 1;
         desc.Usage = D3D11_USAGE_DEFAULT;
         desc.BindFlags = D3D11_BIND_SHADER_RESOURCE | D3D11_BIND_UNORDERED_ACCESS;
@@ -472,10 +472,10 @@ bool D3D11ShadowMap::EnsureEVSMResources() {
     }
 
     const float litMoments[4] = {
-        148.4131591f,
         22026.465795f,
-        -0.006737947f,
-        0.00004539993f
+        485165195.4097903f,
+        0.0f,
+        0.0f
     };
     for ( UINT i = 0; i < cascadeCount; ++i ) {
         m_context->ClearUnorderedAccessViewFloat( m_evsmMomentUAVs[i].Get(), litMoments );
@@ -525,10 +525,10 @@ void D3D11ShadowMap::FilterCascadeToEVSM( UINT cascadeIndex ) {
     ID3D11ShaderResourceView* nullCSResources[2] = {};
     ID3D11UnorderedAccessView* nullUAVs[2] = {};
     const float litMoments[4] = {
-        148.4131591f,
         22026.465795f,
-        -0.006737947f,
-        0.00004539993f
+        485165195.4097903f,
+        0.0f,
+        0.0f
     };
     m_context->ClearUnorderedAccessViewFloat( m_evsmTemporaryUAV.Get(), litMoments );
 
@@ -544,8 +544,9 @@ void D3D11ShadowMap::FilterCascadeToEVSM( UINT cascadeIndex ) {
         m_cascadedShadowMap->GetShaderResourceView(),
         nullptr
     };
+    const bool filterVertically = constants.BlurRadius > 0.001f;
     ID3D11UnorderedAccessView* convertUAVs[2] = {
-        m_evsmTemporaryUAV.Get(),
+        filterVertically ? m_evsmTemporaryUAV.Get() : m_evsmMomentUAVs[cascadeIndex].Get(),
         nullptr
     };
     m_context->CSSetShaderResources( 0, 2, convertResources );
@@ -554,6 +555,11 @@ void D3D11ShadowMap::FilterCascadeToEVSM( UINT cascadeIndex ) {
     m_context->Dispatch( (dispatchSize + 7) / 8, (dispatchSize + 7) / 8, 1 );
     m_context->CSSetUnorderedAccessViews( 0, 2, nullUAVs, nullptr );
     m_context->CSSetShaderResources( 0, 2, nullCSResources );
+
+    if ( !filterVertically ) {
+        m_context->CSSetShader( nullptr, nullptr, 0 );
+        return;
+    }
 
     verticalCS->Apply();
     verticalCS->GetBuffer( "EVSMFilterConstants" ).Update( &constants ).Bind();
@@ -1012,7 +1018,9 @@ XRESULT D3D11ShadowMap::PrepareRender()
                     isLastCascade ? lastCascadeLookAt : lookAt,
                     isLastCascade ? lastCascadeShadowUp : shadowUp,
                     isLastCascade ? lastCascadeData.Position : WorldShadowCP,
-                    GetCascadePixelSize( cascadeIdx ) );
+                    ShouldUseEVSM()
+                        ? GetEVSMCascadeResolution( static_cast<UINT>( cascadeIdx ) )
+                        : GetCascadePixelSize( cascadeIdx ) );
             }
         }
     }
@@ -1267,6 +1275,7 @@ XRESULT D3D11ShadowMap::DrawPointlightShadows( std::vector<VobLightInfo*>& light
     ZoneScopedN( "DrawPointlightShadows" );
 
     auto& settings = Engine::GAPI->GetRendererState().RendererSettings;
+    const XMVECTOR cameraPositionXm = Engine::GAPI->GetCameraPositionXM();
 
     // Release resources for disabled lights. Keep transition-safe dynamic/VFX lights
     // alive for brief indoor/outdoor visibility hiccups so their shadows do not pop.
@@ -1278,10 +1287,17 @@ XRESULT D3D11ShadowMap::DrawPointlightShadows( std::vector<VobLightInfo*>& light
 
         const bool vobDisabled = !info->Vob->IsEnabled();
         const bool temporarilyOutOfFrame = !info->VisibleInFrame;
+        const float lightRange = info->Vob->GetLightRange();
+        const float maxCenterDistance = std::max( 0.0f, settings.VisualFXDrawRadius - lightRange );
+        const float cameraDistanceSq = XMVectorGetX( XMVector3LengthSq(
+            info->Vob->GetPositionWorldXM() - cameraPositionXm ) );
+        const bool outsideVisualFxRange = cameraDistanceSq >= maxCenterDistance * maxCenterDistance;
         const bool keepAcrossPortalTransition = temporarilyOutOfFrame
+            && !outsideVisualFxRange
             && info->IgnoreIndoorOutdoorLimit
             && (info->IsDynamicVobLight || info->IsVisualFXLight);
-        if ( vobDisabled || (temporarilyOutOfFrame && !keepAcrossPortalTransition) ) {
+        if ( vobDisabled || outsideVisualFxRange
+            || (temporarilyOutOfFrame && !keepAcrossPortalTransition) ) {
             if ( D3D11PointLight* pl = dynamic_cast<D3D11PointLight*>(info->LightShadowBuffers.get()) ) {
                 pl->ClearTiledSlot();
                 pl->ReleaseShadowMap();
@@ -1301,7 +1317,6 @@ XRESULT D3D11ShadowMap::DrawPointlightShadows( std::vector<VobLightInfo*>& light
     // ********************************
     // Draw world shadows
     // ********************************
-    const XMVECTOR cameraPositionXm = Engine::GAPI->GetCameraPositionXM();
     bool partialShadowUpdate = settings.PartialDynamicShadowUpdates;
     const bool staticOnlyMode = settings.EnablePointlightShadows == GothicRendererSettings::PLS_STATIC_ONLY;
     const bool dynamicMode = settings.EnablePointlightShadows >= GothicRendererSettings::PLS_UPDATE_DYNAMIC;
@@ -1336,10 +1351,11 @@ XRESULT D3D11ShadowMap::DrawPointlightShadows( std::vector<VobLightInfo*>& light
         }
 
         if ( D3D11PointLight* pl = dynamic_cast<D3D11PointLight*>(light->LightShadowBuffers.get()) ) {
-            const float d = XMVectorGetX( XMVector3LengthSq( light->GetEffectivePositionWorldXM() - cameraPositionXm ) );
-            float range = light->Vob->GetLightRange();
-
-            float distMaxShadowSq = (range * 9.0f) * (range * 9.0f); // Fade out entirely after this
+            const float d = XMVectorGetX( XMVector3LengthSq(
+                light->Vob->GetPositionWorldXM() - cameraPositionXm ) );
+            const float range = light->Vob->GetLightRange();
+            const float maxCenterDistance = std::max( 0.0f, settings.VisualFXDrawRadius - range );
+            const float distMaxShadowSq = maxCenterDistance * maxCenterDistance;
 
             // Preset-controlled point-light shadow resolution. In dynamic mode
             // visible eligible lights update every frame so actor/VFX shadows do not lag.

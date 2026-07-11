@@ -607,9 +607,12 @@ XRESULT D3D11PfxRenderer::RenderPostFXComposition(
     // Bind output RTV (no depth)
     context->OMSetRenderTargets( 1, &outputRTV, nullptr );
 
-    // Bind SRVs: t0=backbuffer, t1=GodRays, t2=Depth, t3=Normals, t4=WaterMask, t5=ScreenSpaceLighting
-    ID3D11ShaderResourceView* srvs[6] = { backbufferSRV, godraysSRV, depthSRV, normalsSRV, waterMaskSRV, screenSpaceLightingSRV };
-    context->PSSetShaderResources( 0, 6, srvs );
+    // Bind SRVs: t0=backbuffer, t1=GodRays, t2=Depth, t3=Normals, t4=WaterMask, t5=ScreenSpaceLighting, t6=BlueNoise
+    ID3D11ShaderResourceView* srvs[7] = {
+        backbufferSRV, godraysSRV, depthSRV, normalsSRV, waterMaskSRV, screenSpaceLightingSRV,
+        compositionHeightFog ? engine->GetBlueNoiseTexture()->GetShaderResourceView().Get() : nullptr
+    };
+    context->PSSetShaderResources( 0, 7, srvs );
 
     // No blending - direct overwrite
     Engine::GAPI->GetRendererState().BlendState.SetDefault();
@@ -622,8 +625,8 @@ XRESULT D3D11PfxRenderer::RenderPostFXComposition(
     DrawFullScreenQuad();
 
     // Unbind SRVs
-    ID3D11ShaderResourceView* nullSRVs[6] = { nullptr, nullptr, nullptr, nullptr, nullptr, nullptr };
-    context->PSSetShaderResources( 0, 6, nullSRVs );
+    ID3D11ShaderResourceView* nullSRVs[7] = {};
+    context->PSSetShaderResources( 0, 7, nullSRVs );
 
     // Restore default states
     Engine::GAPI->GetRendererState().DepthState.DepthBufferCompareFunc =

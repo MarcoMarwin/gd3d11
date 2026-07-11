@@ -2,6 +2,14 @@
 
 Kurze, append-only Dokumentation der von Codex gepushten Renderer-Builds.
 
+## Build 110
+
+- Pointlights und ihre Shadowmaps folgen wieder der VisualFX-Sichtweite mit festem Nightly-Maximum, ohne eigenen F11-Regler.
+- Schatten- und Vegetationspfade wurden weiter gegen die verbliebenen Streifen- und Flimmerartefakte nachgezogen; EVSM, Contact Shadows und die zugehoerigen Shaderpfade wurden konsistenter angebunden.
+- Anzeige- und F11-UI-Verhalten wurden vereinheitlicht, inklusive Display-Mode- und Tooltip-Polish sowie lokalisierter Startmeldung.
+- Partikel- und Fog-Faelle sowie Distanz-/Dither-Verhalten wurden weiter geglaettet, ohne die vorhandenen Effekte pauschal abzuschalten.
+- Pruefung: statische Diff-, Aufrufer-, Binding- und Shaderpfadkontrolle; kein vollstaendiger lokaler C++-Build.
+
 ## Build 075
 
 - Grundlage: Kirides Nightly; 17.9.7 bleibt der letzte Stable-Vergleichsstand davor.

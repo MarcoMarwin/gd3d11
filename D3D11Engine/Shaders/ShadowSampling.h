@@ -58,7 +58,7 @@
 // Abstracts Texture2DArray (FL11+) vs Texture2D atlas (FL10) sampling
 //--------------------------------------------------------------------------------------
 #if SHD_FILTER_EVSM
-float4 SampleEVSMMoments(float2 cascadeUV, int cascadeIndex)
+float2 SampleEVSMMoments(float2 cascadeUV, int cascadeIndex)
 {
     if (cascadeIndex <= 0) return TX_EVSMShadowmap0.SampleLevel(SS_Linear, cascadeUV, 0);
     if (cascadeIndex == 1) return TX_EVSMShadowmap1.SampleLevel(SS_Linear, cascadeUV, 0);
@@ -78,15 +78,13 @@ float EVSMChebyshevUpperBound(float2 moments, float receiver)
 
 float SampleEVSMShadow(float2 cascadeUV, int cascadeIndex, float depth)
 {
-    const float positiveExponent = 5.0f;
-    const float negativeExponent = 5.0f;
+    const float exponent = 10.0f;
+
     float receiverDepth = saturate(depth);
-    float positiveReceiver = exp(positiveExponent * receiverDepth);
-    float negativeReceiver = -exp(-negativeExponent * receiverDepth);
-    float4 moments = SampleEVSMMoments(cascadeUV, cascadeIndex);
-    float probability = min(
-        EVSMChebyshevUpperBound(moments.xy, positiveReceiver),
-        EVSMChebyshevUpperBound(moments.zw, negativeReceiver));
+    float warpedReceiver = exp(exponent * receiverDepth);
+
+    float2 moments = SampleEVSMMoments(cascadeUV, cascadeIndex);
+    float probability = EVSMChebyshevUpperBound(moments, warpedReceiver);
     const float lightBleedingReduction = 0.15f;
     return saturate((probability - lightBleedingReduction) / (1.0f - lightBleedingReduction));
 }

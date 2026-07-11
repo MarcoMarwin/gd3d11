@@ -76,10 +76,10 @@ cbuffer FP_TileConstantBuffer : register( b5 )
 
 // CSM shadow map (t3)
 #if SHD_FILTER_EVSM
-Texture2D<float4> TX_EVSMShadowmap0 : register( t14 );
-Texture2D<float4> TX_EVSMShadowmap1 : register( t15 );
-Texture2D<float4> TX_EVSMShadowmap2 : register( t16 );
-Texture2D<float4> TX_EVSMShadowmap3 : register( t17 );
+Texture2D<float2> TX_EVSMShadowmap0 : register( t14 );
+Texture2D<float2> TX_EVSMShadowmap1 : register( t15 );
+Texture2D<float2> TX_EVSMShadowmap2 : register( t16 );
+Texture2D<float2> TX_EVSMShadowmap3 : register( t17 );
 #elif SHADOW_ATLAS
 Texture2D TX_ShadowmapAtlas : register( t3 );
 #else

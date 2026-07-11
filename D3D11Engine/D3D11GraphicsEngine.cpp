@@ -1183,6 +1183,21 @@ DXGI_FORMAT D3D11GraphicsEngine::GetBackBufferFormat() {
     return Engine::GAPI->GetRendererState().RendererSettings.CompressBackBuffer ? DXGI_FORMAT_R11G11B10_FLOAT : DXGI_FORMAT_R16G16B16A16_FLOAT;
 }
 
+static INT2 GetBorderlessMonitorResolution( HWND window ) {
+    MONITORINFO monitorInfo = {};
+    monitorInfo.cbSize = sizeof( monitorInfo );
+    HMONITOR monitor = MonitorFromWindow( window, MONITOR_DEFAULTTOPRIMARY );
+    if ( monitor && GetMonitorInfo( monitor, &monitorInfo ) ) {
+        return INT2(
+            monitorInfo.rcMonitor.right - monitorInfo.rcMonitor.left,
+            monitorInfo.rcMonitor.bottom - monitorInfo.rcMonitor.top );
+    }
+
+    RECT desktopRect = {};
+    GetClientRect( GetDesktopWindow(), &desktopRect );
+    return INT2( desktopRect.right, desktopRect.bottom );
+}
+
 void ApplyWindowStyle(HWND window, WindowModes windowMode) {
     if (windowMode == WindowModes::WINDOW_MODE_WINDOWED) {
         // Standard window styles for a Win32 window in windowed mode
@@ -1292,12 +1307,21 @@ XRESULT D3D11GraphicsEngine::RecreateBuffers() {
 /** Called on window resize/resolution change */
 XRESULT D3D11GraphicsEngine::OnResize( INT2 newSize ) {
     HRESULT hr;
+
+    // Borderless always matches the active monitor. Lower rendering resolutions belong
+    // to Render Scale/FSR; stretching an arbitrary output aspect ratio distorts the game.
+    if ( OutputWindow && Engine::GAPI->GetRendererState().RendererSettings.StretchWindow ) {
+        const INT2 monitorResolution = GetBorderlessMonitorResolution( OutputWindow );
+        if ( monitorResolution.x > 0 && monitorResolution.y > 0 ) {
+            newSize = monitorResolution;
+        }
+    }
+
+    NewResolution = newSize;
     if ( memcmp( &Resolution, &newSize, sizeof( newSize ) ) == 0 && SwapChain.Get() )
         return XR_SUCCESS;  // Don't resize if we don't have to
 
     Resolution = newSize;
-    NewResolution = newSize;
-
     INT2 bbres = GetBackbufferResolution();
 
     // TODO: Also always set/reset if player changes from Gothics UI, as settings a resolution from gothics settings breaks this.
@@ -1313,6 +1337,12 @@ XRESULT D3D11GraphicsEngine::OnResize( INT2 newSize ) {
 
     POINT virtualSize = { 8192, 8192 };
     zCViewDraw::GetScreen().SetVirtualSize( virtualSize );
+
+    auto* game = oCGame::GetGame();
+    auto* mainCamera = game ? static_cast<zCCamera*>(game->_zCSession_camera) : nullptr;
+    if ( mainCamera ) {
+        mainCamera->UpdateViewport();
+    }
 
 #ifndef BUILD_SPACER
     BOOL isFullscreen = 0;

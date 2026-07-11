@@ -69,6 +69,10 @@ Texture2D TX_GodRays : register( t1 );
 Texture2D TX_Depth : register( t2 );
 #endif
 
+#if COMPOSE_HEIGHTFOG
+Texture2D TX_BlueNoise : register( t6 );
+#endif
+
 #if COMPOSE_CONTACT_SHADOWS || COMPOSE_SSGI
 Texture2D TX_Normals : register( t3 );
 Texture2D TX_WaterMask : register( t4 );
@@ -104,14 +108,13 @@ float ComputeVolumetricFog( float3 cameraToWorldPos, float3 posOriginal )
     return exp( -HF_GlobalDensity * w * fogInt );
 }
 
-float FogDither(float2 pixelPosition)
+float FogBlueNoise(float2 pixelPosition)
 {
-    float n1 = frac(52.9829189f * frac(dot(pixelPosition, float2(0.06711056f, 0.00583715f))));
-    float n2 = frac(52.9829189f * frac(dot(pixelPosition + 37.17f, float2(0.00583715f, 0.06711056f))));
-    return n1 + n2 - 1.0f;
+    uint2 noiseCoord = uint2(pixelPosition) & 511u;
+    return TX_BlueNoise.Load(int3(noiseCoord, 0)).x - 0.5f;
 }
 
-float4 ComputeHeightFog( float2 texcoord, float2 pixelPosition )
+float4 ComputeHeightFog( float2 texcoord )
 {
     float expDepth = TX_Depth.Sample( SS_Linear, texcoord ).r;
     float skyPixel = 1.0f - step(0.00001f, expDepth);
@@ -132,9 +135,7 @@ float4 ComputeHeightFog( float2 texcoord, float2 pixelPosition )
     float weatherFog = max(fog, stableWorldFade) * activeWeatherFog;
     float dryNightFog = fog * nightTimeBlend * (1.0f - activeWeatherFog);
     fog = max(weatherFog, dryNightFog);
-    float fogGradientWeight = saturate(fog * (1.0f - fog) * 4.0f);
-    float fogGradientDither = FogDither(pixelPosition) * nightTimeBlend * (2.0f / 255.0f);
-    float ditheredFog = saturate(fog + fogGradientDither * fogGradientWeight);
+
     float3 color = ApplyAtmosphericScatteringGround( position, HF_FogColorMod, true, false );
 	float nightFogBrightness = lerp(1.0f, max(0.0f, AC_NightFogBrightness), saturate(AC_EnableNightAtmosphere));
 	float3 nightFogColor = float3(0.12f, 0.18f, 0.27f) * nightFogBrightness;
@@ -149,7 +150,7 @@ float4 ComputeHeightFog( float2 texcoord, float2 pixelPosition )
 	float geometryFogOpacity = lerp(maxFogOpacity, 0.91f, rainyNightGeometry);
 	float skyRainFogAttenuation = lerp(1.0f, 0.54f, skyPixel * activeWeatherFog);
 
-	return float4(saturate(color / darknessFactor), ditheredFog * geometryFogOpacity * skyRainFogAttenuation);
+	return float4(saturate(color / darknessFactor), fog * geometryFogOpacity * skyRainFogAttenuation);
 }
 #endif
 
@@ -396,11 +397,10 @@ float4 PSMain( PS_INPUT Input ) : SV_TARGET
 #if COMPOSE_HEIGHTFOG
     [branch] if ( CC_HeightFogEnabled > 0.5f )
     {
-        float4 fog = ComputeHeightFog( Input.vTexcoord, Input.vPosition.xy );
+        float4 fog = ComputeHeightFog( Input.vTexcoord );
         color.rgb = lerp( color.rgb, fog.rgb, fog.a );
-        float nightTimeBlend = smoothstep(0.0f, 1.0f, saturate(-AC_LightPos.y * 4.0f));
-        float ditherStrength = lerp(1.0f, 2.5f, nightTimeBlend) / 255.0f;
-        color.rgb = saturate(color.rgb + FogDither(Input.vPosition.xy) * fog.a * ditherStrength);
+        float ditherWeight = saturate(fog.a * 4.0f);
+        color.rgb = saturate(color.rgb + FogBlueNoise(Input.vPosition.xy) * ditherWeight / 255.0f);
     }
 #endif
 

@@ -228,6 +228,39 @@ namespace {
         return true;
     }
 
+    bool DetectGermanMenuLanguage() {
+        static const char* menuPaths[] = {
+            R"(\_WORK\DATA\SCRIPTS\_COMPILED\MENU.DAT)",
+            R"(\DATA\SCRIPTS\_COMPILED\MENU.DAT)",
+            "MENU.DAT",
+        };
+        static const char* germanMarkers[] = {
+            "einstellungen",
+            "spiel laden",
+            "spiel speichern",
+            "untertitel",
+        };
+
+        std::vector<char> bytes;
+        for ( const char* menuPath : menuPaths ) {
+            if ( !ReadVdfsBytes( menuPath, bytes ) ) {
+                continue;
+            }
+
+            std::string menuText( bytes.begin(), bytes.end() );
+            std::transform( menuText.begin(), menuText.end(), menuText.begin(), []( unsigned char c ) {
+                return c >= 'A' && c <= 'Z' ? static_cast<char>(c + ('a' - 'A')) : static_cast<char>(c);
+            } );
+
+            int matches = 0;
+            for ( const char* marker : germanMarkers ) {
+                matches += menuText.find( marker ) != std::string::npos ? 1 : 0;
+            }
+            return matches >= 2;
+        }
+        return false;
+    }
+
     bool LoadTextFile( const char* filePath, std::string& out ) {
         FILE* f = fopen( filePath, "rb" );
         if ( !f ) {
@@ -1354,6 +1387,8 @@ void GothicAPI::OnWorldLoaded() {
     // First load the F11-visible global draw-distance preset values, then true world-specific overrides.
     LoadRendererMenuWorldSettings( RendererState.RendererSettings, MENU_SETTINGS_FILE );
     LoadRendererWorldSettings( RendererState.RendererSettings );
+    // The removed F11 control stays at Kirides' former maximum value (10).
+    RendererState.RendererSettings.VisualFXDrawRadius = VISUAL_FX_DRAW_RADIUS_FIXED;
 
     // Reset wetness
     SceneWetness = GetRainFXWeight();
@@ -2020,12 +2055,22 @@ void GothicAPI::GetVisibleParticleEffectsList( std::vector<zCVob*>& pfxList ) {
             return;
         }
 
-        const XMVECTOR vVfxRangeSq = XMVectorReplicate( RendererState.RendererSettings.VisualFXDrawRadius * RendererState.RendererSettings.VisualFXDrawRadius );
+        const float visualFxRange = RendererState.RendererSettings.VisualFXDrawRadius;
+        const XMVECTOR vVfxRangeSq = XMVectorReplicate( visualFxRange * visualFxRange );
+        XMFLOAT3 cameraPosition;
+        XMStoreFloat3( &cameraPosition, camPos );
 
         for ( auto const& it : ParticleEffectVobs ) {
             const bool keepGroundFogVisible = IsGroundFogParticleVob( it );
-            if ( XMVector3Greater( XMVector3LengthSq( it->GetPositionWorldXM() - camPos ), vVfxRangeSq ) && !keepGroundFogVisible ) {
-                // too far? It's ok for particles to not update and restart.
+            bool outsideVisualFxRange = XMVector3Greater(
+                XMVector3LengthSq( it->GetPositionWorldXM() - camPos ), vVfxRangeSq );
+            if ( keepGroundFogVisible && outsideVisualFxRange ) {
+                const zTBBox3D bbox = it->GetBBox();
+                outsideVisualFxRange = Toolbox::ComputePointAABBDistance(
+                    cameraPosition, bbox.Min, bbox.Max ) > visualFxRange;
+            }
+            if ( outsideVisualFxRange ) {
+                // Ground fog uses its field bounds so large emitters remain visible near their edges.
                 continue;
             }
 
@@ -5246,8 +5291,11 @@ void GothicAPI::ConfigureAllPointlightShadowSources() const {
 
         resolvedByFlame[lightIndex] = true;
         lights[lightIndex].Info->AllowsPointlightShadows = true;
-        if ( flameClaims[lightIndex].size() == 1 )
-            assignAnchor( lights[lightIndex], resolvedFlames[flameClaims[lightIndex].front()].Anchor );
+        if ( flameClaims[lightIndex].size() == 1 ) {
+            XMFLOAT3 shadowAnchor = resolvedFlames[flameClaims[lightIndex].front()].Anchor;
+            shadowAnchor.y += 25.0f;
+            assignAnchor( lights[lightIndex], shadowAnchor );
+        }
         // Multiple independent flames claim this light: keep the authored position.
     }
 
@@ -6764,9 +6812,17 @@ void GothicAPI::PrintMessageTimed( const INT2& position, const std::string& strM
     }
 }
 
+/** Returns whether the active Gothic menu uses German localization. */
+bool GothicAPI::IsGermanMenuLanguage() {
+    static const bool isGerman = DetectGermanMenuLanguage();
+    return isGerman;
+}
+
 /** Prints information about the mod to the screen for a couple of seconds */
 void GothicAPI::PrintModInfo() {
-    PrintMessageTimed( INT2( 5, 5 ), "Press F11 for graphics settings", 8000.0f );
+    PrintMessageTimed( INT2( 5, 5 ), IsGermanMenuLanguage()
+        ? u8"Dr\u00FCcke F11 f\u00FCr Grafikeinstellungen"
+        : "Press F11 for graphics settings", 8000.0f );
 }
 
 /** Returns the current weight of the rain-fx. The bigger value of ours and gothics is returned. */
