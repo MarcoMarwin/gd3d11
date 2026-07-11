@@ -2,6 +2,14 @@
 
 Kurze, append-only Dokumentation der von Codex gepushten Renderer-Builds.
 
+## Build 111 (Korrekturpush)
+
+- Startstabilitaet: Die absturzverdaechtige MENU.DAT-Spracherkennung ueber Gothics VDFS wurde entfernt; die Renderer-Sprache wird nun im F11-Menue manuell zwischen Englisch und Deutsch gewaehlt und global persistiert.
+- F11-Speicherung: Die ungewoehnliche STRG-Weltspeicherung samt Welt-Schreibpfad wurde entfernt; sichtbare Renderer-Einstellungen werden ausschliesslich global gespeichert.
+- Mod-Weltformat: Weltdateien duerfen nur noch Fog, Atmosphere und Rain setzen; der alte Atmoshpere-Schreibfehler und die entsprechende interne Benennung wurden ohne Legacy-Fallback korrigiert.
+- Dokumentation: README auf Installation, aktuelle Buildvoraussetzungen, Mod-Weltformat, Abhaengigkeiten, Lizenz und die gleichwertige Autorenliste reduziert.
+- Pruefung: statische Diff-, Aufrufer-, INI-, Symbol- und Projektkonsistenzpruefung; kein vollstaendiger lokaler C++-Build.
+
 ## Build 110 (Korrekturpush)
 
 - CI-Fix: Deutsche UTF-8-UI-Texte bleiben als `u8`-Literals erhalten, werden aber fuer ImGui/Gothic gezielt als `const char*` uebergeben, damit Release_G1_12f unter C++20 nicht an `char8_t` scheitert.

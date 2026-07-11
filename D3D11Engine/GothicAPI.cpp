@@ -228,38 +228,6 @@ namespace {
         return true;
     }
 
-    bool DetectGermanMenuLanguage() {
-        static const char* menuPaths[] = {
-            R"(\_WORK\DATA\SCRIPTS\_COMPILED\MENU.DAT)",
-            R"(\DATA\SCRIPTS\_COMPILED\MENU.DAT)",
-            "MENU.DAT",
-        };
-        static const char* germanMarkers[] = {
-            "einstellungen",
-            "spiel laden",
-            "spiel speichern",
-            "untertitel",
-        };
-
-        std::vector<char> bytes;
-        for ( const char* menuPath : menuPaths ) {
-            if ( !ReadVdfsBytes( menuPath, bytes ) ) {
-                continue;
-            }
-
-            std::string menuText( bytes.begin(), bytes.end() );
-            std::transform( menuText.begin(), menuText.end(), menuText.begin(), []( unsigned char c ) {
-                return c >= 'A' && c <= 'Z' ? static_cast<char>(c + ('a' - 'A')) : static_cast<char>(c);
-            } );
-
-            int matches = 0;
-            for ( const char* marker : germanMarkers ) {
-                matches += menuText.find( marker ) != std::string::npos ? 1 : 0;
-            }
-            return matches >= 2;
-        }
-        return false;
-    }
 
     bool LoadTextFile( const char* filePath, std::string& out ) {
         FILE* f = fopen( filePath, "rb" );
@@ -1384,8 +1352,8 @@ void GothicAPI::OnWorldLoaded() {
         RendererState.RendererSettings.SetupNewWorldSpecificValues();
     }
 
-    // First load the F11-visible global draw-distance preset values, then true world-specific overrides.
-    LoadRendererMenuWorldSettings( RendererState.RendererSettings, MENU_SETTINGS_FILE );
+    // Load global F11 draw distances first, then optional world-specific environment overrides.
+    LoadRendererGlobalSettings( RendererState.RendererSettings, MENU_SETTINGS_FILE );
     LoadRendererWorldSettings( RendererState.RendererSettings );
     // The removed F11 control stays at Kirides' former maximum value (10).
     RendererState.RendererSettings.VisualFXDrawRadius = VISUAL_FX_DRAW_RADIUS_FIXED;
@@ -1444,30 +1412,20 @@ void GothicAPI::LoadRendererWorldSettings( GothicRendererSettings& s, const char
     s.FogGlobalDensity = GetPrivateProfileFloatA( "Fog", "GlobalDensity", s.FogGlobalDensity, ini );
 
     s.SunLightColor = float3::FromColor(
-        GetPrivateProfileIntA( "Atmoshpere", "SunLightColorR", static_cast<int>(s.SunLightColor.x * 255.0f), ini.c_str() ),
-        GetPrivateProfileIntA( "Atmoshpere", "SunLightColorG", static_cast<int>(s.SunLightColor.y * 255.0f), ini.c_str() ),
-        GetPrivateProfileIntA( "Atmoshpere", "SunLightColorB", static_cast<int>(s.SunLightColor.z * 255.0f), ini.c_str() )
+        GetPrivateProfileIntA( "Atmosphere", "SunLightColorR", static_cast<int>(s.SunLightColor.x * 255.0f), ini.c_str() ),
+        GetPrivateProfileIntA( "Atmosphere", "SunLightColorG", static_cast<int>(s.SunLightColor.y * 255.0f), ini.c_str() ),
+        GetPrivateProfileIntA( "Atmosphere", "SunLightColorB", static_cast<int>(s.SunLightColor.z * 255.0f), ini.c_str() )
     );
 
-    GetPrivateProfileRGB("Atmoshpere", "SunLightColor", s.SunLightColor, ini);
+    GetPrivateProfileRGB("Atmosphere", "SunLightColor", s.SunLightColor, ini);
 
     s.FogColorMod = float3::FromColor(
-        GetPrivateProfileIntA( "Atmoshpere", "FogColorModR", static_cast<int>(s.FogColorMod.x * 255.0f), ini.c_str() ),
-        GetPrivateProfileIntA( "Atmoshpere", "FogColorModG", static_cast<int>(s.FogColorMod.y * 255.0f), ini.c_str() ),
-        GetPrivateProfileIntA( "Atmoshpere", "FogColorModB", static_cast<int>(s.FogColorMod.z * 255.0f), ini.c_str() )
+        GetPrivateProfileIntA( "Atmosphere", "FogColorModR", static_cast<int>(s.FogColorMod.x * 255.0f), ini.c_str() ),
+        GetPrivateProfileIntA( "Atmosphere", "FogColorModG", static_cast<int>(s.FogColorMod.y * 255.0f), ini.c_str() ),
+        GetPrivateProfileIntA( "Atmosphere", "FogColorModB", static_cast<int>(s.FogColorMod.z * 255.0f), ini.c_str() )
     );
 
-    GetPrivateProfileRGB("Atmoshpere", "FogColorMod", s.FogColorMod, ini);
-
-	s.GraphicsPreset = (GothicRendererSettings::E_GraphicsPreset)GetPrivateProfileIntA( "General", "GraphicsPreset", s.GraphicsPreset, ini.c_str() );
-    if ( !GMPModeActive ) {
-	    s.VisualFXDrawRadius = GetPrivateProfileFloatA( "General", "VisualFXDrawRadius", s.VisualFXDrawRadius, ini );
-	    s.OutdoorVobDrawRadius = GetPrivateProfileFloatA( "General", "OutdoorVobDrawRadius", s.OutdoorVobDrawRadius, ini );
-        s.OutdoorSmallVobDrawRadius = std::clamp( GetPrivateProfileFloatA( "General", "OutdoorSmallVobDrawRadius", s.OutdoorSmallVobDrawRadius, ini ), 5000.0f, 25000.0f );
-        s.IndoorVobDrawRadius = GetPrivateProfileFloatA( "General", "IndoorVobDrawRadius", s.IndoorVobDrawRadius, ini );
-	    s.SkeletalMeshDrawRadius = GetPrivateProfileFloatA( "General", "SkeletalMeshDrawRadius", s.SkeletalMeshDrawRadius, ini );
-	    s.SectionDrawRadius = static_cast<decltype(s.SectionDrawRadius)>( std::clamp<int>( static_cast<int>( GetPrivateProfileIntA( "General", "SectionDrawRadius", s.SectionDrawRadius, ini.c_str() ) ), 1, 10 ) );
-    }
+    GetPrivateProfileRGB("Atmosphere", "FogColorMod", s.FogColorMod, ini);
 
     s.RainRadiusRange = GetPrivateProfileFloatA( "Rain", "RadiusRange", s.RainRadiusRange, ini );
     s.RainHeightRange = GetPrivateProfileFloatA( "Rain", "HeightRange", s.RainHeightRange, ini );
@@ -1481,20 +1439,20 @@ void GothicAPI::LoadRendererWorldSettings( GothicRendererSettings& s, const char
         s.RainFogDensity = 0.00078f;
     }
 
-    s.ReplaceSunDirection = GetPrivateProfileBoolA( "Atmoshpere", "ReplaceSunDirection", s.ReplaceSunDirection, ini );
+    s.ReplaceSunDirection = GetPrivateProfileBoolA( "Atmosphere", "ReplaceSunDirection", s.ReplaceSunDirection, ini );
 
-    AtmosphereSettings& aS = GetSky()->GetAtmoshpereSettings();
+    AtmosphereSettings& aS = GetSky()->GetAtmosphereSettings();
 
     aS.LightDirection = XMFLOAT3(
-        GetPrivateProfileFloatA( "Atmoshpere", "LightDirectionX", aS.LightDirection.x, ini ),
-        GetPrivateProfileFloatA( "Atmoshpere", "LightDirectionY", aS.LightDirection.y, ini ),
-        GetPrivateProfileFloatA( "Atmoshpere", "LightDirectionZ", aS.LightDirection.z, ini )
+        GetPrivateProfileFloatA( "Atmosphere", "LightDirectionX", aS.LightDirection.x, ini ),
+        GetPrivateProfileFloatA( "Atmosphere", "LightDirectionY", aS.LightDirection.y, ini ),
+        GetPrivateProfileFloatA( "Atmosphere", "LightDirectionZ", aS.LightDirection.z, ini )
     );
 
-    GetPrivateProfileArray("Atmoshpere", "LightDirection", &aS.LightDirection.x, 3, &aS.LightDirection.x, ini);
+    GetPrivateProfileArray("Atmosphere", "LightDirection", &aS.LightDirection.x, 3, &aS.LightDirection.x, ini);
 }
 
-void GothicAPI::LoadRendererMenuWorldSettings( GothicRendererSettings& s, const char* iniFile ) {
+void GothicAPI::LoadRendererGlobalSettings( GothicRendererSettings& s, const char* iniFile ) {
     if ( !Toolbox::FileExists( iniFile ) ) {
         return;
     }
@@ -1513,78 +1471,7 @@ void GothicAPI::LoadRendererMenuWorldSettings( GothicRendererSettings& s, const 
     }
 }
 
-void GothicAPI::SaveRendererWorldSettings( const GothicRendererSettings& s )
-{
-    if ( !LoadedWorldInfo || LoadedWorldInfo->WorldName.empty() ) {
-        return;
-    }
-    auto gameName = GetGameName();
-    std::string zenFolder;
-    if ( gameName == "Original" ) {
-        zenFolder = "system\\GD3D11\\ZENResources\\";
-    } else {
-        zenFolder = "system\\GD3D11\\ZENResources\\" + gameName + "\\";
-    }
-    if ( !Toolbox::FolderExists( zenFolder ) ) {
-        if ( !Toolbox::CreateDirectoryRecursive( zenFolder ) ) {
-            LogError() << "Could not save custom ZEN-Resources. Could not create directory: " << zenFolder;
-            return;
-        }
-    }
-
-    auto const ini = zenFolder + LoadedWorldInfo->WorldName + ".INI";
-    SaveRendererWorldSettings(s, ini.c_str());
-}
-
-void GothicAPI::SaveRendererWorldSettings( const GothicRendererSettings& s, const char* iniFile ) {
-    const std::string ini = iniFile;
-
-    WritePrivateProfileStringA( "Fog", "Height", std::to_string( s.FogHeight ).c_str(), ini.c_str() );
-    WritePrivateProfileStringA( "Fog", "HeightFalloff", std::to_string( s.FogHeightFalloff ).c_str(), ini.c_str() );
-    WritePrivateProfileStringA( "Fog", "GlobalDensity", std::to_string( s.FogGlobalDensity ).c_str(), ini.c_str() );
-
-    WritePrivateProfileRGB("Atmoshpere", "SunLightColor", s.SunLightColor, ini);
-    WritePrivateProfileRGB("Atmoshpere", "FogColorMod", s.FogColorMod, ini);
-
-    WritePrivateProfileStringA( "General", "GraphicsPreset", std::to_string( (int)s.GraphicsPreset ).c_str(), ini.c_str() );
-    WritePrivateProfileStringA( "General", "VisualFXDrawRadius", std::to_string( s.VisualFXDrawRadius ).c_str(), ini.c_str() );
-    WritePrivateProfileStringA( "General", "OutdoorVobDrawRadius", std::to_string( s.OutdoorVobDrawRadius ).c_str(), ini.c_str() );
-    WritePrivateProfileStringA( "General", "OutdoorSmallVobDrawRadius", std::to_string( s.OutdoorSmallVobDrawRadius ).c_str(), ini.c_str() );
-    WritePrivateProfileStringA( "General", "IndoorVobDrawRadius", std::to_string( s.IndoorVobDrawRadius ).c_str(), ini.c_str() );
-    WritePrivateProfileStringA( "General", "SkeletalMeshDrawRadius", std::to_string( s.SkeletalMeshDrawRadius ).c_str(), ini.c_str() );
-    WritePrivateProfileStringA( "General", "SectionDrawRadius", std::to_string( s.SectionDrawRadius ).c_str(), ini.c_str() );
-
-    WritePrivateProfileStringA( "Rain", "RadiusRange", std::to_string( s.RainRadiusRange ).c_str(), ini.c_str() );
-    WritePrivateProfileStringA( "Rain", "HeightRange", std::to_string( s.RainHeightRange ).c_str(), ini.c_str() );
-    WritePrivateProfileStringA( "Rain", "NumParticles", std::to_string( s.RainNumParticles ).c_str(), ini.c_str() );
-    WritePrivateProfileArray( "Rain", "GlobalVelocity", &s.RainGlobalVelocity.x, 3, ini.c_str() );
-    WritePrivateProfileStringA( "Rain", "SceneWettness", std::to_string( s.RainSceneWettness ).c_str(), ini.c_str() );
-    WritePrivateProfileStringA( "Rain", "SunLightStrength", std::to_string( s.RainSunLightStrength ).c_str(), ini.c_str() );
-    WritePrivateProfileRGB( "Rain", "FogColor", s.RainFogColor, ini );
-    WritePrivateProfileStringA( "Rain", "FogDensity", std::to_string( s.RainFogDensity ).c_str(), ini.c_str() );
-
-    WritePrivateProfileStringA( "Atmoshpere", "ReplaceSunDirection", std::to_string( s.ReplaceSunDirection ? TRUE : FALSE ).c_str(), ini.c_str() );
-
-    AtmosphereSettings& aS = GetSky()->GetAtmoshpereSettings();
-
-    WritePrivateProfileArray("Atmoshpere", "LightDirection", &aS.LightDirection.x, 3, ini.c_str() );
-
-    // delete old named keys
-
-    WritePrivateProfileStringA( "Atmoshpere", "SunLightColorR", nullptr, ini.c_str() );
-    WritePrivateProfileStringA( "Atmoshpere", "SunLightColorG", nullptr, ini.c_str() );
-    WritePrivateProfileStringA( "Atmoshpere", "SunLightColorB", nullptr, ini.c_str() );
-
-    WritePrivateProfileStringA( "Atmoshpere", "FogColorModR", nullptr, ini.c_str() );
-    WritePrivateProfileStringA( "Atmoshpere", "FogColorModG", nullptr, ini.c_str() );
-    WritePrivateProfileStringA( "Atmoshpere", "FogColorModB", nullptr, ini.c_str() );
-    
-    WritePrivateProfileStringA( "Atmoshpere", "LightDirectionX", nullptr, ini.c_str() );
-    WritePrivateProfileStringA( "Atmoshpere", "LightDirectionY", nullptr, ini.c_str() );
-    WritePrivateProfileStringA( "Atmoshpere", "LightDirectionZ", nullptr, ini.c_str() );
-}
-
-void GothicAPI::SaveRendererMenuWorldSettings( const GothicRendererSettings& s, const char* iniFile ) {
+void GothicAPI::SaveRendererGlobalSettings( const GothicRendererSettings& s, const char* iniFile ) {
     const std::string ini = iniFile;
 
     WritePrivateProfileStringA( "General", "GraphicsPreset", std::to_string( static_cast<int>(s.GraphicsPreset) ).c_str(), ini.c_str() );
@@ -1599,7 +1486,7 @@ void GothicAPI::SaveRendererMenuWorldSettings( const GothicRendererSettings& s, 
     }
 
     WritePrivateProfileStringA( "Fog", nullptr, nullptr, ini.c_str() );
-    WritePrivateProfileStringA( "Atmoshpere", nullptr, nullptr, ini.c_str() );
+    WritePrivateProfileStringA( "Atmosphere", nullptr, nullptr, ini.c_str() );
     WritePrivateProfileStringA( "Rain", nullptr, nullptr, ini.c_str() );
 }
 /** Goes through the given zCTree and registers all found vobs */
@@ -5917,6 +5804,7 @@ XRESULT GothicAPI::SaveMenuSettings( const std::string& file ) {
     GothicRendererSettings& s = RendererState.RendererSettings;
 
     WritePrivateProfileStringA( "General", "ChangeToMode", std::to_string( s.ChangeWindowPreset ).c_str(), ini.c_str() );
+    WritePrivateProfileStringA( "General", "D3D11Language", std::to_string( static_cast<int>(s.D3D11Language) ).c_str(), ini.c_str() );
     WritePrivateProfileStringA( "General", "AtmosphericScattering", std::to_string( s.AtmosphericScattering ? TRUE : FALSE ).c_str(), ini.c_str() );
     WritePrivateProfileStringA( "General", "EnableFog", std::to_string( s.DrawFog ? TRUE : FALSE ).c_str(), ini.c_str() );
     WritePrivateProfileStringA( "General", "FogRange", float_to_string( s.FogRange , 2).c_str(), ini.c_str() );
@@ -5957,7 +5845,7 @@ XRESULT GothicAPI::SaveMenuSettings( const std::string& file ) {
     WritePrivateProfileStringA( "General", "EnableSSS", std::to_string( s.EnableSSS ? TRUE : FALSE ).c_str(), ini.c_str() );
 
     /*
-    * Draw-distance is saved on a per World basis using SaveRendererWorldSettings
+    * F11 draw-distance settings are saved globally in UserSettings.ini
     */
 
     WritePrivateProfileStringA( "General", "EnableOcclusionCulling", std::to_string( s.EnableOcclusionCulling ).c_str(), ini.c_str() );
@@ -6081,6 +5969,10 @@ XRESULT GothicAPI::LoadMenuSettings( const std::string& file ) {
         LogInfo() << "Loading menu settings from " << ini;
 
         s.ChangeWindowPreset = GetPrivateProfileIntA( "General", "ChangeToMode", 0, ini.c_str() );
+        s.D3D11Language = static_cast<GothicRendererSettings::E_D3D11Language>(std::clamp<int>(
+            GetPrivateProfileIntA( "General", "D3D11Language", static_cast<int>(ds.D3D11Language), ini.c_str() ),
+            static_cast<int>(GothicRendererSettings::D3D11_LANGUAGE_ENGLISH),
+            static_cast<int>(GothicRendererSettings::D3D11_LANGUAGE_GERMAN) ));
         s.DrawFog = GetPrivateProfileBoolA( "General", "EnableFog", ds.DrawFog, ini );
         s.FogRange = GetPrivateProfileFloatA( "General", "FogRange", ds.FogRange, ini.c_str() );
         s.AtmosphericScattering = GetPrivateProfileBoolA( "General", "AtmosphericScattering", ds.AtmosphericScattering, ini );
@@ -6127,7 +6019,7 @@ XRESULT GothicAPI::LoadMenuSettings( const std::string& file ) {
         s.SSSIntensity = s.EnableSSS ? 0.5f : 0.0f;
 
         /*
-        * Draw-distance is Loaded on a per World basis using LoadRendererWorldSettings
+        * F11 draw-distance settings are loaded globally from UserSettings.ini
         */
 
         s.EnableOcclusionCulling = GetPrivateProfileBoolA( "General", "EnableOcclusionCulling", ds.EnableOcclusionCulling, ini );
@@ -6812,10 +6704,10 @@ void GothicAPI::PrintMessageTimed( const INT2& position, const std::string& strM
     }
 }
 
-/** Returns whether the active Gothic menu uses German localization. */
+/** Returns whether the renderer UI uses German localization. */
 bool GothicAPI::IsGermanMenuLanguage() {
-    static const bool isGerman = DetectGermanMenuLanguage();
-    return isGerman;
+    return RendererState.RendererSettings.D3D11Language
+        == GothicRendererSettings::D3D11_LANGUAGE_GERMAN;
 }
 
 /** Prints information about the mod to the screen for a couple of seconds */
@@ -6906,7 +6798,7 @@ void GothicAPI::ResetRenderStates() {
 
 /** Get sky timescale variable */
 float GothicAPI::GetSkyTimeScale() {
-    return SkyRenderer->GetAtmoshpereSettings().SkyTimeScale;
+    return SkyRenderer->GetAtmosphereSettings().SkyTimeScale;
 }
 
 /** Processes vobs and lights in a single BSP leaf node that has already passed distance and frustum tests. */

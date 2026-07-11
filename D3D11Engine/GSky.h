@@ -64,7 +64,7 @@ public:
     AtmosphereConstantBuffer& GetAtmosphereCB() { return AtmosphereCB; }
 
     /** returns atmosphere settings */
-    AtmosphereSettings& GetAtmoshpereSettings() { return Atmosphere; }
+    AtmosphereSettings& GetAtmosphereSettings() { return Atmosphere; }
 
     /** Returns the current sky-light color */
     float4 GetSkylightColor();

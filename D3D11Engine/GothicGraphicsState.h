@@ -544,6 +544,11 @@ struct GothicRendererSettings {
         GRAPHICS_VERY_HIGH = 5
     };
 
+    enum E_D3D11Language {
+        D3D11_LANGUAGE_ENGLISH = 0,
+        D3D11_LANGUAGE_GERMAN = 1,
+    };
+
     enum E_Upscaler {
         UPSCALER_DEFAULT = 0,
         // Values 1 and 2 remain reserved so old INI files migrate safely to FSR3.
@@ -776,6 +781,7 @@ struct GothicRendererSettings {
         EnableWaterAnimation = true;
 
         GraphicsPreset = E_GraphicsPreset::GRAPHICS_CUSTOM;
+        D3D11Language = E_D3D11Language::D3D11_LANGUAGE_ENGLISH;
 
         ResetDebugSettings();
     }
@@ -983,6 +989,7 @@ struct GothicRendererSettings {
     E_AntiAliasingMode AntiAliasingMode;
     E_SharpeningMode SharpeningMode;
     E_GraphicsPreset GraphicsPreset;
+    E_D3D11Language D3D11Language;
     
     struct {
         struct {

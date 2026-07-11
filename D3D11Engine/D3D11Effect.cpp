@@ -195,7 +195,7 @@ XRESULT D3D11Effect::DrawRain( bool outputResolution, bool useRainExclusionMask 
     // Update constantbuffer for the advance-VS
     AdvanceRainConstantBuffer acb = {};
     XMFLOAT3 LightPosition_XMFloat3;
-    XMStoreFloat3( &LightPosition_XMFloat3, XMLoadFloat3( &Engine::GAPI->GetSky()->GetAtmoshpereSettings().LightDirection ) * Engine::GAPI->GetSky()->GetAtmoshpereSettings().OuterRadius + Engine::GAPI->GetCameraPositionXM() );
+    XMStoreFloat3( &LightPosition_XMFloat3, XMLoadFloat3( &Engine::GAPI->GetSky()->GetAtmosphereSettings().LightDirection ) * Engine::GAPI->GetSky()->GetAtmosphereSettings().OuterRadius + Engine::GAPI->GetCameraPositionXM() );
     acb.AR_LightPosition = LightPosition_XMFloat3;
     acb.AR_FPS = state.RendererInfo.FPS;
     acb.AR_Radius = state.RendererSettings.RainRadiusRange;
@@ -400,7 +400,7 @@ XRESULT D3D11Effect::DrawRain_CS( bool outputResolution, bool useRainExclusionMa
     // Update constantbuffer for the advance-CS
     AdvanceRainConstantBuffer acb = {};
     XMFLOAT3 LightPosition_XMFloat3;
-    XMStoreFloat3( &LightPosition_XMFloat3, XMLoadFloat3( &Engine::GAPI->GetSky()->GetAtmoshpereSettings().LightDirection ) * Engine::GAPI->GetSky()->GetAtmoshpereSettings().OuterRadius + Engine::GAPI->GetCameraPositionXM() );
+    XMStoreFloat3( &LightPosition_XMFloat3, XMLoadFloat3( &Engine::GAPI->GetSky()->GetAtmosphereSettings().LightDirection ) * Engine::GAPI->GetSky()->GetAtmosphereSettings().OuterRadius + Engine::GAPI->GetCameraPositionXM() );
     acb.AR_LightPosition = LightPosition_XMFloat3;
     acb.AR_FPS = state.RendererInfo.FPS;
     acb.AR_Radius = state.RendererSettings.RainRadiusRange;

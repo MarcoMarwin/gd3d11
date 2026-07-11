@@ -594,8 +594,8 @@ void ImGuiShim::OnResize( INT2 newSize )
     }
 }
 
-template <typename T>
-bool ImComboBoxC( const char* id, const std::vector<std::pair<const char*, T>>& items, T* storage, const std::function<void()>& selected ) {
+template <typename Items, typename T>
+bool ImComboBoxC( const char* id, const Items& items, T* storage, const std::function<void()>& selected ) {
     if ( storage == nullptr || items.size() == 0 ) {
         return ImGui::BeginCombo( id, "invalid storage" );
     }
@@ -624,8 +624,8 @@ bool ImComboBoxC( const char* id, const std::vector<std::pair<const char*, T>>& 
     return false;
 }
 
-template <typename T>
-bool ImComboBoxCT( const char* id, const std::vector<std::tuple<const char*, T, const char*>>& items, T* storage, const std::function<void()>& selected ) {
+template <typename Items, typename T>
+bool ImComboBoxCT( const char* id, const Items& items, T* storage, const std::function<void()>& selected ) {
     if ( storage == nullptr || items.size() == 0 ) {
         return ImGui::BeginCombo( id, "invalid storage" );
     }
@@ -657,8 +657,8 @@ bool ImComboBoxCT( const char* id, const std::vector<std::tuple<const char*, T, 
     return false;
 }
 
-template <typename T>
-bool ImComboBox( const char* id, const std::vector<std::pair<const char*, T>>& items, T* storage ) {
+template <typename Items, typename T>
+bool ImComboBox( const char* id, const Items& items, T* storage ) {
     if ( storage == nullptr || items.size() == 0 ) {
         return ImGui::BeginCombo( id, "invalid storage" );
     }
@@ -1041,6 +1041,10 @@ namespace
         } else if ( presetValue > static_cast<int>(GothicRendererSettings::GRAPHICS_VERY_HIGH) ) {
             s.GraphicsPreset = GothicRendererSettings::GRAPHICS_VERY_HIGH;
         }
+        s.D3D11Language = static_cast<GothicRendererSettings::E_D3D11Language>(std::clamp<int>(
+            static_cast<int>(s.D3D11Language),
+            static_cast<int>(GothicRendererSettings::D3D11_LANGUAGE_ENGLISH),
+            static_cast<int>(GothicRendererSettings::D3D11_LANGUAGE_GERMAN) ));
         s.LimitLightIntesity = true;
         s.VisualFXDrawRadius = VISUAL_FX_DRAW_RADIUS_FIXED;
         s.EnableShadows = true;
@@ -1162,12 +1166,12 @@ void ImGuiShim::RenderSettingsWindow()
         }
         GothicRendererSettings& settings = Engine::GAPI->GetRendererState().RendererSettings;
         FixupSettings(settings);
-        const bool german = Engine::GAPI->IsGermanMenuLanguage();
-        const auto Tr = [german]( const char* english, const auto* germanText ) -> const char* {
+        bool german = Engine::GAPI->IsGermanMenuLanguage();
+        const auto Tr = [&german]( const char* english, const auto* germanText ) -> const char* {
             return german ? reinterpret_cast<const char*>( germanText ) : english;
         };
 
-        static const std::vector<std::pair<const char*, int>> graphicsPresets = {
+        const std::array<std::pair<const char*, int>, 4> graphicsPresets = {
             {Tr( "Low", u8"Niedrig" ), GothicRendererSettings::E_GraphicsPreset::GRAPHICS_LOW},
             {Tr( "Medium", u8"Mittel" ), GothicRendererSettings::E_GraphicsPreset::GRAPHICS_MEDIUM},
             {Tr( "High", u8"Hoch" ), GothicRendererSettings::E_GraphicsPreset::GRAPHICS_HIGH},
@@ -1182,9 +1186,14 @@ void ImGuiShim::RenderSettingsWindow()
             }
         }
 
-        ImText( Tr( "Graphics Preset", u8"Grafikvoreinstellung" ), buttonWidth ); ImGui::SameLine();
-        
-        ImGui::PushItemWidth( controlWidth );
+        const float topPresetLabelWidth = 170.0f;
+        const float topPresetControlWidth = 145.0f;
+        const float topLanguageLabelWidth = 125.0f;
+        const float topLanguageControlWidth = 95.0f;
+
+        ImText( Tr( "Graphics Preset", u8"Grafikvoreinstellung" ), ImVec2( topPresetLabelWidth, 0.0f ) ); ImGui::SameLine();
+
+        ImGui::PushItemWidth( topPresetControlWidth );
         if ( ImGui::BeginCombo( "##GraphicsPreset", graphicsPresetPreview ) ) {
             for ( const auto& preset : graphicsPresets ) {
                 const bool isSelected = static_cast<int>(settings.GraphicsPreset) == preset.second;
@@ -1201,6 +1210,33 @@ void ImGuiShim::RenderSettingsWindow()
         }
         ImGui::SetItemTooltip( "%s", Tr( "Applies a predefined balance of visual quality and performance.", u8"Wendet eine vorgegebene Abstimmung von Bildqualit\u00E4t und Leistung an." ) );
         ImGui::PopItemWidth();
+
+        ImGui::SameLine();
+        ImText( Tr( "D3D11 Language", u8"D3D11-Sprache" ), ImVec2( topLanguageLabelWidth, 0.0f ) ); ImGui::SameLine();
+        ImGui::PushItemWidth( topLanguageControlWidth );
+        const char* languagePreview = settings.D3D11Language == GothicRendererSettings::D3D11_LANGUAGE_GERMAN
+            ? "Deutsch"
+            : "English";
+        if ( ImGui::BeginCombo( "##D3D11Language", languagePreview ) ) {
+            const std::array<std::pair<const char*, GothicRendererSettings::E_D3D11Language>, 2> languages = {
+                std::pair{"English", GothicRendererSettings::D3D11_LANGUAGE_ENGLISH},
+                std::pair{"Deutsch", GothicRendererSettings::D3D11_LANGUAGE_GERMAN},
+            };
+            for ( const auto& language : languages ) {
+                const bool isSelected = settings.D3D11Language == language.second;
+                if ( ImGui::Selectable( language.first, isSelected ) ) {
+                    settings.D3D11Language = language.second;
+                    german = settings.D3D11Language == GothicRendererSettings::D3D11_LANGUAGE_GERMAN;
+                }
+                if ( isSelected ) {
+                    ImGui::SetItemDefaultFocus();
+                }
+            }
+            ImGui::EndCombo();
+        }
+        ImGui::SetItemTooltip( "%s", Tr( "Selects the language used by the D3D11 renderer.", u8"Wählt die Sprache des D3D11-Renderers aus." ) );
+        ImGui::PopItemWidth();
+
         const char* versionText = VERSION_STRING;
         const ImVec2 versionTextSize = ImGui::CalcTextSize( versionText );
         ImGui::SameLine();
@@ -1240,7 +1276,7 @@ void ImGuiShim::RenderSettingsWindow()
             }
             ImGui::SetItemTooltip( "%s", Tr( "Changes the game output size.", u8"\u00C4ndert die Ausgabeaufl\u00F6sung des Spiels." ) );
 
-            static const std::vector<std::tuple<const char*, GothicRendererSettings::E_AntiAliasingMode, const char*>> antiAliasing = {
+            const std::array<std::tuple<const char*, GothicRendererSettings::E_AntiAliasingMode, const char*>, 4> antiAliasing = {
                 {Tr( "Disabled", u8"Aus" ), GothicRendererSettings::E_AntiAliasingMode::AA_NONE, nullptr },
                 {"SMAA", GothicRendererSettings::E_AntiAliasingMode::AA_SMAA, nullptr },
                 { "TAA", GothicRendererSettings::E_AntiAliasingMode::AA_TAA, Tr( "Temporal Anti-Aliasing", u8"Temporale Kantengl\u00E4ttung" ) },
@@ -1278,7 +1314,7 @@ void ImGuiShim::RenderSettingsWindow()
             if ( settings.Upscaler == GothicRendererSettings::UPSCALER_FSR_3 ) {
                 settings.ResolutionScalePercent = std::clamp( settings.ResolutionScalePercent, 33, 100 );
                 // Display "levels" as typical for FSR
-                static const std::vector<std::pair<const char*, int>> fsrLevels = {
+                const std::array<std::pair<const char*, int>, 6> fsrLevels = {
                     { Tr( "Native AA", u8"Nativ mit AA" ), 100 },
                     { Tr( "High Quality", u8"Sehr hohe Qualit\u00E4t" ), 83 },
                     { Tr( "Quality", u8"Qualit\u00E4t" ), 75 },
@@ -1304,7 +1340,7 @@ void ImGuiShim::RenderSettingsWindow()
             }
 
             ImText( Tr( "Texture Quality", u8"Texturqualit\u00E4t" ), buttonWidth ); ImGui::SameLine();
-            static const std::vector<std::pair<const char*, int>> QualityOptions = {
+            const std::array<std::pair<const char*, int>, 6> QualityOptions = {
                 { Tr( "Very Low", u8"Sehr niedrig" ), static_cast<int>(TX_QUALITY::VeryLow) },
                 { Tr( "Low", u8"Niedrig" ), static_cast<int>(TX_QUALITY::Low) },
                 { Tr( "Medium", u8"Mittel" ), static_cast<int>(TX_QUALITY::Medium) },
@@ -1340,7 +1376,7 @@ void ImGuiShim::RenderSettingsWindow()
             if ( displayModeState != WindowModes::WINDOW_MODE_WINDOWED ) {
                 displayModeState = WindowModes::WINDOW_MODE_FULLSCREEN_BORDERLESS;
             }
-            static const std::vector<std::tuple<const char*, WindowModes, const char*>> DisplayEnums = {
+            const std::array<std::tuple<const char*, WindowModes, const char*>, 2> DisplayEnums = {
                 { Tr( "Fullscreen", u8"Vollbild" ), WindowModes::WINDOW_MODE_FULLSCREEN_BORDERLESS, nullptr },
                 { Tr( "Windowed", u8"Fenstermodus" ), WindowModes::WINDOW_MODE_WINDOWED, nullptr},
             };
@@ -1354,7 +1390,7 @@ void ImGuiShim::RenderSettingsWindow()
 
 
             ImGui::SetItemTooltip( "%s", Tr( "Fullscreen fills the monitor without changing its display mode.", u8"Vollbild f\u00FCllt den Monitor ohne dessen Anzeigemodus zu \u00E4ndern." ) );
-            static const std::vector<std::pair<const char*, int>> shadowMapSizes = {
+            const std::array<std::pair<const char*, int>, 4> shadowMapSizes = {
                 {Tr( "Low", u8"Niedrig" ), 1024},
                 {Tr( "Medium", u8"Mittel" ), 2048},
                 {Tr( "High", u8"Hoch" ), 4096},
@@ -1482,7 +1518,7 @@ void ImGuiShim::RenderSettingsWindow()
             ImGui::SetItemTooltip( "%s", Tr( "Adds fine depth and structure to surfaces.", u8"F\u00FCgt Oberfl\u00E4chen feine Tiefe und Struktur hinzu." ) );
             ImGui::SameLine();
 
-            static const std::vector<std::pair<const char*, bool>> surfaceDetailModes = {
+            const std::array<std::pair<const char*, bool>, 2> surfaceDetailModes = {
                 {Tr( "Normal Maps", u8"Normalmaps" ), false},
                 {"Parallax", true},
             };
@@ -1649,14 +1685,7 @@ void ImGuiShim::RenderSettingsWindow()
         ImGui::SetItemTooltip( "%s", Tr( "Discard changes made since opening the F11 menu.", u8"Verwirft alle seit dem \u00D6ffnen des F11-Men\u00FCs vorgenommenen \u00C4nderungen." ) );
         ImGui::SameLine();
         const bool saved = ImGui::Button( Tr( "Save Settings", u8"Einstellungen speichern" ), ImVec2( footerButtonWidth, footerHeight ) );
-        auto worldSettingsPath = Engine::GAPI->GetLoadedWorldSettingsPath(false);
-        const bool isInWorld = !worldSettingsPath.empty();
-        const bool hasWorldSettings = Toolbox::FileExists( worldSettingsPath );
-        if ( ( ImGui::GetIO().KeyCtrl || hasWorldSettings ) && isInWorld ) {
-            ImGui::SetItemTooltip( Tr( "Save settings to \"%s\"", u8"Einstellungen unter \"%s\" speichern" ), worldSettingsPath.c_str() );
-        } else {
-            ImGui::SetItemTooltip( "%s", Tr( "Save settings.\nCTRL+Click to save just for the current world.", u8"Einstellungen speichern.\nSTRG+Klick speichert sie nur f\u00FCr die aktuelle Welt." ) );
-        }
+        ImGui::SetItemTooltip( "%s", Tr( "Saves the renderer settings globally.", u8"Speichert die Renderer-Einstellungen global." ) );
         if ( cancelled ) {
             CancelSettingsEdit();
             shadersToReload = ShaderCategory::None;
@@ -1664,11 +1693,7 @@ void ImGuiShim::RenderSettingsWindow()
         } else if ( saved ) {
             CommitSettingsEdit();
             Engine::GraphicsEngine->OnUIEvent( BaseGraphicsEngine::UI_ClosedSettings );
-            if ( (ImGui::GetIO().KeyCtrl || hasWorldSettings) && isInWorld ) {
-                Engine::GAPI->SaveRendererWorldSettings( settings );
-            } else {
-                Engine::GAPI->SaveRendererMenuWorldSettings( settings, MENU_SETTINGS_FILE );
-            }
+            Engine::GAPI->SaveRendererGlobalSettings( settings, MENU_SETTINGS_FILE );
             Engine::GAPI->SaveMenuSettings( MENU_SETTINGS_FILE );
         }
     }

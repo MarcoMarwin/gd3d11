@@ -8281,14 +8281,14 @@ XRESULT D3D11GraphicsEngine::DrawSky() {
     }
     // Create a rotaion only view-matrix
     XMMATRIX scale = XMMatrixScaling(
-        sky->GetAtmoshpereSettings().OuterRadius,
-        sky->GetAtmoshpereSettings().OuterRadius,
-        sky->GetAtmoshpereSettings().OuterRadius );  // Upscale it a huge amount. Gothics world is big.
+        sky->GetAtmosphereSettings().OuterRadius,
+        sky->GetAtmosphereSettings().OuterRadius,
+        sky->GetAtmosphereSettings().OuterRadius );  // Upscale it a huge amount. Gothics world is big.
 
     XMMATRIX world = XMMatrixTranslation(
         Engine::GAPI->GetCameraPosition().x,
         Engine::GAPI->GetCameraPosition().y +
-        sky->GetAtmoshpereSettings().SphereOffsetY,
+        sky->GetAtmosphereSettings().SphereOffsetY,
         Engine::GAPI->GetCameraPosition().z );
 
     world = XMMatrixTranspose( scale * world );

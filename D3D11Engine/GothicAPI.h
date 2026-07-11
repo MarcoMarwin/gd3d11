@@ -321,15 +321,13 @@ public:
     /** Called when the game is done loading the world */
     void OnWorldLoaded();
 
-    /** Sets the per mod & per world renderersettings which can be persisted */
+    /** Loads optional per-mod and per-world environment settings. */
     void LoadRendererWorldSettings( GothicRendererSettings& s );
     void LoadRendererWorldSettings( GothicRendererSettings& s, const char* iniFile );
-    void LoadRendererMenuWorldSettings( GothicRendererSettings& s, const char* iniFile );
+    void LoadRendererGlobalSettings( GothicRendererSettings& s, const char* iniFile );
 
-    /** Persists the per mod & per world renderersettings */
-    void SaveRendererWorldSettings( const GothicRendererSettings& s );
-    void SaveRendererWorldSettings( const GothicRendererSettings& s, const char* iniFile );
-    void SaveRendererMenuWorldSettings( const GothicRendererSettings& s, const char* iniFile );
+    /** Persists the global F11 settings. */
+    void SaveRendererGlobalSettings( const GothicRendererSettings& s, const char* iniFile );
 
     /** Called to update the multi thread resource manager state */
     void UpdateMTResourceManager();
@@ -550,30 +548,6 @@ public:
 
     /** Returns the midpoint of the current world */
     WorldInfo* GetLoadedWorldInfo() { return LoadedWorldInfo.get(); }
-
-    [[nodiscard]] std::string GetLoadedWorldSettingsPath(bool createPath = false) const {
-        if ( !LoadedWorldInfo || LoadedWorldInfo->WorldName.empty() ) {
-            return "";
-        }
-        auto gameName = GetGameName();
-        std::string zenFolder;
-        if ( gameName == "Original" ) {
-            zenFolder = "system\\GD3D11\\ZENResources\\";
-        } else {
-            zenFolder = "system\\GD3D11\\ZENResources\\" + gameName + "\\";
-        }
-        if ( !Toolbox::FolderExists( zenFolder ) ) {
-            if (createPath) {
-                if ( !Toolbox::CreateDirectoryRecursive( zenFolder ) ) {
-                    LogError() << "Could not save custom ZEN-Resources. Could not create directory: " << zenFolder;
-                    return "";
-                }
-            }
-        }
-
-        auto const ini = zenFolder + LoadedWorldInfo->WorldName + ".INI";
-        return ini;
-    }
 
     /** Returns wether the camera is indoor or not */
     bool IsCameraIndoor();
@@ -843,7 +817,7 @@ public:
     /** Prints a message to the screen for the given amount of time */
     void PrintMessageTimed( const INT2& position, const std::string& strMessage, float time = 3000.0f, DWORD color = 0xFFFFFFFF );
 
-    /** Returns whether the active Gothic menu uses German localization. */
+    /** Returns whether the renderer UI uses German localization. */
     bool IsGermanMenuLanguage();
 
     /** Prints information about the mod to the screen for a couple of seconds */
