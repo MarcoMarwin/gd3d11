@@ -75,6 +75,7 @@ struct PS_INPUT
 float4 PSMain( PS_INPUT Input ) : SV_TARGET
 {
 	float expDepth = TX_Depth.Sample(SS_Linear, Input.vTexcoord).r;
+	float skyPixel = 1.0f - step(0.00001f, expDepth);
 	
 	float3 position = VSPositionFromDepth(expDepth, Input.vTexcoord);
 	
@@ -111,5 +112,21 @@ float4 PSMain( PS_INPUT Input ) : SV_TARGET
 	float dayDarknessFactor = max(1.0f, 2.0f - max(0.0f, AC_LightPos.y));
 	float darknessFactor = lerp(dayDarknessFactor, 2.0f, nightTimeBlend);
 	float maxFogOpacity = lerp(1.0f, 0.85f, nightTimeBlend);
-	return float4(saturate(color / darknessFactor), fog * maxFogOpacity);
+	float rainyNightGeometry = (1.0f - skyPixel) * activeWeatherFog * nightTimeBlend;
+	float geometryFogOpacity = lerp(maxFogOpacity, 0.91f, rainyNightGeometry);
+	float skyRainFogAttenuation = lerp(1.0f, 0.54f, skyPixel * activeWeatherFog);
+	float fogOpacity = fog * geometryFogOpacity * skyRainFogAttenuation;
+
+	float globalRainFogOpacity = activeWeatherFog
+		* lerp(0.06f, 0.20f, nightTimeBlend)
+		* lerp(1.0f, 0.65f, skyPixel);
+	float rainDepthStart = max(500.0f, stableFadeStart * 0.20f);
+	float rainDepthEnd = max(rainDepthStart + 3500.0f, stableFadeEnd * 0.90f);
+	float rainDepthT = saturate((fogDistance - rainDepthStart) / max(rainDepthEnd - rainDepthStart, 1.0f));
+	float rainDepthRamp = SmootherStep01(rainDepthT);
+	float rainyNightDepthFog = activeWeatherFog * nightTimeBlend * (1.0f - skyPixel)
+		* lerp(0.20f, 0.48f, rainDepthRamp);
+	fogOpacity = max(fogOpacity, max(globalRainFogOpacity, rainyNightDepthFog));
+
+	return float4(saturate(color / darknessFactor), saturate(fogOpacity));
 }

@@ -1,4 +1,6 @@
 #include "pch.h"
+#include <algorithm>
+#include <cmath>
 #include "D3D11TiledDeferredShading.h"
 
 #include "D3D11GraphicsEngine.h"
@@ -361,6 +363,23 @@ D3D11TiledDeferredShading::CullResult D3D11TiledDeferredShading::CullLights(
     auto graphicsEngine = reinterpret_cast<D3D11GraphicsEngine*>(Engine::GraphicsEngine);
     auto _ = graphicsEngine->RecordGraphicsEvent( GE_NAME( "CullLights" ) );
     auto& settings = Engine::GAPI->GetRendererState().RendererSettings;
+    const bool fsr3TemporalShadows = settings.Upscaler == GothicRendererSettings::UPSCALER_FSR_3
+        && settings.AntiAliasingMode == GothicRendererSettings::AA_FSR
+        && settings.ResolutionScalePercent < 100;
+    const bool temporalPointlightShadows = fsr3TemporalShadows
+        || settings.AntiAliasingMode == GothicRendererSettings::AA_TAA;
+    const float pointlightRenderScale = fsr3TemporalShadows
+        ? std::clamp( static_cast<float>(settings.ResolutionScalePercent) * 0.01f, 0.33f, 1.0f )
+        : 1.0f;
+    const float temporalPointlightFilterScale = fsr3TemporalShadows
+        ? std::clamp( 1.0f / std::sqrt(pointlightRenderScale), 1.0f, 1.75f )
+        : 1.0f;
+    const float minimumTemporalShadowSoftness = temporalPointlightShadows
+        ? 0.35f * temporalPointlightFilterScale
+        : 0.0f;
+    const float shadowFadeStartRatio = fsr3TemporalShadows
+        ? std::clamp( 0.65f + (pointlightRenderScale - 0.5f) * 0.20f, 0.65f, 0.75f )
+        : 0.75f;
     auto& context = graphicsEngine->GetContext();
 
     XMMATRIX viewRaw = Engine::GAPI->GetViewMatrixXM();
@@ -435,7 +454,7 @@ D3D11TiledDeferredShading::CullResult D3D11TiledDeferredShading::CullLights(
         XMStoreFloat( &dist, XMVector3Length( XMLoadFloat3( posWorld.toXMFLOAT3() ) - camPos ) );
 
         const float shadowFadeEnd = std::max( settings.VisualFXDrawRadius - lightRange, 1.0f );
-        const float shadowFadeStart = shadowFadeEnd * 0.75f;
+        const float shadowFadeStart = shadowFadeEnd * shadowFadeStartRatio;
         const float shadowFadeT = std::clamp(
             (shadowFadeEnd - dist) / std::max( shadowFadeEnd - shadowFadeStart, 1.0f ), 0.0f, 1.0f );
         const float shadowDistanceFade = shadowFadeT * shadowFadeT * (3.0f - 2.0f * shadowFadeT);
@@ -468,7 +487,7 @@ D3D11TiledDeferredShading::CullResult D3D11TiledDeferredShading::CullLights(
         tl.ShadowStrength = shadowDistanceFade;
         tl.IsIndoor = light->Vob && light->Vob->IsIndoorVob() ? 1.0f : 0.0f;
         tl.IgnoreIndoorOutdoorLimit = light->IgnoreIndoorOutdoorLimit ? 1.0f : 0.0f;
-        tl.ShadowSoftness = settings.ShadowSoftness * 2.0f;
+        tl.ShadowSoftness = std::max( settings.ShadowSoftness * 2.0f, minimumTemporalShadowSoftness );
 
         if ( hasShadow ) {
             tl.ShadowCubeIndex = pl->GetTiledSlot();

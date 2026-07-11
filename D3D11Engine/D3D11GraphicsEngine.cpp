@@ -1905,9 +1905,19 @@ XRESULT D3D11GraphicsEngine::Present() {
         GammaCorrectConstantBuffer gcb = {};
         gcb.G_Gamma = Engine::GAPI->GetGammaValue();
         gcb.G_Brightness = Engine::GAPI->GetBrightnessValue();
+        const bool lowResolutionFSR3 = settings.Upscaler == GothicRendererSettings::UPSCALER_FSR_3
+            && settings.AntiAliasingMode == GothicRendererSettings::AA_FSR
+            && settings.ResolutionScalePercent < 67;
+        const float outputDitherRamp = lowResolutionFSR3
+            ? std::clamp( (67.0f - static_cast<float>(settings.ResolutionScalePercent)) / 17.0f, 0.0f, 1.0f )
+            : 0.0f;
+        gcb.G_OutputDitherStrength = outputDitherRamp * (1.5f / 255.0f);
         ActivePS->GetBuffer( "GammaCorrectConstantBuffer" ).Update( &gcb ).Bind();
 
+        GetBlueNoiseTexture()->BindToPixelShader( 1 );
         PfxRenderer->CopyTextureToRTV( Backbuffer->GetShaderResView(), BackbufferRTV, {}, true );
+        ID3D11ShaderResourceView* nullOutputDither = nullptr;
+        GetContext()->PSSetShaderResources( 1, 1, &nullOutputDither );
 
         static int show_velocity = 0;
         if ( settings.DebugSettings.TAA.DisplayVelocity ) {
@@ -3927,26 +3937,9 @@ XRESULT D3D11GraphicsEngine::OnStartWorldRendering() {
 
     rendererState.RendererInfo.RenderStage = STAGE_DRAW_WORLD;
 
-    // Borderless presentation may stretch a lower-resolution swapchain to a
-    // desktop with another aspect ratio. Compensate only the 3D projection;
-    // Gothic's menu and HUD intentionally continue to fill the whole window.
     const XMFLOAT4X4 uiProjection = rendererState.TransformState.TransformProjUnjittered;
-    XMFLOAT4X4 worldProjection = uiProjection;
-    if ( rendererState.RendererSettings.StretchWindow && OutputWindow
-        && Resolution.x > 0 && Resolution.y > 0 ) {
-        RECT clientRect = {};
-        if ( GetClientRect( OutputWindow, &clientRect ) ) {
-            const int clientWidth = clientRect.right - clientRect.left;
-            const int clientHeight = clientRect.bottom - clientRect.top;
-            if ( clientWidth > 0 && clientHeight > 0 ) {
-                const float renderAspect = static_cast<float>(Resolution.x) / static_cast<float>(Resolution.y);
-                const float windowAspect = static_cast<float>(clientWidth) / static_cast<float>(clientHeight);
-                worldProjection._11 *= renderAspect / windowAspect;
-            }
-        }
-    }
-    rendererState.TransformState.TransformProjUnjittered = worldProjection;
-    rendererState.TransformState.TransformProj = worldProjection;
+    rendererState.TransformState.TransformProjUnjittered = uiProjection;
+    rendererState.TransformState.TransformProj = uiProjection;
 
     SetViewport( ViewportInfo( 0, 0, GetResolution() ) );
 
@@ -4867,6 +4860,47 @@ XRESULT D3D11GraphicsEngine::OnStartWorldRendering() {
             ID3D11ShaderResourceView* nullRainInputs[2] = {};
             GetContext()->PSSetShaderResources( 1, 2, nullRainInputs );
         }
+
+        // A borderless lower-resolution swapchain is stretched to the desktop
+        // by DXGI. Fit only the completed world image into that anisotropic
+        // stretch so its original aspect ratio survives; HUD and menu render
+        // afterwards and intentionally continue to fill the window.
+        if ( rendererState.RendererSettings.StretchWindow && OutputWindow
+            && Resolution.x > 0 && Resolution.y > 0 ) {
+            RECT clientRect = {};
+            if ( GetClientRect( OutputWindow, &clientRect ) ) {
+                const int clientWidth = clientRect.right - clientRect.left;
+                const int clientHeight = clientRect.bottom - clientRect.top;
+                if ( clientWidth > 0 && clientHeight > 0 ) {
+                    const float renderAspect = static_cast<float>(Resolution.x) / static_cast<float>(Resolution.y);
+                    const float windowAspect = static_cast<float>(clientWidth) / static_cast<float>(clientHeight);
+                    if ( std::abs( renderAspect - windowAspect ) > 0.001f ) {
+                        const float logicalContentAspect = renderAspect * renderAspect / windowAspect;
+                        INT2 contentSize = Resolution;
+                        INT2 contentOffset = INT2( 0, 0 );
+                        if ( logicalContentAspect < renderAspect ) {
+                            contentSize.x = std::max( 1, static_cast<int>(std::lround( Resolution.y * logicalContentAspect )) );
+                            contentOffset.x = (Resolution.x - contentSize.x) / 2;
+                        } else {
+                            contentSize.y = std::max( 1, static_cast<int>(std::lround( Resolution.x / logicalContentAspect )) );
+                            contentOffset.y = (Resolution.y - contentSize.y) / 2;
+                        }
+
+                        auto aspectCorrectedWorld = PfxRenderer->GetBackbufferTempBuffer();
+                        ID3D11ShaderResourceView* nullWorldSRV = nullptr;
+                        GetContext()->PSSetShaderResources( 0, 1, &nullWorldSRV );
+                        GetContext()->OMSetRenderTargets( 0, nullptr, nullptr );
+                        GetContext()->CopyResource(
+                            aspectCorrectedWorld->GetTexture().Get(), Backbuffer->GetTexture().Get() );
+                        const float black[4] = {};
+                        GetContext()->ClearRenderTargetView( Backbuffer->GetRenderTargetView().Get(), black );
+                        PfxRenderer->CopyTextureToRTV(
+                            aspectCorrectedWorld->GetShaderResView(), Backbuffer->GetRenderTargetView(),
+                            contentSize, false, contentOffset );
+                    }
+                }
+            }
+        }
         GetContext()->ClearDepthStencilView( DepthStencilBuffer->GetDepthStencilView().Get(), D3D11_CLEAR_DEPTH, 0, 0 );
         GetContext()->ClearDepthStencilView( m_SwapchainDepthStencilBuffer->GetDepthStencilView().Get(), D3D11_CLEAR_DEPTH, 0, 0 );
         SetDefaultStates();
@@ -4874,8 +4908,8 @@ XRESULT D3D11GraphicsEngine::OnStartWorldRendering() {
         // Temporal AA/FSR3 jitter belongs to world rendering only. Gothic's HUD
         // and 3D inventory are drawn after upscaling at output resolution and
         // must use an unjittered projection to avoid subpixel shimmer.
-        // Restore the exact projection supplied by Gothic. Aspect compensation
-        // and temporal jitter belong to world rendering only.
+        // Restore the exact projection supplied by Gothic. Temporal jitter
+        // belongs to world rendering only.
         rendererState.TransformState.TransformProj = uiProjection;
         rendererState.TransformState.TransformProjUnjittered = uiProjection;
 
@@ -8632,7 +8666,7 @@ void D3D11GraphicsEngine::GetBackbufferData( bool thumbnail, byte** data, INT2& 
     SetActivePixelShader( PShaderID::PS_PFX_GammaCorrectInv );
     ActivePS->Apply();
 
-    GammaCorrectConstantBuffer gcb;
+    GammaCorrectConstantBuffer gcb = {};
     gcb.G_Gamma = Engine::GAPI->GetGammaValue();
     gcb.G_Brightness = Engine::GAPI->GetBrightnessValue();
 

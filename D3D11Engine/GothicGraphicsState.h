@@ -672,9 +672,9 @@ struct GothicRendererSettings {
         BrightnessValue = 1.0f;
         GammaValue = 1.0f;
 
-        EnableOcclusionCulling = false;
+        EnableOcclusionCulling = true;
         PCSSLightSize = 0.140f;
-        ShadowFilterMode = E_ShadowFilterMode::SHADOW_FILTER_SIMPLE;
+        ShadowFilterMode = E_ShadowFilterMode::SHADOW_FILTER_PCSS;
 
         EnableShadows = true;
         ThreadedShadowCulling = false;

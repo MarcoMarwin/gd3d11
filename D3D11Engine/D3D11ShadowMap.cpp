@@ -125,14 +125,9 @@ void CalculateTemporalInterpolatedPosition(
     // Update the stored previous direction for next frame
     previousDir = dir;
 
-    // Additionally apply quantization for sub-texel stability
-    // This snaps the direction to discrete steps to prevent micro-flickering
-    XMVECTOR scale = XMVectorReplicate( frequency );
-    dir = XMVectorDivide(
-        _mm_cvtepi32_ps( _mm_cvtps_epi32( XMVectorMultiply( dir, scale ) ) ),
-        scale
-    );
-    outDir = XMVector3Normalize( dir );
+    // Keep the interpolated direction continuous. Cascade centers are already
+    // stabilized on a global shadow-texel grid in CalculateCascadeMatrices.
+    outDir = dir;
 }
 
 /// <summary>
@@ -557,7 +552,6 @@ XRESULT D3D11ShadowMap::PrepareRender()
 
     static struct alignas(16) {
         XMVECTOR PreviousLightDir;
-        XMVECTOR OldPosition;
         XMVECTOR LightDir;
         XMVECTOR Position;
         bool initialized;
@@ -610,30 +604,12 @@ XRESULT D3D11ShadowMap::PrepareRender()
         lastCascadeData.LightDir,
         500.0f );
 
-    static XMVECTOR oldP = XMVectorZero();
-    XMVECTOR WorldShadowCP;
-    // Update position
-    // Try to update only if the camera went 200 units away from the last position
-    // This prevents "shaking" when the player is strafing or moving just a tiny bit
-    float len;
-    XMStoreFloat( &len, XMVector3LengthSq( oldP - cameraPositionXm ) );
-    constexpr float distSq = 64.f * 64.f;
-    if ( (len < distSq) ) {
-        WorldShadowCP = oldP;
-    } else {
-        oldP = cameraPositionXm;
-        WorldShadowCP = oldP;
-    }
+    // Feed the real camera position into the stable CSM calculation every frame.
+    // CalculateCascadeMatrices performs the final movement in shadow-texel steps,
+    // avoiding both coarse 64/160-unit jumps and sub-texel crawling.
+    const XMVECTOR WorldShadowCP = cameraPositionXm;
+    lastCascadeData.Position = cameraPositionXm;
     XMStoreFloat3( &m_WorldShadowPos, WorldShadowCP );
-
-    XMStoreFloat( &len, XMVector3LengthSq( lastCascadeData.OldPosition - cameraPositionXm ) );
-    // for the last cascade, we snap greater distances to avoid shimmering when moving
-    if ( (len < (160.f * 160.f)) ) {
-        lastCascadeData.Position = lastCascadeData.OldPosition;
-    } else {
-        lastCascadeData.OldPosition = cameraPositionXm;
-        lastCascadeData.Position = cameraPositionXm;
-    }
 
     // Indoor check
     static zTBspMode lastBspMode = zBSP_MODE_OUTDOOR;

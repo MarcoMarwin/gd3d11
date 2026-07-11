@@ -52,7 +52,8 @@ struct SkyConstantBuffer {
 struct GammaCorrectConstantBuffer {
     float G_Gamma;
     float G_Brightness;
-    float2 G_pad;
+    float G_OutputDitherStrength;
+    float G_Pad;
 };
 
 struct PfxSharpenConstantBuffer {
@@ -136,7 +137,7 @@ struct ScreenSpaceLightingConstantBuffer {
 };
 struct CompositionControlConstantBuffer {
     float CC_HeightFogEnabled;
-    float CC_Pad0;
+    float CC_LowResolutionFSR3;
     float2 CC_InvResolution;
 
     float4 CC_ProjParams;

@@ -1,4 +1,6 @@
 #include "pch.h"
+#include <algorithm>
+#include <cmath>
 #include "D3D11LegacyDeferredShading.h"
 
 #include "D3D11GraphicsEngine.h"
@@ -21,6 +23,23 @@ XRESULT D3D11LegacyDeferredShading::DrawPointlightLights(
     auto _ = graphicsEngine->RecordGraphicsEvent( GE_NAME( "LegacyPointlightLights" ) );
     auto& context = graphicsEngine->GetContext();
     auto& settings = Engine::GAPI->GetRendererState().RendererSettings;
+    const bool fsr3TemporalShadows = settings.Upscaler == GothicRendererSettings::UPSCALER_FSR_3
+        && settings.AntiAliasingMode == GothicRendererSettings::AA_FSR
+        && settings.ResolutionScalePercent < 100;
+    const bool temporalPointlightShadows = fsr3TemporalShadows
+        || settings.AntiAliasingMode == GothicRendererSettings::AA_TAA;
+    const float pointlightRenderScale = fsr3TemporalShadows
+        ? std::clamp( static_cast<float>(settings.ResolutionScalePercent) * 0.01f, 0.33f, 1.0f )
+        : 1.0f;
+    const float temporalPointlightFilterScale = fsr3TemporalShadows
+        ? std::clamp( 1.0f / std::sqrt(pointlightRenderScale), 1.0f, 1.75f )
+        : 1.0f;
+    const float minimumTemporalShadowSoftness = temporalPointlightShadows
+        ? 0.35f * temporalPointlightFilterScale
+        : 0.0f;
+    const float shadowFadeStartRatio = fsr3TemporalShadows
+        ? std::clamp( 0.65f + (pointlightRenderScale - 0.5f) * 0.20f, 0.65f, 0.75f )
+        : 0.75f;
 
     XMMATRIX view = Engine::GAPI->GetViewMatrixXM();
     Engine::GAPI->SetViewTransformXM( view );
@@ -99,14 +118,14 @@ XRESULT D3D11LegacyDeferredShading::DrawPointlightLights(
         plcb.Pl_PositionWorld = light->GetEffectivePositionWorld();
         plcb.PL_Outdoor = light->IsIndoorVob ? 0.0f : 1.0f;
         plcb.PL_IgnoreIndoorOutdoorLimit = light->IgnoreIndoorOutdoorLimit ? 1.0f : 0.0f;
-        plcb.PL_ShadowSoftness = settings.ShadowSoftness * 2.0f;
+        plcb.PL_ShadowSoftness = std::max( settings.ShadowSoftness * 2.0f, minimumTemporalShadowSoftness );
 
         float dist;
         XMStoreFloat( &dist, XMVector3Length( XMLoadFloat3( plcb.Pl_PositionWorld.toXMFLOAT3() ) - Engine::GAPI->GetCameraPositionXM() ) );
 
         const float lightRange = plcb.PL_Range;
         const float shadowFadeEnd = std::max( settings.VisualFXDrawRadius - lightRange, 1.0f );
-        const float shadowFadeStart = shadowFadeEnd * 0.75f;
+        const float shadowFadeStart = shadowFadeEnd * shadowFadeStartRatio;
         const float shadowFadeT = std::clamp(
             (shadowFadeEnd - dist) / std::max( shadowFadeEnd - shadowFadeStart, 1.0f ), 0.0f, 1.0f );
         plcb.PL_ShadowStrength = shadowFadeT * shadowFadeT * (3.0f - 2.0f * shadowFadeT);

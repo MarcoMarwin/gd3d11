@@ -43,7 +43,7 @@ cbuffer PFXBuffer : register( b0 )
 cbuffer CompositionControl : register( b2 )
 {
     float CC_HeightFogEnabled;
-    float CC_Pad0;
+    float CC_LowResolutionFSR3;
     float2 CC_InvResolution;
 
     float4 CC_ProjParams;
@@ -154,9 +154,17 @@ float4 ComputeHeightFog( float2 texcoord )
 	// Rain keeps a depth-independent weather veil near the camera. It is stronger at night,
 	// while sky pixels receive less opacity so the cloud deck remains visible through it.
 	float globalRainFogOpacity = activeWeatherFog
-		* lerp(0.06f, 0.16f, nightTimeBlend)
+		* lerp(0.06f, 0.20f, nightTimeBlend)
 		* lerp(1.0f, 0.65f, skyPixel);
-	fogOpacity = max(fogOpacity, globalRainFogOpacity);
+
+	// Add depth to rainy nights instead of increasing a flat full-screen veil.
+	float rainDepthStart = max(500.0f, stableFadeStart * 0.20f);
+	float rainDepthEnd = max(rainDepthStart + 3500.0f, stableFadeEnd * 0.90f);
+	float rainDepthT = saturate((fogDistance - rainDepthStart) / max(rainDepthEnd - rainDepthStart, 1.0f));
+	float rainDepthRamp = SmootherStep01(rainDepthT);
+	float rainyNightDepthFog = activeWeatherFog * nightTimeBlend * (1.0f - skyPixel)
+		* lerp(0.20f, 0.48f, rainDepthRamp);
+	fogOpacity = max(fogOpacity, max(globalRainFogOpacity, rainyNightDepthFog));
 
 	return float4(saturate(color / darknessFactor), saturate(fogOpacity));
 }
@@ -407,7 +415,7 @@ float4 PSMain( PS_INPUT Input ) : SV_TARGET
     {
         float4 fog = ComputeHeightFog( Input.vTexcoord );
         color.rgb = lerp( color.rgb, fog.rgb, fog.a );
-        float ditherWeight = saturate(fog.a * 4.0f);
+        float ditherWeight = saturate(fog.a * 4.0f) * (1.0f - saturate(CC_LowResolutionFSR3));
         color.rgb = saturate(color.rgb + FogBlueNoise(Input.vPosition.xy) * ditherWeight / 255.0f);
     }
 #endif

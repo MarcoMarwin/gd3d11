@@ -112,6 +112,31 @@ namespace {
     bool IsGroundFogParticleTexture( zCTexture* texture ) {
         return texture && IsGroundFogName( texture->GetNameWithoutExt() );
     }
+    bool IsSmokeName( std::string name ) {
+        name = ToLowerMaterialName( std::move( name ) );
+        return name.find( "smoke" ) != std::string::npos
+            || name.find( "rauch" ) != std::string::npos
+            || name.find( "steam" ) != std::string::npos
+            || name.find( "dampf" ) != std::string::npos;
+    }
+
+    bool IsSmokeParticleTexture( zCTexture* texture ) {
+        return texture && IsSmokeName( texture->GetNameWithoutExt() );
+    }
+
+    bool IsSmokeParticleVob( zCVob* source ) {
+        if ( !source )
+            return false;
+
+        std::string name = source->GetName();
+        if ( zCVisual* visual = source->GetVisual() ) {
+            name += " ";
+            if ( const char* objectName = visual->GetObjectName() ) {
+                name += objectName;
+            }
+        }
+        return IsSmokeName( std::move( name ) );
+    }
 
     bool IsGroundFogParticleVob( zCVob* source ) {
         if ( !source )
@@ -3439,6 +3464,9 @@ void GothicAPI::DrawParticleFX( zCVob* source, zCParticleFX* fx, ParticleFrameDa
 
         const bool waterfallParticle = IsWaterfallParticleTexture( texture );
         const bool groundFogParticle = IsGroundFogParticleVob( source ) || IsGroundFogParticleTexture( texture );
+        const bool smokeOrFogParticle = groundFogParticle
+            || IsSmokeParticleVob( source )
+            || IsSmokeParticleTexture( texture );
         const int sourceBlendMode = static_cast<int>(fx->GetEmitter()->GetVisAlphaFunc());
         const int blendMode = sourceBlendMode;
         const bool emissiveParticle = !groundFogParticle && !waterfallParticle
@@ -3536,6 +3564,11 @@ void GothicAPI::DrawParticleFX( zCVob* source, zCParticleFX* fx, ParticleFrameDa
                 // here only for translucent ground fog so its original linear
                 // emitter opacity survives the shader path.
                 color.w = std::pow( color.w, 1.0f / 2.2f );
+            }
+            if ( smokeOrFogParticle ) {
+                // Alpha is raised to 2.2 in VS_ParticlePoint. Applying the
+                // inverse-gamma factor here yields exactly 75% final opacity.
+                color.w *= 0.8774243f;
             }
 
             ii.position = p->PositionWS;

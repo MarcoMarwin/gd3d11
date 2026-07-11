@@ -6,16 +6,20 @@
 
 #if !defined(__cplusplus)
 
-static const int PLS_SHADOW_BLUR_COUNT = 8;
+static const int PLS_SHADOW_BLUR_COUNT = 12;
 static const float2 PLS_SHADOW_BLUR_OFFSETS[PLS_SHADOW_BLUR_COUNT] = {
-    float2( 0.076849f, -0.078216f),
-    float2(-0.165415f,  0.370808f),
-    float2(-0.551062f, -0.407284f),
-    float2( 0.449733f, -0.518174f),
-    float2( 0.347526f,  0.730303f),
-    float2(-0.840654f,  0.134261f),
-    float2( 0.896791f,  0.038446f),
-    float2(-0.258169f, -0.912648f)
+    float2( 0.000000f,  0.000000f),
+    float2( 0.350000f,  0.000000f),
+    float2(-0.270000f,  0.250000f),
+    float2( 0.040000f, -0.460000f),
+    float2( 0.420000f,  0.410000f),
+    float2(-0.550000f, -0.100000f),
+    float2( 0.300000f, -0.580000f),
+    float2(-0.340000f,  0.620000f),
+    float2( 0.720000f,  0.050000f),
+    float2(-0.680000f,  0.400000f),
+    float2( 0.080000f,  0.820000f),
+    float2(-0.180000f, -0.880000f)
 };
 
 float PLS_AggressiveNoise(float3 p)

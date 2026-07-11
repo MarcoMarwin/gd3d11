@@ -22,6 +22,16 @@ Kurze, append-only Dokumentation der von Codex gepushten Renderer-Builds.
 - Interaktive Vegetation: Horizontaler Vollbereich auf 0-20 und der weiche Uebergang auf 20-25 Welt-Einheiten begrenzt; die maximale Verschiebung bleibt bei 38.
 - Nachtnebel: Der horizontale Entfernungsnebelschleier ist nachts 20 Prozent dunkler; vertikaler Ground Fog und Fernwelt-Dunkelung bleiben unveraendert.
 
+- Regen bei Nacht: Der globale Regenschleier wird um eine entfernungsabhaengige Geometrieschicht ergaenzt; Himmel und Wolkendecke bleiben schwacher betroffen. Kompositions- und Height-Fog-Fallback verwenden dieselbe Logik.
+- Regennebel-Uebergang: Die Geometrieverdichtung erreicht ihre maximale Deckkraft erst nach mindestens 3500 Welteinheiten beziehungsweise bei 90 Prozent der Fog-Reichweite; eine quintische S-Kurve verhindert einen sichtbaren Beginn oder harten Fernuebergang.
+- Seitenverhaeltnis: Bei gestrecktem Borderless-Betrieb wird nur das fertige Weltbild vor HUD und Menue mit schwarzen Balken proportional eingepasst; 800x600 auf 1920x1080 ergibt 600x600 plus je 100 logische Pixel Seitenrand und damit physisch korrektes 4:3.
+- Pointlight-Schatten: Festes 12-Tap-PCF sowie renderaufloesungsabhaengige Mindestweichheit und ein breiterer Distanzuebergang beruhigen FSR-3-/TAA-Flackern; Shadowmaps und Licht bleiben weiterhin bis zur VisualFX-Reichweite erhalten.
+- Schattenfilter-Standard: PCSS ist fuer neue beziehungsweise auf Standardwerte zurueckgesetzte Konfigurationen vorausgewaehlt; vorhandene explizite Benutzerauswahlen bleiben erhalten, Feature Level 10 faellt weiterhin auf Simple PCF zurueck.
+- World-Shadow-Bewegung: Die geglaettete Sonnen-/Mondrichtung wird nicht mehr auf harte 1/500-Schritte quantisiert und die CSM-Kamera nicht mehr in 64-/160-Einheiten versetzt. Die vorhandene globale Shadow-Texel-Ausrichtung stabilisiert weiterhin gegen Subpixel-Flimmern; Cascade-Renderintervalle und GPU-Last bleiben unveraendert.
+- Occlusion Culling: Fuer neue Konfigurationen standardmaessig aktiv; die bewussten Profilwerte bleiben erhalten, also aktiv bei Niedrig/Mittel und inaktiv bei Hoch/Extrem. Individuell gespeicherte Benutzerwerte bleiben beim normalen Laden ebenfalls erhalten.
+- Rauch und Fog: Erkannte Smoke-, Rauch-, Steam-, Dampf-, Fog-, Nebel-, Dunst- und Ground-Fog-Partikel werden gamma-korrekt auf exakt 75 Prozent ihrer bisherigen finalen Deckkraft reduziert; Feuer- und Wasserpartikel bleiben unveraendert.
+- FSR-3-Himmel: Nur im niedrigen FSR-3-Skalierungsbereich unter 67 Prozent wird Fog-Blue-Noise nicht mehr vor der Rekonstruktion eingemischt. Dort erfolgt stattdessen ein schwaches, dunkelheitsgewichtetes Blue-Noise-Dithering im Ausgabeformat gegen diagonale Rekonstruktionsstreifen; hoehere Qualitaetsstufen bleiben unveraendert.
+
 ## Build 110 (Korrekturpush)
 
 - CI-Fix: Deutsche UTF-8-UI-Texte bleiben als `u8`-Literals erhalten, werden aber fuer ImGui/Gothic gezielt als `const char*` uebergeben, damit Release_G1_12f unter C++20 nicht an `char8_t` scheitert.
