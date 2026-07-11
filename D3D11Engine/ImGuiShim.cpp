@@ -1163,8 +1163,8 @@ void ImGuiShim::RenderSettingsWindow()
         GothicRendererSettings& settings = Engine::GAPI->GetRendererState().RendererSettings;
         FixupSettings(settings);
         const bool german = Engine::GAPI->IsGermanMenuLanguage();
-        const auto Tr = [german]( const char* english, const char* germanText ) {
-            return german ? germanText : english;
+        const auto Tr = [german]( const char* english, const auto* germanText ) -> const char* {
+            return german ? reinterpret_cast<const char*>( germanText ) : english;
         };
 
         static const std::vector<std::pair<const char*, int>> graphicsPresets = {

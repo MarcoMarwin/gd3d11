@@ -2,6 +2,12 @@
 
 Kurze, append-only Dokumentation der von Codex gepushten Renderer-Builds.
 
+## Build 110 (Korrekturpush)
+
+- CI-Fix: Deutsche UTF-8-UI-Texte bleiben als `u8`-Literals erhalten, werden aber fuer ImGui/Gothic gezielt als `const char*` uebergeben, damit Release_G1_12f unter C++20 nicht an `char8_t` scheitert.
+- Inhaltlich keine zusaetzlichen Renderer-Aenderungen gegenueber Build 110.
+- Pruefung: CI-Fehlerstellen in `GothicAPI.cpp` und `ImGuiShim.cpp` statisch gegen die gemeldeten C2664/C2446-Fehler kontrolliert; kein vollstaendiger lokaler C++-Build.
+
 ## Build 110
 
 - Pointlights und ihre Shadowmaps folgen wieder der VisualFX-Sichtweite mit festem Nightly-Maximum, ohne eigenen F11-Regler.
