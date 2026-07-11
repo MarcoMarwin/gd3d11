@@ -10,7 +10,10 @@ Kurze, append-only Dokumentation der von Codex gepushten Renderer-Builds.
 - Dokumentation: README auf Installation, aktuelle Buildvoraussetzungen, Mod-Weltformat, Abhaengigkeiten, Lizenz und die gleichwertige Autorenliste reduziert.
 - Pruefung: statische Diff-, Aufrufer-, INI-, Symbol- und Projektkonsistenzpruefung; kein vollstaendiger lokaler C++-Build.
 - CI-Korrektur: Die lokalisierten std::array-Tabellen im F11-Menue verwenden nun die von MSVC benoetigte doppelte Aggregatklammerung.
-- Startkorrektur: Der erste Aufloesungswechsel folgt wieder Build 109; Borderless wird erst nach vorhandener Swapchain verzerrungsfrei auf die Monitoraufloesung nachgezogen. Der Sprachwert liegt am Ende der Settings-Struktur, damit bestehende Feld-Offsets erhalten bleiben.
+- Aufloesungskorrektur: F11-Aufloesungen werden wieder wirklich uebernommen; Menu und HUD fuellen Borderless vollstaendig aus, waehrend nur die 3D-Projektion ein abweichendes Fensterseitenverhaeltnis ausgleicht. Der Sprachwert bleibt am Ende der Settings-Struktur, damit bestehende Feld-Offsets erhalten bleiben.
+- Schattenkorrektur: EVSM4-Momente bei erhaltener neuer Cascade-Logik wiederhergestellt; CSM-Empfaengerbias fuer alle Flaechen stabilisiert und Pointlight-Shadowmaps mit Reichweitenhysterese sowie festem FSR-3-tauglichem Filter beruhigt.
+- F11: Ueberlange deutsche Beschriftungen wurden gekuerzt und nur die Sprachauswahl verbreitert. Der Blue-Noise-Fog bleibt unveraendert.
+- Ground Fog und VisualFX: Die originale Ground-Fog-Partikeldeckkraft bleibt erhalten; fuer alle Partikeleffekte gilt ohne Boundingbox-Sonderfall ausschliesslich VisualFXDrawRadius als Distanzgrenze.
 
 ## Build 110 (Korrekturpush)
 

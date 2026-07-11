@@ -1944,20 +1944,12 @@ void GothicAPI::GetVisibleParticleEffectsList( std::vector<zCVob*>& pfxList ) {
 
         const float visualFxRange = RendererState.RendererSettings.VisualFXDrawRadius;
         const XMVECTOR vVfxRangeSq = XMVectorReplicate( visualFxRange * visualFxRange );
-        XMFLOAT3 cameraPosition;
-        XMStoreFloat3( &cameraPosition, camPos );
 
         for ( auto const& it : ParticleEffectVobs ) {
             const bool keepGroundFogVisible = IsGroundFogParticleVob( it );
-            bool outsideVisualFxRange = XMVector3Greater(
-                XMVector3LengthSq( it->GetPositionWorldXM() - camPos ), vVfxRangeSq );
-            if ( keepGroundFogVisible && outsideVisualFxRange ) {
-                const zTBBox3D bbox = it->GetBBox();
-                outsideVisualFxRange = Toolbox::ComputePointAABBDistance(
-                    cameraPosition, bbox.Min, bbox.Max ) > visualFxRange;
-            }
-            if ( outsideVisualFxRange ) {
-                // Ground fog uses its field bounds so large emitters remain visible near their edges.
+            if ( XMVector3Greater(
+                    XMVector3LengthSq( it->GetPositionWorldXM() - camPos ), vVfxRangeSq ) ) {
+                // VisualFXDrawRadius is the single distance cutoff for every particle effect.
                 continue;
             }
 

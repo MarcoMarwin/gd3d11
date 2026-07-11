@@ -47,10 +47,10 @@ Texture2D TX_Diffuse : register(t0);
 Texture2D TX_Nrm : register(t1);
 Texture2D TX_Depth : register(t2);
 #if SHD_FILTER_EVSM
-Texture2D<float2> TX_EVSMShadowmap0 : register(t14);
-Texture2D<float2> TX_EVSMShadowmap1 : register(t15);
-Texture2D<float2> TX_EVSMShadowmap2 : register(t16);
-Texture2D<float2> TX_EVSMShadowmap3 : register(t17);
+Texture2D<float4> TX_EVSMShadowmap0 : register(t14);
+Texture2D<float4> TX_EVSMShadowmap1 : register(t15);
+Texture2D<float4> TX_EVSMShadowmap2 : register(t16);
+Texture2D<float4> TX_EVSMShadowmap3 : register(t17);
 #elif SHADOW_ATLAS
 Texture2D TX_ShadowmapAtlas : register(t3);
 #else
@@ -292,15 +292,12 @@ float4 PSMain(PS_INPUT Input) : SV_TARGET
         float texelWorldSize = GetCascadeWorldTexelSize(cascadeIndex);
 
         float3 wsBiasNormal = wsNormal;
-        if (vegetationReceiverMask > 0.5f)
+        float3 geometricNormal = cross(ddy(wsPosition), ddx(wsPosition));
+        float geometricLengthSq = dot(geometricNormal, geometricNormal);
+        if (geometricLengthSq > 1.0e-8f)
         {
-            float3 geometricNormal = cross(ddy(wsPosition), ddx(wsPosition));
-            float geometricLengthSq = dot(geometricNormal, geometricNormal);
-            if (geometricLengthSq > 1.0e-8f)
-            {
-                geometricNormal *= rsqrt(geometricLengthSq);
-                wsBiasNormal = dot(geometricNormal, wsNormal) < 0.0f ? -geometricNormal : geometricNormal;
-            }
+            geometricNormal *= rsqrt(geometricLengthSq);
+            wsBiasNormal = dot(geometricNormal, wsNormal) < 0.0f ? -geometricNormal : geometricNormal;
         }
 
         float3 biasedWsPosition = ApplyReceiverNormalBias(wsPosition, wsBiasNormal, wsLightDirection, texelWorldSize, vegetationReceiverMask);

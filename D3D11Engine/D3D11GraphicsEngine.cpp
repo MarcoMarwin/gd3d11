@@ -1183,20 +1183,6 @@ DXGI_FORMAT D3D11GraphicsEngine::GetBackBufferFormat() {
     return Engine::GAPI->GetRendererState().RendererSettings.CompressBackBuffer ? DXGI_FORMAT_R11G11B10_FLOAT : DXGI_FORMAT_R16G16B16A16_FLOAT;
 }
 
-static INT2 GetBorderlessMonitorResolution( HWND window ) {
-    MONITORINFO monitorInfo = {};
-    monitorInfo.cbSize = sizeof( monitorInfo );
-    HMONITOR monitor = MonitorFromWindow( window, MONITOR_DEFAULTTOPRIMARY );
-    if ( monitor && GetMonitorInfo( monitor, &monitorInfo ) ) {
-        return INT2(
-            monitorInfo.rcMonitor.right - monitorInfo.rcMonitor.left,
-            monitorInfo.rcMonitor.bottom - monitorInfo.rcMonitor.top );
-    }
-
-    RECT desktopRect = {};
-    GetClientRect( GetDesktopWindow(), &desktopRect );
-    return INT2( desktopRect.right, desktopRect.bottom );
-}
 
 void ApplyWindowStyle(HWND window, WindowModes windowMode) {
     if (windowMode == WindowModes::WINDOW_MODE_WINDOWED) {
@@ -1308,40 +1294,19 @@ XRESULT D3D11GraphicsEngine::RecreateBuffers() {
 XRESULT D3D11GraphicsEngine::OnResize( INT2 newSize ) {
     HRESULT hr;
 
-    // Keep Gothic's first mode switch on its proven startup resolution. Borderless is
-    // moved to the monitor resolution only after the swapchain exists, then stays there.
-    const bool hadSwapChain = SwapChain.Get() != nullptr;
-    INT2 deferredBorderlessResolution = newSize;
-    bool deferBorderlessResize = false;
-    bool resizeBorderlessOutputOnly = false;
-    if ( OutputWindow && Engine::GAPI->GetRendererState().RendererSettings.StretchWindow ) {
-        const INT2 monitorResolution = GetBorderlessMonitorResolution( OutputWindow );
-        if ( monitorResolution.x > 0 && monitorResolution.y > 0 ) {
-            if ( hadSwapChain ) {
-                newSize = monitorResolution;
-                resizeBorderlessOutputOnly = true;
-            } else if ( monitorResolution.x != newSize.x || monitorResolution.y != newSize.y ) {
-                deferredBorderlessResolution = monitorResolution;
-                deferBorderlessResize = true;
-            }
-        }
-    }
-
-    NewResolution = newSize;
-    if ( memcmp( &Resolution, &newSize, sizeof( newSize ) ) == 0 && hadSwapChain )
+    if ( memcmp( &Resolution, &newSize, sizeof( newSize ) ) == 0 && SwapChain.Get() )
         return XR_SUCCESS;  // Don't resize if we don't have to
 
     Resolution = newSize;
+    NewResolution = newSize;
     INT2 bbres = GetBackbufferResolution();
 
-    // The initial Gothic mode switch must keep the proven Build 109 resolution.
-    // A later borderless resize changes only the D3D11 output and virtual view.
-    if ( !resizeBorderlessOutputOnly ) {
-        zCView::SetWindowMode(
-            Resolution.x,
-            Resolution.y,
-            32 );
-    }
+    // Keep Gothic's logical UI surface in sync with the selected swapchain size.
+    // Borderless presentation stretches that complete surface to the desktop.
+    zCView::SetWindowMode(
+        Resolution.x,
+        Resolution.y,
+        32 );
 
     zCView::SetVirtualMode(
         static_cast<int>(Resolution.x),
@@ -1556,9 +1521,6 @@ XRESULT D3D11GraphicsEngine::OnResize( INT2 newSize ) {
     // Engine::AntTweakBar->OnResize( newSize );
     Engine::ImGuiHandle->OnResize( newSize );
 
-    if ( deferBorderlessResize ) {
-        NewResolution = deferredBorderlessResolution;
-    }
 
     return XR_SUCCESS;
 }
@@ -3965,6 +3927,27 @@ XRESULT D3D11GraphicsEngine::OnStartWorldRendering() {
 
     rendererState.RendererInfo.RenderStage = STAGE_DRAW_WORLD;
 
+    // Borderless presentation may stretch a lower-resolution swapchain to a
+    // desktop with another aspect ratio. Compensate only the 3D projection;
+    // Gothic's menu and HUD intentionally continue to fill the whole window.
+    const XMFLOAT4X4 uiProjection = rendererState.TransformState.TransformProjUnjittered;
+    XMFLOAT4X4 worldProjection = uiProjection;
+    if ( rendererState.RendererSettings.StretchWindow && OutputWindow
+        && Resolution.x > 0 && Resolution.y > 0 ) {
+        RECT clientRect = {};
+        if ( GetClientRect( OutputWindow, &clientRect ) ) {
+            const int clientWidth = clientRect.right - clientRect.left;
+            const int clientHeight = clientRect.bottom - clientRect.top;
+            if ( clientWidth > 0 && clientHeight > 0 ) {
+                const float renderAspect = static_cast<float>(Resolution.x) / static_cast<float>(Resolution.y);
+                const float windowAspect = static_cast<float>(clientWidth) / static_cast<float>(clientHeight);
+                worldProjection._11 *= renderAspect / windowAspect;
+            }
+        }
+    }
+    rendererState.TransformState.TransformProjUnjittered = worldProjection;
+    rendererState.TransformState.TransformProj = worldProjection;
+
     SetViewport( ViewportInfo( 0, 0, GetResolution() ) );
 
     UpdateZEngineViewport();
@@ -4891,12 +4874,10 @@ XRESULT D3D11GraphicsEngine::OnStartWorldRendering() {
         // Temporal AA/FSR3 jitter belongs to world rendering only. Gothic's HUD
         // and 3D inventory are drawn after upscaling at output resolution and
         // must use an unjittered projection to avoid subpixel shimmer.
-        if ( requireJitter ) {
-            // Restore the exact unjittered projection supplied by Gothic. Merely
-            // clearing two offsets can retain a stale forced-FOV projection.
-            rendererState.TransformState.TransformProj =
-                rendererState.TransformState.TransformProjUnjittered;
-        }
+        // Restore the exact projection supplied by Gothic. Aspect compensation
+        // and temporal jitter belong to world rendering only.
+        rendererState.TransformState.TransformProj = uiProjection;
+        rendererState.TransformState.TransformProjUnjittered = uiProjection;
 
         // Below this, we assume UI/HUD rendering
         rendererState.RendererInfo.RenderStage = STAGE_DRAW_HUD;

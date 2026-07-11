@@ -1178,7 +1178,7 @@ void ImGuiShim::RenderSettingsWindow()
             {Tr( "Extreme", u8"Extrem" ), GothicRendererSettings::E_GraphicsPreset::GRAPHICS_VERY_HIGH},
         }};
 
-        const char* graphicsPresetPreview = Tr( "Custom", u8"Benutzerdefiniert" );
+        const char* graphicsPresetPreview = Tr( "Custom", u8"Individuell" );
         for ( const auto& preset : graphicsPresets ) {
             if ( preset.second == static_cast<int>(settings.GraphicsPreset) ) {
                 graphicsPresetPreview = preset.first;
@@ -1188,10 +1188,10 @@ void ImGuiShim::RenderSettingsWindow()
 
         const float topPresetLabelWidth = 170.0f;
         const float topPresetControlWidth = 145.0f;
-        const float topLanguageLabelWidth = 125.0f;
-        const float topLanguageControlWidth = 95.0f;
+        const float topLanguageLabelWidth = 85.0f;
+        const float topLanguageControlWidth = 115.0f;
 
-        ImText( Tr( "Graphics Preset", u8"Grafikvoreinstellung" ), ImVec2( topPresetLabelWidth, 0.0f ) ); ImGui::SameLine();
+        ImText( Tr( "Graphics Preset", u8"Grafikprofil" ), ImVec2( topPresetLabelWidth, 0.0f ) ); ImGui::SameLine();
 
         ImGui::PushItemWidth( topPresetControlWidth );
         if ( ImGui::BeginCombo( "##GraphicsPreset", graphicsPresetPreview ) ) {
@@ -1212,7 +1212,7 @@ void ImGuiShim::RenderSettingsWindow()
         ImGui::PopItemWidth();
 
         ImGui::SameLine();
-        ImText( Tr( "D3D11 Language", u8"D3D11-Sprache" ), ImVec2( topLanguageLabelWidth, 0.0f ) ); ImGui::SameLine();
+        ImText( Tr( "Language", u8"Sprache" ), ImVec2( topLanguageLabelWidth, 0.0f ) ); ImGui::SameLine();
         ImGui::PushItemWidth( topLanguageControlWidth );
         const char* languagePreview = settings.D3D11Language == GothicRendererSettings::D3D11_LANGUAGE_GERMAN
             ? "Deutsch"
@@ -1646,8 +1646,8 @@ void ImGuiShim::RenderSettingsWindow()
                 ImGui::SetItemTooltip( "%s", Tr( "Makes vegetation move more or less strongly in the wind.", u8"L\u00E4sst Vegetation sich schw\u00E4cher oder st\u00E4rker im Wind bewegen." ) );
             }
 
-            ImText( Tr( "Characters affect objects", u8"Figuren beeinflussen Objekte" ), { buttonWidth.x - ImGui::GetFrameHeight() - style.ItemSpacing.x, buttonWidth.y } ); ImGui::SameLine();
-            if ( ImGui::Checkbox( "##Enable Characters affect objects", &settings.HeroAffectsObjects ) ) {
+            ImText( Tr( "Interactive Vegetation", u8"Interaktive Vegetation" ), { buttonWidth.x - ImGui::GetFrameHeight() - style.ItemSpacing.x, buttonWidth.y } ); ImGui::SameLine();
+            if ( ImGui::Checkbox( "##Enable Interactive Vegetation", &settings.HeroAffectsObjects ) ) {
                 shadersToReload |= ShaderCategory::Other;
             }
             ImGui::SetItemTooltip( "%s", Tr( "Lets grass and wheat bend around nearby characters.", u8"L\u00E4sst Gras und Getreide auf nahe Figuren reagieren." ) );
@@ -1671,7 +1671,7 @@ void ImGuiShim::RenderSettingsWindow()
             ImGui::Checkbox( "##Enable Rain", &settings.EnableRain );
             ImGui::SetItemTooltip( "%s", Tr( "Adds rainfall and related environmental effects.", u8"F\u00FCgt Regen und zugeh\u00F6rige Umgebungseffekte hinzu." ) );
 
-            ImText( Tr( "Occlusion Culling", u8"Verdeckte Objekte ausblenden" ), { buttonWidth.x - ImGui::GetFrameHeight() - style.ItemSpacing.x, buttonWidth.y } ); ImGui::SameLine();
+            ImText( Tr( "Occlusion Culling", u8"Verdeckungspr\u00FCfung" ), { buttonWidth.x - ImGui::GetFrameHeight() - style.ItemSpacing.x, buttonWidth.y } ); ImGui::SameLine();
             ImGui::Checkbox( "##Enable Occlusion Culling", &settings.EnableOcclusionCulling );
             ImGui::SetItemTooltip( "%s", Tr( "Skips world geometry hidden behind other objects.", u8"\u00DCberspringt Weltgeometrie, die hinter anderen Objekten verborgen ist." ) );
 

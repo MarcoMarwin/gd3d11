@@ -156,9 +156,10 @@ FORWARD_PLUS_PS_OUTPUT PSMain( PS_INPUT Input )
 			float texelWorldSize = GetCascadeWorldTexelSize(cascadeIndex);
 
 			float3 wsBiasNormal = wsNormal;
-			if (vegetationReceiverMask > 0.5f)
+			float geometricLengthSq = dot(Input.vNormalVS, Input.vNormalVS);
+			if (geometricLengthSq > 1.0e-8f)
 			{
-				float3 geometricNormal = normalize(mul(float4(normalize(Input.vNormalVS), 0.0f), SQ_InvView).xyz);
+				float3 geometricNormal = normalize(mul(float4(Input.vNormalVS * rsqrt(geometricLengthSq), 0.0f), SQ_InvView).xyz);
 				wsBiasNormal = dot(geometricNormal, wsNormal) < 0.0f ? -geometricNormal : geometricNormal;
 			}
 

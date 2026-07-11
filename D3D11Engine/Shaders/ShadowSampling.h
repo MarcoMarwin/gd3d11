@@ -58,7 +58,7 @@
 // Abstracts Texture2DArray (FL11+) vs Texture2D atlas (FL10) sampling
 //--------------------------------------------------------------------------------------
 #if SHD_FILTER_EVSM
-float2 SampleEVSMMoments(float2 cascadeUV, int cascadeIndex)
+float4 SampleEVSMMoments(float2 cascadeUV, int cascadeIndex)
 {
     if (cascadeIndex <= 0) return TX_EVSMShadowmap0.SampleLevel(SS_Linear, cascadeUV, 0);
     if (cascadeIndex == 1) return TX_EVSMShadowmap1.SampleLevel(SS_Linear, cascadeUV, 0);
@@ -78,13 +78,15 @@ float EVSMChebyshevUpperBound(float2 moments, float receiver)
 
 float SampleEVSMShadow(float2 cascadeUV, int cascadeIndex, float depth)
 {
-    const float exponent = 10.0f;
-
+    const float positiveExponent = 5.0f;
+    const float negativeExponent = 5.0f;
     float receiverDepth = saturate(depth);
-    float warpedReceiver = exp(exponent * receiverDepth);
-
-    float2 moments = SampleEVSMMoments(cascadeUV, cascadeIndex);
-    float probability = EVSMChebyshevUpperBound(moments, warpedReceiver);
+    float positiveReceiver = exp(positiveExponent * receiverDepth);
+    float negativeReceiver = -exp(-negativeExponent * receiverDepth);
+    float4 moments = SampleEVSMMoments(cascadeUV, cascadeIndex);
+    float probability = min(
+        EVSMChebyshevUpperBound(moments.xy, positiveReceiver),
+        EVSMChebyshevUpperBound(moments.zw, negativeReceiver));
     const float lightBleedingReduction = 0.15f;
     return saturate((probability - lightBleedingReduction) / (1.0f - lightBleedingReduction));
 }
@@ -430,12 +432,10 @@ float ComputeReceiverNormalBias(float3 wsNormal, float3 wsLightDirection, float 
 {
     float NoL = saturate(abs(dot(wsNormal, wsLightDirection)));
     float slopeScale = sqrt(saturate(1.0f - NoL * NoL));
-    float verticalReceiver = 1.0f - saturate(abs(wsNormal.y));
     float vegetationBiasWeight = saturate(vegetationReceiverMask) *
-        smoothstep(0.65f, 0.95f, slopeScale) *
-        smoothstep(0.45f, 0.85f, verticalReceiver);
+        smoothstep(0.45f, 0.90f, slopeScale);
     float normalBiasMultiplier = lerp(1.5f, 4.0f, vegetationBiasWeight);
-    return slopeScale * texelWorldSize * normalBiasMultiplier;
+    return max(slopeScale, 0.15f) * texelWorldSize * normalBiasMultiplier;
 }
 
 float3 ApplyReceiverNormalBias(float3 wsPosition, float3 wsNormal, float3 wsLightDirection, float texelWorldSize, float vegetationReceiverMask)

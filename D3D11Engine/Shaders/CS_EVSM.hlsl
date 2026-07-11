@@ -1,5 +1,5 @@
-// True EVSM2 preprocessing for cascaded world shadows.
-// Pass 1 converts depth to stable 32-bit exponential moments and filters horizontally.
+// True EVSM4 preprocessing for cascaded world shadows.
+// Pass 1 converts depth to positive/negative exponential moments and filters horizontally.
 // Pass 2 filters vertically into the cascade's distance-scaled moment texture.
 
 cbuffer EVSMFilterConstants : register(b0)
@@ -13,11 +13,12 @@ cbuffer EVSMFilterConstants : register(b0)
 SamplerState SS_PointClamp : register(s0);
 SamplerState SS_LinearClamp : register(s1);
 Texture2DArray<float> TX_ShadowDepth : register(t0);
-Texture2D<float2> TX_EVSMTemp : register(t1);
-RWTexture2D<float2> RW_EVSMTemp : register(u0);
-RWTexture2D<float2> RW_EVSMOutput : register(u1);
+Texture2D<float4> TX_EVSMTemp : register(t1);
+RWTexture2D<float4> RW_EVSMTemp : register(u0);
+RWTexture2D<float4> RW_EVSMOutput : register(u1);
 
-static const float EVSMExponent = 10.0f;
+static const float EVSMPositiveExponent = 5.0f;
+static const float EVSMNegativeExponent = 5.0f;
 static const float GaussianWeights[5] =
 {
     0.2270270270f,
@@ -27,11 +28,12 @@ static const float GaussianWeights[5] =
     0.0162162162f
 };
 
-float2 DepthToEVSMMoments(float depth)
+float4 DepthToEVSMMoments(float depth)
 {
     depth = saturate(depth);
-    float warpedDepth = exp(EVSMExponent * depth);
-    return float2(warpedDepth, warpedDepth * warpedDepth);
+    float positive = exp(EVSMPositiveExponent * depth);
+    float negative = -exp(-EVSMNegativeExponent * depth);
+    return float4(positive, positive * positive, negative, negative * negative);
 }
 
 float SampleCascadeDepth(float2 uv)
@@ -43,9 +45,9 @@ float SampleCascadeDepth(float2 uv)
         SS_PointClamp, float3(uv, (float)EVSM_CascadeIndex), 0).r;
 }
 
-float2 SampleDepthMoments(float2 uv)
+float4 SampleDepthMoments(float2 uv)
 {
-    float2 center = DepthToEVSMMoments(SampleCascadeDepth(uv));
+    float4 center = DepthToEVSMMoments(SampleCascadeDepth(uv));
     if (EVSM_SourceSize <= EVSM_DestinationSize)
         return center;
 
@@ -57,7 +59,7 @@ float2 SampleDepthMoments(float2 uv)
         DepthToEVSMMoments(SampleCascadeDepth(uv + float2( subPixelOffset.x,  subPixelOffset.y))));
 }
 
-float2 SampleTemporaryMoments(float2 pixel)
+float4 SampleTemporaryMoments(float2 pixel)
 {
     if (any(pixel < 0.0f) || any(pixel >= (float)EVSM_DestinationSize))
         return DepthToEVSMMoments(1.0f);
@@ -75,14 +77,14 @@ void CSConvertHorizontal(uint3 dispatchThreadId : SV_DispatchThreadID)
 
     float2 uv = (float2(pixel) + 0.5f) / (float)EVSM_DestinationSize;
     float2 texel = float2(1.0f / (float)EVSM_DestinationSize, 0.0f);
-    float2 centerMoments = SampleDepthMoments(uv);
+    float4 centerMoments = SampleDepthMoments(uv);
     if (EVSM_BlurRadius <= 0.001f)
     {
         RW_EVSMTemp[pixel] = centerMoments;
         return;
     }
 
-    float2 moments = centerMoments * GaussianWeights[0];
+    float4 moments = centerMoments * GaussianWeights[0];
 
     [unroll]
     for (int i = 1; i < 5; ++i)
@@ -102,7 +104,7 @@ void CSVertical(uint3 dispatchThreadId : SV_DispatchThreadID)
     if (any(pixel >= EVSM_DestinationSize))
         return;
 
-    float2 moments = SampleTemporaryMoments(float2(pixel)) * GaussianWeights[0];
+    float4 moments = SampleTemporaryMoments(float2(pixel)) * GaussianWeights[0];
 
     [unroll]
     for (int i = 1; i < 5; ++i)

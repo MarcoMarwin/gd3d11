@@ -218,15 +218,15 @@ void PLS_PrepareShadowSampling(
 
     float baseBlur = lerp( 0.02f, 0.08f, depthCurve );
 
-    float noise = PLS_AggressiveNoise(wsPosition * 50.0f);
-    fixedBlurScale = baseBlur * clamp(shadowSoftness, 0.2f, 8.0f) * lerp(0.5f, 1.5f, noise);
+    // A fixed Poisson kernel is stable under temporal reconstruction.
+    fixedBlurScale = baseBlur * clamp(shadowSoftness, 0.2f, 8.0f);
 
     up = abs( dir.y ) < 0.999f ? float3( 0, 1, 0 ) : float3( 1, 0, 0 );
     right = normalize( cross( up, dir ) );
     up = cross( dir, right );
 
-    float angle = noise * 6.2831853f;
-    sincos( angle, sinA, cosA );
+    sinA = 0.0f;
+    cosA = 1.0f;
 }
 
 float PLS_SampleShadowCube(
