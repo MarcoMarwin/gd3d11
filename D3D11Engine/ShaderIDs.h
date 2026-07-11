@@ -139,7 +139,5 @@ enum class CShaderID : size_t {
     CS_PFX_XeGTAO_Denoise,
     CS_PFX_XeGTAO_DenoiseLast,
     CS_PFX_Sharpen,
-    CS_EVSM_ConvertHorizontal,
-    CS_EVSM_Vertical,
     COUNT
 };

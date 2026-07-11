@@ -14,6 +14,13 @@ Kurze, append-only Dokumentation der von Codex gepushten Renderer-Builds.
 - Schattenkorrektur: EVSM4-Momente bei erhaltener neuer Cascade-Logik wiederhergestellt; CSM-Empfaengerbias fuer alle Flaechen stabilisiert und Pointlight-Shadowmaps mit Reichweitenhysterese sowie festem FSR-3-tauglichem Filter beruhigt.
 - F11: Ueberlange deutsche Beschriftungen wurden gekuerzt und nur die Sprachauswahl verbreitert. Der Blue-Noise-Fog bleibt unveraendert.
 - Ground Fog und VisualFX: Die originale Ground-Fog-Partikeldeckkraft bleibt erhalten; fuer alle Partikeleffekte gilt ohne Boundingbox-Sonderfall ausschliesslich VisualFXDrawRadius als Distanzgrenze.
+- Pointlight-Schatten: Die Shadowmap bleibt bis zur VisualFX-gesteuerten Lichtausblendung zugeteilt; statt der harten 9x-/10x-LightRange-Grenze reduziert ein stabiler Distanzfade in Legacy und Tiled die Schattenstaerke im letzten Viertel der realen Sichtweite.
+- Schattenfilter: EVSM wurde vollstaendig aus Auswahl, Persistenz, Shaderregistrierung, Ressourcenverwaltung und HLSL entfernt; alte EVSM-Konfigurationswerte fallen auf Simple PCF zurueck.
+- Schattenstreifen: Die seit Build 109 ergaenzten, wirkungslosen globalen Geometrienormalen- und Mindestbias-Patches wurden gezielt auf das Build-109-Verhalten zurueckgenommen.
+- F11-Sprache: Beschriftung und Auswahlfeld verwenden exakt dieselben Breiten wie Grafikprofil.
+- Regennebel: Zusaetzlich zur Geometrieueberblendung wirkt bei Regen wieder ein globaler Nahschleier, nachts staerker als tagsueber und fuer Himmelspixel reduziert, damit die Wolkendecke sichtbar bleibt.
+- Interaktive Vegetation: Horizontaler Vollbereich auf 0-20 und der weiche Uebergang auf 20-25 Welt-Einheiten begrenzt; die maximale Verschiebung bleibt bei 38.
+- Nachtnebel: Der horizontale Entfernungsnebelschleier ist nachts 20 Prozent dunkler; vertikaler Ground Fog und Fernwelt-Dunkelung bleiben unveraendert.
 
 ## Build 110 (Korrekturpush)
 

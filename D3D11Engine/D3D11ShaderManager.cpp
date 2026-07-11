@@ -307,12 +307,10 @@ XRESULT D3D11ShaderManager::Init() {
         const bool advancedShadowFilterSupported =
             !FeatureLevel10Compatibility && !s.DebugSettings.FeatureSet.UseShadowAtlas;
         const bool advancedFilterSelected =
-            s.ShadowFilterMode == GothicRendererSettings::SHADOW_FILTER_PCSS
-            || s.ShadowFilterMode == GothicRendererSettings::SHADOW_FILTER_EVSM;
+            s.ShadowFilterMode == GothicRendererSettings::SHADOW_FILTER_PCSS;
         list.push_back( {"SHD_ENABLE",           s.EnableShadows ? "1" : "0"} );
         list.push_back( {"SHD_FILTER_16TAP_PCF", (s.ShadowFilterMode == GothicRendererSettings::SHADOW_FILTER_SIMPLE || (advancedFilterSelected && !advancedShadowFilterSupported)) ? "1" : "0"} );
         list.push_back( {"SHD_FILTER_PCSS",      (s.ShadowFilterMode == GothicRendererSettings::SHADOW_FILTER_PCSS && advancedShadowFilterSupported) ? "1" : "0"} );
-        list.push_back( {"SHD_FILTER_EVSM",      (s.ShadowFilterMode == GothicRendererSettings::SHADOW_FILTER_EVSM && advancedShadowFilterSupported) ? "1" : "0"} );
         list.push_back( {"MAX_CSM_CASCADES",     TO_LITERAL(MAX_CSM_CASCADES)} );
         list.push_back( {"NUM_CSM_CASCADES",     sNums[std::clamp<size_t>(s.NumShadowCascades, 1, MAX_CSM_CASCADES)]} );
         list.push_back( {"CSM_PCF_LIMIT",        sNums[std::clamp<size_t>(s.ShadowCascadePCFLimit, 0, MAX_CSM_CASCADES)]} );
@@ -491,12 +489,6 @@ XRESULT D3D11ShaderManager::Init() {
 
         Shaders.push_back( ShaderInfo::make<CShaderID::CS_PFX_Sharpen>( "CS_PFX_Sharpen.hlsl" ));
 
-        Shaders.push_back( ShaderInfo::make<CShaderID::CS_EVSM_ConvertHorizontal>( "CS_EVSM.hlsl" )
-            .with_entrypoint( "CSConvertHorizontal" )
-            .with_category( ShaderCategory::LightsAndShadows ) );
-        Shaders.push_back( ShaderInfo::make<CShaderID::CS_EVSM_Vertical>( "CS_EVSM.hlsl" )
-            .with_entrypoint( "CSVertical" )
-            .with_category( ShaderCategory::LightsAndShadows ) );
 
         // Forward+ pixel shader variants
         Shaders.push_back( ShaderInfo::make<PShaderID::PS_FP_Diffuse>( "PS_Diffuse.hlsl" )

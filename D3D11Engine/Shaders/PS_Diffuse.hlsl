@@ -155,15 +155,7 @@ FORWARD_PLUS_PS_OUTPUT PSMain( PS_INPUT Input )
 			int cascadeIndex = GetPrimaryCascadeIndex(wsPosition);
 			float texelWorldSize = GetCascadeWorldTexelSize(cascadeIndex);
 
-			float3 wsBiasNormal = wsNormal;
-			float geometricLengthSq = dot(Input.vNormalVS, Input.vNormalVS);
-			if (geometricLengthSq > 1.0e-8f)
-			{
-				float3 geometricNormal = normalize(mul(float4(Input.vNormalVS * rsqrt(geometricLengthSq), 0.0f), SQ_InvView).xyz);
-				wsBiasNormal = dot(geometricNormal, wsNormal) < 0.0f ? -geometricNormal : geometricNormal;
-			}
-
-			float3 biasedWsPosition = ApplyReceiverNormalBias(wsPosition, wsBiasNormal, wsLightDirection, texelWorldSize, vegetationReceiverMask);
+			float3 biasedWsPosition = ApplyReceiverNormalBias(wsPosition, wsNormal, wsLightDirection, texelWorldSize, vegetationReceiverMask);
 
 			shadow = ComputeCascadedShadowValueSoft(biasedWsPosition, vsPosition.z, vertLighting, 0.0f, Input.vPosition.xy);
 		#endif

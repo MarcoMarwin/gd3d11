@@ -38,7 +38,7 @@ cbuffer DS_ScreenQuadConstantBuffer : register( b0 )
     float2 SQ_JitterOffset;
     float SQ_LightSize;
 
-    // Cascade data: EVSM resolution in x, or atlas UV rect (xy = offset, zw = scale)
+    // Cascade atlas UV rect (xy = offset, zw = scale); unused for texture arrays.
     float4 SQ_CascadeAtlasRect[MAX_CSM_CASCADES];
 };
 
@@ -50,12 +50,7 @@ SamplerComparisonState SS_Comp   : register( s2 );
 
 Texture2D TX_Depth : register( t2 );
 
-#if SHD_FILTER_EVSM
-Texture2D<float4> TX_EVSMShadowmap0 : register( t14 );
-Texture2D<float4> TX_EVSMShadowmap1 : register( t15 );
-Texture2D<float4> TX_EVSMShadowmap2 : register( t16 );
-Texture2D<float4> TX_EVSMShadowmap3 : register( t17 );
-#elif SHADOW_ATLAS
+#if SHADOW_ATLAS
 Texture2D      TX_ShadowmapAtlas : register( t3 );
 #else
 Texture2DArray TX_ShadowmapArray : register( t3 );

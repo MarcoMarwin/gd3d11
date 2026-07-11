@@ -1049,7 +1049,7 @@ namespace
         s.VisualFXDrawRadius = VISUAL_FX_DRAW_RADIUS_FIXED;
         s.EnableShadows = true;
         if ( static_cast<int>(s.ShadowFilterMode) < static_cast<int>(GothicRendererSettings::E_ShadowFilterMode::SHADOW_FILTER_SIMPLE)
-            || static_cast<int>(s.ShadowFilterMode) > static_cast<int>(GothicRendererSettings::E_ShadowFilterMode::SHADOW_FILTER_EVSM)
+            || static_cast<int>(s.ShadowFilterMode) > static_cast<int>(GothicRendererSettings::E_ShadowFilterMode::SHADOW_FILTER_PCSS)
             || (FeatureLevel10Compatibility && s.ShadowFilterMode != GothicRendererSettings::E_ShadowFilterMode::SHADOW_FILTER_SIMPLE) ) {
             s.ShadowFilterMode = GothicRendererSettings::E_ShadowFilterMode::SHADOW_FILTER_SIMPLE;
         }
@@ -1188,8 +1188,8 @@ void ImGuiShim::RenderSettingsWindow()
 
         const float topPresetLabelWidth = 170.0f;
         const float topPresetControlWidth = 145.0f;
-        const float topLanguageLabelWidth = 85.0f;
-        const float topLanguageControlWidth = 115.0f;
+        const float topLanguageLabelWidth = topPresetLabelWidth;
+        const float topLanguageControlWidth = topPresetControlWidth;
 
         ImText( Tr( "Graphics Preset", u8"Grafikprofil" ), ImVec2( topPresetLabelWidth, 0.0f ) ); ImGui::SameLine();
 
@@ -1412,7 +1412,6 @@ void ImGuiShim::RenderSettingsWindow()
             static const std::vector<std::pair<const char*, GothicRendererSettings::E_ShadowFilterMode>> shadowFilterModes = {
                 {"Simple PCF", GothicRendererSettings::E_ShadowFilterMode::SHADOW_FILTER_SIMPLE},
                 {"PCSS", GothicRendererSettings::E_ShadowFilterMode::SHADOW_FILTER_PCSS},
-                {"EVSM", GothicRendererSettings::E_ShadowFilterMode::SHADOW_FILTER_EVSM},
             };
             ImText( Tr( "Shadow Filter", u8"Schattenfilter" ), buttonWidth ); ImGui::SameLine();
             ImGui::BeginDisabled( FeatureLevel10Compatibility );

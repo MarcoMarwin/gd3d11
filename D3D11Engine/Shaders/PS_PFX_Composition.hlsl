@@ -138,7 +138,7 @@ float4 ComputeHeightFog( float2 texcoord )
 
     float3 color = ApplyAtmosphericScatteringGround( position, HF_FogColorMod, true, false );
 	float nightFogBrightness = lerp(1.0f, max(0.0f, AC_NightFogBrightness), saturate(AC_EnableNightAtmosphere));
-	float3 nightFogColor = float3(0.12f, 0.18f, 0.27f) * nightFogBrightness;
+	float3 nightFogColor = float3(0.12f, 0.18f, 0.27f) * nightFogBrightness * 0.8f;
 	color = lerp(color, nightFogColor, nightTimeBlend);
 
 	float dayDarknessFactor = max(1.0f, 2.0f - max(0.0f, AC_LightPos.y));
@@ -149,8 +149,16 @@ float4 ComputeHeightFog( float2 texcoord )
 	float rainyNightGeometry = (1.0f - skyPixel) * activeWeatherFog * nightTimeBlend;
 	float geometryFogOpacity = lerp(maxFogOpacity, 0.91f, rainyNightGeometry);
 	float skyRainFogAttenuation = lerp(1.0f, 0.54f, skyPixel * activeWeatherFog);
+	float fogOpacity = fog * geometryFogOpacity * skyRainFogAttenuation;
 
-	return float4(saturate(color / darknessFactor), fog * geometryFogOpacity * skyRainFogAttenuation);
+	// Rain keeps a depth-independent weather veil near the camera. It is stronger at night,
+	// while sky pixels receive less opacity so the cloud deck remains visible through it.
+	float globalRainFogOpacity = activeWeatherFog
+		* lerp(0.06f, 0.16f, nightTimeBlend)
+		* lerp(1.0f, 0.65f, skyPixel);
+	fogOpacity = max(fogOpacity, globalRainFogOpacity);
+
+	return float4(saturate(color / darknessFactor), saturate(fogOpacity));
 }
 #endif
 

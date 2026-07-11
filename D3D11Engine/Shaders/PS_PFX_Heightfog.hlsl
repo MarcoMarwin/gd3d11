@@ -105,7 +105,7 @@ float4 PSMain( PS_INPUT Input ) : SV_TARGET
 		
 	float3 color = ApplyAtmosphericScatteringGround(position, HF_FogColorMod, true, false);
 	float nightFogBrightness = lerp(1.0f, max(0.0f, AC_NightFogBrightness), saturate(AC_EnableNightAtmosphere));
-	float3 nightFogColor = float3(0.12f, 0.18f, 0.27f) * nightFogBrightness;
+	float3 nightFogColor = float3(0.12f, 0.18f, 0.27f) * nightFogBrightness * 0.8f;
 	color = lerp(color, nightFogColor, nightTimeBlend);
 
 	float dayDarknessFactor = max(1.0f, 2.0f - max(0.0f, AC_LightPos.y));

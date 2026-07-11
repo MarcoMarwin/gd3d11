@@ -17,10 +17,6 @@
 #define SHD_FILTER_PCSS 0
 #endif
 
-#ifndef SHD_FILTER_EVSM
-#define SHD_FILTER_EVSM 0
-#endif
-
 #ifndef SHADOW_ATLAS
 #define SHADOW_ATLAS 0
 #endif
@@ -57,40 +53,7 @@
 // Shadow map sampling helpers
 // Abstracts Texture2DArray (FL11+) vs Texture2D atlas (FL10) sampling
 //--------------------------------------------------------------------------------------
-#if SHD_FILTER_EVSM
-float4 SampleEVSMMoments(float2 cascadeUV, int cascadeIndex)
-{
-    if (cascadeIndex <= 0) return TX_EVSMShadowmap0.SampleLevel(SS_Linear, cascadeUV, 0);
-    if (cascadeIndex == 1) return TX_EVSMShadowmap1.SampleLevel(SS_Linear, cascadeUV, 0);
-    if (cascadeIndex == 2) return TX_EVSMShadowmap2.SampleLevel(SS_Linear, cascadeUV, 0);
-    return TX_EVSMShadowmap3.SampleLevel(SS_Linear, cascadeUV, 0);
-}
-
-float EVSMChebyshevUpperBound(float2 moments, float receiver)
-{
-    if (receiver <= moments.x) return 1.0f;
-    float variance = moments.y - moments.x * moments.x;
-    float minimumVariance = max(1.0e-6f, moments.x * moments.x * 2.0e-5f);
-    variance = max(variance, minimumVariance);
-    float distanceToMean = receiver - moments.x;
-    return variance / (variance + distanceToMean * distanceToMean);
-}
-
-float SampleEVSMShadow(float2 cascadeUV, int cascadeIndex, float depth)
-{
-    const float positiveExponent = 5.0f;
-    const float negativeExponent = 5.0f;
-    float receiverDepth = saturate(depth);
-    float positiveReceiver = exp(positiveExponent * receiverDepth);
-    float negativeReceiver = -exp(-negativeExponent * receiverDepth);
-    float4 moments = SampleEVSMMoments(cascadeUV, cascadeIndex);
-    float probability = min(
-        EVSMChebyshevUpperBound(moments.xy, positiveReceiver),
-        EVSMChebyshevUpperBound(moments.zw, negativeReceiver));
-    const float lightBleedingReduction = 0.15f;
-    return saturate((probability - lightBleedingReduction) / (1.0f - lightBleedingReduction));
-}
-#elif SHADOW_ATLAS
+#if SHADOW_ATLAS
 float2 CascadeToAtlasUV(float2 cascadeUV, int cascadeIndex)
 {
     float4 rect = SQ_CascadeAtlasRect[cascadeIndex];
@@ -122,11 +85,7 @@ float SampleShadowMapLevel(float2 cascadeUV, int cascadeIndex)
 
 float GetCascadeShadowResolution(int cascadeIndex)
 {
-#if SHD_FILTER_EVSM
-    return max(SQ_CascadeAtlasRect[cascadeIndex].x, 1.0f);
-#else
     return max(SQ_ShadowmapSize, 1.0f);
-#endif
 }
 //--------------------------------------------------------------------------------------
 // High-quality Poisson disk for shadow sampling
@@ -432,10 +391,12 @@ float ComputeReceiverNormalBias(float3 wsNormal, float3 wsLightDirection, float 
 {
     float NoL = saturate(abs(dot(wsNormal, wsLightDirection)));
     float slopeScale = sqrt(saturate(1.0f - NoL * NoL));
+    float verticalReceiver = 1.0f - saturate(abs(wsNormal.y));
     float vegetationBiasWeight = saturate(vegetationReceiverMask) *
-        smoothstep(0.45f, 0.90f, slopeScale);
+        smoothstep(0.65f, 0.95f, slopeScale) *
+        smoothstep(0.45f, 0.85f, verticalReceiver);
     float normalBiasMultiplier = lerp(1.5f, 4.0f, vegetationBiasWeight);
-    return max(slopeScale, 0.15f) * texelWorldSize * normalBiasMultiplier;
+    return slopeScale * texelWorldSize * normalBiasMultiplier;
 }
 
 float3 ApplyReceiverNormalBias(float3 wsPosition, float3 wsNormal, float3 wsLightDirection, float texelWorldSize, float vegetationReceiverMask)
@@ -471,11 +432,7 @@ float SampleCascadeShadowSoft(float4 vShadowSamplingPos, float2 projectedTexCoor
     // softness of 1.0 = default, < 1.0 = sharper, > 1.0 = softer
     float filterRadius = texelSize * softness;
 
-#if SHD_FILTER_EVSM
-    shadow = SampleEVSMShadow(
-        projectedTexCoords.xy, cascadeIndex,
-        vShadowSamplingPos.z - bias);
-#elif SHD_FILTER_PCSS
+#if SHD_FILTER_PCSS
     // PCSS: Percentage-Closer Soft Shadows
     // Variable-width PCF based on blocker distance for contact-hardening shadows
     // Use SQ_ShadowSoftness directly (not distance-scaled 'softness') because

@@ -434,6 +434,12 @@ D3D11TiledDeferredShading::CullResult D3D11TiledDeferredShading::CullLights(
         float dist;
         XMStoreFloat( &dist, XMVector3Length( XMLoadFloat3( posWorld.toXMFLOAT3() ) - camPos ) );
 
+        const float shadowFadeEnd = std::max( settings.VisualFXDrawRadius - lightRange, 1.0f );
+        const float shadowFadeStart = shadowFadeEnd * 0.75f;
+        const float shadowFadeT = std::clamp(
+            (shadowFadeEnd - dist) / std::max( shadowFadeEnd - shadowFadeStart, 1.0f ), 0.0f, 1.0f );
+        const float shadowDistanceFade = shadowFadeT * shadowFadeT * (3.0f - 2.0f * shadowFadeT);
+
         if ( dist + lightRange < settings.VisualFXDrawRadius ) {
             float fadeEnd = settings.VisualFXDrawRadius;
             float fadeFactor = std::min( 1.0f, std::max( 0.0f, ((fadeEnd - (dist + lightRange)) / lightRange) ) );
@@ -459,7 +465,7 @@ D3D11TiledDeferredShading::CullResult D3D11TiledDeferredShading::CullLights(
         tl.Range = lightRange;
         tl.Color = XMFLOAT4( lightColor.x, lightColor.y, lightColor.z, lightColor.w );
         tl.PositionWorld = XMFLOAT3( posWorld.x, posWorld.y, posWorld.z );
-        tl.ShadowStrength = 1.0f;
+        tl.ShadowStrength = shadowDistanceFade;
         tl.IsIndoor = light->Vob && light->Vob->IsIndoorVob() ? 1.0f : 0.0f;
         tl.IgnoreIndoorOutdoorLimit = light->IgnoreIndoorOutdoorLimit ? 1.0f : 0.0f;
         tl.ShadowSoftness = settings.ShadowSoftness * 2.0f;

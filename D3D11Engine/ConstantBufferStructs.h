@@ -224,8 +224,7 @@ struct DS_ScreenQuadConstantBuffer {
     float2 SQ_JitterOffset;
     float SQ_LightSize;
 
-    // Cascade data: EVSM resolution in x, or atlas UV rect (xy = offset, zw = scale)
-    // EVSM and the Feature Level 10 atlas share this layout without changing the cbuffer ABI.
+    // Cascade atlas UV rect (xy = offset, zw = scale); unused for texture arrays.
     float4 SQ_CascadeAtlasRect[MAX_CSM_CASCADES];
 };
 

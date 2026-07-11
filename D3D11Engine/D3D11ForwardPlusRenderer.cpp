@@ -176,8 +176,6 @@ void D3D11ForwardPlusRenderer::AddGeometryPasses(
                 context->PSSetShaderResources( 2, 1, s_nullSRVs );
                 context->PSSetShaderResources( 3, 1, s_nullSRVs );
                 context->PSSetShaderResources( 8, 1, s_nullSRVs );
-                ID3D11ShaderResourceView* nullEVSMSRVs[MAX_CSM_CASCADES] = {};
-                context->PSSetShaderResources( 14, MAX_CSM_CASCADES, nullEVSMSRVs );
             };
         } );
     }

@@ -6,7 +6,7 @@
 //
 // Expected defines (set by ConstructShaderMakroList):
 //   MAX_CSM_CASCADES, NUM_CSM_CASCADES, CSM_PCF_LIMIT
-//   SHD_ENABLE, SHD_FILTER_16TAP_PCF, SHD_FILTER_PCSS, SHD_FILTER_EVSM, SHADOW_ATLAS
+//   SHD_ENABLE, SHD_FILTER_16TAP_PCF, SHD_FILTER_PCSS, SHADOW_ATLAS
 //   FP_USE_SHADOW_MASK
 //
 // Expected resources already declared by the including shader:
@@ -75,12 +75,7 @@ cbuffer FP_TileConstantBuffer : register( b5 )
 // ============================================
 
 // CSM shadow map (t3)
-#if SHD_FILTER_EVSM
-Texture2D<float4> TX_EVSMShadowmap0 : register( t14 );
-Texture2D<float4> TX_EVSMShadowmap1 : register( t15 );
-Texture2D<float4> TX_EVSMShadowmap2 : register( t16 );
-Texture2D<float4> TX_EVSMShadowmap3 : register( t17 );
-#elif SHADOW_ATLAS
+#if SHADOW_ATLAS
 Texture2D TX_ShadowmapAtlas : register( t3 );
 #else
 Texture2DArray TX_ShadowmapArray : register( t3 );

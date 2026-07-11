@@ -4407,11 +4407,7 @@ void GothicAPI::CollectVisibleVobs(
                 // Ineligible ambience lights stay excluded by AllowsPointlightShadows.
                 if ( vi->AllowsPointlightShadows
                     && RendererState.RendererSettings.EnablePointlightShadows >= GothicRendererSettings::PLS_UPDATE_DYNAMIC ) {
-                    float lightCameraDist;
-                    XMStoreFloat( &lightCameraDist, XMVector3Length( cameraPosition - vi->GetEffectivePositionWorldXM() ) );
-                    // Match the allocation radius so small lights are not starved by the third-person camera offset.
-                    if ( lightCameraDist < vi->Vob->GetLightRange() * 9.0f )
-                        vi->UpdateShadows = true;
+                    vi->UpdateShadows = true;
                 }
             }
         }
@@ -6034,10 +6030,11 @@ XRESULT GothicAPI::LoadMenuSettings( const std::string& file ) {
 
         static XMFLOAT3 defaultLightDirection = XMFLOAT3( 1, 1, 1 );
         s.EnableShadows = true;
-        s.ShadowFilterMode = static_cast<GothicRendererSettings::E_ShadowFilterMode>(std::clamp<int>(
-            GetPrivateProfileIntA( "Shadows", "ShadowFilterMode", static_cast<int>(ds.ShadowFilterMode), ini.c_str() ),
-            static_cast<int>(GothicRendererSettings::E_ShadowFilterMode::SHADOW_FILTER_SIMPLE),
-            static_cast<int>(GothicRendererSettings::E_ShadowFilterMode::SHADOW_FILTER_EVSM) ));
+        const int configuredShadowFilter = GetPrivateProfileIntA(
+            "Shadows", "ShadowFilterMode", static_cast<int>(ds.ShadowFilterMode), ini.c_str() );
+        s.ShadowFilterMode = configuredShadowFilter == static_cast<int>(GothicRendererSettings::E_ShadowFilterMode::SHADOW_FILTER_PCSS)
+            ? GothicRendererSettings::E_ShadowFilterMode::SHADOW_FILTER_PCSS
+            : GothicRendererSettings::E_ShadowFilterMode::SHADOW_FILTER_SIMPLE;
         if ( FeatureLevel10Compatibility && s.ShadowFilterMode != GothicRendererSettings::E_ShadowFilterMode::SHADOW_FILTER_SIMPLE ) {
             s.ShadowFilterMode = GothicRendererSettings::E_ShadowFilterMode::SHADOW_FILTER_SIMPLE;
         }
