@@ -405,3 +405,7 @@ Kurze, append-only Dokumentation der von Codex gepushten Renderer-Builds.
 - Nachtregen: entfernte Weltgeometrie wird bei Regen in der Nacht deutlich dunkler und der 360-Grad-Regennebel dichter, damit Silhouetten nicht hellgrau aus dem Nebel leuchten.
 - 4:3-Darstellung: World-Rendering bekommt bei gestrecktem Fenster eine horizontale Projektionskompensation, waehrend HUD/F11 wieder die originale UI-Projektion nutzt.
 - Pruefung: AGENTS-Regeln gelesen; Buildnummer aus outputs ermittelt; Build 111 gegen 113 fuer die Nachtregen-Aenderung verglichen; Shaderaufrufe, Constant-Buffer-Layout, F11-Abhaengigkeit, Konflikt-/Escape-Artefakte und git diff --check statisch kontrolliert. Kein vollstaendiger lokaler C++-/Shader-Build.
+## Build 114 (G1-AVX2 Buildfix fuer 4:3-Weltprojektion)
+
+- Buildfix: die 4:3-Weltprojektionskompensation nutzt nun `rendererState.RendererSettings.StretchWindow` statt einer nicht vorhandenen freien `StretchWindow`-Variable, damit Release_G1_AVX2 wieder kompiliert.
+- Pruefung: angehaengten GitHub-Buildlog ausgewertet; betroffene D3D11GraphicsEngine-Stelle und vorhandene StretchWindow-Aufrufer kontrolliert; git diff --check statisch kontrolliert. Kein vollstaendiger lokaler C++-/Shader-Build.

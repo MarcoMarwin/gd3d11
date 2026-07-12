@@ -3992,7 +3992,7 @@ XRESULT D3D11GraphicsEngine::OnStartWorldRendering() {
 
     const XMFLOAT4X4 uiProjection = rendererState.TransformState.TransformProjUnjittered;
     XMFLOAT4X4 worldProjection = uiProjection;
-    if ( StretchWindow && Resolution.y > 0 && m_swapchainResolution.y > 0 ) {
+    if ( rendererState.RendererSettings.StretchWindow && Resolution.y > 0 && m_swapchainResolution.y > 0 ) {
         const float logicalAspect = static_cast<float>( Resolution.x ) / static_cast<float>( Resolution.y );
         const float outputAspect = static_cast<float>( m_swapchainResolution.x ) / static_cast<float>( m_swapchainResolution.y );
         const float aspectScale = outputAspect / logicalAspect;
