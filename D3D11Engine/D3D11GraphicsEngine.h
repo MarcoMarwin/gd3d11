@@ -520,6 +520,7 @@ protected:
     std::vector<std::pair<MeshKey, MeshInfo*>> FrameTransparencyMeshesWetSSRBlockers;
 
     INT2 m_scaledResolution;
+    INT2 m_swapchainResolution;
 public:
     /** Lighting */
     GMesh* InverseUnitSphereMesh;

@@ -95,7 +95,8 @@ float4 PSMain( PS_INPUT Input ) : SV_TARGET
 	float activeWeatherFog = saturate(AC_RainFXWeight);
 	float nightTimeBlend = smoothstep(0.0f, 1.0f, saturate(-AC_LightPos.y * 4.0f))
 		* saturate(AC_EnableNightAtmosphere);
-	float weatherFog = max(fog, stableWorldFade) * activeWeatherFog;
+	float weatherFogStrength = lerp(1.0f, 1.20f, nightTimeBlend);
+	float weatherFog = saturate(max(fog, stableWorldFade) * activeWeatherFog * weatherFogStrength);
 	float dryNightFog = fog * nightTimeBlend * (1.0f - activeWeatherFog);
 	fog = max(weatherFog, dryNightFog);
 	float dryNightCurve = nightTimeBlend * (1.0f - activeWeatherFog);
@@ -113,26 +114,10 @@ float4 PSMain( PS_INPUT Input ) : SV_TARGET
 	float darknessFactor = lerp(dayDarknessFactor, 2.0f, nightTimeBlend);
 	float maxFogOpacity = lerp(1.0f, 0.85f, nightTimeBlend);
 	float rainyNightGeometry = (1.0f - skyPixel) * activeWeatherFog * nightTimeBlend;
-	float geometryFogOpacity = lerp(maxFogOpacity, 0.91f, rainyNightGeometry);
-	float skyRainFogAttenuation = lerp(1.0f, 0.54f, skyPixel * activeWeatherFog);
+	float geometryFogOpacity = lerp(maxFogOpacity, 0.94f, rainyNightGeometry);
+	float rainySkyOpacity = lerp(0.54f, 0.90f, nightTimeBlend);
+	float skyRainFogAttenuation = lerp(1.0f, rainySkyOpacity, skyPixel * activeWeatherFog);
 	float fogOpacity = fog * geometryFogOpacity * skyRainFogAttenuation;
 
-	float globalRainFogOpacity = activeWeatherFog
-		* lerp(0.06f, 0.20f, nightTimeBlend)
-		* lerp(1.0f, 0.65f, skyPixel);
-	float rainDepthStart = max(500.0f, stableFadeStart * 0.20f);
-	float rainDepthEnd = max(rainDepthStart + 3500.0f, stableFadeEnd * 0.90f);
-	float rainDepthT = saturate((fogDistance - rainDepthStart) / max(rainDepthEnd - rainDepthStart, 1.0f));
-	float rainDepthRamp = SmootherStep01(rainDepthT);
-	float rainyNightDepthFog = activeWeatherFog * nightTimeBlend * (1.0f - skyPixel)
-		* lerp(0.20f, 0.48f, rainDepthRamp);
-	fogOpacity = max(fogOpacity, max(globalRainFogOpacity, rainyNightDepthFog));
-
-	// Match the standalone fallback to the composition path: only distant
-	// rainy-night geometry darkens, while sky and cloud pixels stay unchanged.
-	float distantRainGeometry = rainyNightGeometry * rainDepthRamp;
-	float3 finalFogColor = saturate(color / darknessFactor);
-	finalFogColor *= lerp(1.0f, 0.65f, distantRainGeometry);
-
-	return float4(finalFogColor, saturate(fogOpacity));
+	return float4(saturate(color / darknessFactor), saturate(fogOpacity));
 }

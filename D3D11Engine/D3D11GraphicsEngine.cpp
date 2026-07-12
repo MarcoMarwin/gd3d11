@@ -441,6 +441,7 @@ D3D11GraphicsEngine::D3D11GraphicsEngine() :
     // Match the resolution with the current desktop resolution
     Resolution = m_scaledResolution =
         Engine::GAPI->GetRendererState().RendererSettings.LoadedResolution;
+    m_swapchainResolution = Resolution;
     unionCurrentCustomFontMultiplier = 1.0;
 }
 
@@ -1294,11 +1295,25 @@ XRESULT D3D11GraphicsEngine::RecreateBuffers() {
 XRESULT D3D11GraphicsEngine::OnResize( INT2 newSize ) {
     HRESULT hr;
 
-    if ( memcmp( &Resolution, &newSize, sizeof( newSize ) ) == 0 && SwapChain.Get() )
-        return XR_SUCCESS;  // Don't resize if we don't have to
+    INT2 requestedSwapchainSize = newSize;
+#ifndef BUILD_SPACER
+    if ( Engine::GAPI->GetRendererState().RendererSettings.StretchWindow ) {
+        RECT desktopRect = {};
+        if ( GetClientRect( GetDesktopWindow(), &desktopRect ) ) {
+            requestedSwapchainSize.x = std::max( desktopRect.right - desktopRect.left, 1L );
+            requestedSwapchainSize.y = std::max( desktopRect.bottom - desktopRect.top, 1L );
+        }
+    }
+#endif
+
+    if ( memcmp( &Resolution, &newSize, sizeof( newSize ) ) == 0
+        && memcmp( &m_swapchainResolution, &requestedSwapchainSize, sizeof( requestedSwapchainSize ) ) == 0
+        && SwapChain.Get() )
+        return XR_SUCCESS;  // Don't resize if neither logical nor physical output changed.
 
     Resolution = newSize;
     NewResolution = newSize;
+    m_swapchainResolution = requestedSwapchainSize;
     INT2 bbres = GetBackbufferResolution();
 
     // Keep Gothic's logical UI surface in sync with the selected swapchain size.
@@ -1439,8 +1454,8 @@ XRESULT D3D11GraphicsEngine::OnResize( INT2 newSize ) {
         scd.BufferUsage = DXGI_USAGE_RENDER_TARGET_OUTPUT | DXGI_USAGE_SHADER_INPUT;
         scd.SampleDesc.Count = 1;
         scd.SampleDesc.Quality = 0;
-        scd.Height = bbres.y;
-        scd.Width = bbres.x;
+        scd.Height = m_swapchainResolution.y;
+        scd.Width = m_swapchainResolution.x;
 
         hr = DXGIFactory2->CreateSwapChainForHwnd( GetDevice().Get(), OutputWindow, &scd, nullptr, nullptr, SwapChain.GetAddressOf() );
         if ( FAILED( hr ) ) {
@@ -1476,7 +1491,7 @@ XRESULT D3D11GraphicsEngine::OnResize( INT2 newSize ) {
     } else {
         LogInfo() << "Resizing swapchain  (Format: DXGI_FORMAT_SWAPCHAIN )";
         GetContext()->ClearState();
-        hr =SwapChain->ResizeBuffers( 0, bbres.x, bbres.y, DXGI_FORMAT_ENGINE_SWAPCHAIN , lastSwapchainFlags );
+        hr = SwapChain->ResizeBuffers( 0, m_swapchainResolution.x, m_swapchainResolution.y, DXGI_FORMAT_ENGINE_SWAPCHAIN, lastSwapchainFlags );
         if ( FAILED( hr ) ) {
             LogError() << "Failed to resize swapchain! HRESULT: " << std::hex << hr;
             return XR_FAILED;
@@ -1893,34 +1908,26 @@ XRESULT D3D11GraphicsEngine::Present() {
     ZoneScoped;
     const auto& settings = Engine::GAPI->GetRendererState().RendererSettings;
 
-    INT2 presentContentSize = GetBackbufferResolution();
+    INT2 presentContentSize = m_swapchainResolution;
     INT2 presentContentOffset( 0, 0 );
-    bool aspectFitPresentation = false;
-    if ( settings.StretchWindow && OutputWindow
-        && presentContentSize.x > 0 && presentContentSize.y > 0 ) {
-        RECT clientRect = {};
-        if ( GetClientRect( OutputWindow, &clientRect ) ) {
-            const int clientWidth = clientRect.right - clientRect.left;
-            const int clientHeight = clientRect.bottom - clientRect.top;
-            if ( clientWidth > 0 && clientHeight > 0 ) {
-                const float renderAspect = static_cast<float>(presentContentSize.x) / static_cast<float>(presentContentSize.y);
-                const float windowAspect = static_cast<float>(clientWidth) / static_cast<float>(clientHeight);
-                if ( std::abs( renderAspect - windowAspect ) > 0.001f ) {
-                    // DXGI stretches the low-resolution swapchain anisotropically to the
-                    // borderless window. Pre-compensate that stretch for the complete frame.
-                    const float logicalContentAspect = renderAspect * renderAspect / windowAspect;
-                    if ( logicalContentAspect < renderAspect ) {
-                        presentContentSize.x = std::max( 1, static_cast<int>(std::lround(
-                            static_cast<float>(presentContentSize.y) * logicalContentAspect )) );
-                        presentContentOffset.x = (Resolution.x - presentContentSize.x) / 2;
-                    } else {
-                        presentContentSize.y = std::max( 1, static_cast<int>(std::lround(
-                            static_cast<float>(presentContentSize.x) / logicalContentAspect )) );
-                        presentContentOffset.y = (Resolution.y - presentContentSize.y) / 2;
-                    }
-                    aspectFitPresentation = true;
-                }
-            }
+    const INT2 logicalFrameSize = GetBackbufferResolution();
+    const bool aspectFitPresentation =
+        logicalFrameSize.x != m_swapchainResolution.x
+        || logicalFrameSize.y != m_swapchainResolution.y;
+
+    if ( aspectFitPresentation ) {
+        const float sourceAspect = static_cast<float>(logicalFrameSize.x) / static_cast<float>(logicalFrameSize.y);
+        const float targetAspect = static_cast<float>(m_swapchainResolution.x) / static_cast<float>(m_swapchainResolution.y);
+        if ( targetAspect > sourceAspect ) {
+            presentContentSize.y = m_swapchainResolution.y;
+            presentContentSize.x = std::max( 1, static_cast<int>(std::lround(
+                static_cast<float>(presentContentSize.y) * sourceAspect )) );
+            presentContentOffset.x = (m_swapchainResolution.x - presentContentSize.x) / 2;
+        } else if ( targetAspect < sourceAspect ) {
+            presentContentSize.x = m_swapchainResolution.x;
+            presentContentSize.y = std::max( 1, static_cast<int>(std::lround(
+                static_cast<float>(presentContentSize.x) / sourceAspect )) );
+            presentContentOffset.y = (m_swapchainResolution.y - presentContentSize.y) / 2;
         }
     }
 
@@ -1971,8 +1978,8 @@ XRESULT D3D11GraphicsEngine::Present() {
     }
 
     if ( aspectFitPresentation ) {
-        // ImGui is now part of the same logical frame as Gothic's HUD and menus.
-        // Fit that completed frame once, then let DXGI perform its window stretch.
+        // ImGui is part of the logical frame. Scale that completed frame uniformly
+        // into the physical borderless swapchain and keep the unused area black.
         ID3D11ShaderResourceView* nullPresentationSRV = nullptr;
         GetContext()->PSSetShaderResources( 0, 1, &nullPresentationSRV );
         GetContext()->OMSetRenderTargets( 0, nullptr, nullptr );
@@ -6953,7 +6960,7 @@ void XM_CALLCONV D3D11GraphicsEngine::DrawWorldAroundForWorldShadow( FXMVECTOR p
             ctx.drawDistances.OutdoorVobs = rs.OutdoorVobDrawRadius;
             ctx.drawDistances.OutdoorVobsSmall = rs.OutdoorSmallVobDrawRadius;
             ctx.drawDistances.IndoorVobs = rs.IndoorVobDrawRadius;
-            ctx.drawDistances.VisualFX = rs.VisualFXDrawRadius;
+            ctx.drawDistances.VisualFX = rs.GetEffectiveVisualFXDrawRadius();
             ctx.drawDistancesSq.OutdoorVobs = ctx.drawDistances.OutdoorVobs * ctx.drawDistances.OutdoorVobs;
             ctx.drawDistancesSq.OutdoorVobsSmall = ctx.drawDistances.OutdoorVobsSmall * ctx.drawDistances.OutdoorVobsSmall;
             ctx.drawDistancesSq.IndoorVobs = ctx.drawDistances.IndoorVobs * ctx.drawDistances.IndoorVobs;
@@ -9118,7 +9125,7 @@ void D3D11GraphicsEngine::DrawQuadMarks() {
 
     int alphaFunc = zMAT_ALPHA_FUNC_NONE;
 
-    auto vfxRadiusSq = Engine::GAPI->GetRendererState().RendererSettings.VisualFXDrawRadius * Engine::GAPI->GetRendererState().RendererSettings.VisualFXDrawRadius;
+    auto vfxRadiusSq = Engine::GAPI->GetRendererState().RendererSettings.GetEffectiveVisualFXDrawRadius() * Engine::GAPI->GetRendererState().RendererSettings.GetEffectiveVisualFXDrawRadius();
     auto vVfxRadiusSq = XMVectorReplicate(vfxRadiusSq);
     const auto camPos = Engine::GAPI->GetCameraPositionXM();
     for ( auto const& it : quadMarks ) {
@@ -9299,7 +9306,7 @@ void D3D11GraphicsEngine::DrawFrameParticleMeshes( std::unordered_map<zCVob*, Me
 
     FXMVECTOR camPos = Engine::GAPI->GetCameraPositionXM();
     int lastBlend = zRND_ALPHA_FUNC_NONE;
-    auto vfxRadiusSq = state.RendererSettings.VisualFXDrawRadius * state.RendererSettings.VisualFXDrawRadius;
+    auto vfxRadiusSq = state.RendererSettings.GetEffectiveVisualFXDrawRadius() * state.RendererSettings.GetEffectiveVisualFXDrawRadius();
     auto vVfxRadiusSq = XMVectorReplicate(vfxRadiusSq);
     auto vsBufMPI = ActiveVS->GetBuffer( "Matrices_PerInstances" );
     vsBufMPI.Bind();

@@ -124,16 +124,16 @@ XRESULT D3D11LegacyDeferredShading::DrawPointlightLights(
         XMStoreFloat( &dist, XMVector3Length( XMLoadFloat3( plcb.Pl_PositionWorld.toXMFLOAT3() ) - Engine::GAPI->GetCameraPositionXM() ) );
 
         const float lightRange = plcb.PL_Range;
-        const float shadowFadeEnd = std::max( settings.VisualFXDrawRadius - lightRange, 1.0f );
+        const float shadowFadeEnd = std::max( settings.GetEffectiveVisualFXDrawRadius() - lightRange, 1.0f );
         const float shadowFadeStart = shadowFadeEnd * shadowFadeStartRatio;
         const float shadowFadeT = std::clamp(
             (shadowFadeEnd - dist) / std::max( shadowFadeEnd - shadowFadeStart, 1.0f ), 0.0f, 1.0f );
         plcb.PL_ShadowStrength = shadowFadeT * shadowFadeT * (3.0f - 2.0f * shadowFadeT);
 
         if ( dist + plcb.PL_Range <
-            settings.VisualFXDrawRadius ) {
+            settings.GetEffectiveVisualFXDrawRadius() ) {
             float fadeEnd =
-                settings.VisualFXDrawRadius;
+                settings.GetEffectiveVisualFXDrawRadius();
 
             float fadeFactor = std::min(
                 1.0f,

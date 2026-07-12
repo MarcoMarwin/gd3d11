@@ -740,7 +740,7 @@ void ApplyFeatureLevel10Downgrades(GothicRendererSettings& s) {
 
 namespace
 {
-    constexpr float OBJECT_DRAW_DISTANCE_MIN_KM = 5.0f;
+    constexpr float OBJECT_DRAW_DISTANCE_MIN_KM = 2.5f;
     constexpr float OBJECT_DRAW_DISTANCE_MAX_KM = 25.0f;
     constexpr int OBJECT_DRAW_DISTANCE_UI_MIN = 1;
     constexpr int OBJECT_DRAW_DISTANCE_UI_MAX = 10;
@@ -933,7 +933,7 @@ void ApplyGraphicsPresets( GothicRendererSettings& s, bool applyRuntimeUpdates =
         s.WindQuality = GothicRendererSettings::EWindQuality::WIND_QUALITY_ADVANCED;
         s.HeroAffectsObjects = true;
         s.EnableOcclusionCulling = true;
-        s.OutdoorSmallVobDrawRadius = ObjectDrawDistanceUiToMeters( 1 );
+        s.OutdoorSmallVobDrawRadius = ObjectDrawDistanceUiToMeters( 2 );
         s.SectionDrawRadius = 3;
         s.textureMaxSize = static_cast<int>(TX_QUALITY::High);
         break;
@@ -952,7 +952,7 @@ void ApplyGraphicsPresets( GothicRendererSettings& s, bool applyRuntimeUpdates =
         s.WindQuality = GothicRendererSettings::EWindQuality::WIND_QUALITY_ADVANCED;
         s.HeroAffectsObjects = true;
         s.EnableOcclusionCulling = true;
-        s.OutdoorSmallVobDrawRadius = ObjectDrawDistanceUiToMeters( 3 );
+        s.OutdoorSmallVobDrawRadius = ObjectDrawDistanceUiToMeters( 4 );
         s.SectionDrawRadius = 4;
         s.textureMaxSize = static_cast<int>(TX_QUALITY::MAX);
         break;

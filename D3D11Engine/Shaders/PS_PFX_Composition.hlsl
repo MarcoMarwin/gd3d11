@@ -122,7 +122,8 @@ float4 ComputeHeightFog( float2 texcoord )
     float activeWeatherFog = saturate(AC_RainFXWeight);
 	float nightTimeBlend = smoothstep(0.0f, 1.0f, saturate(-AC_LightPos.y * 4.0f))
 		* saturate(AC_EnableNightAtmosphere);
-    float weatherFog = max(fog, stableWorldFade) * activeWeatherFog;
+    float weatherFogStrength = lerp(1.0f, 1.20f, nightTimeBlend);
+    float weatherFog = saturate(max(fog, stableWorldFade) * activeWeatherFog * weatherFogStrength);
     float dryNightFog = fog * nightTimeBlend * (1.0f - activeWeatherFog);
     fog = max(weatherFog, dryNightFog);
 
@@ -134,35 +135,13 @@ float4 ComputeHeightFog( float2 texcoord )
 	float dayDarknessFactor = max(1.0f, 2.0f - max(0.0f, AC_LightPos.y));
 	float darknessFactor = lerp(dayDarknessFactor, 2.5f, nightTimeBlend);
 	float maxFogOpacity = lerp(1.0f, 0.85f, nightTimeBlend);
-	// Recover a little rainy-night geometry fog without touching the sky path:
-	// distant silhouettes recede, while the cloud layer keeps its existing visibility.
 	float rainyNightGeometry = (1.0f - skyPixel) * activeWeatherFog * nightTimeBlend;
-	float geometryFogOpacity = lerp(maxFogOpacity, 0.91f, rainyNightGeometry);
-	float skyRainFogAttenuation = lerp(1.0f, 0.54f, skyPixel * activeWeatherFog);
+	float geometryFogOpacity = lerp(maxFogOpacity, 0.94f, rainyNightGeometry);
+	float rainySkyOpacity = lerp(0.54f, 0.90f, nightTimeBlend);
+	float skyRainFogAttenuation = lerp(1.0f, rainySkyOpacity, skyPixel * activeWeatherFog);
 	float fogOpacity = fog * geometryFogOpacity * skyRainFogAttenuation;
 
-	// Rain keeps a depth-independent weather veil near the camera. It is stronger at night,
-	// while sky pixels receive less opacity so the cloud deck remains visible through it.
-	float globalRainFogOpacity = activeWeatherFog
-		* lerp(0.06f, 0.20f, nightTimeBlend)
-		* lerp(1.0f, 0.65f, skyPixel);
-
-	// Add depth to rainy nights instead of increasing a flat full-screen veil.
-	float rainDepthStart = max(500.0f, stableFadeStart * 0.20f);
-	float rainDepthEnd = max(rainDepthStart + 3500.0f, stableFadeEnd * 0.90f);
-	float rainDepthT = saturate((fogDistance - rainDepthStart) / max(rainDepthEnd - rainDepthStart, 1.0f));
-	float rainDepthRamp = SmootherStep01(rainDepthT);
-	float rainyNightDepthFog = activeWeatherFog * nightTimeBlend * (1.0f - skyPixel)
-		* lerp(0.20f, 0.48f, rainDepthRamp);
-	fogOpacity = max(fogOpacity, max(globalRainFogOpacity, rainyNightDepthFog));
-
-	// Distant rainy-night geometry must recede into a darker horizon instead of
-	// becoming brighter than the night sky. Sky and cloud pixels stay unchanged.
-	float distantRainGeometry = rainyNightGeometry * rainDepthRamp;
-	float3 finalFogColor = saturate(color / darknessFactor);
-	finalFogColor *= lerp(1.0f, 0.65f, distantRainGeometry);
-
-	return float4(finalFogColor, saturate(fogOpacity));
+	return float4(saturate(color / darknessFactor), saturate(fogOpacity));
 }
 #endif
 

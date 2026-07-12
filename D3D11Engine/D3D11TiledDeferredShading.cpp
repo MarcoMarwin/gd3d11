@@ -453,14 +453,14 @@ D3D11TiledDeferredShading::CullResult D3D11TiledDeferredShading::CullLights(
         float dist;
         XMStoreFloat( &dist, XMVector3Length( XMLoadFloat3( posWorld.toXMFLOAT3() ) - camPos ) );
 
-        const float shadowFadeEnd = std::max( settings.VisualFXDrawRadius - lightRange, 1.0f );
+        const float shadowFadeEnd = std::max( settings.GetEffectiveVisualFXDrawRadius() - lightRange, 1.0f );
         const float shadowFadeStart = shadowFadeEnd * shadowFadeStartRatio;
         const float shadowFadeT = std::clamp(
             (shadowFadeEnd - dist) / std::max( shadowFadeEnd - shadowFadeStart, 1.0f ), 0.0f, 1.0f );
         const float shadowDistanceFade = shadowFadeT * shadowFadeT * (3.0f - 2.0f * shadowFadeT);
 
-        if ( dist + lightRange < settings.VisualFXDrawRadius ) {
-            float fadeEnd = settings.VisualFXDrawRadius;
+        if ( dist + lightRange < settings.GetEffectiveVisualFXDrawRadius() ) {
+            float fadeEnd = settings.GetEffectiveVisualFXDrawRadius();
             float fadeFactor = std::min( 1.0f, std::max( 0.0f, ((fadeEnd - (dist + lightRange)) / lightRange) ) );
             lightColor.x *= fadeFactor;
             lightColor.y *= fadeFactor;

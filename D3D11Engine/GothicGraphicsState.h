@@ -569,6 +569,10 @@ struct GothicRendererSettings {
         RM_ForwardPlus = 1,
     };
 
+    float GetEffectiveVisualFXDrawRadius() const {
+        return std::min( VISUAL_FX_DRAW_RADIUS_FIXED, OutdoorSmallVobDrawRadius );
+    }
+
     float GetContactShadowFixedStrength() const {
         const bool temporalReconstructionActive =
             Upscaler == E_Upscaler::UPSCALER_FSR_3

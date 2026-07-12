@@ -1489,7 +1489,7 @@ void GothicAPI::LoadRendererGlobalSettings( GothicRendererSettings& s, const cha
     if ( !GMPModeActive ) {
         s.OutdoorSmallVobDrawRadius = std::clamp(
             GetPrivateProfileFloatA( "General", "OutdoorSmallVobDrawRadius", s.OutdoorSmallVobDrawRadius, ini ),
-            5000.0f, 25000.0f );
+            2500.0f, 25000.0f );
         s.SectionDrawRadius = static_cast<decltype(s.SectionDrawRadius)>( std::clamp<int>(
             static_cast<int>( GetPrivateProfileIntA( "General", "SectionDrawRadius", s.SectionDrawRadius, ini.c_str() ) ),
             1, 10 ) );
@@ -1846,7 +1846,7 @@ void GothicAPI::CalcFlashMeshes() {
         return;
     }
     
-    auto vVfxRangeSq = XMVectorReplicate(RendererState.RendererSettings.VisualFXDrawRadius * RendererState.RendererSettings.VisualFXDrawRadius);
+    auto vVfxRangeSq = XMVectorReplicate(RendererState.RendererSettings.GetEffectiveVisualFXDrawRadius() * RendererState.RendererSettings.GetEffectiveVisualFXDrawRadius());
 
     FXMVECTOR camPos = GetCameraPositionXM();
     static std::vector<zCPolyStrip*> polyStrips; polyStrips.clear();
@@ -1967,7 +1967,7 @@ void GothicAPI::GetVisibleParticleEffectsList( std::vector<zCVob*>& pfxList ) {
             return;
         }
 
-        const float visualFxRange = RendererState.RendererSettings.VisualFXDrawRadius;
+        const float visualFxRange = RendererState.RendererSettings.GetEffectiveVisualFXDrawRadius();
         const XMVECTOR vVfxRangeSq = XMVectorReplicate( visualFxRange * visualFxRange );
 
         for ( auto const& it : ParticleEffectVobs ) {
@@ -2008,7 +2008,7 @@ void GothicAPI::GetVisibleDecalList( std::vector<zCVob*>& decals ) {
     FXMVECTOR camPos = GetCameraPositionXM();
     static std::vector<std::pair<zCVob*, float>> decalDistances; // Static to get around reallocations
 
-    float vVfxRangeSq = RendererState.RendererSettings.VisualFXDrawRadius * RendererState.RendererSettings.VisualFXDrawRadius;
+    float vVfxRangeSq = RendererState.RendererSettings.GetEffectiveVisualFXDrawRadius() * RendererState.RendererSettings.GetEffectiveVisualFXDrawRadius();
     float dist;
     for ( auto const& it : DecalVobs ) {
         XMStoreFloat( &dist, XMVector3LengthSq( it->GetPositionWorldXM() - camPos ) );
@@ -4341,7 +4341,7 @@ void GothicAPI::CollectVisibleVobs(
     ctx.drawDistances.OutdoorVobs = RendererState.RendererSettings.OutdoorVobDrawRadius;
     ctx.drawDistances.OutdoorVobsSmall = RendererState.RendererSettings.OutdoorSmallVobDrawRadius;
     ctx.drawDistances.IndoorVobs = RendererState.RendererSettings.IndoorVobDrawRadius;
-    ctx.drawDistances.VisualFX = RendererState.RendererSettings.VisualFXDrawRadius;
+    ctx.drawDistances.VisualFX = RendererState.RendererSettings.GetEffectiveVisualFXDrawRadius();
     ctx.drawDistancesSq.OutdoorVobs = ctx.drawDistances.OutdoorVobs * ctx.drawDistances.OutdoorVobs;
     ctx.drawDistancesSq.OutdoorVobsSmall = ctx.drawDistances.OutdoorVobsSmall * ctx.drawDistances.OutdoorVobsSmall;
     ctx.drawDistancesSq.IndoorVobs = ctx.drawDistances.IndoorVobs * ctx.drawDistances.IndoorVobs;

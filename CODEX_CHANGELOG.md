@@ -2,6 +2,15 @@
 
 Kurze, append-only Dokumentation der von Codex gepushten Renderer-Builds.
 
+## Build 112
+
+- Seitenverhaeltnis: Logische Spielaufloesung und physische Borderless-Swapchain sind getrennt. Welt, HUD, Gothic-Menue und F11 werden gemeinsam in der gewaehlten Aufloesung gerendert und erst zur Ausgabe proportional mit schwarzen Balken eingepasst.
+- Nachtregen: Die zusaetzlichen flachen Regen- und Tiefennebelschichten wurden entfernt. Der 360-Grad-Entfernungsnebel folgt wieder dem bewaehrten Verlauf, ist nachts dichter und laesst die Wolkendecke nur noch leicht durchscheinen.
+- Regenuebergang: In Gothic 2 haelt der echte Wettertyp den Atmosphaerenzustand waehrend aktiven Regens stabil. Nach bestaetigtem Wetterende bleibt der Ausklang strikt monoton und ignoriert verspaetete RainFX-Pulse.
+- NPC-Schatten: PCSS bleibt fuer die Welt aktiv; markierte animierte NPC-/Skeletal-Empfaenger verwenden automatisch den stabilen PCF-Abtastpfad.
+- Objektsichtweite und VisualFX: Die F11-Skala verwendet zehn gleichmaessige 2500er-Schritte von 2500 bis 25000. Niedrig nutzt Stufe 2, Mittel und Default Stufe 4, Hoch Stufe 6 und Extrem Stufe 8. VisualFX folgt bis Stufe 4 der Objektsichtweite und bleibt darueber bei 10000.
+- Pruefung: Statische Diff-, Aufrufer-, Shaderstruktur-, Persistenz- und Seitenverhaeltnispruefung; kein vollstaendiger lokaler C++-Build.
+
 ## Build 111 (Korrekturpush)
 
 - Startstabilitaet: Die absturzverdaechtige MENU.DAT-Spracherkennung ueber Gothics VDFS wurde entfernt; die Renderer-Sprache wird nun im F11-Menue manuell zwischen Englisch und Deutsch gewaehlt und global persistiert.

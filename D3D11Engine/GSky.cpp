@@ -265,6 +265,18 @@ XRESULT GSky::RenderSky() {
         ? std::clamp( Engine::GAPI->GetRainFXWeight(), 0.0f, 1.0f )
         : 0.0f;
     const DWORD atmosphericRainNow = GetTickCount();
+    bool rainWeatherActive = !AtmosphericRainReleasing && rawAtmosphericRain > 0.01f;
+#ifdef BUILD_GOTHIC_2_6_fix
+    if ( oCGame* game = oCGame::GetGame() ) {
+        if ( zCWorld* world = game->_zCSession_world ) {
+            if ( zCSkyController_Outdoor* skyController = world->GetSkyControllerOutdoor() ) {
+                const zTWeather weather = skyController->GetWeatherType();
+                rainWeatherActive = weather == zTWeather::zTWEATHER_RAIN
+                    || weather == zTWeather::zTWEATHER_SNOW;
+            }
+        }
+    }
+#endif
     const bool rainManuallyEnabled = AtmosphericRainSettingInitialized
         && rainEnabled && !AtmosphericRainSettingEnabled;
     if ( !rainEnabled ) {
@@ -288,38 +300,33 @@ XRESULT GSky::RenderSky() {
         const float deltaSeconds = std::min( (atmosphericRainNow - AtmosphericRainLastUpdateMs) * 0.001f, 0.1f );
         constexpr float ATMOSPHERIC_RAIN_TRANSITION_RATE = 1.0f / 60.0f;
 
-        if ( !AtmosphericRainReleasing ) {
-            if ( rawAtmosphericRain + 0.02f < AtmosphericRainWeight ) {
-                if ( AtmosphericRainDropStartMs == 0 ) {
-                    AtmosphericRainDropStartMs = atmosphericRainNow;
-                } else if ( atmosphericRainNow - AtmosphericRainDropStartMs >= 250 ) {
-                    AtmosphericRainReleasing = true;
-                    AtmosphericRainDropStartMs = 0;
-                }
-            } else {
-                AtmosphericRainDropStartMs = 0;
-            }
-
-            // While rain is active or a possible drop is being debounced, only a
-            // stronger rain signal may move the atmospheric state.
-            if ( !AtmosphericRainReleasing && rawAtmosphericRain > AtmosphericRainWeight ) {
+        if ( rainWeatherActive ) {
+            // A real weather state owns the active phase. Short RainFX-weight dips
+            // must not start the atmospheric fade while Gothic is still raining.
+            AtmosphericRainDropStartMs = 0;
+            AtmosphericRainSettledStartMs = 0;
+            AtmosphericRainReleasing = false;
+            if ( rawAtmosphericRain > AtmosphericRainWeight ) {
                 AtmosphericRainWeight += std::min(
                     rawAtmosphericRain - AtmosphericRainWeight, ATMOSPHERIC_RAIN_TRANSITION_RATE * deltaSeconds );
+            }
+        } else if ( !AtmosphericRainReleasing ) {
+            // Debounce the real weather end once, then commit to a monotonic fade.
+            if ( AtmosphericRainDropStartMs == 0 ) {
+                AtmosphericRainDropStartMs = atmosphericRainNow;
+            } else if ( atmosphericRainNow - AtmosphericRainDropStartMs >= 250 ) {
+                AtmosphericRainReleasing = true;
+                AtmosphericRainDropStartMs = 0;
             }
         }
 
         if ( AtmosphericRainReleasing ) {
-            // Once rain shutdown is confirmed, the atmosphere may only move toward
-            // clear weather. Late controller pulses cannot darken it again.
-            if ( rawAtmosphericRain < AtmosphericRainWeight ) {
-                AtmosphericRainWeight -= std::min(
-                    AtmosphericRainWeight - rawAtmosphericRain, ATMOSPHERIC_RAIN_TRANSITION_RATE * deltaSeconds );
-            }
-            if ( AtmosphericRainWeight < 0.0001f ) {
-                AtmosphericRainWeight = 0.0f;
-            }
+            // Ignore late RainFX pulses during shutdown. They caused the old
+            // rain -> clear -> rain jumps in distant geometry and sky transitions.
+            AtmosphericRainWeight = std::max(
+                0.0f, AtmosphericRainWeight - ATMOSPHERIC_RAIN_TRANSITION_RATE * deltaSeconds );
 
-            if ( AtmosphericRainWeight == 0.0f && rawAtmosphericRain <= 0.01f ) {
+            if ( AtmosphericRainWeight == 0.0f ) {
                 if ( AtmosphericRainSettledStartMs == 0 ) {
                     AtmosphericRainSettledStartMs = atmosphericRainNow;
                 } else if ( atmosphericRainNow - AtmosphericRainSettledStartMs >= 1500 ) {
