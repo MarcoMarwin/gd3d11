@@ -423,7 +423,7 @@ struct AtmosphereConstantBuffer {
     float AC_EnableContactShadows;
 
     float AC_EnableScreenSpaceGI;
-    float AC_PadLightFX1;
+    float AC_SkyEffectsEnabled;
     float AC_ContactShadowStrength;
     float AC_ScreenSpaceGIStrength;
 

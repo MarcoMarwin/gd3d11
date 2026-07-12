@@ -486,7 +486,7 @@ XRESULT GSky::RenderSky() {
     AtmosphereCB.AC_EnableContactShadows = Engine::GAPI->GetRendererState().RendererSettings.EnableContactShadows ? 1.0f : 0.0f;
     AtmosphereCB.AC_EnableScreenSpaceGI = (Engine::GAPI->GetRendererState().RendererSettings.EnableScreenSpaceGI && Engine::GAPI->GetRendererState().RendererSettings.ScreenSpaceGIStrength > 0.0f) ? 1.0f : 0.0f;
     const auto& rendererSettings = Engine::GAPI->GetRendererState().RendererSettings;
-    AtmosphereCB.AC_PadLightFX1 = 0.0f;
+    AtmosphereCB.AC_SkyEffectsEnabled = rendererSettings.EnableRain ? 1.0f : 0.0f;
     AtmosphereCB.AC_ContactShadowStrength = (rendererSettings.EnableContactShadows ? rendererSettings.GetContactShadowFixedStrength() : 0.0f) * GetMainLightVisibility();
     AtmosphereCB.AC_ScreenSpaceGIStrength = rendererSettings.ScreenSpaceGIStrength;
     AtmosphereCB.AC_EnableParticleLighting = rendererSettings.EnableParticleLighting ? 1.0f : 0.0f;

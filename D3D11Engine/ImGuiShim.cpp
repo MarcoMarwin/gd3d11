@@ -1687,10 +1687,9 @@ void ImGuiShim::RenderSettingsWindow()
             }
             ImGui::SetItemTooltip( "%s", Tr( "Adds small shadows where objects meet nearby surfaces.", u8"F\u00FCgt kleine Schatten an nahen Kontaktstellen hinzu." ) );
 
-            ImText( Tr( "Enable Rain", u8"Regen aktivieren" ), { buttonWidth.x - ImGui::GetFrameHeight() - style.ItemSpacing.x, buttonWidth.y } ); ImGui::SameLine();
+            ImText( Tr( "Sky Effects", u8"Himmelseffekte" ), { buttonWidth.x - ImGui::GetFrameHeight() - style.ItemSpacing.x, buttonWidth.y } ); ImGui::SameLine();
             ImGui::Checkbox( "##Enable Rain", &settings.EnableRain );
-            ImGui::SetItemTooltip( "%s", Tr( "Adds rainfall and related environmental effects.", u8"F\u00FCgt Regen und zugeh\u00F6rige Umgebungseffekte hinzu." ) );
-
+            ImGui::SetItemTooltip( "%s", Tr( "Enables rain, rain effects, and low atmospheric cloud layers.", u8"Aktiviert Regen, Regeneffekte und tiefe atmosph\u00E4rische Nebelschichten." ) );
             ImText( Tr( "Occlusion Culling", u8"Verdeckungspr\u00FCfung" ), { buttonWidth.x - ImGui::GetFrameHeight() - style.ItemSpacing.x, buttonWidth.y } ); ImGui::SameLine();
             ImGui::Checkbox( "##Enable Occlusion Culling", &settings.EnableOcclusionCulling );
             ImGui::SetItemTooltip( "%s", Tr( "Skips world geometry hidden behind other objects.", u8"\u00DCberspringt Weltgeometrie, die hinter anderen Objekten verborgen ist." ) );

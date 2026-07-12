@@ -398,3 +398,10 @@ Kurze, append-only Dokumentation der von Codex gepushten Renderer-Builds.
 - F11: Tooltiptexte wurden kurz und allgemein formuliert; Displaymodus und Versionsanzeige bleiben auf den vereinbarten sichtbaren Positionen.
 - EVSM: echter EVSM4-Filterpfad mit mehrstufigen Kaskaden und qualitativer Aufloesungsstaffelung je nach Shadow-Quality weiter integriert.
 - Pruefung: nur statische Diff-/Binding-/Aufrufer- und Shaderpfadkontrollen; kein lokaler Vollbau.
+## Build 113 (Himmelseffekte, volumetrische Tiefwolken und 4:3-Weltprojektion)
+
+- Himmelseffekte: der bisherige F11-Schalter fuer Regen heisst nun Himmelseffekte/Sky Effects und steuert Regen, Regeneffekte und die neuen tiefen atmosphaerischen Wolkenschichten gemeinsam.
+- Volumetrische Tiefwolken: world-space Raymarching fuer dunkle Tal-/Bergnebelkoerper mit Noise-Dichte, Distanzbegrenzung, Regen-/Nachtgewichtung, einfacher Selbstabschattung und Depth-Begrenzung gegen sichtbare Weltgeometrie integriert.
+- Nachtregen: entfernte Weltgeometrie wird bei Regen in der Nacht deutlich dunkler und der 360-Grad-Regennebel dichter, damit Silhouetten nicht hellgrau aus dem Nebel leuchten.
+- 4:3-Darstellung: World-Rendering bekommt bei gestrecktem Fenster eine horizontale Projektionskompensation, waehrend HUD/F11 wieder die originale UI-Projektion nutzt.
+- Pruefung: AGENTS-Regeln gelesen; Buildnummer aus outputs ermittelt; Build 111 gegen 113 fuer die Nachtregen-Aenderung verglichen; Shaderaufrufe, Constant-Buffer-Layout, F11-Abhaengigkeit, Konflikt-/Escape-Artefakte und git diff --check statisch kontrolliert. Kein vollstaendiger lokaler C++-/Shader-Build.

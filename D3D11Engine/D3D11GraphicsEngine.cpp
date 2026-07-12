@@ -3991,8 +3991,17 @@ XRESULT D3D11GraphicsEngine::OnStartWorldRendering() {
     rendererState.RendererInfo.RenderStage = STAGE_DRAW_WORLD;
 
     const XMFLOAT4X4 uiProjection = rendererState.TransformState.TransformProjUnjittered;
-    rendererState.TransformState.TransformProjUnjittered = uiProjection;
-    rendererState.TransformState.TransformProj = uiProjection;
+    XMFLOAT4X4 worldProjection = uiProjection;
+    if ( StretchWindow && Resolution.y > 0 && m_swapchainResolution.y > 0 ) {
+        const float logicalAspect = static_cast<float>( Resolution.x ) / static_cast<float>( Resolution.y );
+        const float outputAspect = static_cast<float>( m_swapchainResolution.x ) / static_cast<float>( m_swapchainResolution.y );
+        const float aspectScale = outputAspect / logicalAspect;
+        if ( std::isfinite( aspectScale ) && std::abs( aspectScale - 1.0f ) > 0.001f ) {
+            worldProjection._11 *= aspectScale;
+        }
+    }
+    rendererState.TransformState.TransformProjUnjittered = worldProjection;
+    rendererState.TransformState.TransformProj = worldProjection;
 
     SetViewport( ViewportInfo( 0, 0, GetResolution() ) );
 
