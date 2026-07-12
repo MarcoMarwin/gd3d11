@@ -3992,9 +3992,24 @@ XRESULT D3D11GraphicsEngine::OnStartWorldRendering() {
 
     const XMFLOAT4X4 uiProjection = rendererState.TransformState.TransformProjUnjittered;
     XMFLOAT4X4 worldProjection = uiProjection;
-    if ( rendererState.RendererSettings.StretchWindow && Resolution.y > 0 && m_swapchainResolution.y > 0 ) {
+    if ( Resolution.y > 0 && m_swapchainResolution.y > 0 ) {
         const float logicalAspect = static_cast<float>( Resolution.x ) / static_cast<float>( Resolution.y );
-        const float outputAspect = static_cast<float>( m_swapchainResolution.x ) / static_cast<float>( m_swapchainResolution.y );
+        float outputAspect = static_cast<float>( m_swapchainResolution.x ) / static_cast<float>( m_swapchainResolution.y );
+#ifndef BUILD_SPACER
+        const bool startupWindowed = !rendererState.RendererSettings.StretchWindow
+            && ( Engine::GAPI->HasCommandlineParameter( "ZWINDOW" )
+                || Engine::GAPI->GetIntParamFromConfig( "zStartupWindowed" ) );
+        if ( startupWindowed ) {
+            RECT desktopRect = {};
+            if ( GetClientRect( GetDesktopWindow(), &desktopRect ) ) {
+                const int desktopWidth = desktopRect.right - desktopRect.left;
+                const int desktopHeight = desktopRect.bottom - desktopRect.top;
+                if ( desktopWidth > 0 && desktopHeight > 0 ) {
+                    outputAspect = static_cast<float>( desktopWidth ) / static_cast<float>( desktopHeight );
+                }
+            }
+        }
+#endif
         const float aspectScale = outputAspect / logicalAspect;
         if ( std::isfinite( aspectScale ) && std::abs( aspectScale - 1.0f ) > 0.001f ) {
             worldProjection._11 *= aspectScale;

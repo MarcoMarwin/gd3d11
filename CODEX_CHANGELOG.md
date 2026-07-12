@@ -409,3 +409,11 @@ Kurze, append-only Dokumentation der von Codex gepushten Renderer-Builds.
 
 - Buildfix: die 4:3-Weltprojektionskompensation nutzt nun `rendererState.RendererSettings.StretchWindow` statt einer nicht vorhandenen freien `StretchWindow`-Variable, damit Release_G1_AVX2 wieder kompiliert.
 - Pruefung: angehaengten GitHub-Buildlog ausgewertet; betroffene D3D11GraphicsEngine-Stelle und vorhandene StretchWindow-Aufrufer kontrolliert; git diff --check statisch kontrolliert. Kein vollstaendiger lokaler C++-/Shader-Build.
+
+## Build 115 (Tiefwolken-Felder, Nachtregen und Windowed-4:3-Projektion)
+
+- Tiefwolken: die vorherige durchgehende Nebelwirkung wurde zu eigenstaendigen, weltkoordinatenbasierten Wolkenfeldern mit sichtbaren Luecken, hoehenversetzten Baenken, einfacher Selbstabschattung und sonnenzugewandter Oberseitenaufhellung umgebaut.
+- Wolkenschatten: die Tiefwolken dunkeln entfernte Weltgeometrie weich und breit ab, ohne harte Shadowmap-Kanten und weiterhin unabhaengig vom Regen.
+- Nachtregen: der Regennebel bleibt beim Tag naeher am Build-112-Verhalten; nachts wird die entfernte Weltgeometrie dunkler grau statt hellgrau, und der 360-Grad-Haze wirkt weich auch auf den Himmel.
+- Windowed-4:3: die horizontale Weltprojektionskompensation gilt nun auch im Windowed-Modus, damit 800x600-Ingame nicht schmal zusammengedrueckt wirkt; HUD/F11 bleiben an die Fensterflaeche gekoppelt.
+- Pruefung: AGENTS-Regeln gelesen; Buildnummer aus outputs ermittelt; Projektionspfad, Shaderaufrufe, Konflikt-/Escape-Artefakte und git diff --check statisch kontrolliert. Kein vollstaendiger lokaler C++-/Shader-Build.
