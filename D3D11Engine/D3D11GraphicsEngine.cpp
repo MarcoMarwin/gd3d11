@@ -1893,6 +1893,44 @@ XRESULT D3D11GraphicsEngine::Present() {
     ZoneScoped;
     const auto& settings = Engine::GAPI->GetRendererState().RendererSettings;
 
+    INT2 presentContentSize = GetBackbufferResolution();
+    INT2 presentContentOffset( 0, 0 );
+    bool aspectFitPresentation = false;
+    if ( settings.StretchWindow && OutputWindow
+        && presentContentSize.x > 0 && presentContentSize.y > 0 ) {
+        RECT clientRect = {};
+        if ( GetClientRect( OutputWindow, &clientRect ) ) {
+            const int clientWidth = clientRect.right - clientRect.left;
+            const int clientHeight = clientRect.bottom - clientRect.top;
+            if ( clientWidth > 0 && clientHeight > 0 ) {
+                const float renderAspect = static_cast<float>(presentContentSize.x) / static_cast<float>(presentContentSize.y);
+                const float windowAspect = static_cast<float>(clientWidth) / static_cast<float>(clientHeight);
+                if ( std::abs( renderAspect - windowAspect ) > 0.001f ) {
+                    // DXGI stretches the low-resolution swapchain anisotropically to the
+                    // borderless window. Pre-compensate that stretch for the complete frame.
+                    const float logicalContentAspect = renderAspect * renderAspect / windowAspect;
+                    if ( logicalContentAspect < renderAspect ) {
+                        presentContentSize.x = std::max( 1, static_cast<int>(std::lround(
+                            static_cast<float>(presentContentSize.y) * logicalContentAspect )) );
+                        presentContentOffset.x = (Resolution.x - presentContentSize.x) / 2;
+                    } else {
+                        presentContentSize.y = std::max( 1, static_cast<int>(std::lround(
+                            static_cast<float>(presentContentSize.x) / logicalContentAspect )) );
+                        presentContentOffset.y = (Resolution.y - presentContentSize.y) / 2;
+                    }
+                    aspectFitPresentation = true;
+                }
+            }
+        }
+    }
+
+    TextureHandle fittedPresentation;
+    Microsoft::WRL::ComPtr<ID3D11RenderTargetView> presentationRTV = BackbufferRTV;
+    if ( aspectFitPresentation ) {
+        fittedPresentation = PfxRenderer->GetBackbufferTempBuffer();
+        presentationRTV = fittedPresentation->GetRenderTargetView();
+    }
+
     SetViewport( ViewportInfo( 0, 0, GetBackbufferResolution() ) );
     SetDefaultStates();
     UpdateRenderStates();
@@ -1905,31 +1943,23 @@ XRESULT D3D11GraphicsEngine::Present() {
         GammaCorrectConstantBuffer gcb = {};
         gcb.G_Gamma = Engine::GAPI->GetGammaValue();
         gcb.G_Brightness = Engine::GAPI->GetBrightnessValue();
-        const bool lowResolutionFSR3 = settings.Upscaler == GothicRendererSettings::UPSCALER_FSR_3
-            && settings.AntiAliasingMode == GothicRendererSettings::AA_FSR
-            && settings.ResolutionScalePercent < 67;
-        const float outputDitherRamp = lowResolutionFSR3
-            ? std::clamp( (67.0f - static_cast<float>(settings.ResolutionScalePercent)) / 17.0f, 0.0f, 1.0f )
-            : 0.0f;
-        gcb.G_OutputDitherStrength = outputDitherRamp * (1.5f / 255.0f);
+        // Dither exactly once immediately before the final 8-bit presentation.
+        gcb.G_OutputDitherStrength = 1.0f / 255.0f;
         ActivePS->GetBuffer( "GammaCorrectConstantBuffer" ).Update( &gcb ).Bind();
 
-        GetBlueNoiseTexture()->BindToPixelShader( 1 );
-        PfxRenderer->CopyTextureToRTV( Backbuffer->GetShaderResView(), BackbufferRTV, {}, true );
-        ID3D11ShaderResourceView* nullOutputDither = nullptr;
-        GetContext()->PSSetShaderResources( 1, 1, &nullOutputDither );
+        PfxRenderer->CopyTextureToRTV( Backbuffer->GetShaderResView(), presentationRTV, {}, true );
 
         static int show_velocity = 0;
         if ( settings.DebugSettings.TAA.DisplayVelocity ) {
-            RenderVelocity( this, settings, BackbufferRTV );
+            RenderVelocity( this, settings, presentationRTV );
         } else if ( show_velocity == 2 && GetPfxRenderer()->GetTAAEffect() ) {
             GetPfxRenderer()->CopyTextureToRTV(
                 GetPfxRenderer()->GetTAAEffect()->GetVelocityBufferSRV(),
-                BackbufferRTV,
+                presentationRTV,
                 GetBackbufferResolution() );
         }
 
-        GetContext()->OMSetRenderTargets( 1, BackbufferRTV.GetAddressOf(), nullptr );
+        GetContext()->OMSetRenderTargets( 1, presentationRTV.GetAddressOf(), nullptr );
     }
 
     if ( Engine::ImGuiHandle ) {
@@ -1938,6 +1968,22 @@ XRESULT D3D11GraphicsEngine::Present() {
         if ( Engine::ImGuiHandle->Initiated ) {
             Engine::ImGuiHandle->RenderLoop();
         }
+    }
+
+    if ( aspectFitPresentation ) {
+        // ImGui is now part of the same logical frame as Gothic's HUD and menus.
+        // Fit that completed frame once, then let DXGI perform its window stretch.
+        ID3D11ShaderResourceView* nullPresentationSRV = nullptr;
+        GetContext()->PSSetShaderResources( 0, 1, &nullPresentationSRV );
+        GetContext()->OMSetRenderTargets( 0, nullptr, nullptr );
+        SetDefaultStates();
+        UpdateRenderStates();
+        const float black[4] = {};
+        GetContext()->ClearRenderTargetView( BackbufferRTV.Get(), black );
+        PfxRenderer->CopyTextureToRTV(
+            fittedPresentation->GetShaderResView(), BackbufferRTV,
+            presentContentSize, false, presentContentOffset );
+        GetContext()->OMSetRenderTargets( 1, BackbufferRTV.GetAddressOf(), nullptr );
     }
 
     GetContext()->CopyResource(
@@ -4861,46 +4907,6 @@ XRESULT D3D11GraphicsEngine::OnStartWorldRendering() {
             GetContext()->PSSetShaderResources( 1, 2, nullRainInputs );
         }
 
-        // A borderless lower-resolution swapchain is stretched to the desktop
-        // by DXGI. Fit only the completed world image into that anisotropic
-        // stretch so its original aspect ratio survives; HUD and menu render
-        // afterwards and intentionally continue to fill the window.
-        if ( rendererState.RendererSettings.StretchWindow && OutputWindow
-            && Resolution.x > 0 && Resolution.y > 0 ) {
-            RECT clientRect = {};
-            if ( GetClientRect( OutputWindow, &clientRect ) ) {
-                const int clientWidth = clientRect.right - clientRect.left;
-                const int clientHeight = clientRect.bottom - clientRect.top;
-                if ( clientWidth > 0 && clientHeight > 0 ) {
-                    const float renderAspect = static_cast<float>(Resolution.x) / static_cast<float>(Resolution.y);
-                    const float windowAspect = static_cast<float>(clientWidth) / static_cast<float>(clientHeight);
-                    if ( std::abs( renderAspect - windowAspect ) > 0.001f ) {
-                        const float logicalContentAspect = renderAspect * renderAspect / windowAspect;
-                        INT2 contentSize = Resolution;
-                        INT2 contentOffset = INT2( 0, 0 );
-                        if ( logicalContentAspect < renderAspect ) {
-                            contentSize.x = std::max( 1, static_cast<int>(std::lround( Resolution.y * logicalContentAspect )) );
-                            contentOffset.x = (Resolution.x - contentSize.x) / 2;
-                        } else {
-                            contentSize.y = std::max( 1, static_cast<int>(std::lround( Resolution.x / logicalContentAspect )) );
-                            contentOffset.y = (Resolution.y - contentSize.y) / 2;
-                        }
-
-                        auto aspectCorrectedWorld = PfxRenderer->GetBackbufferTempBuffer();
-                        ID3D11ShaderResourceView* nullWorldSRV = nullptr;
-                        GetContext()->PSSetShaderResources( 0, 1, &nullWorldSRV );
-                        GetContext()->OMSetRenderTargets( 0, nullptr, nullptr );
-                        GetContext()->CopyResource(
-                            aspectCorrectedWorld->GetTexture().Get(), Backbuffer->GetTexture().Get() );
-                        const float black[4] = {};
-                        GetContext()->ClearRenderTargetView( Backbuffer->GetRenderTargetView().Get(), black );
-                        PfxRenderer->CopyTextureToRTV(
-                            aspectCorrectedWorld->GetShaderResView(), Backbuffer->GetRenderTargetView(),
-                            contentSize, false, contentOffset );
-                    }
-                }
-            }
-        }
         GetContext()->ClearDepthStencilView( DepthStencilBuffer->GetDepthStencilView().Get(), D3D11_CLEAR_DEPTH, 0, 0 );
         GetContext()->ClearDepthStencilView( m_SwapchainDepthStencilBuffer->GetDepthStencilView().Get(), D3D11_CLEAR_DEPTH, 0, 0 );
         SetDefaultStates();

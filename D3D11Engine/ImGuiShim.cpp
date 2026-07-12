@@ -55,10 +55,34 @@ namespace {
 
         clientWidth = static_cast<float>( std::max<LONG>( 1, clientRect.right - clientRect.left ) );
         clientHeight = static_cast<float>( std::max<LONG>( 1, clientRect.bottom - clientRect.top ) );
+
+        float contentOffsetX = 0.0f;
+        float contentOffsetY = 0.0f;
+        const INT2 backbuffer = Engine::GraphicsEngine->GetBackbufferResolution();
+        const auto& settings = Engine::GAPI->GetRendererState().RendererSettings;
+        if ( settings.StretchWindow && backbuffer.x > 0 && backbuffer.y > 0 ) {
+            const float renderAspect = static_cast<float>(backbuffer.x) / static_cast<float>(backbuffer.y);
+            const float clientAspect = clientWidth / clientHeight;
+            if ( std::abs( renderAspect - clientAspect ) > 0.001f ) {
+                if ( clientAspect > renderAspect ) {
+                    const float fittedWidth = clientHeight * renderAspect;
+                    contentOffsetX = (clientWidth - fittedWidth) * 0.5f;
+                    clientWidth = fittedWidth;
+                } else {
+                    const float fittedHeight = clientWidth / renderAspect;
+                    contentOffsetY = (clientHeight - fittedHeight) * 0.5f;
+                    clientHeight = fittedHeight;
+                }
+            }
+        }
         uiScale = std::max( 0.01f, std::min( clientWidth / 1920.0f, clientHeight / 1080.0f ) );
 
-        if ( cursorPos && (!GetCursorPos( cursorPos ) || !ScreenToClient( window, cursorPos )) ) {
-            return false;
+        if ( cursorPos ) {
+            if ( !GetCursorPos( cursorPos ) || !ScreenToClient( window, cursorPos ) ) {
+                return false;
+            }
+            cursorPos->x -= static_cast<LONG>(std::lround( contentOffsetX ));
+            cursorPos->y -= static_cast<LONG>(std::lround( contentOffsetY ));
         }
         return true;
     }
@@ -565,12 +589,9 @@ LRESULT ImGuiShim::OnWindowMessage( HWND hWnd, UINT msg, WPARAM wParam, LPARAM l
             float clientWidth = 0.0f;
             float clientHeight = 0.0f;
             float uiScale = 1.0f;
-            if ( GetSettingsUiGeometry( hWnd, clientWidth, clientHeight, uiScale ) ) {
-                POINT eventPos = { GET_X_LPARAM( lParam ), GET_Y_LPARAM( lParam ) };
-                if ( msg == WM_MOUSEWHEEL || msg == WM_MOUSEHWHEEL ) {
-                    ScreenToClient( hWnd, &eventPos );
-                }
-                ImGui::GetIO().AddMousePosEvent( eventPos.x / uiScale, eventPos.y / uiScale );
+            POINT cursorPos = {};
+            if ( GetSettingsUiGeometry( hWnd, clientWidth, clientHeight, uiScale, &cursorPos ) ) {
+                ImGui::GetIO().AddMousePosEvent( cursorPos.x / uiScale, cursorPos.y / uiScale );
             }
         }
         return ImGui_ImplWin32_WndProcHandler( hWnd, msg, wParam, lParam );

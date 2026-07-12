@@ -43,7 +43,7 @@ cbuffer PFXBuffer : register( b0 )
 cbuffer CompositionControl : register( b2 )
 {
     float CC_HeightFogEnabled;
-    float CC_LowResolutionFSR3;
+    float CC_Pad0;
     float2 CC_InvResolution;
 
     float4 CC_ProjParams;
@@ -67,10 +67,6 @@ Texture2D TX_GodRays : register( t1 );
 
 #if COMPOSE_HEIGHTFOG || COMPOSE_CONTACT_SHADOWS || COMPOSE_SSGI
 Texture2D TX_Depth : register( t2 );
-#endif
-
-#if COMPOSE_HEIGHTFOG
-Texture2D TX_BlueNoise : register( t6 );
 #endif
 
 #if COMPOSE_CONTACT_SHADOWS || COMPOSE_SSGI
@@ -106,12 +102,6 @@ float ComputeVolumetricFog( float3 cameraToWorldPos, float3 posOriginal )
     }
 
     return exp( -HF_GlobalDensity * w * fogInt );
-}
-
-float FogBlueNoise(float2 pixelPosition)
-{
-    uint2 noiseCoord = uint2(pixelPosition) & 511u;
-    return TX_BlueNoise.Load(int3(noiseCoord, 0)).x - 0.5f;
 }
 
 float4 ComputeHeightFog( float2 texcoord )
@@ -166,7 +156,13 @@ float4 ComputeHeightFog( float2 texcoord )
 		* lerp(0.20f, 0.48f, rainDepthRamp);
 	fogOpacity = max(fogOpacity, max(globalRainFogOpacity, rainyNightDepthFog));
 
-	return float4(saturate(color / darknessFactor), saturate(fogOpacity));
+	// Distant rainy-night geometry must recede into a darker horizon instead of
+	// becoming brighter than the night sky. Sky and cloud pixels stay unchanged.
+	float distantRainGeometry = rainyNightGeometry * rainDepthRamp;
+	float3 finalFogColor = saturate(color / darknessFactor);
+	finalFogColor *= lerp(1.0f, 0.65f, distantRainGeometry);
+
+	return float4(finalFogColor, saturate(fogOpacity));
 }
 #endif
 
@@ -415,8 +411,6 @@ float4 PSMain( PS_INPUT Input ) : SV_TARGET
     {
         float4 fog = ComputeHeightFog( Input.vTexcoord );
         color.rgb = lerp( color.rgb, fog.rgb, fog.a );
-        float ditherWeight = saturate(fog.a * 4.0f) * (1.0f - saturate(CC_LowResolutionFSR3));
-        color.rgb = saturate(color.rgb + FogBlueNoise(Input.vPosition.xy) * ditherWeight / 255.0f);
     }
 #endif
 

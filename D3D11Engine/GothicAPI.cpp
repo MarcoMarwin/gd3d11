@@ -3567,8 +3567,8 @@ void GothicAPI::DrawParticleFX( zCVob* source, zCParticleFX* fx, ParticleFrameDa
             }
             if ( smokeOrFogParticle ) {
                 // Alpha is raised to 2.2 in VS_ParticlePoint. Applying the
-                // inverse-gamma factor here yields exactly 75% final opacity.
-                color.w *= 0.8774243f;
+                // inverse-gamma factor here yields exactly 50% final opacity.
+                color.w *= 0.7297401f;
             }
 
             ii.position = p->PositionWS;

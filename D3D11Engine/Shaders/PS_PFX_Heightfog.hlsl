@@ -128,5 +128,11 @@ float4 PSMain( PS_INPUT Input ) : SV_TARGET
 		* lerp(0.20f, 0.48f, rainDepthRamp);
 	fogOpacity = max(fogOpacity, max(globalRainFogOpacity, rainyNightDepthFog));
 
-	return float4(saturate(color / darknessFactor), saturate(fogOpacity));
+	// Match the standalone fallback to the composition path: only distant
+	// rainy-night geometry darkens, while sky and cloud pixels stay unchanged.
+	float distantRainGeometry = rainyNightGeometry * rainDepthRamp;
+	float3 finalFogColor = saturate(color / darknessFactor);
+	finalFogColor *= lerp(1.0f, 0.65f, distantRainGeometry);
+
+	return float4(finalFogColor, saturate(fogOpacity));
 }

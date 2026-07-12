@@ -32,6 +32,11 @@ Kurze, append-only Dokumentation der von Codex gepushten Renderer-Builds.
 - Rauch und Fog: Erkannte Smoke-, Rauch-, Steam-, Dampf-, Fog-, Nebel-, Dunst- und Ground-Fog-Partikel werden gamma-korrekt auf exakt 75 Prozent ihrer bisherigen finalen Deckkraft reduziert; Feuer- und Wasserpartikel bleiben unveraendert.
 - FSR-3-Himmel: Nur im niedrigen FSR-3-Skalierungsbereich unter 67 Prozent wird Fog-Blue-Noise nicht mehr vor der Rekonstruktion eingemischt. Dort erfolgt stattdessen ein schwaches, dunkelheitsgewichtetes Blue-Noise-Dithering im Ausgabeformat gegen diagonale Rekonstruktionsstreifen; hoehere Qualitaetsstufen bleiben unveraendert.
 
+- Regenferne-Korrektur: Nur weit entfernte Geometrie wird bei Nachtregen entlang des bestehenden weichen Distanzverlaufs bis auf 65 Prozent der bisherigen Nebelfarbe abgedunkelt; Himmel und Wolkendecke bleiben unveraendert.
+- Dithering-Korrektur: Das doppelte Fog-/Ausgabedithering und der auffaellige einzelne DDS-Farbkanal sind entfernt. Ein einziges pixelstabiles, kachelfreies Hash-Dither wirkt nach Gamma in allen Darstellungsmodi mit maximal einer halben 8-Bit-Stufe.
+- Seitenverhaeltnis-Korrektur: Nicht mehr nur die Welt, sondern der vollstaendige Frame samt Gothic-HUD, Hauptmenue und F11 wird in Borderless proportional eingepasst. 4:3 erzeugt auf 16:9 seitliche Balken, Ultrawide auf 16:9 obere und untere Balken; Fenstermodus und native Seitenverhaeltnisse bleiben ohne Balken.
+- World-Shadow-Stabilisierung: Die kontinuierliche Lichtrichtung wird pro Kaskade erst nach etwa einer projizierten Texelbreite zusammen mit Matrix und Shadowmap uebernommen. Bestehende Kaskadenintervalle bleiben erhalten, das Light-Space-Raster rundet symmetrisch und es entstehen keine zusaetzlichen regulaeren Shadowmap-Renderings.
+- Rauch und Fog: Die vorherige 75-Prozent-Korrektur wird ersetzt; erkannte Rauch-, Steam-, Dampf-, Fog-, Nebel-, Dunst- und Ground-Fog-Partikel enden nun gamma-korrekt bei exakt 50 Prozent ihrer bisherigen finalen Deckkraft. Feuer- und Wasserpartikel bleiben unveraendert.
 ## Build 110 (Korrekturpush)
 
 - CI-Fix: Deutsche UTF-8-UI-Texte bleiben als `u8`-Literals erhalten, werden aber fuer ImGui/Gothic gezielt als `const char*` uebergeben, damit Release_G1_12f unter C++20 nicht an `char8_t` scheitert.

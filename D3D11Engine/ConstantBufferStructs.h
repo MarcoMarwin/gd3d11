@@ -137,7 +137,7 @@ struct ScreenSpaceLightingConstantBuffer {
 };
 struct CompositionControlConstantBuffer {
     float CC_HeightFogEnabled;
-    float CC_LowResolutionFSR3;
+    float CC_Pad0;
     float2 CC_InvResolution;
 
     float4 CC_ProjParams;
