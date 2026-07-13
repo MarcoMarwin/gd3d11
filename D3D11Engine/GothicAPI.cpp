@@ -5892,6 +5892,7 @@ XRESULT GothicAPI::SaveMenuSettings( const std::string& file ) {
     WritePrivateProfileStringA( "Display", "StretchWindow", std::to_string( s.StretchWindow ? TRUE : FALSE ).c_str(), ini.c_str() );
     WritePrivateProfileStringA( "Display", "UIScale", std::to_string( s.GothicUIScale ).c_str(), ini.c_str() );
     WritePrivateProfileStringA( "Display", "Rain", std::to_string( s.EnableRain ? TRUE : FALSE ).c_str(), ini.c_str() );
+    WritePrivateProfileStringA( "Display", "DynamicClouds", std::to_string( s.EnableDynamicClouds ? TRUE : FALSE ).c_str(), ini.c_str() );
     WritePrivateProfileStringA( "Display", "TiledLighting", std::to_string( s.EnableTiledLighting ? TRUE : FALSE ).c_str(), ini.c_str() );
     WritePrivateProfileStringA( "Display", "RendererMode", std::to_string( static_cast<int>(s.RendererMode) ).c_str(), ini.c_str() );
     WritePrivateProfileStringA( "Display", "WindQuality", std::to_string( s.WindQuality ).c_str(), ini.c_str() );
@@ -6116,6 +6117,7 @@ XRESULT GothicAPI::LoadMenuSettings( const std::string& file ) {
         }
         s.GothicUIScale = GetPrivateProfileFloatA( "Display", "UIScale", 1.0f, ini );
         s.EnableRain = GetPrivateProfileBoolA( "Display", "Rain", ds.EnableRain, ini );
+        s.EnableDynamicClouds = GetPrivateProfileBoolA( "Display", "DynamicClouds", ds.EnableDynamicClouds, ini );
         s.LimitLightIntesity = true;
         // Forward+/tiled lighting is still experimental; keep the shipped path deferred.
         s.EnableTiledLighting = false;

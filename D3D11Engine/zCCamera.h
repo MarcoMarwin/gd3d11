@@ -61,10 +61,8 @@ public:
     static void __fastcall UpdateViewport_Hook( zCCamera* _this, void* pUnknown ) {
         // make the session camera aware of our viewport
         if ( auto view = (_zCView*)_this->targetView; view && view->viewID == 1 ) {
-            // Modify the engines Viewport to match our current active backbuffer size
-            auto res = Engine::GAPI->GetRendererState().RendererInfo.IsRenderStageDx11()
-                ? Engine::GraphicsEngine->GetResolution()
-                : Engine::GraphicsEngine->GetBackbufferResolution();
+            // Gothic's camera projection must use the logical game resolution; render scale only changes DX11 targets.
+            auto res = Engine::GraphicsEngine->GetBackbufferResolution();
 
             view->pposx = 0;
             view->pposy = 0;

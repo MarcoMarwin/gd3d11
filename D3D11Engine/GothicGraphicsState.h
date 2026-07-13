@@ -735,6 +735,7 @@ struct GothicRendererSettings {
         RainFogDensity = 0.00078f;
 
         EnableRain = true;
+        EnableDynamicClouds = true;
 
         GodRayDecay = 0.97f;
         GodRayWeight = 0.85f;
@@ -1023,6 +1024,7 @@ struct GothicRendererSettings {
 
     // Appended to preserve every pre-existing renderer-settings field offset.
     E_D3D11Language D3D11Language;
+    bool EnableDynamicClouds;
 
     static int SnapFSRResolutionScale( int value ) {
         constexpr int levels[] = { 100, 83, 75, 66, 50, 33 };

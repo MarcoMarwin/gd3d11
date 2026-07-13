@@ -809,6 +809,7 @@ struct GraphicsPresetComparable {
     bool EnableWaterAnimation;
     bool EnableGodRays;
     bool EnableRain;
+    bool EnableDynamicClouds;
     bool EnableOcclusionCulling;
     int OutdoorSmallVobDrawDistance;
     int SectionDrawRadius;
@@ -843,6 +844,7 @@ GraphicsPresetComparable MakeGraphicsPresetComparable( const GothicRendererSetti
         s.EnableWaterAnimation,
         s.EnableGodRays,
         s.EnableRain,
+        s.EnableDynamicClouds,
         s.EnableOcclusionCulling,
         ObjectDrawDistanceMetersToUi( s.OutdoorSmallVobDrawRadius ),
         s.SectionDrawRadius,
@@ -877,6 +879,7 @@ bool GraphicsPresetComparableEqual( const GraphicsPresetComparable& a, const Gra
         && a.EnableWaterAnimation == b.EnableWaterAnimation
         && a.EnableGodRays == b.EnableGodRays
         && a.EnableRain == b.EnableRain
+        && a.EnableDynamicClouds == b.EnableDynamicClouds
         && a.EnableOcclusionCulling == b.EnableOcclusionCulling
         && a.OutdoorSmallVobDrawDistance == b.OutdoorSmallVobDrawDistance
         && a.SectionDrawRadius == b.SectionDrawRadius
@@ -906,6 +909,7 @@ void ApplyGraphicsPresets( GothicRendererSettings& s, bool applyRuntimeUpdates =
     s.EnableWaterAnimation = true;
     s.EnableGodRays = true;
     s.EnableRain = true;
+    s.EnableDynamicClouds = true;
 
     // Reset all visible effect strengths to their normalized UI defaults.
     s.AOStrength = 1.0f;
@@ -1689,7 +1693,11 @@ void ImGuiShim::RenderSettingsWindow()
 
             ImText( Tr( "Sky Effects", u8"Himmelseffekte" ), { buttonWidth.x - ImGui::GetFrameHeight() - style.ItemSpacing.x, buttonWidth.y } ); ImGui::SameLine();
             ImGui::Checkbox( "##Enable Rain", &settings.EnableRain );
-            ImGui::SetItemTooltip( "%s", Tr( "Enables rain, rain effects, and low atmospheric cloud layers.", u8"Aktiviert Regen, Regeneffekte und tiefe atmosph\u00E4rische Nebelschichten." ) );
+            ImGui::SetItemTooltip( "%s", Tr( "Enables rain and rain effects.", u8"Aktiviert Regen und Regeneffekte." ) );
+
+            ImText( Tr( "Dynamic Clouds", u8"Dynamische Wolken" ), { buttonWidth.x - ImGui::GetFrameHeight() - style.ItemSpacing.x, buttonWidth.y } ); ImGui::SameLine();
+            ImGui::Checkbox( "##Enable Dynamic Clouds", &settings.EnableDynamicClouds );
+            ImGui::SetItemTooltip( "%s", Tr( "Enables moving low cloud fields.", u8"Aktiviert bewegte tiefe Wolkenfelder." ) );
             ImText( Tr( "Occlusion Culling", u8"Verdeckungspr\u00FCfung" ), { buttonWidth.x - ImGui::GetFrameHeight() - style.ItemSpacing.x, buttonWidth.y } ); ImGui::SameLine();
             ImGui::Checkbox( "##Enable Occlusion Culling", &settings.EnableOcclusionCulling );
             ImGui::SetItemTooltip( "%s", Tr( "Skips world geometry hidden behind other objects.", u8"\u00DCberspringt Weltgeometrie, die hinter anderen Objekten verborgen ist." ) );

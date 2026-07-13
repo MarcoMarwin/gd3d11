@@ -436,3 +436,11 @@ Kurze, append-only Dokumentation der von Codex gepushten Renderer-Builds.
 - Nachtregen: sehr weit entfernte Weltgeometrie wird bei Regen nachts nochmals dunkler und kuehler blaugrau begrenzt, ohne in Schwarzgrau zu kippen.
 - Seitenverhaeltnis: die fehleranfaellige Desktop-/Output-Aspekt-Heuristik fuer die Weltprojektion wurde entfernt; Gothic aktualisiert die Kamera-Projection vor dem DX11-World-Stage, damit 16:9/4:3-Wechsel und Savegame-Loads nicht mehr zwischen schmaler und breiter Darstellung kippen.
 - Pruefung: AGENTS-Regeln gelesen; Buildnummer aus outputs ermittelt; Kirides 17.9.7 als Projektions-/Viewport-Referenz verglichen; Shaderpfade, Projektionspfad, Konflikt-/Escape-Artefakte und git diff --check statisch kontrolliert. Kein vollstaendiger lokaler C++-/Shader-Build.
+
+## Build 119 (Dynamische Wolken, Nachtregen und robuste Aufloesungswechsel)
+
+- F11: Dynamische Wolken sind ein eigener Schalter mit INI-Persistenz; Himmelseffekte/Sky Effects steuert wieder nur Regen und Regeneffekte.
+- Tiefwolken: Wolken laufen unabhaengig vom Regen, sind nachts dunkler, bewegen sich langsamer sichtbar in Weltkoordinaten und verzichten auf die teure globale Wolkenschatten-Abdunklung am Boden.
+- Nachtregen: sehr entfernte Weltgeometrie wird bei Regen nachts weiter in ein dunkleres kaltes Blaugrau gedrueckt, ohne in Schwarzgrau zu kippen.
+- Seitenverhaeltnis/Render Scale: Gothic-Kamera und zVidResFullscreenX/Y nutzen wieder die echte Spielaufloesung statt der intern skalierten Renderaufloesung; nach Resize wird die Kamera-Projektion erneuert, damit 16:9/4:3-Wechsel und Savegame-Loads nicht zwischen schmal/breit kippen.
+- Pruefung: AGENTS-Regeln gelesen; Buildnummer aus outputs ermittelt; Settings-/INI-Pfade, Low-Cloud-Gates, Nachtregen-Shader, Viewport-/Optionspfad, Konflikt-/Escape-Artefakte und git diff --check statisch kontrolliert. Kein vollstaendiger lokaler C++-/Shader-Build.

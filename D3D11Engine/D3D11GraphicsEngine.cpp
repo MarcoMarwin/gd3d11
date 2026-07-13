@@ -1331,6 +1331,17 @@ XRESULT D3D11GraphicsEngine::OnResize( INT2 newSize ) {
     POINT virtualSize = { 8192, 8192 };
     zCViewDraw::GetScreen().SetVirtualSize( virtualSize );
 
+    if ( auto game = oCGame::GetGame(); game && game->_zCSession_camera ) {
+        auto camera = static_cast<zCCamera*>(game->_zCSession_camera);
+        camera->UpdateViewport();
+        float fovH = 0.0f;
+        float fovV = 0.0f;
+        camera->GetFOV( fovH, fovV );
+        if ( std::isfinite( fovH ) && std::isfinite( fovV ) && fovH > 0.0f && fovV > 0.0f ) {
+            camera->SetFOV( fovH, fovV );
+        }
+    }
+
 #ifndef BUILD_SPACER
     BOOL isFullscreen = 0;
     if ( SwapChain.Get() ) LE( SwapChain->GetFullscreenState( &isFullscreen, nullptr ) );
@@ -4172,7 +4183,7 @@ XRESULT D3D11GraphicsEngine::OnStartWorldRendering() {
     bool isOutdoor = Engine::GAPI->GetLoadedWorldInfo()->BspTree->GetBspTreeMode() == zBSP_MODE_OUTDOOR;
     bool compositionGodRays = (rendererState.RendererSettings.EnableGodRays && isOutdoor);
     bool compositionHeightFog = (rendererState.RendererSettings.DrawFog && isOutdoor);
-    bool compositionLowClouds = (rendererState.RendererSettings.EnableRain && rendererState.RendererSettings.DrawFog && isOutdoor);
+    bool compositionLowClouds = (rendererState.RendererSettings.EnableDynamicClouds && rendererState.RendererSettings.DrawFog && isOutdoor);
     bool compositionContactShadows = rendererState.RendererSettings.EnableContactShadows;
     bool compositionSSGI = rendererState.RendererSettings.EnableScreenSpaceGI && rendererState.RendererSettings.ScreenSpaceGIStrength > 0.0f;
     bool compositionNeedsGeometry = compositionContactShadows || compositionSSGI;
