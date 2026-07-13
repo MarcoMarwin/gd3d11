@@ -444,3 +444,11 @@ Kurze, append-only Dokumentation der von Codex gepushten Renderer-Builds.
 - Nachtregen: sehr entfernte Weltgeometrie wird bei Regen nachts weiter in ein dunkleres kaltes Blaugrau gedrueckt, ohne in Schwarzgrau zu kippen.
 - Seitenverhaeltnis/Render Scale: Gothic-Kamera und zVidResFullscreenX/Y nutzen wieder die echte Spielaufloesung statt der intern skalierten Renderaufloesung; nach Resize wird die Kamera-Projektion erneuert, damit 16:9/4:3-Wechsel und Savegame-Loads nicht zwischen schmal/breit kippen.
 - Pruefung: AGENTS-Regeln gelesen; Buildnummer aus outputs ermittelt; Settings-/INI-Pfade, Low-Cloud-Gates, Nachtregen-Shader, Viewport-/Optionspfad, Konflikt-/Escape-Artefakte und git diff --check statisch kontrolliert. Kein vollstaendiger lokaler C++-/Shader-Build.
+
+## Build 120 (Load-stabile Projektion, dichtere Wolken und Nachtregen-Mitteldistanz)
+
+- Seitenverhaeltnis/Load: die Session-Kamera schreibt nach echter Aufloesungsaenderung und nach `zCCamera::Activate` wieder die logische Spielaufloesung in den Gothic-Viewport; Render Scale bleibt dabei strikt von der Gothic-Kamera-Projektion getrennt.
+- Render Scale/FSR: reine Render-Scale-Aenderungen bauen nur die DX11-Renderziele neu und loesen keine zusaetzliche Gothic-Kamera-Projektionsaktualisierung mehr aus.
+- Tiefwolken: Wolkenfelder sind dichter, tagsueber neutraler/weisslicher, bei Regen grauer und nachts etwas dunkler; die langsame world-space Bewegung bleibt erhalten.
+- Nachtregen: die mittlere entfernte Weltgeometrie wird bei Regen nachts staerker in dunkles kaltes Blaugrau gezogen, waehrend der sehr ferne Hintergrund nicht weiter abgedunkelt wird.
+- Pruefung: AGENTS-Regeln gelesen; Buildnummer aus outputs ermittelt; Kamera-/Viewport-Hooks, Render-Scale-Pfad, Cloud-/Nachtregen-Shader, Konflikt-/Escape-Artefakte und git diff --check statisch kontrolliert. Kein vollstaendiger lokaler C++-/Shader-Build.

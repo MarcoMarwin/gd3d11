@@ -200,7 +200,7 @@ void GetWorldLowCloudLight(out float3 lightDir, out float lightWeight)
 float ComputeWorldLowCloudDensity(float3 worldPosition, float baseFogHeight)
 {
 	float cloudBase = ResolveWorldLowCloudBase(baseFogHeight);
-	float3 wind = float3(AC_Time * 18.0f, AC_Time * 0.20f, -AC_Time * 11.0f);
+	float3 wind = float3(AC_Time * 3.8f, AC_Time * 0.04f, -AC_Time * 2.3f);
 	float3 macroP = (worldPosition + wind * 52.0f) * float3(0.000026f, 0.000032f, 0.000026f);
 	float3 warpP = (worldPosition + wind * 34.0f) * float3(0.000040f, 0.000047f, 0.000040f);
 	float3 warp = float3(
@@ -234,7 +234,7 @@ float ComputeWorldLowCloudDensity(float3 worldPosition, float baseFogHeight)
 	float topFade = 1.0f - smoothstep(localTop - topFeather, localTop + topFeather * 0.85f, worldPosition.y);
 	float verticalBand = saturate(lowerCore * 1.14f + lowerSkirt * 0.40f + highBank * 0.50f) * bottomFade * topFade;
 
-	return saturate(verticalBand * cloudBody * 1.34f);
+	return saturate(verticalBand * cloudBody * 1.42f);
 }
 float4 ComputeWorldLowCloudVolume(float3 cameraWorld, float3 endWorld, float cameraDistance, float skyPixel, float baseFogHeight, float3 fogColorMod, float nightTimeBlend)
 {
@@ -263,10 +263,15 @@ float4 ComputeWorldLowCloudVolume(float3 cameraWorld, float3 endWorld, float cam
 
 	float usableDistance = max(marchDistance - startDistance, 1.0f);
 	float dayWeight = saturate(AC_LightPos.y * 2.4f + 0.22f);
-	float3 dayLit = lerp(fogColorMod * 0.62f, float3(0.60f, 0.62f, 0.59f), 0.58f);
-	float3 dayShadow = lerp(fogColorMod * 0.30f, float3(0.20f, 0.23f, 0.24f), 0.72f);
-	float3 nightLit = float3(0.043f, 0.053f, 0.070f);
-	float3 nightShadow = float3(0.017f, 0.023f, 0.034f);
+	float rainWeight = saturate(AC_RainFXWeight);
+	float3 dayLitClear = lerp(fogColorMod * 0.70f, float3(0.78f, 0.79f, 0.76f), 0.70f);
+	float3 dayShadowClear = lerp(fogColorMod * 0.38f, float3(0.38f, 0.40f, 0.40f), 0.68f);
+	float3 dayLitRain = lerp(fogColorMod * 0.58f, float3(0.54f, 0.55f, 0.54f), 0.72f);
+	float3 dayShadowRain = lerp(fogColorMod * 0.27f, float3(0.21f, 0.23f, 0.24f), 0.80f);
+	float3 dayLit = lerp(dayLitClear, dayLitRain, rainWeight);
+	float3 dayShadow = lerp(dayShadowClear, dayShadowRain, rainWeight);
+	float3 nightLit = float3(0.035f, 0.044f, 0.060f);
+	float3 nightShadow = float3(0.012f, 0.018f, 0.028f);
 
 	float3 lightDir = normalize(lerp(float3(-0.25f, 0.72f, 0.18f), AC_LightPos, saturate(abs(AC_LightPos.y) + 0.12f)));
 	float transmittance = 1.0f;
@@ -295,10 +300,10 @@ float4 ComputeWorldLowCloudVolume(float3 cameraWorld, float3 endWorld, float cam
 		float3 cloudColor = lerp(shadowColor, litColor, selfShadow);
 		float upperSunLayer = smoothstep(cloudBase + 3900.0f, cloudBase + 9200.0f, sampleWorld.y);
 		float viewSunForward = pow(saturate(dot(rayDir, lightDir) * 0.5f + 0.5f), 4.0f);
-		float sunTopLight = upperSunLayer * dayWeight * saturate(lightDir.y * 1.35f) * selfShadow;
-		cloudColor += float3(0.115f, 0.120f, 0.098f) * sunTopLight * lerp(0.38f, 0.90f, viewSunForward);
+		float sunTopLight = upperSunLayer * dayWeight * saturate(lightDir.y * 1.35f) * selfShadow * lerp(1.0f, 0.45f, rainWeight);
+		cloudColor += float3(0.155f, 0.156f, 0.140f) * sunTopLight * lerp(0.38f, 0.88f, viewSunForward);
 
-		float sampleAlpha = saturate(density * lerp(0.52f, 0.72f, dayWeight) * lerp(1.0f, 0.92f, nightTimeBlend));
+		float sampleAlpha = saturate(density * lerp(0.53f, 0.75f, dayWeight) * lerp(1.0f, 0.92f, nightTimeBlend));
 		sampleAlpha = 1.0f - exp(-sampleAlpha * stepLength * 0.00022f);
 		float weight = sampleAlpha * transmittance;
 		scattering += cloudColor * weight;
@@ -306,7 +311,7 @@ float4 ComputeWorldLowCloudVolume(float3 cameraWorld, float3 endWorld, float cam
 		transmittance *= 1.0f - sampleAlpha;
 	}
 
-	accumulatedAlpha = saturate(accumulatedAlpha * 1.02f);
+	accumulatedAlpha = saturate(accumulatedAlpha * 1.04f);
 	return float4(saturate(scattering / max(accumulatedAlpha, 0.001f)), accumulatedAlpha);
 }
 

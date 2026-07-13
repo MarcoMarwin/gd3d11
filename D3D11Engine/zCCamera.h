@@ -80,10 +80,9 @@ public:
         HookedFunctions::OriginalFunctions.original_zCCamera__Activate( _this );
 
         if ( auto view = (_zCView*)_this->targetView; view && view->viewID == 1 ) {
-            // HACK: override the viewport for the session camera if this is the main viewport
-            // Activate changes the viewport and does some clamping which breaks our viewport,
-            // even though the viewport zCView has the correct values
-            // we just assume the values are correct and set the viewport again after the original Activate is done
+            // Savegame loading and world changes can reactivate the session camera after Gothic has
+            // restored an old target view. Re-apply the logical game viewport before binding DX state.
+            UpdateViewport_Hook( _this, nullptr );
             Engine::GraphicsEngine->SetViewport( ViewportInfo( view->pposx, view->pposy, view->psizex, view->psizey ) );
         }
     }

@@ -1291,6 +1291,14 @@ XRESULT D3D11GraphicsEngine::RecreateBuffers() {
     return XR_SUCCESS;
 }
 
+namespace {
+    void RefreshGothicCameraViewportForLogicalResolution() {
+        if ( auto game = oCGame::GetGame(); game && game->_zCSession_camera ) {
+            static_cast<zCCamera*>(game->_zCSession_camera)->UpdateViewport();
+        }
+    }
+}
+
 /** Called on window resize/resolution change */
 XRESULT D3D11GraphicsEngine::OnResize( INT2 newSize ) {
     HRESULT hr;
@@ -1331,16 +1339,7 @@ XRESULT D3D11GraphicsEngine::OnResize( INT2 newSize ) {
     POINT virtualSize = { 8192, 8192 };
     zCViewDraw::GetScreen().SetVirtualSize( virtualSize );
 
-    if ( auto game = oCGame::GetGame(); game && game->_zCSession_camera ) {
-        auto camera = static_cast<zCCamera*>(game->_zCSession_camera);
-        camera->UpdateViewport();
-        float fovH = 0.0f;
-        float fovV = 0.0f;
-        camera->GetFOV( fovH, fovV );
-        if ( std::isfinite( fovH ) && std::isfinite( fovV ) && fovH > 0.0f && fovV > 0.0f ) {
-            camera->SetFOV( fovH, fovV );
-        }
-    }
+    RefreshGothicCameraViewportForLogicalResolution();
 
 #ifndef BUILD_SPACER
     BOOL isFullscreen = 0;
@@ -1645,6 +1644,7 @@ XRESULT D3D11GraphicsEngine::OnBeginFrame() {
 
     if (NewResolution != Resolution) {
         OnResize(NewResolution);
+        s_oldResolutionScalePercent = rendererState.RendererSettings.ResolutionScalePercent;
 
     } else if ( rendererState.RendererSettings.ResolutionScalePercent != s_oldResolutionScalePercent ) {
         RecreateBuffers();
