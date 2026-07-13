@@ -3996,10 +3996,7 @@ XRESULT D3D11GraphicsEngine::OnStartWorldRendering() {
         const float logicalAspect = static_cast<float>( Resolution.x ) / static_cast<float>( Resolution.y );
         float outputAspect = static_cast<float>( m_swapchainResolution.x ) / static_cast<float>( m_swapchainResolution.y );
 #ifndef BUILD_SPACER
-        const bool startupWindowed = !rendererState.RendererSettings.StretchWindow
-            && ( Engine::GAPI->HasCommandlineParameter( "ZWINDOW" )
-                || Engine::GAPI->GetIntParamFromConfig( "zStartupWindowed" ) );
-        if ( startupWindowed ) {
+        if ( !rendererState.RendererSettings.StretchWindow ) {
             RECT desktopRect = {};
             if ( GetClientRect( GetDesktopWindow(), &desktopRect ) ) {
                 const int desktopWidth = desktopRect.right - desktopRect.left;
@@ -4060,9 +4057,7 @@ XRESULT D3D11GraphicsEngine::OnStartWorldRendering() {
     rendererState.RendererSettings.DrawSkeletalMeshes = bDrawVobsGlobal;
 #endif
 
-
     Engine::GAPI->SetFarPlane( rendererState.RendererSettings.SectionDrawRadius * WORLD_SECTION_SIZE );
-
     // Clear textures from the last frame
     RenderedVobs.clear();
     FrameWaterSurfaces.clear();
@@ -4196,6 +4191,7 @@ XRESULT D3D11GraphicsEngine::OnStartWorldRendering() {
     bool isOutdoor = Engine::GAPI->GetLoadedWorldInfo()->BspTree->GetBspTreeMode() == zBSP_MODE_OUTDOOR;
     bool compositionGodRays = (rendererState.RendererSettings.EnableGodRays && isOutdoor);
     bool compositionHeightFog = (rendererState.RendererSettings.DrawFog && isOutdoor);
+    bool compositionLowClouds = (rendererState.RendererSettings.EnableRain && rendererState.RendererSettings.DrawFog && isOutdoor);
     bool compositionContactShadows = rendererState.RendererSettings.EnableContactShadows;
     bool compositionSSGI = rendererState.RendererSettings.EnableScreenSpaceGI && rendererState.RendererSettings.ScreenSpaceGIStrength > 0.0f;
     bool compositionNeedsGeometry = compositionContactShadows || compositionSSGI;
@@ -4683,6 +4679,27 @@ XRESULT D3D11GraphicsEngine::OnStartWorldRendering() {
         });
     }
 
+    if ( compositionLowClouds ) {
+        graph.AddPass( RG_PASS_NAME("PostFX Low Clouds"), [&]( RGBuilder& builder, RenderPass& pass ) {
+            builder.Read( backBufferHandle );
+            builder.Write( backBufferHandle );
+
+            pass.m_executeCallback = [this, backBufferHandle](const RenderGraph& graph) {
+                TracyD3D11ZoneCGX( "D3D11GraphicsEngine::PostFX Low Clouds" );
+
+                auto backBuffer = graph.GetPhysicalTexture(backBufferHandle);
+                auto tempBuffer = PfxRenderer->GetTempBuffer();
+                GetContext()->CopyResource( tempBuffer->GetTexture().Get(), backBuffer->GetTexture().Get() );
+
+                PfxRenderer->RenderLowClouds(
+                    backBuffer->GetRenderTargetView().Get(),
+                    tempBuffer->GetShaderResView().Get(),
+                    GetDepthBuffer()->GetShaderResView().Get() );
+
+                GetContext()->PSSetSamplers( 0, 1, DefaultSamplerState.GetAddressOf() );
+            };
+        });
+    }
     if ( rendererState.RendererSettings.EnableDoF ) {
         graph.AddPass( RG_PASS_NAME("Draw DepthOfField"), [&]( RGBuilder& builder, RenderPass& pass ) {
             builder.Read( backBufferHandle );

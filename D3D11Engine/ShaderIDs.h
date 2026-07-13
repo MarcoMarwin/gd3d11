@@ -57,6 +57,7 @@ enum class PShaderID : size_t {
     PS_PFX_GaussBlur,
     PS_PFX_BloomCombine,
     PS_PFX_Heightfog,
+    PS_PFX_LowClouds,
     PS_PFX_UnderwaterFinal,
     PS_PFX_Alpha_Blend,
     PS_PFX_CinemaScope,

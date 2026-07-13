@@ -79,6 +79,11 @@ public:
                                         ID3D11ShaderResourceView* velocitySRV,
                                         ID3D11ShaderResourceView** outLightingSRV );
 
+    XRESULT RenderLowClouds( ID3D11RenderTargetView* outputRTV,
+                             ID3D11ShaderResourceView* sceneSRV,
+                             ID3D11ShaderResourceView* depthSRV );
+
+
     /** Renders the PostFX composition pass. */
     XRESULT RenderPostFXComposition( ID3D11RenderTargetView* outputRTV,
                                      ID3D11ShaderResourceView* backbufferSRV,

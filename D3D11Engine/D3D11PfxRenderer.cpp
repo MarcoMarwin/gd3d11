@@ -636,6 +636,121 @@ XRESULT D3D11PfxRenderer::RenderPostFXComposition(
     return XR_SUCCESS;
 }
 
+XRESULT D3D11PfxRenderer::RenderLowClouds( ID3D11RenderTargetView* outputRTV,
+                                           ID3D11ShaderResourceView* sceneSRV,
+                                           ID3D11ShaderResourceView* depthSRV ) {
+    if ( !outputRTV || !sceneSRV || !depthSRV ) {
+        return XR_SUCCESS;
+    }
+
+    D3D11GraphicsEngine* engine = reinterpret_cast<D3D11GraphicsEngine*>(Engine::GraphicsEngine);
+    auto& context = engine->GetContext();
+    GSky* sky = Engine::GAPI->GetSky();
+    if ( !sky ) {
+        return XR_SUCCESS;
+    }
+
+    auto lowCloudPS = engine->GetShaderManager().GetPShader( PShaderID::PS_PFX_LowClouds );
+    auto vs = engine->GetShaderManager().GetVShader( VShaderID::VS_PFX );
+    if ( !lowCloudPS || !vs ) {
+        return XR_FAILED;
+    }
+
+    auto& settings = Engine::GAPI->GetRendererState().RendererSettings;
+    HeightfogConstantBuffer cb = {};
+    {
+        auto& proj = Engine::GAPI->GetProjectionMatrix();
+        cb.HF_ProjParams = float4( 1.0f / proj._11, 1.0f / proj._22, proj._43, proj._33 );
+    }
+    XMStoreFloat4x4( &cb.InvView, XMMatrixInverse( nullptr, Engine::GAPI->GetViewMatrixXM() ) );
+    cb.CameraPosition = Engine::GAPI->GetCameraPosition();
+    cb.HF_GlobalDensity = settings.FogGlobalDensity;
+    cb.HF_HeightFalloff = settings.FogHeightFalloff;
+
+    float height = settings.FogHeight;
+    XMVECTOR color = XMLoadFloat3( settings.FogColorMod.toXMFLOAT3() );
+
+    float fnear = 15000.0f;
+    float ffar = 60000.0f;
+    float secScale = std::min<float>( settings.SectionDrawRadius, settings.FogRange );
+
+    cb.HF_WeightZNear = std::max( 0.0f, WORLD_SECTION_SIZE * ((secScale - 0.5f) * 0.7f) - (ffar - fnear) );
+    cb.HF_WeightZFar = WORLD_SECTION_SIZE * ((secScale - 0.5f) * 0.8f);
+
+    float atmoMax = 83200.0f;
+    float atmoMin = 27799.9922f;
+    cb.HF_WeightZFar = std::min( cb.HF_WeightZFar, atmoMax );
+    cb.HF_WeightZNear = std::min( cb.HF_WeightZNear, atmoMin );
+
+#if !defined(BUILD_GOTHIC_1_08k) && !defined(BUILD_1_12F)
+    float fogDensityFactor = 2;
+    float fogDensityFactorRain = (1.0f - Engine::GAPI->GetFogOverride());
+#else
+    float fogDensityFactor = pow( 15000.0f / Engine::GAPI->GetFarZ(), 4.0f );
+    float fogDensityFactorRain = 1.0f;
+#endif
+
+    if ( Engine::GAPI->GetFogOverride() > 0.0f ) {
+        height = Toolbox::lerp( height, Engine::GAPI->GetCameraPosition().y + 10000, Engine::GAPI->GetFogOverride() );
+        color = Engine::GAPI->GetFogColor();
+#if !defined(BUILD_GOTHIC_1_08k) && !defined(BUILD_1_12F)
+        cb.HF_HeightFalloff = Toolbox::lerp( cb.HF_HeightFalloff, 0.000001f, Engine::GAPI->GetFogOverride() );
+#endif
+        cb.HF_GlobalDensity = Toolbox::lerp( cb.HF_GlobalDensity, cb.HF_GlobalDensity * fogDensityFactor, Engine::GAPI->GetFogOverride() );
+#if !defined(BUILD_GOTHIC_1_08k) && !defined(BUILD_1_12F)
+        cb.HF_WeightZNear = Toolbox::lerp( cb.HF_WeightZNear, WORLD_SECTION_SIZE * 0.09f, Engine::GAPI->GetFogOverride() );
+        cb.HF_WeightZFar = Toolbox::lerp( cb.HF_WeightZFar, WORLD_SECTION_SIZE * 0.8, Engine::GAPI->GetFogOverride() );
+#endif
+    }
+
+    cb.HF_FogHeight = height;
+    cb.HF_ProjAB = float2( Engine::GAPI->GetProjectionMatrix()._33, Engine::GAPI->GetProjectionMatrix()._34 );
+
+    float rain = sky->GetAtmosphereCB().AC_RainFXWeight;
+    float rainFogColorWeight = std::min( 1.0f, rain * 2.0f );
+    float daylightRainFog = std::max( 0.0f, std::min( 1.0f, (sky->GetAtmosphereCB().AC_LightPos.y + 0.05f) * 4.0f ) );
+    daylightRainFog = daylightRainFog * daylightRainFog * (3.0f - 2.0f * daylightRainFog);
+    rainFogColorWeight *= daylightRainFog;
+
+    XMFLOAT3 fogColorMod;
+    XMStoreFloat3( &fogColorMod, XMVectorLerpV( color, XMLoadFloat3( &settings.RainFogColor ), XMVectorSet( rainFogColorWeight, rainFogColorWeight, rainFogColorWeight, 0 ) ) );
+    cb.HF_FogColorMod = fogColorMod;
+    cb.HF_GlobalDensity = Toolbox::lerp( cb.HF_GlobalDensity, settings.RainFogDensity, rain * fogDensityFactorRain );
+
+    vs->Apply();
+    lowCloudPS->Apply();
+    lowCloudPS->GetBuffer( "PFXBuffer" ).Update( &cb ).Bind();
+    lowCloudPS->GetBuffer( "Atmosphere" ).Update( &sky->GetAtmosphereCB() ).Bind();
+
+    auto res = engine->GetResolution();
+    D3D11_VIEWPORT vp = {};
+    vp.Width = static_cast<float>( res.x );
+    vp.Height = static_cast<float>( res.y );
+    vp.MinDepth = 0.0f;
+    vp.MaxDepth = 1.0f;
+    context->RSSetViewports( 1, &vp );
+    context->OMSetRenderTargets( 1, &outputRTV, nullptr );
+
+    ID3D11ShaderResourceView* srvs[2] = { sceneSRV, depthSRV };
+    context->PSSetShaderResources( 0, 2, srvs );
+
+    Engine::GAPI->GetRendererState().BlendState.SetDefault();
+    Engine::GAPI->GetRendererState().BlendState.SetDirty();
+    Engine::GAPI->GetRendererState().DepthState.DepthBufferCompareFunc = GothicDepthBufferStateInfo::CF_COMPARISON_ALWAYS;
+    Engine::GAPI->GetRendererState().DepthState.DepthWriteEnabled = false;
+    Engine::GAPI->GetRendererState().DepthState.SetDirty();
+
+    DrawFullScreenQuad();
+
+    ID3D11ShaderResourceView* nullSRVs[2] = {};
+    context->PSSetShaderResources( 0, 2, nullSRVs );
+
+    Engine::GAPI->GetRendererState().DepthState.DepthBufferCompareFunc = GothicDepthBufferStateInfo::DEFAULT_DEPTH_COMP_STATE;
+    Engine::GAPI->GetRendererState().DepthState.DepthWriteEnabled = true;
+    Engine::GAPI->GetRendererState().DepthState.SetDirty();
+
+    return XR_SUCCESS;
+}
 XRESULT D3D11PfxRenderer::RenderXeGTAO( ID3D11ShaderResourceView* depthSRV,
                                         ID3D11ShaderResourceView* normalsSRV,
                                         ID3D11RenderTargetView* outputRTV ) {

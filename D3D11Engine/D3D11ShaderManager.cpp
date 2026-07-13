@@ -249,7 +249,11 @@ XRESULT D3D11ShaderManager::Init() {
     Shaders.push_back( ShaderInfo::make<PShaderID::PS_PFX_GaussBlur>( "PS_PFX_GaussBlur.hlsl" )  );
     Shaders.push_back( ShaderInfo::make<PShaderID::PS_PFX_BloomCombine>( "PS_PFX_BloomCombine.hlsl" )  );
 
-    Shaders.push_back( ShaderInfo::make<PShaderID::PS_PFX_Heightfog>( "PS_PFX_Heightfog.hlsl" )  );
+    Shaders.push_back( ShaderInfo::make<PShaderID::PS_PFX_Heightfog>( "PS_PFX_Heightfog.hlsl" )
+        .with_category( ShaderCategory::SkyEffects ) );
+
+    Shaders.push_back( ShaderInfo::make<PShaderID::PS_PFX_LowClouds>( "PS_PFX_LowClouds.hlsl" )
+        .with_category( ShaderCategory::SkyEffects ) );
 
     Shaders.push_back( ShaderInfo::make<PShaderID::PS_PFX_UnderwaterFinal>( "PS_PFX_UnderwaterFinal.hlsl" )  );
 

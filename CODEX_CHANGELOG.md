@@ -417,3 +417,9 @@ Kurze, append-only Dokumentation der von Codex gepushten Renderer-Builds.
 - Nachtregen: der Regennebel bleibt beim Tag naeher am Build-112-Verhalten; nachts wird die entfernte Weltgeometrie dunkler grau statt hellgrau, und der 360-Grad-Haze wirkt weich auch auf den Himmel.
 - Windowed-4:3: die horizontale Weltprojektionskompensation gilt nun auch im Windowed-Modus, damit 800x600-Ingame nicht schmal zusammengedrueckt wirkt; HUD/F11 bleiben an die Fensterflaeche gekoppelt.
 - Pruefung: AGENTS-Regeln gelesen; Buildnummer aus outputs ermittelt; Projektionspfad, Shaderaufrufe, Konflikt-/Escape-Artefakte und git diff --check statisch kontrolliert. Kein vollstaendiger lokaler C++-/Shader-Build.
+## Build 116 (Low-Cloud-Pass, Shader-Reloads und Windowed-Projektion)
+
+- Tiefwolken: die world-space Tiefwolken laufen nun ueber einen eigenen PostFX-Pass/Shader, statt in Composition/Heightfog mitzustecken; das reduziert die teuren Shader-Recompiles beim Umschalten von Contact Shadows und Screen Space GI.
+- Shader-Kategorien: Heightfog und Low Clouds sind als `SkyEffects` kategorisiert, waehrend Contact Shadows/SSGI weiter nur die `Other`-Composition-Permutation betreffen.
+- Windowed-4:3: die Weltprojektionskompensation greift nun fuer jeden echten Windowed-Modus mit `StretchWindow=false`, nicht nur fuer den Startup-Windowed-Pfad; HUD/F11 bleiben weiterhin an die Fensterflaeche gekoppelt.
+- Pruefung: AGENTS-Regeln gelesen; Buildnummer aus outputs ermittelt; Projekt-XML, Shaderregister, Low-Cloud-Aufrufer, Windowed-Aspektpfad, Konflikt-/Escape-Artefakte und git diff --check statisch kontrolliert. Kein vollstaendiger lokaler C++-/Shader-Build.

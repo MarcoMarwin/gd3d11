@@ -1117,6 +1117,9 @@
     <None Include="Shaders\PS_PFX_SkyVelocity.hlsl">
       <Filter>Engine\Shaders</Filter>
     </None>
+    <None Include="Shaders\PS_PFX_LowClouds.hlsl">
+      <Filter>Engine\Shaders</Filter>
+    </None>
     <None Include="Shaders\VS_DecalInstanced.hlsl">
       <Filter>Engine\Shaders</Filter>
     </None>

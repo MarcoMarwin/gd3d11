@@ -25,7 +25,8 @@ enum class ShaderCategory : uint32_t {
     Water = 1 << 9,
     Other = 1 << 10,
     Tonemapping = 1 << 11,
-    AllContent = LightsAndShadows | Water | Other,
+    SkyEffects = 1 << 12,
+    AllContent = LightsAndShadows | Water | Other | Tonemapping | SkyEffects,
 
     // Combined: All types and all content
     All = AllTypes | AllContent
