@@ -183,10 +183,19 @@ float LowCloudFbm3(float3 p)
 
 float ResolveWorldLowCloudBase(float baseFogHeight)
 {
-	float cameraAnchoredBase = AC_WorldCameraPos.y - 2600.0f;
-	return lerp(baseFogHeight, cameraAnchoredBase, 0.42f);
+	return baseFogHeight;
 }
 
+void GetWorldLowCloudLight(out float3 lightDir, out float lightWeight)
+{
+	float sunWeight = saturate(AC_SunVisibility) * smoothstep(0.04f, 0.42f, AC_LightPos.y);
+	float moonWeight = saturate(AC_MoonVisibility) * saturate(AC_EnableNightAtmosphere) * smoothstep(0.02f, 0.34f, AC_MoonPos.y) * 0.34f;
+	float useMoon = step(sunWeight, moonWeight);
+	float3 sunDir = normalize(lerp(float3(-0.25f, 0.72f, 0.18f), AC_LightPos, saturate(abs(AC_LightPos.y) + 0.12f)));
+	float3 moonDir = normalize(lerp(float3(0.22f, 0.64f, -0.28f), AC_MoonPos, saturate(abs(AC_MoonPos.y) + 0.12f)));
+	lightDir = normalize(lerp(sunDir, moonDir, useMoon));
+	lightWeight = max(sunWeight, moonWeight);
+}
 float ComputeWorldLowCloudDensity(float3 worldPosition, float baseFogHeight)
 {
 	float cloudBase = ResolveWorldLowCloudBase(baseFogHeight);
@@ -219,15 +228,26 @@ float4 ComputeWorldLowCloudVolume(float3 cameraWorld, float3 endWorld, float cam
 	float3 ray = endWorld - cameraWorld;
 	float rayDistance = max(length(ray), 1.0f);
 	float3 rayDir = ray / rayDistance;
+	float cloudBase = ResolveWorldLowCloudBase(baseFogHeight);
+	float layerMin = cloudBase - 2600.0f;
+	float layerMax = cloudBase + 12200.0f;
 	float marchDistance = lerp(min(cameraDistance, 105000.0f), 92000.0f, skyPixel);
 	float startDistance = lerp(7000.0f, 9000.0f, skyPixel);
-	if (skyPixel < 0.5f && marchDistance <= startDistance + 200.0f)
+	if (abs(rayDir.y) > 0.035f)
+	{
+		float t0 = (layerMin - cameraWorld.y) / rayDir.y;
+		float t1 = (layerMax - cameraWorld.y) / rayDir.y;
+		float layerEnter = min(t0, t1);
+		float layerExit = max(t0, t1);
+		startDistance = max(startDistance, layerEnter - 3600.0f);
+		marchDistance = min(marchDistance, layerExit + 5200.0f);
+	}
+	if (marchDistance <= startDistance + 200.0f)
 	{
 		return float4(0.0f, 0.0f, 0.0f, 0.0f);
 	}
 
 	float usableDistance = max(marchDistance - startDistance, 1.0f);
-	float cloudBase = ResolveWorldLowCloudBase(baseFogHeight);
 	float dayWeight = saturate(AC_LightPos.y * 2.4f + 0.22f);
 	float3 dayLit = lerp(fogColorMod * 0.62f, float3(0.60f, 0.62f, 0.59f), 0.58f);
 	float3 dayShadow = lerp(fogColorMod * 0.30f, float3(0.20f, 0.23f, 0.24f), 0.72f);
@@ -238,13 +258,13 @@ float4 ComputeWorldLowCloudVolume(float3 cameraWorld, float3 endWorld, float cam
 	float transmittance = 1.0f;
 	float3 scattering = 0.0f;
 	float accumulatedAlpha = 0.0f;
-	const int CLOUD_FIELD_STEPS = 6;
+	const int CLOUD_FIELD_STEPS = 8;
 	float stepLength = usableDistance / CLOUD_FIELD_STEPS;
 
 	[unroll]
 	for (int i = 0; i < CLOUD_FIELD_STEPS; ++i)
 	{
-		float stepJitter = LowCloudHash21(float2(i + 23.0f, floor(AC_Time * 0.013f))) - 0.5f;
+		float stepJitter = LowCloudHash21(float2(i * 17.0f, i * 29.0f) + float2(11.0f, 37.0f)) - 0.5f;
 		float sampleDistance = startDistance + (i + 0.58f + stepJitter * 0.24f) * stepLength;
 		float3 sampleWorld = cameraWorld + rayDir * sampleDistance;
 		float distanceFade = smoothstep(7800.0f, 18000.0f, sampleDistance) * (1.0f - smoothstep(105000.0f, 140000.0f, sampleDistance));
@@ -271,16 +291,18 @@ float4 ComputeWorldLowCloudVolume(float3 cameraWorld, float3 endWorld, float cam
 	accumulatedAlpha = saturate(accumulatedAlpha * 1.02f);
 	return float4(saturate(scattering / max(accumulatedAlpha, 0.001f)), accumulatedAlpha);
 }
+
 float ComputeWorldLowCloudShadow(float3 worldPosition, float baseFogHeight, float nightTimeBlend)
 {
 	float skyEffects = saturate(AC_SkyEffectsEnabled);
-	float dayWeight = saturate(AC_LightPos.y * 2.2f + 0.08f) * (1.0f - nightTimeBlend * 0.85f);
-	if (skyEffects <= 0.0001f || dayWeight <= 0.0001f)
+	float3 lightDir;
+	float lightWeight;
+	GetWorldLowCloudLight(lightDir, lightWeight);
+	if (skyEffects <= 0.0001f || lightWeight <= 0.0001f)
 	{
 		return 0.0f;
 	}
 
-	float3 lightDir = normalize(lerp(float3(-0.25f, 0.72f, 0.18f), AC_LightPos, saturate(abs(AC_LightPos.y) + 0.12f)));
 	float upward = max(lightDir.y, 0.08f);
 	float cloudBase = ResolveWorldLowCloudBase(baseFogHeight);
 	float lowerT = ((cloudBase + 3400.0f) - worldPosition.y) / upward;
@@ -297,19 +319,20 @@ float ComputeWorldLowCloudShadow(float3 worldPosition, float baseFogHeight, floa
 
 	float cameraDistance = length(worldPosition - AC_WorldCameraPos);
 	float distanceFade = smoothstep(5200.0f, 16500.0f, cameraDistance) * (1.0f - smoothstep(120000.0f, 160000.0f, cameraDistance));
-	float sunHeightFade = smoothstep(0.05f, 0.42f, AC_LightPos.y);
-	return SmootherStep01(softDensity) * distanceFade * dayWeight * sunHeightFade * 0.24f * skyEffects;
+	return SmootherStep01(softDensity) * distanceFade * lightWeight * 0.34f * skyEffects;
 }
+
 float ComputeWorldLowCloudGlobalShadow(float baseFogHeight, float nightTimeBlend)
 {
 	float skyEffects = saturate(AC_SkyEffectsEnabled);
-	float dayWeight = saturate(AC_LightPos.y * 2.2f + 0.08f) * (1.0f - nightTimeBlend * 0.90f);
-	if (skyEffects <= 0.0001f || dayWeight <= 0.0001f)
+	float3 lightDir;
+	float lightWeight;
+	GetWorldLowCloudLight(lightDir, lightWeight);
+	if (skyEffects <= 0.0001f || lightWeight <= 0.0001f)
 	{
 		return 0.0f;
 	}
 
-	float3 lightDir = normalize(lerp(float3(-0.25f, 0.72f, 0.18f), AC_LightPos, saturate(abs(AC_LightPos.y) + 0.12f)));
 	float upward = max(lightDir.y, 0.08f);
 	float cloudBase = ResolveWorldLowCloudBase(baseFogHeight);
 	float referenceHeight = min(AC_WorldCameraPos.y, cloudBase + 1700.0f);
@@ -318,10 +341,8 @@ float ComputeWorldLowCloudGlobalShadow(float baseFogHeight, float nightTimeBlend
 	float3 referenceWorld = float3(AC_WorldCameraPos.x, referenceHeight, AC_WorldCameraPos.z);
 	float lowerDensity = ComputeWorldLowCloudDensity(referenceWorld + lightDir * clamp(lowerT, 0.0f, 76000.0f), baseFogHeight) * step(0.0f, lowerT);
 	float upperDensity = ComputeWorldLowCloudDensity(referenceWorld + lightDir * clamp(upperT, 0.0f, 92000.0f), baseFogHeight) * step(0.0f, upperT);
-	float sunHeightFade = smoothstep(0.05f, 0.44f, AC_LightPos.y);
-	return SmootherStep01(saturate(lowerDensity * 0.88f + upperDensity * 0.56f)) * dayWeight * sunHeightFade * 0.22f * skyEffects;
+	return SmootherStep01(saturate(lowerDensity * 0.96f + upperDensity * 0.62f)) * lightWeight * 0.32f * skyEffects;
 }
-
 #endif // ENABLE_LOW_CLOUDS
 
 float GetNightWeight()

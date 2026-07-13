@@ -62,7 +62,14 @@ float4 PSMain( PS_INPUT Input ) : SV_TARGET
 
     float globalShadow = ComputeWorldLowCloudGlobalShadow( HF_FogHeight, nightTimeBlend );
     float surfaceShadow = (1.0f - skyPixel) * ComputeWorldLowCloudShadow( worldPosition, HF_FogHeight, nightTimeBlend );
-    color.rgb *= 1.0f - saturate( globalShadow + surfaceShadow * 0.90f );
+    float cloudLightOcclusion = saturate( globalShadow + surfaceShadow * 0.88f );
+    float sunWeight = saturate( AC_SunVisibility ) * smoothstep( 0.04f, 0.42f, AC_LightPos.y );
+    float moonWeight = saturate( AC_MoonVisibility ) * saturate( AC_EnableNightAtmosphere ) * smoothstep( 0.02f, 0.34f, AC_MoonPos.y ) * 0.34f;
+    float directLightWeight = saturate( sunWeight + moonWeight );
+    float sceneLuma = dot( color.rgb, float3( 0.299f, 0.587f, 0.114f ) );
+    float directLitMask = smoothstep( 0.12f, 0.58f, sceneLuma ) * directLightWeight * (1.0f - skyPixel);
+    float shadowAttenuation = saturate( cloudLightOcclusion * lerp( 0.74f, 1.34f, directLitMask ) );
+    color.rgb *= 1.0f - shadowAttenuation;
 
     float4 clouds = ComputeWorldLowCloudVolume(
         HF_CameraPosition,
@@ -73,6 +80,22 @@ float4 PSMain( PS_INPUT Input ) : SV_TARGET
         HF_FogColorMod,
         nightTimeBlend );
 
-    color.rgb = lerp( color.rgb, clouds.rgb, clouds.a );
+    float3 viewDir = normalize( worldPosition - HF_CameraPosition );
+    float3 sunDir = normalize( lerp( float3( -0.25f, 0.72f, 0.18f ), AC_LightPos, saturate( abs( AC_LightPos.y ) + 0.12f ) ) );
+    float3 moonDir = normalize( lerp( float3( 0.22f, 0.64f, -0.28f ), AC_MoonPos, saturate( abs( AC_MoonPos.y ) + 0.12f ) ) );
+    float moonDiskWeight = saturate( AC_MoonVisibility ) * saturate( AC_EnableNightAtmosphere ) * smoothstep( 0.02f, 0.34f, AC_MoonPos.y );
+    float sunAlignment = dot( viewDir, sunDir );
+    float moonAlignment = dot( viewDir, moonDir );
+    float sunCore = smoothstep( 0.99920f, 0.99986f, sunAlignment ) * sunWeight * skyPixel;
+    float sunHalo = smoothstep( 0.99200f, 0.99860f, sunAlignment ) * sunWeight * skyPixel;
+    float moonCore = smoothstep( 0.99935f, 0.99988f, moonAlignment ) * moonDiskWeight * skyPixel;
+    float moonHalo = smoothstep( 0.99500f, 0.99900f, moonAlignment ) * moonDiskWeight * skyPixel;
+    float lightDiskMask = saturate( sunCore + sunHalo * 0.42f + moonCore * 0.92f + moonHalo * 0.24f );
+    float cloudCoverAtLight = saturate( clouds.a * 1.58f + globalShadow * 0.86f );
+    float lightCoreMask = saturate( sunCore + moonCore );
+    float lightDiskOcclusion = saturate( lightDiskMask * cloudCoverAtLight );
+    float3 occludedScene = color.rgb * ( 1.0f - lightDiskOcclusion * lerp( 0.72f, 0.985f, lightCoreMask ) );
+
+    color.rgb = lerp( occludedScene, clouds.rgb, clouds.a );
     return color;
 }

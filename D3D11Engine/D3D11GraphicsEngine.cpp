@@ -4008,7 +4008,16 @@ XRESULT D3D11GraphicsEngine::OnStartWorldRendering() {
         }
 #endif
         const float aspectScale = outputAspect / logicalAspect;
-        if ( std::isfinite( aspectScale ) && std::abs( aspectScale - 1.0f ) > 0.001f ) {
+        bool applyAspectScale = std::isfinite( aspectScale ) && std::abs( aspectScale - 1.0f ) > 0.001f;
+        if ( applyAspectScale && std::abs( uiProjection._11 ) > 0.0001f ) {
+            const float projectionAspect = std::abs( uiProjection._22 / uiProjection._11 );
+            if ( std::isfinite( projectionAspect ) ) {
+                const float outputDelta = std::abs( projectionAspect - outputAspect );
+                const float logicalDelta = std::abs( projectionAspect - logicalAspect );
+                applyAspectScale = logicalDelta <= outputDelta;
+            }
+        }
+        if ( applyAspectScale ) {
             worldProjection._11 *= aspectScale;
         }
     }

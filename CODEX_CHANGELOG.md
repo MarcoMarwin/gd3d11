@@ -423,3 +423,10 @@ Kurze, append-only Dokumentation der von Codex gepushten Renderer-Builds.
 - Shader-Kategorien: Heightfog und Low Clouds sind als `SkyEffects` kategorisiert, waehrend Contact Shadows/SSGI weiter nur die `Other`-Composition-Permutation betreffen.
 - Windowed-4:3: die Weltprojektionskompensation greift nun fuer jeden echten Windowed-Modus mit `StretchWindow=false`, nicht nur fuer den Startup-Windowed-Pfad; HUD/F11 bleiben weiterhin an die Fensterflaeche gekoppelt.
 - Pruefung: AGENTS-Regeln gelesen; Buildnummer aus outputs ermittelt; Projekt-XML, Shaderregister, Low-Cloud-Aufrufer, Windowed-Aspektpfad, Konflikt-/Escape-Artefakte und git diff --check statisch kontrolliert. Kein vollstaendiger lokaler C++-/Shader-Build.
+## Build 117 (Nachtregen, Tiefwolken und Windowed-Projektion)
+
+- Tiefwolken: Wolkenfelder sind kamerastabiler, nutzen eine feste Welt-Hoehenschicht, feinere Raymarch-Schritte und koennen Sonne beziehungsweise Mond sichtbar verdecken.
+- Wolkenschatten: direkte Sonnen-/Mondlichtwirkung wird bei Wolkenueberdeckung weicher und staerker gedimmt, einschliesslich sichtbarer Lichtscheiben im Himmel.
+- Nachtregen: entfernte Weltgeometrie faellt bei Regen nachts in ein dunkleres kaltes Blaugrau mit niedrigerem Luma-Deckel, ohne den Himmel-/Regenwolken-Haze mitzudrehen.
+- Windowed-4:3: die Weltprojektionskompensation wird gegen bereits passende Projektionen abgesichert, damit Laden/Resolution-Wechsel keine zu breite Figurendarstellung erzeugt.
+- Pruefung: AGENTS-Regeln gelesen; Buildnummer aus outputs ermittelt; Shaderpfade fuer Heightfog/Composition/Low-Clouds, Projektionspfad, Konflikt-/Escape-Artefakte und git diff --check statisch kontrolliert. Kein vollstaendiger lokaler C++-/Shader-Build.
