@@ -150,13 +150,17 @@ float4 ComputeHeightFog( float2 texcoord )
 	fogOpacity = max(fogOpacity, max(softSkyRainHaze, softWorldRainHaze));
 
 	float3 finalFogColor = saturate(color / darknessFactor);
-	float3 darkRainGeometryBlue = float3(0.060f, 0.078f, 0.112f);
+	float3 midRainGeometryBlue = float3(0.058f, 0.075f, 0.106f);
+	float3 farRainGeometryBlue = float3(0.040f, 0.055f, 0.080f);
 	float3 rainSkyHazeGray = float3(0.070f, 0.074f, 0.078f);
-	float farRainGeometry = saturate(distantRainGeometry * 1.18f);
-	finalFogColor = lerp(finalFogColor, darkRainGeometryBlue, saturate(distantRainGeometry * 0.92f));
+	float farRainGeometry = saturate(distantRainGeometry * 1.10f);
+	float veryFarRainGeometry = rainyNightGeometry * SmootherStep01(saturate((rainDepthT - 0.38f) / 0.62f));
+	finalFogColor = lerp(finalFogColor, midRainGeometryBlue, saturate(distantRainGeometry * 0.66f));
+	finalFogColor = lerp(finalFogColor, farRainGeometryBlue, saturate(veryFarRainGeometry * 0.96f));
 	finalFogColor = lerp(finalFogColor, rainSkyHazeGray, saturate(softSkyRainHaze * 0.72f));
 	float farRainLuma = dot(finalFogColor, float3(0.2126f, 0.7152f, 0.0722f));
-	float farRainMaxLuma = lerp(1.0f, 0.118f, farRainGeometry);
+	float farRainMaxLuma = lerp(1.0f, 0.112f, farRainGeometry);
+	farRainMaxLuma = lerp(farRainMaxLuma, 0.090f, saturate(veryFarRainGeometry * 1.12f));
 	finalFogColor *= min(1.0f, farRainMaxLuma / max(farRainLuma, 0.001f));
 
 	return float4(finalFogColor, saturate(fogOpacity));

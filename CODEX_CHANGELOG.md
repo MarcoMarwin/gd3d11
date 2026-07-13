@@ -430,3 +430,9 @@ Kurze, append-only Dokumentation der von Codex gepushten Renderer-Builds.
 - Nachtregen: entfernte Weltgeometrie faellt bei Regen nachts in ein dunkleres kaltes Blaugrau mit niedrigerem Luma-Deckel, ohne den Himmel-/Regenwolken-Haze mitzudrehen.
 - Windowed-4:3: die Weltprojektionskompensation wird gegen bereits passende Projektionen abgesichert, damit Laden/Resolution-Wechsel keine zu breite Figurendarstellung erzeugt.
 - Pruefung: AGENTS-Regeln gelesen; Buildnummer aus outputs ermittelt; Shaderpfade fuer Heightfog/Composition/Low-Clouds, Projektionspfad, Konflikt-/Escape-Artefakte und git diff --check statisch kontrolliert. Kein vollstaendiger lokaler C++-/Shader-Build.
+## Build 118 (Tiefwolken, Nachtregen und stabile 4:3-Projektion)
+
+- Tiefwolken: die Wolkenfelder bekommen staerker lokale Hoehenformen, weichere Oberkanten und dichtere Baenke in mittlerer bis weiter Entfernung, damit weniger flache Wolkendecken und weniger harte Feldkanten entstehen.
+- Nachtregen: sehr weit entfernte Weltgeometrie wird bei Regen nachts nochmals dunkler und kuehler blaugrau begrenzt, ohne in Schwarzgrau zu kippen.
+- Seitenverhaeltnis: die fehleranfaellige Desktop-/Output-Aspekt-Heuristik fuer die Weltprojektion wurde entfernt; Gothic aktualisiert die Kamera-Projection vor dem DX11-World-Stage, damit 16:9/4:3-Wechsel und Savegame-Loads nicht mehr zwischen schmaler und breiter Darstellung kippen.
+- Pruefung: AGENTS-Regeln gelesen; Buildnummer aus outputs ermittelt; Kirides 17.9.7 als Projektions-/Viewport-Referenz verglichen; Shaderpfade, Projektionspfad, Konflikt-/Escape-Artefakte und git diff --check statisch kontrolliert. Kein vollstaendiger lokaler C++-/Shader-Build.

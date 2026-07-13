@@ -3988,45 +3988,17 @@ XRESULT D3D11GraphicsEngine::OnStartWorldRendering() {
     RGResourceHandle backBufferHandle = graph.ImportResource( L"BackBuffer", HDRBackBuffer.get() );
     RGResourceHandle velocityBufferHandle = graph.ImportResource( L"VelocityBuffer", VelocityBuffer.get() );
 
+    // Let Gothic refresh its camera projection before STAGE_DRAW_WORLD blocks D3D7 projection resets.
+    SetViewport( ViewportInfo( 0, 0, GetResolution() ) );
+    UpdateZEngineViewport();
+
     rendererState.RendererInfo.RenderStage = STAGE_DRAW_WORLD;
 
     const XMFLOAT4X4 uiProjection = rendererState.TransformState.TransformProjUnjittered;
-    XMFLOAT4X4 worldProjection = uiProjection;
-    if ( Resolution.y > 0 && m_swapchainResolution.y > 0 ) {
-        const float logicalAspect = static_cast<float>( Resolution.x ) / static_cast<float>( Resolution.y );
-        float outputAspect = static_cast<float>( m_swapchainResolution.x ) / static_cast<float>( m_swapchainResolution.y );
-#ifndef BUILD_SPACER
-        if ( !rendererState.RendererSettings.StretchWindow ) {
-            RECT desktopRect = {};
-            if ( GetClientRect( GetDesktopWindow(), &desktopRect ) ) {
-                const int desktopWidth = desktopRect.right - desktopRect.left;
-                const int desktopHeight = desktopRect.bottom - desktopRect.top;
-                if ( desktopWidth > 0 && desktopHeight > 0 ) {
-                    outputAspect = static_cast<float>( desktopWidth ) / static_cast<float>( desktopHeight );
-                }
-            }
-        }
-#endif
-        const float aspectScale = outputAspect / logicalAspect;
-        bool applyAspectScale = std::isfinite( aspectScale ) && std::abs( aspectScale - 1.0f ) > 0.001f;
-        if ( applyAspectScale && std::abs( uiProjection._11 ) > 0.0001f ) {
-            const float projectionAspect = std::abs( uiProjection._22 / uiProjection._11 );
-            if ( std::isfinite( projectionAspect ) ) {
-                const float outputDelta = std::abs( projectionAspect - outputAspect );
-                const float logicalDelta = std::abs( projectionAspect - logicalAspect );
-                applyAspectScale = logicalDelta <= outputDelta;
-            }
-        }
-        if ( applyAspectScale ) {
-            worldProjection._11 *= aspectScale;
-        }
-    }
-    rendererState.TransformState.TransformProjUnjittered = worldProjection;
-    rendererState.TransformState.TransformProj = worldProjection;
+    rendererState.TransformState.TransformProjUnjittered = uiProjection;
+    rendererState.TransformState.TransformProj = uiProjection;
 
     SetViewport( ViewportInfo( 0, 0, GetResolution() ) );
-
-    UpdateZEngineViewport();
 
     GetContext()->OMSetRenderTargets( 1, HDRBackBuffer->GetRenderTargetView().GetAddressOf(), nullptr );
 
