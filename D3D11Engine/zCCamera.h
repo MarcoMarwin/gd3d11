@@ -61,8 +61,10 @@ public:
     static void __fastcall UpdateViewport_Hook( zCCamera* _this, void* pUnknown ) {
         // make the session camera aware of our viewport
         if ( auto view = (_zCView*)_this->targetView; view && view->viewID == 1 ) {
-            // Gothic's camera projection must use the logical game resolution; render scale only changes DX11 targets.
-            auto res = Engine::GraphicsEngine->GetBackbufferResolution();
+            // Modify the engines Viewport to match our current active backbuffer size
+            auto res = Engine::GAPI->GetRendererState().RendererInfo.IsRenderStageDx11()
+                ? Engine::GraphicsEngine->GetResolution()
+                : Engine::GraphicsEngine->GetBackbufferResolution();
 
             view->pposx = 0;
             view->pposy = 0;
@@ -80,9 +82,10 @@ public:
         HookedFunctions::OriginalFunctions.original_zCCamera__Activate( _this );
 
         if ( auto view = (_zCView*)_this->targetView; view && view->viewID == 1 ) {
-            // Savegame loading and world changes can reactivate the session camera after Gothic has
-            // restored an old target view. Re-apply the logical game viewport before binding DX state.
-            UpdateViewport_Hook( _this, nullptr );
+            // HACK: override the viewport for the session camera if this is the main viewport
+            // Activate changes the viewport and does some clamping which breaks our viewport,
+            // even though the viewport zCView has the correct values
+            // we just assume the values are correct and set the viewport again after the original Activate is done
             Engine::GraphicsEngine->SetViewport( ViewportInfo( view->pposx, view->pposy, view->psizex, view->psizey ) );
         }
     }

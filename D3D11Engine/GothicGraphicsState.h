@@ -690,7 +690,7 @@ struct GothicRendererSettings {
         SSRStrength = 1.0f; // UI-normalized: 1.0 equals the former 1.4 slider value.
         WaterCubemapStrength = 1.0f;
         EnableSSS = true;
-        SSSIntensity = 0.5f; // Fixed Backlit Vegetation intensity; the F11 option is an enabler.
+        SSSIntensity = 1.0f; // Default Backlit Vegetation intensity.
         EnableContactShadows = true;
         EnableScreenSpaceGI = false;
         ScreenSpaceGIStrength = 1.0f;
@@ -750,14 +750,21 @@ struct GothicRendererSettings {
         DynamicCloudDistance = 1.0f;
         DynamicCloudSpeed = 1.0f;
         DynamicCloudSunLight = 1.0f;
-        DynamicCloudDayColor = XMFLOAT3( 1.08f, 1.08f, 1.04f );
-        DynamicCloudRainColor = XMFLOAT3( 0.82f, 0.84f, 0.84f );
-        DynamicCloudNightColor = XMFLOAT3( 0.70f, 0.75f, 0.86f );
+#ifdef BUILD_GOTHIC_1_08k
+        DynamicCloudDayColor = XMFLOAT3( 0.90f, 0.80f, 0.65f );
+#else
+        DynamicCloudDayColor = XMFLOAT3( 1.05f, 1.15f, 1.15f );
+#endif
+        DynamicCloudRainColor = XMFLOAT3( 0.70f, 0.70f, 0.70f );
+        DynamicCloudNightColor = XMFLOAT3( 0.50f, 0.55f, 0.55f );
         OceanWaterColor = XMFLOAT3( 0.72f, 0.88f, 0.95f );
         OceanWaterColorStrength = 0.0f;
         NightNearBrightness = 1.0f;
-        NightFogBrightness = 1.0f;
-        NightDarkeningStart = 3000.0f;
+        NightFogBrightness = 0.70f;
+#ifdef BUILD_GOTHIC_1_08k
+        NightFogBrightness = 0.35f;
+#endif
+        NightDarkeningStart = 1000.0f;
         NightDarkeningRange = 12000.0f;
         NightDarkeningMax = 1.0f;
 
@@ -827,25 +834,50 @@ struct GothicRendererSettings {
         DebugSettings.FeatureSet.UseScreenSpaceShadowMask = false;
     }
 
+    void ApplyOldWorldSkyColorValues() {
+        FogColorMod = float3::FromColor( 189, 146, 107 );
+        DynamicCloudDayColor = XMFLOAT3( 0.90f, 0.80f, 0.65f );
+    }
+
+    void ApplyNewWorldSkyColorValues() {
+        FogColorMod = float3::FromColor( 180, 180, 255 );
+        DynamicCloudDayColor = XMFLOAT3( 1.05f, 1.15f, 1.15f );
+    }
+
+    void ApplySkyColorValues( bool useOldWorldSky ) {
+        if ( useOldWorldSky ) {
+            ApplyOldWorldSkyColorValues();
+        } else {
+            ApplyNewWorldSkyColorValues();
+        }
+    }
+
+    void ApplyWorldNightFogBrightness( bool useOldWorldNightFog ) {
+        NightFogBrightness = useOldWorldNightFog ? 0.35f : 0.70f;
+    }
+
     void SetupOldWorldSpecificValues() {
         FogGlobalDensity = 0.00002f;
         FogHeightFalloff = 0.00018f;
-        FogColorMod = float3::FromColor( 189, 146, 107 );
         FogHeight = 4000;
+        ApplyOldWorldSkyColorValues();
+        ApplyWorldNightFogBrightness( true );
     }
 
     void SetupNewWorldSpecificValues() {
         FogGlobalDensity = 0.00004f;
         FogHeightFalloff = 0.0005f;
-        FogColorMod = float3::FromColor( 180, 180, 255 );
         FogHeight = 800;
+        ApplyNewWorldSkyColorValues();
+        ApplyWorldNightFogBrightness( false );
     }
 
     void SetupAddonWorldSpecificValues() {
         FogGlobalDensity = 0.00004f;
         FogHeightFalloff = 0.0005f;
-        FogColorMod = float3::FromColor( 180, 180, 255 );
         FogHeight = 0;
+        ApplyNewWorldSkyColorValues();
+        ApplyWorldNightFogBrightness( false );
     }
 
     void DisableEverything() {}

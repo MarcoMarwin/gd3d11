@@ -49,6 +49,7 @@ public:
 
     /** Sets the current sky texture */
     void SetSkyTexture( ESkyTexture texture );
+    ESkyTexture GetDaySkyTexture() const { return DaySkyTexture; }
 
     void SetCustomCloudAndNightTexture( int idx, bool isNightTexture, bool isOldWorld );
     void SetCustomSkyTexture_ZenGin( bool isNightTexture, zCTexture* texture, bool isOldWorld );
@@ -91,6 +92,8 @@ public:
     float3 GetSunColor();
 
 protected:
+    void ApplyDaySkyColorProfile();
+
     /** Loads the sky textures */
     XRESULT LoadSkyResources();
 
@@ -116,6 +119,7 @@ protected:
 
     zCTexture* CloudTexture_Zen = nullptr;
     zCTexture* NightTexture_Zen = nullptr;
+    ESkyTexture DaySkyTexture = ESkyTexture::ST_NewWorld;
 
     std::unique_ptr<D3D11VertexBuffer> SkyPlaneVertexBuffer;
     ExVertexStruct SkyPlaneVertices[6];

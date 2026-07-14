@@ -119,8 +119,10 @@ XRESULT GSky::LoadSkyResources() {
     CloudTexture.reset( cloudTex );
 
 #ifdef BUILD_GOTHIC_1_08k
+    DaySkyTexture = ESkyTexture::ST_OldWorld;
     XLE( CloudTexture->Init( "system\\GD3D11\\Textures\\SkyDay_G1.dds" ) );
 #else
+    DaySkyTexture = ESkyTexture::ST_NewWorld;
     XLE( CloudTexture->Init( "system\\GD3D11\\Textures\\SkyDay.dds" ) );
 #endif
 
@@ -146,8 +148,14 @@ XRESULT GSky::LoadSkyResources() {
     return XR_SUCCESS;
 }
 
+void GSky::ApplyDaySkyColorProfile() {
+    Engine::GAPI->GetRendererState().RendererSettings.ApplySkyColorValues( DaySkyTexture == ESkyTexture::ST_OldWorld );
+}
+
 /** Sets the current sky texture */
 void GSky::SetSkyTexture( ESkyTexture texture ) {
+    DaySkyTexture = texture;
+
     D3D11Texture* cloudTex;
     XLE( Engine::GraphicsEngine->CreateTexture( &cloudTex ) );
     CloudTexture.reset( cloudTex );
@@ -164,6 +172,8 @@ void GSky::SetSkyTexture( ESkyTexture texture ) {
         Atmosphere.WaveLengths = float3( 0.54f, 0.56f, 0.60f );
         break;
     }
+
+    ApplyDaySkyColorProfile();
 }
 
 /** Sets the custom cloud sky texture */
@@ -197,7 +207,9 @@ void GSky::SetCustomCloudAndNightTexture( int idx, bool isNightTexture, bool isO
                 XLE( Engine::GraphicsEngine->CreateTexture( &cloudTex ) );
                 CloudTexture.reset( cloudTex );
                 XLE( CloudTexture->Init( textureFile ) );
+                DaySkyTexture = isOldWorld ? ESkyTexture::ST_OldWorld : ESkyTexture::ST_NewWorld;
                 Atmosphere.WaveLengths = isOldWorld ? float3( 0.54f, 0.56f, 0.60f ) : float3( 0.63f, 0.57f, 0.50f );
+                ApplyDaySkyColorProfile();
             }
         }
     }
@@ -219,7 +231,9 @@ void GSky::SetCustomSkyTexture_ZenGin( bool isNightTexture, zCTexture* texture, 
     } else {
         (isNightTexture ? NightTexture_Zen : CloudTexture_Zen) = texture;
         if ( !isNightTexture ) {
+            DaySkyTexture = isOldWorld ? ESkyTexture::ST_OldWorld : ESkyTexture::ST_NewWorld;
             Atmosphere.WaveLengths = isOldWorld ? float3( 0.54f, 0.56f, 0.60f ) : float3( 0.63f, 0.57f, 0.50f );
+            ApplyDaySkyColorProfile();
         }
     }
 }

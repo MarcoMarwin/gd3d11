@@ -1380,6 +1380,8 @@ void GothicAPI::OnWorldLoaded() {
     // Load global F11 draw distances first, then optional world-specific environment overrides.
     LoadRendererGlobalSettings( RendererState.RendererSettings, MENU_SETTINGS_FILE );
     LoadRendererWorldSettings( RendererState.RendererSettings );
+    RendererState.RendererSettings.ApplySkyColorValues( GetSky()->GetDaySkyTexture() == ESkyTexture::ST_OldWorld );
+    RendererState.RendererSettings.ApplyWorldNightFogBrightness( LoadedWorldInfo->WorldName == "OLDWORLD" || LoadedWorldInfo->WorldName == "WORLD" );
     // The removed F11 control stays at Kirides' former maximum value (10).
     RendererState.RendererSettings.VisualFXDrawRadius = VISUAL_FX_DRAW_RADIUS_FIXED;
 
@@ -5826,43 +5828,22 @@ XRESULT GothicAPI::SaveMenuSettings( const std::string& file ) {
 
     WritePrivateProfileStringA( "General", "ChangeToMode", std::to_string( s.ChangeWindowPreset ).c_str(), ini.c_str() );
     WritePrivateProfileStringA( "General", "D3D11Language", std::to_string( static_cast<int>(s.D3D11Language) ).c_str(), ini.c_str() );
-    WritePrivateProfileStringA( "General", "AtmosphericScattering", std::to_string( s.AtmosphericScattering ? TRUE : FALSE ).c_str(), ini.c_str() );
     WritePrivateProfileStringA( "General", "EnableFog", std::to_string( s.DrawFog ? TRUE : FALSE ).c_str(), ini.c_str() );
     WritePrivateProfileStringA( "General", "FogRange", float_to_string( s.FogRange , 2).c_str(), ini.c_str() );
     WritePrivateProfileStringA( "General", "EnableHDR", std::to_string( s.EnableHDR ? TRUE : FALSE ).c_str(), ini.c_str() );
     WritePrivateProfileStringA( "General", "HDRToneMapStrength", float_to_string( s.HDRToneMapStrength, 2 ).c_str(), ini.c_str() );
     WritePrivateProfileStringA( "General", "HDRToneMapStrengthNormalized", "1", ini.c_str() );
-    WritePrivateProfileStringA( "General", "EnableDebugLog", std::to_string( s.EnableDebugLog ? TRUE : FALSE ).c_str(), ini.c_str() );
-    WritePrivateProfileStringA( "General", "EnableAutoupdates", std::to_string( s.EnableAutoupdates ? TRUE : FALSE ).c_str(), ini.c_str() );
     WritePrivateProfileStringA( "General", "EnableGodRays", std::to_string( s.EnableGodRays ? TRUE : FALSE ).c_str(), ini.c_str() );
     WritePrivateProfileStringA( "General", "GodRayStrength", float_to_string( s.GodRayStrength, 2 ).c_str(), ini.c_str() );
     WritePrivateProfileStringA( "General", "EnableDoF", std::to_string( s.EnableDoF ? TRUE : FALSE ).c_str(), ini.c_str() );
-    WritePrivateProfileStringA( "General", "DoFGaussBlur", std::to_string( s.DoFGaussBlur ? TRUE : FALSE ).c_str(), ini.c_str() );
-    WritePrivateProfileStringA( "General", "DoFFocusDistance", float_to_string( s.DoFFocusDistance, 1 ).c_str(), ini.c_str() );
-    WritePrivateProfileStringA( "General", "DoFFocusRange", float_to_string( s.DoFFocusRange, 1 ).c_str(), ini.c_str() );
     WritePrivateProfileStringA( "General", "DoFBokehRadius", float_to_string( s.DoFBokehRadius, 2 ).c_str(), ini.c_str() );
-    WritePrivateProfileStringA( "General", "DoFMaxBlur", float_to_string( s.DoFMaxBlur, 1 ).c_str(), ini.c_str() );
-    WritePrivateProfileStringA( "General", "DoFNearBlurDistance", float_to_string( s.DoFNearBlurDistance, 1 ).c_str(), ini.c_str() );
-    WritePrivateProfileStringA( "General", "DoFNearBlurStrength", float_to_string( s.DoFNearBlurStrength, 2 ).c_str(), ini.c_str() );
     WritePrivateProfileStringA( "General", "AllowNormalmaps", std::to_string( s.AllowNormalmaps ? TRUE : FALSE ).c_str(), ini.c_str() );
     WritePrivateProfileStringA( "General", "EnableParallaxOcclusionMapping", std::to_string( s.EnableParallaxOcclusionMapping ? TRUE : FALSE ).c_str(), ini.c_str() );
-    WritePrivateProfileStringA( "General", "ParallaxOcclusionStrength", float_to_string( s.ParallaxOcclusionStrength, 2 ).c_str(), ini.c_str() );
-    WritePrivateProfileStringA( "General", "AllowNumpadKeys", std::to_string( s.AllowNumpadKeys ? TRUE : FALSE ).c_str(), ini.c_str() );
-    WritePrivateProfileStringA( "General", "EnableInactiveFpsLock", std::to_string( s.EnableInactiveFpsLock ? TRUE : FALSE ).c_str(), ini.c_str() );
-    WritePrivateProfileStringA( "General", "MultiThreadResourceManager", std::to_string( s.MTResoureceManager ? TRUE : FALSE ).c_str(), ini.c_str() );
-    WritePrivateProfileStringA( "General", "CompressBackBuffer", std::to_string( s.CompressBackBuffer ? TRUE : FALSE ).c_str(), ini.c_str() );
-    WritePrivateProfileStringA( "General", "AnimateStaticVobs", std::to_string( s.AnimateStaticVobs ? TRUE : FALSE ).c_str(), ini.c_str() );
-    WritePrivateProfileStringA( "General", "DrawWorldSectionIntersections", std::to_string( s.DrawSectionIntersections ? TRUE : FALSE ).c_str(), ini.c_str() );
-    WritePrivateProfileStringA( "General", "SunLightStrength", std::to_string( s.SunLightStrength ).c_str(), ini.c_str() );
-    WritePrivateProfileStringA( "General", "DrawG1ForestPortals", std::to_string( s.DrawG1ForestPortals ? TRUE : FALSE ).c_str(), ini.c_str() );
-    WritePrivateProfileStringA( "General", "DrawRainThroughTransformFeedback", std::to_string( s.DrawRainThroughTransformFeedback ? TRUE : FALSE ).c_str(), ini.c_str() );
     WritePrivateProfileStringA( "General", "SSRStrength", std::to_string( s.SSRStrength ).c_str(), ini.c_str() );
     WritePrivateProfileStringA( "General", "EnableContactShadows", std::to_string( s.EnableContactShadows ? TRUE : FALSE ).c_str(), ini.c_str() );
     WritePrivateProfileStringA( "General", "ContactShadowStrength", nullptr, ini.c_str() );
     WritePrivateProfileStringA( "General", "EnableScreenSpaceGI", std::to_string( s.EnableScreenSpaceGI ? TRUE : FALSE ).c_str(), ini.c_str() );
     WritePrivateProfileStringA( "General", "ScreenSpaceGIStrength", float_to_string( s.ScreenSpaceGIStrength, 2 ).c_str(), ini.c_str() );
-    WritePrivateProfileStringA( "General", "EnableParticleLighting", std::to_string( s.EnableParticleLighting ? TRUE : FALSE ).c_str(), ini.c_str() );
-    WritePrivateProfileStringA( "General", "ParticleLightingStrength", float_to_string( s.ParticleLightingStrength, 2 ).c_str(), ini.c_str() );
     WritePrivateProfileStringA( "General", "EnableSSS", std::to_string( s.EnableSSS ? TRUE : FALSE ).c_str(), ini.c_str() );
 
     /*
@@ -5887,87 +5868,23 @@ XRESULT GothicAPI::SaveMenuSettings( const std::string& file ) {
     WritePrivateProfileStringA( "Display", "DisplayBrightness", std::to_string( s.BrightnessValue ).c_str(), ini.c_str() );
     WritePrivateProfileStringA( "Display", "DisplayFlip", std::to_string( s.DisplayFlip ? TRUE : FALSE ).c_str(), ini.c_str() );
     WritePrivateProfileStringA( "Display", "LowLatency", std::to_string( s.LowLatency ? TRUE : FALSE ).c_str(), ini.c_str() );
-    WritePrivateProfileStringA( "Display", "HDR_Monitor", std::to_string( s.HDR_Monitor ? TRUE : FALSE ).c_str(), ini.c_str() );
-
     WritePrivateProfileStringA( "Display", "StretchWindow", std::to_string( s.StretchWindow ? TRUE : FALSE ).c_str(), ini.c_str() );
-    WritePrivateProfileStringA( "Display", "UIScale", std::to_string( s.GothicUIScale ).c_str(), ini.c_str() );
     WritePrivateProfileStringA( "Display", "Rain", std::to_string( s.EnableRain ? TRUE : FALSE ).c_str(), ini.c_str() );
     WritePrivateProfileStringA( "Display", "DynamicClouds", std::to_string( s.EnableDynamicClouds ? TRUE : FALSE ).c_str(), ini.c_str() );
-    WritePrivateProfileStringA( "Detail", "NightRainMidColorR", float_to_string( s.NightRainMidColor.x, 3 ).c_str(), ini.c_str() );
-    WritePrivateProfileStringA( "Detail", "NightRainMidColorG", float_to_string( s.NightRainMidColor.y, 3 ).c_str(), ini.c_str() );
-    WritePrivateProfileStringA( "Detail", "NightRainMidColorB", float_to_string( s.NightRainMidColor.z, 3 ).c_str(), ini.c_str() );
-    WritePrivateProfileStringA( "Detail", "NightRainWorldHaze", float_to_string( s.NightRainWorldHazeStrength, 3 ).c_str(), ini.c_str() );
-    WritePrivateProfileStringA( "Detail", "NightRainSkyHaze", float_to_string( s.NightRainSkyHazeStrength, 3 ).c_str(), ini.c_str() );
-    WritePrivateProfileStringA( "Detail", "NightRainMidInfluence", float_to_string( s.NightRainMidInfluence, 3 ).c_str(), ini.c_str() );
-    WritePrivateProfileStringA( "Detail", "NightRainFarLuma", float_to_string( s.NightRainFarMaxLuma, 3 ).c_str(), ini.c_str() );
-    WritePrivateProfileStringA( "Detail", "NightRainVeryFarLuma", float_to_string( s.NightRainVeryFarMaxLuma, 3 ).c_str(), ini.c_str() );
-    WritePrivateProfileStringA( "Detail", "DayRainAtmosphere", float_to_string( s.DayRainAtmosphereStrength, 2 ).c_str(), ini.c_str() );
-    WritePrivateProfileStringA( "Detail", "NightNearBrightness", float_to_string( s.NightNearBrightness, 2 ).c_str(), ini.c_str() );
-    WritePrivateProfileStringA( "Detail", "NightFogBrightness", float_to_string( s.NightFogBrightness, 2 ).c_str(), ini.c_str() );
-    WritePrivateProfileStringA( "Detail", "NightDarkeningStart", float_to_string( s.NightDarkeningStart, 0 ).c_str(), ini.c_str() );
-    WritePrivateProfileStringA( "Detail", "NightDarkeningRange", float_to_string( s.NightDarkeningRange, 0 ).c_str(), ini.c_str() );
-    WritePrivateProfileStringA( "Detail", "NightDarkeningMax", float_to_string( s.NightDarkeningMax, 2 ).c_str(), ini.c_str() );
-    WritePrivateProfileStringA( "Detail", "SSSIntensity", float_to_string( s.SSSIntensity, 2 ).c_str(), ini.c_str() );
-    WritePrivateProfileStringA( "Detail", "HeroAffectsObjectsStrength", float_to_string( s.HeroAffectsObjectsStrength, 2 ).c_str(), ini.c_str() );
-    WritePrivateProfileStringA( "Detail", "DynamicCloudDensity", float_to_string( s.DynamicCloudDensity, 2 ).c_str(), ini.c_str() );
-    WritePrivateProfileStringA( "Detail", "DynamicCloudScale", float_to_string( s.DynamicCloudScale, 2 ).c_str(), ini.c_str() );
-    WritePrivateProfileStringA( "Detail", "DynamicCloudHeight", float_to_string( s.DynamicCloudHeight, 2 ).c_str(), ini.c_str() );
-    WritePrivateProfileStringA( "Detail", "DynamicCloudDistance", float_to_string( s.DynamicCloudDistance, 2 ).c_str(), ini.c_str() );
-    WritePrivateProfileStringA( "Detail", "DynamicCloudSpeed", float_to_string( s.DynamicCloudSpeed, 2 ).c_str(), ini.c_str() );
-    WritePrivateProfileStringA( "Detail", "DynamicCloudSunLight", float_to_string( s.DynamicCloudSunLight, 2 ).c_str(), ini.c_str() );
-    WritePrivateProfileStringA( "Detail", "DynamicCloudDayColorR", float_to_string( s.DynamicCloudDayColor.x, 2 ).c_str(), ini.c_str() );
-    WritePrivateProfileStringA( "Detail", "DynamicCloudDayColorG", float_to_string( s.DynamicCloudDayColor.y, 2 ).c_str(), ini.c_str() );
-    WritePrivateProfileStringA( "Detail", "DynamicCloudDayColorB", float_to_string( s.DynamicCloudDayColor.z, 2 ).c_str(), ini.c_str() );
-    WritePrivateProfileStringA( "Detail", "DynamicCloudRainColorR", float_to_string( s.DynamicCloudRainColor.x, 2 ).c_str(), ini.c_str() );
-    WritePrivateProfileStringA( "Detail", "DynamicCloudRainColorG", float_to_string( s.DynamicCloudRainColor.y, 2 ).c_str(), ini.c_str() );
-    WritePrivateProfileStringA( "Detail", "DynamicCloudRainColorB", float_to_string( s.DynamicCloudRainColor.z, 2 ).c_str(), ini.c_str() );
-    WritePrivateProfileStringA( "Detail", "DynamicCloudNightColorR", float_to_string( s.DynamicCloudNightColor.x, 2 ).c_str(), ini.c_str() );
-    WritePrivateProfileStringA( "Detail", "DynamicCloudNightColorG", float_to_string( s.DynamicCloudNightColor.y, 2 ).c_str(), ini.c_str() );
-    WritePrivateProfileStringA( "Detail", "DynamicCloudNightColorB", float_to_string( s.DynamicCloudNightColor.z, 2 ).c_str(), ini.c_str() );
-    WritePrivateProfileStringA( "Detail", "OceanWaterColorR", float_to_string( s.OceanWaterColor.x, 2 ).c_str(), ini.c_str() );
-    WritePrivateProfileStringA( "Detail", "OceanWaterColorG", float_to_string( s.OceanWaterColor.y, 2 ).c_str(), ini.c_str() );
-    WritePrivateProfileStringA( "Detail", "OceanWaterColorB", float_to_string( s.OceanWaterColor.z, 2 ).c_str(), ini.c_str() );
-    WritePrivateProfileStringA( "Detail", "OceanWaterColorStrength", float_to_string( s.OceanWaterColorStrength, 2 ).c_str(), ini.c_str() );
-    WritePrivateProfileStringA( "Display", "TiledLighting", std::to_string( s.EnableTiledLighting ? TRUE : FALSE ).c_str(), ini.c_str() );
-    WritePrivateProfileStringA( "Display", "RendererMode", std::to_string( static_cast<int>(s.RendererMode) ).c_str(), ini.c_str() );
+    WritePrivateProfileStringA( "Detail", nullptr, nullptr, ini.c_str() );
     WritePrivateProfileStringA( "Display", "WindQuality", std::to_string( s.WindQuality ).c_str(), ini.c_str() );
     WritePrivateProfileStringA( "Display", "WindStrength", std::to_string( s.GlobalWindStrength ).c_str(), ini.c_str() );
     WritePrivateProfileStringA( "Display", "WaterWaveAnimation", std::to_string( s.EnableWaterAnimation ? TRUE : FALSE ).c_str(), ini.c_str() );
     WritePrivateProfileStringA( "Display", "HeroAffectsObjects", std::to_string( s.HeroAffectsObjects ? TRUE : FALSE ).c_str(), ini.c_str() );
-    WritePrivateProfileStringA( "Shadows", "EnableShadows", std::to_string( s.EnableShadows ? TRUE : FALSE ).c_str(), ini.c_str() );
     WritePrivateProfileStringA( "Shadows", "ShadowFilterMode", std::to_string( static_cast<int>(s.ShadowFilterMode) ).c_str(), ini.c_str() );
     WritePrivateProfileStringA( "Shadows", "ShadowMapSize", std::to_string( s.ShadowMapSize ).c_str(), ini.c_str() );
-    WritePrivateProfileStringA( "Shadows", "PointlightShadowMapSize", std::to_string( s.PointlightShadowMapSize ).c_str(), ini.c_str() );
-    WritePrivateProfileStringA( "Shadows", "WorldShadowRangeScale", std::to_string( s.WorldShadowRangeScale ).c_str(), ini.c_str() );
-    WritePrivateProfileStringA( "Shadows", "NumShadowCascades", std::to_string( s.NumShadowCascades ).c_str(), ini.c_str() );
-    WritePrivateProfileStringA( "Shadows", "ShadowCascadePCFLimit", std::to_string( s.ShadowCascadePCFLimit ).c_str(), ini.c_str() );
-    WritePrivateProfileStringA( "Shadows", "ShadowFrustumCullingMode", std::to_string( static_cast<int>(s.ShadowFrustumCullingMode) ).c_str(), ini.c_str() );
-    WritePrivateProfileStringA( "Shadows", "PointlightShadows", std::to_string( s.EnablePointlightShadows ).c_str(), ini.c_str() );
-    WritePrivateProfileStringA( "Shadows", "EnableDynamicLighting", std::to_string( s.EnableDynamicLighting ? TRUE : FALSE ).c_str(), ini.c_str() );
-    WritePrivateProfileStringA( "Shadows", "SmoothCameraUpdate", std::to_string( s.SmoothShadowCameraUpdate ? TRUE : FALSE ).c_str(), ini.c_str() );
-    WritePrivateProfileStringA( "Shadows", "SmoothShadowFrequency", std::to_string( s.SmoothShadowFrequency ).c_str(), ini.c_str() );
-    WritePrivateProfileStringA( "Shadows", "ShadowStrength", std::to_string( s.ShadowStrength ).c_str(), ini.c_str() );
     WritePrivateProfileStringA( "Shadows", "ShadowSoftness", std::to_string( s.ShadowSoftness ).c_str(), ini.c_str() );
-    WritePrivateProfileStringA( "Shadows", "ShadowAOStrength", std::to_string( s.ShadowAOStrength ).c_str(), ini.c_str() );
-    WritePrivateProfileStringA( "Shadows", "WorldAOStrength", std::to_string( s.WorldAOStrength ).c_str(), ini.c_str() );
 
     // WritePrivateProfileStringA( "SMAA", "Enabled", std::to_string( s.EnableSMAA ? TRUE : FALSE ).c_str(), ini.c_str() );
     WritePrivateProfileStringA( "General", "AntiAliasing", std::to_string( (int)s.AntiAliasingMode ).c_str(), ini.c_str() );
 
-    WritePrivateProfileStringA( "SMAA", "SharpenFactor", std::to_string( s.SharpenFactor ).c_str(), ini.c_str() );
-    WritePrivateProfileStringA( "General", "SharpeningMode", std::to_string( static_cast<int>(s.SharpeningMode) ).c_str(), ini.c_str() );
-
     WritePrivateProfileStringA( "AO", "Mode", std::to_string( static_cast<int>(s.AoMode) ).c_str(), ini.c_str() );
     WritePrivateProfileStringA( "AO", "Strength", float_to_string( s.AOStrength, 2 ).c_str(), ini.c_str() );
-    WritePrivateProfileStringA( "XeGTAO", "Quality", std::to_string( s.XegtaoSettings.QualityLevel ).c_str(), ini.c_str() );
-    WritePrivateProfileStringA( "XeGTAO", "DenoisePasses", std::to_string( s.XegtaoSettings.DenoisePasses ).c_str(), ini.c_str() );
-    WritePrivateProfileStringA( "XeGTAO", "Radius", std::to_string( s.XegtaoSettings.Radius ).c_str(), ini.c_str() );
-    WritePrivateProfileStringA( "FontRendering", "Enable", std::to_string( s.EnableCustomFontRendering ? TRUE : FALSE ).c_str(), ini.c_str() );
-    WritePrivateProfileStringA( "Debug", "UseShadowAtlas", std::to_string( s.DebugSettings.FeatureSet.UseShadowAtlas ? TRUE : FALSE ).c_str(), ini.c_str() );
-    WritePrivateProfileStringA( "Debug", "UseScreenSpaceShadowMask", std::to_string( s.DebugSettings.FeatureSet.UseScreenSpaceShadowMask ? TRUE : FALSE ).c_str(), ini.c_str() );
-    WritePrivateProfileStringA( "Debug", "ForceFeatureLevel10", std::to_string( s.DebugSettings.FeatureSet.ForceFeatureLevel10 ? TRUE : FALSE ).c_str(), ini.c_str() );
-    WritePrivateProfileStringA( "Debug", "EnableDriverExtensions", std::to_string( s.DebugSettings.FeatureSet.EnableDriverExtensions ? TRUE : FALSE ).c_str(), ini.c_str() );
-
     const char* hiddenUserGeneralKeys[] = {
         "AtmosphericScattering", "EnableDebugLog", "EnableAutoupdates", "DoFGaussBlur",
         "DoFFocusDistance", "DoFFocusRange", "DoFMaxBlur", "DoFNearBlurDistance",
@@ -6029,7 +5946,7 @@ XRESULT GothicAPI::LoadMenuSettings( const std::string& file ) {
             static_cast<int>(GothicRendererSettings::D3D11_LANGUAGE_GERMAN) ));
         s.DrawFog = GetPrivateProfileBoolA( "General", "EnableFog", ds.DrawFog, ini );
         s.FogRange = GetPrivateProfileFloatA( "General", "FogRange", ds.FogRange, ini.c_str() );
-        s.AtmosphericScattering = GetPrivateProfileBoolA( "General", "AtmosphericScattering", ds.AtmosphericScattering, ini );
+        s.AtmosphericScattering = ds.AtmosphericScattering;
         s.EnableHDR = GetPrivateProfileBoolA( "General", "EnableHDR", ds.EnableHDR, ini );
         const bool normalizedHDRToneMapStrength = GetPrivateProfileBoolA( "General", "HDRToneMapStrengthNormalized", false, ini );
         const float defaultStoredHDRToneMapStrength = normalizedHDRToneMapStrength ? ds.HDRToneMapStrength : 7.5f;
@@ -6038,39 +5955,39 @@ XRESULT GothicAPI::LoadMenuSettings( const std::string& file ) {
             storedHDRToneMapStrength /= 7.5f;
         }
         s.HDRToneMapStrength = std::clamp( storedHDRToneMapStrength, 0.0f, 2.0f );
-        s.EnableDebugLog = GetPrivateProfileBoolA( "General", "EnableDebugLog", ds.EnableDebugLog, ini );
-        s.EnableAutoupdates = GetPrivateProfileBoolA( "General", "EnableAutoupdates", ds.EnableAutoupdates, ini );
+        s.EnableDebugLog = ds.EnableDebugLog;
+        s.EnableAutoupdates = ds.EnableAutoupdates;
         s.EnableGodRays = GetPrivateProfileBoolA( "General", "EnableGodRays", ds.EnableGodRays, ini );
         s.GodRayStrength = std::clamp( GetPrivateProfileFloatA( "General", "GodRayStrength", ds.GodRayStrength, ini ), 0.0f, 2.0f );
         s.EnableDoF = GetPrivateProfileBoolA( "General", "EnableDoF", ds.EnableDoF, ini );
-        s.DoFGaussBlur = GetPrivateProfileBoolA( "General", "DoFGaussBlur", ds.DoFGaussBlur, ini );
-        s.DoFFocusDistance = std::clamp( GetPrivateProfileFloatA( "General", "DoFFocusDistance", ds.DoFFocusDistance, ini ), 0.0f, 30000.0f );
-        s.DoFFocusRange = GetPrivateProfileFloatA( "General", "DoFFocusRange", ds.DoFFocusRange, ini );
+        s.DoFGaussBlur = ds.DoFGaussBlur;
+        s.DoFFocusDistance = ds.DoFFocusDistance;
+        s.DoFFocusRange = ds.DoFFocusRange;
         s.DoFBokehRadius = std::clamp( GetPrivateProfileFloatA( "General", "DoFBokehRadius", ds.DoFBokehRadius, ini ), 0.0f, 7.0f );
-        s.DoFMaxBlur = GetPrivateProfileFloatA( "General", "DoFMaxBlur", ds.DoFMaxBlur, ini );
-        s.DoFNearBlurDistance = std::clamp( GetPrivateProfileFloatA( "General", "DoFNearBlurDistance", ds.DoFNearBlurDistance, ini ), 0.0f, 1000.0f );
-        s.DoFNearBlurStrength = std::clamp( GetPrivateProfileFloatA( "General", "DoFNearBlurStrength", ds.DoFNearBlurStrength, ini ), 0.0f, 2.0f );
+        s.DoFMaxBlur = ds.DoFMaxBlur;
+        s.DoFNearBlurDistance = ds.DoFNearBlurDistance;
+        s.DoFNearBlurStrength = ds.DoFNearBlurStrength;
         s.AllowNormalmaps = GetPrivateProfileBoolA( "General", "AllowNormalmaps", ds.AllowNormalmaps, ini );
         s.EnableParallaxOcclusionMapping = GetPrivateProfileBoolA( "General", "EnableParallaxOcclusionMapping", ds.EnableParallaxOcclusionMapping, ini );
-        s.ParallaxOcclusionStrength = std::clamp( GetPrivateProfileFloatA( "General", "ParallaxOcclusionStrength", ds.ParallaxOcclusionStrength, ini ), 0.0f, 4.0f );
-        s.AllowNumpadKeys = GetPrivateProfileBoolA( "General", "AllowNumpadKeys", ds.AllowNumpadKeys, ini );
-        s.EnableInactiveFpsLock = GetPrivateProfileBoolA( "General", "EnableInactiveFpsLock", ds.EnableInactiveFpsLock, ini );
-        s.MTResoureceManager = GetPrivateProfileBoolA( "General", "MultiThreadResourceManager", ds.MTResoureceManager, ini );
-        s.CompressBackBuffer = GetPrivateProfileBoolA( "General", "CompressBackBuffer", ds.CompressBackBuffer, ini );
-        s.AnimateStaticVobs = GetPrivateProfileBoolA( "General", "AnimateStaticVobs", ds.AnimateStaticVobs, ini );
-        s.DrawSectionIntersections = GetPrivateProfileBoolA( "General", "DrawWorldSectionIntersections", ds.DrawSectionIntersections, ini );
-        s.SunLightStrength = GetPrivateProfileFloatA( "General", "SunLightStrength", ds.SunLightStrength, ini );
-        s.DrawG1ForestPortals = GetPrivateProfileBoolA( "General", "DrawG1ForestPortals", ds.DrawG1ForestPortals, ini );
-        s.DrawRainThroughTransformFeedback = GetPrivateProfileBoolA( "General", "DrawRainThroughTransformFeedback", ds.DrawRainThroughTransformFeedback, ini );
+        s.ParallaxOcclusionStrength = ds.ParallaxOcclusionStrength;
+        s.AllowNumpadKeys = ds.AllowNumpadKeys;
+        s.EnableInactiveFpsLock = ds.EnableInactiveFpsLock;
+        s.MTResoureceManager = ds.MTResoureceManager;
+        s.CompressBackBuffer = ds.CompressBackBuffer;
+        s.AnimateStaticVobs = ds.AnimateStaticVobs;
+        s.DrawSectionIntersections = ds.DrawSectionIntersections;
+        s.SunLightStrength = ds.SunLightStrength;
+        s.DrawG1ForestPortals = ds.DrawG1ForestPortals;
+        s.DrawRainThroughTransformFeedback = ds.DrawRainThroughTransformFeedback;
         s.SSRStrength = std::clamp( GetPrivateProfileFloatA( "General", "SSRStrength", ds.SSRStrength, ini ), 0.0f, 2.0f );
         s.WaterCubemapStrength = ds.WaterCubemapStrength;
         s.EnableContactShadows = GetPrivateProfileBoolA( "General", "EnableContactShadows", ds.EnableContactShadows, ini );
         s.EnableScreenSpaceGI = GetPrivateProfileBoolA( "General", "EnableScreenSpaceGI", ds.EnableScreenSpaceGI, ini );
         s.ScreenSpaceGIStrength = std::clamp( GetPrivateProfileFloatA( "General", "ScreenSpaceGIStrength", ds.ScreenSpaceGIStrength, ini ), 0.0f, 2.0f );
-        s.EnableParticleLighting = GetPrivateProfileBoolA( "General", "EnableParticleLighting", ds.EnableParticleLighting, ini );
-        s.ParticleLightingStrength = std::clamp( GetPrivateProfileFloatA( "General", "ParticleLightingStrength", ds.ParticleLightingStrength, ini ), 0.0f, 2.0f );
+        s.EnableParticleLighting = ds.EnableParticleLighting;
+        s.ParticleLightingStrength = ds.ParticleLightingStrength;
         s.EnableSSS = GetPrivateProfileBoolA( "General", "EnableSSS", ds.EnableSSS, ini );
-        s.SSSIntensity = s.EnableSSS ? std::clamp( GetPrivateProfileFloatA( "Detail", "SSSIntensity", ds.SSSIntensity, ini ), 0.0f, 2.0f ) : 0.0f;
+        s.SSSIntensity = s.EnableSSS ? ds.SSSIntensity : 0.0f;
 
         /*
         * F11 draw-distance settings are loaded globally from UserSettings.ini
@@ -6111,17 +6028,17 @@ XRESULT GothicAPI::LoadMenuSettings( const std::string& file ) {
         else s.ShadowMapSize = 8192;
         s.PointlightShadowMapSize = s.ShadowMapSize >= 4096 ? 256 : 128;
         s.EnablePointlightShadows = GothicRendererSettings::EPointLightShadowMode::PLS_UPDATE_DYNAMIC;
-        s.WorldShadowRangeScale = GetPrivateProfileFloatA( "Shadows", "WorldShadowRangeScale", ds.WorldShadowRangeScale, ini );
-        s.NumShadowCascades = GetPrivateProfileIntA( "Shadows", "NumShadowCascades", ds.NumShadowCascades, ini.c_str() );
-        s.ShadowCascadePCFLimit = GetPrivateProfileIntA( "Shadows", "ShadowCascadePCFLimit", ds.ShadowCascadePCFLimit, ini.c_str() );
-        s.ShadowFrustumCullingMode = static_cast<GothicRendererSettings::E_ShadowFrustumCulling>(GetPrivateProfileIntA( "Shadows", "ShadowFrustumCullingMode", ds.ShadowFrustumCullingMode, ini.c_str() ));
-        s.EnableDynamicLighting = GetPrivateProfileBoolA( "Shadows", "EnableDynamicLighting", ds.EnableDynamicLighting, ini );
-        s.SmoothShadowCameraUpdate = GetPrivateProfileBoolA( "Shadows", "SmoothCameraUpdate", ds.SmoothShadowCameraUpdate, ini );
-        s.SmoothShadowFrequency = GetPrivateProfileFloatA( "Shadows", "SmoothShadowFrequency", ds.SmoothShadowFrequency, ini );
-        s.ShadowStrength = GetPrivateProfileFloatA( "Shadows", "ShadowStrength", ds.ShadowStrength, ini );
+        s.WorldShadowRangeScale = ds.WorldShadowRangeScale;
+        s.NumShadowCascades = ds.NumShadowCascades;
+        s.ShadowCascadePCFLimit = ds.ShadowCascadePCFLimit;
+        s.ShadowFrustumCullingMode = ds.ShadowFrustumCullingMode;
+        s.EnableDynamicLighting = ds.EnableDynamicLighting;
+        s.SmoothShadowCameraUpdate = ds.SmoothShadowCameraUpdate;
+        s.SmoothShadowFrequency = ds.SmoothShadowFrequency;
+        s.ShadowStrength = ds.ShadowStrength;
         s.ShadowSoftness = std::clamp( GetPrivateProfileFloatA( "Shadows", "ShadowSoftness", ds.ShadowSoftness, ini ), 0.0f, 2.0f );
-        s.ShadowAOStrength = GetPrivateProfileFloatA( "Shadows", "ShadowAOStrength", ds.ShadowAOStrength, ini );
-        s.WorldAOStrength = GetPrivateProfileFloatA( "Shadows", "WorldAOStrength", ds.WorldAOStrength, ini );
+        s.ShadowAOStrength = ds.ShadowAOStrength;
+        s.WorldAOStrength = ds.WorldAOStrength;
 
         INT2 res = {};
         RECT desktopRect;
@@ -6139,7 +6056,7 @@ XRESULT GothicAPI::LoadMenuSettings( const std::string& file ) {
         s.BrightnessValue = GetPrivateProfileFloatA( "Display", "DisplayBrightness", 1.0f, ini );
         s.DisplayFlip = GetPrivateProfileBoolA( "Display", "DisplayFlip", ds.DisplayFlip, ini );
         s.LowLatency = GetPrivateProfileBoolA( "Display", "LowLatency", ds.LowLatency, ini );
-        s.HDR_Monitor = GetPrivateProfileBoolA( "Display", "HDR_Monitor", false, ini );
+        s.HDR_Monitor = ds.HDR_Monitor;
         s.StretchWindow = GetPrivateProfileBoolA( "Display", "StretchWindow", ds.StretchWindow, ini );
         if ( !s.DisplayFlip || s.LowLatency ) {
             s.DisplayFlip = true;
@@ -6147,23 +6064,24 @@ XRESULT GothicAPI::LoadMenuSettings( const std::string& file ) {
             WritePrivateProfileStringA( "Display", "DisplayFlip", "1", ini.c_str() );
             WritePrivateProfileStringA( "Display", "LowLatency", "0", ini.c_str() );
         }
-        s.GothicUIScale = GetPrivateProfileFloatA( "Display", "UIScale", 1.0f, ini );
+        s.GothicUIScale = ds.GothicUIScale;
         s.EnableRain = GetPrivateProfileBoolA( "Display", "Rain", ds.EnableRain, ini );
         s.EnableDynamicClouds = GetPrivateProfileBoolA( "Display", "DynamicClouds", ds.EnableDynamicClouds, ini );
-        s.NightRainMidColor.x = std::clamp( GetPrivateProfileFloatA( "Detail", "NightRainMidColorR", ds.NightRainMidColor.x, ini ), 0.0f, 0.20f );
-        s.NightRainMidColor.y = std::clamp( GetPrivateProfileFloatA( "Detail", "NightRainMidColorG", ds.NightRainMidColor.y, ini ), 0.0f, 0.20f );
-        s.NightRainMidColor.z = std::clamp( GetPrivateProfileFloatA( "Detail", "NightRainMidColorB", ds.NightRainMidColor.z, ini ), 0.0f, 0.20f );
-        s.NightRainWorldHazeStrength = std::clamp( GetPrivateProfileFloatA( "Detail", "NightRainWorldHaze", ds.NightRainWorldHazeStrength, ini ), 0.0f, 0.80f );
-        s.NightRainSkyHazeStrength = std::clamp( GetPrivateProfileFloatA( "Detail", "NightRainSkyHaze", ds.NightRainSkyHazeStrength, ini ), 0.0f, 1.0f );
-        s.NightRainMidInfluence = std::clamp( GetPrivateProfileFloatA( "Detail", "NightRainMidInfluence", ds.NightRainMidInfluence, ini ), 0.0f, 1.8f );
-        s.NightRainFarMaxLuma = std::clamp( GetPrivateProfileFloatA( "Detail", "NightRainFarLuma", ds.NightRainFarMaxLuma, ini ), 0.0f, 0.25f );
-        s.NightRainVeryFarMaxLuma = std::clamp( GetPrivateProfileFloatA( "Detail", "NightRainVeryFarLuma", ds.NightRainVeryFarMaxLuma, ini ), 0.0f, 0.25f );
-        s.DayRainAtmosphereStrength = std::clamp( GetPrivateProfileFloatA( "Detail", "DayRainAtmosphere", ds.DayRainAtmosphereStrength, ini ), 0.0f, 2.0f );
-        s.NightNearBrightness = std::clamp( GetPrivateProfileFloatA( "Detail", "NightNearBrightness", ds.NightNearBrightness, ini ), 0.0f, 2.0f );
-        s.NightFogBrightness = std::clamp( GetPrivateProfileFloatA( "Detail", "NightFogBrightness", ds.NightFogBrightness, ini ), 0.0f, 2.0f );
-        s.NightDarkeningStart = std::clamp( GetPrivateProfileFloatA( "Detail", "NightDarkeningStart", ds.NightDarkeningStart, ini ), 0.0f, 20000.0f );
-        s.NightDarkeningRange = std::clamp( GetPrivateProfileFloatA( "Detail", "NightDarkeningRange", ds.NightDarkeningRange, ini ), 1000.0f, 40000.0f );
-        s.NightDarkeningMax = std::clamp( GetPrivateProfileFloatA( "Detail", "NightDarkeningMax", ds.NightDarkeningMax, ini ), 0.0f, 2.0f );
+        s.NightRainMidColor = ds.NightRainMidColor;
+        s.NightRainFarColor = ds.NightRainFarColor;
+        s.NightRainSkyColor = ds.NightRainSkyColor;
+        s.NightRainWorldHazeStrength = ds.NightRainWorldHazeStrength;
+        s.NightRainSkyHazeStrength = ds.NightRainSkyHazeStrength;
+        s.NightRainMidInfluence = ds.NightRainMidInfluence;
+        s.NightRainVeryFarInfluence = ds.NightRainVeryFarInfluence;
+        s.NightRainFarMaxLuma = ds.NightRainFarMaxLuma;
+        s.NightRainVeryFarMaxLuma = ds.NightRainVeryFarMaxLuma;
+        s.DayRainAtmosphereStrength = ds.DayRainAtmosphereStrength;
+        s.NightNearBrightness = ds.NightNearBrightness;
+        s.NightFogBrightness = ds.NightFogBrightness;
+        s.NightDarkeningStart = ds.NightDarkeningStart;
+        s.NightDarkeningRange = ds.NightDarkeningRange;
+        s.NightDarkeningMax = ds.NightDarkeningMax;
         s.LimitLightIntesity = true;
         // Forward+/tiled lighting is still experimental; keep the shipped path deferred.
         s.EnableTiledLighting = false;
@@ -6173,39 +6091,22 @@ XRESULT GothicAPI::LoadMenuSettings( const std::string& file ) {
         s.GlobalWindStrength = std::clamp( GetPrivateProfileFloatA( "Display", "WindStrength", ds.GlobalWindStrength, ini ), 0.0f, 2.0f );
         s.EnableWaterAnimation = GetPrivateProfileBoolA( "Display", "WaterWaveAnimation", ds.EnableWaterAnimation, ini );
         s.HeroAffectsObjects = GetPrivateProfileBoolA( "Display", "HeroAffectsObjects", ds.HeroAffectsObjects, ini );
-        s.HeroAffectsObjectsStrength = std::clamp( GetPrivateProfileFloatA( "Detail", "HeroAffectsObjectsStrength", ds.HeroAffectsObjectsStrength, ini ), 0.0f, 2.0f );
-        s.DynamicCloudDensity = std::clamp( GetPrivateProfileFloatA( "Detail", "DynamicCloudDensity", ds.DynamicCloudDensity, ini ), 0.0f, 2.0f );
-        s.DynamicCloudScale = std::clamp( GetPrivateProfileFloatA( "Detail", "DynamicCloudScale", ds.DynamicCloudScale, ini ), 0.35f, 2.5f );
-        s.DynamicCloudHeight = std::clamp( GetPrivateProfileFloatA( "Detail", "DynamicCloudHeight", ds.DynamicCloudHeight, ini ), 0.35f, 2.5f );
-        s.DynamicCloudDistance = std::clamp( GetPrivateProfileFloatA( "Detail", "DynamicCloudDistance", ds.DynamicCloudDistance, ini ), 0.45f, 2.5f );
-        s.DynamicCloudSpeed = std::clamp( GetPrivateProfileFloatA( "Detail", "DynamicCloudSpeed", ds.DynamicCloudSpeed, ini ), 0.0f, 2.0f );
-        s.DynamicCloudSunLight = std::clamp( GetPrivateProfileFloatA( "Detail", "DynamicCloudSunLight", ds.DynamicCloudSunLight, ini ), 0.0f, 2.0f );
-        s.DynamicCloudDayColor.x = std::clamp( GetPrivateProfileFloatA( "Detail", "DynamicCloudDayColorR", ds.DynamicCloudDayColor.x, ini ), 0.0f, 2.0f );
-        s.DynamicCloudDayColor.y = std::clamp( GetPrivateProfileFloatA( "Detail", "DynamicCloudDayColorG", ds.DynamicCloudDayColor.y, ini ), 0.0f, 2.0f );
-        s.DynamicCloudDayColor.z = std::clamp( GetPrivateProfileFloatA( "Detail", "DynamicCloudDayColorB", ds.DynamicCloudDayColor.z, ini ), 0.0f, 2.0f );
-        s.DynamicCloudRainColor.x = std::clamp( GetPrivateProfileFloatA( "Detail", "DynamicCloudRainColorR", ds.DynamicCloudRainColor.x, ini ), 0.0f, 2.0f );
-        s.DynamicCloudRainColor.y = std::clamp( GetPrivateProfileFloatA( "Detail", "DynamicCloudRainColorG", ds.DynamicCloudRainColor.y, ini ), 0.0f, 2.0f );
-        s.DynamicCloudRainColor.z = std::clamp( GetPrivateProfileFloatA( "Detail", "DynamicCloudRainColorB", ds.DynamicCloudRainColor.z, ini ), 0.0f, 2.0f );
-        s.DynamicCloudNightColor.x = std::clamp( GetPrivateProfileFloatA( "Detail", "DynamicCloudNightColorR", ds.DynamicCloudNightColor.x, ini ), 0.0f, 2.0f );
-        s.DynamicCloudNightColor.y = std::clamp( GetPrivateProfileFloatA( "Detail", "DynamicCloudNightColorG", ds.DynamicCloudNightColor.y, ini ), 0.0f, 2.0f );
-        s.DynamicCloudNightColor.z = std::clamp( GetPrivateProfileFloatA( "Detail", "DynamicCloudNightColorB", ds.DynamicCloudNightColor.z, ini ), 0.0f, 2.0f );
-        s.OceanWaterColor.x = std::clamp( GetPrivateProfileFloatA( "Detail", "OceanWaterColorR", ds.OceanWaterColor.x, ini ), 0.0f, 2.0f );
-        s.OceanWaterColor.y = std::clamp( GetPrivateProfileFloatA( "Detail", "OceanWaterColorG", ds.OceanWaterColor.y, ini ), 0.0f, 2.0f );
-        s.OceanWaterColor.z = std::clamp( GetPrivateProfileFloatA( "Detail", "OceanWaterColorB", ds.OceanWaterColor.z, ini ), 0.0f, 2.0f );
-        s.OceanWaterColorStrength = std::clamp( GetPrivateProfileFloatA( "Detail", "OceanWaterColorStrength", ds.OceanWaterColorStrength, ini ), 0.0f, 1.0f );
-
-        if ( GetPrivateProfileBoolA( "SMAA", "Enabled", false, ini ) ) {
-            s.AntiAliasingMode = GothicRendererSettings::E_AntiAliasingMode::AA_SMAA;
-        }
+        s.HeroAffectsObjectsStrength = s.HeroAffectsObjects ? ds.HeroAffectsObjectsStrength : 0.0f;
+        s.DynamicCloudDensity = ds.DynamicCloudDensity;
+        s.DynamicCloudScale = ds.DynamicCloudScale;
+        s.DynamicCloudHeight = ds.DynamicCloudHeight;
+        s.DynamicCloudDistance = ds.DynamicCloudDistance;
+        s.DynamicCloudSpeed = ds.DynamicCloudSpeed;
+        s.DynamicCloudSunLight = ds.DynamicCloudSunLight;
+        s.DynamicCloudDayColor = ds.DynamicCloudDayColor;
+        s.DynamicCloudRainColor = ds.DynamicCloudRainColor;
+        s.DynamicCloudNightColor = ds.DynamicCloudNightColor;
+        s.OceanWaterColor = ds.OceanWaterColor;
+        s.OceanWaterColorStrength = ds.OceanWaterColorStrength;
 
         s.AntiAliasingMode = (GothicRendererSettings::E_AntiAliasingMode)GetPrivateProfileIntA( "General", "AntiAliasing", (int)ds.AntiAliasingMode, ini.c_str() );
-        const float defaultSharpenFactor = s.GetIsTAAEnabled() ? 1.0f : 0.2f;
-        s.SharpenFactor = std::clamp( GetPrivateProfileFloatA( "SMAA", "SharpenFactor", defaultSharpenFactor, ini ), 0.0f, 1.0f );
-        const int sharpeningMode = std::clamp<int>(
-            GetPrivateProfileIntA( "General", "SharpeningMode", static_cast<int>(ds.SharpeningMode), ini.c_str() ),
-            static_cast<int>(GothicRendererSettings::SHARPEN_NONE),
-            static_cast<int>(GothicRendererSettings::SHARPEN_CAS) );
-        s.SharpeningMode = static_cast<GothicRendererSettings::E_SharpeningMode>(sharpeningMode);
+        s.SharpeningMode = ds.SharpeningMode;
+        s.SharpenFactor = s.GetIsTAAEnabled() ? 1.0f : 0.2f;
 
         const int defaultAoMode = static_cast<int>(ds.AoMode);
         const int storedAoMode = static_cast<int>(GetPrivateProfileIntA( "AO", "Mode", defaultAoMode, ini.c_str() ));
@@ -6220,21 +6121,14 @@ XRESULT GothicAPI::LoadMenuSettings( const std::string& file ) {
         if ( !s.EnableDoF ) s.DoFBokehRadius = 0.0f;
         if ( !s.EnableSSR || !s.EnableWaterAnimation ) s.SSRStrength = 0.0f;
         if ( !s.EnableScreenSpaceGI ) s.ScreenSpaceGIStrength = 0.0f;
-        if ( !s.EnableSSS ) s.SSSIntensity = 0.0f;
-        if ( !s.HeroAffectsObjects ) s.HeroAffectsObjectsStrength = 0.0f;
+        s.SSSIntensity = s.EnableSSS ? ds.SSSIntensity : 0.0f;
+        s.HeroAffectsObjectsStrength = s.HeroAffectsObjects ? ds.HeroAffectsObjectsStrength : 0.0f;
         if ( s.WindQuality == GothicRendererSettings::EWindQuality::WIND_QUALITY_NONE ) s.GlobalWindStrength = 0.0f;
         if ( s.AoMode == AOMode::AO_NONE ) s.AOStrength = 0.0f;
-        const int xegtaoQuality = static_cast<int>(GetPrivateProfileIntA( "XeGTAO", "Quality", ds.XegtaoSettings.QualityLevel, ini.c_str() ));
-        const int xegtaoDenoise = static_cast<int>(GetPrivateProfileIntA( "XeGTAO", "DenoisePasses", ds.XegtaoSettings.DenoisePasses, ini.c_str() ));
-        s.XegtaoSettings.QualityLevel = std::clamp( xegtaoQuality, 0, 3 );
-        s.XegtaoSettings.DenoisePasses = std::clamp( xegtaoDenoise, 1, 3 );
-        s.XegtaoSettings.Radius = std::clamp( GetPrivateProfileFloatA( "XeGTAO", "Radius", ds.XegtaoSettings.Radius, ini ), 1.0f, 500.0f );
-
-        s.EnableCustomFontRendering = GetPrivateProfileBoolA( "FontRendering", "Enable", ds.EnableCustomFontRendering, ini );
-        s.DebugSettings.FeatureSet.UseShadowAtlas = GetPrivateProfileBoolA( "Debug", "UseShadowAtlas", ds.DebugSettings.FeatureSet.UseShadowAtlas, ini );
+        s.XegtaoSettings = ds.XegtaoSettings;
+        s.EnableCustomFontRendering = ds.EnableCustomFontRendering;
+        s.DebugSettings.FeatureSet = ds.DebugSettings.FeatureSet;
         s.DebugSettings.FeatureSet.UseScreenSpaceShadowMask = false; // Forward+ shadow-mask path is incomplete and disabled with deferred rendering.
-        s.DebugSettings.FeatureSet.ForceFeatureLevel10 = GetPrivateProfileBoolA( "Debug", "ForceFeatureLevel10", ds.DebugSettings.FeatureSet.ForceFeatureLevel10, ini );
-        s.DebugSettings.FeatureSet.EnableDriverExtensions = GetPrivateProfileBoolA( "Debug", "EnableDriverExtensions", ds.DebugSettings.FeatureSet.EnableDriverExtensions, ini );
 
         // Fix the resolution if the players maximum resolution got lower
         /*RECT r;
@@ -6328,6 +6222,41 @@ XRESULT GothicAPI::LoadMenuSettings( const std::string& file ) {
     s.WorldAOStrength = ds.WorldAOStrength;
     s.HDR_Monitor = ds.HDR_Monitor;
     s.GothicUIScale = ds.GothicUIScale;
+    s.SSSIntensity = s.EnableSSS ? ds.SSSIntensity : 0.0f;
+    s.HeroAffectsObjectsStrength = s.HeroAffectsObjects ? ds.HeroAffectsObjectsStrength : 0.0f;
+    s.NightRainMidColor = ds.NightRainMidColor;
+    s.NightRainFarColor = ds.NightRainFarColor;
+    s.NightRainSkyColor = ds.NightRainSkyColor;
+    s.NightRainWorldHazeStrength = ds.NightRainWorldHazeStrength;
+    s.NightRainSkyHazeStrength = ds.NightRainSkyHazeStrength;
+    s.NightRainMidInfluence = ds.NightRainMidInfluence;
+    s.NightRainVeryFarInfluence = ds.NightRainVeryFarInfluence;
+    s.NightRainFarMaxLuma = ds.NightRainFarMaxLuma;
+    s.NightRainVeryFarMaxLuma = ds.NightRainVeryFarMaxLuma;
+    s.DayRainAtmosphereStrength = ds.DayRainAtmosphereStrength;
+    s.DynamicCloudDensity = ds.DynamicCloudDensity;
+    s.DynamicCloudScale = ds.DynamicCloudScale;
+    s.DynamicCloudHeight = ds.DynamicCloudHeight;
+    s.DynamicCloudDistance = ds.DynamicCloudDistance;
+    s.DynamicCloudSpeed = ds.DynamicCloudSpeed;
+    s.DynamicCloudSunLight = ds.DynamicCloudSunLight;
+    if ( GetSky() ) {
+        s.ApplySkyColorValues( GetSky()->GetDaySkyTexture() == ESkyTexture::ST_OldWorld );
+    } else {
+        s.DynamicCloudDayColor = ds.DynamicCloudDayColor;
+    }
+    s.DynamicCloudRainColor = ds.DynamicCloudRainColor;
+    s.DynamicCloudNightColor = ds.DynamicCloudNightColor;
+    s.OceanWaterColor = ds.OceanWaterColor;
+    s.OceanWaterColorStrength = ds.OceanWaterColorStrength;
+    s.NightNearBrightness = ds.NightNearBrightness;
+    s.NightFogBrightness = ds.NightFogBrightness;
+    if ( LoadedWorldInfo ) {
+        s.ApplyWorldNightFogBrightness( LoadedWorldInfo->WorldName == "OLDWORLD" || LoadedWorldInfo->WorldName == "WORLD" );
+    }
+    s.NightDarkeningStart = ds.NightDarkeningStart;
+    s.NightDarkeningRange = ds.NightDarkeningRange;
+    s.NightDarkeningMax = ds.NightDarkeningMax;
     s.XegtaoSettings = ds.XegtaoSettings;
     s.EnableCustomFontRendering = ds.EnableCustomFontRendering;
     s.DebugSettings.FeatureSet = ds.DebugSettings.FeatureSet;

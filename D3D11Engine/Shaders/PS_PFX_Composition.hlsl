@@ -104,10 +104,16 @@ float ComputeVolumetricFog( float3 cameraToWorldPos, float3 posOriginal )
     return exp( -HF_GlobalDensity * w * fogInt );
 }
 
-float4 ComputeHeightFog( float2 texcoord )
+float FogDither(float2 pixelPosition)
+{
+    float n1 = frac(52.9829189f * frac(dot(pixelPosition, float2(0.06711056f, 0.00583715f))));
+    float n2 = frac(52.9829189f * frac(dot(pixelPosition + 37.17f, float2(0.00583715f, 0.06711056f))));
+    return n1 + n2 - 1.0f;
+}
+
+float4 ComputeHeightFog( float2 texcoord, float2 pixelPosition )
 {
     float expDepth = TX_Depth.Sample( SS_Linear, texcoord ).r;
-    float skyPixel = 1.0f - step(0.00001f, expDepth);
     float3 position = VSPositionFromDepth( expDepth, texcoord );
     position = mul( float4( position, 1 ), HF_InvView ).xyz;
     float3 posOriginal = position;
@@ -117,53 +123,27 @@ float4 ComputeHeightFog( float2 texcoord )
     float fog = 1.0f - ComputeVolumetricFog( position, posOriginal );
     float fogDistance = length(posOriginal - HF_CameraPosition);
     float stableFadeEnd = max(HF_WeightZFar, 1000.0f);
-    float stableFadeStart = max(HF_WeightZNear, stableFadeEnd * 0.58f);
-    float stableWorldFade = smoothstep(stableFadeStart, stableFadeEnd, fogDistance);
     float activeWeatherFog = saturate(AC_RainFXWeight);
 	float nightTimeBlend = smoothstep(0.0f, 1.0f, saturate(-AC_LightPos.y * 4.0f))
 		* saturate(AC_EnableNightAtmosphere);
-    float weatherFogStrength = lerp(1.0f, 1.20f, nightTimeBlend);
-    float weatherFog = saturate(max(fog, stableWorldFade) * activeWeatherFog * weatherFogStrength);
+    float stableFadeStart = max(HF_WeightZNear, stableFadeEnd * lerp(0.58f, 0.82f, nightTimeBlend * activeWeatherFog));
+    float stableWorldFade = smoothstep(stableFadeStart, stableFadeEnd, fogDistance);
+    float weatherFog = max(fog, stableWorldFade) * activeWeatherFog;
     float dryNightFog = fog * nightTimeBlend * (1.0f - activeWeatherFog);
     fog = max(weatherFog, dryNightFog);
 
     float3 color = ApplyAtmosphericScatteringGround( position, HF_FogColorMod, true, false );
 	float nightFogBrightness = lerp(1.0f, max(0.0f, AC_NightFogBrightness), saturate(AC_EnableNightAtmosphere));
-	float3 nightFogColor = float3(0.12f, 0.18f, 0.27f) * nightFogBrightness * 0.8f;
+	float3 nightFogColor = float3(0.12f, 0.18f, 0.27f) * nightFogBrightness;
 	color = lerp(color, nightFogColor, nightTimeBlend);
 	float dayDarknessFactor = max(1.0f, 2.0f - max(0.0f, AC_LightPos.y));
 	float darknessFactor = lerp(dayDarknessFactor, 2.5f, nightTimeBlend);
 	float maxFogOpacity = lerp(1.0f, 0.85f, nightTimeBlend);
-	float rainyNight = activeWeatherFog * nightTimeBlend;
-	float rainyNightGeometry = (1.0f - skyPixel) * rainyNight;
-	float geometryFogOpacity = lerp(maxFogOpacity, 0.94f, rainyNightGeometry);
-	float rainySkyOpacity = lerp(0.54f, 0.90f, nightTimeBlend);
-	float skyRainFogAttenuation = lerp(1.0f, rainySkyOpacity, skyPixel * activeWeatherFog);
-	float fogOpacity = fog * geometryFogOpacity * skyRainFogAttenuation;
-	float rainDepthStart = max(900.0f, stableFadeStart * 0.25f);
-	float rainDepthEnd = max(rainDepthStart + 5200.0f, stableFadeEnd * 0.92f);
-	float rainDepthT = saturate((fogDistance - rainDepthStart) / max(rainDepthEnd - rainDepthStart, 1.0f));
-	float rainDepthRamp = SmootherStep01(rainDepthT);
-	float distantRainGeometry = rainyNightGeometry * rainDepthRamp;
-	float softSkyRainHaze = skyPixel * rainyNight * max(0.0f, AC_NightRainSkyHazeStrength);
-	float softWorldRainHaze = rainyNightGeometry * rainDepthRamp * max(0.0f, AC_NightRainWorldHazeStrength);
-	fogOpacity = max(fogOpacity, max(softSkyRainHaze, softWorldRainHaze));
+    float fogGradientWeight = saturate(fog * (1.0f - fog) * 4.0f);
+    float fogGradientDither = FogDither(pixelPosition) * nightTimeBlend * (2.0f / 255.0f);
+    float ditheredFog = saturate(fog + fogGradientDither * fogGradientWeight);
 
-	float3 finalFogColor = saturate(color / darknessFactor);
-	float3 midRainGeometryBlue = AC_NightRainMidColor;
-	float3 farRainGeometryBlue = AC_NightRainFarColor;
-	float3 rainSkyHazeGray = AC_NightRainSkyColor;
-	float farRainGeometry = saturate(distantRainGeometry * 1.18f);
-	float veryFarRainGeometry = rainyNightGeometry * SmootherStep01(saturate((rainDepthT - 0.34f) / 0.66f));
-	finalFogColor = lerp(finalFogColor, midRainGeometryBlue, saturate(distantRainGeometry * max(0.0f, AC_NightRainMidInfluence)));
-	finalFogColor = lerp(finalFogColor, farRainGeometryBlue, saturate(veryFarRainGeometry * max(0.0f, AC_NightRainVeryFarInfluence)));
-	finalFogColor = lerp(finalFogColor, rainSkyHazeGray, saturate(softSkyRainHaze * 0.72f));
-	float farRainLuma = dot(finalFogColor, float3(0.2126f, 0.7152f, 0.0722f));
-	float farRainMaxLuma = lerp(1.0f, max(0.0f, AC_NightRainFarMaxLuma), farRainGeometry);
-	farRainMaxLuma = lerp(farRainMaxLuma, max(0.0f, AC_NightRainVeryFarMaxLuma), saturate(veryFarRainGeometry * 1.18f));
-	finalFogColor *= min(1.0f, farRainMaxLuma / max(farRainLuma, 0.001f));
-
-	return float4(finalFogColor, saturate(fogOpacity));
+	return float4(saturate(color / darknessFactor), ditheredFog * maxFogOpacity);
 }
 #endif
 
@@ -410,8 +390,11 @@ float4 PSMain( PS_INPUT Input ) : SV_TARGET
 #if COMPOSE_HEIGHTFOG
     [branch] if ( CC_HeightFogEnabled > 0.5f )
     {
-        float4 fog = ComputeHeightFog( Input.vTexcoord );
+        float4 fog = ComputeHeightFog( Input.vTexcoord, Input.vPosition.xy );
         color.rgb = lerp( color.rgb, fog.rgb, fog.a );
+        float nightTimeBlend = smoothstep(0.0f, 1.0f, saturate(-AC_LightPos.y * 4.0f));
+        float ditherStrength = lerp(1.0f, 2.5f, nightTimeBlend) / 255.0f;
+        color.rgb = saturate(color.rgb + FogDither(Input.vPosition.xy) * fog.a * ditherStrength);
     }
 #endif
 

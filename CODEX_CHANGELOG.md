@@ -461,3 +461,11 @@ Kurze, append-only Dokumentation der von Codex gepushten Renderer-Builds.
 - Seitenverhaeltnis/Render Scale: die Gothic-Kamera wird nur mit der echten Backbuffer-Aufloesung synchronisiert; Render Scale/FSR bleibt intern und greift nicht mehr in die Spielprojektion ein.
 - Nachtregen und Partikel: Nachtregen nutzt die dunklere Mittelbereichsfarbe; nicht-emissive Partikel werden bei Regen tagsueber genauso stark abgedunkelt wie nachts, wobei Rauch staerker und Wasserpartikel weiterhin schwaecher reagieren.
 - Pruefung: AGENTS-Regeln gelesen; Buildnummer aus outputs ermittelt; Build 117 als Render-Scale-Referenz verglichen; Settings-/INI-Pfade, Wasser-/Wolken-/Partikel-Shader, CBuffer-Layout, Konflikt-/Escape-Artefakte und git diff --check statisch kontrolliert. Kein vollstaendiger lokaler C++-/Shader-Build.
+
+## Build 123 (Render Scale, Detail-Menue-Rueckbau und Sky-Farbprofile)
+
+- Render Scale: der Skalierungspfad wurde wieder auf das Build-117-Verhalten ausgerichtet, damit nicht-100-Prozent-Render-Scale keine unterschiedlichen Bildbestandteile fehlerhaft skaliert.
+- F11/INI: das Detail-Untermenue wurde entfernt; versteckte Detail-/Entwicklerwerte werden nicht mehr aus normalen User-INI-Eintraegen gelesen und der sichtbare F11-Hauptmenue-Umfang bleibt massgeblich.
+- Nachtregen und Wolken: Nachtregen ist naeher am Build-061-Eindruck, Cloud Day/Rain/Night Defaults wurden festgezogen und die Tagwolkenfarbe folgt dem aktiven Sky-Profil.
+- Sky/Fog: `Cloud Day Color` und `FogColorMod` haengen am aktiven Tag-Sky-Profil; OldWorld/World behalten optisch den G1-Sky-Look, sonstige Welten den SkyDay.dds-Look. OldWorld/World nutzen nachts `NightFogBrightness 0.35`, Standard bleibt `0.70`.
+- Pruefung: AGENTS-Regeln gelesen; Buildnummer aus outputs ermittelt; Render-Scale-, F11-/INI-, Sky-/Fog- und Shaderpfade statisch kontrolliert; Konflikt-/Escape-Artefakte und git diff --check geprueft. Kein vollstaendiger lokaler C++-/Shader-Build.
