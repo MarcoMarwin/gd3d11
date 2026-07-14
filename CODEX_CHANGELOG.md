@@ -452,3 +452,12 @@ Kurze, append-only Dokumentation der von Codex gepushten Renderer-Builds.
 - Tiefwolken: Wolkenfelder sind dichter, tagsueber neutraler/weisslicher, bei Regen grauer und nachts etwas dunkler; die langsame world-space Bewegung bleibt erhalten.
 - Nachtregen: die mittlere entfernte Weltgeometrie wird bei Regen nachts staerker in dunkles kaltes Blaugrau gezogen, waehrend der sehr ferne Hintergrund nicht weiter abgedunkelt wird.
 - Pruefung: AGENTS-Regeln gelesen; Buildnummer aus outputs ermittelt; Kamera-/Viewport-Hooks, Render-Scale-Pfad, Cloud-/Nachtregen-Shader, Konflikt-/Escape-Artefakte und git diff --check statisch kontrolliert. Kein vollstaendiger lokaler C++-/Shader-Build.
+
+## Build 121 (Detail-Menue, Render-Scale-Fix, Wolken/Wasser-Tuning und Regenpartikel)
+
+- F11: das Standardmenue bleibt erhalten und bekommt nur einen Detail-Button; darin liegen Feinregler fuer Nachtregen, Nacht-/Nebelhelligkeit, dynamische Wolken, Vegetationseinfluss und Meerwasserfarbe.
+- Dynamische Wolken: Dichte, Groesse, Hoehe, Reichweite, Geschwindigkeit, Sonnenlicht sowie Tag-/Regen-/Nachtfarbe werden gespeichert und direkt im Low-Cloud-Shader ausgewertet.
+- Meerwasser: der Wasserpass kann Meerwasser separat faerben, waehrend Fluss-/Bach-/Wasserfall-Marker ausgeschlossen bleiben; die Standardstaerke ist neutral.
+- Seitenverhaeltnis/Render Scale: die Gothic-Kamera wird nur mit der echten Backbuffer-Aufloesung synchronisiert; Render Scale/FSR bleibt intern und greift nicht mehr in die Spielprojektion ein.
+- Nachtregen und Partikel: Nachtregen nutzt die dunklere Mittelbereichsfarbe; nicht-emissive Partikel werden bei Regen tagsueber genauso stark abgedunkelt wie nachts, wobei Rauch staerker und Wasserpartikel weiterhin schwaecher reagieren.
+- Pruefung: AGENTS-Regeln gelesen; Buildnummer aus outputs ermittelt; Build 117 als Render-Scale-Referenz verglichen; Settings-/INI-Pfade, Wasser-/Wolken-/Partikel-Shader, CBuffer-Layout, Konflikt-/Escape-Artefakte und git diff --check statisch kontrolliert. Kein vollstaendiger lokaler C++-/Shader-Build.

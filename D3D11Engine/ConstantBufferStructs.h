@@ -432,6 +432,28 @@ struct AtmosphereConstantBuffer {
     float AC_PadParticle0;
     float AC_PadParticle1;
 
+    XMFLOAT3 AC_NightRainMidColor;
+    float AC_NightRainWorldHazeStrength;
+    XMFLOAT3 AC_NightRainFarColor;
+    float AC_NightRainMidInfluence;
+    XMFLOAT3 AC_NightRainSkyColor;
+    float AC_NightRainSkyHazeStrength;
+    float AC_NightRainFarMaxLuma;
+    float AC_NightRainVeryFarMaxLuma;
+    float AC_NightRainVeryFarInfluence;
+    float AC_DayRainAtmosphereStrength;
+
+    XMFLOAT3 AC_LowCloudDayColor;
+    float AC_LowCloudDensity;
+    XMFLOAT3 AC_LowCloudRainColor;
+    float AC_LowCloudScale;
+    XMFLOAT3 AC_LowCloudNightColor;
+    float AC_LowCloudSpeed;
+    float AC_LowCloudHeightScale;
+    float AC_LowCloudDistanceScale;
+    float AC_LowCloudSunLight;
+    float AC_LowCloudPad0;
+
     float4 AC_LightScreenPos;
 };
 

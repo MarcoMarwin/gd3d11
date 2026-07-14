@@ -474,18 +474,18 @@ XRESULT GSky::RenderSky() {
     AtmosphereCB.AC_EnableSSS = Engine::GAPI->GetRendererState().RendererSettings.EnableSSS ? 1.0f : 0.0f;
     AtmosphereCB.AC_SSRStrength = Engine::GAPI->GetRendererState().RendererSettings.SSRStrength * 0.84f;
     AtmosphereCB.AC_SSSIntensity = Engine::GAPI->GetRendererState().RendererSettings.SSSIntensity;
-    AtmosphereCB.AC_WaterCubemapStrength = Engine::GAPI->GetRendererState().RendererSettings.WaterCubemapStrength;
+    const auto& rendererSettings = Engine::GAPI->GetRendererState().RendererSettings;
+    AtmosphereCB.AC_WaterCubemapStrength = rendererSettings.WaterCubemapStrength;
     AtmosphereCB.AC_EnableNightAtmosphere = 1.0f;
-    AtmosphereCB.AC_NearNightBrightness = 1.0f;
-    AtmosphereCB.AC_NightFogBrightness = 1.0f;
-    AtmosphereCB.AC_NightDarkeningStart = 3000.0f;
-    AtmosphereCB.AC_NightDarkeningRange = 12000.0f;
-    AtmosphereCB.AC_NightDarkeningMax = 1.0f;
+    AtmosphereCB.AC_NearNightBrightness = rendererSettings.NightNearBrightness;
+    AtmosphereCB.AC_NightFogBrightness = rendererSettings.NightFogBrightness;
+    AtmosphereCB.AC_NightDarkeningStart = rendererSettings.NightDarkeningStart;
+    AtmosphereCB.AC_NightDarkeningRange = rendererSettings.NightDarkeningRange;
+    AtmosphereCB.AC_NightDarkeningMax = rendererSettings.NightDarkeningMax;
     // AC_SunVisibility was filled together with the moon visibility above.
     AtmosphereCB.AC_WorldCameraPos = camPos;
-    AtmosphereCB.AC_EnableContactShadows = Engine::GAPI->GetRendererState().RendererSettings.EnableContactShadows ? 1.0f : 0.0f;
-    AtmosphereCB.AC_EnableScreenSpaceGI = (Engine::GAPI->GetRendererState().RendererSettings.EnableScreenSpaceGI && Engine::GAPI->GetRendererState().RendererSettings.ScreenSpaceGIStrength > 0.0f) ? 1.0f : 0.0f;
-    const auto& rendererSettings = Engine::GAPI->GetRendererState().RendererSettings;
+    AtmosphereCB.AC_EnableContactShadows = rendererSettings.EnableContactShadows ? 1.0f : 0.0f;
+    AtmosphereCB.AC_EnableScreenSpaceGI = (rendererSettings.EnableScreenSpaceGI && rendererSettings.ScreenSpaceGIStrength > 0.0f) ? 1.0f : 0.0f;
     AtmosphereCB.AC_SkyEffectsEnabled = rendererSettings.EnableRain ? 1.0f : 0.0f;
     AtmosphereCB.AC_ContactShadowStrength = (rendererSettings.EnableContactShadows ? rendererSettings.GetContactShadowFixedStrength() : 0.0f) * GetMainLightVisibility();
     AtmosphereCB.AC_ScreenSpaceGIStrength = rendererSettings.ScreenSpaceGIStrength;
@@ -493,6 +493,26 @@ XRESULT GSky::RenderSky() {
     AtmosphereCB.AC_ParticleLightingStrength = rendererSettings.ParticleLightingStrength * 1.5f;
     AtmosphereCB.AC_PadParticle0 = 0.0f;
     AtmosphereCB.AC_PadParticle1 = 0.0f;
+    AtmosphereCB.AC_NightRainMidColor = rendererSettings.NightRainMidColor;
+    AtmosphereCB.AC_NightRainWorldHazeStrength = rendererSettings.NightRainWorldHazeStrength;
+    AtmosphereCB.AC_NightRainFarColor = rendererSettings.NightRainFarColor;
+    AtmosphereCB.AC_NightRainMidInfluence = rendererSettings.NightRainMidInfluence;
+    AtmosphereCB.AC_NightRainSkyColor = rendererSettings.NightRainSkyColor;
+    AtmosphereCB.AC_NightRainSkyHazeStrength = rendererSettings.NightRainSkyHazeStrength;
+    AtmosphereCB.AC_NightRainFarMaxLuma = rendererSettings.NightRainFarMaxLuma;
+    AtmosphereCB.AC_NightRainVeryFarMaxLuma = rendererSettings.NightRainVeryFarMaxLuma;
+    AtmosphereCB.AC_NightRainVeryFarInfluence = rendererSettings.NightRainVeryFarInfluence;
+    AtmosphereCB.AC_DayRainAtmosphereStrength = rendererSettings.DayRainAtmosphereStrength;
+    AtmosphereCB.AC_LowCloudDayColor = rendererSettings.DynamicCloudDayColor;
+    AtmosphereCB.AC_LowCloudDensity = rendererSettings.DynamicCloudDensity;
+    AtmosphereCB.AC_LowCloudRainColor = rendererSettings.DynamicCloudRainColor;
+    AtmosphereCB.AC_LowCloudScale = rendererSettings.DynamicCloudScale;
+    AtmosphereCB.AC_LowCloudNightColor = rendererSettings.DynamicCloudNightColor;
+    AtmosphereCB.AC_LowCloudSpeed = rendererSettings.DynamicCloudSpeed;
+    AtmosphereCB.AC_LowCloudHeightScale = rendererSettings.DynamicCloudHeight;
+    AtmosphereCB.AC_LowCloudDistanceScale = rendererSettings.DynamicCloudDistance;
+    AtmosphereCB.AC_LowCloudSunLight = rendererSettings.DynamicCloudSunLight;
+    AtmosphereCB.AC_LowCloudPad0 = 0.0f;
 
     //Engine::GraphicsEngine->DrawSky();
 

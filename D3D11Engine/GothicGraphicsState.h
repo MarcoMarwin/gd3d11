@@ -734,6 +734,33 @@ struct GothicRendererSettings {
         RainFogColor = XMFLOAT3( 0.28f, 0.28f, 0.28f );
         RainFogDensity = 0.00078f;
 
+        NightRainMidColor = XMFLOAT3( 0.028f, 0.040f, 0.060f );
+        NightRainFarColor = XMFLOAT3( 0.030f, 0.045f, 0.070f );
+        NightRainSkyColor = XMFLOAT3( 0.070f, 0.074f, 0.078f );
+        NightRainWorldHazeStrength = 0.26f;
+        NightRainSkyHazeStrength = 0.75f;
+        NightRainMidInfluence = 0.82f;
+        NightRainVeryFarInfluence = 1.08f;
+        NightRainFarMaxLuma = 0.086f;
+        NightRainVeryFarMaxLuma = 0.070f;
+        DayRainAtmosphereStrength = 1.0f;
+        DynamicCloudDensity = 1.0f;
+        DynamicCloudScale = 1.0f;
+        DynamicCloudHeight = 1.0f;
+        DynamicCloudDistance = 1.0f;
+        DynamicCloudSpeed = 1.0f;
+        DynamicCloudSunLight = 1.0f;
+        DynamicCloudDayColor = XMFLOAT3( 1.08f, 1.08f, 1.04f );
+        DynamicCloudRainColor = XMFLOAT3( 0.82f, 0.84f, 0.84f );
+        DynamicCloudNightColor = XMFLOAT3( 0.70f, 0.75f, 0.86f );
+        OceanWaterColor = XMFLOAT3( 0.72f, 0.88f, 0.95f );
+        OceanWaterColorStrength = 0.0f;
+        NightNearBrightness = 1.0f;
+        NightFogBrightness = 1.0f;
+        NightDarkeningStart = 3000.0f;
+        NightDarkeningRange = 12000.0f;
+        NightDarkeningMax = 1.0f;
+
         EnableRain = true;
         EnableDynamicClouds = true;
 
@@ -1025,6 +1052,32 @@ struct GothicRendererSettings {
     // Appended to preserve every pre-existing renderer-settings field offset.
     E_D3D11Language D3D11Language;
     bool EnableDynamicClouds;
+    XMFLOAT3 NightRainMidColor;
+    XMFLOAT3 NightRainFarColor;
+    XMFLOAT3 NightRainSkyColor;
+    float NightRainWorldHazeStrength;
+    float NightRainSkyHazeStrength;
+    float NightRainMidInfluence;
+    float NightRainVeryFarInfluence;
+    float NightRainFarMaxLuma;
+    float NightRainVeryFarMaxLuma;
+    float DayRainAtmosphereStrength;
+    float DynamicCloudDensity;
+    float DynamicCloudScale;
+    float DynamicCloudHeight;
+    float DynamicCloudDistance;
+    float DynamicCloudSpeed;
+    float DynamicCloudSunLight;
+    XMFLOAT3 DynamicCloudDayColor;
+    XMFLOAT3 DynamicCloudRainColor;
+    XMFLOAT3 DynamicCloudNightColor;
+    XMFLOAT3 OceanWaterColor;
+    float OceanWaterColorStrength;
+    float NightNearBrightness;
+    float NightFogBrightness;
+    float NightDarkeningStart;
+    float NightDarkeningRange;
+    float NightDarkeningMax;
 
     static int SnapFSRResolutionScale( int value ) {
         constexpr int levels[] = { 100, 83, 75, 66, 50, 33 };

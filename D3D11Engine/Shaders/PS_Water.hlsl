@@ -32,7 +32,10 @@ cbuffer WaterMaterialInfo : register( b3 )
 {
 	float WM_DisableSSR;
 	float WM_DisableRainEffects;
-	float2 WM_Pad;
+	float WM_OceanWaterTintStrength;
+	float WM_IsOceanWater;
+	float3 WM_OceanWaterTint;
+	float WM_Pad;
 };
 
 //--------------------------------------------------------------------------------------
@@ -290,6 +293,8 @@ PS_OUTPUT PSMain( PS_INPUT Input )
 	// Blend SSR last so shallow-water coloring and water darkening cannot erase light reflections.
 	float3 finalColor = color / darknessFactor;
 	finalColor = lerp(finalColor, reflectionSSRColor, ssrBlend);
+	float oceanTint = saturate(WM_IsOceanWater * WM_OceanWaterTintStrength);
+	finalColor = lerp(finalColor, finalColor * max(WM_OceanWaterTint, float3(0.0f, 0.0f, 0.0f)), oceanTint);
 	output.color = float4(finalColor, 1);
 	// Regular water blocks wet-ground SSR (0.25), while frozen water also blocks
 	// rain particles and the remaining rain-only water response (1.0).

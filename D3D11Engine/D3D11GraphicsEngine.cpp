@@ -184,9 +184,12 @@ namespace
     struct WaterMaterialInfoConstantBuffer {
         float WM_DisableSSR;
         float WM_DisableRainEffects;
-        float WM_Pad[2];
+        float WM_OceanWaterTintStrength;
+        float WM_IsOceanWater;
+        XMFLOAT3 WM_OceanWaterTint;
+        float WM_Pad;
     };
-    static_assert( sizeof( WaterMaterialInfoConstantBuffer ) == 16 );
+    static_assert( sizeof( WaterMaterialInfoConstantBuffer ) == 32 );
 
     bool TextureNameContainsMarker( const std::string& name, const char* marker ) {
         if ( !marker || !*marker ) {
@@ -263,6 +266,39 @@ namespace
         const std::string name = texture->GetNameWithoutExt();
         return TextureNameContainsMarker( name, "WATERFALL" )
             || TextureNameContainsMarker( name, "WASSERFALL" );
+    }
+
+    bool IsOceanWaterTexture( zCTexture* texture ) {
+        if ( !texture ) {
+            return false;
+        }
+
+        const std::string name = texture->GetNameWithoutExt();
+        if ( TextureNameContainsMarker( name, "RIVER" )
+            || TextureNameContainsMarker( name, "FLUSS" )
+            || TextureNameContainsMarker( name, "BACH" )
+            || TextureNameContainsMarker( name, "STREAM" )
+            || TextureNameContainsMarker( name, "WATERFALL" )
+            || TextureNameContainsMarker( name, "WASSERFALL" ) ) {
+            return false;
+        }
+
+        return TextureNameContainsMarker( name, "OCEAN" )
+            || TextureNameContainsMarker( name, "SEA" )
+            || TextureNameContainsMarker( name, "MEER" )
+            || TextureNameContainsMarker( name, "SEAWATER" )
+            || TextureNameContainsMarker( name, "HARBOUR" )
+            || TextureNameContainsMarker( name, "HARBOR" );
+    }
+
+    void FillWaterMaterialInfo( WaterMaterialInfoConstantBuffer& wmcb, zCTexture* texture ) {
+        const auto& settings = Engine::GAPI->GetRendererState().RendererSettings;
+        wmcb.WM_DisableSSR = IsWaterTextureExcludedFromSSR( texture ) ? 1.0f : 0.0f;
+        wmcb.WM_DisableRainEffects = 0.0f;
+        wmcb.WM_OceanWaterTintStrength = settings.OceanWaterColorStrength;
+        wmcb.WM_IsOceanWater = IsOceanWaterTexture( texture ) ? 1.0f : 0.0f;
+        wmcb.WM_OceanWaterTint = settings.OceanWaterColor;
+        wmcb.WM_Pad = 0.0f;
     }
     bool EnsureStructuredMatrixBuffer(
         std::unique_ptr<D3D11VertexBuffer>& buffer,
@@ -1291,13 +1327,7 @@ XRESULT D3D11GraphicsEngine::RecreateBuffers() {
     return XR_SUCCESS;
 }
 
-namespace {
-    void RefreshGothicCameraViewportForLogicalResolution() {
-        if ( auto game = oCGame::GetGame(); game && game->_zCSession_camera ) {
-            static_cast<zCCamera*>(game->_zCSession_camera)->UpdateViewport();
-        }
-    }
-}
+
 
 /** Called on window resize/resolution change */
 XRESULT D3D11GraphicsEngine::OnResize( INT2 newSize ) {
@@ -1338,8 +1368,6 @@ XRESULT D3D11GraphicsEngine::OnResize( INT2 newSize ) {
 
     POINT virtualSize = { 8192, 8192 };
     zCViewDraw::GetScreen().SetVirtualSize( virtualSize );
-
-    RefreshGothicCameraViewportForLogicalResolution();
 
 #ifndef BUILD_SPACER
     BOOL isFullscreen = 0;
@@ -1965,7 +1993,7 @@ XRESULT D3D11GraphicsEngine::Present() {
         gcb.G_OutputDitherStrength = 1.0f / 255.0f;
         ActivePS->GetBuffer( "GammaCorrectConstantBuffer" ).Update( &gcb ).Bind();
 
-        PfxRenderer->CopyTextureToRTV( Backbuffer->GetShaderResView(), presentationRTV, {}, true );
+        PfxRenderer->CopyTextureToRTV( Backbuffer->GetShaderResView(), presentationRTV, GetBackbufferResolution(), true );
 
         static int show_velocity = 0;
         if ( settings.DebugSettings.TAA.DisplayVelocity ) {
@@ -3999,8 +4027,9 @@ XRESULT D3D11GraphicsEngine::OnStartWorldRendering() {
     RGResourceHandle backBufferHandle = graph.ImportResource( L"BackBuffer", HDRBackBuffer.get() );
     RGResourceHandle velocityBufferHandle = graph.ImportResource( L"VelocityBuffer", VelocityBuffer.get() );
 
-    // Let Gothic refresh its camera projection before STAGE_DRAW_WORLD blocks D3D7 projection resets.
-    SetViewport( ViewportInfo( 0, 0, GetResolution() ) );
+    // Let Gothic refresh its camera projection at the real game resolution;
+    // the internal render scale must not change the game camera aspect.
+    SetViewport( ViewportInfo( 0, 0, GetBackbufferResolution() ) );
     UpdateZEngineViewport();
 
     rendererState.RendererInfo.RenderStage = STAGE_DRAW_WORLD;
@@ -5865,8 +5894,7 @@ void D3D11GraphicsEngine::DrawWaterSurfaces( ID3D11RenderTargetView* waterMaskRT
                 batch.texture->Bind( 0 );
 
                 WaterMaterialInfoConstantBuffer wmcb = {};
-                wmcb.WM_DisableSSR = IsWaterTextureExcludedFromSSR( batch.texture ) ? 1.0f : 0.0f;
-                wmcb.WM_DisableRainEffects = 0.0f;
+                FillWaterMaterialInfo( wmcb, batch.texture );
                 ActivePS->GetBuffer( "WaterMaterialInfo" ).Update( &wmcb ).Bind();
 
                 DrawMultiIndexedInstancedIndirect( Context.Get(),
@@ -5881,8 +5909,7 @@ void D3D11GraphicsEngine::DrawWaterSurfaces( ID3D11RenderTargetView* waterMaskRT
                 batch.texture->Bind( 0 );
 
                 WaterMaterialInfoConstantBuffer wmcb = {};
-                wmcb.WM_DisableSSR = IsWaterTextureExcludedFromSSR( batch.texture ) ? 1.0f : 0.0f;
-                wmcb.WM_DisableRainEffects = 0.0f;
+                FillWaterMaterialInfo( wmcb, batch.texture );
                 ActivePS->GetBuffer( "WaterMaterialInfo" ).Update( &wmcb ).Bind();
 
                 for ( unsigned int i = 0; i < batch.drawCount; i++ ) {

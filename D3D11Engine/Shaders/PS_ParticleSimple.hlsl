@@ -35,7 +35,8 @@ float3 AdaptParticleLighting(float3 rgb, float particleLightingScale)
 
     float night = saturate((-AC_LightPos.y + 0.08f) * 2.5f);
     float rain = max(saturate(AC_RainFXWeight), saturate(AC_SceneWettness));
-    float nonEmissiveDim = lerp(1.0f, 0.24f, night) * lerp(1.0f, 0.78f, rain);
+    float weatherDim = max(night, rain);
+    float nonEmissiveDim = lerp(1.0f, 0.24f, weatherDim);
     float strength = saturate(AC_EnableParticleLighting * AC_ParticleLightingStrength) * saturate(particleLightingScale);
     return rgb * lerp(1.0f, nonEmissiveDim, strength);
 }

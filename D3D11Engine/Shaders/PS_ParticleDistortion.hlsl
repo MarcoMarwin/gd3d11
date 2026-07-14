@@ -45,7 +45,8 @@ PS_OUTPUT PSMain( PS_INPUT Input )
 	{
 		float nightParticle = saturate((-AC_LightPos.y + 0.08f) * 2.5f);
 		float rainParticle = max(saturate(AC_RainFXWeight), saturate(AC_SceneWettness));
-		float nonEmissiveDim = lerp(1.0f, 0.28f, nightParticle) * lerp(1.0f, 0.78f, rainParticle);
+		float weatherParticle = max(nightParticle, rainParticle);
+		float nonEmissiveDim = lerp(1.0f, 0.28f, weatherParticle);
 		float lightingStrength = saturate(AC_EnableParticleLighting * AC_ParticleLightingStrength) * saturate(Input.vParticleLightingScale);
 		color.rgb *= lerp(1.0f, nonEmissiveDim, lightingStrength);
 	}

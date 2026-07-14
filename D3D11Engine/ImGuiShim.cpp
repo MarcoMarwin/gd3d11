@@ -1003,10 +1003,10 @@ void ApplyGraphicsPresets( GothicRendererSettings& s, bool applyRuntimeUpdates =
     }
 
     if ( s.AoMode == AOMode::AO_NONE ) s.AOStrength = 0.0f;
-        if ( !s.EnableScreenSpaceGI ) s.ScreenSpaceGIStrength = 0.0f;
+    if ( !s.EnableScreenSpaceGI ) s.ScreenSpaceGIStrength = 0.0f;
     if ( !s.EnableGodRays ) s.GodRayStrength = 0.0f;
     if ( !s.EnableSSR || !s.EnableWaterAnimation ) s.SSRStrength = 0.0f;
-    s.SSSIntensity = s.EnableSSS ? 0.5f : 0.0f;
+    if ( !s.EnableSSS ) s.SSSIntensity = 0.0f;
     if ( !s.EnableDoF ) s.DoFBokehRadius = 0.0f;
     if ( s.WindQuality == GothicRendererSettings::EWindQuality::WIND_QUALITY_NONE ) s.GlobalWindStrength = 0.0f;
 
@@ -1088,7 +1088,7 @@ namespace
         if ( !s.EnableScreenSpaceGI ) s.ScreenSpaceGIStrength = 0.0f;
         if ( !s.EnableGodRays ) s.GodRayStrength = 0.0f;
         if ( !s.EnableSSR || !s.EnableWaterAnimation ) s.SSRStrength = 0.0f;
-        s.SSSIntensity = s.EnableSSS ? 0.5f : 0.0f;
+        if ( !s.EnableSSS ) s.SSSIntensity = 0.0f;
         if ( !s.EnableDoF ) s.DoFBokehRadius = 0.0f;
         if ( s.WindQuality == GothicRendererSettings::EWindQuality::WIND_QUALITY_NONE ) s.GlobalWindStrength = 0.0f;
         s.OutdoorSmallVobDrawRadius = ObjectDrawDistanceUiToMeters( ObjectDrawDistanceMetersToUi( s.OutdoorSmallVobDrawRadius ) );
@@ -1679,10 +1679,9 @@ void ImGuiShim::RenderSettingsWindow()
 
             ImText( Tr( "Backlit Vegetation", u8"Vegetations-Gegenlicht" ), { buttonWidth.x - ImGui::GetFrameHeight() - style.ItemSpacing.x, buttonWidth.y } ); ImGui::SameLine();
             if ( ImGui::Checkbox( "##Enable Backlit Vegetation", &settings.EnableSSS ) ) {
-                settings.SSSIntensity = settings.EnableSSS ? 0.5f : 0.0f;
+                settings.SSSIntensity = settings.EnableSSS ? std::max( settings.SSSIntensity, 0.5f ) : 0.0f;
                 shadersToReload |= ShaderCategory::Other;
             }
-            settings.SSSIntensity = settings.EnableSSS ? 0.5f : 0.0f;
             ImGui::SetItemTooltip( "%s", Tr( "Adds sunlight backlighting to vegetation.", u8"L\u00E4sst Sonnenlicht durch Vegetation hindurchscheinen." ) );
 
             ImText( Tr( "Contact Shadows", u8"Kontaktschatten" ), { buttonWidth.x - ImGui::GetFrameHeight() - style.ItemSpacing.x, buttonWidth.y } ); ImGui::SameLine();
@@ -1698,6 +1697,93 @@ void ImGuiShim::RenderSettingsWindow()
             ImText( Tr( "Dynamic Clouds", u8"Dynamische Wolken" ), { buttonWidth.x - ImGui::GetFrameHeight() - style.ItemSpacing.x, buttonWidth.y } ); ImGui::SameLine();
             ImGui::Checkbox( "##Enable Dynamic Clouds", &settings.EnableDynamicClouds );
             ImGui::SetItemTooltip( "%s", Tr( "Enables moving low cloud fields.", u8"Aktiviert bewegte tiefe Wolkenfelder." ) );
+
+            if ( ImGui::Button( Tr( "Detail", u8"Detail" ), buttonWidth ) ) {
+                ImGui::OpenPopup( "##DetailSettingsPopup" );
+            }
+            ImGui::SetItemTooltip( "%s", Tr( "Opens detailed tuning for weather, clouds, vegetation, and ocean water.", u8"\u00D6ffnet Detailregler f\u00FCr Wetter, Wolken, Vegetation und Meerwasser." ) );
+            ImGui::SetNextWindowSize( ImVec2( 560.0f, 640.0f ), ImGuiCond_Appearing );
+            if ( ImGui::BeginPopup( "##DetailSettingsPopup" ) ) {
+                ImGui::PushItemWidth( 280.0f );
+                ImGui::TextUnformatted( Tr( "Rain and Night", u8"Regen und Nacht" ) );
+                ImGui::Separator();
+                ImGui::SliderFloat3( Tr( "Night Rain Mid Color", u8"Nachtregen-Mittelton" ), &settings.NightRainMidColor.x, 0.0f, 0.20f, "%.3f" );
+                ImGui::SetItemTooltip( "%s", Tr( "Changes the mid-distance night rain geometry tint.", u8"Ver\u00E4ndert die Mittelbereichsfarbe der Weltgeometrie bei Nachtregen." ) );
+                ImGui::SliderFloat( Tr( "Night Rain World Haze", u8"Nachtregen-Weltnebel" ), &settings.NightRainWorldHazeStrength, 0.0f, 0.80f, "%.3f" );
+                ImGui::SetItemTooltip( "%s", Tr( "Changes the night rain haze on world geometry.", u8"Regelt den Nachtregen-Schleier auf Weltgeometrie." ) );
+                ImGui::SliderFloat( Tr( "Night Rain Sky Haze", u8"Nachtregen-Himmelsnebel" ), &settings.NightRainSkyHazeStrength, 0.0f, 1.0f, "%.3f" );
+                ImGui::SetItemTooltip( "%s", Tr( "Changes the night rain haze on the sky.", u8"Regelt den Nachtregen-Schleier am Himmel." ) );
+                ImGui::SliderFloat( Tr( "Night Rain Mid Influence", u8"Nachtregen-Mittelwirkung" ), &settings.NightRainMidInfluence, 0.0f, 1.8f, "%.3f" );
+                ImGui::SetItemTooltip( "%s", Tr( "Changes how strongly mid-distance geometry is tinted.", u8"Regelt die St\u00E4rke der Mittelbereichs-T\u00F6nung." ) );
+                ImGui::SliderFloat( Tr( "Night Rain Far Brightness", u8"Nachtregen-Fernhelligkeit" ), &settings.NightRainFarMaxLuma, 0.0f, 0.25f, "%.3f" );
+                ImGui::SetItemTooltip( "%s", Tr( "Limits the brightness of distant night rain geometry.", u8"Begrenzt die Helligkeit ferner Weltgeometrie bei Nachtregen." ) );
+                ImGui::SliderFloat( Tr( "Night Rain Very Far Brightness", u8"Nachtregen-Weitfernhelligkeit" ), &settings.NightRainVeryFarMaxLuma, 0.0f, 0.25f, "%.3f" );
+                ImGui::SetItemTooltip( "%s", Tr( "Limits the brightness of very distant night rain geometry.", u8"Begrenzt die Helligkeit sehr ferner Weltgeometrie bei Nachtregen." ) );
+                ImGui::SliderFloat( Tr( "Day Rain Atmosphere", u8"Tagesregen-Atmosph\u00E4re" ), &settings.DayRainAtmosphereStrength, 0.0f, 2.0f, "%.2f" );
+                ImGui::SetItemTooltip( "%s", Tr( "Changes daytime rain influence on atmospheric cloud lighting.", u8"Regelt den Tagesregen-Einfluss auf atmosph\u00E4rische Wolkenbeleuchtung." ) );
+                ImGui::SliderFloat( Tr( "Night Near Brightness", u8"Nacht-Nahhelligkeit" ), &settings.NightNearBrightness, 0.0f, 2.0f, "%.2f" );
+                ImGui::SetItemTooltip( "%s", Tr( "Changes near night brightness.", u8"Regelt die nahe Nachthelligkeit." ) );
+                ImGui::SliderFloat( Tr( "Night Fog Brightness", u8"Nachtnebel-Helligkeit" ), &settings.NightFogBrightness, 0.0f, 2.0f, "%.2f" );
+                ImGui::SetItemTooltip( "%s", Tr( "Changes night fog brightness.", u8"Regelt die Helligkeit des Nachtnebels." ) );
+                ImGui::SliderFloat( Tr( "Night Darkening", u8"Nacht-Abdunklung" ), &settings.NightDarkeningMax, 0.0f, 2.0f, "%.2f" );
+                ImGui::SetItemTooltip( "%s", Tr( "Changes distant night darkening.", u8"Regelt die Abdunklung in der Entfernung bei Nacht." ) );
+                ImGui::SliderFloat( Tr( "Night Darkening Start", u8"Beginn Nacht-Abdunklung" ), &settings.NightDarkeningStart, 0.0f, 20000.0f, "%.0f" );
+                ImGui::SetItemTooltip( "%s", Tr( "Moves the start of distant night darkening.", u8"Verschiebt den Beginn der Nacht-Abdunklung." ) );
+                ImGui::SliderFloat( Tr( "Night Darkening Range", u8"Weichheit Nacht-Abdunklung" ), &settings.NightDarkeningRange, 1000.0f, 40000.0f, "%.0f" );
+                ImGui::SetItemTooltip( "%s", Tr( "Changes the softness of distant night darkening.", u8"Regelt die Weichheit der Nacht-Abdunklung." ) );
+
+                ImGui::Spacing();
+                ImGui::TextUnformatted( Tr( "Dynamic Clouds", u8"Dynamische Wolken" ) );
+                ImGui::Separator();
+                ImGui::BeginDisabled( !settings.EnableDynamicClouds );
+                ImGui::SliderFloat( Tr( "Cloud Density", u8"Wolkendichte" ), &settings.DynamicCloudDensity, 0.0f, 2.0f, "%.2f" );
+                ImGui::SetItemTooltip( "%s", Tr( "Changes cloud opacity and body strength.", u8"Regelt Deckkraft und K\u00F6rperst\u00E4rke der Wolken." ) );
+                ImGui::SliderFloat( Tr( "Cloud Size", u8"Wolkengr\u00F6\u00DFe" ), &settings.DynamicCloudScale, 0.35f, 2.5f, "%.2f" );
+                ImGui::SetItemTooltip( "%s", Tr( "Changes the size of cloud fields.", u8"Regelt die Gr\u00F6\u00DFe der Wolkenfelder." ) );
+                ImGui::SliderFloat( Tr( "Cloud Height", u8"Wolkenh\u00F6he" ), &settings.DynamicCloudHeight, 0.35f, 2.5f, "%.2f" );
+                ImGui::SetItemTooltip( "%s", Tr( "Changes vertical cloud thickness.", u8"Regelt die vertikale M\u00E4chtigkeit der Wolken." ) );
+                ImGui::SliderFloat( Tr( "Cloud Distance", u8"Wolkenreichweite" ), &settings.DynamicCloudDistance, 0.45f, 2.5f, "%.2f" );
+                ImGui::SetItemTooltip( "%s", Tr( "Changes where cloud fields begin and fade out.", u8"Regelt Beginn und Ausblendung der Wolkenfelder." ) );
+                ImGui::SliderFloat( Tr( "Cloud Speed", u8"Wolkengeschwindigkeit" ), &settings.DynamicCloudSpeed, 0.0f, 2.0f, "%.2f" );
+                ImGui::SetItemTooltip( "%s", Tr( "Changes cloud drift speed.", u8"Regelt die Driftgeschwindigkeit der Wolken." ) );
+                ImGui::SliderFloat( Tr( "Cloud Sunlight", u8"Wolken-Sonnenlicht" ), &settings.DynamicCloudSunLight, 0.0f, 2.0f, "%.2f" );
+                ImGui::SetItemTooltip( "%s", Tr( "Changes sunlight on upper cloud layers.", u8"Regelt Sonnenlicht auf den oberen Wolkenschichten." ) );
+                ImGui::SliderFloat3( Tr( "Cloud Day Color", u8"Wolkenfarbe Tag" ), &settings.DynamicCloudDayColor.x, 0.0f, 2.0f, "%.2f" );
+                ImGui::SetItemTooltip( "%s", Tr( "Changes cloud color during clear daytime.", u8"Regelt die Wolkenfarbe bei klarem Tag." ) );
+                ImGui::SliderFloat3( Tr( "Cloud Rain Color", u8"Wolkenfarbe Regen" ), &settings.DynamicCloudRainColor.x, 0.0f, 2.0f, "%.2f" );
+                ImGui::SetItemTooltip( "%s", Tr( "Changes cloud color during rain.", u8"Regelt die Wolkenfarbe bei Regen." ) );
+                ImGui::SliderFloat3( Tr( "Cloud Night Color", u8"Wolkenfarbe Nacht" ), &settings.DynamicCloudNightColor.x, 0.0f, 2.0f, "%.2f" );
+                ImGui::SetItemTooltip( "%s", Tr( "Changes cloud color at night.", u8"Regelt die Wolkenfarbe bei Nacht." ) );
+                ImGui::EndDisabled();
+
+                ImGui::Spacing();
+                ImGui::TextUnformatted( Tr( "Ocean Water", u8"Meerwasser" ) );
+                ImGui::Separator();
+                ImGui::BeginDisabled( !settings.EnableWaterAnimation );
+                ImGui::SliderFloat3( Tr( "Ocean Water Color", u8"Meerwasserfarbe" ), &settings.OceanWaterColor.x, 0.0f, 2.0f, "%.2f" );
+                ImGui::SetItemTooltip( "%s", Tr( "Changes the tint of ocean water only.", u8"Regelt nur die T\u00F6nung von Meerwasser." ) );
+                ImGui::SliderFloat( Tr( "Ocean Water Strength", u8"Meerwasser-St\u00E4rke" ), &settings.OceanWaterColorStrength, 0.0f, 1.0f, "%.2f" );
+                ImGui::SetItemTooltip( "%s", Tr( "Changes how strongly the ocean tint is applied.", u8"Regelt die St\u00E4rke der Meerwasser-T\u00F6nung." ) );
+                ImGui::EndDisabled();
+
+                ImGui::Spacing();
+                ImGui::TextUnformatted( Tr( "Vegetation Influence", u8"Vegetationseinfluss" ) );
+                ImGui::Separator();
+                ImGui::BeginDisabled( settings.WindQuality == GothicRendererSettings::EWindQuality::WIND_QUALITY_NONE );
+                ImGui::SliderFloat( Tr( "Wind Strength", u8"Windst\u00E4rke" ), &settings.GlobalWindStrength, 0.0f, 2.0f, "%.2f" );
+                ImGui::EndDisabled();
+                ImGui::SetItemTooltip( "%s", Tr( "Changes wind influence on vegetation.", u8"Regelt den Windeinfluss auf Vegetation." ) );
+                ImGui::BeginDisabled( !settings.HeroAffectsObjects );
+                ImGui::SliderFloat( Tr( "Character Influence", u8"Figureneinfluss" ), &settings.HeroAffectsObjectsStrength, 0.0f, 2.0f, "%.2f" );
+                ImGui::EndDisabled();
+                ImGui::SetItemTooltip( "%s", Tr( "Changes character influence on grass and wheat.", u8"Regelt den Figureneinfluss auf Gras und Getreide." ) );
+                ImGui::BeginDisabled( !settings.EnableSSS );
+                ImGui::SliderFloat( Tr( "Backlit Vegetation", u8"Vegetations-Gegenlicht" ), &settings.SSSIntensity, 0.0f, 2.0f, "%.2f" );
+                ImGui::EndDisabled();
+                ImGui::SetItemTooltip( "%s", Tr( "Changes backlit vegetation intensity.", u8"Regelt die St\u00E4rke des Vegetations-Gegenlichts." ) );
+                ImGui::PopItemWidth();
+                ImGui::EndPopup();
+            }
             ImText( Tr( "Occlusion Culling", u8"Verdeckungspr\u00FCfung" ), { buttonWidth.x - ImGui::GetFrameHeight() - style.ItemSpacing.x, buttonWidth.y } ); ImGui::SameLine();
             ImGui::Checkbox( "##Enable Occlusion Culling", &settings.EnableOcclusionCulling );
             ImGui::SetItemTooltip( "%s", Tr( "Skips world geometry hidden behind other objects.", u8"\u00DCberspringt Weltgeometrie, die hinter anderen Objekten verborgen ist." ) );
