@@ -126,11 +126,8 @@ float3 ApplyTreeWind(float3 vertexPos, float3 direction, float heightNorm, float
 
 #if SHD_INFLUENCE
 
-// HERO/NPC INTERACTION CONST (Gothic world units)
-static const float heroAffectInnerRadius = 20.0f;
-static const float heroAffectOuterRadius = 25.0f;
-static const float heroAffectVerticalInnerRadius = 70.0f;
-static const float heroAffectVerticalOuterRadius = 130.0f;
+// HERO/NPC INTERACTION CONST
+static const float heroAffectRange = 100.0f;
 static const float heroAffectStrength = 38.0f;
 
 float3 CalculateSingleActorInfluence(
@@ -147,34 +144,23 @@ float3 CalculateSingleActorInfluence(
     float heightRange = max(maxHeight - minHeight, 0.001f);
     float vertexHeightNorm = saturate((vertexLocalPos.y - minHeight) / heightRange);
 
-    // Keep the base planted and move only the flexible upper portion.
+    // 15% of object height check
     float heightMask = smoothstep(0.14f, 0.16f, vertexHeightNorm);
 
     float3 vertexWorldPos = mul(float4(vertexLocalPos, 1.0f), instWorldMatrix).xyz;
     float3 toVertex = vertexWorldPos - actorPositionAndActive.xyz;
+
+    float3 displaceDirWorld = lerp(float3(0.0f, 1.0f, 0.0f), normalize(toVertex), step(0.001f, length(toVertex)));
+
     float distanceXZ = length(toVertex.xz);
+    float distanceFactor = exp(-(distanceXZ * distanceXZ) / (1.8f * heroAffectRange * heroAffectRange));
 
-    // Full response close to the actor, a tight soft edge, then exactly zero.
-    // This keeps interaction local even on large vegetation objects.
-    float radialFactor = 1.0f - smoothstep(heroAffectInnerRadius, heroAffectOuterRadius, distanceXZ);
-    radialFactor *= radialFactor;
-    float verticalFactor = 1.0f - smoothstep(
-        heroAffectVerticalInnerRadius,
-        heroAffectVerticalOuterRadius,
-        abs(toVertex.y));
-    float localityMask = radialFactor * verticalFactor;
+    float influence = distanceFactor * vertexHeightNorm * heightMask;
 
-    float horizontalLengthSq = dot(toVertex.xz, toVertex.xz);
-    float2 horizontalDirection = toVertex.xz * rsqrt(max(horizontalLengthSq, 0.0001f));
-    float3 displaceDirWorld = float3(horizontalDirection.x, 0.0f, horizontalDirection.y);
+    float randomOffset = frac(sin(dot(vertexLocalPos.xz, float2(12.9898f, 78.233f))) * 43758.5453f);
+    influence *= 0.9f + 0.1f * randomOffset;
 
-    float influence = localityMask * vertexHeightNorm * heightMask;
-
-    // Instance positions are transformed as row vectors, so transpose the rotation
-    // when converting the world-space push direction back into local space.
-    float3 displaceDirLocal = mul(displaceDirWorld, transpose((float3x3)instWorldMatrix));
-    float localDirectionLengthSq = dot(displaceDirLocal, displaceDirLocal);
-    displaceDirLocal *= rsqrt(max(localDirectionLengthSq, 0.0001f));
+    float3 displaceDirLocal = normalize(mul(displaceDirWorld, (float3x3)instWorldMatrix));
     return displaceDirLocal * heroAffectStrength * characterInteractionStrength * influence;
 }
 
@@ -246,7 +232,7 @@ VS_OUTPUT VSMain( VS_INPUT Input )
         float heightRange = max(localMaxHeight - localMinHeight, 0.001);
         float vertexHeightNorm = saturate((Input.vPosition.y - localMinHeight) / heightRange);
 
-        // Apply current and previous wind phases so FSR/TAA receive vegetation motion vectors.
+        // Apply current and previous wind phases so FSR receives vegetation motion vectors.
         float3 windDirection = normalize(windDir);
         position += ApplyTreeWind(
             Input.vPosition,

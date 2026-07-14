@@ -1394,6 +1394,9 @@ void GothicAPI::OnWorldLoaded() {
 #endif
 
 
+    if ( graphicsEngine ) {
+        graphicsEngine->SyncGothicResolutionState( true );
+    }
     _canClearVobsByVisual = false;
 }
 
@@ -5851,6 +5854,7 @@ XRESULT GothicAPI::SaveMenuSettings( const std::string& file ) {
     */
 
     WritePrivateProfileStringA( "General", "EnableOcclusionCulling", std::to_string( s.EnableOcclusionCulling ).c_str(), ini.c_str() );
+    WritePrivateProfileStringA( "General", "EnableMotionBlur", std::to_string( s.EnableMotionBlur ? TRUE : FALSE ).c_str(), ini.c_str() );
     WritePrivateProfileStringA( "General", "FpsLimit", std::to_string( s.FpsLimit ).c_str(), ini.c_str() );
     WritePrivateProfileStringA( "General", "FpsLimitLastEnabled", std::to_string( s.FpsLimitLastEnabled ).c_str(), ini.c_str() );
     
@@ -5994,6 +5998,7 @@ XRESULT GothicAPI::LoadMenuSettings( const std::string& file ) {
         */
 
         s.EnableOcclusionCulling = GetPrivateProfileBoolA( "General", "EnableOcclusionCulling", ds.EnableOcclusionCulling, ini );
+        s.EnableMotionBlur = GetPrivateProfileBoolA( "General", "EnableMotionBlur", ds.EnableMotionBlur, ini );
         s.FpsLimit = GetPrivateProfileIntA( "General", "FpsLimit", 0, ini.c_str() );
         s.FpsLimitLastEnabled = std::clamp(
             static_cast<int>(GetPrivateProfileIntA( "General", "FpsLimitLastEnabled",
@@ -6106,7 +6111,7 @@ XRESULT GothicAPI::LoadMenuSettings( const std::string& file ) {
 
         s.AntiAliasingMode = (GothicRendererSettings::E_AntiAliasingMode)GetPrivateProfileIntA( "General", "AntiAliasing", (int)ds.AntiAliasingMode, ini.c_str() );
         s.SharpeningMode = ds.SharpeningMode;
-        s.SharpenFactor = s.GetIsTAAEnabled() ? 1.0f : 0.2f;
+        s.SharpenFactor = s.GetUsesTemporalReconstruction() ? 1.0f : 0.2f;
 
         const int defaultAoMode = static_cast<int>(ds.AoMode);
         const int storedAoMode = static_cast<int>(GetPrivateProfileIntA( "AO", "Mode", defaultAoMode, ini.c_str() ));
@@ -6261,8 +6266,8 @@ XRESULT GothicAPI::LoadMenuSettings( const std::string& file ) {
     s.EnableCustomFontRendering = ds.EnableCustomFontRendering;
     s.DebugSettings.FeatureSet = ds.DebugSettings.FeatureSet;
     s.SharpeningMode = ds.SharpeningMode;
-    s.SharpenFactor = s.GetIsTAAEnabled() ? 1.0f : 0.2f;
     s.FixupUpscalingSettings();
+    s.SharpenFactor = s.GetUsesTemporalReconstruction() ? 1.0f : 0.2f;
 
     return XR_SUCCESS;
 }
@@ -6339,7 +6344,7 @@ void GothicAPI::DrawMorphMesh( zCMorphMesh* msh, std::map<zCMaterial*, std::vect
     const unsigned int oldSwitches = graphicsState.FF_GSwitches;
     if ( bindShader && !isZPrepass ) {
         graphicsState.FF_GSwitches |= GSWITCH_FSR3_REACTIVE;
-        if ( RendererState.RendererSettings.AntiAliasingMode == GothicRendererSettings::AA_FSR
+        if ( RendererState.RendererSettings.AntiAliasingMode == GothicRendererSettings::AA_FSR3
             && RendererState.RendererSettings.Upscaler == GothicRendererSettings::UPSCALER_FSR_3
             && !Engine::GAPI->DialogFinished() ) {
             graphicsState.FF_GSwitches |= GSWITCH_FSR3_DIALOG_REACTIVE;

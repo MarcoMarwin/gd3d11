@@ -5,7 +5,7 @@
 
 class D3D11PFX_FSR3;
 class D3D11PFX_CAS;
-class D3D11PFX_TAA;
+class D3D11PFX_MotionBlur;
 struct RenderToTextureBuffer;
 class D3D11PFX_Blur;
 class D3D11PFX_HeightFog;
@@ -41,7 +41,10 @@ public:
     /** Renders the SMAA-Effect */
     XRESULT RenderSMAA(ID3D11ShaderResourceView* backbuffer);
 
-    XRESULT RenderTAA(const ComPtr<ID3D11ShaderResourceView>& velocityBuffer);
+    XRESULT RenderMotionBlur( ID3D11RenderTargetView* outputRTV,
+                              ID3D11ShaderResourceView* sceneSRV,
+                              ID3D11ShaderResourceView* velocitySRV,
+                              ID3D11ShaderResourceView* depthSRV );
     XRESULT RenderCAS( const Microsoft::WRL::ComPtr<ID3D11ShaderResourceView>& input, INT2 inputSize, const Microsoft::WRL::ComPtr<ID3D11RenderTargetView>& output, INT2 outputSize, RenderToTextureBuffer& intermediateBuffer );
     XRESULT RenderSimpleSharpen( const Microsoft::WRL::ComPtr<ID3D11ShaderResourceView>& source, INT2 sourceSize, RenderToTextureBuffer* dest, INT2 destSize );
 
@@ -103,7 +106,6 @@ public:
     TextureHandle GetBackbufferTempBuffer();
     TextureHandle GetTempBufferDS4();
 
-    D3D11PFX_TAA* GetTAAEffect() { return FX_TAA.get(); }
     D3D11PFX_CAS* GetCAS() { return PFX_CAS.get(); }
     D3D11PFX_FSR3* GetFSR3() { return PFX_FSR3.get(); }
 
@@ -128,7 +130,7 @@ private:
     std::unique_ptr<D3D11PFX_GodRays> FX_GodRays;
     std::unique_ptr<D3D11PFX_DepthOfField> FX_DepthOfField;
 
-    std::unique_ptr<D3D11PFX_TAA> FX_TAA;
+    std::unique_ptr<D3D11PFX_MotionBlur> FX_MotionBlur;
 
     std::unique_ptr<D3D11PFX_CAS> PFX_CAS;
     std::unique_ptr<D3D11PFX_SimpleSharpen> PFX_SimpleSharpen;

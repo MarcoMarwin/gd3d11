@@ -4,7 +4,7 @@
 #include "D3D11GraphicsEngine.h"
 #include "D3D11PfxRenderer.h"
 #include "D3D11PFX_FSR3.h"
-#include "D3D11PFX_TAA.h"
+#include "D3D11TemporalState.h"
 #include "oCGame.h"
 
 namespace {
@@ -39,13 +39,13 @@ namespace {
 
                 auto* pfxRenderer = engine.GetPfxRenderer();
                 auto* fsr3 = pfxRenderer ? pfxRenderer->GetFSR3() : nullptr;
-                auto* taa = pfxRenderer ? pfxRenderer->GetTAAEffect() : nullptr;
-                if ( !fsr3 || !taa || !backbufferTex || !velocityBufferTex || !depth || !outputRTV ) {
+                auto* temporalState = engine.GetTemporalState();
+                if ( !fsr3 || !temporalState || !backbufferTex || !velocityBufferTex || !depth || !outputRTV ) {
                     LogError() << "FSR3: Upscaling pass skipped because required resources are missing.";
                     return;
                 }
 
-                auto jitter = taa->GetJitterOffsetUnscaled();
+                auto jitter = temporalState->GetJitterOffsetUnscaled();
                 const auto inputSize = engine.GetResolution();
 
                 float fovHorizontal, fovVertical;
@@ -98,7 +98,7 @@ void D3D11Upscaling::UpdateUpscaling( D3D11GraphicsEngine& engine )
 {
     auto& settings = Engine::GAPI->GetRendererState().RendererSettings;
     if ( engine.GetDevice()->GetFeatureLevel() < D3D_FEATURE_LEVEL_11_0 ) {
-        if ( settings.AntiAliasingMode == GothicRendererSettings::AA_FSR
+        if ( settings.AntiAliasingMode == GothicRendererSettings::AA_FSR3
             && settings.Upscaler == GothicRendererSettings::UPSCALER_FSR_3 ) {
             settings.AntiAliasingMode = GothicRendererSettings::AA_SMAA;
             settings.Upscaler = GothicRendererSettings::UPSCALER_DEFAULT;
@@ -108,9 +108,7 @@ void D3D11Upscaling::UpdateUpscaling( D3D11GraphicsEngine& engine )
         return;
     }
 
-    const bool needsJitteredProj = settings.AntiAliasingMode == GothicRendererSettings::AA_FSR
-        || settings.AntiAliasingMode == GothicRendererSettings::AA_TAA
-        || settings.AntiAliasingMode == GothicRendererSettings::AA_FSR3;
+    const bool needsJitteredProj = settings.AntiAliasingMode == GothicRendererSettings::AA_FSR3;
 
     if ( needsJitteredProj ) {
         engine.SetFrameNeedsJitter();
@@ -137,10 +135,10 @@ bool D3D11Upscaling::AddUpscalingPass( RenderGraph& graph,
     auto* pfxRenderer = engine.GetPfxRenderer();
     if ( settings.Upscaler == GothicRendererSettings::E_Upscaler::UPSCALER_FSR_3
             && (settings.ResolutionScalePercent <= 100)
-            && settings.AntiAliasingMode == GothicRendererSettings::AA_FSR
+            && settings.AntiAliasingMode == GothicRendererSettings::AA_FSR3
             && pfxRenderer
             && pfxRenderer->GetFSR3()
-            && pfxRenderer->GetTAAEffect() ) {
+            && engine.GetTemporalState() ) {
 
         AddFSR3Pass( graph, engine, outputRTV, color, depth, motionVectors, reactiveMask,
             transparencyAndCompositionMask );

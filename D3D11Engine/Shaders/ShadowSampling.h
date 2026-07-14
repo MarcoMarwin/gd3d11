@@ -89,7 +89,7 @@ float GetCascadeShadowResolution(int cascadeIndex)
 }
 //--------------------------------------------------------------------------------------
 // High-quality Poisson disk for shadow sampling
-// Rotated per-pixel for better TAA integration and reduced banding
+// Rotated per-pixel for better temporal integration and reduced banding
 //--------------------------------------------------------------------------------------
 static const float2 g_PoissonDisk16[16] = {
     float2(-0.94201624f, -0.39906216f),
@@ -414,7 +414,7 @@ float3 ApplyReceiverNormalBias(float3 wsPosition, float3 wsNormal, float3 wsLigh
 
 //--------------------------------------------------------------------------------------
 // High-quality shadow sampling with configurable softness
-// Uses rotated Poisson disk for TAA-friendly results
+// Uses rotated Poisson disk for temporal-friendly results
 //--------------------------------------------------------------------------------------
 float SampleCascadeShadowStablePCF(float4 vShadowSamplingPos, float2 projectedTexCoords,
                                    int cascadeIndex, float bias, float2 screenPos, float filterRadius)

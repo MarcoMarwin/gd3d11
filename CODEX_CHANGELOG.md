@@ -469,3 +469,12 @@ Kurze, append-only Dokumentation der von Codex gepushten Renderer-Builds.
 - Nachtregen und Wolken: Nachtregen ist naeher am Build-061-Eindruck, Cloud Day/Rain/Night Defaults wurden festgezogen und die Tagwolkenfarbe folgt dem aktiven Sky-Profil.
 - Sky/Fog: `Cloud Day Color` und `FogColorMod` haengen am aktiven Tag-Sky-Profil; OldWorld/World behalten optisch den G1-Sky-Look, sonstige Welten den SkyDay.dds-Look. OldWorld/World nutzen nachts `NightFogBrightness 0.35`, Standard bleibt `0.70`.
 - Pruefung: AGENTS-Regeln gelesen; Buildnummer aus outputs ermittelt; Render-Scale-, F11-/INI-, Sky-/Fog- und Shaderpfade statisch kontrolliert; Konflikt-/Escape-Artefakte und git diff --check geprueft. Kein vollstaendiger lokaler C++-/Shader-Build.
+
+## Build 124 (Nachtregen-Schleier, Aufloesungswechsel, NPC-Vegetation, Motion Blur und TAA-Rueckbau)
+
+- Nachtregen/Tagregen: der Regen-Schleier liegt als sanfter Overlay ueber Welt und Himmel; nachts staerker, tagsueber abgeschwaecht, damit entfernte Geometrie und Sky wieder zusammenhaengender wirken.
+- Seitenverhaeltnis: echte Aufloesungswechsel synchronisieren Gothic-Viewport und Kamera nach World-Load wieder mit der Backbuffer-Aufloesung, ohne den Render-Scale-Pfad anzufassen.
+- Vegetation: der Hero-Affects-Vegetation-Effekt ist wieder naeher am Kirides-Nightly-Verhalten, wirkt aber weiter auch fuer weitere NPCs.
+- Motion Blur: ein optionaler F11-Schalter aktiviert Bewegungsunschaerfe als persoenliche Option; Grafik-Presets setzen diese Option nicht.
+- TAA/FSR3: TAA wurde aus UI, Shadern und PostFX-Code entfernt; FSR3 nutzt einen eigenen Temporal-State fuer Jitter/Velocity und bleibt als `AA_FSR3 = 2` der einzige FSR3-Anti-Aliasing-Modus.
+- Pruefung: AGENTS-Regeln gelesen; Buildnummer aus outputs ermittelt; TAA-/AA-FSR-Reste, Projekt-XML, Shader-/Projektpfade, F11-/INI-Pfade, Konflikt-/Escape-Artefakte und git diff --check statisch kontrolliert. Kein vollstaendiger lokaler C++-/Shader-Build.

@@ -523,9 +523,7 @@ struct GothicRendererSettings {
     enum E_AntiAliasingMode {
         AA_NONE = 0,
         AA_SMAA = 1,
-        AA_TAA = 2,
-        AA_FSR = 3,
-        AA_FSR3 = 4, // Dummy value! only used for settings!
+        AA_FSR3 = 2,
         _AA_NUM_MODES
     };
 
@@ -575,8 +573,8 @@ struct GothicRendererSettings {
 
     float GetContactShadowFixedStrength() const {
         const bool temporalReconstructionActive =
-            Upscaler == E_Upscaler::UPSCALER_FSR_3
-            || AntiAliasingMode == E_AntiAliasingMode::AA_TAA;
+            AntiAliasingMode == E_AntiAliasingMode::AA_FSR3
+            && Upscaler == E_Upscaler::UPSCALER_FSR_3;
         return temporalReconstructionActive ? 0.35f : 0.50f;
     }
 
@@ -651,7 +649,7 @@ struct GothicRendererSettings {
         DisableRendering = false;
         DisableDrawcalls = false;
 
-        AntiAliasingMode = E_AntiAliasingMode::AA_FSR;
+        AntiAliasingMode = E_AntiAliasingMode::AA_FSR3;
 
         TesselationFactor = 20.0f;
         TesselationRange = 8.0f;
@@ -677,6 +675,7 @@ struct GothicRendererSettings {
         GammaValue = 1.0f;
 
         EnableOcclusionCulling = true;
+        EnableMotionBlur = false;
         PCSSLightSize = 0.140f;
         ShadowFilterMode = E_ShadowFilterMode::SHADOW_FILTER_PCSS;
 
@@ -944,6 +943,7 @@ struct GothicRendererSettings {
     float DoFNearBlurDistance;
     float DoFNearBlurStrength;
     bool EnableOcclusionCulling;
+    bool EnableMotionBlur;
     bool SortRenderQueue;
     bool DrawThreaded;
     EPointLightShadowMode EnablePointlightShadows;
@@ -1055,9 +1055,8 @@ struct GothicRendererSettings {
     
     struct {
         struct {
-            bool DepthMotionVectors;
             bool DisplayVelocity;
-        } TAA;
+        } Velocity;
         struct {
             bool LazyCascadeUpdate;
             float ExtendBack;
@@ -1132,15 +1131,7 @@ struct GothicRendererSettings {
     }
 
     void FixupUpscalingSettings() {
-        // AA_FSR3 is a UI-only value. Runtime FSR3 uses AA_FSR plus the FSR3 upscaler.
         if ( AntiAliasingMode == E_AntiAliasingMode::AA_FSR3 ) {
-            AntiAliasingMode = E_AntiAliasingMode::AA_FSR;
-            Upscaler = E_Upscaler::UPSCALER_FSR_3;
-        }
-
-        if ( AntiAliasingMode == E_AntiAliasingMode::AA_FSR ) {
-            // FSR3 is the only temporal upscaler. Legacy FSR1/FSR2 INI values
-            // are migrated here without reusing their removed implementations.
             Upscaler = E_Upscaler::UPSCALER_FSR_3;
             ResolutionScalePercent = SnapFSRResolutionScale( ResolutionScalePercent );
             return;
@@ -1149,10 +1140,8 @@ struct GothicRendererSettings {
         Upscaler = E_Upscaler::UPSCALER_DEFAULT;
     }
 
-    bool GetIsTAAEnabled() const {
-        return AntiAliasingMode == E_AntiAliasingMode::AA_TAA
-            || AntiAliasingMode == E_AntiAliasingMode::AA_FSR
-            || AntiAliasingMode == E_AntiAliasingMode::AA_FSR3;
+    bool GetUsesTemporalReconstruction() const {
+        return AntiAliasingMode == E_AntiAliasingMode::AA_FSR3;
     }
 };
 

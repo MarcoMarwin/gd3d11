@@ -723,7 +723,7 @@ void ImText( const char* label, const ImVec2& size ) {
 void ApplyFeatureLevel10Downgrades(GothicRendererSettings& s) {
     // one 4k texture, 1/2 2k textures max.
     s.NumShadowCascades = std::min(s.NumShadowCascades, MAX_CSM_CASCADES);
-    if ( s.AntiAliasingMode == GothicRendererSettings::AA_FSR
+    if ( s.AntiAliasingMode == GothicRendererSettings::AA_FSR3
         && s.Upscaler == GothicRendererSettings::UPSCALER_FSR_3 ) {
         s.AntiAliasingMode = GothicRendererSettings::AA_SMAA;
         s.Upscaler = GothicRendererSettings::UPSCALER_DEFAULT;
@@ -778,10 +778,7 @@ namespace
     }
 
     bool UsesTemporalSharpeningBoost( const GothicRendererSettings& s ) {
-        return s.AntiAliasingMode == GothicRendererSettings::E_AntiAliasingMode::AA_TAA
-            || s.AntiAliasingMode == GothicRendererSettings::E_AntiAliasingMode::AA_FSR3
-            || (s.AntiAliasingMode == GothicRendererSettings::E_AntiAliasingMode::AA_FSR
-                && s.Upscaler == GothicRendererSettings::E_Upscaler::UPSCALER_FSR_3);
+        return s.AntiAliasingMode == GothicRendererSettings::E_AntiAliasingMode::AA_FSR3;
     }
 
     void ApplyAntiAliasingDependentSettings( GothicRendererSettings& s ) {
@@ -923,7 +920,7 @@ void ApplyGraphicsPresets( GothicRendererSettings& s, bool applyRuntimeUpdates =
 
     switch ( preset ) {
     case GothicRendererSettings::GRAPHICS_LOW:
-        s.AntiAliasingMode = GothicRendererSettings::E_AntiAliasingMode::AA_FSR;
+        s.AntiAliasingMode = GothicRendererSettings::E_AntiAliasingMode::AA_FSR3;
         s.Upscaler = GothicRendererSettings::E_Upscaler::UPSCALER_FSR_3;
         s.ResolutionScalePercent = 66;
         s.ShadowMapSize = 1024;
@@ -942,7 +939,7 @@ void ApplyGraphicsPresets( GothicRendererSettings& s, bool applyRuntimeUpdates =
         s.textureMaxSize = static_cast<int>(TX_QUALITY::High);
         break;
     case GothicRendererSettings::GRAPHICS_MEDIUM:
-        s.AntiAliasingMode = GothicRendererSettings::E_AntiAliasingMode::AA_FSR;
+        s.AntiAliasingMode = GothicRendererSettings::E_AntiAliasingMode::AA_FSR3;
         s.Upscaler = GothicRendererSettings::E_Upscaler::UPSCALER_FSR_3;
         s.ResolutionScalePercent = 83;
         s.ShadowMapSize = 2048;
@@ -961,7 +958,7 @@ void ApplyGraphicsPresets( GothicRendererSettings& s, bool applyRuntimeUpdates =
         s.textureMaxSize = static_cast<int>(TX_QUALITY::MAX);
         break;
     case GothicRendererSettings::GRAPHICS_HIGH:
-        s.AntiAliasingMode = GothicRendererSettings::E_AntiAliasingMode::AA_FSR;
+        s.AntiAliasingMode = GothicRendererSettings::E_AntiAliasingMode::AA_FSR3;
         s.Upscaler = GothicRendererSettings::E_Upscaler::UPSCALER_FSR_3;
         s.ResolutionScalePercent = 100;
         s.ShadowMapSize = 4096;
@@ -980,7 +977,7 @@ void ApplyGraphicsPresets( GothicRendererSettings& s, bool applyRuntimeUpdates =
         s.textureMaxSize = static_cast<int>(TX_QUALITY::MAX);
         break;
     case GothicRendererSettings::GRAPHICS_VERY_HIGH:
-        s.AntiAliasingMode = GothicRendererSettings::E_AntiAliasingMode::AA_FSR;
+        s.AntiAliasingMode = GothicRendererSettings::E_AntiAliasingMode::AA_FSR3;
         s.Upscaler = GothicRendererSettings::E_Upscaler::UPSCALER_FSR_3;
         s.ResolutionScalePercent = 100;
         s.ShadowMapSize = 8192;
@@ -1301,19 +1298,15 @@ void ImGuiShim::RenderSettingsWindow()
             }
             ImGui::SetItemTooltip( "%s", Tr( "Changes the game output size.", u8"\u00C4ndert die Ausgabeaufl\u00F6sung des Spiels." ) );
 
-            const std::array<std::tuple<const char*, GothicRendererSettings::E_AntiAliasingMode, const char*>, 4> antiAliasing = {{
+            const std::array<std::tuple<const char*, GothicRendererSettings::E_AntiAliasingMode, const char*>, 3> antiAliasing = {{
                 {Tr( "Disabled", u8"Aus" ), GothicRendererSettings::E_AntiAliasingMode::AA_NONE, nullptr },
                 {"SMAA", GothicRendererSettings::E_AntiAliasingMode::AA_SMAA, nullptr },
-                { "TAA", GothicRendererSettings::E_AntiAliasingMode::AA_TAA, Tr( "Temporal Anti-Aliasing", u8"Temporale Kantengl\u00E4ttung" ) },
                 {"FSR 3", GothicRendererSettings::E_AntiAliasingMode::AA_FSR3, "FidelityFX Super Resolution 3"},
             }};
             {
                 ImGui::PushID( "AntiAliasingSettings" );
                 auto selectedMode = settings.AntiAliasingMode;
-                if ( selectedMode == GothicRendererSettings::E_AntiAliasingMode::AA_FSR ) {
-                    selectedMode = GothicRendererSettings::E_AntiAliasingMode::AA_FSR3;
-                }
-                const bool wasFSRAntiAliasing = settings.AntiAliasingMode == GothicRendererSettings::E_AntiAliasingMode::AA_FSR;
+                const bool wasFSRAntiAliasing = settings.AntiAliasingMode == GothicRendererSettings::E_AntiAliasingMode::AA_FSR3;
                 ImText( Tr( "Anti Aliasing", u8"Kantengl\u00E4ttung" ), buttonWidth ); ImGui::SameLine();
                 if ( ImComboBoxCT( "##AntiAliasing", antiAliasing, &selectedMode, [&selectedMode, &settings, wasFSRAntiAliasing] {
                     const bool selectsFSRAntiAliasing = selectedMode == GothicRendererSettings::E_AntiAliasingMode::AA_FSR3;
@@ -1322,7 +1315,6 @@ void ImGuiShim::RenderSettingsWindow()
                     }
 
                     if ( selectedMode == GothicRendererSettings::E_AntiAliasingMode::AA_FSR3 ) {
-                        selectedMode = GothicRendererSettings::E_AntiAliasingMode::AA_FSR;
                         settings.Upscaler = GothicRendererSettings::E_Upscaler::UPSCALER_FSR_3;
                     }
                     settings.AntiAliasingMode = selectedMode;
@@ -1698,6 +1690,10 @@ void ImGuiShim::RenderSettingsWindow()
             ImText( Tr( "Dynamic Clouds", u8"Dynamische Wolken" ), { buttonWidth.x - ImGui::GetFrameHeight() - style.ItemSpacing.x, buttonWidth.y } ); ImGui::SameLine();
             ImGui::Checkbox( "##Enable Dynamic Clouds", &settings.EnableDynamicClouds );
             ImGui::SetItemTooltip( "%s", Tr( "Enables moving low cloud fields.", u8"Aktiviert bewegte tiefe Wolkenfelder." ) );
+
+            ImText( "Motion Blur", { buttonWidth.x - ImGui::GetFrameHeight() - style.ItemSpacing.x, buttonWidth.y } ); ImGui::SameLine();
+            ImGui::Checkbox( "##Enable Motion Blur", &settings.EnableMotionBlur );
+            ImGui::SetItemTooltip( "%s", Tr( "Blurs fast camera and object movement.", u8"Verwischt schnelle Kamera- und Objektbewegungen." ) );
 
             ImText( Tr( "Occlusion Culling", u8"Verdeckungspr\u00FCfung" ), { buttonWidth.x - ImGui::GetFrameHeight() - style.ItemSpacing.x, buttonWidth.y } ); ImGui::SameLine();
             ImGui::Checkbox( "##Enable Occlusion Culling", &settings.EnableOcclusionCulling );

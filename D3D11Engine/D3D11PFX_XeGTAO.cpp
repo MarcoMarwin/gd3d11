@@ -188,7 +188,7 @@ XRESULT D3D11PFX_XeGTAO::Render( ID3D11ShaderResourceView* depthSRV,
     XeGTAO::GTAOConstants constants = {};
     XeGTAO::GTAOUpdateConstants( constants, resolution.x, resolution.y, gtaoSettings,
         reinterpret_cast<const float*>(&projection), true, m_frameIndex );
-    constants.NoiseIndex = rendererSettings.GetIsTAAEnabled() ? static_cast<int>(m_frameIndex % 64) : 0;
+    constants.NoiseIndex = rendererSettings.GetUsesTemporalReconstruction() ? static_cast<int>(m_frameIndex % 64) : 0;
     ++m_frameIndex;
 
     ID3D11RenderTargetView* nullRTVs[8] = {};

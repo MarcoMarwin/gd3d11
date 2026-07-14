@@ -19,7 +19,7 @@
 // 1.20 (2021-09-06): Optional normal from depth generation is now a standalone pass: no longer integrated into 
 //                    main XeGTAO pass to reduce complexity and allow reuse; also quality of generated normals improved
 // 1.21 (2021-09-28): Replaced 'groupshared'-based denoiser with a slightly slower multi-pass one where a 2-pass new
-//                    equals 1-pass old. However, 1-pass new is faster than the 1-pass old and enough when TAA enabled.
+//                    equals 1-pass old. However, 1-pass new is faster than the 1-pass old and enough with temporal reconstruction.
 // 1.22 (2021-09-28): Added 'XeGTAO_' prefix to all local functions to avoid name clashes with various user codebases.
 // 1.30 (2021-10-10): Added support for directional component (bent normals).
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -79,7 +79,7 @@ namespace XeGTAO
         float                   SampleDistributionPower;
         float                   ThinOccluderCompensation;
         float                   DepthMIPSamplingOffset;
-        int                     NoiseIndex;                         // frameIndex % 64 if using TAA or 0 otherwise
+        int                     NoiseIndex;                         // frameIndex % 64 if using temporal reconstruction or 0 otherwise
     };
 
     // This is used only for the development (ray traced ground truth).
@@ -160,7 +160,7 @@ namespace XeGTAO
 
     template<class T> inline T clamp( T const & v, T const & min, T const & max ) { assert( max >= min ); if( v < min ) return min; if( v > max ) return max;  return v; }
 
-    // If using TAA then set noiseIndex to frameIndex % 64 - otherwise use 0
+    // If using temporal reconstruction then set noiseIndex to frameIndex % 64 - otherwise use 0
     inline void GTAOUpdateConstants( XeGTAO::GTAOConstants& consts, int viewportWidth, int viewportHeight, const XeGTAO::GTAOSettings & settings, const float projMatrix[16], bool rowMajor, unsigned int frameCounter )
     {
         consts.ViewportSize                 = { viewportWidth, viewportHeight };

@@ -16,6 +16,7 @@ class D3D11VertexBuffer;
 class D3D11ShaderManager;
 
 class D3D11NVAPI;
+class D3D11TemporalState;
 
 enum D3D11ENGINE_RENDER_STAGE {
     DES_Z_PRE_PASS,
@@ -126,6 +127,9 @@ public:
 
     /** Get Window Mode */
     int GetWindowMode();
+
+    /** Syncs Gothic's logical view/camera state to the real game resolution. */
+    void SyncGothicResolutionState( bool refreshCamera );
 
     XRESULT RecreateBuffers();
     /** Called on window resize/resolution change */
@@ -405,6 +409,7 @@ public:
     D3D11Texture* GetWhiteTexture() const { return WhiteTexture.get(); }
 
     RenderToTextureBuffer* GetVelocityBuffer() const { return VelocityBuffer.get(); }
+    D3D11TemporalState* GetTemporalState() const { return TemporalState.get(); }
     const std::vector<SkeletalVobInfo*>& GetFrameVisibleSkeletalVobs() const { return m_FrameGeometryCache.cachedMobs; }
     const std::vector<SkeletalVobInfo*>& GetFrameVisibleNpcVobs() const { return m_FrameGeometryCache.visibleNpcs; }
     void RegisterFrameVisibleNpcVob( SkeletalVobInfo* vobInfo ) {
@@ -709,6 +714,7 @@ private:
     float unionCurrentCustomFontMultiplier;
 
     std::unique_ptr<RenderToTextureBuffer> VelocityBuffer;
+    std::unique_ptr<D3D11TemporalState> TemporalState;
     std::unique_ptr<RenderToTextureBuffer> RainExclusionMaskBuffer;
     XMFLOAT4X4 m_PrevViewProjMatrix;
     

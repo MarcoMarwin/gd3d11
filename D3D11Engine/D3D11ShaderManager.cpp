@@ -13,7 +13,6 @@
 
 #include "D3D11GraphicsEngineBase.h"
 #include <d3dcompiler.h>
-#include "D3D11PFX_TAA.h"
 #include "D3D11FileRelativeInclude.h"
 
 #pragma comment(lib, "d3d11.lib")
@@ -451,12 +450,10 @@ XRESULT D3D11ShaderManager::Init() {
     Shaders.push_back( ShaderInfo::make<VShaderID::VS_AdvanceRain>( "VS_AdvanceRain.hlsl" )
         .with_layout( VERTEX_INPUT_LAYOUT_13 ) );
 
-    // TAA Shader
-    Shaders.push_back( ShaderInfo::make<PShaderID::PS_PFX_TAA>( "PS_PFX_TAA.hlsl" )  );
-
     // Velocity Buffer Shader
     Shaders.push_back( ShaderInfo::make<PShaderID::PS_PFX_Velocity>( "PS_PFX_Velocity.hlsl" ) );
     Shaders.push_back( ShaderInfo::make<PShaderID::PS_PFX_SkyVelocity>( "PS_PFX_SkyVelocity.hlsl" ) );
+    Shaders.push_back( ShaderInfo::make<PShaderID::PS_PFX_MotionBlur>( "PS_PFX_MotionBlur.hlsl" ) );
 
     Shaders.push_back( ShaderInfo::make<PShaderID::PS_PFX_CAS>( "PS_PFX_CAS.hlsl" ));
 

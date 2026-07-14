@@ -403,7 +403,7 @@ public:
 		case D3DTRANSFORMSTATE_PROJECTION: {
             if ( state.RendererInfo.RenderStage == STAGE_DRAW_WORLD ) {
                 // stop the game from constantly resetting the projection matrix
-                // as we may have modified it for TAA. Only allow this once at the start of a frame.
+                // as temporal jitter may have modified it. Only allow this once at the start of a frame.
                 return S_OK;
             }
 

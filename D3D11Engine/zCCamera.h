@@ -108,6 +108,15 @@ public:
         UpdateViewport_Hook( this, nullptr );
     }
 
+    void UpdateViewport( const INT2& realResolution ) {
+        if ( auto view = (_zCView*)targetView; view && view->viewID == 1 ) {
+            view->pposx = 0;
+            view->pposy = 0;
+            view->psizex = realResolution.x;
+            view->psizey = realResolution.y;
+        }
+        HookedFunctions::OriginalFunctions.original_zCCamera__UpdateViewport( this );
+    }
     zTCam_ClipType BBox3DInFrustum( const zTBBox3D& box ) {
         //int flags = 15; // Full clip, no farplane
         int flags = 63;

@@ -13,7 +13,7 @@
 #include "D3D11PFX_SMAA.h"
 #include "D3D11PFX_GodRays.h"
 #include "D3D11PFX_DepthOfField.h"
-#include "D3D11PFX_TAA.h"
+#include "D3D11PFX_MotionBlur.h"
 #include "D3D11PFX_SimpleSharpen.h"
 #include "D3D11PFX_CAS.h"
 #include "D3D11PFX_FSR3.h"
@@ -37,10 +37,10 @@ D3D11PfxRenderer::D3D11PfxRenderer() {
     FX_HDR = std::make_unique<D3D11PFX_HDR>( this );
     FX_GodRays = std::make_unique<D3D11PFX_GodRays>( this );
     FX_DepthOfField = std::make_unique<D3D11PFX_DepthOfField>( this );
+    FX_MotionBlur = std::make_unique<D3D11PFX_MotionBlur>( this );
 
     if ( !FeatureLevel10Compatibility ) {
         FX_SMAA = std::make_unique<D3D11PFX_SMAA>( this );
-        FX_TAA = std::make_unique<D3D11PFX_TAA>( this );
         PFX_XeGTAO = std::make_unique<D3D11PFX_XeGTAO>( this );
         PFX_FSR3 = std::make_unique<D3D11PFX_FSR3>( this );
     }
@@ -76,6 +76,14 @@ XRESULT D3D11PfxRenderer::RenderGodRays(ID3D11ShaderResourceView* backbuffer, ID
 /** Renders the depth-of-field effect */
 XRESULT D3D11PfxRenderer::RenderDepthOfField( ID3D11ShaderResourceView* backbuffer ) {
     return FX_DepthOfField->Render( backbuffer );
+}
+
+XRESULT D3D11PfxRenderer::RenderMotionBlur( ID3D11RenderTargetView* outputRTV,
+                                           ID3D11ShaderResourceView* sceneSRV,
+                                           ID3D11ShaderResourceView* velocitySRV,
+                                           ID3D11ShaderResourceView* depthSRV ) {
+    if ( !FX_MotionBlur ) return XR_FAILED;
+    return FX_MotionBlur->Render( outputRTV, sceneSRV, velocitySRV, depthSRV );
 }
 
 XRESULT D3D11PfxRenderer::RenderWetGroundSSR(
@@ -171,34 +179,6 @@ void D3D11PfxRenderer::ResetHDRAdaptation() {
 /** Renders the SMAA-Effect */
 XRESULT D3D11PfxRenderer::RenderSMAA(ID3D11ShaderResourceView* backbuffer) {
     FX_SMAA->RenderPostFX( backbuffer );
-    return XR_SUCCESS;
-}
-
-/** Renders the TAA-Effect */
-XRESULT D3D11PfxRenderer::RenderTAA(const Microsoft::WRL::ComPtr<ID3D11ShaderResourceView>& velocityBuffer) {
-    auto* engine = reinterpret_cast<D3D11GraphicsEngine*>(Engine::GraphicsEngine);
-    auto& context = engine->GetContext();
-
-    // WICHTIG: Depth-Buffer als DSV entbinden, damit er als SRV gelesen werden kann!
-    // Speichere aktuellen RTV, setze DSV auf nullptr
-    Microsoft::WRL::ComPtr<ID3D11RenderTargetView> currentRTV;
-    Microsoft::WRL::ComPtr<ID3D11DepthStencilView> currentDSV;
-    context->OMGetRenderTargets( 1, currentRTV.GetAddressOf(), currentDSV.GetAddressOf() );
-    context->OMSetRenderTargets( 1, currentRTV.GetAddressOf(), nullptr );  // DSV = nullptr!
-
-    // First, generate the velocity buffer from depth
-    if (!velocityBuffer.Get()) {
-        FX_TAA->RenderVelocityBuffer(engine->GetDepthBuffer()->GetShaderResView());
-    }
-    
-    // Then render TAA using the velocity buffer
-    FX_TAA->RenderPostFX(
-        engine->GetHDRBackBuffer().GetShaderResView(),
-        engine->GetDepthBuffer()->GetShaderResView(),
-        velocityBuffer.Get() ? velocityBuffer : FX_TAA->GetVelocityBufferSRV()
-    );
-    // Restore DSV if needed
-    context->OMSetRenderTargets(1, currentRTV.GetAddressOf(), currentDSV.Get());
     return XR_SUCCESS;
 }
 
@@ -343,7 +323,6 @@ XRESULT D3D11PfxRenderer::OnResize( const INT2& newResolution ) {
     m_texturePool->Clear(); // textures will be created on demand
     if ( !FeatureLevel10Compatibility ) {
         FX_SMAA->OnResize( newResolution );
-        FX_TAA->OnResize( newResolution );
     }
 
     return XR_SUCCESS;
@@ -419,7 +398,7 @@ XRESULT D3D11PfxRenderer::RenderScreenSpaceLighting(
     cb.SSL_EnableGI = giActive ? 1.0f : 0.0f;
     cb.SSL_HistoryValid = ScreenSpaceLightingHistoryValid ? 1.0f : 0.0f;
     cb.SSL_FSR3Active = (settings.Upscaler == GothicRendererSettings::UPSCALER_FSR_3
-        && settings.AntiAliasingMode == GothicRendererSettings::AA_FSR) ? 1.0f : 0.0f;
+        && settings.AntiAliasingMode == GothicRendererSettings::AA_FSR3) ? 1.0f : 0.0f;
     cb.SSL_FrameIndex = static_cast<float>(ScreenSpaceLightingFrameIndex++ & 1023u);
     if ( sky ) {
         const XMFLOAT3 mainLightDirection = sky->GetMainLightDirection();
@@ -456,7 +435,7 @@ XRESULT D3D11PfxRenderer::RenderScreenSpaceLighting(
     temporalPS->Apply();
     cb.SSL_HistoryValid = ScreenSpaceLightingHistoryValid ? 1.0f : 0.0f;
     cb.SSL_FSR3Active = (settings.Upscaler == GothicRendererSettings::UPSCALER_FSR_3
-        && settings.AntiAliasingMode == GothicRendererSettings::AA_FSR) ? 1.0f : 0.0f;
+        && settings.AntiAliasingMode == GothicRendererSettings::AA_FSR3) ? 1.0f : 0.0f;
     temporalPS->GetBuffer( "ScreenSpaceLightingConstantBuffer" ).Update( &cb ).Bind();
 
     ID3D11RenderTargetView* temporalRTVs[2] = {
@@ -790,9 +769,5 @@ void D3D11PfxRenderer::FreeResources()
     if ( this->FX_SMAA 
         && settings.AntiAliasingMode != GothicRendererSettings::AA_SMAA ) {
         this->FX_SMAA->ReleaseResources();
-    }
-    if ( this->FX_TAA 
-        && settings.AntiAliasingMode != GothicRendererSettings::AA_TAA ) {
-        this->FX_TAA->ReleaseResources();
     }
 }

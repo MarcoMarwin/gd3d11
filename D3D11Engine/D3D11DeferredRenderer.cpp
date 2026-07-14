@@ -57,9 +57,9 @@ void D3D11DeferredRenderer::AddGeometryPasses( RenderGraph& graph,
             auto transparencyAndCompositionMask = graph.GetPhysicalTexture( transparencyAndCompositionMaskResource );
             auto velocityBuffer = graph.GetPhysicalTexture( velocityBufferHandle );
 
-            const auto aaMode = Engine::GAPI->GetRendererState().RendererSettings.AntiAliasingMode;
-            if ( aaMode != GothicRendererSettings::AA_TAA
-                && aaMode != GothicRendererSettings::AA_FSR
+            const auto& settings = Engine::GAPI->GetRendererState().RendererSettings;
+            const auto aaMode = settings.AntiAliasingMode;
+            if ( !settings.EnableMotionBlur
                 && aaMode != GothicRendererSettings::AA_FSR3 ) {
                 velocityBuffer = nullptr; // don't write velocity if not needed.
                 // NOTE: we should automate this, by putting the velocity 

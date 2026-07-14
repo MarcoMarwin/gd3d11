@@ -205,7 +205,7 @@ XRESULT D3D11Effect::DrawRain( bool outputResolution, bool useRainExclusionMask 
     acb.AR_MoveRainParticles = state.RendererSettings.RainMoveParticles ? 1 : 0;
     acb.AR_Pad1.x = useRainExclusionMask ? 1.0f : 0.0f;
     acb.AR_Pad1.y = !outputResolution
-        && state.RendererSettings.AntiAliasingMode == GothicRendererSettings::AA_FSR
+        && state.RendererSettings.AntiAliasingMode == GothicRendererSettings::AA_FSR3
         && state.RendererSettings.Upscaler == GothicRendererSettings::UPSCALER_FSR_3 ? 1.0f : 0.0f;
     acb.AR_Pad1.z = outputResolution
         ? static_cast<float>(e->GetResolution().x) / static_cast<float>(e->GetBackbufferResolution().x)
@@ -410,7 +410,7 @@ XRESULT D3D11Effect::DrawRain_CS( bool outputResolution, bool useRainExclusionMa
     acb.AR_MoveRainParticles = numParticles;
     acb.AR_Pad1.x = useRainExclusionMask ? 1.0f : 0.0f;
     acb.AR_Pad1.y = !outputResolution
-        && state.RendererSettings.AntiAliasingMode == GothicRendererSettings::AA_FSR
+        && state.RendererSettings.AntiAliasingMode == GothicRendererSettings::AA_FSR3
         && state.RendererSettings.Upscaler == GothicRendererSettings::UPSCALER_FSR_3 ? 1.0f : 0.0f;
     acb.AR_Pad1.z = outputResolution
         ? static_cast<float>(e->GetResolution().x) / static_cast<float>(e->GetBackbufferResolution().x)

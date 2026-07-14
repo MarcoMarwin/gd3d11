@@ -717,9 +717,6 @@
       <Filter>Engine</Filter>
     </ClInclude>
     <ClInclude Include="GothicExternals.h" />
-    <ClInclude Include="D3D11PFX_TAA.h">
-      <Filter>Engine\D3D11\PFX\Effects</Filter>
-    </ClInclude>
     <ClInclude Include="D3D11PFX_SimpleSharpen.h">
       <Filter>Engine\D3D11\PFX\Effects</Filter>
     </ClInclude>
@@ -790,6 +787,9 @@
     </ClInclude>
     <ClInclude Include="zCSoundSystem.h">
       <Filter>ZenGin\Classes</Filter>
+    </ClInclude>
+    <ClInclude Include="D3D11TemporalState.h">
+      <Filter>Engine\D3D11</Filter>
     </ClInclude>
     <ClInclude Include="D3D11Upscaling.h">
       <Filter>Engine\D3D11</Filter>
@@ -906,6 +906,9 @@
     <ClCompile Include="D3D11PFX_DepthOfField.cpp">
       <Filter>Engine\D3D11\PFX\Effects</Filter>
     </ClCompile>
+    <ClCompile Include="D3D11PFX_MotionBlur.cpp">
+      <Filter>Engine\D3D11\PFX\Effects</Filter>
+    </ClCompile>
     <ClCompile Include="D3D11OcclusionQuerry.cpp">
       <Filter>Engine\D3D11</Filter>
     </ClCompile>
@@ -1014,9 +1017,6 @@
     <ClCompile Include="D3D11PFX_CAS.cpp">
       <Filter>Engine\D3D11\PFX\Effects</Filter>
     </ClCompile>
-    <ClCompile Include="D3D11PFX_TAA.cpp">
-      <Filter>Engine\D3D11\PFX\Effects</Filter>
-    </ClCompile>
     <ClCompile Include="D3D11PFX_SimpleSharpen.cpp">
       <Filter>Engine\D3D11\PFX\Effects</Filter>
     </ClCompile>
@@ -1061,6 +1061,9 @@
     </ClCompile>
     <ClCompile Include="zSndMss.cpp">
       <Filter>ZenGin\Classes</Filter>
+    </ClCompile>
+    <ClCompile Include="D3D11TemporalState.cpp">
+      <Filter>Engine\D3D11</Filter>
     </ClCompile>
     <ClCompile Include="D3D11Upscaling.cpp">
       <Filter>Engine\D3D11</Filter>
@@ -1108,13 +1111,13 @@
     <None Include="include\assimp\.editorconfig">
       <Filter>Librarys\Assimp</Filter>
     </None>
-    <None Include="Shaders\PS_PFX_TAA.hlsl">
-      <Filter>Engine\Shaders</Filter>
-    </None>
     <None Include="Shaders\PS_PFX_Velocity.hlsl">
       <Filter>Engine\Shaders</Filter>
     </None>
     <None Include="Shaders\PS_PFX_SkyVelocity.hlsl">
+      <Filter>Engine\Shaders</Filter>
+    </None>
+    <None Include="Shaders\PS_PFX_MotionBlur.hlsl">
       <Filter>Engine\Shaders</Filter>
     </None>
     <None Include="Shaders\PS_PFX_LowClouds.hlsl">

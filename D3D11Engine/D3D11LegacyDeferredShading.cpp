@@ -24,10 +24,9 @@ XRESULT D3D11LegacyDeferredShading::DrawPointlightLights(
     auto& context = graphicsEngine->GetContext();
     auto& settings = Engine::GAPI->GetRendererState().RendererSettings;
     const bool fsr3TemporalShadows = settings.Upscaler == GothicRendererSettings::UPSCALER_FSR_3
-        && settings.AntiAliasingMode == GothicRendererSettings::AA_FSR
+        && settings.AntiAliasingMode == GothicRendererSettings::AA_FSR3
         && settings.ResolutionScalePercent < 100;
-    const bool temporalPointlightShadows = fsr3TemporalShadows
-        || settings.AntiAliasingMode == GothicRendererSettings::AA_TAA;
+    const bool temporalPointlightShadows = fsr3TemporalShadows;
     const float pointlightRenderScale = fsr3TemporalShadows
         ? std::clamp( static_cast<float>(settings.ResolutionScalePercent) * 0.01f, 0.33f, 1.0f )
         : 1.0f;

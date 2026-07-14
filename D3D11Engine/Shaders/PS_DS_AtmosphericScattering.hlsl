@@ -288,7 +288,7 @@ float4 PSMain(PS_INPUT Input) : SV_TARGET
 
         float3 biasedWsPosition = ApplyReceiverNormalBias(wsPosition, wsNormal, wsLightDirection, texelWorldSize, vegetationReceiverMask);
 
-        // Use screen position for per-pixel rotation (TAA-friendly)
+        // Use screen position for per-pixel rotation (temporal-friendly)
         shadow = ComputeCascadedShadowValueSoft(biasedWsPosition, vsPosition.z, vertLighting, 0.0f, Input.vPosition.xy, npcMaterial);
 	} else {
         // Night-time sky ambient:

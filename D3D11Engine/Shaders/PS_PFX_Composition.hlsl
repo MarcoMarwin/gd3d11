@@ -393,8 +393,15 @@ float4 PSMain( PS_INPUT Input ) : SV_TARGET
         float4 fog = ComputeHeightFog( Input.vTexcoord, Input.vPosition.xy );
         color.rgb = lerp( color.rgb, fog.rgb, fog.a );
         float nightTimeBlend = smoothstep(0.0f, 1.0f, saturate(-AC_LightPos.y * 4.0f));
+        float nightAtmosphereBlend = nightTimeBlend * saturate(AC_EnableNightAtmosphere);
+        float activeWeatherFog = saturate(AC_RainFXWeight);
+        float nightFogBrightness = lerp(1.0f, max(0.0f, AC_NightFogBrightness), saturate(AC_EnableNightAtmosphere));
+        float3 nightRainVeilColor = float3(0.12f, 0.18f, 0.27f) * nightFogBrightness / 2.5f;
+        float3 rainVeilColor = lerp(fog.rgb, nightRainVeilColor, nightAtmosphereBlend);
+        float rainVeil = activeWeatherFog * lerp(0.055f, 0.18f, nightAtmosphereBlend);
+        color.rgb = lerp(color.rgb, rainVeilColor, rainVeil);
         float ditherStrength = lerp(1.0f, 2.5f, nightTimeBlend) / 255.0f;
-        color.rgb = saturate(color.rgb + FogDither(Input.vPosition.xy) * fog.a * ditherStrength);
+        color.rgb = saturate(color.rgb + FogDither(Input.vPosition.xy) * max(fog.a, rainVeil) * ditherStrength);
     }
 #endif
 

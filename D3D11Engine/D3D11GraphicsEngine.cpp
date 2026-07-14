@@ -23,6 +23,7 @@
 #include "zCQuadMark.h"
 #include "zCTexture.h"
 #include "zCView.h"
+#include "zCCamera.h"
 #include "zCVobLight.h"
 #include "oCNPC.h"
 #include "oCGame.h"
@@ -48,7 +49,7 @@
 #include <dxgi1_6.h>
 
 #include "D3D11PFX_FSR3.h"
-#include "D3D11PFX_TAA.h"
+#include "D3D11TemporalState.h"
 #include "ImGuiShim.h"
 #include "zCModel.h"
 #include "zCMorphMesh.h"
@@ -466,6 +467,7 @@ D3D11GraphicsEngine::D3D11GraphicsEngine() :
     m_FrameNeedsJitter(false)
 {
     Effects = std::make_unique<D3D11Effect>();
+    TemporalState = std::make_unique<D3D11TemporalState>();
     LineRenderer = std::make_unique<D3D11LineRenderer>();
     Occlusion = std::make_unique<D3D11OcclusionQuerry>();
 
@@ -1249,6 +1251,30 @@ int D3D11GraphicsEngine::GetWindowMode() {
         : WINDOW_MODE_WINDOWED;
 }
 
+void D3D11GraphicsEngine::SyncGothicResolutionState( bool refreshCamera ) {
+    const INT2 realResolution = GetBackbufferResolution();
+    if ( realResolution.x <= 0 || realResolution.y <= 0 ) {
+        return;
+    }
+
+    zCView::SetWindowMode( realResolution.x, realResolution.y, 32 );
+    zCView::SetVirtualMode(
+        static_cast<int>(realResolution.x),
+        static_cast<int>(realResolution.y),
+        32 );
+
+    POINT virtualSize = { 8192, 8192 };
+    zCViewDraw::GetScreen().SetVirtualSize( virtualSize );
+
+    if ( refreshCamera ) {
+        if ( zCCamera* camera = zCCamera::GetCamera() ) {
+            camera->UpdateViewport( realResolution );
+            camera->Activate();
+            camera->UpdateViewport( realResolution );
+            SetViewport( ViewportInfo( 0, 0, realResolution ) );
+        }
+    }
+}
 XRESULT D3D11GraphicsEngine::RecreateBuffers() {
     INT2 bbres = GetBackbufferResolution();
 
@@ -1354,20 +1380,7 @@ XRESULT D3D11GraphicsEngine::OnResize( INT2 newSize ) {
     m_swapchainResolution = requestedSwapchainSize;
     INT2 bbres = GetBackbufferResolution();
 
-    // Keep Gothic's logical UI surface in sync with the selected swapchain size.
-    // Borderless presentation stretches that complete surface to the desktop.
-    zCView::SetWindowMode(
-        Resolution.x,
-        Resolution.y,
-        32 );
-
-    zCView::SetVirtualMode(
-        static_cast<int>(Resolution.x),
-        static_cast<int>(Resolution.y),
-        32 );
-
-    POINT virtualSize = { 8192, 8192 };
-    zCViewDraw::GetScreen().SetVirtualSize( virtualSize );
+    SyncGothicResolutionState( false );
 
 #ifndef BUILD_SPACER
     BOOL isFullscreen = 0;
@@ -1932,14 +1945,10 @@ void RenderVelocity(D3D11GraphicsEngine* engine,
     ps->Apply();
 
     engine->GetPfxRenderer()->CopyTextureToRTV(
-        !settings.DebugSettings.TAA.DepthMotionVectors
-                ? engine->GetVelocityBuffer()->GetShaderResView()
-                : engine->GetPfxRenderer()->GetTAAEffect()
-                    ? engine->GetPfxRenderer()->GetTAAEffect()->GetVelocityBufferSRV()
-                    : nullptr,
-            rtv,
-            engine->GetBackbufferResolution(),
-            /* useCustomPS: */ true);
+        engine->GetVelocityBuffer()->GetShaderResView(),
+        rtv,
+        engine->GetBackbufferResolution(),
+        /* useCustomPS: */ true);
 }
 
 /** Presents the current frame to the screen */
@@ -1996,13 +2005,8 @@ XRESULT D3D11GraphicsEngine::Present() {
         PfxRenderer->CopyTextureToRTV( Backbuffer->GetShaderResView(), presentationRTV, {}, true );
 
         static int show_velocity = 0;
-        if ( settings.DebugSettings.TAA.DisplayVelocity ) {
+        if ( settings.DebugSettings.Velocity.DisplayVelocity || show_velocity == 2 ) {
             RenderVelocity( this, settings, presentationRTV );
-        } else if ( show_velocity == 2 && GetPfxRenderer()->GetTAAEffect() ) {
-            GetPfxRenderer()->CopyTextureToRTV(
-                GetPfxRenderer()->GetTAAEffect()->GetVelocityBufferSRV(),
-                presentationRTV,
-                GetBackbufferResolution() );
         }
 
         GetContext()->OMSetRenderTargets( 1, presentationRTV.GetAddressOf(), nullptr );
@@ -3010,7 +3014,7 @@ void D3D11GraphicsEngine::DrawSkeletalMeshVobs(
     } graphicsSwitchRestore { graphicsState.FF_GSwitches, graphicsState.FF_GSwitches };
     const auto& rendererSettings = Engine::GAPI->GetRendererState().RendererSettings;
     if ( isMainStage
-        && rendererSettings.AntiAliasingMode == GothicRendererSettings::AA_FSR
+        && rendererSettings.AntiAliasingMode == GothicRendererSettings::AA_FSR3
         && rendererSettings.Upscaler == GothicRendererSettings::UPSCALER_FSR_3 ) {
         graphicsState.FF_GSwitches |= GSWITCH_FSR3_REACTIVE;
         if ( !Engine::GAPI->DialogFinished() ) {
@@ -4072,17 +4076,13 @@ XRESULT D3D11GraphicsEngine::OnStartWorldRendering() {
     D3D11Upscaling u;
     u.UpdateUpscaling( *this );
 
-    bool requireJitter = m_FrameNeedsJitter
-        || rendererState.RendererSettings.AntiAliasingMode == GothicRendererSettings::AA_TAA;
+    bool requireJitter = m_FrameNeedsJitter;
 
-    if ( requireJitter ) {
-        if ( PfxRenderer && PfxRenderer->GetTAAEffect() ) {
-            // If enabled, advance jitter and apply to projection
-            PfxRenderer->GetTAAEffect()->AdvanceJitter();
-        }
-    } else {
-        if ( PfxRenderer && PfxRenderer->GetTAAEffect() ) {
-            PfxRenderer->GetTAAEffect()->OnDisabled();
+    if ( TemporalState ) {
+        if ( requireJitter ) {
+            TemporalState->AdvanceJitter();
+        } else {
+            TemporalState->OnDisabled();
         }
     }
 
@@ -4249,18 +4249,18 @@ XRESULT D3D11GraphicsEngine::OnStartWorldRendering() {
     const bool fsr3UpscalingActive = GetDevice()->GetFeatureLevel() >= D3D_FEATURE_LEVEL_11_0
         && rendererState.RendererSettings.Upscaler == GothicRendererSettings::UPSCALER_FSR_3
         && rendererState.RendererSettings.ResolutionScalePercent <= 100
-        && rendererState.RendererSettings.AntiAliasingMode == GothicRendererSettings::AA_FSR
-        && PfxRenderer && PfxRenderer->GetFSR3() && PfxRenderer->GetTAAEffect();
+        && rendererState.RendererSettings.AntiAliasingMode == GothicRendererSettings::AA_FSR3
+        && PfxRenderer && PfxRenderer->GetFSR3() && TemporalState;
     const bool renderTemporalSkyVelocity = rendererState.RendererSettings.DrawSky
         && fsr3UpscalingActive;
     XMFLOAT4X4 skyCurrentInvViewProj;
     const XMFLOAT4X4 skyPreviousViewProj = m_PrevViewProjMatrix;
     XMFLOAT2 skyJitterOffset( 0.0f, 0.0f );
-    if ( PfxRenderer && PfxRenderer->GetTAAEffect() ) {
-        const XMFLOAT4X4& currentViewProj = PfxRenderer->GetTAAEffect()->GetUnjitteredViewProj();
+    if ( TemporalState ) {
+        const XMFLOAT4X4& currentViewProj = TemporalState->GetUnjitteredViewProj();
         XMStoreFloat4x4( &skyCurrentInvViewProj,
             XMMatrixInverse( nullptr, XMLoadFloat4x4( &currentViewProj ) ) );
-        skyJitterOffset = PfxRenderer->GetTAAEffect()->GetJitterOffset();
+        skyJitterOffset = TemporalState->GetJitterOffset();
     } else {
         XMFLOAT4X4 currentProjection = Engine::GAPI->GetProjectionMatrix();
         currentProjection._13 = 0.0f;
@@ -4347,8 +4347,7 @@ XRESULT D3D11GraphicsEngine::OnStartWorldRendering() {
         waterMaskResource = graph.ImportResource( L"RainExclusionMask", RainExclusionMaskBuffer.get() );
     }
     const bool fsr3ActiveForReactiveMask = rendererState.RendererSettings.AntiAliasingMode == GothicRendererSettings::AA_FSR3
-        || (rendererState.RendererSettings.AntiAliasingMode == GothicRendererSettings::AA_FSR
-            && rendererState.RendererSettings.Upscaler == GothicRendererSettings::UPSCALER_FSR_3);
+        && rendererState.RendererSettings.Upscaler == GothicRendererSettings::UPSCALER_FSR_3;
 
     graph.AddPass( RG_PASS_NAME("DrawWaterSurfaces"), [&]( RGBuilder& builder, RenderPass& pass ) {
         builder.Read( backBufferHandle );
@@ -4830,25 +4829,6 @@ XRESULT D3D11GraphicsEngine::OnStartWorldRendering() {
         };
     } );
 
-    if ( rendererState.RendererSettings.AntiAliasingMode
-        == GothicRendererSettings::AA_TAA ) {
-        // TAA before any HDR stuff
-        graph.AddPass( RG_PASS_NAME("Render TAA"), [&]( RGBuilder& builder, RenderPass& pass ) {
-            builder.Read( velocityBufferHandle );
-            builder.Write( backBufferHandle );
-
-            pass.m_executeCallback = [this, &rendererState, velocityBufferHandle](const RenderGraph& graph) {
-                TracyD3D11ZoneCGX( "D3D11GraphicsEngine::Render TAA" );
-
-                auto velocityBufferTex = graph.GetPhysicalTexture( velocityBufferHandle );
-                PfxRenderer->RenderTAA( rendererState.RendererSettings.DebugSettings.TAA.DepthMotionVectors
-                    ? nullptr
-                    : velocityBufferTex->GetShaderResView() );
-                GetContext()->PSSetSamplers( 0, 1, DefaultSamplerState.GetAddressOf() );
-            };
-        } );
-    }
-
     if ( rendererState.RendererSettings.EnableHDR ) {
         graph.AddPass( RG_PASS_NAME("Render HDR"), [&]( RGBuilder& builder, RenderPass& pass ) {
             builder.Read( backBufferHandle );
@@ -4878,6 +4858,26 @@ XRESULT D3D11GraphicsEngine::OnStartWorldRendering() {
         } );
     }
 
+
+    if ( rendererState.RendererSettings.EnableMotionBlur ) {
+        graph.AddPass( RG_PASS_NAME("Motion Blur"), [&]( RGBuilder& builder, RenderPass& pass ) {
+            builder.Read( backBufferHandle );
+            builder.Read( velocityBufferHandle );
+            builder.Write( backBufferHandle );
+
+            pass.m_executeCallback = [this, backBufferHandle, velocityBufferHandle](const RenderGraph& graph) {
+                TracyD3D11ZoneCGX( "D3D11GraphicsEngine::Motion Blur" );
+                auto backbufferTex = graph.GetPhysicalTexture( backBufferHandle );
+                auto velocityTex = graph.GetPhysicalTexture( velocityBufferHandle );
+                PfxRenderer->RenderMotionBlur(
+                    backbufferTex->GetRenderTargetView().Get(),
+                    backbufferTex->GetShaderResView().Get(),
+                    velocityTex->GetShaderResView().Get(),
+                    DepthStencilBuffer->GetShaderResView().Get() );
+                GetContext()->PSSetSamplers( 0, 1, DefaultSamplerState.GetAddressOf() );
+            };
+        } );
+    }
 
     graph.AddPass( RG_PASS_NAME("Reset Viewport"), [&]( RGBuilder& builder, RenderPass& pass ) {
         builder.Write( backBufferHandle );
@@ -5065,11 +5065,9 @@ void D3D11GraphicsEngine::SetupVS_ExConstantBuffer() {
     XMStoreFloat4x4( &cb.ViewProj, XMMatrixMultiply( XMLoadFloat4x4( &proj ), XMLoadFloat4x4( &view ) ) );
     cb.PrevViewProj = m_PrevViewProjMatrix;
 
-    // Get unjittered ViewProj for velocity calculation
-    if ( PfxRenderer && PfxRenderer->GetTAAEffect() ) {
-        cb.UnjitteredViewProj = PfxRenderer->GetTAAEffect()->GetUnjitteredViewProj();
+    if ( TemporalState ) {
+        cb.UnjitteredViewProj = TemporalState->GetUnjitteredViewProj();
     } else {
-        // If TAA not active, ViewProj is already unjittered
         cb.UnjitteredViewProj = cb.ViewProj;
     }
 
@@ -9974,16 +9972,11 @@ void D3D11GraphicsEngine::DrawString( const std::string& str, float x, float y, 
 }
 
 void D3D11GraphicsEngine::StorePrevViewProjMatrix() {
-    // Store UNJITTERED view-projection matrix for motion vectors
-    // This is crucial: both current and previous ViewProj must be unjittered
-    // for correct velocity calculation
-    if ( PfxRenderer && PfxRenderer->GetTAAEffect() ) {
-        m_PrevViewProjMatrix = PfxRenderer->GetTAAEffect()->GetUnjitteredViewProj();
+    if ( TemporalState ) {
+        m_PrevViewProjMatrix = TemporalState->GetUnjitteredViewProj();
     } else {
-        // Fallback if TAA is not active
         XMMATRIX view = Engine::GAPI->GetViewMatrixXM();
         auto projF = Engine::GAPI->GetProjectionMatrix();
-        // Remove any jitter that might be in the projection
         projF._13 = 0;
         projF._23 = 0;
         XMMATRIX viewProj = XMMatrixMultiply( XMLoadFloat4x4( &projF ), view );
