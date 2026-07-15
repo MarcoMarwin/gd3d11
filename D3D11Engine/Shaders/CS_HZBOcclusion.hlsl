@@ -26,14 +26,14 @@ void CSMain(uint3 dispatchThreadId : SV_DispatchThreadID)
     endPixel.x = min(endPixel.x, InputWidth);
     endPixel.y = min(endPixel.y, InputHeight);
 
-    float nearestDepth = 0.0f;
+    float conservativeDepth = 1.0f;
     for (uint y = startPixel.y; y < endPixel.y; ++y)
     {
         for (uint x = startPixel.x; x < endPixel.x; ++x)
         {
-            nearestDepth = max(nearestDepth, DepthInput.Load(int3(x, y, 0)));
+            conservativeDepth = min(conservativeDepth, DepthInput.Load(int3(x, y, 0)));
         }
     }
 
-    HZBOutput[dispatchThreadId.xy] = nearestDepth;
+    HZBOutput[dispatchThreadId.xy] = conservativeDepth;
 }

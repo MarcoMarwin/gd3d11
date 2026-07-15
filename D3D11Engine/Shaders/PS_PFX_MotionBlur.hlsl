@@ -58,10 +58,17 @@ float4 PSMain(PS_INPUT Input) : SV_TARGET
     float2 velocity = TX_Velocity.SampleLevel(SS_Point, uv, 0).rg * MB_Strength;
 
     float aspect = resolution.x / max(resolution.y, 1.0f);
-    float2 centered = uv - float2(0.5f, 0.5f);
-    centered.x *= aspect;
-    float peripheralWeight = smoothstep(0.18f, 0.75f, length(centered));
-    velocity *= lerp(0.70f, 1.15f, peripheralWeight);
+    float2 centerArea = uv - float2(0.5f, 0.50f);
+    centerArea.x *= aspect;
+    float centerBlurMask = smoothstep(0.30f, 0.82f, length(centerArea * 2.0f));
+
+    float2 heroArea = uv - float2(0.5f, 0.68f);
+    heroArea.x *= aspect * 1.10f;
+    heroArea.y *= 1.65f;
+    float heroBlurMask = smoothstep(0.18f, 0.46f, length(heroArea));
+
+    float edgeBlurMask = min(centerBlurMask, heroBlurMask);
+    velocity *= edgeBlurMask;
 
     float velocityPixels = length(velocity * resolution);
     if (velocityPixels < MB_MinVelocityPixels) {
@@ -77,8 +84,8 @@ float4 PSMain(PS_INPUT Input) : SV_TARGET
     float weightSum = 1.0f;
 
     [unroll]
-    for (int i = 0; i < 6; ++i) {
-        float shutter = ((float)i + 0.5f) / 6.0f - 0.5f;
+    for (int i = 1; i <= 6; ++i) {
+        float shutter = (float)i / 6.0f;
         float2 sampleUV = uv + velocity * shutter;
         if (sampleUV.x < 0.0f || sampleUV.x > 1.0f || sampleUV.y < 0.0f || sampleUV.y > 1.0f) {
             continue;

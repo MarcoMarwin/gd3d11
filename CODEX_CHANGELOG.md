@@ -514,3 +514,11 @@ Kurze, append-only Dokumentation der von Codex gepushten Renderer-Builds.
 - Wasser-SSR: der nicht erfolgreiche Vordergrund-Occluder-/Thin-Fill-Fix wurde wieder auf den Build-124-Wasser-SSR-Stand zurueckgesetzt, ohne Wet-Ground-SSR anzufassen.
 - Grenzen: Render Scale, Aspect-/Viewport- und echte Aufloesungswechsel-Pfade bleiben unveraendert.
 - Pruefung: AGENTS-Regeln gelesen; Buildnummer aus outputs ermittelt; origin/master mit PortableGit/OpenSSL abgeglichen; PS_Water.hlsl gegen Build 124 verglichen; HZB-/Occlusion-Projektpfade, alte Query-Reste, SSR-Fallback-Marker, Render-Scale-/Aspect-Grenze, Shader-Escape-Artefakte und git diff --check statisch kontrolliert. Kein vollstaendiger lokaler C++-/Shader-Build.
+
+## Build 129 (Konservative HZB-Occlusion, DoF-Rueckbau und Motion-Blur-Randlook)
+
+- Occlusion: die HZB-Reduktion nutzt fuer reversed-Z nun konservative Mindest-Tiefen statt naechster Max-Tiefen, damit einzelne nahe Pixel keine sichtbaren VOBs/Vegetation ueber ganze Kacheln wegcullen; das versteckte Tiny-Screen-Culling unter derselben Option ist entfernt.
+- DoF: die Depth-of-Field-Shader sind wieder auf den Build-127-Look zurueckgesetzt, inklusive vorheriger CoC-/Sky-Edge-Logik.
+- Motion Blur: Randmaske, Heldenbereich, Samplingrichtung und Konstanten folgen wieder Build 127; die aktuelle depth-aware Kantenabsicherung gegen Silhouettenartefakte bleibt erhalten.
+- Grenzen: Render Scale, Aspect-/Viewport-, Kamera- und echte Aufloesungswechsel-Pfade bleiben unveraendert.
+- Pruefung: AGENTS-Regeln gelesen; Buildnummer aus outputs ermittelt; origin/master mit PortableGit/OpenSSL abgeglichen; DoF-Shader gegen Build 127 verglichen; HZB-/Tiny-Cull-, Motion-Blur- und Shader-Escape-Artefakte sowie git diff --check statisch kontrolliert. Kein vollstaendiger lokaler C++-/Shader-Build.

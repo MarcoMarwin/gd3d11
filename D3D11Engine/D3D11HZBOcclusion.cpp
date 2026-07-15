@@ -170,15 +170,15 @@ void D3D11HZBOcclusion::BuildMipsFromReadback( const D3D11_MAPPED_SUBRESOURCE& m
             for ( UINT x = 0; x < dst.Width; ++x ) {
                 const UINT sx = x * 2u;
                 const UINT sy = y * 2u;
-                float nearest = 0.0f;
+                float conservativeDepth = 1.0f;
                 for ( UINT oy = 0; oy < 2u; ++oy ) {
                     for ( UINT ox = 0; ox < 2u; ++ox ) {
                         const UINT ix = std::min( sx + ox, src.Width - 1u );
                         const UINT iy = std::min( sy + oy, src.Height - 1u );
-                        nearest = std::max( nearest, src.Depth[static_cast<size_t>( iy ) * src.Width + ix] );
+                        conservativeDepth = std::min( conservativeDepth, src.Depth[static_cast<size_t>( iy ) * src.Width + ix] );
                     }
                 }
-                dst.Depth[static_cast<size_t>( y ) * dst.Width + x] = nearest;
+                dst.Depth[static_cast<size_t>( y ) * dst.Width + x] = conservativeDepth;
             }
         }
     }
@@ -238,6 +238,8 @@ float D3D11HZBOcclusion::SampleMipDepth( const MipLevel& mip, int x, int y ) con
 
 bool D3D11HZBOcclusion::IsBoxOccluded( const zTBBox3D& bbox, float meshSize, bool allowTinyCull ) const {
     if ( !m_valid || m_mips.empty() ) return false;
+    (void)meshSize;
+    (void)allowTinyCull;
 
     float minX, minY, maxX, maxY, nearestDepth;
     if ( !ProjectBox( bbox, minX, minY, maxX, maxY, nearestDepth ) ) return false;
@@ -246,7 +248,6 @@ bool D3D11HZBOcclusion::IsBoxOccluded( const zTBBox3D& bbox, float meshSize, boo
     const float rectH = maxY - minY;
     const float rectArea = rectW * rectH;
 
-    if ( allowTinyCull && meshSize > 0.0f && rectW < 1.15f && rectH < 1.15f ) return true;
     if ( rectArea > static_cast<float>( m_width * m_height ) * 0.06f ) return false;
     if ( rectW > 72.0f || rectH > 72.0f ) return false;
 
