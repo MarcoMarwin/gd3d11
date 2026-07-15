@@ -207,13 +207,34 @@ PS_OUTPUT PSMain( PS_INPUT Input )
 				float closeOccluder = 1.0f - smoothstep(1400.0f, 6200.0f, hitViewZ);
 				float foregroundOccluderFade = 1.0f - saturate(foregroundOccluder * max(silhouetteOccluder, closeOccluder * 0.35f)) * 0.82f;
 				reflectionSSR = TX_Scene.SampleLevel(SS_Linear, uv, 0).xyz;
+
+				float thinFillQuality = 0.0f;
+				float thinFillMask = saturate((1.0f - foregroundOccluderFade) * foregroundOccluder * silhouetteOccluder);
+				if (thinFillMask > 0.001f) {
+					float minBehindDelta = max(90.0f, edgeTolerance * 0.55f);
+					float maxBehindDelta = minBehindDelta * 3.0f;
+					float wL = smoothstep(minBehindDelta, maxBehindDelta, abs(zL) - hitViewZ);
+					float wR = smoothstep(minBehindDelta, maxBehindDelta, abs(zR) - hitViewZ);
+					float wU = smoothstep(minBehindDelta, maxBehindDelta, abs(zU) - hitViewZ);
+					float wD = smoothstep(minBehindDelta, maxBehindDelta, abs(zD) - hitViewZ);
+					float fillWeight = wL + wR + wU + wD;
+					if (fillWeight > 0.001f) {
+						float3 fillColor = TX_Scene.SampleLevel(SS_Linear, saturate(uv + float2(-2.0f, 0.0f) * px), 0).xyz * wL;
+						fillColor += TX_Scene.SampleLevel(SS_Linear, saturate(uv + float2( 2.0f, 0.0f) * px), 0).xyz * wR;
+						fillColor += TX_Scene.SampleLevel(SS_Linear, saturate(uv + float2(0.0f, -2.0f) * px), 0).xyz * wU;
+						fillColor += TX_Scene.SampleLevel(SS_Linear, saturate(uv + float2(0.0f,  2.0f) * px), 0).xyz * wD;
+						thinFillQuality = saturate(thinFillMask * saturate(fillWeight) * 0.52f);
+						reflectionSSR = lerp(reflectionSSR, fillColor / fillWeight, thinFillQuality);
+					}
+				}
+
 				ssrHitWorldPosition = midPos;
 				ssrHitValid = 1.0f;
 				float2 edgeFade = saturate(abs(uv - 0.5f) * 2.0f);
 				float edgeDistance = max(edgeFade.x, edgeFade.y);
 				ssrRawWeight = 1.0f - smoothstep(0.78f, 1.0f, edgeDistance);
 				float baseHitQuality = edgeQuality * nearHitQuality;
-				ssrHitQuality = baseHitQuality * foregroundOccluderFade;
+				ssrHitQuality = baseHitQuality * max(foregroundOccluderFade, thinFillQuality);
 				ssrFallbackQuality = baseHitQuality * lerp(0.65f, 1.0f, foregroundOccluderFade);
 				break;
 			}

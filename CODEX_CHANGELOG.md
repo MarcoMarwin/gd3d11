@@ -497,3 +497,10 @@ Kurze, append-only Dokumentation der von Codex gepushten Renderer-Builds.
 - Wasser-SSR: Vordergrundobjekte lassen den Cubemap-Fallback an den betroffenen Wasserstellen weniger stark durchbrechen, ohne Wet-Ground-SSR anzufassen.
 - Vegetation: der Interaktionsradius fuer Hero/NPC-Vegetation ist kleiner, waehrend Staerke und gaussscher Uebergang unveraendert bleiben.
 - Pruefung: AGENTS-Regeln gelesen; Buildnummer aus outputs ermittelt; origin/master mit PortableGit/OpenSSL abgeglichen; Render-Scale-/Aspect-Grenze, Shaderpfade, Dither-/Escape-Artefakte und git diff --check statisch kontrolliert. Kein vollstaendiger lokaler C++-/Shader-Build.
+
+## Build 127 (Motion-Blur-Heldenschutz und Wasser-SSR Thin-Occluder-Fill)
+
+- Motion Blur: die stabile Zone schuetzt nun zusaetzlich den unteren mittigen Heldenbereich, statt nur exakt um die Bildmitte zu liegen.
+- Wasser-SSR: duenne Vordergrund-Occluder wie Seile oder Pfosten bekommen einen kleinen bilateralen Nachbar-Fill aus direkten SSR-Trefferumgebungen; breite Occluder bleiben beim bisherigen Cubemap-Suppression-Fallback.
+- Grenzen: Nebel/Fog, Render Scale, Aspect-/Viewport- und Aufloesungswechsel-Pfade bleiben unveraendert.
+- Pruefung: AGENTS-Regeln gelesen; Buildnummer aus outputs ermittelt; origin/master mit PortableGit/OpenSSL abgeglichen; Fog-/Render-Scale-/Aspect-Grenze, Shader-Escape-Artefakte und git diff --check statisch kontrolliert. Kein vollstaendiger lokaler C++-/Shader-Build.

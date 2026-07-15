@@ -38,9 +38,17 @@ float4 PSMain(PS_INPUT Input) : SV_TARGET
     float2 resolution = 1.0f / MB_InvResolution;
     float2 velocity = TX_Velocity.SampleLevel(SS_Point, uv, 0).rg * MB_Strength;
 
-    float2 centered = uv * 2.0f - 1.0f;
-    centered.x *= resolution.x / max(resolution.y, 1.0f);
-    float edgeBlurMask = smoothstep(0.30f, 0.82f, length(centered));
+    float aspect = resolution.x / max(resolution.y, 1.0f);
+    float2 centerArea = uv - float2(0.5f, 0.50f);
+    centerArea.x *= aspect;
+    float centerBlurMask = smoothstep(0.30f, 0.82f, length(centerArea * 2.0f));
+
+    float2 heroArea = uv - float2(0.5f, 0.68f);
+    heroArea.x *= aspect * 1.10f;
+    heroArea.y *= 1.65f;
+    float heroBlurMask = smoothstep(0.18f, 0.46f, length(heroArea));
+
+    float edgeBlurMask = min(centerBlurMask, heroBlurMask);
     velocity *= edgeBlurMask;
 
     float velocityPixels = length(velocity * resolution);
