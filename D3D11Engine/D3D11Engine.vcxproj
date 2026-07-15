@@ -895,7 +895,7 @@ copy "$(OutDir)$(TargetName).pdb" "$(G1_SYSTEM_PATH)\ddraw.pdb"</Command>
     <ClInclude Include="D3D11IndirectBuffer.h" />
     <ClInclude Include="D3D11LineRenderer.h" />
     <ClInclude Include="D3D11NVAPI.h" />
-    <ClInclude Include="D3D11OcclusionQuerry.h" />
+    <ClInclude Include="D3D11HZBOcclusion.h" />
     <ClInclude Include="D3D11PfxRenderer.h" />
     <ClInclude Include="D3D11PFX_Blur.h" />
     <ClInclude Include="D3D11PFX_DistanceBlur.h" />
@@ -1142,7 +1142,7 @@ copy "$(OutDir)$(TargetName).pdb" "$(G1_SYSTEM_PATH)\ddraw.pdb"</Command>
     <ClCompile Include="D3D11IndirectBuffer.cpp" />
     <ClCompile Include="D3D11LineRenderer.cpp" />
     <ClCompile Include="D3D11NVAPI.cpp" />
-    <ClCompile Include="D3D11OcclusionQuerry.cpp" />
+    <ClCompile Include="D3D11HZBOcclusion.cpp" />
     <ClCompile Include="D3D11PfxRenderer.cpp" />
     <ClCompile Include="D3D11PFX_Blur.cpp" />
     <ClCompile Include="D3D11PFX_CAS.cpp" />
@@ -1276,6 +1276,7 @@ copy "$(OutDir)$(TargetName).pdb" "$(G1_SYSTEM_PATH)\ddraw.pdb"</Command>
     <ClCompile Include="zSndMss.cpp" />
     <None Include="Shaders\VS_DecalInstanced.hlsl" />
     <None Include="Shaders\PS_PFX_VelocityDebug.hlsl" />
+    <None Include="Shaders\CS_HZBOcclusion.hlsl" />
     <ClCompile Include="RenderGraph.cpp" />
     <ClCompile Include="RenderPass.cpp" />
     <ClCompile Include="SMAA\D3D11SMAA.cpp" />

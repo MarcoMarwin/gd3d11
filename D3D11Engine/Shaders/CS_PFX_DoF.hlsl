@@ -56,6 +56,38 @@ bool IsSkyDepth( float depth )
     return depth <= 1e-7f;
 }
 
+float ComputeDilatedCoC( float2 texcoord, float focusDepth, float2 texelSize, float centerCoC )
+{
+    float maxCoC = centerCoC;
+    float avgCoC = centerCoC;
+    float sampleCount = 1.0f;
+
+    [unroll]
+    for ( int y = -1; y <= 1; ++y )
+    {
+        [unroll]
+        for ( int x = -1; x <= 1; ++x )
+        {
+            if ( x == 0 && y == 0 )
+                continue;
+
+            float2 sampleUV = texcoord + float2( x, y ) * texelSize;
+            float sampleDepth = TX_Depth.SampleLevel( SS_Linear, sampleUV, 0 ).r;
+            if ( IsSkyDepth( sampleDepth ) )
+                continue;
+
+            float sampleLinear = CameraDistanceFromDepth( sampleDepth, sampleUV );
+            float sampleCoC = ComputeCoC( sampleLinear, focusDepth, sampleUV );
+            maxCoC = max( maxCoC, sampleCoC );
+            avgCoC += sampleCoC;
+            sampleCount += 1.0f;
+        }
+    }
+
+    avgCoC /= max( sampleCount, 1.0f );
+    float edgeAmount = smoothstep( 0.02f, 0.35f, maxCoC - centerCoC );
+    return lerp( centerCoC, max( avgCoC, maxCoC * 0.88f ), edgeAmount );
+}
 static const int SAMPLE_COUNT = 48;
 
 float2 GetSpiralSample( int index, int count )
@@ -93,9 +125,11 @@ void CSMain( uint3 DTid : SV_DispatchThreadID )
 
     float centerLinear = CameraDistanceFromDepth( centerDepth, texcoord );
     float centerCoC = ComputeCoC( centerLinear, focusDepth, texcoord );
+    float dilatedCoC = ComputeDilatedCoC( texcoord, focusDepth, texelSize, centerCoC );
+    float blurCoC = max( centerCoC, dilatedCoC );
 
     // Early out: pass through sharp pixel
-    if ( centerCoC < 0.01 )
+    if ( blurCoC < 0.01 )
     {
         OutputBlur[DTid.xy] = float4( centerColor, 0.0 );
         return;
@@ -106,7 +140,7 @@ void CSMain( uint3 DTid : SV_DispatchThreadID )
     const float nearMaxBlur = 5.25f;
     float blurRadius = nearCoC > 0.001f
         ? min( nearCoC * nearBlurRadius, nearMaxBlur )
-        : min( centerCoC * DoF_BokehRadius, DoF_MaxBlur );
+        : min( blurCoC * DoF_BokehRadius, DoF_MaxBlur );
 
 #ifdef DOF_GAUSS_BLUR
     // --- Simple Gaussian blur (16 taps) ---
@@ -158,7 +192,7 @@ void CSMain( uint3 DTid : SV_DispatchThreadID )
         float sampleLinear = CameraDistanceFromDepth( sampleDepth, sampleUV );
         float sampleCoC = ComputeCoC( sampleLinear, focusDepth, sampleUV );
 
-        float weight = ( sampleCoC >= length( offset ) * centerCoC ) ? 1.0 : sampleCoC;
+        float weight = ( sampleCoC >= length( offset ) * blurCoC ) ? 1.0 : sampleCoC;
 
         // Asymmetric foreground rejection
         float depthMargin = max( centerLinear * 0.05, 5.0 );
@@ -175,5 +209,5 @@ void CSMain( uint3 DTid : SV_DispatchThreadID )
 
     colorAccum /= max( weightAccum, 0.001 );
 
-    OutputBlur[DTid.xy] = float4( colorAccum, centerCoC );
+    OutputBlur[DTid.xy] = float4( colorAccum, blurCoC );
 }

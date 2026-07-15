@@ -504,3 +504,13 @@ Kurze, append-only Dokumentation der von Codex gepushten Renderer-Builds.
 - Wasser-SSR: duenne Vordergrund-Occluder wie Seile oder Pfosten bekommen einen kleinen bilateralen Nachbar-Fill aus direkten SSR-Trefferumgebungen; breite Occluder bleiben beim bisherigen Cubemap-Suppression-Fallback.
 - Grenzen: Nebel/Fog, Render Scale, Aspect-/Viewport- und Aufloesungswechsel-Pfade bleiben unveraendert.
 - Pruefung: AGENTS-Regeln gelesen; Buildnummer aus outputs ermittelt; origin/master mit PortableGit/OpenSSL abgeglichen; Fog-/Render-Scale-/Aspect-Grenze, Shader-Escape-Artefakte und git diff --check statisch kontrolliert. Kein vollstaendiger lokaler C++-/Shader-Build.
+
+## Build 128 (DoF-Kanten, Motion-Blur-Stabilitaet, HZB-Occlusion, Schatten-Updates und Wasser-SSR-Rueckbau)
+
+- DoF: Vorder- und Hintergrundunschaerfe nutzen eine kleine CoC-Erweiterung, damit geblurte Objektkanten weniger hart ausgeschnitten wirken, waehrend die bestehende Sky-Maske erhalten bleibt.
+- Motion Blur: Staerke und maximale Laenge sind reduziert; Velocity-Dilation und Tiefenkanten-Gewichtung sollen Helden-/Silhouettenartefakte und weisse Uebergangsbereiche abschwaechen.
+- Occlusion: das alte BSP-Predicate-/Query-Culling wurde entfernt; stattdessen baut der Renderer nach dem Welt-Depth-Pass eine kleine Depth-Hierarchie und cullt nur kleine VOBs/Mobs konservativ pro Bounding-Box. Wenn der asynchrone Readback nicht frisch verfuegbar ist, bleibt alles sichtbar.
+- Schatten: entfernte Outdoor-Schatten-Cascades werden bei relevanter Kamera-Bewegung oder -Drehung sofort aktualisiert.
+- Wasser-SSR: der nicht erfolgreiche Vordergrund-Occluder-/Thin-Fill-Fix wurde wieder auf den Build-124-Wasser-SSR-Stand zurueckgesetzt, ohne Wet-Ground-SSR anzufassen.
+- Grenzen: Render Scale, Aspect-/Viewport- und echte Aufloesungswechsel-Pfade bleiben unveraendert.
+- Pruefung: AGENTS-Regeln gelesen; Buildnummer aus outputs ermittelt; origin/master mit PortableGit/OpenSSL abgeglichen; PS_Water.hlsl gegen Build 124 verglichen; HZB-/Occlusion-Projektpfade, alte Query-Reste, SSR-Fallback-Marker, Render-Scale-/Aspect-Grenze, Shader-Escape-Artefakte und git diff --check statisch kontrolliert. Kein vollstaendiger lokaler C++-/Shader-Build.

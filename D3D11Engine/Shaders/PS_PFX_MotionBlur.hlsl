@@ -25,31 +25,43 @@ struct PS_INPUT
     float4 vPosition : SV_POSITION;
 };
 
+bool IsSkyDepth(float depth)
+{
+    return depth <= 1e-7f;
+}
+
 float DepthWeight(float centerDepth, float sampleDepth)
 {
-    float tolerance = MB_DepthTolerance + max(centerDepth, 0.02f) * 0.08f;
-    return saturate(1.0f - abs(sampleDepth - centerDepth) / max(tolerance, 0.0001f));
+    if (IsSkyDepth(centerDepth) || IsSkyDepth(sampleDepth)) {
+        return 0.0f;
+    }
+
+    // Reversed-Z: near pixels have high depth. Keep near silhouettes strict so
+    // character edges do not pull bright background samples into the blur.
+    float farFactor = saturate(1.0f - centerDepth);
+    float tolerance = MB_DepthTolerance + farFactor * 0.004f;
+    float depthDelta = abs(sampleDepth - centerDepth);
+    float weight = saturate(1.0f - depthDelta / max(tolerance, 0.0001f));
+    return weight * weight;
 }
 
 float4 PSMain(PS_INPUT Input) : SV_TARGET
 {
     float2 uv = Input.vTexcoord;
     float4 centerColor = TX_Scene.SampleLevel(SS_Linear, uv, 0);
+    float centerDepth = TX_Depth.SampleLevel(SS_Point, uv, 0).r;
+    if (IsSkyDepth(centerDepth)) {
+        return centerColor;
+    }
+
     float2 resolution = 1.0f / MB_InvResolution;
     float2 velocity = TX_Velocity.SampleLevel(SS_Point, uv, 0).rg * MB_Strength;
 
     float aspect = resolution.x / max(resolution.y, 1.0f);
-    float2 centerArea = uv - float2(0.5f, 0.50f);
-    centerArea.x *= aspect;
-    float centerBlurMask = smoothstep(0.30f, 0.82f, length(centerArea * 2.0f));
-
-    float2 heroArea = uv - float2(0.5f, 0.68f);
-    heroArea.x *= aspect * 1.10f;
-    heroArea.y *= 1.65f;
-    float heroBlurMask = smoothstep(0.18f, 0.46f, length(heroArea));
-
-    float edgeBlurMask = min(centerBlurMask, heroBlurMask);
-    velocity *= edgeBlurMask;
+    float2 centered = uv - float2(0.5f, 0.5f);
+    centered.x *= aspect;
+    float peripheralWeight = smoothstep(0.18f, 0.75f, length(centered));
+    velocity *= lerp(0.70f, 1.15f, peripheralWeight);
 
     float velocityPixels = length(velocity * resolution);
     if (velocityPixels < MB_MinVelocityPixels) {
@@ -61,13 +73,12 @@ float4 PSMain(PS_INPUT Input) : SV_TARGET
         velocityPixels = MB_MaxPixels;
     }
 
-    float centerDepth = TX_Depth.SampleLevel(SS_Point, uv, 0).r;
     float4 colorSum = centerColor;
     float weightSum = 1.0f;
 
     [unroll]
-    for (int i = 1; i <= 6; ++i) {
-        float shutter = (float)i / 6.0f;
+    for (int i = 0; i < 6; ++i) {
+        float shutter = ((float)i + 0.5f) / 6.0f - 0.5f;
         float2 sampleUV = uv + velocity * shutter;
         if (sampleUV.x < 0.0f || sampleUV.x > 1.0f || sampleUV.y < 0.0f || sampleUV.y > 1.0f) {
             continue;
@@ -75,7 +86,6 @@ float4 PSMain(PS_INPUT Input) : SV_TARGET
 
         float sampleDepth = TX_Depth.SampleLevel(SS_Point, sampleUV, 0).r;
         float weight = DepthWeight(centerDepth, sampleDepth);
-        weight *= weight;
         if (weight <= 0.001f) {
             continue;
         }

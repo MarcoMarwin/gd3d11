@@ -368,7 +368,7 @@
     <ClInclude Include="D3D11PFX_DepthOfField.h">
       <Filter>Engine\D3D11\PFX\Effects</Filter>
     </ClInclude>
-    <ClInclude Include="D3D11OcclusionQuerry.h">
+    <ClInclude Include="D3D11HZBOcclusion.h">
       <Filter>Engine\D3D11</Filter>
     </ClInclude>
     <ClInclude Include="D3D11GraphicsEngineBase.h" />
@@ -909,7 +909,7 @@
     <ClCompile Include="D3D11PFX_MotionBlur.cpp">
       <Filter>Engine\D3D11\PFX\Effects</Filter>
     </ClCompile>
-    <ClCompile Include="D3D11OcclusionQuerry.cpp">
+    <ClCompile Include="D3D11HZBOcclusion.cpp">
       <Filter>Engine\D3D11</Filter>
     </ClCompile>
     <ClCompile Include="D3D11GraphicsEngineBase.cpp" />
@@ -1133,6 +1133,9 @@
       <Filter>Engine\Shaders</Filter>
     </None>
     <None Include="Shaders\PS_PFX_VelocityDebug.hlsl">
+      <Filter>Engine\Shaders</Filter>
+    </None>
+    <None Include="Shaders\CS_HZBOcclusion.hlsl">
       <Filter>Engine\Shaders</Filter>
     </None>
     <None Include="Shaders\PS_DS_AtmosphericScattering.hlsl">

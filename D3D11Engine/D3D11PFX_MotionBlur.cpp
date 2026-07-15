@@ -56,10 +56,10 @@ XRESULT D3D11PFX_MotionBlur::Render( ID3D11RenderTargetView* outputRTV,
 
     MotionBlurConstants cb = {};
     cb.MB_InvResolution = float2( 1.0f / static_cast<float>( resolution.x ), 1.0f / static_cast<float>( resolution.y ) );
-    cb.MB_Strength = 0.65f;
-    cb.MB_MaxPixels = 10.0f;
-    cb.MB_DepthTolerance = 0.0025f;
-    cb.MB_MinVelocityPixels = 0.65f;
+    cb.MB_Strength = 0.45f;
+    cb.MB_MaxPixels = 7.0f;
+    cb.MB_DepthTolerance = 0.0012f;
+    cb.MB_MinVelocityPixels = 0.85f;
     ps->GetBuffer( "MotionBlurConstants" ).Update( &cb ).Bind();
 
     D3D11_VIEWPORT vp = {};

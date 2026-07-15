@@ -6,7 +6,7 @@
 #include "D3D11Effect.h"
 #include "D3D11GShader.h"
 #include "D3D11LineRenderer.h"
-#include "D3D11OcclusionQuerry.h"
+#include "D3D11HZBOcclusion.h"
 #include "D3D11PShader.h"
 #include "D3D11PfxRenderer.h"
 #include "D3D11PipelineStates.h"
@@ -469,7 +469,7 @@ D3D11GraphicsEngine::D3D11GraphicsEngine() :
     Effects = std::make_unique<D3D11Effect>();
     TemporalState = std::make_unique<D3D11TemporalState>();
     LineRenderer = std::make_unique<D3D11LineRenderer>();
-    Occlusion = std::make_unique<D3D11OcclusionQuerry>();
+    Occlusion = std::make_unique<D3D11HZBOcclusion>();
 
     m_FrameLimiter = std::make_unique<FpsLimiter>();
 
@@ -9712,41 +9712,25 @@ XRESULT D3D11GraphicsEngine::OnVobRemovedFromWorld( zCVob* vob ) {
     return XR_SUCCESS;
 }
 
-/** Updates the occlusion for the bsp-tree */
+/** Updates the depth hierarchy used for conservative object occlusion. */
 void D3D11GraphicsEngine::UpdateOcclusion() {
-    if ( !Engine::GAPI->GetRendererState().RendererSettings.EnableOcclusionCulling )
+    if ( !Occlusion )
         return;
+
+    if ( !Engine::GAPI->GetRendererState().RendererSettings.EnableOcclusionCulling || FeatureLevel10Compatibility ) {
+        Occlusion->Reset();
+        return;
+    }
+
     auto _ = RecordGraphicsEvent( GE_NAME( "D3D11GraphicsEngine::UpdateOcclusion" ) );
     TracyD3D11ZoneCGX( "D3D11GraphicsEngine::UpdateOcclusion" );
 
-    // Set up states
-    Engine::GAPI->GetRendererState().RasterizerState.SetDefault();
-    Engine::GAPI->GetRendererState().RasterizerState.CullMode = GothicRasterizerStateInfo::CM_CULL_NONE;
-    Engine::GAPI->GetRendererState().RasterizerState.SetDirty();
+    CopyDepthStencil();
+    Occlusion->Update( this, GetDepthBufferCopy(), Engine::GAPI->GetViewMatrixXM(), Engine::GAPI->GetProjectionMatrix(), GetResolution() );
+}
 
-    Engine::GAPI->GetRendererState().BlendState.SetDefault();
-    Engine::GAPI->GetRendererState().BlendState.ColorWritesEnabled =
-        false;  // Rasterization is faster without writes
-    Engine::GAPI->GetRendererState().BlendState.SetDirty();
-
-    Engine::GAPI->GetRendererState().DepthState.SetDefault();
-    Engine::GAPI->GetRendererState().DepthState.DepthWriteEnabled =
-        false;  // Don't write the bsp-nodes to the depth buffer, also quicker
-    Engine::GAPI->GetRendererState().DepthState.SetDirty();
-
-    UpdateRenderStates();
-
-    // Set up occlusion pass
-    Occlusion->AdvanceFrameCounter();
-    Occlusion->BeginOcclusionPass();
-
-    // Do occlusiontests for the BSP-Tree
-    Occlusion->DoOcclusionForBSP( Engine::GAPI->GetNewRootNode() );
-
-    Occlusion->EndOcclusionPass();
-
-    // Setup default renderstates
-    SetDefaultStates();
+bool D3D11GraphicsEngine::ShouldOcclusionCullVob( const zTBBox3D& bbox, float meshSize, bool allowTinyCull ) {
+    return Occlusion && Occlusion->IsBoxOccluded( bbox, meshSize, allowTinyCull );
 }
 
 /** Saves a screenshot */

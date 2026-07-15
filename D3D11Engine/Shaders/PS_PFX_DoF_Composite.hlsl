@@ -87,7 +87,7 @@ float4 GetSkyEdgeBlurSample(float2 texcoord, float2 dtexel, float focusDepth)
     float3 colorAccum = 0.0f;
     float coverageAccum = 0.0f;
     float kernelAccum = 0.0f;
-    float edgeRadius = clamp(max(DoF_BokehRadius, DoF_MaxBlur) * 0.22f, 2.0f, 10.0f);
+    float edgeRadius = clamp(max(DoF_BokehRadius, DoF_MaxBlur) * 0.26f, 2.5f, 12.0f);
 
     [unroll]
     for (int i = 0; i < SKY_EDGE_SAMPLE_COUNT; ++i)
@@ -98,7 +98,7 @@ float4 GetSkyEdgeBlurSample(float2 texcoord, float2 dtexel, float focusDepth)
         float coc = ComputeCoCFromDepth(depth, focusDepth, sampleUV);
         float4 blur = TX_Blur.SampleLevel(SS_Linear, sampleUV, 0);
         float radialWeight = exp(-dot(offset, offset) * 2.4f);
-        float geometryWeight = IsSkyDepth(depth) ? 0.0f : smoothstep(0.12f, 0.65f, coc);
+        float geometryWeight = IsSkyDepth(depth) ? 0.0f : smoothstep(0.06f, 0.56f, coc);
         float sampleWeight = radialWeight * geometryWeight;
 
         colorAccum += blur.rgb * sampleWeight;
@@ -106,8 +106,8 @@ float4 GetSkyEdgeBlurSample(float2 texcoord, float2 dtexel, float focusDepth)
         kernelAccum += radialWeight;
     }
 
-    float coverage = saturate(coverageAccum / max(kernelAccum, 0.001f) * 2.2f);
-    float blend = smoothstep(0.02f, 0.85f, coverage);
+    float coverage = saturate(coverageAccum / max(kernelAccum, 0.001f) * 2.35f);
+    float blend = smoothstep(0.01f, 0.78f, coverage);
     return float4(colorAccum / max(coverageAccum, 0.001f), blend);
 }
 
@@ -168,11 +168,22 @@ float4 PSMain( PS_INPUT Input ) : SV_TARGET
     }
 
     float minCoC = min( min( cocC, cocL ), min( cocR, min( cocU, cocD ) ) );
+    float maxCoC = max( max( cocC, cocL ), max( cocR, max( cocU, cocD ) ) );
+    float avgCoC = ( cocC + cocL + cocR + cocU + cocD ) * 0.2f;
+    float edgeContrast = maxCoC - minCoC;
+    float edgeCoverage = smoothstep( 0.04f, 0.36f, edgeContrast ) * smoothstep( 0.08f, 0.70f, maxCoC );
+    float skyNeighbourCount = ( IsSkyDepth( depthL ) ? 1.0f : 0.0f )
+        + ( IsSkyDepth( depthR ) ? 1.0f : 0.0f )
+        + ( IsSkyDepth( depthU ) ? 1.0f : 0.0f )
+        + ( IsSkyDepth( depthD ) ? 1.0f : 0.0f );
 
-    // Keep the old erosion for normal/far DoF edges, but not for near foreground blur:
-    // close NPCs and objects must soften across their silhouette instead of staying cut out.
+    // Keep the sky itself sharp, but let blurred geometry keep a small soft
+    // coverage at silhouettes instead of cutting every DoF edge to minCoC.
     float nearForegroundWeight = smoothstep( 0.02f, 0.20f, nearNeighbourCoC );
-    float compositeCoC = lerp( minCoC, max( cocC, blurSample.a ), nearForegroundWeight );
+    float farEdgeWeight = edgeCoverage * ( 1.0f - nearForegroundWeight ) * 0.42f;
+    float skyEdgeWeight = saturate( skyNeighbourCount * 0.35f ) * edgeCoverage * ( 1.0f - nearForegroundWeight ) * 0.34f;
+    float softenedEdgeCoC = lerp( minCoC, max( avgCoC, min( maxCoC, blurSample.a ) ), saturate( farEdgeWeight + skyEdgeWeight ) );
+    float compositeCoC = lerp( softenedEdgeCoC, max( cocC, blurSample.a ), nearForegroundWeight );
 
     // Bilinear-upsampled half-res bokeh blur
 

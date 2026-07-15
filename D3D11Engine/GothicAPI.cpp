@@ -4862,6 +4862,11 @@ static void CVVH_AddNotDrawnVobToList(
             && !ctx.frustum.Intersects( it->Vob->GetBBox() ) ) {
             continue;
         }
+        if ( ctx.drawFlags.EnableOcclusionCulling
+            && ctx.stage == RenderStage::STAGE_DRAW_WORLD
+            && Engine::GraphicsEngine->ShouldOcclusionCullVob( it->Vob->GetBBox(), it->VisualInfo ? it->VisualInfo->MeshSize : 0.0f, true ) ) {
+            continue;
+        }
         if ( it->Vob->GetVisualAlpha() ) {
             ctx.queue->PushTransparencyVob( TransparencyVobInfo{ std::sqrtf( vdSq ), it->Vob->GetVobTransparency(), nullptr, it } );
             continue;
@@ -4893,6 +4898,11 @@ static void CVVH_AddNotDrawnVobToList(
         if ( bspContainment != ContainmentType::CONTAINS // only do frustum check if previously "INTERSECTS"
             && cullingEnabled
             && !ctx.frustum.Intersects( it->Vob->GetBBox() ) ) {
+            continue;
+        }
+        if ( ctx.drawFlags.EnableOcclusionCulling
+            && ctx.stage == RenderStage::STAGE_DRAW_WORLD
+            && Engine::GraphicsEngine->ShouldOcclusionCullVob( it->Vob->GetBBox(), 0.0f, false ) ) {
             continue;
         }
 
@@ -6945,12 +6955,7 @@ static void CollectVisibleVobsHelper( BspInfo* base,
     const float vobOutdoorDist = ctx.drawDistances.OutdoorVobs;
     const XMFLOAT3 camPos = ctx.cameraPosition;
     const FXMVECTOR cameraPosition = XMLoadFloat3( &camPos );
-    const bool enableOcclusionCulling = ctx.drawFlags.EnableOcclusionCulling;
     while ( base->OriginalNode ) {
-        // Check for occlusion-culling
-        if ( enableOcclusionCulling && !base->OcclusionInfo.VisibleLastFrame ) {
-            return;
-        }
 
         zTBBox3D nodeBox = base->OriginalNode->BBox3D;
         float nodeYMax = std::min( yMaxWorld, camPos.y );
@@ -6960,24 +6965,8 @@ static void CollectVisibleVobsHelper( BspInfo* base,
         float dist = Toolbox::ComputePointAABBDistance( camPos, base->OriginalNode->BBox3D.Min, base->OriginalNode->BBox3D.Max );
         ContainmentType clipResult = inheritedContainment;
         if ( dist < vobOutdoorDist ) {
-            if ( !enableOcclusionCulling ) {
-                if ( clipResult != ContainmentType::CONTAINS ) {
-                    clipResult = ctx.frustum.Contains( Frustum::BBoxFromzTBBox3D( nodeBox ) );
-                }
-            } else {
-                // If we are using occlusion-clipping, this test has already been done
-                switch (static_cast<zTCam_ClipType>(base->OcclusionInfo.LastCameraClipType))
-                {
-                case zTCam_ClipType::ZTCAM_CLIPTYPE_IN:
-                    clipResult = ContainmentType::CONTAINS; 
-                    break;
-                case zTCam_ClipType::ZTCAM_CLIPTYPE_CROSSING:
-                    clipResult = ContainmentType::INTERSECTS; 
-                    break;
-                case zTCam_ClipType::ZTCAM_CLIPTYPE_OUT:
-                    clipResult = ContainmentType::DISJOINT; 
-                    break;
-                }
+            if ( clipResult != ContainmentType::CONTAINS ) {
+                clipResult = ctx.frustum.Contains( Frustum::BBoxFromzTBBox3D( nodeBox ) );
             }
 
             if ( clipResult == ContainmentType::DISJOINT ) {
@@ -7073,8 +7062,6 @@ static void CollectVisibleVobsWithLeafCache(
     const float* pMaxX = cache.MaxX.data();
     const float* pMaxY = cache.MaxY.data();
     const float* pMaxZ = cache.MaxZ.data();
-
-    const bool enableOcclusionCulling = ctx.drawFlags.EnableOcclusionCulling;
     const uint32_t padded = (cache.Count + 7u) & ~7u;
 
     for ( uint32_t i = 0; i < padded; i += 8 ) {
@@ -7128,7 +7115,6 @@ static void CollectVisibleVobsWithLeafCache(
 
                 BspInfo* leaf = cache.Leaves[idx];
                 if ( !leaf ) continue;
-                if ( enableOcclusionCulling && !leaf->OcclusionInfo.VisibleLastFrame ) continue;
 
                 const float dx = std::max( 0.0f, std::max( pMinX[idx] - cpX, cpX - pMaxX[idx] ) );
                 const float dy = std::max( 0.0f, std::max( pMinY[idx] - cpY, cpY - pMaxY[idx] ) );
@@ -7150,10 +7136,6 @@ static void CollectVisibleVobsWithLeafCache(
 
             BspInfo* leaf = cache.Leaves[idx];
             if ( !leaf ) continue;
-
-            // Occlusion culling gate (GPU query result from prior frame)
-            if ( enableOcclusionCulling && !leaf->OcclusionInfo.VisibleLastFrame )
-                continue;
 
             // Recompute scalar distance^2 for per-category range checks inside CollectLeafVobs.
             const float dx = std::max( 0.0f, std::max( pMinX[idx] - cpX, cpX - pMaxX[idx] ) );
@@ -7257,6 +7239,11 @@ void GothicAPI::CollectVisibleVobs( const RndCullContext& ctx ) {
                 }
 
                 if ( cullingEnabled && !ctx.frustum.Intersects( it->Vob->GetBBox() ) ) {
+                    continue;
+                }
+                if ( ctx.drawFlags.EnableOcclusionCulling
+                    && it->VisualInfo->MeshSize < vobSmallSize
+                    && Engine::GraphicsEngine->ShouldOcclusionCullVob( it->Vob->GetBBox(), it->VisualInfo->MeshSize, true ) ) {
                     continue;
                 }
 

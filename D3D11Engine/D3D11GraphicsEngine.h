@@ -92,7 +92,7 @@ class zCVobLight;
 class zCVob;
 struct VobLightInfo;
 class GMesh;
-class D3D11OcclusionQuerry;
+class D3D11HZBOcclusion;
 struct MeshInfo;
 struct RenderToTextureBuffer;
 class D3D11Effect;
@@ -330,8 +330,9 @@ public:
         bool clearDepth = true,
         unsigned int casterMask = SHADOW_CASTER_ALL );
 
-    /** Updates the occlusion for the bsp-tree */
+    /** Updates the depth hierarchy used for conservative object occlusion. */
     void UpdateOcclusion();
+    bool ShouldOcclusionCullVob( const zTBBox3D& bbox, float meshSize, bool allowTinyCull ) override;
 
     /** Recreates the renderstates */
     XRESULT UpdateRenderStates() override;
@@ -681,8 +682,8 @@ private:
     D3D11VertexBuffer* QuadVertexBuffer;
     D3D11VertexBuffer* QuadIndexBuffer;
 
-    /** Occlusion query manager */
-    std::unique_ptr<D3D11OcclusionQuerry> Occlusion;
+    /** Conservative depth-hierarchy object occlusion. */
+    std::unique_ptr<D3D11HZBOcclusion> Occlusion;
 
     /** Temporary vertex buffers */
     std::unique_ptr<D3D11VertexBuffer> TempPolysVertexBuffer;

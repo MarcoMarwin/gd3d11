@@ -492,6 +492,7 @@ XRESULT D3D11ShaderManager::Init() {
         Shaders.push_back( ShaderInfo::make<CShaderID::CS_PFX_XeGTAO_DenoiseLast>( "CS_PFX_XeGTAO.hlsl" ).with_entrypoint( "CSDenoiseLastPass" ) );
 
         Shaders.push_back( ShaderInfo::make<CShaderID::CS_PFX_Sharpen>( "CS_PFX_Sharpen.hlsl" ));
+        Shaders.push_back( ShaderInfo::make<CShaderID::CS_HZBOcclusion>( "CS_HZBOcclusion.hlsl" ));
 
 
         // Forward+ pixel shader variants

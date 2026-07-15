@@ -667,6 +667,36 @@ XRESULT D3D11ShadowMap::PrepareRender()
             );
         }
 
+        static XMFLOAT3 s_previousShadowCameraPosition = XMFLOAT3( 0.0f, 0.0f, 0.0f );
+        static XMFLOAT3 s_previousShadowCameraForward = XMFLOAT3( 0.0f, 0.0f, 1.0f );
+        static bool s_hasPreviousShadowCamera = false;
+
+        XMFLOAT3 currentShadowCameraPosition;
+        XMStoreFloat3( &currentShadowCameraPosition, cameraPositionXm );
+        const XMMATRIX inverseView = XMMatrixInverse( nullptr, Engine::GAPI->GetViewMatrixXM() );
+        XMFLOAT3 currentShadowCameraForward;
+        XMStoreFloat3( &currentShadowCameraForward, XMVector3Normalize( inverseView.r[2] ) );
+
+        bool forceCascadeUpdateForViewChange = !s_hasPreviousShadowCamera;
+        if ( s_hasPreviousShadowCamera ) {
+            float cameraMoveDistance = 0.0f;
+            XMStoreFloat( &cameraMoveDistance, XMVector3Length(
+                XMLoadFloat3( &currentShadowCameraPosition ) - XMLoadFloat3( &s_previousShadowCameraPosition ) ) );
+
+            float cameraTurnDot = 1.0f;
+            XMStoreFloat( &cameraTurnDot, XMVector3Dot(
+                XMLoadFloat3( &currentShadowCameraForward ), XMLoadFloat3( &s_previousShadowCameraForward ) ) );
+
+            forceCascadeUpdateForViewChange = cameraMoveDistance > 40.0f || cameraTurnDot < 0.9992f;
+        }
+
+        s_previousShadowCameraPosition = currentShadowCameraPosition;
+        s_previousShadowCameraForward = currentShadowCameraForward;
+        s_hasPreviousShadowCamera = true;
+
+        if ( forceCascadeUpdateForViewChange ) {
+            lazyCascadeUpdate = false;
+        }
         for ( int cascadeIdx = 0; cascadeIdx < numCascades; ++cascadeIdx ) {
             // pre-calculate all cascade matrices, to be able to frustum-cull anything that is not in this or the next cascade.
 

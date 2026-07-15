@@ -89,19 +89,6 @@ struct BspInfo {
         OriginalNode = nullptr;
         Front = nullptr;
         Back = nullptr;
-
-        // Safe default: new/world-load BSP nodes start visible. Occlusion culling may only hide
-        // them after conservative confirmation; this avoids blank/popping first frames.
-        OcclusionInfo.VisibleLastFrame = true;
-        OcclusionInfo.LastVisitedFrameID = 0;
-        OcclusionInfo.LastVisibleFrameID = 0;
-        OcclusionInfo.VisibleGraceUntilFrameID = 0;
-        OcclusionInfo.InvisibleCandidateFrames = 0;
-        OcclusionInfo.QueryID = -1;
-        OcclusionInfo.QueryInProgress = false;
-        OcclusionInfo.LastCameraClipType = ZTCAM_CLIPTYPE_OUT;
-
-        OcclusionInfo.NodeMesh = nullptr;
     }
 
     BspInfo( BspInfo&& other ) noexcept {
@@ -113,16 +100,6 @@ struct BspInfo {
         Mobs = std::move( other.Mobs );
         NodePolygons = std::move( other.NodePolygons );
         NumStaticLights = other.NumStaticLights;
-        
-        OcclusionInfo.NodeMesh = std::move(other.OcclusionInfo.NodeMesh);
-        OcclusionInfo.LastVisitedFrameID = other.OcclusionInfo.LastVisitedFrameID;
-        OcclusionInfo.LastVisibleFrameID = other.OcclusionInfo.LastVisibleFrameID;
-        OcclusionInfo.VisibleGraceUntilFrameID = other.OcclusionInfo.VisibleGraceUntilFrameID;
-        OcclusionInfo.InvisibleCandidateFrames = other.OcclusionInfo.InvisibleCandidateFrames;
-        OcclusionInfo.LastCameraClipType = other.OcclusionInfo.LastCameraClipType;
-        OcclusionInfo.QueryID = other.OcclusionInfo.QueryID;
-        OcclusionInfo.VisibleLastFrame = other.OcclusionInfo.VisibleLastFrame;
-        OcclusionInfo.QueryInProgress = other.OcclusionInfo.QueryInProgress;
         OriginalNode = other.OriginalNode;
         Front = other.Front;
         Back = other.Back;
@@ -130,10 +107,7 @@ struct BspInfo {
 
     BspInfo( const BspInfo& ) = delete;
     BspInfo& operator=( const BspInfo& ) = delete;
-
-    ~BspInfo() {
-        delete OcclusionInfo.NodeMesh;
-    }
+    ~BspInfo() = default;
 
     bool IsEmpty() {
         return Vobs.empty() && IndoorVobs.empty() && SmallVobs.empty() && Lights.empty() && IndoorLights.empty();
@@ -150,19 +124,6 @@ struct BspInfo {
     std::vector<zCPolygon*> NodePolygons;
 
     int NumStaticLights;
-
-    /** Occlusion info for this node */
-    struct OcclusionInfo_s {
-        MeshInfo* NodeMesh;
-        unsigned int LastVisitedFrameID;
-        unsigned int LastVisibleFrameID;
-        unsigned int VisibleGraceUntilFrameID;
-        unsigned int InvisibleCandidateFrames;
-        int LastCameraClipType;
-        int QueryID;
-        bool VisibleLastFrame;
-        bool QueryInProgress;
-    } OcclusionInfo;
 
     // Original bsp-node
     zCBspBase* OriginalNode;
