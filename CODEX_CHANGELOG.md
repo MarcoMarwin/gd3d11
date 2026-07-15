@@ -487,3 +487,13 @@ Kurze, append-only Dokumentation der von Codex gepushten Renderer-Builds.
 - FSR3: Alpha-getestete Weltflaechen und Contact Shadows schreiben gezielte Transparency-/Composition-Masken fuer die Rekonstruktion; die Contact-Shadow-Staerke ist wieder der normale Standardwert.
 - Seitenverhaeltnis: der fehleranfaellige World-Projection-Aspect-Hack ist entfernt; echte Aufloesungswechsel aktualisieren die Gothic-Kamera wieder direkt, Render Scale bleibt davon getrennt.
 - Pruefung: AGENTS-Regeln gelesen; Buildnummer aus outputs ermittelt; origin/master mit PortableGit/OpenSSL abgeglichen; Projekt-XML, Shader-/Projektpfade, FSR3-Maskenfluss, Render-Scale-Grenze, Konflikt-/Escape-Artefakte und git diff --check statisch kontrolliert. Kein vollstaendiger lokaler C++-/Shader-Build.
+
+## Build 126 (Dynamic-Cloud-Regen, Motion Blur, Wasser-SSR und Vegetationsradius)
+
+- Dynamic Clouds: Tiefwolken blenden bei Regen gegen die Raincloud-Textur aus, werden im Composite auch vom Nachtnebel mitgenommen und der Low-Cloud-Pass wird bei starkem Regen uebersprungen.
+- Regen-Schleier: der globale Regenschleier bleibt ohne Dither, bekommt aber eine raeumlich weichere Wirkung ueber die bestehende Fog-Maske.
+- FSR3/Contact Shadows: Contact Shadows nutzen bei aktivem FSR3 wieder die reduzierte Staerke `0.35`, waehrend andere Modi beim Standard `0.50` bleiben.
+- Motion Blur: die Bildmitte bleibt stabiler und Bewegungsunschaerfe nimmt zu den Raendern zu; Tiefenkanten werden strenger gewichtet, um Helden-/Silhouettenartefakte zu reduzieren.
+- Wasser-SSR: Vordergrundobjekte lassen den Cubemap-Fallback an den betroffenen Wasserstellen weniger stark durchbrechen, ohne Wet-Ground-SSR anzufassen.
+- Vegetation: der Interaktionsradius fuer Hero/NPC-Vegetation ist kleiner, waehrend Staerke und gaussscher Uebergang unveraendert bleiben.
+- Pruefung: AGENTS-Regeln gelesen; Buildnummer aus outputs ermittelt; origin/master mit PortableGit/OpenSSL abgeglichen; Render-Scale-/Aspect-Grenze, Shaderpfade, Dither-/Escape-Artefakte und git diff --check statisch kontrolliert. Kein vollstaendiger lokaler C++-/Shader-Build.

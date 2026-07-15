@@ -35,9 +35,14 @@ float4 PSMain(PS_INPUT Input) : SV_TARGET
 {
     float2 uv = Input.vTexcoord;
     float4 centerColor = TX_Scene.SampleLevel(SS_Linear, uv, 0);
+    float2 resolution = 1.0f / MB_InvResolution;
     float2 velocity = TX_Velocity.SampleLevel(SS_Point, uv, 0).rg * MB_Strength;
 
-    float2 resolution = 1.0f / MB_InvResolution;
+    float2 centered = uv * 2.0f - 1.0f;
+    centered.x *= resolution.x / max(resolution.y, 1.0f);
+    float edgeBlurMask = smoothstep(0.30f, 0.82f, length(centered));
+    velocity *= edgeBlurMask;
+
     float velocityPixels = length(velocity * resolution);
     if (velocityPixels < MB_MinVelocityPixels) {
         return centerColor;
@@ -62,6 +67,7 @@ float4 PSMain(PS_INPUT Input) : SV_TARGET
 
         float sampleDepth = TX_Depth.SampleLevel(SS_Point, sampleUV, 0).r;
         float weight = DepthWeight(centerDepth, sampleDepth);
+        weight *= weight;
         if (weight <= 0.001f) {
             continue;
         }

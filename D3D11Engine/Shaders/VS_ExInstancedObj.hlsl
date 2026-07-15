@@ -127,7 +127,7 @@ float3 ApplyTreeWind(float3 vertexPos, float3 direction, float heightNorm, float
 #if SHD_INFLUENCE
 
 // HERO/NPC INTERACTION CONST
-static const float heroAffectRange = 100.0f;
+static const float heroAffectRange = 70.0f;
 static const float heroAffectStrength = 38.0f;
 
 float3 CalculateSingleActorInfluence(

@@ -392,7 +392,9 @@ float4 PSMain( PS_INPUT Input ) : SV_TARGET
         float nightFogBrightness = lerp(1.0f, max(0.0f, AC_NightFogBrightness), saturate(AC_EnableNightAtmosphere));
         float3 nightRainVeilColor = float3(0.12f, 0.18f, 0.27f) * nightFogBrightness / 2.5f;
         float3 rainVeilColor = lerp(fog.rgb, nightRainVeilColor, nightAtmosphereBlend);
-        float rainVeil = activeWeatherFog * lerp(0.050f, 0.22f, nightAtmosphereBlend);
+        float rainVeilBase = activeWeatherFog * lerp(0.050f, 0.22f, nightAtmosphereBlend);
+        float rainVeilSpatial = lerp(0.45f, 1.0f, SmootherStep01(saturate(fog.a * 1.35f)));
+        float rainVeil = rainVeilBase * rainVeilSpatial;
         color.rgb = lerp(color.rgb, rainVeilColor, rainVeil);
     }
 #endif

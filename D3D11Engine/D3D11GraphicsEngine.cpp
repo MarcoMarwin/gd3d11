@@ -4207,7 +4207,8 @@ XRESULT D3D11GraphicsEngine::OnStartWorldRendering() {
     bool isOutdoor = Engine::GAPI->GetLoadedWorldInfo()->BspTree->GetBspTreeMode() == zBSP_MODE_OUTDOOR;
     bool compositionGodRays = (rendererState.RendererSettings.EnableGodRays && isOutdoor);
     bool compositionHeightFog = (rendererState.RendererSettings.DrawFog && isOutdoor);
-    bool compositionLowClouds = (rendererState.RendererSettings.EnableDynamicClouds && rendererState.RendererSettings.DrawFog && isOutdoor);
+    const float dynamicCloudRainWeight = Engine::GAPI->GetRainFXWeight();
+    bool compositionLowClouds = (rendererState.RendererSettings.EnableDynamicClouds && rendererState.RendererSettings.DrawFog && isOutdoor && dynamicCloudRainWeight < 0.90f);
     bool compositionContactShadows = rendererState.RendererSettings.EnableContactShadows;
     bool compositionSSGI = rendererState.RendererSettings.EnableScreenSpaceGI && rendererState.RendererSettings.ScreenSpaceGIStrength > 0.0f;
     bool compositionNeedsGeometry = compositionContactShadows || compositionSSGI;

@@ -136,6 +136,7 @@ PS_OUTPUT PSMain( PS_INPUT Input )
 	float ssrRawWeight = 0.0f;
 	float ssrWeight = 0.0f;
 	float ssrHitQuality = 0.0f;
+	float ssrFallbackQuality = 0.0f;
 	float3 ssrHitWorldPosition = Input.vWorldPosition;
 	float ssrHitValid = 0.0f;
 	bool waterSSRActive = AC_EnableSSR > 0.5f && WM_DisableSSR < 0.5f;
@@ -211,7 +212,9 @@ PS_OUTPUT PSMain( PS_INPUT Input )
 				float2 edgeFade = saturate(abs(uv - 0.5f) * 2.0f);
 				float edgeDistance = max(edgeFade.x, edgeFade.y);
 				ssrRawWeight = 1.0f - smoothstep(0.78f, 1.0f, edgeDistance);
-				ssrHitQuality = edgeQuality * nearHitQuality * foregroundOccluderFade;
+				float baseHitQuality = edgeQuality * nearHitQuality;
+				ssrHitQuality = baseHitQuality * foregroundOccluderFade;
+				ssrFallbackQuality = baseHitQuality * lerp(0.65f, 1.0f, foregroundOccluderFade);
 				break;
 			}
 		}
@@ -223,6 +226,7 @@ PS_OUTPUT PSMain( PS_INPUT Input )
 	float ssrContactFade = smoothstep(0.04f, 0.22f, shallowDepth);
 	float ssrBaseWeight = ssrRawWeight * lerp(0.45f, 1.0f, ssrNearFade) * lerp(0.55f, 1.0f, ssrContactFade) * ssrHitQuality;
 	ssrWeight = ssrRawWeight * ssrNearFade * ssrContactFade * ssrHitQuality;
+	float ssrFallbackWeight = ssrRawWeight * lerp(0.45f, 1.0f, ssrNearFade) * lerp(0.55f, 1.0f, ssrContactFade) * ssrFallbackQuality;
 	// Darken the scene, to make a wet surface
 	float f = 1-saturate(pow(1-shallowDepth, 8.0f) + clamp(pow(distortionSmall.y, 2), 0.5f, 1.0f));
 	float nightAmount = saturate((-AC_LightPos.y + 0.12f) * 2.2f);
@@ -234,7 +238,8 @@ PS_OUTPUT PSMain( PS_INPUT Input )
 	scene = lerp(scene, diffuse, 0.73f * max(pow(fresnel,8.0f), 0.5f));
 	float ssrFresnel = lerp(0.55f, 0.80f, saturate(pow(1.0f - saturate(dot(-viewDirection, wavesFres)), 2.0f)));
 	float reflectionStrength = (WM_DisableSSR < 0.5f) ? max(0.0f, AC_SSRStrength) : 0.0f;
-	float cubeWeight = waterSSRActive ? saturate(1.0f - ssrWeight * saturate(reflectionStrength)) : 1.0f;
+	float cubeSuppressionWeight = max(ssrWeight, ssrFallbackWeight * 0.72f);
+	float cubeWeight = waterSSRActive ? saturate(1.0f - cubeSuppressionWeight * saturate(reflectionStrength)) : 1.0f;
 	float3 reflectionSSRColor = max(reflectionSSR, float3(0.0f, 0.0f, 0.0f));
 	if (ssrHitValid > 0.5f)
 	{
