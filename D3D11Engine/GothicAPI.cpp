@@ -24,6 +24,7 @@
 #include "GInventory.h"
 
 #define DIRECTINPUT_VERSION 0x0700
+#include <atomic>
 #include <charconv>
 #include <numeric>
 #include <cmath>
@@ -4306,6 +4307,28 @@ void GothicAPI::DebugDrawBSPTree() {
     DebugDrawTreeNode( root, root->BBox3D );
 }
 
+static std::atomic<uint32_t> s_MainViewOcclusionFrame{ 1 };
+
+static uint32_t GetMainViewOcclusionFrame() {
+    return s_MainViewOcclusionFrame.load( std::memory_order_relaxed );
+}
+
+static void BeginMainViewOcclusionFrame() {
+    const uint32_t nextFrame = s_MainViewOcclusionFrame.fetch_add( 1, std::memory_order_relaxed ) + 1;
+    if ( nextFrame == 0 ) {
+        s_MainViewOcclusionFrame.store( 1, std::memory_order_relaxed );
+    }
+}
+
+static void MarkMainViewOcclusionCulled( BaseVobInfo* vob ) {
+    if ( vob ) {
+        vob->MainViewOcclusionCullFrame.store( GetMainViewOcclusionFrame(), std::memory_order_relaxed );
+    }
+}
+
+static bool WasMainViewOcclusionCulled( const BaseVobInfo* vob ) {
+    return vob && vob->MainViewOcclusionCullFrame.load( std::memory_order_relaxed ) == GetMainViewOcclusionFrame();
+}
 /** Collects vobs using gothics BSP-Tree */
 void GothicAPI::CollectVisibleVobs( 
     std::vector<VobInfo*>& vobs,
@@ -4361,6 +4384,7 @@ void GothicAPI::CollectVisibleVobs(
     ctx.drawFlags.CollectSmallVobs = true;
     ctx.drawFlags.CollectMobs = true;
     ctx.drawFlags.CollectLights = true;
+    BeginMainViewOcclusionFrame();
     CollectVisibleVobs( ctx );
 
     if ( RendererState.RendererSettings.SortRenderQueue ) {
@@ -4853,6 +4877,7 @@ static void CVVH_AddNotDrawnVobToList(
         if ( !visitor->Visit( it ) ) continue;
 
         if ( !it->Vob->GetShowVisual() ) continue;
+        if ( ctx.stage == RenderStage::STAGE_DRAW_SHADOWS && WasMainViewOcclusionCulled( it ) ) continue;
         float vdSq;
         XMStoreFloat( &vdSq, XMVector3LengthSq( camPos - XMLoadFloat3( &it->LastRenderPosition ) ) );
         if ( vdSq > distSq ) continue;
@@ -4865,6 +4890,7 @@ static void CVVH_AddNotDrawnVobToList(
         if ( ctx.drawFlags.EnableOcclusionCulling
             && ctx.stage == RenderStage::STAGE_DRAW_WORLD
             && Engine::GraphicsEngine->ShouldOcclusionCullVob( it->Vob->GetBBox(), it->VisualInfo ? it->VisualInfo->MeshSize : 0.0f, true ) ) {
+            MarkMainViewOcclusionCulled( it );
             continue;
         }
         if ( it->Vob->GetVisualAlpha() ) {
@@ -4891,6 +4917,8 @@ static void CVVH_AddNotDrawnVobToList(
 
         if ( !it->Vob->GetShowVisual() )
             continue;
+        if ( ctx.stage == RenderStage::STAGE_DRAW_SHADOWS && WasMainViewOcclusionCulled( it ) )
+            continue;
 
         if ( XMVector3Greater( XMVector3LengthSq( camPos - it->Vob->GetPositionWorldXM() ), vDistSq ) ) {
             continue;
@@ -4903,6 +4931,7 @@ static void CVVH_AddNotDrawnVobToList(
         if ( ctx.drawFlags.EnableOcclusionCulling
             && ctx.stage == RenderStage::STAGE_DRAW_WORLD
             && Engine::GraphicsEngine->ShouldOcclusionCullVob( it->Vob->GetBBox(), 0.0f, false ) ) {
+            MarkMainViewOcclusionCulled( it );
             continue;
         }
 
@@ -7237,6 +7266,9 @@ void GothicAPI::CollectVisibleVobs( const RndCullContext& ctx ) {
                 if ( !it->Vob->GetShowVisual() ) {
                     continue;
                 }
+                if ( ctx.stage == RenderStage::STAGE_DRAW_SHADOWS && WasMainViewOcclusionCulled( it ) ) {
+                    continue;
+                }
 
                 if ( cullingEnabled && !ctx.frustum.Intersects( it->Vob->GetBBox() ) ) {
                     continue;
@@ -7244,6 +7276,7 @@ void GothicAPI::CollectVisibleVobs( const RndCullContext& ctx ) {
                 if ( ctx.drawFlags.EnableOcclusionCulling
                     && it->VisualInfo->MeshSize < vobSmallSize
                     && Engine::GraphicsEngine->ShouldOcclusionCullVob( it->Vob->GetBBox(), it->VisualInfo->MeshSize, true ) ) {
+                    MarkMainViewOcclusionCulled( it );
                     continue;
                 }
 

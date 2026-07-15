@@ -522,3 +522,11 @@ Kurze, append-only Dokumentation der von Codex gepushten Renderer-Builds.
 - Motion Blur: Randmaske, Heldenbereich, Samplingrichtung und Konstanten folgen wieder Build 127; die aktuelle depth-aware Kantenabsicherung gegen Silhouettenartefakte bleibt erhalten.
 - Grenzen: Render Scale, Aspect-/Viewport-, Kamera- und echte Aufloesungswechsel-Pfade bleiben unveraendert.
 - Pruefung: AGENTS-Regeln gelesen; Buildnummer aus outputs ermittelt; origin/master mit PortableGit/OpenSSL abgeglichen; DoF-Shader gegen Build 127 verglichen; HZB-/Tiny-Cull-, Motion-Blur- und Shader-Escape-Artefakte sowie git diff --check statisch kontrolliert. Kein vollstaendiger lokaler C++-/Shader-Build.
+
+## Build 130 (HZB-Occlusion-Fix, konsistente VOB-Schatten und Motion-Blur-Maske)
+
+- Occlusion: die HZB-Bounding-Box-Projektion nutzt dieselbe Projection-mal-View-Reihenfolge wie der restliche Renderer, damit sichtbare VOBs nicht durch falsche Clip-Projektion verschwinden.
+- Schatten: VOBs, die durch die Main-View-Occlusion ausgeblendet werden, werden im Shadow-Collect ebenfalls uebersprungen; grosse nicht-occludable VOBs bleiben davon unberuehrt.
+- Motion Blur: die stabile Bildzone ist horizontal breiter und der Uebergang zu den geblurten Raendern weicher; kleine Restgeschwindigkeiten werden gedaempft, um Nachziehen nach Kamerastopps abzuschwaechen.
+- Grenzen: Render Scale, Aspect-/Viewport-, Kamera- und echte Aufloesungswechsel-Pfade bleiben unveraendert.
+- Pruefung: AGENTS-Regeln gelesen; Buildnummer aus outputs ermittelt; origin/master mit PortableGit/OpenSSL abgeglichen; Occlusion-/Shadow-Pfade, Render-Scale-/Aspect-Grenze, Shader-Escape-Artefakte und git diff --check statisch kontrolliert. Kein vollstaendiger lokaler C++-/Shader-Build.

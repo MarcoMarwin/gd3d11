@@ -59,18 +59,22 @@ float4 PSMain(PS_INPUT Input) : SV_TARGET
 
     float aspect = resolution.x / max(resolution.y, 1.0f);
     float2 centerArea = uv - float2(0.5f, 0.50f);
-    centerArea.x *= aspect;
-    float centerBlurMask = smoothstep(0.30f, 0.82f, length(centerArea * 2.0f));
+    centerArea.x *= aspect * 0.58f;
+    centerArea.y *= 1.05f;
+    float centerBlurMask = smoothstep(0.34f, 0.94f, length(centerArea * 2.0f));
 
     float2 heroArea = uv - float2(0.5f, 0.68f);
-    heroArea.x *= aspect * 1.10f;
-    heroArea.y *= 1.65f;
-    float heroBlurMask = smoothstep(0.18f, 0.46f, length(heroArea));
+    heroArea.x *= aspect * 0.85f;
+    heroArea.y *= 1.45f;
+    float heroBlurMask = smoothstep(0.20f, 0.58f, length(heroArea));
 
     float edgeBlurMask = min(centerBlurMask, heroBlurMask);
     velocity *= edgeBlurMask;
 
     float velocityPixels = length(velocity * resolution);
+    float velocityFade = smoothstep(MB_MinVelocityPixels, MB_MinVelocityPixels * 2.4f, velocityPixels);
+    velocity *= velocityFade;
+    velocityPixels *= velocityFade;
     if (velocityPixels < MB_MinVelocityPixels) {
         return centerColor;
     }

@@ -128,7 +128,7 @@ bool D3D11HZBOcclusion::Update( D3D11GraphicsEngine* engine, RenderToTextureBuff
     context->CSSetShaderResources( 0, 8, nullSRVs );
     context->CSSetShader( nullptr, nullptr, 0 );
 
-    XMStoreFloat4x4( &m_submittedViewProj[m_writeReadback], view * XMLoadFloat4x4( &projection ) );
+    XMStoreFloat4x4( &m_submittedViewProj[m_writeReadback], XMMatrixMultiply( XMLoadFloat4x4( &projection ), view ) );
     context->CopyResource( m_readback[m_writeReadback].Get(), m_depthGrid.Get() );
 
     const UINT readIndex = 1u - m_writeReadback;
