@@ -332,7 +332,7 @@ public:
 
     /** Updates the depth hierarchy used for conservative object occlusion. */
     void UpdateOcclusion();
-    bool ShouldOcclusionCullVob( const zTBBox3D& bbox, float meshSize, bool allowTinyCull ) override;
+    bool ShouldOcclusionCullVob( const zTBBox3D& bbox ) override;
 
     /** Recreates the renderstates */
     XRESULT UpdateRenderStates() override;

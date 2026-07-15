@@ -306,16 +306,8 @@ struct SkeletalMeshVisualInfo : public BaseVisualInfo {
 
 struct BaseVobInfo {
     BaseVobInfo() = default;
-    BaseVobInfo(BaseVobInfo&& other) noexcept
-        : VisualInfo( other.VisualInfo )
-        , Vob( other.Vob )
-        , MainViewOcclusionCullFrame( other.MainViewOcclusionCullFrame.load( std::memory_order_relaxed ) ) {}
-    BaseVobInfo& operator=( BaseVobInfo&& other ) noexcept {
-        VisualInfo = other.VisualInfo;
-        Vob = other.Vob;
-        MainViewOcclusionCullFrame.store( other.MainViewOcclusionCullFrame.load( std::memory_order_relaxed ), std::memory_order_relaxed );
-        return *this;
-    }
+    BaseVobInfo(BaseVobInfo&& other) = default;
+    BaseVobInfo& operator=( BaseVobInfo&& ) = default;
     BaseVobInfo(const BaseVobInfo& other) = delete;
     BaseVobInfo& operator=(const BaseVobInfo& other) = delete;
     
@@ -325,9 +317,6 @@ struct BaseVobInfo {
 
     /** Vob the data came from */
     zCVob* Vob;
-
-    /** Main camera occlusion-cull stamp used to keep VOB shadows consistent with visibility. */
-    std::atomic<uint32_t> MainViewOcclusionCullFrame{ 0 };
 };
 
 struct WorldMeshSectionInfo;

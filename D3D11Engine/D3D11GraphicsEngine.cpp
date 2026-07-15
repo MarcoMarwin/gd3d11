@@ -4103,6 +4103,14 @@ XRESULT D3D11GraphicsEngine::OnStartWorldRendering() {
     rendererState.RasterizerState.FrontCounterClockwise = false;
     rendererState.RasterizerState.SetDirty();
 
+    if ( Occlusion ) {
+        if ( rendererState.RendererSettings.EnableOcclusionCulling && !FeatureLevel10Compatibility ) {
+            Occlusion->BeginFrame( this );
+        } else {
+            Occlusion->Reset();
+        }
+    }
+
     if ( rendererState.RendererSettings.EnableShadows ) {
         ShadowMaps->PrepareRender();
     }
@@ -7102,7 +7110,7 @@ void XM_CALLCONV D3D11GraphicsEngine::DrawWorldAroundForWorldShadow( FXMVECTOR p
             ctx.drawFlags.DrawVOBs = rs.DrawVOBs;
             ctx.drawFlags.DrawMobs = rs.DrawMobs;
             ctx.drawFlags.EnableDynamicLighting = rs.EnableDynamicLighting;
-            ctx.drawFlags.EnableOcclusionCulling = false; // shadows do not use the players view frustum for culling, so occlusion culling would be inaccurate and cause popping.
+            ctx.drawFlags.EnableOcclusionCulling = rs.EnableOcclusionCulling;
             ctx.drawFlags.CullVobs = rs.DebugSettings.Culling.CullVobs;
             ctx.drawFlags.CollectIndoorVobs = true;
             ctx.drawFlags.CollectLargeVobs = true;
@@ -9726,11 +9734,11 @@ void D3D11GraphicsEngine::UpdateOcclusion() {
     TracyD3D11ZoneCGX( "D3D11GraphicsEngine::UpdateOcclusion" );
 
     CopyDepthStencil();
-    Occlusion->Update( this, GetDepthBufferCopy(), Engine::GAPI->GetViewMatrixXM(), Engine::GAPI->GetProjectionMatrix(), GetResolution() );
+    Occlusion->Capture( this, GetDepthBufferCopy(), Engine::GAPI->GetViewMatrixXM(), Engine::GAPI->GetProjectionMatrix(), GetResolution() );
 }
 
-bool D3D11GraphicsEngine::ShouldOcclusionCullVob( const zTBBox3D& bbox, float meshSize, bool allowTinyCull ) {
-    return Occlusion && Occlusion->IsBoxOccluded( bbox, meshSize, allowTinyCull );
+bool D3D11GraphicsEngine::ShouldOcclusionCullVob( const zTBBox3D& bbox ) {
+    return Occlusion && Occlusion->IsBoxOccluded( bbox );
 }
 
 /** Saves a screenshot */

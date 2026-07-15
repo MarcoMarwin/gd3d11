@@ -530,3 +530,13 @@ Kurze, append-only Dokumentation der von Codex gepushten Renderer-Builds.
 - Motion Blur: die stabile Bildzone ist horizontal breiter und der Uebergang zu den geblurten Raendern weicher; kleine Restgeschwindigkeiten werden gedaempft, um Nachziehen nach Kamerastopps abzuschwaechen.
 - Grenzen: Render Scale, Aspect-/Viewport-, Kamera- und echte Aufloesungswechsel-Pfade bleiben unveraendert.
 - Pruefung: AGENTS-Regeln gelesen; Buildnummer aus outputs ermittelt; origin/master mit PortableGit/OpenSSL abgeglichen; Occlusion-/Shadow-Pfade, Render-Scale-/Aspect-Grenze, Shader-Escape-Artefakte und git diff --check statisch kontrolliert. Kein vollstaendiger lokaler C++-/Shader-Build.
+
+## Build 131 (HZB-Occlusion-Snapshot, konsistente VOB-Schatten und Motion-Blur-Sampling)
+
+- Occlusion: die HZB-Auswertung nutzt nun einen stabilen Readback-Snapshot vom vorher abgeschlossenen Frame; neue HZB-Daten werden erst nach dem World-Depth-Pass fuer den naechsten Frame erfasst, damit Shadow- und Main-Collect nicht gegen wechselnde Tiefendaten laufen.
+- Occlusion: die Bounding-Box-Projektion nutzt die zur Renderer-CPU-Projektion passende Projection-mal-View-Reihenfolge; wenn kein frischer Readback verfuegbar ist, wird konservativ nicht gecullt.
+- Schatten: kleine VOBs/Mobs, die durch dieselbe HZB-Entscheidung ausgeblendet werden, werden auch aus Sun- und Pointlight-Shadow-Collects genommen; grosse VOBs bleiben weiterhin von Occlusion ausgeschlossen.
+- Motion Blur: das Sampling ist symmetrisch um den aktuellen Pixel statt einseitig in Richtung vorheriger Pose, die horizontale stabile Zone ist breiter und der Uebergang zu den Raendern weicher.
+- Aufraeumen: die nicht erfolgreichen Main-View-Frame-Stamp-/Shadow-Kopplungen aus dem vorherigen Versuch sind entfernt.
+- Grenzen: Render Scale, Aspect-/Viewport-, Kamera- und echte Aufloesungswechsel-Pfade sowie DoF bleiben unveraendert.
+- Pruefung: AGENTS-Regeln gelesen; Buildnummer aus outputs ermittelt; origin/master mit PortableGit/OpenSSL abgeglichen; Occlusion-/Shadow-Pfade, Render-Scale-/Aspect-Grenze, Shader-Escape-Artefakte und git diff --check statisch kontrolliert. Kein vollstaendiger lokaler C++-/Shader-Build.

@@ -12,8 +12,9 @@ public:
     ~D3D11HZBOcclusion() = default;
 
     void Reset();
-    bool Update( D3D11GraphicsEngine* engine, RenderToTextureBuffer* depthCopy, const XMMATRIX& view, const XMFLOAT4X4& projection, INT2 resolution );
-    bool IsBoxOccluded( const zTBBox3D& bbox, float meshSize, bool allowTinyCull ) const;
+    void BeginFrame( D3D11GraphicsEngine* engine );
+    bool Capture( D3D11GraphicsEngine* engine, RenderToTextureBuffer* depthCopy, const XMMATRIX& view, const XMFLOAT4X4& projection, INT2 resolution );
+    bool IsBoxOccluded( const zTBBox3D& bbox ) const;
 
 private:
     struct HZBConstants {
@@ -41,8 +42,11 @@ private:
 
     UINT m_width = 0;
     UINT m_height = 0;
-    UINT m_writeReadback = 0;
+    UINT m_nextWriteReadback = 0;
     bool m_pendingReadback[ReadbackCount] = {};
+    uint64_t m_submissionSerial[ReadbackCount] = {};
+    uint64_t m_nextSubmissionSerial = 1;
+    uint64_t m_activeSubmissionSerial = 0;
     bool m_valid = false;
 
     Microsoft::WRL::ComPtr<ID3D11Texture2D> m_depthGrid;

@@ -59,9 +59,9 @@ float4 PSMain(PS_INPUT Input) : SV_TARGET
 
     float aspect = resolution.x / max(resolution.y, 1.0f);
     float2 centerArea = uv - float2(0.5f, 0.50f);
-    centerArea.x *= aspect * 0.58f;
+    centerArea.x *= aspect * 0.55f;
     centerArea.y *= 1.05f;
-    float centerBlurMask = smoothstep(0.34f, 0.94f, length(centerArea * 2.0f));
+    float centerBlurMask = smoothstep(0.40f, 1.10f, length(centerArea * 2.0f));
 
     float2 heroArea = uv - float2(0.5f, 0.68f);
     heroArea.x *= aspect * 0.85f;
@@ -72,12 +72,10 @@ float4 PSMain(PS_INPUT Input) : SV_TARGET
     velocity *= edgeBlurMask;
 
     float velocityPixels = length(velocity * resolution);
-    float velocityFade = smoothstep(MB_MinVelocityPixels, MB_MinVelocityPixels * 2.4f, velocityPixels);
-    velocity *= velocityFade;
-    velocityPixels *= velocityFade;
     if (velocityPixels < MB_MinVelocityPixels) {
         return centerColor;
     }
+    float blurAmount = smoothstep(MB_MinVelocityPixels, MB_MinVelocityPixels * 2.0f, velocityPixels);
 
     if (velocityPixels > MB_MaxPixels) {
         velocity *= MB_MaxPixels / velocityPixels;
@@ -88,8 +86,8 @@ float4 PSMain(PS_INPUT Input) : SV_TARGET
     float weightSum = 1.0f;
 
     [unroll]
-    for (int i = 1; i <= 6; ++i) {
-        float shutter = (float)i / 6.0f;
+    for (int i = 0; i < 6; ++i) {
+        float shutter = ((float)i - 2.5f) * 0.2f;
         float2 sampleUV = uv + velocity * shutter;
         if (sampleUV.x < 0.0f || sampleUV.x > 1.0f || sampleUV.y < 0.0f || sampleUV.y > 1.0f) {
             continue;
@@ -105,5 +103,5 @@ float4 PSMain(PS_INPUT Input) : SV_TARGET
         weightSum += weight;
     }
 
-    return colorSum / max(weightSum, 0.0001f);
+    return lerp(centerColor, colorSum / max(weightSum, 0.0001f), blurAmount);
 }

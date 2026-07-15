@@ -25,8 +25,13 @@ namespace {
 
 void D3D11HZBOcclusion::Reset() {
     m_valid = false;
-    m_pendingReadback[0] = false;
-    m_pendingReadback[1] = false;
+    m_nextWriteReadback = 0;
+    m_nextSubmissionSerial = 1;
+    m_activeSubmissionSerial = 0;
+    for ( UINT i = 0; i < ReadbackCount; ++i ) {
+        m_pendingReadback[i] = false;
+        m_submissionSerial[i] = 0;
+    }
 }
 
 void D3D11HZBOcclusion::ReleaseResources() {
@@ -89,7 +94,38 @@ bool D3D11HZBOcclusion::EnsureResources( D3D11GraphicsEngine* engine, UINT width
     return true;
 }
 
-bool D3D11HZBOcclusion::Update( D3D11GraphicsEngine* engine, RenderToTextureBuffer* depthCopy, const XMMATRIX& view, const XMFLOAT4X4& projection, INT2 resolution ) {
+void D3D11HZBOcclusion::BeginFrame( D3D11GraphicsEngine* engine ) {
+    m_valid = false;
+    if ( !engine || !m_depthGrid ) return;
+
+    UINT readOrder[ReadbackCount] = { 0, 1 };
+    if ( m_submissionSerial[readOrder[0]] > m_submissionSerial[readOrder[1]] ) {
+        std::swap( readOrder[0], readOrder[1] );
+    }
+
+    auto context = engine->GetContext().Get();
+    for ( UINT orderIndex = 0; orderIndex < ReadbackCount; ++orderIndex ) {
+        const UINT readIndex = readOrder[orderIndex];
+        if ( !m_pendingReadback[readIndex] ) continue;
+
+        D3D11_MAPPED_SUBRESOURCE mapped = {};
+        const HRESULT hr = context->Map( m_readback[readIndex].Get(), 0, D3D11_MAP_READ, D3D11_MAP_FLAG_DO_NOT_WAIT, &mapped );
+        if ( SUCCEEDED( hr ) ) {
+            if ( m_submissionSerial[readIndex] >= m_activeSubmissionSerial ) {
+                m_activeViewProj = m_submittedViewProj[readIndex];
+                BuildMipsFromReadback( mapped );
+                m_activeSubmissionSerial = m_submissionSerial[readIndex];
+                m_valid = true;
+            }
+            context->Unmap( m_readback[readIndex].Get(), 0 );
+            m_pendingReadback[readIndex] = false;
+        } else if ( hr != DXGI_ERROR_WAS_STILL_DRAWING ) {
+            m_pendingReadback[readIndex] = false;
+        }
+    }
+}
+
+bool D3D11HZBOcclusion::Capture( D3D11GraphicsEngine* engine, RenderToTextureBuffer* depthCopy, const XMMATRIX& view, const XMFLOAT4X4& projection, INT2 resolution ) {
     if ( FeatureLevel10Compatibility || !engine || !depthCopy || resolution.x <= 0 || resolution.y <= 0 ) {
         Reset();
         return false;
@@ -102,11 +138,18 @@ bool D3D11HZBOcclusion::Update( D3D11GraphicsEngine* engine, RenderToTextureBuff
         return false;
     }
 
-    auto shader = engine->GetShaderManager().GetCShader( CShaderID::CS_HZBOcclusion );
-    if ( !shader ) {
-        Reset();
-        return false;
+    UINT writeIndex = ReadbackCount;
+    for ( UINT offset = 0; offset < ReadbackCount; ++offset ) {
+        const UINT candidate = (m_nextWriteReadback + offset) % ReadbackCount;
+        if ( !m_pendingReadback[candidate] ) {
+            writeIndex = candidate;
+            break;
+        }
     }
+    if ( writeIndex == ReadbackCount ) return false;
+
+    auto shader = engine->GetShaderManager().GetCShader( CShaderID::CS_HZBOcclusion );
+    if ( !shader ) return false;
 
     auto context = engine->GetContext().Get();
     ID3D11RenderTargetView* nullRTVs[8] = {};
@@ -128,28 +171,14 @@ bool D3D11HZBOcclusion::Update( D3D11GraphicsEngine* engine, RenderToTextureBuff
     context->CSSetShaderResources( 0, 8, nullSRVs );
     context->CSSetShader( nullptr, nullptr, 0 );
 
-    XMStoreFloat4x4( &m_submittedViewProj[m_writeReadback], XMMatrixMultiply( XMLoadFloat4x4( &projection ), view ) );
-    context->CopyResource( m_readback[m_writeReadback].Get(), m_depthGrid.Get() );
+    const XMMATRIX cpuViewProj = XMMatrixTranspose( XMMatrixMultiply( XMLoadFloat4x4( &projection ), view ) );
+    XMStoreFloat4x4( &m_submittedViewProj[writeIndex], cpuViewProj );
+    context->CopyResource( m_readback[writeIndex].Get(), m_depthGrid.Get() );
 
-    const UINT readIndex = 1u - m_writeReadback;
-    m_valid = false;
-    if ( m_pendingReadback[readIndex] ) {
-        D3D11_MAPPED_SUBRESOURCE mapped = {};
-        HRESULT hr = context->Map( m_readback[readIndex].Get(), 0, D3D11_MAP_READ, D3D11_MAP_FLAG_DO_NOT_WAIT, &mapped );
-        if ( SUCCEEDED( hr ) ) {
-            m_activeViewProj = m_submittedViewProj[readIndex];
-            BuildMipsFromReadback( mapped );
-            context->Unmap( m_readback[readIndex].Get(), 0 );
-            m_valid = true;
-            m_pendingReadback[readIndex] = false;
-        } else if ( hr != DXGI_ERROR_WAS_STILL_DRAWING ) {
-            m_pendingReadback[readIndex] = false;
-        }
-    }
-
-    m_pendingReadback[m_writeReadback] = true;
-    m_writeReadback = readIndex;
-    return m_valid;
+    m_pendingReadback[writeIndex] = true;
+    m_submissionSerial[writeIndex] = m_nextSubmissionSerial++;
+    m_nextWriteReadback = (writeIndex + 1u) % ReadbackCount;
+    return true;
 }
 
 void D3D11HZBOcclusion::BuildMipsFromReadback( const D3D11_MAPPED_SUBRESOURCE& mapped ) {
@@ -236,10 +265,8 @@ float D3D11HZBOcclusion::SampleMipDepth( const MipLevel& mip, int x, int y ) con
     return mip.Depth[static_cast<size_t>( y ) * mip.Width + static_cast<size_t>( x )];
 }
 
-bool D3D11HZBOcclusion::IsBoxOccluded( const zTBBox3D& bbox, float meshSize, bool allowTinyCull ) const {
+bool D3D11HZBOcclusion::IsBoxOccluded( const zTBBox3D& bbox ) const {
     if ( !m_valid || m_mips.empty() ) return false;
-    (void)meshSize;
-    (void)allowTinyCull;
 
     float minX, minY, maxX, maxY, nearestDepth;
     if ( !ProjectBox( bbox, minX, minY, maxX, maxY, nearestDepth ) ) return false;
