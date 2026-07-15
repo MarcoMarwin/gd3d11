@@ -45,8 +45,6 @@ float3 VSPositionFromDepth( float depth, float2 vTexCoord )
 
 float4 PSMain( PS_INPUT Input ) : SV_TARGET
 {
-    float4 color = TX_Scene.Sample( SS_Linear, Input.vTexcoord );
-
     float expDepth = TX_Depth.Sample( SS_Linear, Input.vTexcoord ).r;
     float skyPixel = 1.0f - step( 0.00001f, expDepth );
     float3 worldPosition = VSPositionFromDepth( expDepth, Input.vTexcoord );
@@ -78,12 +76,19 @@ float4 PSMain( PS_INPUT Input ) : SV_TARGET
     float sunHalo = smoothstep( 0.99200f, 0.99860f, sunAlignment ) * sunWeight * skyPixel;
     float moonCore = smoothstep( 0.99935f, 0.99988f, moonAlignment ) * moonDiskWeight * skyPixel;
     float moonHalo = smoothstep( 0.99500f, 0.99900f, moonAlignment ) * moonDiskWeight * skyPixel;
+    float nightFogBrightness = lerp( 1.0f, max( 0.0f, AC_NightFogBrightness ), saturate( AC_EnableNightAtmosphere ) );
+    float3 nightRainVeilColor = float3( 0.12f, 0.18f, 0.27f ) * nightFogBrightness / 2.5f;
+    float rainVeil = saturate( AC_RainFXWeight ) * lerp( 0.045f, 0.30f, nightTimeBlend );
+    float veilDistance = SmootherStep01( saturate( ( cameraDistance - 3500.0f ) / 52000.0f ) );
+    float veilAmount = rainVeil * lerp( 0.45f, 1.0f, skyPixel ) * veilDistance;
+    clouds.rgb = lerp( clouds.rgb, nightRainVeilColor, veilAmount );
+    clouds.a *= 1.0f - veilAmount * 0.34f;
+
     float lightDiskMask = saturate( sunCore + sunHalo * 0.42f + moonCore * 0.92f + moonHalo * 0.24f );
     float cloudCoverAtLight = saturate( clouds.a * 1.90f + globalShadow * 0.86f );
     float lightCoreMask = saturate( sunCore + moonCore );
-    float lightDiskOcclusion = saturate( lightDiskMask * cloudCoverAtLight );
-    float3 occludedScene = color.rgb * ( 1.0f - lightDiskOcclusion * lerp( 0.78f, 0.995f, lightCoreMask ) );
+    float lightDiskOcclusion = saturate( lightDiskMask * cloudCoverAtLight ) * lerp( 0.78f, 0.995f, lightCoreMask );
 
-    color.rgb = lerp( occludedScene, clouds.rgb, clouds.a );
-    return color;
+    float layerAlpha = saturate( clouds.a + lightDiskOcclusion * ( 1.0f - clouds.a ) );
+    return float4( clouds.rgb * clouds.a, layerAlpha );
 }

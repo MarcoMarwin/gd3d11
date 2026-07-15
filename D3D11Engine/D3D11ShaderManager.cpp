@@ -253,6 +253,8 @@ XRESULT D3D11ShaderManager::Init() {
 
     Shaders.push_back( ShaderInfo::make<PShaderID::PS_PFX_LowClouds>( "PS_PFX_LowClouds.hlsl" )
         .with_category( ShaderCategory::SkyEffects ) );
+    Shaders.push_back( ShaderInfo::make<PShaderID::PS_PFX_LowCloudComposite>( "PS_PFX_LowCloudComposite.hlsl" )
+        .with_category( ShaderCategory::SkyEffects ) );
 
     Shaders.push_back( ShaderInfo::make<PShaderID::PS_PFX_UnderwaterFinal>( "PS_PFX_UnderwaterFinal.hlsl" )  );
 
@@ -273,6 +275,7 @@ XRESULT D3D11ShaderManager::Init() {
     // PostFX Composition uber shader
     Shaders.push_back( ShaderInfo::make<PShaderID::PS_PFX_ScreenSpaceLightingTrace>( "PS_PFX_ScreenSpaceLightingTrace.hlsl" ) );
     Shaders.push_back( ShaderInfo::make<PShaderID::PS_PFX_ScreenSpaceLightingTemporal>( "PS_PFX_ScreenSpaceLightingTemporal.hlsl" ) );
+    Shaders.push_back( ShaderInfo::make<PShaderID::PS_PFX_FSR3TransparencyMask>( "PS_PFX_FSR3TransparencyMask.hlsl" ) );
 
     Shaders.push_back( ShaderInfo::make<PShaderID::PS_PFX_Composition>( "PS_PFX_Composition.hlsl" )
         .with_category( ShaderCategory::Other )

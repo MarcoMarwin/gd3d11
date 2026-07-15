@@ -104,16 +104,11 @@ float ComputeVolumetricFog( float3 cameraToWorldPos, float3 posOriginal )
     return exp( -HF_GlobalDensity * w * fogInt );
 }
 
-float FogDither(float2 pixelPosition)
-{
-    float n1 = frac(52.9829189f * frac(dot(pixelPosition, float2(0.06711056f, 0.00583715f))));
-    float n2 = frac(52.9829189f * frac(dot(pixelPosition + 37.17f, float2(0.00583715f, 0.06711056f))));
-    return n1 + n2 - 1.0f;
-}
 
-float4 ComputeHeightFog( float2 texcoord, float2 pixelPosition )
+float4 ComputeHeightFog( float2 texcoord )
 {
     float expDepth = TX_Depth.Sample( SS_Linear, texcoord ).r;
+    float skyPixel = 1.0f - step(0.00001f, expDepth);
     float3 position = VSPositionFromDepth( expDepth, texcoord );
     position = mul( float4( position, 1 ), HF_InvView ).xyz;
     float3 posOriginal = position;
@@ -122,12 +117,12 @@ float4 ComputeHeightFog( float2 texcoord, float2 pixelPosition )
 
     float fog = 1.0f - ComputeVolumetricFog( position, posOriginal );
     float fogDistance = length(posOriginal - HF_CameraPosition);
-    float stableFadeEnd = max(HF_WeightZFar, 1000.0f);
     float activeWeatherFog = saturate(AC_RainFXWeight);
 	float nightTimeBlend = smoothstep(0.0f, 1.0f, saturate(-AC_LightPos.y * 4.0f))
 		* saturate(AC_EnableNightAtmosphere);
-    float stableFadeStart = max(HF_WeightZNear, stableFadeEnd * lerp(0.58f, 0.82f, nightTimeBlend * activeWeatherFog));
-    float stableWorldFade = smoothstep(stableFadeStart, stableFadeEnd, fogDistance);
+    float stableFadeEnd = max(HF_WeightZFar * lerp(1.12f, 1.32f, nightTimeBlend * activeWeatherFog), 1000.0f);
+    float stableFadeStart = max(HF_WeightZNear * 0.55f, stableFadeEnd * lerp(0.34f, 0.48f, nightTimeBlend * activeWeatherFog));
+    float stableWorldFade = SmootherStep01(saturate((fogDistance - stableFadeStart) / max(1.0f, stableFadeEnd - stableFadeStart)));
     float weatherFog = max(fog, stableWorldFade) * activeWeatherFog;
     float dryNightFog = fog * nightTimeBlend * (1.0f - activeWeatherFog);
     fog = max(weatherFog, dryNightFog);
@@ -139,11 +134,10 @@ float4 ComputeHeightFog( float2 texcoord, float2 pixelPosition )
 	float dayDarknessFactor = max(1.0f, 2.0f - max(0.0f, AC_LightPos.y));
 	float darknessFactor = lerp(dayDarknessFactor, 2.5f, nightTimeBlend);
 	float maxFogOpacity = lerp(1.0f, 0.85f, nightTimeBlend);
-    float fogGradientWeight = saturate(fog * (1.0f - fog) * 4.0f);
-    float fogGradientDither = FogDither(pixelPosition) * nightTimeBlend * (2.0f / 255.0f);
-    float ditheredFog = saturate(fog + fogGradientDither * fogGradientWeight);
+    float skyRainFogOpacity = lerp(0.90f, 0.85f, nightTimeBlend);
+    maxFogOpacity = lerp(maxFogOpacity, min(maxFogOpacity, skyRainFogOpacity), skyPixel * activeWeatherFog);
 
-	return float4(saturate(color / darknessFactor), ditheredFog * maxFogOpacity);
+	return float4(saturate(color / darknessFactor), fog * maxFogOpacity);
 }
 #endif
 
@@ -390,7 +384,7 @@ float4 PSMain( PS_INPUT Input ) : SV_TARGET
 #if COMPOSE_HEIGHTFOG
     [branch] if ( CC_HeightFogEnabled > 0.5f )
     {
-        float4 fog = ComputeHeightFog( Input.vTexcoord, Input.vPosition.xy );
+        float4 fog = ComputeHeightFog( Input.vTexcoord );
         color.rgb = lerp( color.rgb, fog.rgb, fog.a );
         float nightTimeBlend = smoothstep(0.0f, 1.0f, saturate(-AC_LightPos.y * 4.0f));
         float nightAtmosphereBlend = nightTimeBlend * saturate(AC_EnableNightAtmosphere);
@@ -398,10 +392,8 @@ float4 PSMain( PS_INPUT Input ) : SV_TARGET
         float nightFogBrightness = lerp(1.0f, max(0.0f, AC_NightFogBrightness), saturate(AC_EnableNightAtmosphere));
         float3 nightRainVeilColor = float3(0.12f, 0.18f, 0.27f) * nightFogBrightness / 2.5f;
         float3 rainVeilColor = lerp(fog.rgb, nightRainVeilColor, nightAtmosphereBlend);
-        float rainVeil = activeWeatherFog * lerp(0.055f, 0.18f, nightAtmosphereBlend);
+        float rainVeil = activeWeatherFog * lerp(0.050f, 0.22f, nightAtmosphereBlend);
         color.rgb = lerp(color.rgb, rainVeilColor, rainVeil);
-        float ditherStrength = lerp(1.0f, 2.5f, nightTimeBlend) / 255.0f;
-        color.rgb = saturate(color.rgb + FogDither(Input.vPosition.xy) * max(fog.a, rainVeil) * ditherStrength);
     }
 #endif
 

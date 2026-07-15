@@ -572,10 +572,7 @@ struct GothicRendererSettings {
     }
 
     float GetContactShadowFixedStrength() const {
-        const bool temporalReconstructionActive =
-            AntiAliasingMode == E_AntiAliasingMode::AA_FSR3
-            && Upscaler == E_Upscaler::UPSCALER_FSR_3;
-        return temporalReconstructionActive ? 0.35f : 0.50f;
+        return 0.50f;
     }
 
     /** Sets the default values for this struct */

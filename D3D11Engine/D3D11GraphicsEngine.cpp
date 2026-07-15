@@ -1380,7 +1380,7 @@ XRESULT D3D11GraphicsEngine::OnResize( INT2 newSize ) {
     m_swapchainResolution = requestedSwapchainSize;
     INT2 bbres = GetBackbufferResolution();
 
-    SyncGothicResolutionState( false );
+    SyncGothicResolutionState( true );
 
 #ifndef BUILD_SPACER
     BOOL isFullscreen = 0;
@@ -4034,38 +4034,6 @@ XRESULT D3D11GraphicsEngine::OnStartWorldRendering() {
     rendererState.RendererInfo.RenderStage = STAGE_DRAW_WORLD;
 
     const XMFLOAT4X4 uiProjection = rendererState.TransformState.TransformProjUnjittered;
-    XMFLOAT4X4 worldProjection = uiProjection;
-    if ( Resolution.y > 0 && m_swapchainResolution.y > 0 ) {
-        const float logicalAspect = static_cast<float>( Resolution.x ) / static_cast<float>( Resolution.y );
-        float outputAspect = static_cast<float>( m_swapchainResolution.x ) / static_cast<float>( m_swapchainResolution.y );
-#ifndef BUILD_SPACER
-        if ( !rendererState.RendererSettings.StretchWindow ) {
-            RECT desktopRect = {};
-            if ( GetClientRect( GetDesktopWindow(), &desktopRect ) ) {
-                const int desktopWidth = desktopRect.right - desktopRect.left;
-                const int desktopHeight = desktopRect.bottom - desktopRect.top;
-                if ( desktopWidth > 0 && desktopHeight > 0 ) {
-                    outputAspect = static_cast<float>( desktopWidth ) / static_cast<float>( desktopHeight );
-                }
-            }
-        }
-#endif
-        const float aspectScale = outputAspect / logicalAspect;
-        bool applyAspectScale = std::isfinite( aspectScale ) && std::abs( aspectScale - 1.0f ) > 0.001f;
-        if ( applyAspectScale && std::abs( uiProjection._11 ) > 0.0001f ) {
-            const float projectionAspect = std::abs( uiProjection._22 / uiProjection._11 );
-            if ( std::isfinite( projectionAspect ) ) {
-                const float outputDelta = std::abs( projectionAspect - outputAspect );
-                const float logicalDelta = std::abs( projectionAspect - logicalAspect );
-                applyAspectScale = logicalDelta <= outputDelta;
-            }
-        }
-        if ( applyAspectScale ) {
-            worldProjection._11 *= aspectScale;
-        }
-    }
-    rendererState.TransformState.TransformProjUnjittered = worldProjection;
-    rendererState.TransformState.TransformProj = worldProjection;
 
     SetViewport( ViewportInfo( 0, 0, GetResolution() ) );
 
@@ -4682,6 +4650,86 @@ XRESULT D3D11GraphicsEngine::OnStartWorldRendering() {
                     velocityTexture ? velocityTexture->GetShaderResView().Get() : nullptr,
                     &compositionScreenSpaceLightingSRV );
                 GetContext()->PSSetSamplers( 0, 1, DefaultSamplerState.GetAddressOf() );
+            };
+        } );
+    }
+    if ( fsr3ActiveForReactiveMask && compositionNeedsGeometry ) {
+        graph.AddPass( RG_PASS_NAME("FSR3 Contact Shadow Mask"), [&]( RGBuilder& builder, RenderPass& pass ) {
+            builder.Read( transparencyAndCompositionMaskResource );
+            builder.Read( backBufferHandle );
+            builder.Write( transparencyAndCompositionMaskResource );
+
+            pass.m_executeCallback = [this, transparencyAndCompositionMaskResource, &compositionScreenSpaceLightingSRV]( const RenderGraph& graph ) {
+                TracyD3D11ZoneCGX( "D3D11GraphicsEngine::FSR3 Contact Shadow Mask" );
+
+                if ( !compositionScreenSpaceLightingSRV ) {
+                    return;
+                }
+
+                auto maskTexture = graph.GetPhysicalTexture( transparencyAndCompositionMaskResource );
+                if ( !maskTexture ) {
+                    return;
+                }
+
+                auto vs = ShaderManager->GetVShader( VShaderID::VS_PFX );
+                auto ps = ShaderManager->GetPShader( PShaderID::PS_PFX_FSR3TransparencyMask );
+                if ( !vs || !ps ) {
+                    return;
+                }
+
+                Microsoft::WRL::ComPtr<ID3D11RenderTargetView> oldRTV;
+                Microsoft::WRL::ComPtr<ID3D11DepthStencilView> oldDSV;
+                GetContext()->OMGetRenderTargets( 1, oldRTV.GetAddressOf(), oldDSV.GetAddressOf() );
+
+                Microsoft::WRL::ComPtr<ID3D11BlendState> oldBlendState;
+                FLOAT oldBlendFactor[4] = {};
+                UINT oldSampleMask = 0xffffffff;
+                GetContext()->OMGetBlendState( oldBlendState.GetAddressOf(), oldBlendFactor, &oldSampleMask );
+
+                static Microsoft::WRL::ComPtr<ID3D11BlendState> s_fsr3ContactMaskBlendState;
+                if ( !s_fsr3ContactMaskBlendState ) {
+                    D3D11_BLEND_DESC blendDesc = {};
+                    blendDesc.RenderTarget[0].BlendEnable = TRUE;
+                    blendDesc.RenderTarget[0].SrcBlend = D3D11_BLEND_ONE;
+                    blendDesc.RenderTarget[0].DestBlend = D3D11_BLEND_ONE;
+                    blendDesc.RenderTarget[0].BlendOp = D3D11_BLEND_OP_MAX;
+                    blendDesc.RenderTarget[0].SrcBlendAlpha = D3D11_BLEND_ONE;
+                    blendDesc.RenderTarget[0].DestBlendAlpha = D3D11_BLEND_ONE;
+                    blendDesc.RenderTarget[0].BlendOpAlpha = D3D11_BLEND_OP_MAX;
+                    blendDesc.RenderTarget[0].RenderTargetWriteMask = D3D11_COLOR_WRITE_ENABLE_RED;
+                    GetDevice()->CreateBlendState( &blendDesc, s_fsr3ContactMaskBlendState.GetAddressOf() );
+                }
+
+                SetDefaultStates();
+                Engine::GAPI->GetRendererState().DepthState.DepthBufferCompareFunc = GothicDepthBufferStateInfo::CF_COMPARISON_ALWAYS;
+                Engine::GAPI->GetRendererState().DepthState.DepthWriteEnabled = false;
+                Engine::GAPI->GetRendererState().DepthState.SetDirty();
+
+                SetViewport( ViewportInfo( 0, 0, GetResolution() ) );
+                ID3D11RenderTargetView* rtv = maskTexture->GetRenderTargetView().Get();
+                GetContext()->OMSetRenderTargets( 1, &rtv, nullptr );
+
+                if ( s_fsr3ContactMaskBlendState ) {
+                    const FLOAT blendFactor[4] = {};
+                    GetContext()->OMSetBlendState( s_fsr3ContactMaskBlendState.Get(), blendFactor, 0xffffffff );
+                }
+
+                vs->Apply();
+                ps->Apply();
+                ID3D11ShaderResourceView* srv = compositionScreenSpaceLightingSRV;
+                GetContext()->PSSetShaderResources( 0, 1, &srv );
+                GetContext()->PSSetSamplers( 0, 1, DefaultSamplerState.GetAddressOf() );
+
+                PfxRenderer->DrawFullScreenQuad();
+
+                ID3D11ShaderResourceView* nullSRV = nullptr;
+                GetContext()->PSSetShaderResources( 0, 1, &nullSRV );
+                GetContext()->OMSetBlendState( oldBlendState.Get(), oldBlendFactor, oldSampleMask );
+                GetContext()->OMSetRenderTargets( 1, oldRTV.GetAddressOf(), oldDSV.Get() );
+
+                Engine::GAPI->GetRendererState().DepthState.DepthBufferCompareFunc = GothicDepthBufferStateInfo::DEFAULT_DEPTH_COMP_STATE;
+                Engine::GAPI->GetRendererState().DepthState.DepthWriteEnabled = true;
+                Engine::GAPI->GetRendererState().DepthState.SetDirty();
             };
         } );
     }

@@ -630,8 +630,9 @@ XRESULT D3D11PfxRenderer::RenderLowClouds( ID3D11RenderTargetView* outputRTV,
     }
 
     auto lowCloudPS = engine->GetShaderManager().GetPShader( PShaderID::PS_PFX_LowClouds );
+    auto lowCloudCompositePS = engine->GetShaderManager().GetPShader( PShaderID::PS_PFX_LowCloudComposite );
     auto vs = engine->GetShaderManager().GetVShader( VShaderID::VS_PFX );
-    if ( !lowCloudPS || !vs ) {
+    if ( !lowCloudPS || !lowCloudCompositePS || !vs ) {
         return XR_FAILED;
     }
 
@@ -697,21 +698,25 @@ XRESULT D3D11PfxRenderer::RenderLowClouds( ID3D11RenderTargetView* outputRTV,
     cb.HF_GlobalDensity = Toolbox::lerp( cb.HF_GlobalDensity, settings.RainFogDensity, rain * fogDensityFactorRain );
 
     vs->Apply();
+
+    auto res = engine->GetResolution();
+    const INT2 cloudRes( std::max( 1, (res.x + 1) / 2 ), std::max( 1, (res.y + 1) / 2 ) );
+    auto lowCloudLayer = m_texturePool->Acquire( TexturePool::Description{ cloudRes.x, cloudRes.y, engine->GetBackBufferFormat() } );
+
+    D3D11_VIEWPORT vp = {};
+    vp.Width = static_cast<float>( cloudRes.x );
+    vp.Height = static_cast<float>( cloudRes.y );
+    vp.MinDepth = 0.0f;
+    vp.MaxDepth = 1.0f;
+    context->RSSetViewports( 1, &vp );
+    context->OMSetRenderTargets( 1, lowCloudLayer->GetRenderTargetView().GetAddressOf(), nullptr );
+
     lowCloudPS->Apply();
     lowCloudPS->GetBuffer( "PFXBuffer" ).Update( &cb ).Bind();
     lowCloudPS->GetBuffer( "Atmosphere" ).Update( &sky->GetAtmosphereCB() ).Bind();
 
-    auto res = engine->GetResolution();
-    D3D11_VIEWPORT vp = {};
-    vp.Width = static_cast<float>( res.x );
-    vp.Height = static_cast<float>( res.y );
-    vp.MinDepth = 0.0f;
-    vp.MaxDepth = 1.0f;
-    context->RSSetViewports( 1, &vp );
-    context->OMSetRenderTargets( 1, &outputRTV, nullptr );
-
-    ID3D11ShaderResourceView* srvs[2] = { sceneSRV, depthSRV };
-    context->PSSetShaderResources( 0, 2, srvs );
+    ID3D11ShaderResourceView* cloudSRVs[2] = { sceneSRV, depthSRV };
+    context->PSSetShaderResources( 0, 2, cloudSRVs );
 
     Engine::GAPI->GetRendererState().BlendState.SetDefault();
     Engine::GAPI->GetRendererState().BlendState.SetDirty();
@@ -722,6 +727,20 @@ XRESULT D3D11PfxRenderer::RenderLowClouds( ID3D11RenderTargetView* outputRTV,
     DrawFullScreenQuad();
 
     ID3D11ShaderResourceView* nullSRVs[2] = {};
+    context->PSSetShaderResources( 0, 2, nullSRVs );
+
+    vp.Width = static_cast<float>( res.x );
+    vp.Height = static_cast<float>( res.y );
+    context->RSSetViewports( 1, &vp );
+    context->OMSetRenderTargets( 1, &outputRTV, nullptr );
+
+    lowCloudCompositePS->Apply();
+    lowCloudCompositePS->GetBuffer( "Atmosphere" ).Update( &sky->GetAtmosphereCB() ).Bind();
+    ID3D11ShaderResourceView* compositeSRVs[2] = { sceneSRV, lowCloudLayer->GetShaderResView().Get() };
+    context->PSSetShaderResources( 0, 2, compositeSRVs );
+
+    DrawFullScreenQuad();
+
     context->PSSetShaderResources( 0, 2, nullSRVs );
 
     Engine::GAPI->GetRendererState().DepthState.DepthBufferCompareFunc = GothicDepthBufferStateInfo::DEFAULT_DEPTH_COMP_STATE;

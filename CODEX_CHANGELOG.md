@@ -478,3 +478,12 @@ Kurze, append-only Dokumentation der von Codex gepushten Renderer-Builds.
 - Motion Blur: ein optionaler F11-Schalter aktiviert Bewegungsunschaerfe als persoenliche Option; Grafik-Presets setzen diese Option nicht.
 - TAA/FSR3: TAA wurde aus UI, Shadern und PostFX-Code entfernt; FSR3 nutzt einen eigenen Temporal-State fuer Jitter/Velocity und bleibt als `AA_FSR3 = 2` der einzige FSR3-Anti-Aliasing-Modus.
 - Pruefung: AGENTS-Regeln gelesen; Buildnummer aus outputs ermittelt; TAA-/AA-FSR-Reste, Projekt-XML, Shader-/Projektpfade, F11-/INI-Pfade, Konflikt-/Escape-Artefakte und git diff --check statisch kontrolliert. Kein vollstaendiger lokaler C++-/Shader-Build.
+
+## Build 125 (Wasser-SSR, Regenwolken, FSR3-Masken und 4:3-Seitenverhaeltnis)
+
+- Wasser-SSR: Vordergrundobjekte vor Wasserreflexionen reduzieren nur die betroffenen Screen-Space-Treffer weich, damit fehlender Hintergrund kaschiert wird, ohne Wet-Ground-SSR anzufassen.
+- Regen-Schleier: der globale Regen-/Sky-Schleier ist ohne Dither, beginnt etwas naeher und laeuft weicher/laenger in die maximale Wirkung; tagsueber bleibt die Regenwolken-Textur sichtbar abgeschwaecht erhalten.
+- Dynamische Wolken: Low Clouds werden im Composite vom gleichen Regen-/Nacht-Schleier mitgenommen und laufen bei Regen beziehungsweise starker Nacht mit weniger Raymarch-Schritten, waehrend klare Tageswolken ihre volle Schrittzahl behalten.
+- FSR3: Alpha-getestete Weltflaechen und Contact Shadows schreiben gezielte Transparency-/Composition-Masken fuer die Rekonstruktion; die Contact-Shadow-Staerke ist wieder der normale Standardwert.
+- Seitenverhaeltnis: der fehleranfaellige World-Projection-Aspect-Hack ist entfernt; echte Aufloesungswechsel aktualisieren die Gothic-Kamera wieder direkt, Render Scale bleibt davon getrennt.
+- Pruefung: AGENTS-Regeln gelesen; Buildnummer aus outputs ermittelt; origin/master mit PortableGit/OpenSSL abgeglichen; Projekt-XML, Shader-/Projektpfade, FSR3-Maskenfluss, Render-Scale-Grenze, Konflikt-/Escape-Artefakte und git diff --check statisch kontrolliert. Kein vollstaendiger lokaler C++-/Shader-Build.

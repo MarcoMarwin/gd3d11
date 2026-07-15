@@ -307,11 +307,16 @@ float4 ComputeWorldLowCloudVolume(float3 cameraWorld, float3 endWorld, float cam
 	float3 scattering = 0.0f;
 	float accumulatedAlpha = 0.0f;
 	const int CLOUD_FIELD_STEPS = 8;
-	float stepLength = usableDistance / CLOUD_FIELD_STEPS;
+	int activeCloudSteps = (rainWeight > 0.25f || nightTimeBlend > 0.70f) ? 5 : CLOUD_FIELD_STEPS;
+	float stepLength = usableDistance / max((float)activeCloudSteps, 1.0f);
 
-	[unroll]
+	[loop]
 	for (int i = 0; i < CLOUD_FIELD_STEPS; ++i)
 	{
+		if (i >= activeCloudSteps)
+		{
+			break;
+		}
 		float stepJitter = LowCloudHash21(float2(i * 17.0f, i * 29.0f) + float2(11.0f, 37.0f)) - 0.5f;
 		float sampleDistance = startDistance + (i + 0.58f + stepJitter * 0.24f) * stepLength;
 		float3 sampleWorld = cameraWorld + rayDir * sampleDistance;

@@ -197,13 +197,21 @@ PS_OUTPUT PSMain( PS_INPUT Input )
 				float edgeQuality = 1.0f - smoothstep(edgeTolerance, edgeTolerance * 4.0f, hitEdge);
 				float nearHitQuality = smoothstep(700.0f, 2200.0f, abs(sampleZ));
 
+				float waterViewZ = abs(Input.vTexcoord2.x);
+				float hitViewZ = abs(sampleZ);
+				float foregroundDepthDelta = max(0.0f, waterViewZ - hitViewZ);
+				float foregroundStart = max(220.0f, waterViewZ * 0.035f);
+				float foregroundOccluder = smoothstep(foregroundStart, foregroundStart * 3.0f, foregroundDepthDelta);
+				float silhouetteOccluder = smoothstep(edgeTolerance * 0.65f, edgeTolerance * 2.75f, hitEdge);
+				float closeOccluder = 1.0f - smoothstep(1400.0f, 6200.0f, hitViewZ);
+				float foregroundOccluderFade = 1.0f - saturate(foregroundOccluder * max(silhouetteOccluder, closeOccluder * 0.35f)) * 0.82f;
 				reflectionSSR = TX_Scene.SampleLevel(SS_Linear, uv, 0).xyz;
 				ssrHitWorldPosition = midPos;
 				ssrHitValid = 1.0f;
 				float2 edgeFade = saturate(abs(uv - 0.5f) * 2.0f);
 				float edgeDistance = max(edgeFade.x, edgeFade.y);
 				ssrRawWeight = 1.0f - smoothstep(0.78f, 1.0f, edgeDistance);
-				ssrHitQuality = edgeQuality * nearHitQuality;
+				ssrHitQuality = edgeQuality * nearHitQuality * foregroundOccluderFade;
 				break;
 			}
 		}
