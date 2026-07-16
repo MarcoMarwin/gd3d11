@@ -6,7 +6,6 @@
 #include "D3D11Effect.h"
 #include "D3D11GShader.h"
 #include "D3D11LineRenderer.h"
-#include "D3D11HZBOcclusion.h"
 #include "D3D11PShader.h"
 #include "D3D11PfxRenderer.h"
 #include "D3D11PipelineStates.h"
@@ -469,7 +468,6 @@ D3D11GraphicsEngine::D3D11GraphicsEngine() :
     Effects = std::make_unique<D3D11Effect>();
     TemporalState = std::make_unique<D3D11TemporalState>();
     LineRenderer = std::make_unique<D3D11LineRenderer>();
-    Occlusion = std::make_unique<D3D11HZBOcclusion>();
 
     m_FrameLimiter = std::make_unique<FpsLimiter>();
 
@@ -4103,14 +4101,6 @@ XRESULT D3D11GraphicsEngine::OnStartWorldRendering() {
     rendererState.RasterizerState.FrontCounterClockwise = false;
     rendererState.RasterizerState.SetDirty();
 
-    if ( Occlusion ) {
-        if ( rendererState.RendererSettings.EnableOcclusionCulling && !FeatureLevel10Compatibility ) {
-            Occlusion->BeginFrame( this );
-        } else {
-            Occlusion->Reset();
-        }
-    }
-
     if ( rendererState.RendererSettings.EnableShadows ) {
         ShadowMaps->PrepareRender();
     }
@@ -4915,26 +4905,6 @@ XRESULT D3D11GraphicsEngine::OnStartWorldRendering() {
         } );
     }
 
-
-    if ( rendererState.RendererSettings.EnableMotionBlur ) {
-        graph.AddPass( RG_PASS_NAME("Motion Blur"), [&]( RGBuilder& builder, RenderPass& pass ) {
-            builder.Read( backBufferHandle );
-            builder.Read( velocityBufferHandle );
-            builder.Write( backBufferHandle );
-
-            pass.m_executeCallback = [this, backBufferHandle, velocityBufferHandle](const RenderGraph& graph) {
-                TracyD3D11ZoneCGX( "D3D11GraphicsEngine::Motion Blur" );
-                auto backbufferTex = graph.GetPhysicalTexture( backBufferHandle );
-                auto velocityTex = graph.GetPhysicalTexture( velocityBufferHandle );
-                PfxRenderer->RenderMotionBlur(
-                    backbufferTex->GetRenderTargetView().Get(),
-                    backbufferTex->GetShaderResView().Get(),
-                    velocityTex->GetShaderResView().Get(),
-                    DepthStencilBuffer->GetShaderResView().Get() );
-                GetContext()->PSSetSamplers( 0, 1, DefaultSamplerState.GetAddressOf() );
-            };
-        } );
-    }
 
     graph.AddPass( RG_PASS_NAME("Reset Viewport"), [&]( RGBuilder& builder, RenderPass& pass ) {
         builder.Write( backBufferHandle );
@@ -5797,7 +5767,6 @@ XRESULT D3D11GraphicsEngine::DrawWorldMesh( bool noTextures ) {
         }
     }
 
-    UpdateOcclusion();
     return XR_SUCCESS;
 }
 
@@ -7110,7 +7079,6 @@ void XM_CALLCONV D3D11GraphicsEngine::DrawWorldAroundForWorldShadow( FXMVECTOR p
             ctx.drawFlags.DrawVOBs = rs.DrawVOBs;
             ctx.drawFlags.DrawMobs = rs.DrawMobs;
             ctx.drawFlags.EnableDynamicLighting = rs.EnableDynamicLighting;
-            ctx.drawFlags.EnableOcclusionCulling = rs.EnableOcclusionCulling;
             ctx.drawFlags.CullVobs = rs.DebugSettings.Culling.CullVobs;
             ctx.drawFlags.CollectIndoorVobs = true;
             ctx.drawFlags.CollectLargeVobs = true;
@@ -9718,27 +9686,6 @@ XRESULT D3D11GraphicsEngine::OnVobRemovedFromWorld( zCVob* vob ) {
     DebugPointlight = nullptr;
 
     return XR_SUCCESS;
-}
-
-/** Updates the depth hierarchy used for conservative object occlusion. */
-void D3D11GraphicsEngine::UpdateOcclusion() {
-    if ( !Occlusion )
-        return;
-
-    if ( !Engine::GAPI->GetRendererState().RendererSettings.EnableOcclusionCulling || FeatureLevel10Compatibility ) {
-        Occlusion->Reset();
-        return;
-    }
-
-    auto _ = RecordGraphicsEvent( GE_NAME( "D3D11GraphicsEngine::UpdateOcclusion" ) );
-    TracyD3D11ZoneCGX( "D3D11GraphicsEngine::UpdateOcclusion" );
-
-    CopyDepthStencil();
-    Occlusion->Capture( this, GetDepthBufferCopy(), Engine::GAPI->GetViewMatrixXM(), Engine::GAPI->GetProjectionMatrix(), GetResolution() );
-}
-
-bool D3D11GraphicsEngine::ShouldOcclusionCullVob( const zTBBox3D& bbox ) {
-    return Occlusion && Occlusion->IsBoxOccluded( bbox );
 }
 
 /** Saves a screenshot */

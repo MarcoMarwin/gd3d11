@@ -368,9 +368,6 @@
     <ClInclude Include="D3D11PFX_DepthOfField.h">
       <Filter>Engine\D3D11\PFX\Effects</Filter>
     </ClInclude>
-    <ClInclude Include="D3D11HZBOcclusion.h">
-      <Filter>Engine\D3D11</Filter>
-    </ClInclude>
     <ClInclude Include="D3D11GraphicsEngineBase.h" />
     <ClInclude Include="D3D11GodRayEffect.h">
       <Filter>Engine\D3D11</Filter>
@@ -906,12 +903,6 @@
     <ClCompile Include="D3D11PFX_DepthOfField.cpp">
       <Filter>Engine\D3D11\PFX\Effects</Filter>
     </ClCompile>
-    <ClCompile Include="D3D11PFX_MotionBlur.cpp">
-      <Filter>Engine\D3D11\PFX\Effects</Filter>
-    </ClCompile>
-    <ClCompile Include="D3D11HZBOcclusion.cpp">
-      <Filter>Engine\D3D11</Filter>
-    </ClCompile>
     <ClCompile Include="D3D11GraphicsEngineBase.cpp" />
     <ClCompile Include="D3D11GodRayEffect.cpp">
       <Filter>Engine\D3D11</Filter>
@@ -1117,9 +1108,6 @@
     <None Include="Shaders\PS_PFX_SkyVelocity.hlsl">
       <Filter>Engine\Shaders</Filter>
     </None>
-    <None Include="Shaders\PS_PFX_MotionBlur.hlsl">
-      <Filter>Engine\Shaders</Filter>
-    </None>
     <None Include="Shaders\PS_PFX_LowClouds.hlsl">
       <Filter>Engine\Shaders</Filter>
     </None>
@@ -1133,9 +1121,6 @@
       <Filter>Engine\Shaders</Filter>
     </None>
     <None Include="Shaders\PS_PFX_VelocityDebug.hlsl">
-      <Filter>Engine\Shaders</Filter>
-    </None>
-    <None Include="Shaders\CS_HZBOcclusion.hlsl">
       <Filter>Engine\Shaders</Filter>
     </None>
     <None Include="Shaders\PS_DS_AtmosphericScattering.hlsl">

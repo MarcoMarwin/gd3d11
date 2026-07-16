@@ -673,17 +673,14 @@ struct GothicRendererSettings {
         BrightnessValue = 1.0f;
         GammaValue = 1.0f;
 
-        EnableOcclusionCulling = true;
-        EnableMotionBlur = false;
         PCSSLightSize = 0.140f;
         ShadowFilterMode = E_ShadowFilterMode::SHADOW_FILTER_PCSS;
 
         EnableShadows = true;
         ThreadedShadowCulling = false;
         EnableVSync = false;
-        DoZPrepass = false;
+        DoZPrepass = true;
         SortRenderQueue = false;
-        DrawThreaded = false;
         EnableSSR = true;
         SSRStrength = 1.0f; // UI-normalized: 1.0 equals the former 1.4 slider value.
         WaterCubemapStrength = 1.0f;
@@ -919,8 +916,7 @@ struct GothicRendererSettings {
     bool DisableWatermark;
     bool DisableRendering;
     bool DisableDrawcalls;
-    // deferred render pass geometry Z-Prepass.
-    // doesn't help much if at all.
+    // Deferred depth prepass can reduce G-buffer overdraw in GPU-bound scenes.
     bool DoZPrepass;
     bool EnableAutoupdates;
     bool EnableSSR;
@@ -941,10 +937,7 @@ struct GothicRendererSettings {
     float DoFMaxBlur;
     float DoFNearBlurDistance;
     float DoFNearBlurStrength;
-    bool EnableOcclusionCulling;
-    bool EnableMotionBlur;
     bool SortRenderQueue;
-    bool DrawThreaded;
     EPointLightShadowMode EnablePointlightShadows;
     bool PartialDynamicShadowUpdates;
     bool EnableTiledLighting;

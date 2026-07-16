@@ -206,8 +206,6 @@ public:
     /** Draws a VOB (used for inventory) */
     virtual void DrawVobSingle( VobInfo* vob, zCCamera& camera ) {};
 
-    /** Conservative object occlusion hook for renderers that provide a depth hierarchy. */
-    virtual bool ShouldOcclusionCullVob( const zTBBox3D& bbox ) { return false; }
 
     /** Message-Callback for the main window */
     virtual LRESULT OnWindowMessage( HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam ) { return 0; }

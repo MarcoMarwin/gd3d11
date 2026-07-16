@@ -4354,7 +4354,6 @@ void GothicAPI::CollectVisibleVobs(
     ctx.drawFlags.DrawVOBs = RendererState.RendererSettings.DrawVOBs;
     ctx.drawFlags.DrawMobs = RendererState.RendererSettings.DrawMobs;
     ctx.drawFlags.EnableDynamicLighting = RendererState.RendererSettings.EnableDynamicLighting;
-    ctx.drawFlags.EnableOcclusionCulling = RendererState.RendererSettings.EnableOcclusionCulling;
     ctx.drawFlags.CullVobs = RendererState.RendererSettings.DebugSettings.Culling.CullVobs;
     ctx.drawFlags.CollectIndoorVobs = true;
     ctx.drawFlags.CollectLargeVobs = true;
@@ -4862,10 +4861,6 @@ static void CVVH_AddNotDrawnVobToList(
             && !ctx.frustum.Intersects( it->Vob->GetBBox() ) ) {
             continue;
         }
-        if ( ctx.drawFlags.EnableOcclusionCulling
-            && Engine::GraphicsEngine->ShouldOcclusionCullVob( it->Vob->GetBBox() ) ) {
-            continue;
-        }
         if ( it->Vob->GetVisualAlpha() ) {
             ctx.queue->PushTransparencyVob( TransparencyVobInfo{ std::sqrtf( vdSq ), it->Vob->GetVobTransparency(), nullptr, it } );
             continue;
@@ -4896,10 +4891,6 @@ static void CVVH_AddNotDrawnVobToList(
         if ( bspContainment != ContainmentType::CONTAINS // only do frustum check if previously "INTERSECTS"
             && cullingEnabled
             && !ctx.frustum.Intersects( it->Vob->GetBBox() ) ) {
-            continue;
-        }
-        if ( ctx.drawFlags.EnableOcclusionCulling
-            && Engine::GraphicsEngine->ShouldOcclusionCullVob( it->Vob->GetBBox() ) ) {
             continue;
         }
 
@@ -5860,8 +5851,6 @@ XRESULT GothicAPI::SaveMenuSettings( const std::string& file ) {
     * F11 draw-distance settings are saved globally in UserSettings.ini
     */
 
-    WritePrivateProfileStringA( "General", "EnableOcclusionCulling", std::to_string( s.EnableOcclusionCulling ).c_str(), ini.c_str() );
-    WritePrivateProfileStringA( "General", "EnableMotionBlur", std::to_string( s.EnableMotionBlur ? TRUE : FALSE ).c_str(), ini.c_str() );
     WritePrivateProfileStringA( "General", "FpsLimit", std::to_string( s.FpsLimit ).c_str(), ini.c_str() );
     WritePrivateProfileStringA( "General", "FpsLimitLastEnabled", std::to_string( s.FpsLimitLastEnabled ).c_str(), ini.c_str() );
     
@@ -5887,7 +5876,7 @@ XRESULT GothicAPI::SaveMenuSettings( const std::string& file ) {
     WritePrivateProfileStringA( "Display", "WindStrength", std::to_string( s.GlobalWindStrength ).c_str(), ini.c_str() );
     WritePrivateProfileStringA( "Display", "WaterWaveAnimation", std::to_string( s.EnableWaterAnimation ? TRUE : FALSE ).c_str(), ini.c_str() );
     WritePrivateProfileStringA( "Display", "HeroAffectsObjects", std::to_string( s.HeroAffectsObjects ? TRUE : FALSE ).c_str(), ini.c_str() );
-    WritePrivateProfileStringA( "Shadows", "ShadowFilterMode", std::to_string( static_cast<int>(s.ShadowFilterMode) ).c_str(), ini.c_str() );
+
     WritePrivateProfileStringA( "Shadows", "ShadowMapSize", std::to_string( s.ShadowMapSize ).c_str(), ini.c_str() );
     WritePrivateProfileStringA( "Shadows", "ShadowSoftness", std::to_string( s.ShadowSoftness ).c_str(), ini.c_str() );
 
@@ -6004,8 +5993,6 @@ XRESULT GothicAPI::LoadMenuSettings( const std::string& file ) {
         * F11 draw-distance settings are loaded globally from UserSettings.ini
         */
 
-        s.EnableOcclusionCulling = GetPrivateProfileBoolA( "General", "EnableOcclusionCulling", ds.EnableOcclusionCulling, ini );
-        s.EnableMotionBlur = GetPrivateProfileBoolA( "General", "EnableMotionBlur", ds.EnableMotionBlur, ini );
         s.FpsLimit = GetPrivateProfileIntA( "General", "FpsLimit", 0, ini.c_str() );
         s.FpsLimitLastEnabled = std::clamp(
             static_cast<int>(GetPrivateProfileIntA( "General", "FpsLimitLastEnabled",
@@ -6025,14 +6012,9 @@ XRESULT GothicAPI::LoadMenuSettings( const std::string& file ) {
 
         static XMFLOAT3 defaultLightDirection = XMFLOAT3( 1, 1, 1 );
         s.EnableShadows = true;
-        const int configuredShadowFilter = GetPrivateProfileIntA(
-            "Shadows", "ShadowFilterMode", static_cast<int>(ds.ShadowFilterMode), ini.c_str() );
-        s.ShadowFilterMode = configuredShadowFilter == static_cast<int>(GothicRendererSettings::E_ShadowFilterMode::SHADOW_FILTER_PCSS)
-            ? GothicRendererSettings::E_ShadowFilterMode::SHADOW_FILTER_PCSS
-            : GothicRendererSettings::E_ShadowFilterMode::SHADOW_FILTER_SIMPLE;
-        if ( FeatureLevel10Compatibility && s.ShadowFilterMode != GothicRendererSettings::E_ShadowFilterMode::SHADOW_FILTER_SIMPLE ) {
-            s.ShadowFilterMode = GothicRendererSettings::E_ShadowFilterMode::SHADOW_FILTER_SIMPLE;
-        }
+        s.ShadowFilterMode = FeatureLevel10Compatibility
+            ? GothicRendererSettings::E_ShadowFilterMode::SHADOW_FILTER_SIMPLE
+            : GothicRendererSettings::E_ShadowFilterMode::SHADOW_FILTER_PCSS;
         s.ShadowMapSize = GetPrivateProfileIntA( "Shadows", "ShadowMapSize", ds.ShadowMapSize, ini.c_str() );
         if ( s.ShadowMapSize <= 1024 ) s.ShadowMapSize = 1024;
         else if ( s.ShadowMapSize <= 2048 ) s.ShadowMapSize = 2048;
@@ -7173,32 +7155,12 @@ void GothicAPI::CollectVisibleVobs( const RndCullContext& ctx ) {
         }
     };
 
-    if ( ctx.drawFlags.EnableOcclusionCulling
-        && ctx.drawFlags.DrawVOBs ) {
-        RndCullContext stableCtx = ctx;
-        stableCtx.drawFlags.EnableOcclusionCulling = false;
-        stableCtx.drawFlags.CollectIndoorVobs = ctx.drawFlags.CollectIndoorVobs;
-        stableCtx.drawFlags.CollectLargeVobs = true;
-        stableCtx.drawFlags.CollectSmallVobs = false;
-        stableCtx.drawFlags.CollectMobs = false;
-        stableCtx.drawFlags.CollectLights = ctx.drawFlags.CollectLights;
-        collectTree( stableCtx );
-
-        RndCullContext occludedSmallCtx = ctx;
-        occludedSmallCtx.drawFlags.CollectIndoorVobs = false;
-        occludedSmallCtx.drawFlags.CollectLargeVobs = false;
-        occludedSmallCtx.drawFlags.CollectSmallVobs = true;
-        occludedSmallCtx.drawFlags.CollectMobs = ctx.drawFlags.CollectMobs;
-        occludedSmallCtx.drawFlags.CollectLights = false;
-        collectTree( occludedSmallCtx );
-    } else {
-        RndCullContext singlePassCtx = ctx;
-        if ( !singlePassCtx.drawFlags.CollectLargeVobs && !singlePassCtx.drawFlags.CollectSmallVobs ) {
-            singlePassCtx.drawFlags.CollectLargeVobs = true;
-            singlePassCtx.drawFlags.CollectSmallVobs = true;
-        }
-        collectTree( singlePassCtx );
+    RndCullContext singlePassCtx = ctx;
+    if ( !singlePassCtx.drawFlags.CollectLargeVobs && !singlePassCtx.drawFlags.CollectSmallVobs ) {
+        singlePassCtx.drawFlags.CollectLargeVobs = true;
+        singlePassCtx.drawFlags.CollectSmallVobs = true;
     }
+    collectTree( singlePassCtx );
 
     ZoneText( "vobs", std::size( "vobs" ) - 1 );
     ZoneValue( bspVobVisitor.GetSeenVobs() );
@@ -7234,11 +7196,6 @@ void GothicAPI::CollectVisibleVobs( const RndCullContext& ctx ) {
                     continue;
                 }
                 if ( cullingEnabled && !ctx.frustum.Intersects( it->Vob->GetBBox() ) ) {
-                    continue;
-                }
-                if ( ctx.drawFlags.EnableOcclusionCulling
-                    && it->VisualInfo->MeshSize < vobSmallSize
-                    && Engine::GraphicsEngine->ShouldOcclusionCullVob( it->Vob->GetBBox() ) ) {
                     continue;
                 }
 

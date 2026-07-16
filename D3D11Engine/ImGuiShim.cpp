@@ -807,7 +807,6 @@ struct GraphicsPresetComparable {
     bool EnableGodRays;
     bool EnableRain;
     bool EnableDynamicClouds;
-    bool EnableOcclusionCulling;
     int OutdoorSmallVobDrawDistance;
     int SectionDrawRadius;
     float AOStrength;
@@ -842,7 +841,6 @@ GraphicsPresetComparable MakeGraphicsPresetComparable( const GothicRendererSetti
         s.EnableGodRays,
         s.EnableRain,
         s.EnableDynamicClouds,
-        s.EnableOcclusionCulling,
         ObjectDrawDistanceMetersToUi( s.OutdoorSmallVobDrawRadius ),
         s.SectionDrawRadius,
         s.AOStrength,
@@ -877,7 +875,6 @@ bool GraphicsPresetComparableEqual( const GraphicsPresetComparable& a, const Gra
         && a.EnableGodRays == b.EnableGodRays
         && a.EnableRain == b.EnableRain
         && a.EnableDynamicClouds == b.EnableDynamicClouds
-        && a.EnableOcclusionCulling == b.EnableOcclusionCulling
         && a.OutdoorSmallVobDrawDistance == b.OutdoorSmallVobDrawDistance
         && a.SectionDrawRadius == b.SectionDrawRadius
         && a.AOStrength == b.AOStrength
@@ -933,7 +930,6 @@ void ApplyGraphicsPresets( GothicRendererSettings& s, bool applyRuntimeUpdates =
         s.EnableParallaxOcclusionMapping = true;
         s.WindQuality = GothicRendererSettings::EWindQuality::WIND_QUALITY_ADVANCED;
         s.HeroAffectsObjects = true;
-        s.EnableOcclusionCulling = true;
         s.OutdoorSmallVobDrawRadius = ObjectDrawDistanceUiToMeters( 2 );
         s.SectionDrawRadius = 3;
         s.textureMaxSize = static_cast<int>(TX_QUALITY::High);
@@ -952,7 +948,6 @@ void ApplyGraphicsPresets( GothicRendererSettings& s, bool applyRuntimeUpdates =
         s.EnableParallaxOcclusionMapping = true;
         s.WindQuality = GothicRendererSettings::EWindQuality::WIND_QUALITY_ADVANCED;
         s.HeroAffectsObjects = true;
-        s.EnableOcclusionCulling = true;
         s.OutdoorSmallVobDrawRadius = ObjectDrawDistanceUiToMeters( 4 );
         s.SectionDrawRadius = 4;
         s.textureMaxSize = static_cast<int>(TX_QUALITY::MAX);
@@ -971,7 +966,6 @@ void ApplyGraphicsPresets( GothicRendererSettings& s, bool applyRuntimeUpdates =
         s.EnableParallaxOcclusionMapping = true;
         s.WindQuality = GothicRendererSettings::EWindQuality::WIND_QUALITY_ADVANCED;
         s.HeroAffectsObjects = true;
-        s.EnableOcclusionCulling = false;
         s.OutdoorSmallVobDrawRadius = ObjectDrawDistanceUiToMeters( 6 );
         s.SectionDrawRadius = 5;
         s.textureMaxSize = static_cast<int>(TX_QUALITY::MAX);
@@ -990,7 +984,6 @@ void ApplyGraphicsPresets( GothicRendererSettings& s, bool applyRuntimeUpdates =
         s.EnableParallaxOcclusionMapping = true;
         s.WindQuality = GothicRendererSettings::EWindQuality::WIND_QUALITY_ADVANCED;
         s.HeroAffectsObjects = true;
-        s.EnableOcclusionCulling = false;
         s.OutdoorSmallVobDrawRadius = ObjectDrawDistanceUiToMeters( 8 );
         s.SectionDrawRadius = 6;
         s.textureMaxSize = static_cast<int>(TX_QUALITY::MAX);
@@ -1070,11 +1063,9 @@ namespace
         s.LimitLightIntesity = true;
         s.VisualFXDrawRadius = VISUAL_FX_DRAW_RADIUS_FIXED;
         s.EnableShadows = true;
-        if ( static_cast<int>(s.ShadowFilterMode) < static_cast<int>(GothicRendererSettings::E_ShadowFilterMode::SHADOW_FILTER_SIMPLE)
-            || static_cast<int>(s.ShadowFilterMode) > static_cast<int>(GothicRendererSettings::E_ShadowFilterMode::SHADOW_FILTER_PCSS)
-            || (FeatureLevel10Compatibility && s.ShadowFilterMode != GothicRendererSettings::E_ShadowFilterMode::SHADOW_FILTER_SIMPLE) ) {
-            s.ShadowFilterMode = GothicRendererSettings::E_ShadowFilterMode::SHADOW_FILTER_SIMPLE;
-        }
+        s.ShadowFilterMode = FeatureLevel10Compatibility
+            ? GothicRendererSettings::E_ShadowFilterMode::SHADOW_FILTER_SIMPLE
+            : GothicRendererSettings::E_ShadowFilterMode::SHADOW_FILTER_PCSS;
         s.EnablePointlightShadows = GothicRendererSettings::EPointLightShadowMode::PLS_UPDATE_DYNAMIC;
         s.ShadowMapSize = NormalizeShadowMapSize( s.ShadowMapSize );
         s.PointlightShadowMapSize = NormalizePointlightShadowMapSize( s.PointlightShadowMapSize );
@@ -1426,21 +1417,6 @@ void ImGuiShim::RenderSettingsWindow()
             }
             ImGui::SetItemTooltip( "%s", Tr( "Higher settings preserve finer shadow detail.", u8"H\u00F6here Werte zeigen feinere Schattendetails." ) );
 
-            static const std::vector<std::pair<const char*, GothicRendererSettings::E_ShadowFilterMode>> shadowFilterModes = {
-                {"Simple PCF", GothicRendererSettings::E_ShadowFilterMode::SHADOW_FILTER_SIMPLE},
-                {"PCSS", GothicRendererSettings::E_ShadowFilterMode::SHADOW_FILTER_PCSS},
-            };
-            ImText( Tr( "Shadow Filter", u8"Schattenfilter" ), buttonWidth ); ImGui::SameLine();
-            ImGui::BeginDisabled( FeatureLevel10Compatibility );
-            if ( ImComboBoxC( "##ShadowFilter", shadowFilterModes, &settings.ShadowFilterMode, [&settings, &shadersToReload] {
-                settings.ShadowMapSize = NormalizeShadowMapSize( settings.ShadowMapSize );
-                settings.PointlightShadowMapSize = PointlightShadowSizeForWorldShadowSize( settings.ShadowMapSize );
-                shadersToReload |= ShaderCategory::LightsAndShadows;
-            } ) ) {
-                ImGui::EndCombo();
-            }
-            ImGui::EndDisabled();
-            ImGui::SetItemTooltip( "%s", Tr( "Changes how shadow edges are smoothed.", u8"Bestimmt, wie Schattenkanten gegl\u00E4ttet werden." ) );
 
             ImText( Tr( "Shadow Softness", u8"Schattenweichheit" ), buttonWidth ); ImGui::SameLine();
             SliderNormalizedUiStrength( "##ShadowSoftness", &settings.ShadowSoftness );
@@ -1691,13 +1667,7 @@ void ImGuiShim::RenderSettingsWindow()
             ImGui::Checkbox( "##Enable Dynamic Clouds", &settings.EnableDynamicClouds );
             ImGui::SetItemTooltip( "%s", Tr( "Enables moving low cloud fields.", u8"Aktiviert bewegte tiefe Wolkenfelder." ) );
 
-            ImText( "Motion Blur", { buttonWidth.x - ImGui::GetFrameHeight() - style.ItemSpacing.x, buttonWidth.y } ); ImGui::SameLine();
-            ImGui::Checkbox( "##Enable Motion Blur", &settings.EnableMotionBlur );
-            ImGui::SetItemTooltip( "%s", Tr( "Blurs fast camera and object movement.", u8"Verwischt schnelle Kamera- und Objektbewegungen." ) );
 
-            ImText( Tr( "Occlusion Culling", u8"Verdeckungspr\u00FCfung" ), { buttonWidth.x - ImGui::GetFrameHeight() - style.ItemSpacing.x, buttonWidth.y } ); ImGui::SameLine();
-            ImGui::Checkbox( "##Enable Occlusion Culling", &settings.EnableOcclusionCulling );
-            ImGui::SetItemTooltip( "%s", Tr( "Skips world geometry hidden behind other objects.", u8"\u00DCberspringt Weltgeometrie, die hinter anderen Objekten verborgen ist." ) );
 
 
             ImGui::EndGroup();

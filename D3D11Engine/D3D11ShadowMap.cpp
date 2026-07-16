@@ -782,7 +782,6 @@ XRESULT D3D11ShadowMap::PrepareRender()
                 ctx.drawFlags.DrawVOBs = rs.DrawVOBs;
                 ctx.drawFlags.DrawMobs = rs.DrawMobs;
                 ctx.drawFlags.EnableDynamicLighting = rs.EnableDynamicLighting;
-                ctx.drawFlags.EnableOcclusionCulling = rs.EnableOcclusionCulling;
                 ctx.drawFlags.CullVobs = rs.DebugSettings.Culling.CullVobs;
                 ctx.drawFlags.CollectIndoorVobs = false;
                 ctx.drawFlags.CollectLargeVobs = true;
@@ -873,7 +872,6 @@ XRESULT D3D11ShadowMap::PrepareRender()
         ctx.drawFlags.DrawVOBs = rs.DrawVOBs;
         ctx.drawFlags.DrawMobs = rs.DrawMobs;
         ctx.drawFlags.EnableDynamicLighting = rs.EnableDynamicLighting;
-        ctx.drawFlags.EnableOcclusionCulling = rs.EnableOcclusionCulling;
         ctx.drawFlags.CullVobs = rs.DebugSettings.Culling.CullVobs;
         ctx.drawFlags.CollectIndoorVobs = false;
         ctx.drawFlags.CollectLargeVobs = true;
@@ -1248,7 +1246,7 @@ XRESULT D3D11ShadowMap::DrawLighting(
     RenderToTextureBuffer& color,
     RenderToTextureBuffer& normals,
     RenderToTextureBuffer& specular,
-    RenderToTextureBuffer& rainExclusionMask,
+    RenderToTextureBuffer* rainExclusionMask,
     RenderToTextureBuffer& depthCopy) {
     auto graphicsEngine = reinterpret_cast<D3D11GraphicsEngine*>(Engine::GraphicsEngine);
     auto& settings = Engine::GAPI->GetRendererState().RendererSettings;
@@ -1283,8 +1281,8 @@ XRESULT D3D11ShadowMap::DrawLighting(
     srvs[0] = specular.GetShaderResView().Get();
     m_context->PSSetShaderResources( 7, 1, srvs );
 
-    srvs[0] = rainExclusionMask.GetShaderResView().Get();
-    m_context->PSSetShaderResources( 9, 1, srvs );
+    ID3D11ShaderResourceView* rainExclusionMaskSRV = rainExclusionMask ? rainExclusionMask->GetShaderResView().Get() : nullptr;
+    m_context->PSSetShaderResources( 9, 1, &rainExclusionMaskSRV );
 
     DrawWorldLights();
 

@@ -60,7 +60,6 @@ struct RndCullContext {
         bool DrawVOBs;
         bool DrawMobs;
         bool EnableDynamicLighting;
-        bool EnableOcclusionCulling;
         bool CullVobs;
         bool CollectIndoorVobs;
         bool CollectLargeVobs;

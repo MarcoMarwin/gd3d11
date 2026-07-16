@@ -13,7 +13,6 @@
 #include "D3D11PFX_SMAA.h"
 #include "D3D11PFX_GodRays.h"
 #include "D3D11PFX_DepthOfField.h"
-#include "D3D11PFX_MotionBlur.h"
 #include "D3D11PFX_SimpleSharpen.h"
 #include "D3D11PFX_CAS.h"
 #include "D3D11PFX_FSR3.h"
@@ -37,7 +36,6 @@ D3D11PfxRenderer::D3D11PfxRenderer() {
     FX_HDR = std::make_unique<D3D11PFX_HDR>( this );
     FX_GodRays = std::make_unique<D3D11PFX_GodRays>( this );
     FX_DepthOfField = std::make_unique<D3D11PFX_DepthOfField>( this );
-    FX_MotionBlur = std::make_unique<D3D11PFX_MotionBlur>( this );
 
     if ( !FeatureLevel10Compatibility ) {
         FX_SMAA = std::make_unique<D3D11PFX_SMAA>( this );
@@ -76,14 +74,6 @@ XRESULT D3D11PfxRenderer::RenderGodRays(ID3D11ShaderResourceView* backbuffer, ID
 /** Renders the depth-of-field effect */
 XRESULT D3D11PfxRenderer::RenderDepthOfField( ID3D11ShaderResourceView* backbuffer ) {
     return FX_DepthOfField->Render( backbuffer );
-}
-
-XRESULT D3D11PfxRenderer::RenderMotionBlur( ID3D11RenderTargetView* outputRTV,
-                                           ID3D11ShaderResourceView* sceneSRV,
-                                           ID3D11ShaderResourceView* velocitySRV,
-                                           ID3D11ShaderResourceView* depthSRV ) {
-    if ( !FX_MotionBlur ) return XR_FAILED;
-    return FX_MotionBlur->Render( outputRTV, sceneSRV, velocitySRV, depthSRV );
 }
 
 XRESULT D3D11PfxRenderer::RenderWetGroundSSR(

@@ -310,13 +310,11 @@ XRESULT D3D11ShaderManager::Init() {
     ShaderInfo::MacroBuilder shadowMacroBuilder = [](std::vector<D3D_SHADER_MACRO>& list) {
         const auto& s = Engine::GAPI->GetRendererState().RendererSettings;
 
-        const bool advancedShadowFilterSupported =
-            !FeatureLevel10Compatibility && !s.DebugSettings.FeatureSet.UseShadowAtlas;
-        const bool advancedFilterSelected =
-            s.ShadowFilterMode == GothicRendererSettings::SHADOW_FILTER_PCSS;
+        const bool useSimpleShadowFallback =
+            FeatureLevel10Compatibility || s.DebugSettings.FeatureSet.UseShadowAtlas;
         list.push_back( {"SHD_ENABLE",           s.EnableShadows ? "1" : "0"} );
-        list.push_back( {"SHD_FILTER_16TAP_PCF", (s.ShadowFilterMode == GothicRendererSettings::SHADOW_FILTER_SIMPLE || (advancedFilterSelected && !advancedShadowFilterSupported)) ? "1" : "0"} );
-        list.push_back( {"SHD_FILTER_PCSS",      (s.ShadowFilterMode == GothicRendererSettings::SHADOW_FILTER_PCSS && advancedShadowFilterSupported) ? "1" : "0"} );
+        list.push_back( {"SHD_FILTER_16TAP_PCF", useSimpleShadowFallback ? "1" : "0"} );
+        list.push_back( {"SHD_FILTER_PCSS",      useSimpleShadowFallback ? "0" : "1"} );
         list.push_back( {"MAX_CSM_CASCADES",     TO_LITERAL(MAX_CSM_CASCADES)} );
         list.push_back( {"NUM_CSM_CASCADES",     sNums[std::clamp<size_t>(s.NumShadowCascades, 1, MAX_CSM_CASCADES)]} );
         list.push_back( {"CSM_PCF_LIMIT",        sNums[std::clamp<size_t>(s.ShadowCascadePCFLimit, 0, MAX_CSM_CASCADES)]} );
@@ -456,7 +454,6 @@ XRESULT D3D11ShaderManager::Init() {
     // Velocity Buffer Shader
     Shaders.push_back( ShaderInfo::make<PShaderID::PS_PFX_Velocity>( "PS_PFX_Velocity.hlsl" ) );
     Shaders.push_back( ShaderInfo::make<PShaderID::PS_PFX_SkyVelocity>( "PS_PFX_SkyVelocity.hlsl" ) );
-    Shaders.push_back( ShaderInfo::make<PShaderID::PS_PFX_MotionBlur>( "PS_PFX_MotionBlur.hlsl" ) );
 
     Shaders.push_back( ShaderInfo::make<PShaderID::PS_PFX_CAS>( "PS_PFX_CAS.hlsl" ));
 
@@ -492,7 +489,6 @@ XRESULT D3D11ShaderManager::Init() {
         Shaders.push_back( ShaderInfo::make<CShaderID::CS_PFX_XeGTAO_DenoiseLast>( "CS_PFX_XeGTAO.hlsl" ).with_entrypoint( "CSDenoiseLastPass" ) );
 
         Shaders.push_back( ShaderInfo::make<CShaderID::CS_PFX_Sharpen>( "CS_PFX_Sharpen.hlsl" ));
-        Shaders.push_back( ShaderInfo::make<CShaderID::CS_HZBOcclusion>( "CS_HZBOcclusion.hlsl" ));
 
 
         // Forward+ pixel shader variants

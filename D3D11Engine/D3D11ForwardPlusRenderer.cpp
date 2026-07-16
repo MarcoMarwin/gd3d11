@@ -34,12 +34,15 @@ void D3D11ForwardPlusRenderer::AddGeometryPasses(
     RGResourceHandle& outReactiveMaskResource,
     RGResourceHandle& outTransparencyAndCompositionMaskResource ) {
 
-    RGResourceHandle normalsResource = {};
-    RGResourceHandle specularResource = {};
-    RGResourceHandle reactiveMaskResource = {};
-    RGResourceHandle transparencyAndCompositionMaskResource = {};
+    RGResourceHandle normalsResource = RG_INVALID_HANDLE;
+    RGResourceHandle specularResource = RG_INVALID_HANDLE;
+    RGResourceHandle reactiveMaskResource = RG_INVALID_HANDLE;
+    RGResourceHandle transparencyAndCompositionMaskResource = RG_INVALID_HANDLE;
     RGResourceHandle shadowMaskResource = RG_INVALID_HANDLE;
-    const bool useScreenSpaceShadowMask = Engine::GAPI->GetRendererState().RendererSettings.DebugSettings.FeatureSet.UseScreenSpaceShadowMask;
+    const auto& rendererSettings = Engine::GAPI->GetRendererState().RendererSettings;
+    const bool fsr3MasksActive = rendererSettings.AntiAliasingMode == GothicRendererSettings::AA_FSR3
+        && rendererSettings.Upscaler == GothicRendererSettings::UPSCALER_FSR_3;
+    const bool useScreenSpaceShadowMask = rendererSettings.DebugSettings.FeatureSet.UseScreenSpaceShadowMask;
 
     // --- Depth prepass ---
     graph.AddPass( RG_PASS_NAME("FP Depth Prepass"), [&]( RGBuilder& builder, RenderPass& pass ) {
@@ -185,11 +188,13 @@ void D3D11ForwardPlusRenderer::AddGeometryPasses(
         auto size = engine.GetResolution();
         normalsResource = builder.CreateTexture( { static_cast<uint32_t>( size.x ), static_cast<uint32_t>( size.y ), DXGI_FORMAT_R16G16_FLOAT, L"GBufferNormals" } );
         specularResource = builder.CreateTexture( { static_cast<uint32_t>( size.x ), static_cast<uint32_t>( size.y ), DXGI_FORMAT_R16G16_FLOAT, L"GBufferSpecular" } );
-        reactiveMaskResource = builder.CreateTexture( { static_cast<uint32_t>( size.x ), static_cast<uint32_t>( size.y ), DXGI_FORMAT_R8_UNORM, L"ReactiveMask" } );
-        transparencyAndCompositionMaskResource = builder.CreateTexture( { static_cast<uint32_t>( size.x ), static_cast<uint32_t>( size.y ), DXGI_FORMAT_R8_UNORM, L"TransparencyAndCompositionMask" } );
-        builder.Write( reactiveMaskResource );
-        builder.Write( transparencyAndCompositionMaskResource );
-        builder.Write( velocityBufferHandle );
+        if ( fsr3MasksActive ) {
+            reactiveMaskResource = builder.CreateTexture( { static_cast<uint32_t>( size.x ), static_cast<uint32_t>( size.y ), DXGI_FORMAT_R8_UNORM, L"ReactiveMask" } );
+            transparencyAndCompositionMaskResource = builder.CreateTexture( { static_cast<uint32_t>( size.x ), static_cast<uint32_t>( size.y ), DXGI_FORMAT_R8_UNORM, L"TransparencyAndCompositionMask" } );
+            builder.Write( reactiveMaskResource );
+            builder.Write( transparencyAndCompositionMaskResource );
+            builder.Write( velocityBufferHandle );
+        }
         builder.Write( colorResource );
         builder.Write( normalsResource );
         builder.Write( specularResource );
@@ -198,27 +203,20 @@ void D3D11ForwardPlusRenderer::AddGeometryPasses(
             builder.Read( shadowMaskResource );
         }
 
-        pass.m_executeCallback = [this, &engine, colorResource, normalsResource, specularResource, reactiveMaskResource, transparencyAndCompositionMaskResource, velocityBufferHandle, shadowMaskResource, useScreenSpaceShadowMask]( const RenderGraph& graph ) -> void {
+        pass.m_executeCallback = [this, &engine, colorResource, normalsResource, specularResource, reactiveMaskResource, transparencyAndCompositionMaskResource, velocityBufferHandle, shadowMaskResource, useScreenSpaceShadowMask, fsr3MasksActive]( const RenderGraph& graph ) -> void {
             TracyD3D11ZoneCGX( "D3D11ForwardPlusRenderer::Lit Geometry" );
             auto& context = engine.GetContext();
             auto* shadowMaps = engine.GetShadowMaps();
 
             auto normals = graph.GetPhysicalTexture( normalsResource );
             auto specular = graph.GetPhysicalTexture( specularResource );
-            auto reactiveMask = graph.GetPhysicalTexture( reactiveMaskResource );
-            auto transparencyAndCompositionMask = graph.GetPhysicalTexture( transparencyAndCompositionMaskResource );
-            auto velocityBuffer = graph.GetPhysicalTexture( velocityBufferHandle );
+            auto reactiveMask = fsr3MasksActive ? graph.GetPhysicalTexture( reactiveMaskResource ) : nullptr;
+            auto transparencyAndCompositionMask = fsr3MasksActive ? graph.GetPhysicalTexture( transparencyAndCompositionMaskResource ) : nullptr;
+            auto velocityBuffer = fsr3MasksActive ? graph.GetPhysicalTexture( velocityBufferHandle ) : nullptr;
             auto* shadowMask = ( useScreenSpaceShadowMask && shadowMaskResource != RG_INVALID_HANDLE )
                 ? graph.GetPhysicalTexture( shadowMaskResource )
                 : nullptr;
-            const auto& settings = Engine::GAPI->GetRendererState().RendererSettings;
-            const auto aaMode = settings.AntiAliasingMode;
-            if (!settings.EnableMotionBlur
-                && aaMode != GothicRendererSettings::AA_FSR3) {
-                velocityBuffer = nullptr; // don't write velocity if not needed.
-                // NOTE: we should automate this, by putting the velocity 
-                // buffer creation INTO the rendergraph instead of passing it in via external handle
-            }
+
             ID3D11RenderTargetView* rtvs[] = {
                 graph.GetPhysicalTexture( colorResource )->GetRenderTargetView().Get(),
                 normals ? normals->GetRenderTargetView().Get() : nullptr,
@@ -229,19 +227,13 @@ void D3D11ForwardPlusRenderer::AddGeometryPasses(
             };
 
             constexpr float black[] { 0.f, 0.f, 0.f, 0.f };
-            // Skip color and the T&C mask; clear normals, specular and velocity.
-            for ( size_t i = 1; i + 1 < std::size(rtvs); i++ ) {
+            const UINT rtvCount = fsr3MasksActive ? 6u : 3u;
+            for ( UINT i = 1; i < rtvCount; i++ ) {
                 if ( rtvs[i] )
                     context->ClearRenderTargetView( rtvs[i], black );
             }
 
-            // Kirides Nightly leaves both world geometry and the later sky outside T&C by default.
-            if ( reactiveMask )
-                context->ClearRenderTargetView( reactiveMask->GetRenderTargetView().Get(), black );
-            if ( rtvs[4] )
-                context->ClearRenderTargetView( rtvs[4], black );
-
-            context->OMSetRenderTargets( static_cast<UINT>(std::size( rtvs )), rtvs, engine.GetDepthBuffer()->GetDepthStencilView().Get() );
+            context->OMSetRenderTargets( rtvCount, rtvs, engine.GetDepthBuffer()->GetDepthStencilView().Get() );
 
             // Use LESS_EQUAL depth test to leverage the depth prepass
             auto& depthState = Engine::GAPI->GetRendererState().DepthState;

@@ -261,7 +261,7 @@ Kurze, append-only Dokumentation der von Codex gepushten Renderer-Builds.
 - Regennebel: nur die Deckkraft auf Weltgeometrie bei gleichzeitig Nacht und aktivem Regen leicht angehoben; Wolken-/Himmelpfad, Nachtnebel und sonstige Geometrie-/Himmeluebergaenge bleiben unveraendert.
 - F11/HDR: HDR ist fuer neue Standardwerte aktiv. Deaktivierte gekoppelte Effektregler werden auch beim ersten Oeffnen konsistent auf Null dargestellt.
 - Pruefung: Projekt- und Shaderregistrierungen, Include-/Ressourcenpfade, Constant-Buffer-Layouts, Paketquellen, literal eingefuegte Escapes und `git diff --check` statisch kontrolliert. Kein lokaler HLSL-Compiler und kein vollstaendiger lokaler C++-Build vorhanden.
-## Build 095 (DÃ¤mmerung, Screen-Space-Licht und Regennebel)
+## Build 095 (DÃƒÂ¤mmerung, Screen-Space-Licht und Regennebel)
 
 - Sonne/Mond: Licht, Schatten, Godrays und Backlit Vegetation nutzen getrennte 15-Minuten-Uebergaenge. Mondlicht blendet morgens 04:15-04:30 aus, Sonnenlicht 04:30-04:45 ein; abends blendet Sonnenlicht 17:30-17:45 aus und Mondlicht 17:45-18:00 ein. Schattenquellen ueberlappen nicht.
 - Himmel/Wasser: der Mondkoerper bleibt positionsbasiert sichtbar statt ueber das Lichtgewicht ausgeblendet zu werden. Sonnen- und Mond-Glints auf Wasser laufen positionsbasiert unabhaengig von den Licht-/Schatten-Fades weiter.
@@ -540,3 +540,12 @@ Kurze, append-only Dokumentation der von Codex gepushten Renderer-Builds.
 - Aufraeumen: die nicht erfolgreichen Main-View-Frame-Stamp-/Shadow-Kopplungen aus dem vorherigen Versuch sind entfernt.
 - Grenzen: Render Scale, Aspect-/Viewport-, Kamera- und echte Aufloesungswechsel-Pfade sowie DoF bleiben unveraendert.
 - Pruefung: AGENTS-Regeln gelesen; Buildnummer aus outputs ermittelt; origin/master mit PortableGit/OpenSSL abgeglichen; Occlusion-/Shadow-Pfade, Render-Scale-/Aspect-Grenze, Shader-Escape-Artefakte und git diff --check statisch kontrolliert. Kein vollstaendiger lokaler C++-/Shader-Build.
+
+## Build 132 (Performance-Basis, F11-Aufraeumen und interne Schattenfilter-Auswahl)
+
+- Aufraeumen: die nicht erfolgreichen Occlusion-Culling- und Motion-Blur-Systeme wurden vollstaendig aus Code, Shaderregistrierung, Projektdateien, F11-Menue und INI-Persistenz entfernt.
+- Performance: Deferred-Z-Prepass ist als Standard aktiv; FSR3-Velocity-/Reactive-/Transparency-Masken werden in Deferred und Forward+ nur noch bei aktivem FSR3 als MRTs erzeugt und gebunden.
+- Schattenfilter: die F11-Option `Shadow Filter` wurde entfernt; PCSS bleibt intern Standard, Simple PCF wird nur als Feature-Level-10 beziehungsweise Shadow-Atlas-Fallback verwendet und alte INI-Werte werden ignoriert.
+- Settings: tote `DrawThreaded`-Einstellung wurde entfernt; `SortRenderQueue` bleibt unveraendert.
+- Grenzen: Render Scale, Aspect-/Viewport-, Kamera- und echte Aufloesungswechsel-Pfade bleiben unveraendert.
+- Pruefung: AGENTS-Regeln gelesen; Buildnummer aus outputs ermittelt; Kirides-Nightly/17.9.7 fuer Performance-Pfade verglichen; Occlusion-/MotionBlur-/ShadowFilter-Reste, Projekt-XML, Render-Scale-/Aspect-Grenze, Escape-Artefakte und git diff --check statisch kontrolliert. Kein vollstaendiger lokaler C++-/Shader-Build.
