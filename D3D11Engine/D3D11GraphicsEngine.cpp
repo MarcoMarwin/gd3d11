@@ -300,6 +300,35 @@ namespace
         wmcb.WM_OceanWaterTint = settings.OceanWaterColor;
         wmcb.WM_Pad = 0.0f;
     }
+    float4 ComputeTransparencyTextureFactor( zCMaterial* material ) {
+        const float4 defaultFactor( 1.0f, 1.0f, 1.0f, 1.0f );
+        if ( !material ) {
+            return defaultFactor;
+        }
+
+        if ( material->GetEnvMapEnabled() ) {
+            float intensity = material->GetEnvMapStrength() * 0.1f;
+            if ( Engine::GAPI ) {
+                if ( GSky* sky = Engine::GAPI->GetSky() ) {
+                    const float sunHeight = sky->GetAtmosphereCB().AC_LightPos.y;
+                    if ( sunHeight > 0.0f ) {
+                        const float lerpFactor = std::clamp( sunHeight, 0.0f, 1.0f );
+                        intensity = material->GetEnvMapStrength()
+                            * std::lerp( 0.1f, 0.7f, lerpFactor );
+                    }
+                }
+            }
+            const uint8_t alpha = static_cast<uint8_t>(
+                std::clamp( intensity, 0.0f, 1.0f ) * 255.0f );
+            return zColor( 255, 255, 255, alpha ).ToFloat4();
+        }
+
+        zColor materialColor( material->GetColor() );
+        return materialColor.bgra.alpha < 255
+            ? materialColor.ToFloat4()
+            : defaultFactor;
+    }
+
     bool EnsureStructuredMatrixBuffer(
         std::unique_ptr<D3D11VertexBuffer>& buffer,
         UINT matrixCount,
@@ -5502,9 +5531,32 @@ XRESULT D3D11GraphicsEngine::DrawMeshInfoListAlphablended(
 
 
 XRESULT D3D11GraphicsEngine::DrawWaterfallMask( ID3D11RenderTargetView* waterMaskRTV ) {
-    if ( (FrameTransparencyMeshesWaterfall.empty() && FrameTransparencyMeshesWetSSRBlockers.empty()) || !waterMaskRTV ) {
+    if ( (FrameTransparencyMeshesWaterfall.empty()
+        && FrameTransparencyMeshesWetSSRBlockers.empty()) || !waterMaskRTV ) {
         return XR_SUCCESS;
     }
+
+    auto& rendererState = Engine::GAPI->GetRendererState();
+    const GothicBlendStateInfo previousBlendState = rendererState.BlendState;
+    const GothicDepthBufferStateInfo previousDepthState = rendererState.DepthState;
+    const GothicRasterizerStateInfo previousRasterizerState = rendererState.RasterizerState;
+    XRESULT result = XR_SUCCESS;
+
+    auto restoreMaskState = [&]() {
+        ID3D11ShaderResourceView* nullSRV = nullptr;
+        GetContext()->PSSetShaderResources( 0, 1, &nullSRV );
+        rendererState.BlendState = previousBlendState;
+        rendererState.DepthState = previousDepthState;
+        rendererState.RasterizerState = previousRasterizerState;
+        rendererState.BlendState.SetDirty();
+        rendererState.DepthState.SetDirty();
+        rendererState.RasterizerState.SetDirty();
+        if ( UpdateRenderStates() != XR_SUCCESS ) {
+            result = XR_FAILED;
+        }
+        GetContext()->OMSetRenderTargets( 1, HDRBackBuffer->GetRenderTargetView().GetAddressOf(),
+            DepthStencilBuffer->GetDepthStencilView().Get() );
+    };
 
     GetContext()->OMSetRenderTargets( 1, &waterMaskRTV,
         DepthStencilBuffer->GetDepthStencilView().Get() );
@@ -5513,11 +5565,11 @@ XRESULT D3D11GraphicsEngine::DrawWaterfallMask( ID3D11RenderTargetView* waterMas
     Engine::GAPI->SetViewTransformXM( view );
     Engine::GAPI->ResetWorldTransform();
 
-    SetActivePixelShader( PShaderID::PS_WaterMask );
     SetActiveVertexShader( VShaderID::VS_Ex );
-    ActivePS->Apply();
-    ActiveVS->Apply();
-
+    if ( !ActiveVS || ActiveVS->Apply() != XR_SUCCESS ) {
+        restoreMaskState();
+        return XR_FAILED;
+    }
     SetupVS_ExMeshDrawCall();
     SetupVS_ExConstantBuffer();
 
@@ -5527,39 +5579,103 @@ XRESULT D3D11GraphicsEngine::DrawWaterfallMask( ID3D11RenderTargetView* waterMas
     cbInstance.Color = float4( 1.0f, 1.0f, 1.0f, 1.0f );
     ActiveVS->GetBuffer( "Matrices_PerInstances" ).Update( &cbInstance, sizeof( cbInstance ) ).Bind();
 
-    Engine::GAPI->GetRendererState().DepthState.DepthWriteEnabled = false;
-    Engine::GAPI->GetRendererState().DepthState.SetDirty();
-    Engine::GAPI->GetRendererState().BlendState.SetDefault();
-    Engine::GAPI->GetRendererState().BlendState.SetDirty();
-    UpdateRenderStates();
+    rendererState.DepthState.DepthBufferEnabled = true;
+    rendererState.DepthState.DepthWriteEnabled = false;
+    rendererState.DepthState.DepthBufferCompareFunc =
+        GothicDepthBufferStateInfo::CF_COMPARISON_GREATER_EQUAL;
+    rendererState.DepthState.SetDirty();
 
-    DrawVertexBufferIndexedUINT(
+    rendererState.BlendState.SetDefault();
+    rendererState.BlendState.SrcBlend = GothicBlendStateInfo::BF_ONE;
+    rendererState.BlendState.DestBlend = GothicBlendStateInfo::BF_ONE;
+    rendererState.BlendState.BlendOp = GothicBlendStateInfo::BO_BLEND_OP_MAX;
+    rendererState.BlendState.SrcBlendAlpha = GothicBlendStateInfo::BF_ONE;
+    rendererState.BlendState.DestBlendAlpha = GothicBlendStateInfo::BF_ONE;
+    rendererState.BlendState.BlendOpAlpha = GothicBlendStateInfo::BO_BLEND_OP_MAX;
+    rendererState.BlendState.BlendEnabled = true;
+    rendererState.BlendState.SetDirty();
+
+    // Reverse-Z uses larger depth values near the camera. One bias unit keeps
+    // coplanar transparency masks stable without pulling them through foreground geometry.
+    rendererState.RasterizerState.ZBias = 1;
+    rendererState.RasterizerState.SetDirty();
+    if ( UpdateRenderStates() != XR_SUCCESS ) {
+        restoreMaskState();
+        return XR_FAILED;
+    }
+
+    if ( DrawVertexBufferIndexedUINT(
         Engine::GAPI->GetWrappedWorldMesh()->MeshVertexBuffer,
-        Engine::GAPI->GetWrappedWorldMesh()->MeshIndexBuffer, 0, 0 );
+        Engine::GAPI->GetWrappedWorldMesh()->MeshIndexBuffer, 0, 0 ) != XR_SUCCESS ) {
+        restoreMaskState();
+        return XR_FAILED;
+    }
 
-    for ( auto const& [meshKey, meshInfo] : FrameTransparencyMeshesWaterfall ) {
-        if ( meshKey.Material && meshKey.Material->GetAniTexture() ) {
-            DrawVertexBufferIndexedUINT( nullptr, nullptr, meshInfo->Indices.size(),
-                meshInfo->BaseIndexLocation );
+    if ( !FrameTransparencyMeshesWaterfall.empty() ) {
+        SetActivePixelShader( PShaderID::PS_WaterMask );
+        if ( !ActivePS || ActivePS->Apply() != XR_SUCCESS ) {
+            result = XR_FAILED;
+        } else {
+            for ( auto const& [meshKey, meshInfo] : FrameTransparencyMeshesWaterfall ) {
+                if ( meshKey.Material && meshInfo && !meshInfo->Indices.empty()
+                    && meshKey.Material->GetAniTexture() ) {
+                    if ( DrawVertexBufferIndexedUINT( nullptr, nullptr, meshInfo->Indices.size(),
+                        meshInfo->BaseIndexLocation ) != XR_SUCCESS ) {
+                        result = XR_FAILED;
+                        break;
+                    }
+                }
+            }
         }
     }
 
-    for ( auto const& [meshKey, meshInfo] : FrameTransparencyMeshesWetSSRBlockers ) {
-        if ( meshKey.Material && meshInfo ) {
-            DrawVertexBufferIndexedUINT( nullptr, nullptr, meshInfo->Indices.size(),
-                meshInfo->BaseIndexLocation );
+    if ( result == XR_SUCCESS && !FrameTransparencyMeshesWetSSRBlockers.empty() ) {
+        SetActivePixelShader( PShaderID::PS_TransparencyWetMask );
+        if ( !ActivePS || ActivePS->Apply() != XR_SUCCESS ) {
+            result = XR_FAILED;
+        } else {
+            GetContext()->PSSetSamplers( 0, 1, DefaultSamplerState.GetAddressOf() );
+            zCTexture* lastTexture = nullptr;
+            for ( auto const& [meshKey, meshInfo] : FrameTransparencyMeshesWetSSRBlockers ) {
+                if ( !meshKey.Material || !meshInfo || meshInfo->Indices.empty() ) {
+                    continue;
+                }
+
+                zCTexture* texture = meshKey.Material->GetAniTexture();
+                if ( !texture || texture->CacheIn( 0.6f ) != zRES_CACHED_IN ) {
+                    continue;
+                }
+                MyDirectDrawSurface7* surface = texture->GetSurface();
+                if ( !surface || !surface->GetEngineTexture() ) {
+                    continue;
+                }
+
+                if ( texture != lastTexture ) {
+                    ID3D11ShaderResourceView* textureSRV =
+                        surface->GetEngineTexture()->GetShaderResourceView().Get();
+                    if ( !textureSRV ) {
+                        continue;
+                    }
+                    GetContext()->PSSetShaderResources( 0, 1, &textureSRV );
+                    lastTexture = texture;
+                }
+
+                PsSimpleFFdata ffdata = {};
+                ffdata.textureFactor = ComputeTransparencyTextureFactor( meshKey.Material );
+                ActivePS->GetBuffer( "cbFFData" ).Update( &ffdata ).Bind();
+                if ( DrawVertexBufferIndexedUINT( nullptr, nullptr, meshInfo->Indices.size(),
+                    meshInfo->BaseIndexLocation ) != XR_SUCCESS ) {
+                    result = XR_FAILED;
+                    break;
+                }
+            }
         }
     }
 
-    Engine::GAPI->GetRendererState().DepthState.DepthWriteEnabled = true;
-    Engine::GAPI->GetRendererState().DepthState.SetDirty();
-    UpdateRenderStates();
-
-    GetContext()->OMSetRenderTargets( 1, HDRBackBuffer->GetRenderTargetView().GetAddressOf(),
-        DepthStencilBuffer->GetDepthStencilView().Get() );
-
-    return XR_SUCCESS;
+    restoreMaskState();
+    return result;
 }
+
 
 XRESULT D3D11GraphicsEngine::DrawWorldMesh( bool noTextures ) {
     if ( !Engine::GAPI->GetRendererState().RendererSettings.DrawWorldMesh )

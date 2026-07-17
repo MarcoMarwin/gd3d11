@@ -134,6 +134,30 @@ float SmootherStep01(float x)
 	return x * x * x * (x * (x * 6.0f - 15.0f) + 10.0f);
 }
 
+float4 ResolveLowCloudLayer(float4 rawClouds, float3 sceneColor)
+{
+	float rainWeight = saturate(AC_RainFXWeight);
+	float nightTimeBlend = smoothstep(0.0f, 1.0f, saturate(-AC_LightPos.y * 4.0f))
+		* saturate(AC_EnableNightAtmosphere);
+	float rainCloudVisibility = 1.0f - smoothstep(0.18f, 0.88f, rainWeight);
+	float rainVeil = rainWeight * lerp(0.050f, 0.22f, nightTimeBlend);
+	float dryNightVeil = (1.0f - rainWeight) * nightTimeBlend * 0.12f;
+	float totalVeil = saturate(rainVeil + dryNightVeil);
+	float cloudAlpha = saturate(rawClouds.a) * rainCloudVisibility;
+	float3 cloudPremultiplied = rawClouds.rgb * rainCloudVisibility;
+
+	if (cloudAlpha > 0.001f && totalVeil > 0.0001f)
+	{
+		float3 cloudColor = cloudPremultiplied / max(cloudAlpha, 0.001f);
+		cloudColor = lerp(cloudColor, sceneColor,
+			totalVeil * lerp(0.65f, 1.0f, nightTimeBlend));
+		cloudAlpha *= 1.0f - totalVeil * lerp(0.08f, 0.22f, nightTimeBlend);
+		cloudPremultiplied = cloudColor * cloudAlpha;
+	}
+
+	return float4(cloudPremultiplied, cloudAlpha);
+}
+
 #if defined(ENABLE_LOW_CLOUDS)
 float LowCloudHash21(float2 p)
 {
