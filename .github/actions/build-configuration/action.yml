@@ -44,18 +44,22 @@ runs:
         if ($configuration -notmatch '^[A-Za-z0-9_]+$') {
           throw "Invalid build configuration: $configuration"
         }
-        if ([IO.Path]::GetFileName($outputFile) -ne $outputFile
-            -or [IO.Path]::GetExtension($outputFile) -ne ".dll"
-            -or $outputFile -notmatch '^[A-Za-z0-9_.-]+$') {
+        if (
+          [IO.Path]::GetFileName($outputFile) -ne $outputFile -or
+          [IO.Path]::GetExtension($outputFile) -ne ".dll" -or
+          $outputFile -notmatch '^[A-Za-z0-9_.-]+$'
+        ) {
           throw "Invalid output file name: $outputFile"
         }
 
         $workspaceRoot = [IO.Path]::GetFullPath($env:GITHUB_WORKSPACE)
         $workspacePrefix = $workspaceRoot.TrimEnd([IO.Path]::DirectorySeparatorChar) + [IO.Path]::DirectorySeparatorChar
         $projectPath = [IO.Path]::GetFullPath((Join-Path $workspaceRoot $projectInput))
-        if (-not $projectPath.StartsWith($workspacePrefix, [StringComparison]::OrdinalIgnoreCase)
-            -or [IO.Path]::GetExtension($projectPath) -ne ".vcxproj"
-            -or -not (Test-Path -LiteralPath $projectPath -PathType Leaf)) {
+        if (
+          -not $projectPath.StartsWith($workspacePrefix, [StringComparison]::OrdinalIgnoreCase) -or
+          [IO.Path]::GetExtension($projectPath) -ne ".vcxproj" -or
+          -not (Test-Path -LiteralPath $projectPath -PathType Leaf)
+        ) {
           throw "Invalid project path: $projectInput"
         }
 

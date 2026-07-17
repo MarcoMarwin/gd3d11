@@ -83,8 +83,10 @@ runs:
         $unexpectedArtifacts = @(
           $actualArtifacts | Where-Object { $_ -notin $expectedArtifacts }
         )
-        if ($actualArtifacts.Count -ne $expectedArtifacts.Count
-            -or $unexpectedArtifacts.Count -ne 0) {
+        if (
+          $actualArtifacts.Count -ne $expectedArtifacts.Count -or
+          $unexpectedArtifacts.Count -ne 0
+        ) {
           throw "Downloaded artifacts do not match the release matrix: $unexpectedArtifacts"
         }
 
@@ -148,8 +150,10 @@ runs:
         }
 
         & 7z a -tzip -mx=7 -mmt=on "-xr!*.pdb" $zipPath "./$relDir/*"
-        if ($LASTEXITCODE -ne 0
-            -or -not (Test-Path -LiteralPath $zipPath -PathType Leaf)) {
+        if (
+          $LASTEXITCODE -ne 0 -or
+          -not (Test-Path -LiteralPath $zipPath -PathType Leaf)
+        ) {
           throw "Failed to create release archive: $zipPath"
         }
 

@@ -558,4 +558,5 @@ Kurze, append-only Dokumentation der von Codex gepushten Renderer-Builds.
 - Transparenz/Wet-Ground: transparente Weltgeometrie wird bei Regen/Nacht stabiler behandelt, ohne dass Ground-SSR wieder durch solide Geometrie hindurchscheint.
 - Wasser: Wasserreflektionen bleiben regelbar, Wasserbewegung bleibt immer aktiv; Wasserfarbe, Uferuebergaenge und Regen-/Nacht-Darstellung wurden optisch ausgeglichen.
 - Dynamische Wolken: Konturaufhellungen an Objektkanten werden vermieden; Tiefwolken reichen sauberer an den Horizont, koennen Godrays abschatten/formen und werden in gueltigen Wasser-SSR-Treffern reflektiert.
+- Korrekturpush: Die PowerShell-Bedingungen in den Build- und Package-Actions wurden klammerstabil formuliert, damit alle Matrix- und Packaging-Jobs nach dem Build-133-Push wieder parsen.
 - Pruefung: AGENTS-Regeln gelesen; Buildnummer aus outputs ermittelt; Kirides-/Build-Vergleiche fuer die betroffenen Renderpfade genutzt; F11-/INI-/Preset-Pfade, Shaderbindings, RenderGraph-Reihenfolge, Ressourcen-Cleanup, Projektpfade und Escape-Artefakte statisch kontrolliert. Kein vollstaendiger lokaler C++-/Shader-Build.
