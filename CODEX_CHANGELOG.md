@@ -562,3 +562,5 @@ Kurze, append-only Dokumentation der von Codex gepushten Renderer-Builds.
 - Pruefung: AGENTS-Regeln gelesen; Buildnummer aus outputs ermittelt; Kirides-/Build-Vergleiche fuer die betroffenen Renderpfade genutzt; F11-/INI-/Preset-Pfade, Shaderbindings, RenderGraph-Reihenfolge, Ressourcen-Cleanup, Projektpfade und Escape-Artefakte statisch kontrolliert. Kein vollstaendiger lokaler C++-/Shader-Build.
 - Korrekturpush: Release_G1_12f speichert die Morph-Positionshistorie wieder als XMFLOAT3, damit der 1.12f-Job nicht an float3/XMFLOAT3 emplace_back scheitert.
 - Korrekturpush: Die System-DirectDraw-Validierung verlangt CheckFullscreen nicht mehr als Pflicht-Export; dadurch laden Gothic-2-Renderer-DLLs wieder auf Systemen ohne diesen undokumentierten ddraw-Export.
+
+- Korrekturpush: Der Gothic-2-Startpfad nutzt wieder die bewaehrte Build-132-Reihenfolge fuer COM, Hooking und DirectDrawCreateEx, waehrend der CheckFullscreen-Fallback erhalten bleibt.

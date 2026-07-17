@@ -26,7 +26,8 @@ ZUnquantizeHalfFloat UnquantizeHalfFloat;
 ZUnquantizeHalfFloat_X4 UnquantizeHalfFloat_X4;
 ZUnquantizeHalfFloat_X4 UnquantizeHalfFloat_X8;
 
-
+static HINSTANCE hLThis = 0;
+static bool comInitialized = false;
 #if defined(BUILD_GOTHIC_1_08k) && !defined(BUILD_1_12F)
 bool haveWindAnimations = false;
 #endif
@@ -222,118 +223,19 @@ struct ddraw_dll {
 
 void WINAPI FallbackCheckFullscreen() noexcept {}
 
-bool LoadSystemDirectDraw() noexcept {
-    wchar_t systemPath[MAX_PATH]{};
-    const UINT pathLength = GetSystemDirectoryW( systemPath, MAX_PATH );
-    if ( pathLength == 0 || pathLength >= MAX_PATH
-        || wcscat_s( systemPath, L"\\ddraw.dll" ) != 0 ) {
-        return false;
-    }
-
-    ddraw_dll resolved{};
-    resolved.dll = LoadLibraryW( systemPath );
-    if ( !resolved.dll ) {
-        return false;
-    }
-
-#define RESOLVE_SYSTEM_EXPORT(member) \
-    resolved.member = GetProcAddress( resolved.dll, #member )
-    RESOLVE_SYSTEM_EXPORT( AcquireDDThreadLock );
-    RESOLVE_SYSTEM_EXPORT( CheckFullscreen );
-    RESOLVE_SYSTEM_EXPORT( CompleteCreateSysmemSurface );
-    RESOLVE_SYSTEM_EXPORT( D3DParseUnknownCommand );
-    RESOLVE_SYSTEM_EXPORT( DDGetAttachedSurfaceLcl );
-    RESOLVE_SYSTEM_EXPORT( DDInternalLock );
-    RESOLVE_SYSTEM_EXPORT( DDInternalUnlock );
-    RESOLVE_SYSTEM_EXPORT( DSoundHelp );
-    RESOLVE_SYSTEM_EXPORT( DirectDrawCreate );
-    RESOLVE_SYSTEM_EXPORT( DirectDrawCreateClipper );
-    RESOLVE_SYSTEM_EXPORT( DirectDrawCreateEx );
-    RESOLVE_SYSTEM_EXPORT( DirectDrawEnumerateA );
-    RESOLVE_SYSTEM_EXPORT( DirectDrawEnumerateExA );
-    RESOLVE_SYSTEM_EXPORT( DirectDrawEnumerateExW );
-    RESOLVE_SYSTEM_EXPORT( DirectDrawEnumerateW );
-    RESOLVE_SYSTEM_EXPORT( DllCanUnloadNow );
-    RESOLVE_SYSTEM_EXPORT( DllGetClassObject );
-    RESOLVE_SYSTEM_EXPORT( GetDDSurfaceLocal );
-    RESOLVE_SYSTEM_EXPORT( GetOLEThunkData );
-    RESOLVE_SYSTEM_EXPORT( GetSurfaceFromDC );
-    RESOLVE_SYSTEM_EXPORT( RegisterSpecialCase );
-    RESOLVE_SYSTEM_EXPORT( ReleaseDDThreadLock );
-#undef RESOLVE_SYSTEM_EXPORT
-
-    if ( !resolved.CheckFullscreen ) {
-        resolved.CheckFullscreen = reinterpret_cast<FARPROC>(&FallbackCheckFullscreen);
-    }
-
-    if ( !resolved.DirectDrawCreate || !resolved.DirectDrawCreateClipper
-        || !resolved.DirectDrawCreateEx || !resolved.DirectDrawEnumerateA
-        || !resolved.DirectDrawEnumerateExA || !resolved.DirectDrawEnumerateExW
-        || !resolved.DirectDrawEnumerateW ) {
-        FreeLibrary( resolved.dll );
-        return false;
-    }
-
-    ddraw = resolved;
-    return true;
-}
-
-void InitializeComForCurrentThread() noexcept {
-    static thread_local bool attempted = false;
-    if ( attempted ) {
-        return;
-    }
-    attempted = true;
-
-    const HRESULT result = CoInitializeEx( nullptr, COINIT_APARTMENTTHREADED );
-    if ( result == S_OK || result == S_FALSE ) {
-        LogInfo() << "COM initialized for the render thread.";
-    } else if ( result != RPC_E_CHANGED_MODE ) {
-        LogWarn() << "COM initialization failed with code 0x"
-            << std::hex << static_cast<unsigned long>(result) << ".";
-    }
-}
-
 HRESULT DoHookedDirectDrawCreateEx( GUID FAR* lpGuid, LPVOID* lplpDD, REFIID iid, IUnknown FAR* pUnkOuter ) {
     (void)lpGuid;
-    if ( !lplpDD ) {
-        return E_POINTER;
-    }
-    *lplpDD = nullptr;
-    if ( pUnkOuter ) {
-        return CLASS_E_NOAGGREGATION;
-    }
-    if ( !IsEqualIID( iid, IID_IDirectDraw7 )
-        && !IsEqualIID( iid, IID_IUnknown ) ) {
-        return E_NOINTERFACE;
-    }
-    if ( !Engine::GAPI ) {
-        return E_UNEXPECTED;
+    (void)iid;
+    (void)pUnkOuter;
+
+    *lplpDD = new MyDirectDraw( nullptr );
+
+    if ( !Engine::GraphicsEngine ) {
+        Engine::GAPI->OnGameStart();
+        Engine::CreateGraphicsEngine();
     }
 
-    try {
-        InitializeComForCurrentThread();
-        if ( !Engine::GraphicsEngine ) {
-            Engine::GAPI->OnGameStart();
-            if ( Engine::CreateGraphicsEngine() != XR_SUCCESS ) {
-                LogError() << "DirectDraw initialization aborted because the graphics engine failed.";
-                return E_FAIL;
-            }
-        }
-
-        auto* directDraw = new (std::nothrow) MyDirectDraw( nullptr );
-        if ( !directDraw ) {
-            return E_OUTOFMEMORY;
-        }
-        *lplpDD = directDraw;
-        return S_OK;
-    } catch ( const std::exception& error ) {
-        LogError() << "DirectDraw initialization failed: " << error.what();
-        return E_FAIL;
-    } catch ( ... ) {
-        LogError() << "DirectDraw initialization failed unexpectedly.";
-        return E_FAIL;
-    }
+    return S_OK;
 }
 
 extern "C" HRESULT WINAPI HookedDirectDrawCreateEx( GUID FAR * lpGuid, LPVOID * lplpDD, REFIID  iid, IUnknown FAR * pUnkOuter ) {
@@ -347,7 +249,7 @@ extern "C" HRESULT WINAPI HookedDirectDrawCreateEx( GUID FAR * lpGuid, LPVOID * 
 
     hook_outfunc
 
-    return E_FAIL;
+    return S_OK;
 }
 
 extern "C" void WINAPI HookedAcquireDDThreadLock() {
@@ -619,120 +521,100 @@ BOOL WINAPI DllMain( HINSTANCE hInst, DWORD reason, LPVOID ) {
     if ( DetourIsHelperProcess() ) {
         return TRUE;
     }
-    if ( reason != DLL_PROCESS_ATTACH ) {
-        return TRUE;
-    }
 
-    DisableThreadLibraryCalls( hInst );
-    bool detourTransactionOpen = false;
-    try {
-        if ( !SetupWorkingDirectory() ) {
-            MessageBoxA( nullptr, "GD3D11 could not set the game working directory.",
-                "Gothic GD3D11", MB_ICONERROR );
-            return FALSE;
-        }
+    if ( reason == DLL_PROCESS_ATTACH ) {
+        DetourRestoreAfterWith();
+        DetourTransactionBegin();
 
         std::set_new_handler( badAllocationHandler );
-        Log::Clear();
-        LogInfo() << "Starting DDRAW renderer DLL.";
+        hLThis = hInst;
 
-        if ( !CheckPlatformSupport() ) {
-            return FALSE;
-        }
-        if ( !LoadSystemDirectDraw() ) {
-            LogErrorBox() << "Failed to load or validate the system DirectDraw DLL.";
-            return FALSE;
-        }
-
-        Engine::GAPI = nullptr;
-        Engine::GraphicsEngine = nullptr;
-        Engine::ImGuiHandle = nullptr;
-        Engine::RenderingThreadPool = nullptr;
-        Engine::WorkerThreadPool = nullptr;
-        Engine::PassThrough = !VersionCheck::CheckExecutable();
-
-        if ( !Engine::PassThrough ) {
-            DetourRestoreAfterWith();
-            if ( DetourTransactionBegin() != ERROR_SUCCESS ) {
-                LogError() << "Failed to begin hook transaction.";
-                return FALSE;
-            }
-            detourTransactionOpen = true;
+        Engine::PassThrough = false;
 
 #if defined(BUILD_GOTHIC_2_6_fix)
-            if ( DetourAttachTyped( &originalWinMain, hooked_WinMain ) != ERROR_SUCCESS ) {
-                DetourTransactionAbort();
-                detourTransactionOpen = false;
-                LogError() << "Failed to attach WinMain hook.";
-                return FALSE;
-            }
+        DetourAttachTyped( &originalWinMain, hooked_WinMain );
 #endif
 
-            if ( !GothicPatching::BeginPatchTransaction() ) {
+        SetupWorkingDirectory();
+        if ( !Engine::PassThrough ) {
+            Log::Clear();
+            LogInfo() << "Starting DDRAW Proxy DLL.";
+
+            HRESULT hr = CoInitializeEx( NULL, COINIT_APARTMENTTHREADED );
+            if ( hr == RPC_E_CHANGED_MODE ) {
+                hr = CoInitializeEx( NULL, COINIT_MULTITHREADED );
+            }
+
+            if ( hr == S_FALSE || hr == S_OK ) {
+                comInitialized = true;
+                LogInfo() << "COM initialized";
+            }
+
+            ZoneScoped;
+
+            VersionCheck::CheckExecutable();
+            if ( !CheckPlatformSupport() ) {
                 DetourTransactionAbort();
-                detourTransactionOpen = false;
-                LogError() << "Failed to begin Gothic memory patch transaction. Error "
-                    << GothicPatching::GetPatchStatus() << ".";
                 return FALSE;
             }
 
-            if ( Engine::CreateGothicAPI() != XR_SUCCESS ) {
-                GothicPatching::AbortPatchTransaction();
-                DetourTransactionAbort();
-                detourTransactionOpen = false;
-                return FALSE;
-            }
+            Engine::GAPI = nullptr;
+            Engine::GraphicsEngine = nullptr;
+            Engine::ImGuiHandle = nullptr;
+            Engine::RenderingThreadPool = nullptr;
+            Engine::WorkerThreadPool = nullptr;
 
-            const LONG hookResult = HookedFunctions::OriginalFunctions.InitHooks();
-            if ( hookResult != ERROR_SUCCESS ) {
-                GothicPatching::AbortPatchTransaction();
-                DetourTransactionAbort();
-                detourTransactionOpen = false;
-                LogErrorBox() << "Failed to prepare renderer hooks. Error "
-                    << hookResult << ".";
-                return FALSE;
-            }
-
-            if ( !GothicPatching::CommitPatchTransaction() ) {
-                const LONG patchStatus = GothicPatching::GetPatchStatus();
-                const uintptr_t failedAddress =
-                    GothicPatching::GetFirstFailureAddress();
-                GothicPatching::AbortPatchTransaction();
-                DetourTransactionAbort();
-                detourTransactionOpen = false;
-                LogErrorBox() << "Failed to apply Gothic memory patch at 0x"
-                    << std::hex << failedAddress << ". Error "
-                    << std::dec << patchStatus << ".";
-                return FALSE;
-            }
-
-            const LONG commitResult = DetourTransactionCommit();
-            detourTransactionOpen = false;
-            if ( commitResult != ERROR_SUCCESS ) {
-                GothicPatching::RollbackPatchTransaction();
-                LogErrorBox() << "Failed to commit renderer hooks. Error "
-                    << commitResult << ".";
-                return FALSE;
-            }
-            GothicPatching::FinalizePatchTransaction();
+            Engine::CreateGothicAPI();
+            HookedFunctions::OriginalFunctions.InitHooks();
 
             EnableCrashingOnCrashes();
         }
+        DetourTransactionCommit();
 
-        return TRUE;
-    } catch ( const std::exception& error ) {
-        GothicPatching::AbortPatchTransaction();
-        if ( detourTransactionOpen ) {
-            DetourTransactionAbort();
+        char dllBuf[MAX_PATH];
+        GetSystemDirectoryA( dllBuf, MAX_PATH );
+        strcat_s( dllBuf, MAX_PATH, "\\ddraw.dll" );
+
+        ddraw.dll = LoadLibraryA( dllBuf );
+        if ( !ddraw.dll ) return FALSE;
+
+        ddraw.AcquireDDThreadLock = GetProcAddress( ddraw.dll, "AcquireDDThreadLock" );
+        ddraw.CheckFullscreen = GetProcAddress( ddraw.dll, "CheckFullscreen" );
+        if ( !ddraw.CheckFullscreen ) {
+            ddraw.CheckFullscreen = reinterpret_cast<FARPROC>(&FallbackCheckFullscreen);
         }
-        LogError() << "Renderer DLL initialization failed: " << error.what();
-        return FALSE;
-    } catch ( ... ) {
-        GothicPatching::AbortPatchTransaction();
-        if ( detourTransactionOpen ) {
-            DetourTransactionAbort();
+        ddraw.CompleteCreateSysmemSurface = GetProcAddress( ddraw.dll, "CompleteCreateSysmemSurface" );
+        ddraw.D3DParseUnknownCommand = GetProcAddress( ddraw.dll, "D3DParseUnknownCommand" );
+        ddraw.DDGetAttachedSurfaceLcl = GetProcAddress( ddraw.dll, "DDGetAttachedSurfaceLcl" );
+        ddraw.DDInternalLock = GetProcAddress( ddraw.dll, "DDInternalLock" );
+        ddraw.DDInternalUnlock = GetProcAddress( ddraw.dll, "DDInternalUnlock" );
+        ddraw.DSoundHelp = GetProcAddress( ddraw.dll, "DSoundHelp" );
+        ddraw.DirectDrawCreate = GetProcAddress( ddraw.dll, "DirectDrawCreate" );
+        ddraw.DirectDrawCreateClipper = GetProcAddress( ddraw.dll, "DirectDrawCreateClipper" );
+        ddraw.DirectDrawCreateEx = GetProcAddress( ddraw.dll, "DirectDrawCreateEx" );
+        ddraw.DirectDrawEnumerateA = GetProcAddress( ddraw.dll, "DirectDrawEnumerateA" );
+        ddraw.DirectDrawEnumerateExA = GetProcAddress( ddraw.dll, "DirectDrawEnumerateExA" );
+        ddraw.DirectDrawEnumerateExW = GetProcAddress( ddraw.dll, "DirectDrawEnumerateExW" );
+        ddraw.DirectDrawEnumerateW = GetProcAddress( ddraw.dll, "DirectDrawEnumerateW" );
+        ddraw.DllCanUnloadNow = GetProcAddress( ddraw.dll, "DllCanUnloadNow" );
+        ddraw.DllGetClassObject = GetProcAddress( ddraw.dll, "DllGetClassObject" );
+        ddraw.GetDDSurfaceLocal = GetProcAddress( ddraw.dll, "GetDDSurfaceLocal" );
+        ddraw.GetOLEThunkData = GetProcAddress( ddraw.dll, "GetOLEThunkData" );
+        ddraw.GetSurfaceFromDC = GetProcAddress( ddraw.dll, "GetSurfaceFromDC" );
+        ddraw.RegisterSpecialCase = GetProcAddress( ddraw.dll, "RegisterSpecialCase" );
+        ddraw.ReleaseDDThreadLock = GetProcAddress( ddraw.dll, "ReleaseDDThreadLock" );
+    } else if ( reason == DLL_PROCESS_DETACH ) {
+        Engine::OnShutDown();
+
+        if ( comInitialized ) {
+            comInitialized = false;
+            CoUninitialize();
         }
-        LogError() << "Renderer DLL initialization failed unexpectedly.";
-        return FALSE;
+        if ( ddraw.dll ) {
+            FreeLibrary( ddraw.dll );
+        }
+
+        LogInfo() << "DDRAW Proxy DLL signing off.\n";
     }
+    return TRUE;
 }
