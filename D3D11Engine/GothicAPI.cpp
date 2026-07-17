@@ -6725,7 +6725,7 @@ bool GothicAPI::IsGermanMenuLanguage() {
 
 /** Prints information about the mod to the screen for a couple of seconds */
 void GothicAPI::PrintModInfo() {
-    const char germanPrompt[] = "Dr\xFCcke F11 f\xFCr Grafikeinstellungen";
+    const char germanPrompt[] = "Dr\xFC" "cke F11 f\xFC" "r Grafikeinstellungen";
     PrintMessageTimed( INT2( 5, 5 ), IsGermanMenuLanguage()
         ? germanPrompt
         : "Press F11 for graphics settings", 8000.0f );

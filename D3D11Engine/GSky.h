@@ -74,7 +74,7 @@ public:
     D3D11Texture* GetCloudTexture();
 
     /** Returns the rain-cloud density texture. */
-    D3D11Texture* GetRainCloudTexture() { return RainCloudTexture && RainCloudTexture->IsValid() ? RainCloudTexture.get() : nullptr; }
+    D3D11Texture* GetRainCloudTexture() { return RainCloudTexture && RainCloudTexture->GetShaderResourceView().Get() ? RainCloudTexture.get() : nullptr; }
 
     /** Re-seeds weather transitions after loading a savegame. */
     void ResetWeatherState();
