@@ -1539,7 +1539,7 @@ void WorldConverter::UpdateMorphMeshVisual( void* value, MeshVisualInfo* meshInf
                 break;
             }
             vertices.emplace_back( vertex );
-            currentPositions.emplace_back( currentPosition );
+            currentPositions.emplace_back( currentPositionXM );
         }
         const uint64_t byteSize = static_cast<uint64_t>(vertices.size()) * sizeof( ExVertexStruct );
         if ( !valid || vertices.empty() || byteSize > std::numeric_limits<UINT>::max() ) continue;
