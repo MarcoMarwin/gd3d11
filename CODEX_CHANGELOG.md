@@ -564,3 +564,4 @@ Kurze, append-only Dokumentation der von Codex gepushten Renderer-Builds.
 - Korrekturpush: Die System-DirectDraw-Validierung verlangt CheckFullscreen nicht mehr als Pflicht-Export; dadurch laden Gothic-2-Renderer-DLLs wieder auf Systemen ohne diesen undokumentierten ddraw-Export.
 
 - Korrekturpush: Der Gothic-2-Startpfad nutzt wieder die bewaehrte Build-132-Reihenfolge fuer COM, Hooking und DirectDrawCreateEx, waehrend der CheckFullscreen-Fallback erhalten bleibt.
+- Korrekturpush: Die Gothic-Memory-Patch-Helfer schreiben Start-/Swapchain-Patches wieder permissiver wie Build 132, damit der Gothic-2-Menue-Start nicht durch zu strenge Patchvalidierung blockiert wird.

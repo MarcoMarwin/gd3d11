@@ -109,15 +109,7 @@ namespace GothicPatching {
             return false;
         }
         const uintptr_t regionEnd = regionStart + memoryInfo.RegionSize;
-        const uintptr_t patchEnd = address + length;
-        if ( address < regionStart || patchEnd > regionEnd ) return false;
-
-        if ( IsTransactionAllocationRange( address, length ) ) return true;
-        if ( memoryInfo.Type == MEM_IMAGE ) {
-            return memoryInfo.AllocationBase == GetModuleHandleW( nullptr );
-        }
-        return memoryInfo.Type == MEM_PRIVATE
-            && IsExecutableProtection( memoryInfo.Protect );
+        return address >= regionStart && address + length <= regionEnd;
     }
 
     inline LONG WriteMemoryImmediate(
@@ -128,23 +120,10 @@ namespace GothicPatching {
             return ERROR_INVALID_ADDRESS;
         }
 
-        const bool transactionAllocation =
-            IsTransactionAllocationRange( address, length );
-        MEMORY_BASIC_INFORMATION memoryInfo{};
-        if ( VirtualQuery(
-                reinterpret_cast<const void*>(address), &memoryInfo,
-                sizeof( memoryInfo ) ) != sizeof( memoryInfo ) ) {
-            return ERROR_INVALID_ADDRESS;
-        }
-
-        const DWORD writableProtection =
-            transactionAllocation || !IsExecutableProtection( memoryInfo.Protect )
-                ? PAGE_READWRITE
-                : PAGE_EXECUTE_READWRITE;
         DWORD previousProtection = 0;
         if ( !VirtualProtect(
                 reinterpret_cast<void*>(address), length,
-                writableProtection, &previousProtection ) ) {
+                PAGE_EXECUTE_READWRITE, &previousProtection ) ) {
             const DWORD error = GetLastError();
             return error == ERROR_SUCCESS ? ERROR_ACCESS_DENIED : error;
         }
@@ -178,19 +157,23 @@ namespace GothicPatching {
     }
 
     inline void* AllocateTrampoline( size_t size ) {
-        if ( !TransactionActive || TransactionCommitted
-            || size == 0 || size > MaxPatchSize ) {
+        if ( TransactionCommitted || size == 0 || size > MaxPatchSize ) {
             RecordFailure( ERROR_INVALID_PARAMETER, 0 );
             return nullptr;
         }
 
+        const DWORD protection = TransactionActive ? PAGE_READWRITE : PAGE_EXECUTE_READWRITE;
         void* allocation = VirtualAlloc(
-            nullptr, size, MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE );
+            nullptr, size, MEM_RESERVE | MEM_COMMIT, protection );
         if ( !allocation ) {
             const DWORD error = GetLastError();
             RecordFailure(
                 error == ERROR_SUCCESS ? ERROR_NOT_ENOUGH_MEMORY : error, 0 );
             return nullptr;
+        }
+
+        if ( !TransactionActive ) {
+            return allocation;
         }
 
         try {
