@@ -2982,8 +2982,9 @@ void GothicAPI::DrawSkeletalMeshVob_Layered( SkeletalVobInfo* vi, float distance
     } else if ( !Engine::GAPI->GetRendererState().RendererSettings.EnableShadows ) {
         if ( zCPolygon* polygon = vi->Vob->GetGroundPoly() ) {
             constexpr float inv255f = 1.0f / 255.0f;
+            float3 vobPosition( vi->Vob->GetPositionWorld() );
             const float3 polyLightStat =
-                polygon->GetLightStatAtPos( vi->Vob->GetPositionWorld() );
+                polygon->GetLightStatAtPos( vobPosition );
             modelColor = float4(
                 polyLightStat.z * inv255f,
                 polyLightStat.y * inv255f,
@@ -6395,7 +6396,7 @@ void GothicAPI::DrawMorphMesh( zCMorphMesh* msh,
     }
 
     const auto bindFixedFunctionState = [&]() {
-        auto* pixelShader = graphics->GetActivePS();
+        auto pixelShader = graphics->GetActivePS();
         return !pixelShader || pixelShader->GetBuffer(
             "FFPipelineConstantBuffer" ).Update( &graphicsState ).Bind().Succeeded();
     };

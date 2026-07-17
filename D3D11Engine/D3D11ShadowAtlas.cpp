@@ -112,7 +112,7 @@ HRESULT D3D11ShadowAtlas::Resize( UINT cascade0Size ) {
 
     const UINT maxTextureSize = m_device->GetFeatureLevel() >= D3D_FEATURE_LEVEL_11_0
         ? D3D11_REQ_TEXTURE2D_U_OR_V_DIMENSION
-        : D3D_FL10_0_REQ_TEXTURE2D_U_OR_V_DIMENSION;
+        : D3D10_REQ_TEXTURE2D_U_OR_V_DIMENSION;
     const UINT maxCascadeSize = m_numCascades == 1
         ? maxTextureSize
         : maxTextureSize / 2;

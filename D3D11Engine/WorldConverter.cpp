@@ -1524,15 +1524,16 @@ void WorldConverter::UpdateMorphMeshVisual( void* value, MeshVisualInfo* meshInf
                 valid = false;
                 break;
             }
-            const XMFLOAT3 currentPosition = positions->Array[wedge.position];
+            const float3 currentPosition = positions->Array[wedge.position];
+            const XMFLOAT3 currentPositionXM( currentPosition.x, currentPosition.y, currentPosition.z );
             const XMFLOAT3 previousPosition = hasPreviousPositions
-                ? targetMesh->PreviousMorphPositions[vertexIndex] : currentPosition;
+                ? targetMesh->PreviousMorphPositions[vertexIndex] : currentPositionXM;
             ExVertexStruct vertex{};
             vertex.Position = currentPosition;
             vertex.Normal = wedge.normal;
             vertex.TexCoord = wedge.texUV;
             vertex.TexCoord2 = float2( 0.0f, 0.0f );
-            vertex.Color = PackPreviousMorphDelta( currentPosition, previousPosition );
+            vertex.Color = PackPreviousMorphDelta( currentPositionXM, previousPosition );
             if ( !IsFiniteVertexData( vertex ) ) {
                 valid = false;
                 break;

@@ -501,15 +501,12 @@ XRESULT D3D11Texture::CreateThumbnail() {
 
     const float clearColor[4] = { 1.f, 0.f, 0.f, 1.f };
     engine->GetContext()->ClearRenderTargetView( thumbnailRTV.Get(), clearColor );
-    const XRESULT drawResult = engine->DrawQuad( INT2( 0, 0 ), INT2( 256, 256 ) );
+    engine->DrawQuad( INT2( 0, 0 ), INT2( 256, 256 ) );
 
     ID3D11ShaderResourceView* nullSRV = nullptr;
     engine->GetContext()->PSSetShaderResources( 0, 1, &nullSRV );
     ID3D11RenderTargetView* previousTarget = oldRTV.Get();
     engine->GetContext()->OMSetRenderTargets( 1, &previousTarget, oldDSV.Get() );
-    if ( drawResult != XR_SUCCESS ) {
-        return drawResult;
-    }
 
     Thumbnail = std::move( newThumbnail );
     ThumbnailSRV = std::move( newThumbnailSRV );

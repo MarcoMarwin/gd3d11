@@ -481,7 +481,8 @@ HRESULT MyDirectDrawSurface7::Lock( LPRECT lpDestRect, LPDDSURFACEDESC2 lpDDSurf
             || pitch > static_cast<uint64_t>((std::numeric_limits<LONG>::max)())
             || dataSize > static_cast<uint64_t>((std::numeric_limits<size_t>::max)()) ) {
             CreatingThumbnail = false;
-            SAFE_DELETE_ARRAY( data );
+            delete[] data;
+            data = nullptr;
             LockType = 0;
             IsLocked.store( false, std::memory_order_release );
             return DDERR_GENERIC;

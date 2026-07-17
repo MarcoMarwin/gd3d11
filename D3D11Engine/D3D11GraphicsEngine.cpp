@@ -331,7 +331,7 @@ namespace
             return zColor( 255, 255, 255, alpha ).ToFloat4();
         }
 
-        const zColor materialColor( material->GetColor() );
+        zColor materialColor( material->GetColor() );
         return materialColor.bgra.alpha < 255
             ? materialColor.ToFloat4()
             : defaultFactor;
@@ -1411,6 +1411,24 @@ DXGI_FORMAT D3D11GraphicsEngine::GetBackBufferFormat() {
     return Engine::GAPI->GetRendererState().RendererSettings.CompressBackBuffer ? DXGI_FORMAT_R11G11B10_FLOAT : DXGI_FORMAT_R16G16B16A16_FLOAT;
 }
 
+void D3D11GraphicsEngine::OnResetBackBuffer() {
+    const INT2 resolution = GetResolution();
+    if ( resolution.x <= 0 || resolution.y <= 0 || !GetDevice() ) return;
+
+    const uint32_t bindFlags = D3D11_BIND_RENDER_TARGET | D3D11_BIND_SHADER_RESOURCE
+        | (GetDevice()->GetFeatureLevel() >= D3D_FEATURE_LEVEL_11_0
+            ? D3D11_BIND_UNORDERED_ACCESS : 0);
+    auto hdrBackbuffer = std::make_unique<RenderToTextureBuffer>(
+        GetDevice().Get(), resolution.x, resolution.y, GetBackBufferFormat(),
+        nullptr, DXGI_FORMAT_UNKNOWN, DXGI_FORMAT_UNKNOWN, 1, 1, bindFlags );
+    if ( !hdrBackbuffer || !hdrBackbuffer->IsValid() ) return;
+
+    HDRBackBuffer = std::move( hdrBackbuffer );
+    if ( PfxRenderer ) PfxRenderer->OnResize( resolution );
+    SetDebugName( HDRBackBuffer->GetShaderResView().Get(), "Backbuffer->ShaderResourceView" );
+    SetDebugName( HDRBackBuffer->GetRenderTargetView().Get(), "Backbuffer->RenderTargetView" );
+}
+
 
 void ApplyWindowStyle(HWND window, WindowModes windowMode) {
     if (windowMode == WindowModes::WINDOW_MODE_WINDOWED) {
@@ -2187,7 +2205,7 @@ D3D11GraphicsEngine::GetDisplayModeList( std::vector<DisplayModeInfo>* modeList,
         }
     }
 
-    return presentResult;
+    return XR_SUCCESS;
 }
 
 void RenderVelocity(D3D11GraphicsEngine* engine,
@@ -5406,7 +5424,7 @@ XRESULT D3D11GraphicsEngine::OnStartWorldRendering() {
                 auto* specularTexture = graph.GetPhysicalTexture( specularResource );
                 auto* waterMaskTexture = graph.GetPhysicalTexture( waterMaskResource );
                 auto* velocityTexture = graph.GetPhysicalTexture( velocityBufferHandle );
-                auto* tempBuffer = PfxRenderer ? PfxRenderer->GetTempBuffer() : nullptr;
+                auto tempBuffer = PfxRenderer ? PfxRenderer->GetTempBuffer() : TextureHandle{};
                 if ( !context || !PfxRenderer
                     || !backBuffer || !backBuffer->IsValid()
                     || !normalsTexture || !normalsTexture->IsValid()
@@ -5602,7 +5620,7 @@ XRESULT D3D11GraphicsEngine::OnStartWorldRendering() {
 
                 auto context = GetContext();
                 auto* backBuffer = graph.GetPhysicalTexture( backBufferHandle );
-                auto* tempBuffer = PfxRenderer ? PfxRenderer->GetTempBuffer() : nullptr;
+                auto tempBuffer = PfxRenderer ? PfxRenderer->GetTempBuffer() : TextureHandle{};
                 auto* depthBuffer = compositionNeedsDepth ? GetDepthBuffer() : nullptr;
                 if ( !context || !PfxRenderer
                     || !backBuffer || !backBuffer->IsValid()
@@ -5660,7 +5678,7 @@ XRESULT D3D11GraphicsEngine::OnStartWorldRendering() {
                     graph.GetPhysicalTexture( lowCloudLayerResource );
                 auto* lowCloudDepth =
                     graph.GetPhysicalTexture( lowCloudDepthResource );
-                auto* tempBuffer = PfxRenderer ? PfxRenderer->GetTempBuffer() : nullptr;
+                auto tempBuffer = PfxRenderer ? PfxRenderer->GetTempBuffer() : TextureHandle{};
                 auto* depthBuffer = GetDepthBuffer();
                 if ( !context || !PfxRenderer
                     || !backBuffer || !backBuffer->IsValid()
@@ -5943,7 +5961,7 @@ XRESULT D3D11GraphicsEngine::OnStartWorldRendering() {
                             }
                         }
                         if ( !FeatureLevel10Compatibility ) {
-                            auto* tempBuffer =
+                            auto tempBuffer =
                                 PfxRenderer->GetBackbufferTempBuffer();
                             if ( !tempBuffer || !tempBuffer->IsValid() ) {
                                 return;
@@ -10029,7 +10047,7 @@ XRESULT D3D11GraphicsEngine::DrawVOBsInstanced() {
             for ( SkeletalVobInfo* mob :
                 m_FrameGeometryCache.cachedMobs ) {
                 if ( !mob || !mob->Vob ) continue;
-                zCModel* model = dynamic_cast<zCModel*>(
+                zCModel* model = static_cast<zCModel*>(
                     mob->Vob->GetVisual() );
                 if ( !model ) continue;
 

@@ -111,6 +111,7 @@ public:
     XRESULT SetWindow( HWND hWnd ) override;
 
     /** Reset BackBuffer */
+    void OnResetBackBuffer();
 
     /** Get BackBuffer Format */
     DXGI_FORMAT GetBackBufferFormat();

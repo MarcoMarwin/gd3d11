@@ -49,7 +49,7 @@ HRESULT D3D11CascadedShadowMapBuffer::Resize( UINT size ) {
 
     const UINT maxTextureSize = m_device->GetFeatureLevel() >= D3D_FEATURE_LEVEL_11_0
         ? D3D11_REQ_TEXTURE2D_U_OR_V_DIMENSION
-        : D3D_FL10_0_REQ_TEXTURE2D_U_OR_V_DIMENSION;
+        : D3D10_REQ_TEXTURE2D_U_OR_V_DIMENSION;
     const UINT newSize = std::clamp<UINT>( size, 512, maxTextureSize );
 
     D3D11_TEXTURE2D_DESC texDesc{};

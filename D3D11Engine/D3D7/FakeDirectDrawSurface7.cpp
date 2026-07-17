@@ -41,10 +41,10 @@ void FakeDirectDrawSurface7::InitFakeSurface( const DDSURFACEDESC2* desc, MyDire
     OriginalDesc = *desc;
     Resource = resource;
     MipLevel = mipLevel;
-    OriginalDesc.dwWidth = (std::max)(
-        1u, OriginalDesc.dwWidth >> static_cast<unsigned int>(MipLevel) );
-    OriginalDesc.dwHeight = (std::max)(
-        1u, OriginalDesc.dwHeight >> static_cast<unsigned int>(MipLevel) );
+    OriginalDesc.dwWidth = (std::max<DWORD>)(
+        static_cast<DWORD>(1), OriginalDesc.dwWidth >> static_cast<unsigned int>(MipLevel) );
+    OriginalDesc.dwHeight = (std::max<DWORD>)(
+        static_cast<DWORD>(1), OriginalDesc.dwHeight >> static_cast<unsigned int>(MipLevel) );
 }
 
 HRESULT FakeDirectDrawSurface7::QueryInterface( REFIID riid, LPVOID* ppvObj ) {

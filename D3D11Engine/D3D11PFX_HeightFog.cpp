@@ -190,9 +190,11 @@ namespace {
 
         XMFLOAT3 rainFogColor = settings.RainFogColor;
         if ( !IsFiniteColor( rainFogColor ) ) rainFogColor = baseFogColor;
-        XMStoreFloat3( &constants.HF_FogColorMod, XMVectorLerpV(
+        XMFLOAT3 rainFogColorMod;
+        XMStoreFloat3( &rainFogColorMod, XMVectorLerpV(
             fogColor, XMLoadFloat3( &rainFogColor ),
             XMVectorReplicate( rainFogColorWeight ) ) );
+        constants.HF_FogColorMod = float3( rainFogColorMod );
         constants.HF_GlobalDensity = std::max( 0.0f, Toolbox::lerp(
             constants.HF_GlobalDensity,
             std::max( 0.0f, FiniteOr( settings.RainFogDensity, 0.0f ) ),
