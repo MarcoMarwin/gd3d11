@@ -220,6 +220,8 @@ struct ddraw_dll {
     FARPROC	LoadMenuSettings;
 } ddraw;
 
+void WINAPI FallbackCheckFullscreen() noexcept {}
+
 bool LoadSystemDirectDraw() noexcept {
     wchar_t systemPath[MAX_PATH]{};
     const UINT pathLength = GetSystemDirectoryW( systemPath, MAX_PATH );
@@ -235,8 +237,7 @@ bool LoadSystemDirectDraw() noexcept {
     }
 
 #define RESOLVE_SYSTEM_EXPORT(member) \
-    resolved.member = GetProcAddress( resolved.dll, #member ); \
-    if ( !resolved.member ) { FreeLibrary( resolved.dll ); return false; }
+    resolved.member = GetProcAddress( resolved.dll, #member )
     RESOLVE_SYSTEM_EXPORT( AcquireDDThreadLock );
     RESOLVE_SYSTEM_EXPORT( CheckFullscreen );
     RESOLVE_SYSTEM_EXPORT( CompleteCreateSysmemSurface );
@@ -260,6 +261,18 @@ bool LoadSystemDirectDraw() noexcept {
     RESOLVE_SYSTEM_EXPORT( RegisterSpecialCase );
     RESOLVE_SYSTEM_EXPORT( ReleaseDDThreadLock );
 #undef RESOLVE_SYSTEM_EXPORT
+
+    if ( !resolved.CheckFullscreen ) {
+        resolved.CheckFullscreen = reinterpret_cast<FARPROC>(&FallbackCheckFullscreen);
+    }
+
+    if ( !resolved.DirectDrawCreate || !resolved.DirectDrawCreateClipper
+        || !resolved.DirectDrawCreateEx || !resolved.DirectDrawEnumerateA
+        || !resolved.DirectDrawEnumerateExA || !resolved.DirectDrawEnumerateExW
+        || !resolved.DirectDrawEnumerateW ) {
+        FreeLibrary( resolved.dll );
+        return false;
+    }
 
     ddraw = resolved;
     return true;

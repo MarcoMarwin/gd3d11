@@ -476,6 +476,7 @@ void InstallFallbackExports() noexcept {
     SET_GENERIC_FALLBACK( imgui_table_setup_column );
 #undef SET_GENERIC_FALLBACK
 
+    if ( !ddraw.CheckFullscreen ) ddraw.CheckFullscreen = reinterpret_cast<FARPROC>(&FallbackVoidExport);
     ddraw.GDX_GetVersionString = reinterpret_cast<FARPROC>(&FallbackVersionString);
     ddraw.GDX_GetRendererSettings = reinterpret_cast<FARPROC>(&FallbackRendererSettings);
     ddraw.UpdateCustomFontMultiplier = reinterpret_cast<FARPROC>(&FallbackFontMultiplier);
