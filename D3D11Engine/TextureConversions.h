@@ -1,6 +1,6 @@
 #pragma once
 
-static void Convert565to8888( unsigned char* dst, const unsigned char* src, UINT realDataSize ) {
+static void Convert565to8888( unsigned char* dst, unsigned char* src, UINT realDataSize ) {
     for ( UINT i = 0; i < realDataSize / 4; ++i ) {
         unsigned char temp0 = src[2 * i + 0];
         unsigned char temp1 = src[2 * i + 1];
@@ -17,7 +17,7 @@ static void Convert565to8888( unsigned char* dst, const unsigned char* src, UINT
     }
 }
 
-static void Convert1555to8888( unsigned char* dst, const unsigned char* src, UINT realDataSize ) {
+static void Convert1555to8888( unsigned char* dst, unsigned char* src, UINT realDataSize ) {
     for ( UINT i = 0; i < realDataSize / 4; ++i ) {
         unsigned char temp0 = src[2 * i + 0];
         unsigned char temp1 = src[2 * i + 1];
@@ -35,7 +35,7 @@ static void Convert1555to8888( unsigned char* dst, const unsigned char* src, UIN
     }
 }
 
-static void Convert4444to8888( unsigned char* dst, const unsigned char* src, UINT realDataSize ) {
+static void Convert4444to8888( unsigned char* dst, unsigned char* src, UINT realDataSize ) {
     for ( UINT i = 0; i < realDataSize / 4; ++i ) {
         unsigned char temp0 = src[2 * i + 0];
         unsigned char temp1 = src[2 * i + 1];

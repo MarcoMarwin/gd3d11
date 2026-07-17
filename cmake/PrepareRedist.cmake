@@ -180,25 +180,7 @@ else()
   set(_version_suffix "git-${_short_hash}")
 endif()
 
-string(LENGTH "${_version_suffix}" _version_suffix_length)
-if(_version_suffix_length LESS 1
-  OR _version_suffix_length GREATER 96
-  OR NOT _version_suffix MATCHES "^[A-Za-z0-9][A-Za-z0-9._+-]*$")
-  gd3d11_fail("Unsafe release suffix: ${_version_suffix}")
-endif()
-
-set(_build_prefix "")
-set(_build_number_file "${GD3D11_SOURCE_DIR}/.github/nightly-build-number.txt")
-if(EXISTS "${_build_number_file}")
-  file(READ "${_build_number_file}" _build_number)
-  string(STRIP "${_build_number}" _build_number)
-  if(NOT _build_number MATCHES "^[0-9][0-9][0-9]$")
-    gd3d11_fail("Invalid nightly build number: ${_build_number}")
-  endif()
-  set(_build_prefix "build-${_build_number}-")
-endif()
-
-set(_release_name "GD3D11-${_build_prefix}${_version_suffix}")
+set(_release_name "GD3D11-${_version_suffix}")
 set(_release_dir "${GD3D11_TARGET_DIR}/${_release_name}")
 set(_zip_path "${GD3D11_TARGET_DIR}/${_release_name}.zip")
 set(_bin_dir "${_release_dir}/GD3D11/Bin")
@@ -219,21 +201,13 @@ file(MAKE_DIRECTORY "${_bin_dir}")
 
 gd3d11_require_exists("${GD3D11_SOURCE_DIR}/D3D11Engine/Shaders")
 gd3d11_require_exists("${GD3D11_SOURCE_DIR}/blobs/Fonts")
-gd3d11_require_exists("${GD3D11_SOURCE_DIR}/blobs/Licences.txt")
 gd3d11_require_exists("${GD3D11_SOURCE_DIR}/blobs/Meshes")
 gd3d11_require_exists("${GD3D11_SOURCE_DIR}/blobs/Textures")
-gd3d11_require_exists("${GD3D11_SOURCE_DIR}/blobs/Meshes/unitSphere.obj")
-gd3d11_require_exists("${GD3D11_SOURCE_DIR}/blobs/Textures/Moon.dds")
-gd3d11_require_exists("${GD3D11_SOURCE_DIR}/blobs/Textures/RainCloud.dds")
-gd3d11_require_exists("${GD3D11_SOURCE_DIR}/blobs/Textures/SkyDay.dds")
-gd3d11_require_exists("${GD3D11_SOURCE_DIR}/blobs/Textures/SkyDay_G1.dds")
-gd3d11_require_exists("${GD3D11_SOURCE_DIR}/blobs/Textures/starsh.dds")
 gd3d11_require_exists("${GD3D11_SOURCE_DIR}/blobs/libs")
 gd3d11_require_exists("${GD3D11_SOURCE_DIR}/blobs/bin/wine-d2d1.dll")
 
 file(COPY "${GD3D11_SOURCE_DIR}/D3D11Engine/Shaders/" DESTINATION "${_release_dir}/GD3D11/Shaders")
 file(COPY "${GD3D11_SOURCE_DIR}/blobs/Fonts/" DESTINATION "${_release_dir}/GD3D11/Fonts")
-file(COPY_FILE "${GD3D11_SOURCE_DIR}/blobs/Licences.txt" "${_release_dir}/GD3D11/Licences.txt" ONLY_IF_DIFFERENT)
 file(COPY "${GD3D11_SOURCE_DIR}/blobs/Meshes/" DESTINATION "${_release_dir}/GD3D11/Meshes")
 file(COPY "${GD3D11_SOURCE_DIR}/blobs/Textures/" DESTINATION "${_release_dir}/GD3D11/Textures")
 file(COPY "${GD3D11_SOURCE_DIR}/blobs/libs/" DESTINATION "${_release_dir}")
@@ -241,13 +215,6 @@ file(COPY_FILE "${GD3D11_SOURCE_DIR}/blobs/bin/wine-d2d1.dll" "${_bin_dir}/d2d1.
 
 set(_expected_paths
   "${_bin_dir}/d2d1.dll"
-  "${_release_dir}/GD3D11/Licences.txt"
-  "${_release_dir}/GD3D11/Meshes/unitSphere.obj"
-  "${_release_dir}/GD3D11/Textures/Moon.dds"
-  "${_release_dir}/GD3D11/Textures/RainCloud.dds"
-  "${_release_dir}/GD3D11/Textures/SkyDay.dds"
-  "${_release_dir}/GD3D11/Textures/SkyDay_G1.dds"
-  "${_release_dir}/GD3D11/Textures/starsh.dds"
 )
 
 foreach(_entry IN LISTS _matrix_entries)
@@ -264,12 +231,16 @@ foreach(_entry IN LISTS _matrix_entries)
 
   if(_destination_kind STREQUAL "root")
     set(_destination_dll "${_release_dir}/ddraw.dll")
+    set(_destination_pdb "${_release_dir}/ddraw.pdb")
   else()
     set(_destination_dll "${_bin_dir}/${_output_stem}.dll")
+    set(_destination_pdb "${_bin_dir}/${_output_stem}.pdb")
   endif()
 
   file(COPY_FILE "${_built_dll}" "${_destination_dll}" ONLY_IF_DIFFERENT)
-  list(APPEND _expected_paths "${_destination_dll}")
+  file(COPY_FILE "${_built_pdb}" "${_destination_pdb}" ONLY_IF_DIFFERENT)
+
+  list(APPEND _expected_paths "${_destination_dll}" "${_destination_pdb}")
 endforeach()
 
 foreach(_expected_path IN LISTS _expected_paths)
@@ -277,24 +248,6 @@ foreach(_expected_path IN LISTS _expected_paths)
     gd3d11_fail("Expected packaged artifact is missing: ${_expected_path}")
   endif()
 endforeach()
-
-file(GLOB_RECURSE _release_manifest_files
-  RELATIVE "${_release_dir}"
-  LIST_DIRECTORIES FALSE
-  "${_release_dir}/*"
-)
-list(SORT _release_manifest_files)
-set(_checksum_manifest "")
-foreach(_relative_path IN LISTS _release_manifest_files)
-  file(SHA256 "${_release_dir}/${_relative_path}" _file_hash)
-  string(REPLACE "\\" "/" _portable_path "${_relative_path}")
-  string(TOLOWER "${_file_hash}" _file_hash)
-  string(APPEND _checksum_manifest "${_file_hash}  ${_portable_path}\n")
-endforeach()
-if(_checksum_manifest STREQUAL "")
-  gd3d11_fail("Release package contains no files")
-endif()
-file(WRITE "${_release_dir}/SHA256SUMS.txt" "${_checksum_manifest}")
 
 execute_process(
   COMMAND "${CMAKE_COMMAND}" -E tar cf "${_zip_path}" --format=zip "${_release_name}"

@@ -2,34 +2,25 @@
 #include <intrin.h>
 #include <shlwapi.h>
 #include <algorithm>
-#include <cstdint>
-#include <cwctype>
 #include <string>
+#include <map>
 
 #pragma comment(lib, "shlwapi.lib")
 
-enum ExecutableKind {
-    GOTHIC1_EXECUTABLE,
-    GOTHIC1A_EXECUTABLE,
-    GOTHIC2A_EXECUTABLE,
-    GOTHIC1_SPACERNET,
-    GOTHIC2_SPACERNET,
-    INVALID_EXECUTABLE = -1
-};
+enum { GOTHIC1_EXECUTABLE = 0, GOTHIC1A_EXECUTABLE = 1, GOTHIC2_EXECUTABLE = 2, GOTHIC2A_EXECUTABLE = 3, GOTHIC1_SPACERNET = 4, GOTHIC2_SPACERNET = 5, INVALID_EXECUTABLE = -1 };
 
-const wchar_t* GetRendererBinaryStem( int executable ) noexcept {
-    switch ( executable ) {
-    case GOTHIC1_EXECUTABLE: return L"\\GD3D11\\bin\\g1";
-    case GOTHIC1A_EXECUTABLE: return L"\\GD3D11\\bin\\g1a";
-    case GOTHIC2A_EXECUTABLE: return L"\\GD3D11\\bin\\g2a";
-    case GOTHIC1_SPACERNET: return L"\\GD3D11\\bin\\g1_spacer";
-    case GOTHIC2_SPACERNET: return L"\\GD3D11\\bin\\g2_spacer";
-    default: return nullptr;
-    }
-}
+std::map<int, std::string> dllBinFiles = {
+    { GOTHIC1_EXECUTABLE, "\\GD3D11\\bin\\g1" },
+    { GOTHIC1A_EXECUTABLE, "\\GD3D11\\bin\\g1a" },
+    { GOTHIC2_EXECUTABLE, "\\GD3D11\\bin\\g2" },
+    { GOTHIC2A_EXECUTABLE, "\\GD3D11\\bin\\g2a" },
+    { GOTHIC1_SPACERNET, "\\GD3D11\\bin\\g1_spacer" },
+    { GOTHIC2_SPACERNET, "\\GD3D11\\bin\\g2_spacer" }
+};
 
 struct ddraw_dll {
     HMODULE dll = NULL;
+    FARPROC	IsUsingBGRATextures;
     FARPROC	DirectDrawCreateEx;
     FARPROC	AcquireDDThreadLock;
     FARPROC	CheckFullscreen;
@@ -83,11 +74,8 @@ struct ddraw_dll {
     FARPROC	GDX_SaveRendererSettings;    
     FARPROC	UpdateCustomFontMultiplier;
     FARPROC	SetCustomSkyTexture;
-    FARPROC	SetCustomSkyTexture_ZenGin;
-    FARPROC	SetCustomSkyWavelengths;
-    FARPROC	LoadMenuSettings;
-    FARPROC	LoadCustomZENResources;
-    FARPROC	EnableWindAnimations;
+    FARPROC LoadMenuSettings;
+    FARPROC LoadCustomZENResources;
     FARPROC imgui_begin;
     FARPROC imgui_begin_overlay;
     FARPROC imgui_end;
@@ -124,170 +112,6 @@ struct ddraw_dll {
     FARPROC imgui_get_content_region_avail_x;
     FARPROC imgui_table_setup_column;
 } ddraw;
-
-struct CpuFeatures {
-    bool sse2 = false;
-    bool avx = false;
-    bool avx2 = false;
-};
-
-CpuFeatures GetCpuFeatures() noexcept {
-    CpuFeatures features;
-    int cpuInfo[4]{};
-    __cpuidex( cpuInfo, 0, 0 );
-    const int maxBasicLeaf = cpuInfo[0];
-    if ( maxBasicLeaf < 1 ) {
-        return features;
-    }
-
-    __cpuidex( cpuInfo, 1, 0 );
-    features.sse2 = (cpuInfo[3] & (1 << 26)) != 0;
-    const bool osXsave = (cpuInfo[2] & (1 << 27)) != 0;
-    const bool hardwareAvx = (cpuInfo[2] & (1 << 28)) != 0;
-    if ( osXsave && hardwareAvx && (_xgetbv( 0 ) & 0x6) == 0x6 ) {
-        features.avx = true;
-        if ( maxBasicLeaf >= 7 ) {
-            __cpuidex( cpuInfo, 7, 0 );
-            features.avx2 = (cpuInfo[1] & (1 << 5)) != 0;
-        }
-    }
-    return features;
-}
-
-bool GetExecutableImage( uintptr_t& baseAddress, size_t& imageSize ) noexcept {
-    const HMODULE module = GetModuleHandleW( nullptr );
-    if ( !module ) {
-        return false;
-    }
-
-    const auto* base = reinterpret_cast<const BYTE*>(module);
-    const auto* dosHeader = reinterpret_cast<const IMAGE_DOS_HEADER*>(base);
-    if ( dosHeader->e_magic != IMAGE_DOS_SIGNATURE
-        || dosHeader->e_lfanew <= 0 || dosHeader->e_lfanew > 1024 * 1024 ) {
-        return false;
-    }
-
-    const auto* ntHeader = reinterpret_cast<const IMAGE_NT_HEADERS*>(base + dosHeader->e_lfanew);
-    if ( ntHeader->Signature != IMAGE_NT_SIGNATURE
-        || ntHeader->OptionalHeader.SizeOfImage < sizeof( IMAGE_DOS_HEADER ) ) {
-        return false;
-    }
-
-    baseAddress = reinterpret_cast<uintptr_t>(base);
-    imageSize = ntHeader->OptionalHeader.SizeOfImage;
-    return true;
-}
-
-bool MatchesExecutableDword( uintptr_t baseAddress, size_t imageSize, size_t offset, DWORD expected ) noexcept {
-    if ( offset > imageSize || imageSize - offset < sizeof( DWORD ) ) {
-        return false;
-    }
-    return *reinterpret_cast<const DWORD*>(baseAddress + offset) == expected;
-}
-
-bool ValidateResolvedExports( bool rendererLoaded, const char*& missingExport ) noexcept {
-#define REQUIRE_EXPORT(member) do { if ( !ddraw.member ) { missingExport = #member; return false; } } while ( false )
-    REQUIRE_EXPORT( AcquireDDThreadLock );
-    REQUIRE_EXPORT( CheckFullscreen );
-    REQUIRE_EXPORT( CompleteCreateSysmemSurface );
-    REQUIRE_EXPORT( D3DParseUnknownCommand );
-    REQUIRE_EXPORT( DDGetAttachedSurfaceLcl );
-    REQUIRE_EXPORT( DDInternalLock );
-    REQUIRE_EXPORT( DDInternalUnlock );
-    REQUIRE_EXPORT( DSoundHelp );
-    REQUIRE_EXPORT( DirectDrawCreate );
-    REQUIRE_EXPORT( DirectDrawCreateClipper );
-    REQUIRE_EXPORT( DirectDrawCreateEx );
-    REQUIRE_EXPORT( DirectDrawEnumerateA );
-    REQUIRE_EXPORT( DirectDrawEnumerateExA );
-    REQUIRE_EXPORT( DirectDrawEnumerateExW );
-    REQUIRE_EXPORT( DirectDrawEnumerateW );
-    REQUIRE_EXPORT( DllCanUnloadNow );
-    REQUIRE_EXPORT( DllGetClassObject );
-    REQUIRE_EXPORT( GetDDSurfaceLocal );
-    REQUIRE_EXPORT( GetOLEThunkData );
-    REQUIRE_EXPORT( GetSurfaceFromDC );
-    REQUIRE_EXPORT( RegisterSpecialCase );
-    REQUIRE_EXPORT( ReleaseDDThreadLock );
-
-    if ( !rendererLoaded ) {
-        return true;
-    }
-
-    REQUIRE_EXPORT( GDX_AddPointLocator );
-    REQUIRE_EXPORT( GDX_SetFogColor );
-    REQUIRE_EXPORT( GDX_SetFogDensity );
-    REQUIRE_EXPORT( GDX_SetFogHeight );
-    REQUIRE_EXPORT( GDX_SetFogHeightFalloff );
-    REQUIRE_EXPORT( GDX_SetSunColor );
-    REQUIRE_EXPORT( GDX_SetSunStrength );
-    REQUIRE_EXPORT( GDX_SetShadowStrength );
-    REQUIRE_EXPORT( GDX_SetShadowAOStrength );
-    REQUIRE_EXPORT( GDX_SetWorldAOStrength );
-    REQUIRE_EXPORT( GDX_OpenMessageBox );
-    REQUIRE_EXPORT( GDX_SetBinkVideoRunning );
-    REQUIRE_EXPORT( GDX_SetAtmosphericScattering );
-    REQUIRE_EXPORT( GDX_SetFogRange );
-    REQUIRE_EXPORT( GDX_SetGlobalWindStrength );
-    REQUIRE_EXPORT( GDX_SetRainRadiusRange );
-    REQUIRE_EXPORT( GDX_SetRainHeightRange );
-    REQUIRE_EXPORT( GDX_SetRainSceneWettness );
-    REQUIRE_EXPORT( GDX_SetRainFogDensity );
-    REQUIRE_EXPORT( GDX_SetRainSunLightStrength );
-    REQUIRE_EXPORT( GDX_SetRainNumParticles );
-    REQUIRE_EXPORT( GDX_SetRainGlobalVelocity );
-    REQUIRE_EXPORT( GDX_SetRainFogColor );
-    REQUIRE_EXPORT( GDX_SetRainMoveParticles );
-    REQUIRE_EXPORT( GDX_SetRainUseInitialSet );
-    REQUIRE_EXPORT( GDX_GetDX11RenderingContext );
-    REQUIRE_EXPORT( GDX_GetVersionString );
-    REQUIRE_EXPORT( GDX_GetRendererSettings );
-    REQUIRE_EXPORT( GDX_SaveRendererSettings );
-    REQUIRE_EXPORT( UpdateCustomFontMultiplier );
-    REQUIRE_EXPORT( SetCustomSkyTexture );
-    REQUIRE_EXPORT( SetCustomSkyTexture_ZenGin );
-    REQUIRE_EXPORT( SetCustomSkyWavelengths );
-    REQUIRE_EXPORT( LoadMenuSettings );
-    REQUIRE_EXPORT( LoadCustomZENResources );
-    REQUIRE_EXPORT( EnableWindAnimations );
-    REQUIRE_EXPORT( imgui_begin );
-    REQUIRE_EXPORT( imgui_begin_overlay );
-    REQUIRE_EXPORT( imgui_end );
-    REQUIRE_EXPORT( imgui_text );
-    REQUIRE_EXPORT( imgui_text_unformatted );
-    REQUIRE_EXPORT( imgui_button );
-    REQUIRE_EXPORT( imgui_checkbox );
-    REQUIRE_EXPORT( imgui_slider_float );
-    REQUIRE_EXPORT( imgui_input_text );
-    REQUIRE_EXPORT( imgui_same_line );
-    REQUIRE_EXPORT( imgui_new_line );
-    REQUIRE_EXPORT( imgui_separator );
-    REQUIRE_EXPORT( imgui_begin_child );
-    REQUIRE_EXPORT( imgui_end_child );
-    REQUIRE_EXPORT( imgui_collapsing_header );
-    REQUIRE_EXPORT( imgui_begin_main_menu_bar );
-    REQUIRE_EXPORT( imgui_end_main_menu_bar );
-    REQUIRE_EXPORT( imgui_begin_menu );
-    REQUIRE_EXPORT( imgui_end_menu );
-    REQUIRE_EXPORT( imgui_menu_item );
-    REQUIRE_EXPORT( imgui_push_id );
-    REQUIRE_EXPORT( imgui_pop_id );
-    REQUIRE_EXPORT( imgui_is_ready );
-    REQUIRE_EXPORT( imgui_set_next_window_pos );
-    REQUIRE_EXPORT( imgui_set_next_window_size );
-    REQUIRE_EXPORT( imgui_set_item_tooltip );
-    REQUIRE_EXPORT( imgui_set_next_window_bg_alpha );
-    REQUIRE_EXPORT( imgui_set_next_window_collapsed );
-    REQUIRE_EXPORT( imgui_begin_table );
-    REQUIRE_EXPORT( imgui_end_table );
-    REQUIRE_EXPORT( imgui_table_next_column );
-    REQUIRE_EXPORT( imgui_table_next_row );
-    REQUIRE_EXPORT( imgui_table_set_column_index );
-    REQUIRE_EXPORT( imgui_get_content_region_avail_x );
-    REQUIRE_EXPORT( imgui_table_setup_column );
-#undef REQUIRE_EXPORT
-    return true;
-}
 
 __declspec(naked) void FakeAcquireDDThreadLock() { _asm { jmp[ddraw.AcquireDDThreadLock] } }
 __declspec(naked) void FakeCheckFullscreen() { _asm { jmp[ddraw.CheckFullscreen] } }
@@ -342,11 +166,8 @@ __declspec(naked) void FakeGDX_GetRendererSettings() { _asm { jmp[ddraw.GDX_GetR
 __declspec(naked) void FakeGDX_SaveRendererSettings() { _asm { jmp[ddraw.GDX_SaveRendererSettings] } }
 __declspec(naked) void FakeUpdateCustomFontMultiplier() { _asm { jmp[ddraw.UpdateCustomFontMultiplier] } }
 __declspec(naked) void FakeSetCustomSkyTexture() { _asm { jmp[ddraw.SetCustomSkyTexture] } }
-__declspec(naked) void FakeSetCustomSkyTexture_ZenGin() { _asm { jmp[ddraw.SetCustomSkyTexture_ZenGin] } }
-__declspec(naked) void FakeSetCustomSkyWavelengths() { _asm { jmp[ddraw.SetCustomSkyWavelengths] } }
 __declspec(naked) void FakeLoadMenuSettings() { _asm { jmp[ddraw.LoadMenuSettings] } }
 __declspec(naked) void FakeLoadCustomZENResources() { _asm { jmp[ddraw.LoadCustomZENResources] } }
-__declspec(naked) void FakeEnableWindAnimations() { _asm { jmp[ddraw.EnableWindAnimations] } }
 __declspec(naked) void Fakeimgui_begin() { _asm { jmp[ddraw.imgui_begin] } }
 __declspec(naked) void Fakeimgui_begin_overlay() { _asm { jmp[ddraw.imgui_begin_overlay] } }
 __declspec(naked) void Fakeimgui_end() { _asm { jmp[ddraw.imgui_end] } }
@@ -385,167 +206,106 @@ __declspec(naked) void Fakeimgui_table_setup_column() { _asm { jmp[ddraw.imgui_t
 
 
 
-uintptr_t __cdecl FallbackCdeclExport() noexcept {
-    return 0;
-}
-
-const char* __cdecl FallbackVersionString() noexcept {
-    return "GD3D11 unavailable";
-}
-
-void* __cdecl FallbackRendererSettings( unsigned int& structSize ) noexcept {
-    structSize = 0;
-    return nullptr;
-}
-
-float WINAPI FallbackFontMultiplier( float ) noexcept {
-    return 1.0f;
-}
-
-void WINAPI FallbackSetCustomSkyTexture( int, bool ) noexcept {}
-void WINAPI FallbackSetCustomSkyTextureZenGin( bool, void* ) noexcept {}
-void WINAPI FallbackSetCustomSkyWavelengths( float, float, float ) noexcept {}
-void WINAPI FallbackLoadMenuSettings( char* ) noexcept {}
-void WINAPI FallbackVoidExport() noexcept {}
-
-void InstallFallbackExports() noexcept {
-    FARPROC generic = reinterpret_cast<FARPROC>(&FallbackCdeclExport);
-
-#define SET_GENERIC_FALLBACK(member) ddraw.member = generic
-    SET_GENERIC_FALLBACK( GDX_AddPointLocator );
-    SET_GENERIC_FALLBACK( GDX_SetFogColor );
-    SET_GENERIC_FALLBACK( GDX_SetFogDensity );
-    SET_GENERIC_FALLBACK( GDX_SetFogHeight );
-    SET_GENERIC_FALLBACK( GDX_SetFogHeightFalloff );
-    SET_GENERIC_FALLBACK( GDX_SetSunColor );
-    SET_GENERIC_FALLBACK( GDX_SetSunStrength );
-    SET_GENERIC_FALLBACK( GDX_SetShadowStrength );
-    SET_GENERIC_FALLBACK( GDX_SetShadowAOStrength );
-    SET_GENERIC_FALLBACK( GDX_SetWorldAOStrength );
-    SET_GENERIC_FALLBACK( GDX_OpenMessageBox );
-    SET_GENERIC_FALLBACK( GDX_SetBinkVideoRunning );
-    SET_GENERIC_FALLBACK( GDX_SetAtmosphericScattering );
-    SET_GENERIC_FALLBACK( GDX_SetFogRange );
-    SET_GENERIC_FALLBACK( GDX_SetGlobalWindStrength );
-    SET_GENERIC_FALLBACK( GDX_SetRainRadiusRange );
-    SET_GENERIC_FALLBACK( GDX_SetRainHeightRange );
-    SET_GENERIC_FALLBACK( GDX_SetRainSceneWettness );
-    SET_GENERIC_FALLBACK( GDX_SetRainFogDensity );
-    SET_GENERIC_FALLBACK( GDX_SetRainSunLightStrength );
-    SET_GENERIC_FALLBACK( GDX_SetRainNumParticles );
-    SET_GENERIC_FALLBACK( GDX_SetRainGlobalVelocity );
-    SET_GENERIC_FALLBACK( GDX_SetRainFogColor );
-    SET_GENERIC_FALLBACK( GDX_SetRainMoveParticles );
-    SET_GENERIC_FALLBACK( GDX_SetRainUseInitialSet );
-    SET_GENERIC_FALLBACK( GDX_GetDX11RenderingContext );
-    SET_GENERIC_FALLBACK( GDX_SaveRendererSettings );
-    SET_GENERIC_FALLBACK( imgui_begin );
-    SET_GENERIC_FALLBACK( imgui_begin_overlay );
-    SET_GENERIC_FALLBACK( imgui_end );
-    SET_GENERIC_FALLBACK( imgui_text );
-    SET_GENERIC_FALLBACK( imgui_text_unformatted );
-    SET_GENERIC_FALLBACK( imgui_button );
-    SET_GENERIC_FALLBACK( imgui_checkbox );
-    SET_GENERIC_FALLBACK( imgui_slider_float );
-    SET_GENERIC_FALLBACK( imgui_input_text );
-    SET_GENERIC_FALLBACK( imgui_same_line );
-    SET_GENERIC_FALLBACK( imgui_new_line );
-    SET_GENERIC_FALLBACK( imgui_separator );
-    SET_GENERIC_FALLBACK( imgui_begin_child );
-    SET_GENERIC_FALLBACK( imgui_end_child );
-    SET_GENERIC_FALLBACK( imgui_collapsing_header );
-    SET_GENERIC_FALLBACK( imgui_begin_main_menu_bar );
-    SET_GENERIC_FALLBACK( imgui_end_main_menu_bar );
-    SET_GENERIC_FALLBACK( imgui_begin_menu );
-    SET_GENERIC_FALLBACK( imgui_end_menu );
-    SET_GENERIC_FALLBACK( imgui_menu_item );
-    SET_GENERIC_FALLBACK( imgui_push_id );
-    SET_GENERIC_FALLBACK( imgui_pop_id );
-    SET_GENERIC_FALLBACK( imgui_is_ready );
-    SET_GENERIC_FALLBACK( imgui_set_next_window_pos );
-    SET_GENERIC_FALLBACK( imgui_set_next_window_size );
-    SET_GENERIC_FALLBACK( imgui_set_item_tooltip );
-    SET_GENERIC_FALLBACK( imgui_set_next_window_bg_alpha );
-    SET_GENERIC_FALLBACK( imgui_set_next_window_collapsed );
-    SET_GENERIC_FALLBACK( imgui_begin_table );
-    SET_GENERIC_FALLBACK( imgui_end_table );
-    SET_GENERIC_FALLBACK( imgui_table_next_column );
-    SET_GENERIC_FALLBACK( imgui_table_next_row );
-    SET_GENERIC_FALLBACK( imgui_table_set_column_index );
-    SET_GENERIC_FALLBACK( imgui_get_content_region_avail_x );
-    SET_GENERIC_FALLBACK( imgui_table_setup_column );
-#undef SET_GENERIC_FALLBACK
-
-    if ( !ddraw.CheckFullscreen ) ddraw.CheckFullscreen = reinterpret_cast<FARPROC>(&FallbackVoidExport);
-    ddraw.GDX_GetVersionString = reinterpret_cast<FARPROC>(&FallbackVersionString);
-    ddraw.GDX_GetRendererSettings = reinterpret_cast<FARPROC>(&FallbackRendererSettings);
-    ddraw.UpdateCustomFontMultiplier = reinterpret_cast<FARPROC>(&FallbackFontMultiplier);
-    ddraw.SetCustomSkyTexture = reinterpret_cast<FARPROC>(&FallbackSetCustomSkyTexture);
-    ddraw.SetCustomSkyTexture_ZenGin = reinterpret_cast<FARPROC>(&FallbackSetCustomSkyTextureZenGin);
-    ddraw.SetCustomSkyWavelengths = reinterpret_cast<FARPROC>(&FallbackSetCustomSkyWavelengths);
-    ddraw.LoadMenuSettings = reinterpret_cast<FARPROC>(&FallbackLoadMenuSettings);
-    ddraw.LoadCustomZENResources = reinterpret_cast<FARPROC>(&FallbackVoidExport);
-    ddraw.EnableWindAnimations = reinterpret_cast<FARPROC>(&FallbackVoidExport);
-}
-
 bool FakeIsUsingBGRATextures() { return true; }
 
-bool CheckFileExists( const wchar_t* fileName ) noexcept {
-    if ( !fileName || !fileName[0] ) {
-        return false;
-    }
-    const DWORD attributes = GetFileAttributesW( fileName );
-    return attributes != INVALID_FILE_ATTRIBUTES
-        && (attributes & FILE_ATTRIBUTE_DIRECTORY) == 0;
+extern "C" HMODULE WINAPI FakeGDX_Module() {
+    return ddraw.dll;
 }
 
-void CheckLibraryExists( const wchar_t* filePath, const wchar_t* fileName ) noexcept {
-    wchar_t libraryPath[MAX_PATH]{};
-    if ( !filePath || !fileName || !PathCombineW( libraryPath, filePath, fileName )
-        || !CheckFileExists( libraryPath ) ) {
-        MessageBoxW( nullptr,
-            L"GD3D11 Renderer could not find assimp-vc143-mt.dll in the game directory.",
-            L"Gothic GD3D11", MB_ICONERROR );
+bool CheckFileExists( const char* fileName ) {
+    DWORD attr = GetFileAttributesA( fileName );
+    if ( attr == INVALID_FILE_ATTRIBUTES && GetLastError() == ERROR_FILE_NOT_FOUND ) {
+        return false;
+    }
+    return true;
+}
+
+void CheckLibraryExists( const char* filePath, const char* fileName ) {
+    if ( !CheckFileExists( (std::string( filePath ) + "\\" + fileName).c_str() ) ) {
+        MessageBoxA( nullptr, (std::string( "GD3D11 Renderer couldn't be loaded.\nUnable to load DLL '" ) + fileName + "'. The specified module could not be found.").c_str(), "Gothic GD3D11", MB_ICONERROR);
     }
 }
 
 BOOL APIENTRY DllMain( HINSTANCE hInst, DWORD reason, LPVOID ) {
     if ( reason == DLL_PROCESS_ATTACH ) {
-        DisableThreadLibraryCalls( hInst );
-        try {
         int foundExecutable = INVALID_EXECUTABLE;
-        const CpuFeatures cpu = GetCpuFeatures();
-        bool haveAVX = cpu.avx;
-        bool haveAVX2 = cpu.avx2;
+        bool haveSSE = false;
+        bool haveSSE2 = false;
+        bool haveSSE3 = false;
+        bool haveSSSE3 = false;
+        bool haveSSE41 = false;
+        bool haveSSE42 = false;
+        bool haveFMA3 = false;
+        bool haveFMA4 = false;
+        bool haveAVX = false;
+        bool haveAVX2 = false;
 
-        if ( !cpu.sse2 ) {
-            MessageBoxW( nullptr, L"GD3D11 Renderer requires SSE2 instructions.", L"Gothic GD3D11", MB_ICONERROR );
-            return FALSE;
+        int cpuinfo[4];
+        __cpuid( cpuinfo, 0 );
+        if ( cpuinfo[0] >= 1 ) {
+            __cpuid( cpuinfo, 1 );
+            if ( cpuinfo[3] & 0x02000000 )
+                haveSSE = true;
+            if ( cpuinfo[3] & 0x04000000 )
+                haveSSE2 = true;
+            if ( cpuinfo[2] & 0x00000001 )
+                haveSSE3 = true;
+            if ( cpuinfo[2] & 0x00000200 )
+                haveSSSE3 = true;
+            if ( cpuinfo[2] & 0x00080000 )
+                haveSSE41 = true;
+            if ( cpuinfo[2] & 0x00100000 )
+                haveSSE42 = true;
+            if ( cpuinfo[2] & 0x00001000 )
+                haveFMA3 = true;
+
+            if ( cpuinfo[2] & 0x08000000 ) {
+                int extcpuinfo[4];
+                __cpuid( extcpuinfo, 7 );
+
+                int registerSaves = (int)_xgetbv( 0 );
+                if ( registerSaves & 0x06/*YMM registers*/ ) {
+                    if ( cpuinfo[2] & 0x10000000 )
+                        haveAVX = true;
+                    if ( extcpuinfo[1] & 0x00000020 )
+                        haveAVX2 = true;
+
+                    // FMA4 requires avx instruction set
+                    if ( haveAVX ) {
+                        __cpuid( cpuinfo, 0x80000000 );
+                        if ( cpuinfo[0] >= 0x80000001 ) {
+                            __cpuid( extcpuinfo, 0x80000001 );
+                            if ( extcpuinfo[2] & 0x00010000 )
+                                haveFMA4 = true;
+                        }
+                    }
+                }
+            }
         }
-        uintptr_t baseAddr = 0;
-        size_t imageSize = 0;
-        const bool validImage = GetExecutableImage( baseAddr, imageSize );
-        if ( validImage && baseAddr == 0x400000 ) {
-            if ( MatchesExecutableDword( baseAddr, imageSize, 0x168, 0x3D4318 )
-                && MatchesExecutableDword( baseAddr, imageSize, 0x3D43A0, 0x82E108 )
-                && MatchesExecutableDword( baseAddr, imageSize, 0x3D43CB, 0x82E10C ) ) {
+
+        if ( !haveSSE || !haveSSE2 ) {
+            MessageBoxA( nullptr, "GD3D11 Renderer requires atleast SSE2 instructions to be available.", "Gothic GD3D11", MB_ICONERROR );
+            exit( -1 );
+        }
+
+        DWORD baseAddr = reinterpret_cast<DWORD>(GetModuleHandleA( nullptr ));
+        if ( baseAddr == 0x400000 ) {
+            if ( *reinterpret_cast<DWORD*>(baseAddr + 0x168) == 0x3D4318 && *reinterpret_cast<DWORD*>(baseAddr + 0x3D43A0) == 0x82E108
+                && *reinterpret_cast<DWORD*>(baseAddr + 0x3D43CB) == 0x82E10C ) {
                 foundExecutable = GOTHIC2A_EXECUTABLE;
-            } else if ( MatchesExecutableDword( baseAddr, imageSize, 0x160, 0x37A8D8 )
-                && MatchesExecutableDword( baseAddr, imageSize, 0x37A960, 0x7D01E4 )
-                && MatchesExecutableDword( baseAddr, imageSize, 0x37A98B, 0x7D01E8 ) ) {
+            } else if ( *reinterpret_cast<DWORD*>(baseAddr + 0x160) == 0x37A8D8 && *reinterpret_cast<DWORD*>(baseAddr + 0x37A960) == 0x7D01E4
+                && *reinterpret_cast<DWORD*>(baseAddr + 0x37A98B) == 0x7D01E8 ) {
                 foundExecutable = GOTHIC1_EXECUTABLE;
-            } else if ( MatchesExecutableDword( baseAddr, imageSize, 0x140, 0x3BE698 )
-                && MatchesExecutableDword( baseAddr, imageSize, 0x3BE720, 0x8131E4 )
-                && MatchesExecutableDword( baseAddr, imageSize, 0x3BE74B, 0x8131E8 ) ) {
+            } else if ( *reinterpret_cast<DWORD*>(baseAddr + 0x140) == 0x3BE698 && *reinterpret_cast<DWORD*>(baseAddr + 0x3BE720) == 0x8131E4
+                && *reinterpret_cast<DWORD*>(baseAddr + 0x3BE74B) == 0x8131E8 ) {
                 foundExecutable = GOTHIC1A_EXECUTABLE;
             }
         }
 
         if ( foundExecutable != INVALID_EXECUTABLE ) {
-            std::wstring commandLine = GetCommandLineW();
-            std::transform( commandLine.begin(), commandLine.end(), commandLine.begin(),
-                []( wchar_t character ) { return static_cast<wchar_t>(towlower( character )); } );
-            if ( commandLine.find( L"-game:spacer_net.ini" ) != std::wstring::npos ) {
+            std::string commandLine = GetCommandLineA();
+            std::transform( commandLine.begin(), commandLine.end(), commandLine.begin(), tolower );
+            if ( commandLine.find( "-game:spacer_net.ini" ) != std::string::npos ) {
                 // Don't search for avx versions
                 haveAVX2 = false;
                 haveAVX = false;
@@ -557,42 +317,29 @@ BOOL APIENTRY DllMain( HINSTANCE hInst, DWORD reason, LPVOID ) {
             }
         }
 
-        wchar_t executablePath[MAX_PATH]{};
-        const DWORD executablePathLength = GetModuleFileNameW( nullptr, executablePath, MAX_PATH );
-        if ( executablePathLength == 0 || executablePathLength >= MAX_PATH
-            || !PathRemoveFileSpecW( executablePath ) ) {
-            MessageBoxW( nullptr, L"GD3D11 Renderer could not resolve the game directory.",
-                L"Gothic GD3D11", MB_ICONERROR );
-            return FALSE;
-        }
+        char executablePath[MAX_PATH];
+        GetModuleFileNameA( GetModuleHandleA( nullptr ), executablePath, sizeof( executablePath ) );
+        PathRemoveFileSpecA( executablePath );
 
-        CheckLibraryExists( executablePath, L"assimp-vc143-mt.dll" );
+        CheckLibraryExists( executablePath, "assimp-vc143-mt.dll" );
         ddraw.dll = nullptr;
 
-        std::wstring dllPath;
-        DWORD rendererLoadError = ERROR_SUCCESS;
+        std::string dllPath;
         bool showLoadingInfo = true;
-        const wchar_t* rendererStem = GetRendererBinaryStem( foundExecutable );
-        if ( rendererStem ) {
-            auto tryRenderer = [&]( const wchar_t* suffix ) {
-                if ( ddraw.dll ) {
-                    return;
-                }
-                dllPath = std::wstring( executablePath ) + rendererStem + suffix;
-                SetLastError( ERROR_SUCCESS );
-                ddraw.dll = LoadLibraryW( dllPath.c_str() );
-                if ( !ddraw.dll ) {
-                    rendererLoadError = GetLastError();
-                }
-            };
-
-            if ( haveAVX2 ) {
-                tryRenderer( L"_avx2.dll" );
+        auto it = dllBinFiles.find( foundExecutable );
+        if ( it != dllBinFiles.end() ) {
+            if ( haveAVX2 && !ddraw.dll ) {
+                dllPath = std::string( executablePath ) + it->second + "_avx2.dll";
+                ddraw.dll = LoadLibraryA( dllPath.c_str() );
             }
-            if ( haveAVX ) {
-                tryRenderer( L"_avx.dll" );
+            if ( haveAVX && !ddraw.dll ) {
+                dllPath = std::string( executablePath ) + it->second + "_avx.dll";
+                ddraw.dll = LoadLibraryA( dllPath.c_str() );
             }
-            tryRenderer( L".dll" );
+            if ( !ddraw.dll ) {
+                dllPath = std::string( executablePath ) + it->second + ".dll";
+                ddraw.dll = LoadLibraryA( dllPath.c_str() );
+            }
         } else {
             if ( baseAddr != 0x400000 ) {
                 MessageBoxA( nullptr, "GD3D11 Renderer couldn't be loaded.\nDetected enabled ASLR. Disable both Mandatory and Bottom-up ASLR in Exploit Protection for Gothic executable before continuing.", "Gothic GD3D11", MB_ICONERROR );
@@ -602,50 +349,38 @@ BOOL APIENTRY DllMain( HINSTANCE hInst, DWORD reason, LPVOID ) {
             showLoadingInfo = false;
         }
 
-        const bool rendererLoaded = ddraw.dll != nullptr;
         if ( !ddraw.dll ) {
             if ( showLoadingInfo ) {
                 if ( !CheckFileExists( dllPath.c_str() ) ) {
-                    std::wstring errorMessage =
-                        L"GD3D11 Renderer could not load the selected DLL:\n" + dllPath
-                        + L"\nThe file does not exist.";
-                    MessageBoxW( nullptr, errorMessage.c_str(), L"Gothic GD3D11", MB_ICONERROR );
+                    std::string errorMessage( "GD3D11 Renderer couldn't be loaded.\nUnable to load DLL '" );
+                    errorMessage.append( it->second );
+                    errorMessage.append( ".dll'. The specified module could not be found." );
+                    MessageBoxA( nullptr, errorMessage.c_str(), "Gothic GD3D11", MB_ICONERROR );
                 } else {
-                    const DWORD errorCode = rendererLoadError != ERROR_SUCCESS
-                        ? rendererLoadError : ERROR_DLL_INIT_FAILED;
-                    std::wstring errorMessage( L"GD3D11 Renderer could not load the selected DLL.\n" );
+                    DWORD errorCode = GetLastError();
+                    std::wstring errorMessage( L"GD3D11 Renderer couldn't be loaded.\n" );
+
                     LPWSTR messageBuffer = nullptr;
-                    const DWORD size = FormatMessageW(
-                        FORMAT_MESSAGE_ALLOCATE_BUFFER | FORMAT_MESSAGE_FROM_SYSTEM | FORMAT_MESSAGE_IGNORE_INSERTS,
-                        nullptr, errorCode, MAKELANGID( LANG_NEUTRAL, SUBLANG_DEFAULT ),
-                        reinterpret_cast<LPWSTR>(&messageBuffer), 0, nullptr );
-                    if ( size > 0 && messageBuffer ) {
-                        errorMessage.append( messageBuffer, size );
+                    size_t size = FormatMessageW( FORMAT_MESSAGE_ALLOCATE_BUFFER | FORMAT_MESSAGE_FROM_SYSTEM | FORMAT_MESSAGE_IGNORE_INSERTS,
+                                 NULL, errorCode, MAKELANGID( LANG_NEUTRAL, SUBLANG_DEFAULT ), (LPWSTR)&messageBuffer, 0, NULL );
+                    if ( size > 0 ) {
+                        errorMessage.append( messageBuffer );
                     } else {
-                        wchar_t buffer[32]{};
-                        swprintf_s( buffer, L"Error 0x%08X.", errorCode );
-                        errorMessage.append( buffer );
+                        wchar_t buffer[32];
+                        wprintf_s( buffer, "0x%x", errorCode );
+                        errorMessage.append( L"Access Denied(" + std::wstring( buffer ) + L")."  );
                     }
-                    if ( messageBuffer ) {
-                        LocalFree( messageBuffer );
-                    }
+
+                    LocalFree( messageBuffer );
                     MessageBoxW( nullptr, errorMessage.c_str(), L"Gothic GD3D11", MB_ICONERROR );
                 }
             }
-
-            wchar_t systemDdrawPath[MAX_PATH]{};
-            const UINT systemPathLength = GetSystemDirectoryW( systemDdrawPath, MAX_PATH );
-            if ( systemPathLength == 0 || systemPathLength >= MAX_PATH
-                || wcscat_s( systemDdrawPath, L"\\ddraw.dll" ) != 0 ) {
-                MessageBoxW( nullptr, L"GD3D11 could not resolve the system DirectDraw DLL.",
-                    L"Gothic GD3D11", MB_ICONERROR );
-                return FALSE;
-            }
-            ddraw.dll = LoadLibraryW( systemDdrawPath );
-            if ( !ddraw.dll ) {
-                MessageBoxW( nullptr, L"GD3D11 could not load the system DirectDraw DLL.",
-                    L"Gothic GD3D11", MB_ICONERROR );
-                return FALSE;
+            
+            char ddrawPath[MAX_PATH];
+            GetSystemDirectoryA( ddrawPath, MAX_PATH );
+            strcat_s( ddrawPath, MAX_PATH, "\\ddraw.dll" );
+            if ( ( ddraw.dll = LoadLibraryA( ddrawPath ) ) == nullptr ) {
+                exit( -1 );
             }
         }
 
@@ -704,12 +439,8 @@ BOOL APIENTRY DllMain( HINSTANCE hInst, DWORD reason, LPVOID ) {
 
         ddraw.UpdateCustomFontMultiplier = GetProcAddress( ddraw.dll, "UpdateCustomFontMultiplier" );
         ddraw.SetCustomSkyTexture = GetProcAddress( ddraw.dll, "SetCustomSkyTexture" );
-        ddraw.SetCustomSkyTexture_ZenGin = GetProcAddress( ddraw.dll, "SetCustomSkyTexture_ZenGin" );
-        ddraw.SetCustomSkyWavelengths = GetProcAddress( ddraw.dll, "SetCustomSkyWavelengths" );
         ddraw.LoadMenuSettings = GetProcAddress( ddraw.dll, "LoadMenuSettings" );
         ddraw.LoadCustomZENResources = GetProcAddress( ddraw.dll, "LoadCustomZENResources" );
-        ddraw.EnableWindAnimations = GetProcAddress(
-            ddraw.dll, MAKEINTRESOURCEA( 2137 ) );
         
         ddraw.imgui_begin = GetProcAddress( ddraw.dll, "imgui_begin" );
         ddraw.imgui_begin_overlay = GetProcAddress( ddraw.dll, "imgui_begin_overlay" );
@@ -746,29 +477,10 @@ BOOL APIENTRY DllMain( HINSTANCE hInst, DWORD reason, LPVOID ) {
         ddraw.imgui_table_set_column_index = GetProcAddress( ddraw.dll, "imgui_table_set_column_index" );
         ddraw.imgui_get_content_region_avail_x = GetProcAddress( ddraw.dll, "imgui_get_content_region_avail_x" );
         ddraw.imgui_table_setup_column = GetProcAddress( ddraw.dll, "imgui_table_setup_column" );
-
-        if ( !rendererLoaded ) {
-            InstallFallbackExports();
-        }
-
-        const char* missingExport = nullptr;
-        if ( !ValidateResolvedExports( rendererLoaded, missingExport ) ) {
-            char errorMessage[256]{};
-            sprintf_s( errorMessage, "Loaded DLL is missing required export '%s'.",
-                missingExport ? missingExport : "<unknown>" );
-            MessageBoxA( nullptr, errorMessage, "Gothic GD3D11", MB_ICONERROR );
+        
+    } else if ( reason == DLL_PROCESS_DETACH ) {
+        if ( ddraw.dll ) {
             FreeLibrary( ddraw.dll );
-            ddraw.dll = nullptr;
-            return FALSE;
-        }
-        } catch ( ... ) {
-            if ( ddraw.dll ) {
-                FreeLibrary( ddraw.dll );
-                ddraw.dll = nullptr;
-            }
-            MessageBoxW( nullptr, L"GD3D11 Launcher initialization failed unexpectedly.",
-                L"Gothic GD3D11", MB_ICONERROR );
-            return FALSE;
         }
     }
     return TRUE;

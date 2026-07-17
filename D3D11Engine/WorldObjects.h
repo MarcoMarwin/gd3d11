@@ -29,7 +29,7 @@ struct ParticleBatchKey {
     ParticleBatchKey( zCTexture* texture = nullptr, int blendMode = zRND_ALPHA_FUNC_BLEND )
         : Texture( texture ), BlendMode( blendMode ) {}
 
-    zCTexture* Texture = nullptr;
+    zCTexture* Texture;
     int BlendMode;
 
     bool operator<( const ParticleBatchKey& other ) const {
@@ -69,9 +69,9 @@ struct RainParticleStatic {
 };
 
 struct MeshKey {
-    zCTexture* Texture = nullptr;
-    zCMaterial* Material = nullptr;
-    MaterialInfo* Info = nullptr;
+    zCTexture* Texture;
+    zCMaterial* Material;
+    MaterialInfo* Info;
     //zCLightmap* Lightmap;
     
     bool operator==( const MeshKey& other ) const {
@@ -105,8 +105,8 @@ struct MeshInfo {
         meshId = 0;
     }
 
-    MeshInfo( MeshInfo&& other ) = delete;
-    MeshInfo& operator=( MeshInfo&& ) = delete;
+    MeshInfo( MeshInfo&& other ) = default;
+    MeshInfo& operator=( MeshInfo&& ) = default;
     MeshInfo( const MeshInfo& other ) = delete;
     MeshInfo& operator=(const MeshInfo& other) = delete;
 
@@ -135,7 +135,6 @@ struct WorldMeshInfo : public MeshInfo {
         BoundingBox.Min = XMFLOAT3( FLT_MAX, FLT_MAX, FLT_MAX );
         BoundingBox.Max = XMFLOAT3( -FLT_MAX, -FLT_MAX, -FLT_MAX );
         HasBoundingBox = false;
-        BaseShadowIndexLocation = 0;
     }
 
     zTBBox3D BoundingBox;
@@ -146,7 +145,7 @@ struct WorldMeshInfo : public MeshInfo {
 };
 
 struct QuadMarkInfo {
-    QuadMarkInfo() : NumVertices( 0 ), Visual( nullptr ), Position{} {}
+    QuadMarkInfo() = default;
     QuadMarkInfo( QuadMarkInfo&& other ) = default;
     QuadMarkInfo& operator=( QuadMarkInfo&& ) = default;
     QuadMarkInfo( const QuadMarkInfo& other ) = delete;
@@ -164,10 +163,9 @@ struct QuadMarkInfo {
 /** Holds information about a skeletal mesh */
 class zCMeshSoftSkin;
 struct SkeletalMeshInfo {
-    SkeletalMeshInfo()
-        : MeshVertexBuffer( nullptr ), MeshIndexBuffer( nullptr ), visual( nullptr ), meshId( 0 ) {}
-    SkeletalMeshInfo(SkeletalMeshInfo&& other) = delete;
-    SkeletalMeshInfo& operator=( SkeletalMeshInfo&& ) = delete;
+    SkeletalMeshInfo() = default;
+    SkeletalMeshInfo(SkeletalMeshInfo&& other) = default;
+    SkeletalMeshInfo& operator=( SkeletalMeshInfo&& ) = default;
     SkeletalMeshInfo(const SkeletalMeshInfo& other) = delete;
     SkeletalMeshInfo& operator=(const SkeletalMeshInfo& other) = delete;
 
@@ -185,10 +183,9 @@ struct SkeletalMeshInfo {
 
 class zCVisual;
 struct BaseVisualInfo {
-    BaseVisualInfo()
-        : MeshSize( 0.0f ), BBox{}, MidPoint{}, Visual( nullptr ) {}
-    BaseVisualInfo(BaseVisualInfo&& other) = delete;
-    BaseVisualInfo& operator=( BaseVisualInfo&& ) = delete;
+    BaseVisualInfo() = default;
+    BaseVisualInfo(BaseVisualInfo&& other) = default;
+    BaseVisualInfo& operator=( BaseVisualInfo&& ) noexcept = default;
     BaseVisualInfo(const BaseVisualInfo& other) = delete;
     BaseVisualInfo& operator=(const BaseVisualInfo& other) = delete;
 
@@ -227,12 +224,13 @@ struct MeshVisualInfo : public BaseVisualInfo {
         MorphMeshVisual = nullptr;
         UnloadedSomething = false;
         StartInstanceNum = 0;
+        FullMesh = nullptr;
         LastAniUpdateFrame = 0;
         NeedsAlphaTesting = false;
     }
     
-    MeshVisualInfo(MeshVisualInfo&& other) = delete;
-    MeshVisualInfo& operator=( MeshVisualInfo&& ) = delete;
+    MeshVisualInfo(MeshVisualInfo&& other) = default;
+    MeshVisualInfo& operator=( MeshVisualInfo&& ) = default;
     MeshVisualInfo(const MeshVisualInfo& other) = delete;
     MeshVisualInfo& operator=(const MeshVisualInfo& other) = delete;
 
@@ -241,6 +239,7 @@ struct MeshVisualInfo : public BaseVisualInfo {
         if ( MorphMeshVisual ) {
             zCObject_Release( MorphMeshVisual );
         }
+        delete FullMesh;
     }
 
     /** Starts a new frame for this mesh */
@@ -257,6 +256,9 @@ struct MeshVisualInfo : public BaseVisualInfo {
     std::vector<VobInstanceInfo> Instances;
     unsigned int StartInstanceNum;
 
+    /** Full mesh of this */
+    MeshInfo* FullMesh;
+
     /** This is true if we can't actually render something on this. TODO: Try to fix this! */
     bool UnloadedSomething;
     void* MorphMeshVisual;
@@ -271,8 +273,8 @@ class zCMeshSoftSkin;
 class zCModel;
 struct SkeletalMeshVisualInfo : public BaseVisualInfo {
     SkeletalMeshVisualInfo() = default;
-    SkeletalMeshVisualInfo(SkeletalMeshVisualInfo&& other) = delete;
-    SkeletalMeshVisualInfo& operator=( SkeletalMeshVisualInfo&& ) = delete;
+    SkeletalMeshVisualInfo(SkeletalMeshVisualInfo&& other) = default;
+    SkeletalMeshVisualInfo& operator=( SkeletalMeshVisualInfo&& ) = default;
     SkeletalMeshVisualInfo(const SkeletalMeshVisualInfo& other) = delete;
     SkeletalMeshVisualInfo& operator=(const SkeletalMeshVisualInfo& other) = delete;
     
@@ -303,7 +305,7 @@ struct SkeletalMeshVisualInfo : public BaseVisualInfo {
 };
 
 struct BaseVobInfo {
-    BaseVobInfo() : VisualInfo( nullptr ), Vob( nullptr ) {}
+    BaseVobInfo() = default;
     BaseVobInfo(BaseVobInfo&& other) = default;
     BaseVobInfo& operator=( BaseVobInfo&& ) = default;
     BaseVobInfo(const BaseVobInfo& other) = delete;
@@ -319,9 +321,7 @@ struct BaseVobInfo {
 
 struct WorldMeshSectionInfo;
 struct VobInfo : public BaseVobInfo {
-    VobInfo()
-        : LastRenderPosition{}, VobSection( nullptr ), WorldMatrix{}, GroundColor( 0 ),
-          PrevWorldMatrix{}, HasValidPrevMatrix( false ) {}
+    VobInfo() = default;
     VobInfo(VobInfo&& other) = delete;
     VobInfo& operator=( VobInfo&& ) = delete;
     VobInfo(const VobInfo& other) = delete;
@@ -418,13 +418,13 @@ struct VobLightInfo {
 
 
     /** Position where we were rendered the last time */
-    XMFLOAT3 LastRenderedPosition = {};
+    XMFLOAT3 LastRenderedPosition;
     
     /** Flag that is set on every "seen" light in this frame, reset in ResetVobFrameStats */
     bool VisibleInFrame = false;
 };
 
-inline const XMFLOAT4X4 g_MatIdentity = XMFLOAT4X4(
+static auto g_MatIdentity = XMFLOAT4X4(
     1, 0, 0, 0,
     0, 1, 0, 0,
     0, 0, 1, 0,
@@ -511,15 +511,14 @@ class D3D11Texture;
 
 /** Describes a world-section for the renderer */
 struct WorldMeshSectionInfo {
-    WorldMeshSectionInfo()
-        : FullStaticMesh( nullptr ), BoundingBox{}, WorldCoordinates( 0, 0 ),
-          BaseIndexLocation( 0 ), NumIndices( 0 ) {
+    WorldMeshSectionInfo() {
         BoundingBox.Min = XMFLOAT3( FLT_MAX, FLT_MAX, FLT_MAX );
         BoundingBox.Max = XMFLOAT3( -FLT_MAX, -FLT_MAX, -FLT_MAX );
+        FullStaticMesh = nullptr;
     }
     
-    WorldMeshSectionInfo(WorldMeshSectionInfo&& other) = delete;
-    WorldMeshSectionInfo& operator=( WorldMeshSectionInfo&& ) = delete;
+    WorldMeshSectionInfo(WorldMeshSectionInfo&& other) = default;
+    WorldMeshSectionInfo& operator=( WorldMeshSectionInfo&& ) = default;
     WorldMeshSectionInfo(const WorldMeshSectionInfo& other) = delete;
 
     ~WorldMeshSectionInfo() {
@@ -547,6 +546,7 @@ struct WorldMeshSectionInfo {
     }
 
     /** Saves this sections mesh to a file */
+    void SaveSectionMeshToFile( const std::string& name );
 
     std::map<MeshKey, WorldMeshInfo*, cmpMeshKey> WorldMeshes;
     std::map<D3D11Texture*, std::vector<MeshInfo*>> WorldMeshesByCustomTexture;
@@ -575,9 +575,10 @@ struct WorldMeshSectionInfo {
 class zCBspTree;
 class zCWorld;
 struct WorldInfo {
-    WorldInfo()
-        : MidPoint{}, LowestVertex( 0.0f ), HighestVertex( 0.0f ), BspTree( nullptr ),
-          MainWorld( nullptr ), CustomWorldLoaded( false ) {}
+    WorldInfo() {
+        BspTree = nullptr;
+        CustomWorldLoaded = false;
+    }
     
     WorldInfo(WorldInfo&& other) = default;
     WorldInfo& operator=(WorldInfo&& other) = default;
@@ -598,8 +599,7 @@ struct TransparencyVobInfo {
         distance( distance ), alpha( alpha ), skeletalVob( skeletalVob ), normalVob( normalVob ) {
     }
     
-    TransparencyVobInfo()
-        : distance( 0.0f ), alpha( 0.0f ), skeletalVob( nullptr ), normalVob( nullptr ) {}
+    TransparencyVobInfo() = default;
     TransparencyVobInfo(TransparencyVobInfo&& other) = default;
     TransparencyVobInfo& operator=( TransparencyVobInfo&& ) = default;
     TransparencyVobInfo(const TransparencyVobInfo& other) = delete;

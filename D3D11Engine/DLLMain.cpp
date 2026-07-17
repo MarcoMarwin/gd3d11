@@ -8,6 +8,7 @@
 #include "Detours/detours.h"
 #include "DbgHelp.h"
 #include "HookedFunctions.h"
+#include <csignal>
 #include "VersionCheck.h"
 #include "InstructionSet.h"
 #include "D3D11GraphicsEngine.h"
@@ -15,9 +16,7 @@
 #include <shlwapi.h>
 #include "GSky.h"
 
-#include <cstdlib>
-#include <new>
-
+#pragma comment(lib, "Imagehlp.lib") // Used in VersionCheck.cpp to get Gothic.exe Checksum.
 #pragma comment(lib, "shlwapi.lib")
 
 ZQuantizeHalfFloat QuantizeHalfFloat;
@@ -192,6 +191,11 @@ void UnquantizeHalfFloat_X8_F16C( unsigned short* input, float* output )
 }
 #endif
 
+void SignalHandler( int signal ) {
+    LogInfo() << "Signal:" << signal;
+    throw "!Access Violation!";
+}
+
 struct ddraw_dll {
     HMODULE dll = NULL;
     FARPROC	AcquireDDThreadLock;
@@ -221,13 +225,7 @@ struct ddraw_dll {
     FARPROC	LoadMenuSettings;
 } ddraw;
 
-void WINAPI FallbackCheckFullscreen() noexcept {}
-
-HRESULT DoHookedDirectDrawCreateEx( GUID FAR* lpGuid, LPVOID* lplpDD, REFIID iid, IUnknown FAR* pUnkOuter ) {
-    (void)lpGuid;
-    (void)iid;
-    (void)pUnkOuter;
-
+HRESULT DoHookedDirectDrawCreateEx( GUID FAR* lpGuid, LPVOID* lplpDD, REFIID  iid, IUnknown FAR* pUnkOuter ) {
     *lplpDD = new MyDirectDraw( nullptr );
 
     if ( !Engine::GraphicsEngine ) {
@@ -257,7 +255,8 @@ extern "C" void WINAPI HookedAcquireDDThreadLock() {
         reinterpret_cast<DirectDrawSimple>(ddraw.AcquireDDThreadLock)();
         return;
     }
-    // The renderer does not use the legacy DirectDraw lock.
+    // Do nothing
+    LogInfo() << "AcquireDDThreadLock called!";
 }
 
 extern "C" void WINAPI HookedReleaseDDThreadLock() {
@@ -265,7 +264,8 @@ extern "C" void WINAPI HookedReleaseDDThreadLock() {
         reinterpret_cast<DirectDrawSimple>(ddraw.ReleaseDDThreadLock)();
         return;
     }
-    // The renderer does not use the legacy DirectDraw lock.
+    // Do nothing
+    LogInfo() << "ReleaseDDThreadLock called!";
 }
 
 extern "C" float WINAPI UpdateCustomFontMultiplierFontRendering( float multiplier ) {
@@ -276,9 +276,6 @@ extern "C" float WINAPI UpdateCustomFontMultiplierFontRendering( float multiplie
 }
 
 extern "C" void WINAPI SetCustomCloudAndNightTexture( int idxTexture, bool isNightTexture ) {
-    if ( !Engine::GAPI ) {
-        return;
-    }
     GSky* sky = Engine::GAPI->GetSky();
     WorldInfo* currentWorld = Engine::GAPI->GetLoadedWorldInfo();
     if ( sky && currentWorld ) {
@@ -287,9 +284,6 @@ extern "C" void WINAPI SetCustomCloudAndNightTexture( int idxTexture, bool isNig
 }
 
 extern "C" void WINAPI SetCustomSkyTexture_ZenGin( bool isNightTexture, zCTexture* texture ) {
-    if ( !Engine::GAPI ) {
-        return;
-    }
     GSky* sky = Engine::GAPI->GetSky();
     WorldInfo* currentWorld = Engine::GAPI->GetLoadedWorldInfo();
     if ( sky && currentWorld ) {
@@ -298,9 +292,6 @@ extern "C" void WINAPI SetCustomSkyTexture_ZenGin( bool isNightTexture, zCTextur
 }
 
 extern "C" void WINAPI SetCustomSkyWavelengths( float X, float Y, float Z ) {
-    if ( !Engine::GAPI || !std::isfinite( X ) || !std::isfinite( Y ) || !std::isfinite( Z ) ) {
-        return;
-    }
     GSky* sky = Engine::GAPI->GetSky();
     if ( sky ) {
         sky->SetCustomSkyWavelengths( X, Y, Z );
@@ -308,15 +299,11 @@ extern "C" void WINAPI SetCustomSkyWavelengths( float X, float Y, float Z ) {
 }
 
 extern "C" void WINAPI LoadMenuSettings(char* menuSettingsFile) {
-    if ( Engine::GAPI ) {
-        Engine::GAPI->LoadMenuSettings( !menuSettingsFile ? MENU_SETTINGS_FILE : menuSettingsFile );
-    }
+    Engine::GAPI->LoadMenuSettings( !menuSettingsFile ? MENU_SETTINGS_FILE : menuSettingsFile );
 }
 
 extern "C" void WINAPI LoadCustomZENResources() {
-    if ( Engine::GAPI ) {
-        Engine::GAPI->LoadCustomZENResources();
-    }
+    Engine::GAPI->LoadCustomZENResources();
 }
 
 extern "C" void WINAPI EnableWindAnimations( void ) {
@@ -345,9 +332,6 @@ static char FakeDirectDrawEnumerateA_deviceName[] = "DirectX11";
 
 HRESULT WINAPI FakeDirectDrawEnumerateA( LPDDENUMCALLBACKA lpCallback, LPVOID lpContext )
 {
-    if ( !lpCallback ) {
-        return DDERR_INVALIDPARAMS;
-    }
     GUID deviceGUID = { 0xF5049E78, 0x4861, 0x11D2, {0xA4, 0x07, 0x00, 0xA0, 0xC9, 0x06, 0x29, 0xA8} };
     lpCallback( &deviceGUID, FakeDirectDrawEnumerateA_deviceName, FakeDirectDrawEnumerateA_deviceName, lpContext );
     return S_OK;
@@ -355,10 +339,6 @@ HRESULT WINAPI FakeDirectDrawEnumerateA( LPDDENUMCALLBACKA lpCallback, LPVOID lp
 // HRESULT WINAPI DirectDrawEnumerateExA(LPDDENUMCALLBACKEXA lpCallback, LPVOID lpContext, DWORD dwFlags);
 HRESULT WINAPI FakeDirectDrawEnumerateExA( LPDDENUMCALLBACKEXA lpCallback, LPVOID lpContext, DWORD dwFlags )
 {
-    (void)dwFlags;
-    if ( !lpCallback ) {
-        return DDERR_INVALIDPARAMS;
-    }
     GUID deviceGUID = { 0xF5049E78, 0x4861, 0x11D2, {0xA4, 0x07, 0x00, 0xA0, 0xC9, 0x06, 0x29, 0xA8} };
     lpCallback( &deviceGUID, FakeDirectDrawEnumerateA_deviceName, FakeDirectDrawEnumerateA_deviceName, lpContext, nullptr );
     return S_OK;
@@ -375,12 +355,12 @@ __declspec(naked) void FakeGetSurfaceFromDC() { _asm { jmp[ddraw.GetSurfaceFromD
 __declspec(naked) void FakeRegisterSpecialCase() { _asm { jmp[ddraw.RegisterSpecialCase] } }
 __declspec(naked) void FakeReleaseDDThreadLock() { _asm { jmp[ddraw.ReleaseDDThreadLock] } }
 
-bool SetupWorkingDirectory() noexcept {
-    wchar_t executablePath[MAX_PATH]{};
-    const DWORD pathLength = GetModuleFileNameW( nullptr, executablePath, MAX_PATH );
-    return pathLength > 0 && pathLength < MAX_PATH
-        && PathRemoveFileSpecW( executablePath )
-        && SetCurrentDirectoryW( executablePath );
+void SetupWorkingDirectory() {
+    // Set current working directory to the one with executable
+    char executablePath[MAX_PATH];
+    GetModuleFileNameA( GetModuleHandleA( nullptr ), executablePath, sizeof( executablePath ) );
+    PathRemoveFileSpecA( executablePath );
+    SetCurrentDirectoryA( executablePath );
 }
 
 void EnableCrashingOnCrashes() {
@@ -388,7 +368,7 @@ void EnableCrashingOnCrashes() {
     typedef BOOL( WINAPI* tSetPolicy )(DWORD dwFlags);
     const DWORD EXCEPTION_SWALLOWING = 0x1;
 
-    HMODULE kernel32 = GetModuleHandleW( L"kernel32.dll" );
+    HMODULE kernel32 = LoadLibraryA( "kernel32.dll" );
     if ( kernel32 ) {
         tGetPolicy pGetPolicy = (tGetPolicy)GetProcAddress( kernel32,
             "GetProcessUserModeExceptionPolicy" );
@@ -404,25 +384,22 @@ void EnableCrashingOnCrashes() {
     }
 }
 
-bool CheckPlatformSupport() {
+void CheckPlatformSupport() {
     LogInstructionSet();
-    auto requireFeature = []( const char* feature, bool supported ) {
-        if ( supported ) {
-            return true;
+    auto support_message = []( std::string isa_feature, bool is_supported ) {
+        if ( !is_supported ) {
+            ErrorBox( (std::string( "Incompatible System, wrong DLL?\n\n" + isa_feature + " required, but not supported on:\n" ) + InstructionSet::Brand()).c_str() );
+            exit( 1 );
         }
-        ErrorBox( (std::string( "Incompatible system or wrong renderer DLL.\n\n" )
-            + feature + " is required but unavailable on:\n" + InstructionSet::Brand()).c_str() );
-        return false;
     };
-
 #if __AVX2__
-    if ( !requireFeature( "AVX2", InstructionSet::AVX2() ) ) return false;
+    support_message( "AVX2", InstructionSet::AVX2() );
 #elif __AVX__
-    if ( !requireFeature( "AVX", InstructionSet::AVX() ) ) return false;
+    support_message( "AVX", InstructionSet::AVX() );
 #elif __SSE2__
-    if ( !requireFeature( "SSE2", InstructionSet::SSE2() ) ) return false;
+    support_message( "SSE2", InstructionSet::SSE2() );
 #elif __SSE__
-    if ( !requireFeature( "SSE", InstructionSet::SSE() ) ) return false;
+    support_message( "SSE", InstructionSet::SSE() );
 #endif
 
 #ifdef _XM_AVX2_INTRINSICS_
@@ -447,7 +424,6 @@ bool CheckPlatformSupport() {
         UnquantizeHalfFloat_X4 = UnquantizeHalfFloat_X4_SSE2;
         UnquantizeHalfFloat_X8 = UnquantizeHalfFloat_X8_SSE2;
     }
-    return true;
 }
 
 #if defined(BUILD_GOTHIC_2_6_fix)
@@ -459,62 +435,47 @@ int WINAPI hooked_WinMain( HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR l
     // Remove automatic volume change of sounds regarding whether the camera is indoor or outdoor
     // TODO: Implement!
     if ( !GMPModeActive ) {
-        const LONG beginResult = DetourTransactionBegin();
-        if ( beginResult == ERROR_SUCCESS ) {
-            const LONG attachResult = DetourAttachTyped(
-                &HookedFunctions::OriginalFunctions.original_zCActiveSndAutoCalcObstruction,
-                HookedFunctionInfo::hooked_zCActiveSndAutoCalcObstruction );
-            if ( attachResult == ERROR_SUCCESS ) {
-                const LONG commitResult = DetourTransactionCommit();
-                if ( commitResult != ERROR_SUCCESS ) {
-                    LogError() << "Failed to commit sound obstruction hook. Error " << commitResult << ".";
-                }
-            } else {
-                DetourTransactionAbort();
-                LogError() << "Failed to attach sound obstruction hook. Error " << attachResult << ".";
-            }
-        } else {
-            LogError() << "Failed to begin sound obstruction hook transaction. Error " << beginResult << ".";
-        }
+        DetourTransactionBegin();
+        DetourAttachTyped( &HookedFunctions::OriginalFunctions.original_zCActiveSndAutoCalcObstruction, HookedFunctionInfo::hooked_zCActiveSndAutoCalcObstruction  );
+        DetourTransactionCommit();
     }
     return originalWinMain( hInstance, hPrevInstance, lpCmdLine, nShowCmd );
 }
 #endif
 
-[[noreturn]] void badAllocationHandler() noexcept
+[[noreturn]] void badAllocationHandler()
 {
-    std::set_new_handler( nullptr );
+    D3D11GraphicsEngine* engine = reinterpret_cast<D3D11GraphicsEngine*>(Engine::GraphicsEngine);
+    while ( ShowCursor( true ) < 0 );
+    if ( engine ) {
+        if ( HWND outputWindow = engine->GetOutputWindow() ) {
+            ShowWindow( outputWindow, SW_HIDE );
+        }
+    }
 
-    bool largeAddressAware = true;
-    const auto* codeBase = reinterpret_cast<const BYTE*>(GetModuleHandleW( nullptr ));
-    if ( codeBase ) {
-        const auto* dosHeader = reinterpret_cast<const IMAGE_DOS_HEADER*>(codeBase);
-        if ( dosHeader->e_magic == IMAGE_DOS_SIGNATURE
-            && dosHeader->e_lfanew > 0 && dosHeader->e_lfanew <= 1024 * 1024 ) {
-            const auto* ntHeader = reinterpret_cast<const IMAGE_NT_HEADERS*>(codeBase + dosHeader->e_lfanew);
-            if ( ntHeader->Signature == IMAGE_NT_SIGNATURE ) {
-                largeAddressAware =
-                    (ntHeader->FileHeader.Characteristics & IMAGE_FILE_LARGE_ADDRESS_AWARE) != 0;
+    BYTE* codeBase = reinterpret_cast<BYTE*>(GetModuleHandleA( nullptr ));
+    PIMAGE_DOS_HEADER dos_header = reinterpret_cast<PIMAGE_DOS_HEADER>(codeBase);
+    if ( dos_header->e_magic == IMAGE_DOS_SIGNATURE ) {
+        PIMAGE_NT_HEADERS nt_header = reinterpret_cast<PIMAGE_NT_HEADERS>(&codeBase[dos_header->e_lfanew]);
+        if ( nt_header->Signature == IMAGE_NT_SIGNATURE ) {
+            if ( !(nt_header->FileHeader.Characteristics & IMAGE_FILE_LARGE_ADDRESS_AWARE) ) {
+                LogErrorBox() << "Allocation failed due to running out of memory or virtual address space!\n"
+                    "Large Address Aware flag in executable is missing.\n"
+                    "You might want to patch your game with 4gb patch so that the game can use more memory.";
+                exit( -1 );
             }
         }
     }
 
-    const char* message = "Allocation failed due to running out of memory or virtual address space.";
-    if ( !largeAddressAware ) {
-        message =
-            "Allocation failed due to running out of memory or virtual address space.\n\n"
-            "The executable is not Large Address Aware. Apply a 4 GB patch before running GD3D11.";
-    } else if ( userHaveAMDGPU ) {
-        message =
-            "Allocation failed due to running out of memory or virtual address space.\n\n"
-            "AMD drivers can add substantial 32-bit address-space overhead. "
-            "Using 32-bit DXVK may reduce that overhead.";
+    if ( userHaveAMDGPU ) {
+        LogErrorBox() << "Allocation failed due to running out of memory or virtual address space!\n"
+            "You might experience random crashes when saving game due"
+            " to heavy memory overhead caused by AMD drivers.\n"
+            "It is recommended to use 32-bit DXVK on top of GD3D11 for AMD users.";
+    } else {
+        LogErrorBox() << "Allocation failed due to running out of memory or virtual address space!";
     }
-
-    while ( ShowCursor( TRUE ) < 0 ) {}
-    MessageBoxA( nullptr, message, "Gothic GD3D11", MB_OK | MB_ICONERROR | MB_TOPMOST );
-    TerminateProcess( GetCurrentProcess(), ERROR_NOT_ENOUGH_MEMORY );
-    std::abort();
+    exit( -1 );
 }
 
 BOOL WINAPI DllMain( HINSTANCE hInst, DWORD reason, LPVOID ) {
@@ -526,15 +487,19 @@ BOOL WINAPI DllMain( HINSTANCE hInst, DWORD reason, LPVOID ) {
         DetourRestoreAfterWith();
         DetourTransactionBegin();
 
+        // Setup bad allocation handler
         std::set_new_handler( badAllocationHandler );
+
+        //DebugWrite_i("DDRAW Proxy DLL starting.\n", 0);
         hLThis = hInst;
 
         Engine::PassThrough = false;
 
 #if defined(BUILD_GOTHIC_2_6_fix)
-        DetourAttachTyped( &originalWinMain, hooked_WinMain );
+        DetourAttachTyped( &originalWinMain, hooked_WinMain  );
 #endif
 
+        //_CrtSetDbgFlag (_CRTDBG_ALLOC_MEM_DF | _CRTDBG_LEAK_CHECK_DF);
         SetupWorkingDirectory();
         if ( !Engine::PassThrough ) {
             Log::Clear();
@@ -552,27 +517,26 @@ BOOL WINAPI DllMain( HINSTANCE hInst, DWORD reason, LPVOID ) {
 
             ZoneScoped;
 
+            // Check for right version
             VersionCheck::CheckExecutable();
-            if ( !CheckPlatformSupport() ) {
-                DetourTransactionAbort();
-                return FALSE;
-            }
+            CheckPlatformSupport();
 
             Engine::GAPI = nullptr;
             Engine::GraphicsEngine = nullptr;
-            Engine::ImGuiHandle = nullptr;
-            Engine::RenderingThreadPool = nullptr;
-            Engine::WorkerThreadPool = nullptr;
 
+            // Create GothicAPI here to make all hooks work
             Engine::CreateGothicAPI();
             HookedFunctions::OriginalFunctions.InitHooks();
 
             EnableCrashingOnCrashes();
+            //SetUnhandledExceptionFilter(MyUnhandledExceptionFilter);
         }
         DetourTransactionCommit();
 
         char dllBuf[MAX_PATH];
         GetSystemDirectoryA( dllBuf, MAX_PATH );
+        // We then append \ddraw.dll, which makes the string:
+        // C:\windows\system32\ddraw.dll
         strcat_s( dllBuf, MAX_PATH, "\\ddraw.dll" );
 
         ddraw.dll = LoadLibraryA( dllBuf );
@@ -580,9 +544,6 @@ BOOL WINAPI DllMain( HINSTANCE hInst, DWORD reason, LPVOID ) {
 
         ddraw.AcquireDDThreadLock = GetProcAddress( ddraw.dll, "AcquireDDThreadLock" );
         ddraw.CheckFullscreen = GetProcAddress( ddraw.dll, "CheckFullscreen" );
-        if ( !ddraw.CheckFullscreen ) {
-            ddraw.CheckFullscreen = reinterpret_cast<FARPROC>(&FallbackCheckFullscreen);
-        }
         ddraw.CompleteCreateSysmemSurface = GetProcAddress( ddraw.dll, "CompleteCreateSysmemSurface" );
         ddraw.D3DParseUnknownCommand = GetProcAddress( ddraw.dll, "D3DParseUnknownCommand" );
         ddraw.DDGetAttachedSurfaceLcl = GetProcAddress( ddraw.dll, "DDGetAttachedSurfaceLcl" );

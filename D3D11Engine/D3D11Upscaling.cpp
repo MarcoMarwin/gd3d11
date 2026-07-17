@@ -40,20 +40,8 @@ namespace {
                 auto* pfxRenderer = engine.GetPfxRenderer();
                 auto* fsr3 = pfxRenderer ? pfxRenderer->GetFSR3() : nullptr;
                 auto* temporalState = engine.GetTemporalState();
-                auto applyFallback = [&]() {
-                    if ( pfxRenderer && backbufferTex && outputRTV ) {
-                        Microsoft::WRL::ComPtr<ID3D11RenderTargetView> fallbackOutput = outputRTV;
-                        pfxRenderer->CopyTextureToRTV(
-                            backbufferTex->GetShaderResView(), fallbackOutput, engine.GetBackbufferResolution() );
-                    }
-                    if ( temporalState ) {
-                        temporalState->OnDisabled();
-                    }
-                };
-
                 if ( !fsr3 || !temporalState || !backbufferTex || !velocityBufferTex || !depth || !outputRTV ) {
-                    LogError() << "FSR3: Required resources are missing; using spatial fallback.";
-                    applyFallback();
+                    LogError() << "FSR3: Upscaling pass skipped because required resources are missing.";
                     return;
                 }
 
@@ -64,8 +52,7 @@ namespace {
                 auto* game = oCGame::GetGame();
                 auto cam = game ? ((zCCamera*)game->_zCSession_camera) : nullptr;
                 if ( !cam ) {
-                    LogError() << "FSR3: Gothic camera is missing; using spatial fallback.";
-                    applyFallback();
+                    LogError() << "FSR3: Upscaling pass skipped because Gothic camera is missing.";
                     return;
                 }
                 cam->GetFOV( fovHorizontal, fovVertical );
@@ -84,7 +71,7 @@ namespace {
                 ID3D11Buffer* nullCBs[5]{};
                 engine.GetContext()->CSSetConstantBuffers( 0, std::size( nullCBs ), nullCBs );
 
-                const XRESULT fsrResult = fsr3->Apply(
+                fsr3->Apply(
                     backbufferTex->GetShaderResView().Get(),
                     depth,
                     velocityBufferTex->GetShaderResView().Get(),
@@ -102,10 +89,6 @@ namespace {
                     farZ,
                     sharpenFactor >= 0.001f,
                     sharpenFactor /* FSR3 has 0..1 (sharp)*/ );
-                if ( fsrResult != XR_SUCCESS ) {
-                    LogError() << "FSR3: Dispatch failed; using spatial fallback.";
-                    applyFallback();
-                }
                 };
         } );
     }

@@ -18,12 +18,8 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
   actions: read
-
-concurrency:
-  group: gd3d11-${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: ${{ github.ref_type != 'tag' }}
 
 jobs:
   build:
@@ -102,9 +98,6 @@ jobs:
     if: github.event_name == 'push' && (github.ref_name == 'master' || github.ref_name == 'codex/nightly-ssr-sss-features' || github.ref_type == 'tag')
     needs: package-artifacts
     runs-on: ubuntu-latest
-    permissions:
-      contents: write
-      actions: read
 
     steps:
       - name: Checkout only composite actions

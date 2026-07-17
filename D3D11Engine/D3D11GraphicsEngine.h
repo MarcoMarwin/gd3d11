@@ -7,7 +7,6 @@
 #include "D3D11ShadowMap.h"
 #include "D3D11ShaderManager.h"
 #include "D3D11TracyDebug.h"
-#include <span>
 
 struct RenderToDepthStencilBuffer;
 
@@ -45,36 +44,45 @@ const int NUM_MAX_BONES = 96;
 const int unsigned INSTANCING_BUFFER_SIZE = sizeof( VobInstanceInfo ) * 2048;
 
 struct ConstantBufferAllocation {
-    ID3D11Buffer* pBuffer = nullptr;
-    uint32_t offsetInBytes = 0;
-    uint32_t sizeInBytes = 0;
+    ID3D11Buffer* pBuffer;
+    uint32_t offsetInBytes;
+    uint32_t sizeInBytes;
 
     bool operator==( const ConstantBufferAllocation& other ) const {
         return pBuffer == other.pBuffer && offsetInBytes == other.offsetInBytes && sizeInBytes == other.sizeInBytes;
-    }
-
-    explicit operator bool() const {
-        return pBuffer != nullptr && sizeInBytes != 0;
     }
 };
 
 class ConstantBufferPool {
 private:
-    static constexpr uint32_t PageSizeInBytes = D3D11_REQ_CONSTANT_BUFFER_ELEMENT_COUNT * 16u;
-
-    std::vector<Microsoft::WRL::ComPtr<ID3D11Buffer>> m_pages;
-    uint32_t m_currentPage = 0;
-    uint32_t m_currentOffset = 0;
+    Microsoft::WRL::ComPtr<ID3D11Buffer> m_poolBuffer;
+    uint32_t m_bufferSize;
+    uint32_t m_currentOffset;
 
 public:
-    XRESULT Initialize( ID3D11Device* device, uint32_t totalSizeInBytes = 4u * 1024u * 1024u );
+    void Initialize( ID3D11Device* device, uint32_t totalSizeInBytes = 4 * 1024 * 1024 ) {
+        m_bufferSize = totalSizeInBytes;
+        m_currentOffset = 0;
+
+        D3D11_BUFFER_DESC desc = {};
+        desc.ByteWidth = m_bufferSize;
+        desc.Usage = D3D11_USAGE_DYNAMIC;
+        desc.BindFlags = D3D11_BIND_CONSTANT_BUFFER;
+        desc.CPUAccessFlags = D3D11_CPU_ACCESS_WRITE;
+
+        device->CreateBuffer( &desc, nullptr, &m_poolBuffer );
+#ifdef DEBUG_D3D11
+        SetDebugName( m_poolBuffer.Get(), std::string( "ConstantBufferPool (size:" ) + std::to_string( totalSizeInBytes )+")");
+#endif
+    }
+
     void BeginFrame();
     ConstantBufferAllocation Allocate( ID3D11DeviceContext* context, const void* pData, uint32_t sizeInBytes );
     void EndFrame();
 
-    bool IsValid() const { return !m_pages.empty(); }
-    ID3D11Buffer* GetBuffer() const { return m_pages.empty() ? nullptr : m_pages.front().Get(); }
+    ID3D11Buffer* GetBuffer() const { return m_poolBuffer.Get(); }
 };
+
 class D3D11PointLight;
 class D3D11VShader;
 class D3D11PShader;
@@ -196,8 +204,7 @@ public:
     XRESULT DrawSkeletalMesh_Layered(SkeletalVobInfo* vi, const std::span<XMFLOAT4X4> transforms, float4 color, XMFLOAT4X4& world, float fatness = 1.0f);
 
     /** Draws a batch of skeletal mesh vobs */
-    void DrawSkeletalMeshVobs( std::span<SkeletalVobInfo* const> vis,
-        float distance, bool updateState, bool drawAttachments );
+    void DrawSkeletalMeshVobs( const std::vector<SkeletalVobInfo*>& vis, float distance, bool updateState, bool drawAttachments );
 
     /** Draws a screen fade effects */
     XRESULT DrawScreenFade( void* camera ) override;
@@ -247,7 +254,7 @@ public:
     INT2 GetScaledResolution() const { return m_scaledResolution; }
 
     /** Returns the data of the backbuffer */
-    XRESULT GetBackbufferData( bool thumbnail, byte** data, INT2& buffersize, int& pixelsize ) override;
+    void GetBackbufferData( bool thumbnail, byte** data, INT2& buffersize, int& pixelsize ) override;
 
     /** Returns the line renderer object */
     BaseLineRenderer* GetLineRenderer() override;
@@ -367,7 +374,7 @@ public:
     bool BindShaderForTexture( zCTexture* texture, bool forceAlphaTest = false, int zMatAlphaFunc = 0, MaterialInfo::EMaterialType materialInfo = MaterialInfo::MT_None, bool allowWetNormalFallback = false );
 
     /** Copies the depth stencil buffer to DepthStencilBufferCopy */
-    XRESULT CopyDepthStencil();
+    void CopyDepthStencil();
 
     /** Draws particle meshes */
     void DrawFrameParticleMeshes( std::unordered_map<zCVob*, MeshVisualInfo*>& progMeshes ) override;
@@ -488,6 +495,7 @@ protected:
 
     /** Sky */
     std::unique_ptr<D3D11Texture> DistortionTexture;
+    std::unique_ptr<D3D11Texture> NoiseTexture;
     std::unique_ptr<D3D11Texture> WhiteTexture;
     std::unique_ptr<D3D11Texture> BlueNoise512BGRA;
 
@@ -512,7 +520,7 @@ protected:
     /** List of waterfall worldmeshes we have to render using alphablending */
     std::vector<std::pair<MeshKey, MeshInfo*>> FrameTransparencyMeshesWaterfall;
 
-    /** Transparent worldmeshes contributing alpha-aware wet-SSR/rain exclusion */
+    /** Transparent worldmeshes that must block rain/wet-ground SSR */
     std::vector<std::pair<MeshKey, MeshInfo*>> FrameTransparencyMeshesWetSSRBlockers;
 
     INT2 m_scaledResolution;
@@ -524,7 +532,6 @@ public:
     Microsoft::WRL::ComPtr<ID3D11ShaderResourceView> ReflectionCube;
     Microsoft::WRL::ComPtr<ID3D11ShaderResourceView> ReflectionCube2;
 private:
-    bool UploadAndBindWindMetadata( const std::vector<VobWindMetadata>& metadata );
     bool PrepareAndBindWindMetadata( const std::vector<MeshVisualInfo*>& activeVisuals );
     void UnbindWindMetadata();
 
@@ -703,10 +710,6 @@ private:
     bool m_FrameNeedsJitter;
     float unionCurrentCustomFontMultiplier;
 
-    GothicBlendStateInfo m_BoundBlendState;
-    GothicRasterizerStateInfo m_BoundRasterizerState;
-    GothicDepthBufferStateInfo m_BoundDepthState;
-
     std::unique_ptr<RenderToTextureBuffer> VelocityBuffer;
     std::unique_ptr<D3D11TemporalState> TemporalState;
     std::unique_ptr<RenderToTextureBuffer> RainExclusionMaskBuffer;
@@ -714,5 +717,5 @@ private:
     
     INT2 NewResolution;
     
-    XRESULT CreateAndBindDefaultSampler();
+    void CreateAndBindDefaultSampler();
 };

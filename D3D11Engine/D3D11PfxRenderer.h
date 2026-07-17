@@ -8,6 +8,7 @@ class D3D11PFX_CAS;
 struct RenderToTextureBuffer;
 class D3D11PFX_Blur;
 class D3D11PFX_HeightFog;
+class D3D11PFX_DistanceBlur;
 class D3D11PFX_HDR;
 class D3D11PFX_SMAA;
 class D3D11PFX_GodRays;
@@ -29,6 +30,8 @@ public:
     /** Renders the heightfog */
     XRESULT RenderHeightfog();
 
+    /** Renders the distance blur effect */
+    XRESULT RenderDistanceBlur(ID3D11ShaderResourceView* diffuse );
 
     /** Renders the HDR-Effect */
     XRESULT RenderHDR(ID3D11RenderTargetView* output, ID3D11ShaderResourceView* backbuffer);
@@ -65,9 +68,9 @@ public:
 
     /** Renders godrays mask+zoom to a pool texture, skipping the final additive blit */
     XRESULT RenderGodRaysToTexture( ID3D11ShaderResourceView* backbuffer,
-                                     ID3D11ShaderResourceView* depthCopy,
-                                     ID3D11ShaderResourceView* lowClouds,
-                                     ID3D11ShaderResourceView** outGodRaysSRV );
+                                    ID3D11ShaderResourceView* depthCopy,
+                                    ID3D11ShaderResourceView* lowClouds,
+                                    ID3D11ShaderResourceView** outGodRaysSRV );
 
     XRESULT RenderScreenSpaceLighting( ID3D11ShaderResourceView* sceneSRV,
                                         ID3D11ShaderResourceView* depthSRV,
@@ -94,6 +97,8 @@ public:
                                      ID3D11ShaderResourceView* backbufferSRV,
                                      ID3D11ShaderResourceView* godraysSRV,
                                      ID3D11ShaderResourceView* depthSRV,
+                                     ID3D11ShaderResourceView* normalsSRV,
+                                     ID3D11ShaderResourceView* waterMaskSRV,
                                      ID3D11ShaderResourceView* screenSpaceLightingSRV,
                                      bool compositionHeightFog );
 
@@ -110,8 +115,8 @@ public:
     D3D11PFX_FSR3* GetFSR3() { return PFX_FSR3.get(); }
 
     void OnEndFrame() {
-        if ( m_texturePool ) m_texturePool->GiveTick();
-        if ( m_depthStencilPool ) m_depthStencilPool->GiveTick();
+        m_texturePool->GiveTick();
+        m_depthStencilPool->GiveTick();
         FreeResources();
     }
 
@@ -124,6 +129,7 @@ private:
     /** Blur effect referenced here because it's often needed by PFX */
     std::unique_ptr<D3D11PFX_Blur> FX_Blur;
     std::unique_ptr<D3D11PFX_HeightFog> FX_HeightFog;
+    std::unique_ptr<D3D11PFX_DistanceBlur> FX_DistanceBlur;
     std::unique_ptr<D3D11PFX_HDR> FX_HDR;
     std::unique_ptr<D3D11PFX_SMAA> FX_SMAA;
     std::unique_ptr<D3D11PFX_GodRays> FX_GodRays;
@@ -134,7 +140,6 @@ private:
     std::unique_ptr<D3D11PFX_SimpleSharpen> PFX_SimpleSharpen;
     std::unique_ptr<D3D11PFX_FSR3> PFX_FSR3;
     std::unique_ptr<D3D11PFX_XeGTAO> PFX_XeGTAO;
-    Microsoft::WRL::ComPtr<ID3D11BlendState> m_extraMaskBlendState;
     std::unique_ptr<TexturePool> m_texturePool;
     std::unique_ptr<RenderToTextureBuffer> ScreenSpaceLightingHistory[2];
     std::unique_ptr<RenderToTextureBuffer> ScreenSpaceLightingDepthHistory[2];

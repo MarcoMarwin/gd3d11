@@ -1008,8 +1008,14 @@ namespace
         if ( !s.EnableScreenSpaceGI ) s.ScreenSpaceGIStrength = 0.0f;
         if ( !s.EnableGodRays ) s.GodRayStrength = 0.0f;
         if ( !s.EnableSSR ) s.SSRStrength = 0.0f;
+        s.SSSIntensity = s.EnableSSS ? 1.0f : 0.0f;
         if ( !s.EnableDoF ) s.DoFBokehRadius = 0.0f;
         if ( s.WindQuality == GothicRendererSettings::EWindQuality::WIND_QUALITY_NONE ) s.GlobalWindStrength = 0.0f;
+        s.EnableSSS = true;
+        s.SSSIntensity = 1.0f;
+        s.EnableWaterAnimation = true;
+        s.HeroAffectsObjects = s.WindQuality != GothicRendererSettings::EWindQuality::WIND_QUALITY_NONE;
+        s.HeroAffectsObjectsStrength = s.HeroAffectsObjects ? 1.0f : 0.0f;
         s.OutdoorSmallVobDrawRadius = ObjectDrawDistanceUiToMeters( ObjectDrawDistanceMetersToUi( s.OutdoorSmallVobDrawRadius ) );
         s.ForceFOV = false;
         s.FOVHoriz = 100.0f;

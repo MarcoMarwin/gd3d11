@@ -137,8 +137,14 @@ struct ScreenSpaceLightingConstantBuffer {
 };
 struct CompositionControlConstantBuffer {
     float CC_HeightFogEnabled;
-    float CC_ContactShadowScale;
-    float2 CC_Pad;
+    float CC_Pad0;
+    float2 CC_InvResolution;
+
+    float4 CC_ProjParams;
+    XMFLOAT4X4 CC_Projection;
+
+    XMFLOAT3 CC_LightDirectionVS;
+    float CC_Pad;
 };
 
 struct LumAdaptConstantBuffer {
@@ -414,12 +420,17 @@ struct AtmosphereConstantBuffer {
     float AC_SunVisibility;
 
     float3 AC_WorldCameraPos;
-    float AC_EnableScreenSpaceGI;
+    float AC_EnableContactShadows;
 
+    float AC_EnableScreenSpaceGI;
     float AC_SkyEffectsEnabled;
+    float AC_ContactShadowStrength;
     float AC_ScreenSpaceGIStrength;
+
     float AC_EnableParticleLighting;
     float AC_ParticleLightingStrength;
+    float AC_PadParticle0;
+    float AC_PadParticle1;
 
     XMFLOAT3 AC_NightRainMidColor;
     float AC_NightRainWorldHazeStrength;

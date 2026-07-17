@@ -14,6 +14,7 @@ cbuffer CASConstants : register(b0)
 };
 
 Texture2D InputTexture : register(t0);
+SamplerState LinearSampler : register(s0);
 
 // CAS requires these functions to be defined
 FfxFloat32x4 casLoad(uint2 p)

@@ -8,10 +8,6 @@
 
 #include <ddraw.h>
 #include <d3d.h>
-#include <filesystem>
-#include <limits>
-#include <memory>
-#include <new>
 
 bool NewBinkSetVolume = true;
 DWORD BinkOpenWaveOut;
@@ -42,11 +38,10 @@ struct BinkVideo
 
 	void* vid = nullptr;
 
-    std::unique_ptr<unsigned char[]> textureData;
-    size_t textureDataSize = 0;
-    std::unique_ptr<D3D11Texture> textureY;
-    std::unique_ptr<D3D11Texture> textureU;
-    std::unique_ptr<D3D11Texture> textureV;
+	unsigned char* textureData = nullptr;
+    D3D11Texture* textureY = nullptr;
+    D3D11Texture* textureU = nullptr;
+    D3D11Texture* textureV = nullptr;
 	DWORD width = 0;
 	DWORD height = 0;
 	bool useBGRA = false;
@@ -59,62 +54,6 @@ struct BinkVideo
 	bool updateVolume = true;
 	bool scaleVideo = true;
 };
-
-namespace {
-    bool InitializeBinkFrameResources( BinkVideo& video, DWORD width, DWORD height ) {
-        if ( width == 0 || height == 0
-            || width > D3D11_REQ_TEXTURE2D_U_OR_V_DIMENSION
-            || height > D3D11_REQ_TEXTURE2D_U_OR_V_DIMENSION
-            || (width & 1u) != 0 || (height & 1u) != 0 ) {
-            LogError() << "Bink video reported unsupported dimensions: " << width << "x" << height;
-            return false;
-        }
-
-        const uint64_t lumaSize = static_cast<uint64_t>(width) * height;
-        const uint64_t chromaSize = static_cast<uint64_t>(width / 2u) * (height / 2u);
-        const uint64_t totalSize = lumaSize + chromaSize * 2u;
-        constexpr uint64_t MaxBinkFrameBytes = 512ull * 1024ull * 1024ull;
-        if ( totalSize == 0 || totalSize > MaxBinkFrameBytes
-            || totalSize > std::numeric_limits<size_t>::max() ) {
-            LogError() << "Bink video frame buffer size is invalid.";
-            return false;
-        }
-
-        std::unique_ptr<unsigned char[]> newData(
-            new (std::nothrow) unsigned char[static_cast<size_t>(totalSize)] );
-        std::unique_ptr<D3D11Texture> newY( new (std::nothrow) D3D11Texture() );
-        std::unique_ptr<D3D11Texture> newU( new (std::nothrow) D3D11Texture() );
-        std::unique_ptr<D3D11Texture> newV( new (std::nothrow) D3D11Texture() );
-        if ( !newData || !newY || !newU || !newV ) {
-            return false;
-        }
-
-        const INT2 lumaDimensions( static_cast<int>(width), static_cast<int>(height) );
-        const INT2 chromaDimensions( static_cast<int>(width / 2u), static_cast<int>(height / 2u) );
-        if ( newY->Init( lumaDimensions, D3D11Texture::ETextureFormat::TF_R8, 1, nullptr, "Video Texture Y" ) != XR_SUCCESS
-            || newU->Init( chromaDimensions, D3D11Texture::ETextureFormat::TF_R8, 1, nullptr, "Video Texture U" ) != XR_SUCCESS
-            || newV->Init( chromaDimensions, D3D11Texture::ETextureFormat::TF_R8, 1, nullptr, "Video Texture V" ) != XR_SUCCESS ) {
-            LogError() << "Bink video textures could not be created.";
-            return false;
-        }
-
-        unsigned char* dataY = newData.get();
-        unsigned char* dataV = dataY + static_cast<size_t>(lumaSize);
-        unsigned char* dataU = dataV + static_cast<size_t>(chromaSize);
-        memset( dataY, 16, static_cast<size_t>(lumaSize) );
-        memset( dataV, 128, static_cast<size_t>(chromaSize) );
-        memset( dataU, 128, static_cast<size_t>(chromaSize) );
-
-        video.textureData = std::move( newData );
-        video.textureDataSize = static_cast<size_t>(totalSize);
-        video.textureY = std::move( newY );
-        video.textureU = std::move( newU );
-        video.textureV = std::move( newV );
-        video.width = width;
-        video.height = height;
-        return true;
-    }
-}
 
 float BinkPlayerReadGlobalVolume(DWORD zCOption)
 {
@@ -208,119 +147,90 @@ int __fastcall BinkPlayerPlayHandleEvents(DWORD BinkPlayer)
 	return 1;
 }
 
-float __fastcall BinkPlayerSetSoundVolume( DWORD BinkPlayer, DWORD _EDX, float volume ) {
-    BinkVideo* video = *reinterpret_cast<BinkVideo**>(
-        BinkPlayer + GothicMemoryLocations::zCBinkPlayer::Offset_VideoHandle );
-    if ( !video ) {
-        return 0.0f;
-    }
-
-    video->videoVolume = std::clamp( volume, 0.0f, 1.0f );
-    video->updateVolume = true;
-    return 1.0f;
+float __fastcall BinkPlayerSetSoundVolume(DWORD BinkPlayer, DWORD _EDX, float volume)
+{
+	BinkVideo* video = *reinterpret_cast<BinkVideo**>(BinkPlayer + GothicMemoryLocations::zCBinkPlayer::Offset_VideoHandle);
+	video->videoVolume = std::min<float>(1.0f, std::max<float>(video->videoVolume, 0.0f));
+	video->updateVolume = true;
+	return 1;
 }
 
-int __fastcall BinkPlayerToggleSound( DWORD BinkPlayer ) {
-    BinkVideo* video = *reinterpret_cast<BinkVideo**>(
-        BinkPlayer + GothicMemoryLocations::zCBinkPlayer::Offset_VideoHandle );
-    if ( !video ) {
-        return 0;
-    }
-
-    int* soundOn = reinterpret_cast<int*>(
-        BinkPlayer + GothicMemoryLocations::zCBinkPlayer::Offset_SoundOn );
-    if ( *soundOn ) {
-        video->globalVolume = 0.0f;
-        *soundOn = 0;
-    } else {
-        video->globalVolume = BinkPlayerReadGlobalVolume(
-            *reinterpret_cast<DWORD*>(GothicMemoryLocations::GlobalObjects::zCOption) );
-        *soundOn = 1;
-    }
-    video->updateVolume = true;
-    return 1;
+int __fastcall BinkPlayerToggleSound(DWORD BinkPlayer)
+{
+	BinkVideo* video = *reinterpret_cast<BinkVideo**>(BinkPlayer + GothicMemoryLocations::zCBinkPlayer::Offset_VideoHandle);
+	if(*reinterpret_cast<int*>(BinkPlayer + GothicMemoryLocations::zCBinkPlayer::Offset_SoundOn))
+	{
+		video->globalVolume = 0.f;
+		video->updateVolume = true;
+		*reinterpret_cast<int*>(BinkPlayer + GothicMemoryLocations::zCBinkPlayer::Offset_SoundOn) = 0;
+	}
+	else
+	{
+        video->globalVolume = BinkPlayerReadGlobalVolume(*reinterpret_cast<DWORD*>(GothicMemoryLocations::GlobalObjects::zCOption));
+		video->updateVolume = true;
+		*reinterpret_cast<int*>(BinkPlayer + GothicMemoryLocations::zCBinkPlayer::Offset_SoundOn) = 1;
+	}
+	return 1;
 }
 
-int __fastcall BinkPlayerPause( DWORD BinkPlayer ) {
-    BinkVideo* video = *reinterpret_cast<BinkVideo**>(
-        BinkPlayer + GothicMemoryLocations::zCBinkPlayer::Offset_VideoHandle );
-    if ( !video || !video->vid || !BinkPause ) {
-        return 0;
-    }
-
-    reinterpret_cast<void( __stdcall* )(void*, int)>(BinkPause)(video->vid, 1);
-    return 1;
+int __fastcall BinkPlayerPause(DWORD BinkPlayer)
+{
+	BinkVideo* video = *reinterpret_cast<BinkVideo**>(BinkPlayer + GothicMemoryLocations::zCBinkPlayer::Offset_VideoHandle);
+	reinterpret_cast<void(__stdcall*)(void*, int)>(BinkPause)(video->vid, 1);
+	return 1;
 }
 
-int __fastcall BinkPlayerUnpause( DWORD BinkPlayer ) {
-    BinkVideo* video = *reinterpret_cast<BinkVideo**>(
-        BinkPlayer + GothicMemoryLocations::zCBinkPlayer::Offset_VideoHandle );
-    if ( !video || !video->vid || !BinkPause ) {
-        return 0;
-    }
-
-    reinterpret_cast<void( __stdcall* )(void*, int)>(BinkPause)(video->vid, 0);
-    return 1;
+int __fastcall BinkPlayerUnpause(DWORD BinkPlayer)
+{
+	BinkVideo* video = *reinterpret_cast<BinkVideo**>(BinkPlayer + GothicMemoryLocations::zCBinkPlayer::Offset_VideoHandle);
+	reinterpret_cast<void(__stdcall*)(void*, int)>(BinkPause)(video->vid, 0);
+	return 1;
 }
 
-int __fastcall BinkPlayerIsPlaying( DWORD BinkPlayer ) {
-    BinkVideo* video = *reinterpret_cast<BinkVideo**>(
-        BinkPlayer + GothicMemoryLocations::zCBinkPlayer::Offset_VideoHandle );
-    if ( video && video->vid
-        && *reinterpret_cast<int*>(BinkPlayer + GothicMemoryLocations::zCBinkPlayer::Offset_IsPlaying)
-        && (*reinterpret_cast<int*>(BinkPlayer + GothicMemoryLocations::zCBinkPlayer::Offset_IsLooping)
-            || *reinterpret_cast<DWORD*>(reinterpret_cast<DWORD>(video->vid) + 0x08)
-                > *reinterpret_cast<DWORD*>(reinterpret_cast<DWORD>(video->vid) + 0x0C)) ) {
-        return 1;
-    }
-    return 0;
+int __fastcall BinkPlayerIsPlaying(DWORD BinkPlayer)
+{
+	BinkVideo* video = *reinterpret_cast<BinkVideo**>(BinkPlayer + GothicMemoryLocations::zCBinkPlayer::Offset_VideoHandle);
+	if(video &&
+		(*reinterpret_cast<int*>(BinkPlayer + GothicMemoryLocations::zCBinkPlayer::Offset_IsPlaying)) &&
+		((*reinterpret_cast<int*>(BinkPlayer + GothicMemoryLocations::zCBinkPlayer::Offset_IsLooping)) ||
+		*reinterpret_cast<DWORD*>(reinterpret_cast<DWORD>(video->vid) + 0x08) > *reinterpret_cast<DWORD*>(reinterpret_cast<DWORD>(video->vid) + 0x0C)))
+		return 1;
+
+	return 0;
 }
 
-int __fastcall BinkPlayerPlayGotoNextFrame( DWORD BinkPlayer ) {
-    BinkVideo* video = *reinterpret_cast<BinkVideo**>(
-        BinkPlayer + GothicMemoryLocations::zCBinkPlayer::Offset_VideoHandle );
-    if ( !video || !video->vid || !BinkNextFrame ) {
-        return 0;
-    }
-
-    reinterpret_cast<void( __stdcall* )(void*)>(BinkNextFrame)(video->vid);
-    return 1;
+int __fastcall BinkPlayerPlayGotoNextFrame(DWORD BinkPlayer)
+{
+	BinkVideo* video = *reinterpret_cast<BinkVideo**>(BinkPlayer + GothicMemoryLocations::zCBinkPlayer::Offset_VideoHandle);
+	reinterpret_cast<void(__stdcall*)(void*)>(BinkNextFrame)(video->vid);
+	return 1;
 }
 
-int __fastcall BinkPlayerPlayWaitNextFrame( DWORD BinkPlayer ) {
-    BinkVideo* video = *reinterpret_cast<BinkVideo**>(
-        BinkPlayer + GothicMemoryLocations::zCBinkPlayer::Offset_VideoHandle );
-    if ( !video || !video->vid || !BinkWait ) {
-        return 0;
-    }
-
-    while ( BinkPlayerIsPlaying( BinkPlayer )
-        && reinterpret_cast<int( __stdcall* )(void*)>(BinkWait)(video->vid) ) {
-        BinkPlayerPlayHandleEvents( BinkPlayer );
-        std::this_thread::sleep_for( std::chrono::milliseconds( 1 ) );
-
-        video = *reinterpret_cast<BinkVideo**>(
-            BinkPlayer + GothicMemoryLocations::zCBinkPlayer::Offset_VideoHandle );
-        if ( !video || !video->vid ) {
-            break;
-        }
-    }
-    return 1;
+int __fastcall BinkPlayerPlayWaitNextFrame(DWORD BinkPlayer)
+{
+	BinkVideo* video = *reinterpret_cast<BinkVideo**>(BinkPlayer + GothicMemoryLocations::zCBinkPlayer::Offset_VideoHandle);
+	while(BinkPlayerIsPlaying(BinkPlayer) && reinterpret_cast<int(__stdcall*)(void*)>(BinkWait)(video->vid))
+    {
+        BinkPlayerPlayHandleEvents(BinkPlayer);
+		std::this_thread::sleep_for(std::chrono::milliseconds(1));
+	}
+	return 1;
 }
 
-int __fastcall BinkPlayerPlayDoFrame( DWORD BinkPlayer ) {
-    BinkVideo* video = *reinterpret_cast<BinkVideo**>(
-        BinkPlayer + GothicMemoryLocations::zCBinkPlayer::Offset_VideoHandle );
-    if ( !video || !video->vid || !BinkDoFrame ) {
-        return 0;
-    }
-
-    if ( video->updateVolume ) {
-        video->updateVolume = false;
-    }
-    reinterpret_cast<void( __stdcall* )(void*)>(BinkDoFrame)(video->vid);
-    return 1;
+int __fastcall BinkPlayerPlayDoFrame(DWORD BinkPlayer)
+{
+	BinkVideo* video = *reinterpret_cast<BinkVideo**>(BinkPlayer + GothicMemoryLocations::zCBinkPlayer::Offset_VideoHandle);
+	if(video->updateVolume)
+    {
+		float volume = video->globalVolume * video->videoVolume;
+		//if(NewBinkSetVolume) reinterpret_cast<void(__stdcall*)(void*, int, DWORD)>(BinkSetVolume)(video->vid, 0, static_cast<DWORD>(volume * 65536.f));
+		//else reinterpret_cast<void(__stdcall*)(void*, DWORD)>(BinkSetVolume)(video->vid, static_cast<DWORD>(volume * 65536.f));
+		video->updateVolume = false;
+	}
+	reinterpret_cast<void(__stdcall*)(void*)>(BinkDoFrame)(video->vid);
+	return 1;
 }
+
 int __fastcall BinkPlayerPlayFrame(DWORD BinkPlayer)
 {
 	BinkVideo* video = *reinterpret_cast<BinkVideo**>(BinkPlayer + GothicMemoryLocations::zCBinkPlayer::Offset_VideoHandle);
@@ -331,37 +241,54 @@ int __fastcall BinkPlayerPlayFrame(DWORD BinkPlayer)
 		{
             BinkPlayerPlayDoFrame(BinkPlayer);
             {
-                const DWORD vidWidth = *reinterpret_cast<DWORD*>(
-                    reinterpret_cast<DWORD>(video->vid) + 0x00 );
-                const DWORD vidHeight = *reinterpret_cast<DWORD*>(
-                    reinterpret_cast<DWORD>(video->vid) + 0x04 );
-                if ( !video->textureData || !video->textureY || !video->textureU || !video->textureV
-                    || video->width != vidWidth || video->height != vidHeight ) {
-                    if ( !InitializeBinkFrameResources( *video, vidWidth, vidHeight ) ) {
-                        BinkPlayerPlayGotoNextFrame( BinkPlayer );
-                        BinkPlayerPlayWaitNextFrame( BinkPlayer );
-                        return 1;
+                DWORD vidWidth = *reinterpret_cast<DWORD*>(reinterpret_cast<DWORD>(video->vid) + 0x00);
+                DWORD vidHeight = *reinterpret_cast<DWORD*>(reinterpret_cast<DWORD>(video->vid) + 0x04);
+                if(!video->textureY || !video->textureU || !video->textureV || video->width != vidWidth || video->height != vidHeight)
+                {
+                    if(video->textureY)
+                    {
+                        delete video->textureY;
+                        video->textureY = nullptr;
                     }
-                }
+                    if(video->textureU)
+                    {
+                        delete video->textureU;
+                        video->textureU = nullptr;
+                    }
+                    if(video->textureV)
+                    {
+                        delete video->textureV;
+                        video->textureV = nullptr;
+                    }
 
-                reinterpret_cast<void( __stdcall* )(void*, void*, int, DWORD, DWORD, DWORD, DWORD)>(
-                    BinkCopyToBuffer )(
-                        video->vid, video->textureData.get(), static_cast<int>(vidWidth),
-                        vidHeight, 0, 0, 0x70000000L | 15 );
+                    video->width = vidWidth;
+                    video->height = vidHeight;
+                    video->textureY = new D3D11Texture();
+                    video->textureU = new D3D11Texture();
+                    video->textureV = new D3D11Texture();
+                    video->textureY->Init(INT2(vidWidth, vidHeight), D3D11Texture::ETextureFormat::TF_R8, 1, nullptr, "Video Texture Y");
+                    video->textureU->Init(INT2(vidWidth / 2, vidHeight / 2), D3D11Texture::ETextureFormat::TF_R8, 1, nullptr, "Video Texture U");
+                    video->textureV->Init(INT2(vidWidth / 2, vidHeight / 2), D3D11Texture::ETextureFormat::TF_R8, 1, nullptr, "Video Texture V");
+                    video->textureData = new unsigned char[(vidWidth * vidHeight) + ((vidWidth / 2) * (vidHeight / 2)) * 2];
 
-                const size_t lumaSize = static_cast<size_t>(vidWidth) * vidHeight;
-                const size_t chromaSize = static_cast<size_t>(vidWidth / 2u) * (vidHeight / 2u);
-                unsigned char* dataY = video->textureData.get();
-                unsigned char* dataV = dataY + lumaSize;
-                unsigned char* dataU = dataV + chromaSize;
-                if ( video->textureY->UpdateData( dataY, 0 ) != XR_SUCCESS
-                    || video->textureV->UpdateData( dataV, 0 ) != XR_SUCCESS
-                    || video->textureU->UpdateData( dataU, 0 ) != XR_SUCCESS ) {
-                    LogError() << "Bink video texture upload failed.";
-                    BinkPlayerPlayGotoNextFrame( BinkPlayer );
-                    BinkPlayerPlayWaitNextFrame( BinkPlayer );
-                    return 1;
+                    // Init textureData as black pixel yuv data
+                    unsigned char* dataY = video->textureData;
+                    memset( dataY, 16, vidWidth * vidHeight );
+                    unsigned char* dataV = dataY + (vidWidth * vidHeight);
+                    memset( dataV, 128, (vidWidth / 2) * (vidHeight / 2) );
+                    unsigned char* dataU = dataV + ((vidWidth / 2) * (vidHeight / 2));
+                    memset( dataU, 128, (vidWidth / 2) * (vidHeight / 2) );
                 }
+                reinterpret_cast<void( __stdcall* )(void*, void*, int, DWORD, DWORD, DWORD, DWORD)>(BinkCopyToBuffer)
+                    (video->vid, video->textureData, vidWidth, vidHeight, 0, 0, 0x70000000L | 15);
+
+                unsigned char* dataY = video->textureData;
+                video->textureY->UpdateData( dataY, 0 );
+                unsigned char* dataV = dataY + (vidWidth * vidHeight);
+                video->textureV->UpdateData( dataV, 0 );
+                unsigned char* dataU = dataV + ((vidWidth / 2) * (vidHeight / 2));
+                video->textureU->UpdateData( dataU, 0 );
+
                 DWORD zrenderer = *reinterpret_cast<DWORD*>(GothicMemoryLocations::GlobalObjects::zRenderer);
                 int oldZWrite = reinterpret_cast<int( __thiscall* )(DWORD)>(*reinterpret_cast<DWORD*>
                     (*reinterpret_cast<DWORD*>(zrenderer) + GothicMemoryLocations::zCRndD3D::GetZBufferWriteEnabled_Offset))(zrenderer);
@@ -537,263 +464,173 @@ int __fastcall BinkPlayerPlayDeinit(DWORD BinkPlayer)
 	return reinterpret_cast<int(__thiscall*)(DWORD)>(GothicMemoryLocations::zCBinkPlayer::PlayDeinit)(BinkPlayer);
 }
 
-int __fastcall BinkPlayerOpenVideo( DWORD BinkPlayer, DWORD _EDX, zSTRING videoName ) {
-    if ( !BinkSetSoundSystem || !BinkOpenWaveOut || !BinkOpen
-        || !BinkSetSoundOnOff || !BinkClose ) {
-        videoName.Delete();
-        return 0;
-    }
-
-    const DWORD zCOption = *reinterpret_cast<DWORD*>(GothicMemoryLocations::GlobalObjects::zCOption);
+int __fastcall BinkPlayerOpenVideo(DWORD BinkPlayer, DWORD _EDX, zSTRING videoName)
+{
+    DWORD zCOption = *reinterpret_cast<DWORD*>(GothicMemoryLocations::GlobalObjects::zCOption);
 #if defined(BUILD_GOTHIC_1_08k) && !defined(BUILD_1_12F)
-    zSTRING& directoryRoot = reinterpret_cast<zSTRING&(__thiscall*)(DWORD, int)>(
-        GothicMemoryLocations::zCOption::GetDirectory )(zCOption, 23);
+	zSTRING& directoryRoot = reinterpret_cast<zSTRING&(__thiscall*)(DWORD, int)>(GothicMemoryLocations::zCOption::GetDirectory)(zCOption, 23);
 #else
-    zSTRING& directoryRoot = reinterpret_cast<zSTRING&(__thiscall*)(DWORD, int)>(
-        GothicMemoryLocations::zCOption::GetDirectory )(zCOption, 24);
+	zSTRING& directoryRoot = reinterpret_cast<zSTRING&(__thiscall*)(DWORD, int)>(GothicMemoryLocations::zCOption::GetDirectory)(zCOption, 24);
 #endif
-    std::string pathToVideo = std::string( directoryRoot.ToChar(), directoryRoot.Length() )
-        + std::string( videoName.ToChar(), videoName.Length() );
+	std::string pathToVideo = std::string(directoryRoot.ToChar(), directoryRoot.Length()) +
+		std::string(videoName.ToChar(), videoName.Length());
+	if(pathToVideo.find(".BIK") == std::string::npos && pathToVideo.find(".BK2") == std::string::npos)
+		pathToVideo.append(".BIK");
 
-    auto hasExtension = [&]( const char* extension ) {
-        const size_t extensionLength = strlen( extension );
-        return pathToVideo.size() >= extensionLength
-            && _stricmp( pathToVideo.c_str() + pathToVideo.size() - extensionLength, extension ) == 0;
-    };
-    if ( !hasExtension( ".BIK" ) && !hasExtension( ".BK2" ) ) {
-        pathToVideo.append( ".BIK" );
-    }
+	reinterpret_cast<void(__stdcall*)(DWORD, DWORD)>(BinkSetSoundSystem)(BinkOpenWaveOut, 0);
+	void* videoHandle = reinterpret_cast<void*(__stdcall*)(const char*, DWORD)>(BinkOpen)(pathToVideo.c_str(), 0);
+	if(videoHandle)
+	{
+		reinterpret_cast<void(__stdcall*)(void*, int)>(BinkSetSoundOnOff)(videoHandle, 1);
+		//if(NewBinkSetVolume) reinterpret_cast<void(__stdcall*)(void*, int, DWORD)>(BinkSetVolume)(videoHandle, 0, 65536);
+		//else reinterpret_cast<void(__stdcall*)(void*, DWORD)>(BinkSetVolume)(videoHandle, 65536);
+		*reinterpret_cast<BinkVideo**>(BinkPlayer + GothicMemoryLocations::zCBinkPlayer::Offset_VideoHandle) = new BinkVideo(videoHandle);
+	}
 
-    reinterpret_cast<void( __stdcall* )(DWORD, DWORD)>(
-        BinkSetSoundSystem )(BinkOpenWaveOut, 0);
-    void* videoHandle = reinterpret_cast<void*( __stdcall* )(const char*, DWORD)>(
-        BinkOpen )(pathToVideo.c_str(), 0);
-    if ( videoHandle ) {
-        reinterpret_cast<void( __stdcall* )(void*, int)>(
-            BinkSetSoundOnOff )(videoHandle, 1);
-
-        auto* newVideo = new (std::nothrow) BinkVideo( videoHandle );
-        if ( !newVideo ) {
-            reinterpret_cast<void( __stdcall* )(void*)>(BinkClose)(videoHandle);
-            videoName.Delete();
-            return 0;
-        }
-        *reinterpret_cast<BinkVideo**>(
-            BinkPlayer + GothicMemoryLocations::zCBinkPlayer::Offset_VideoHandle ) = newVideo;
-    }
-
-    BinkVideo* video = *reinterpret_cast<BinkVideo**>(
-        BinkPlayer + GothicMemoryLocations::zCBinkPlayer::Offset_VideoHandle );
-    if ( video ) {
-        video->globalVolume = BinkPlayerReadGlobalVolume( zCOption );
-        video->scaleVideo = BinkPlayerReadScaleVideos( zCOption );
+	BinkVideo* video = *reinterpret_cast<BinkVideo**>(BinkPlayer + GothicMemoryLocations::zCBinkPlayer::Offset_VideoHandle);
+	if(video)
+	{
+        video->globalVolume = BinkPlayerReadGlobalVolume(zCOption);
+        video->scaleVideo = BinkPlayerReadScaleVideos(zCOption);
         Engine::GAPI->GetRendererState().RendererSettings.BinkVideoRunning = true;
 
-        reinterpret_cast<int( __thiscall* )(DWORD, zSTRING)>(
-            GothicMemoryLocations::zCBinkPlayer::OpenVideo )(BinkPlayer, videoName);
-        return 1;
-    }
+		// We are passing directly zSTRING so the memory will be deleted inside this function
+		reinterpret_cast<int(__thiscall*)(DWORD, zSTRING)>(GothicMemoryLocations::zCBinkPlayer::OpenVideo)(BinkPlayer, videoName);
+		return 1;
+	}
 
-    videoName.Delete();
-    return 0;
+	videoName.Delete();
+	return 0;
 }
-int __fastcall BinkPlayerCloseVideo( DWORD BinkPlayer ) {
-    BinkVideo* video = *reinterpret_cast<BinkVideo**>(
-        BinkPlayer + GothicMemoryLocations::zCBinkPlayer::Offset_VideoHandle );
-    if ( !video ) {
-        Engine::GAPI->GetRendererState().RendererSettings.BinkVideoRunning = false;
-        return 0;
-    }
 
-    if ( BinkClose && video->vid ) {
-        reinterpret_cast<void( __stdcall* )(void*)>(BinkClose)(video->vid);
-    }
-    delete video;
-    *reinterpret_cast<BinkVideo**>(
-        BinkPlayer + GothicMemoryLocations::zCBinkPlayer::Offset_VideoHandle ) = nullptr;
+int __fastcall BinkPlayerCloseVideo(DWORD BinkPlayer)
+{
+	BinkVideo* video = *reinterpret_cast<BinkVideo**>(BinkPlayer + GothicMemoryLocations::zCBinkPlayer::Offset_VideoHandle);
+	if(!video)
+		return 0;
+
+	delete[] video->textureData;
+	if(video->textureY)
+	{
+		delete video->textureY;
+		video->textureY = nullptr;
+	}
+	if(video->textureU)
+	{
+		delete video->textureU;
+		video->textureU = nullptr;
+	}
+	if(video->textureV)
+	{
+		delete video->textureV;
+		video->textureV = nullptr;
+	}
+
+	reinterpret_cast<void(__stdcall*)(void*)>(BinkClose)(video->vid);
     Engine::GAPI->GetRendererState().RendererSettings.BinkVideoRunning = false;
 
-    return reinterpret_cast<int( __thiscall* )(DWORD)>(
-        GothicMemoryLocations::zCBinkPlayer::CloseVideo )(BinkPlayer);
+	delete video;
+	*reinterpret_cast<DWORD*>(BinkPlayer + GothicMemoryLocations::zCBinkPlayer::Offset_VideoHandle) = 0;
+	return reinterpret_cast<int(__thiscall*)(DWORD)>(GothicMemoryLocations::zCBinkPlayer::CloseVideo)(BinkPlayer);
 }
-void RegisterBinkPlayerHooks() {
-    static bool registered = false;
-    static HMODULE binkModule = nullptr;
-    if ( registered ) {
-        return;
-    }
 
-    binkModule = GetModuleHandleW( L"Bink2W32.dll" );
-    if ( !binkModule ) {
-        binkModule = GetModuleHandleW( L"BinkW32.dll" );
-    }
-
-    bool loadedByRenderer = false;
-    if ( !binkModule ) {
-        wchar_t executablePath[MAX_PATH]{};
-        const DWORD pathLength = GetModuleFileNameW(
-            nullptr, executablePath, static_cast<DWORD>(std::size( executablePath )) );
-        if ( pathLength != 0 && pathLength < std::size( executablePath ) ) {
-            const std::filesystem::path executableDirectory =
-                std::filesystem::path( executablePath ).parent_path();
-            for ( const wchar_t* dllName : { L"Bink2W32.dll", L"BinkW32.dll" } ) {
-                const std::filesystem::path dllPath = executableDirectory / dllName;
-                binkModule = LoadLibraryW( dllPath.c_str() );
-                if ( binkModule ) {
-                    loadedByRenderer = true;
-                    break;
-                }
-            }
-        }
-    }
-
-    if ( !binkModule ) {
-        LogWarn() << "Bink DLL was not found; keeping Gothic's original video player.";
-        return;
-    }
-
-    auto resolve = [&]( const char* decoratedName, const char* plainName ) -> DWORD {
-        FARPROC address = GetProcAddress( binkModule, decoratedName );
-        if ( !address && plainName ) {
-            address = GetProcAddress( binkModule, plainName );
-        }
-        return reinterpret_cast<DWORD>(address);
-    };
-
-    NewBinkSetVolume = true;
-    BinkOpenWaveOut = resolve( "_BinkOpenWaveOut@4", "BinkOpenWaveOut" );
-    BinkSetSoundSystem = resolve( "_BinkSetSoundSystem@8", "BinkSetSoundSystem" );
-    BinkSetSoundOnOff = resolve( "_BinkSetSoundOnOff@8", "BinkSetSoundOnOff" );
-    BinkSetVolume = resolve( "_BinkSetVolume@12", nullptr );
-    if ( !BinkSetVolume ) {
-        BinkSetVolume = resolve( "_BinkSetVolume@8", "BinkSetVolume" );
+void RegisterBinkPlayerHooks()
+{
+    HMODULE BinkWDLL;
+	if((BinkWDLL = LoadLibraryA("Bink2W32.dll")) != nullptr || (BinkWDLL = GetModuleHandleA("BinkW32.dll")) != nullptr)
+	{
+		NewBinkSetVolume = true;
+		BinkOpenWaveOut = reinterpret_cast<DWORD>(GetProcAddress(BinkWDLL, "_BinkOpenWaveOut@4"));
+		BinkSetSoundSystem = reinterpret_cast<DWORD>(GetProcAddress(BinkWDLL, "_BinkSetSoundSystem@8"));
+		BinkSetSoundOnOff = reinterpret_cast<DWORD>(GetProcAddress(BinkWDLL, "_BinkSetSoundOnOff@8"));
+		BinkSetVolume = reinterpret_cast<DWORD>(GetProcAddress(BinkWDLL, "_BinkSetVolume@12"));
+		if(!BinkSetVolume)
+		{
+			BinkSetVolume = reinterpret_cast<DWORD>(GetProcAddress(BinkWDLL, "_BinkSetVolume@8"));
 #if defined(BUILD_GOTHIC_1_08k)
 #if !defined(BUILD_1_12F)
-        if ( *reinterpret_cast<BYTE*>(0x43A942) != 0xE9 ) {
-            NewBinkSetVolume = false;
-        }
+			if(*reinterpret_cast<BYTE*>(0x43A942) != 0xE9)
+				NewBinkSetVolume = false;
 #else
-        NewBinkSetVolume = false;
+            NewBinkSetVolume = false;
 #endif
 #endif
-    }
+		}
+		BinkOpen = reinterpret_cast<DWORD>(GetProcAddress(BinkWDLL, "_BinkOpen@8"));
+		BinkDoFrame = reinterpret_cast<DWORD>(GetProcAddress(BinkWDLL, "_BinkDoFrame@4"));
+		BinkNextFrame = reinterpret_cast<DWORD>(GetProcAddress(BinkWDLL, "_BinkNextFrame@4"));
+		BinkWait = reinterpret_cast<DWORD>(GetProcAddress(BinkWDLL, "_BinkWait@4"));
+		BinkPause = reinterpret_cast<DWORD>(GetProcAddress(BinkWDLL, "_BinkPause@8"));
+		BinkClose = reinterpret_cast<DWORD>(GetProcAddress(BinkWDLL, "_BinkClose@4"));
+		BinkGoto = reinterpret_cast<DWORD>(GetProcAddress(BinkWDLL, "_BinkGoto@12"));
+		BinkCopyToBuffer = reinterpret_cast<DWORD>(GetProcAddress(BinkWDLL, "_BinkCopyToBuffer@28"));
+		BinkSetFrameRate = reinterpret_cast<DWORD>(GetProcAddress(BinkWDLL, "_BinkSetFrameRate@8"));
+		BinkSetSimulate = reinterpret_cast<DWORD>(GetProcAddress(BinkWDLL, "_BinkSetSimulate@4"));
+	}
+    char* binkPlayerVtable[5];
 
-    BinkOpen = resolve( "_BinkOpen@8", "BinkOpen" );
-    BinkDoFrame = resolve( "_BinkDoFrame@4", "BinkDoFrame" );
-    BinkNextFrame = resolve( "_BinkNextFrame@4", "BinkNextFrame" );
-    BinkWait = resolve( "_BinkWait@4", "BinkWait" );
-    BinkPause = resolve( "_BinkPause@8", "BinkPause" );
-    BinkClose = resolve( "_BinkClose@4", "BinkClose" );
-    BinkGoto = resolve( "_BinkGoto@12", "BinkGoto" );
-    BinkCopyToBuffer = resolve( "_BinkCopyToBuffer@28", "BinkCopyToBuffer" );
-    BinkSetFrameRate = resolve( "_BinkSetFrameRate@8", "BinkSetFrameRate" );
-    BinkSetSimulate = resolve( "_BinkSetSimulate@4", "BinkSetSimulate" );
+    DWORD playHandleEvents = reinterpret_cast<DWORD>(&BinkPlayerPlayHandleEvents);
+    memcpy( binkPlayerVtable, &playHandleEvents, 4 );
+    PatchAddr( GothicMemoryLocations::zCBinkPlayer::PlayHandleEvents_Vtable, binkPlayerVtable );
+    PatchJMP( GothicMemoryLocations::zCBinkPlayer::PlayHandleEvents_Func, reinterpret_cast<DWORD>(&BinkPlayerPlayHandleEvents) );
 
-    struct RequiredExport {
-        const char* name;
-        DWORD address;
-    };
-    const RequiredExport requiredExports[] = {
-        { "BinkOpenWaveOut", BinkOpenWaveOut },
-        { "BinkSetSoundSystem", BinkSetSoundSystem },
-        { "BinkSetSoundOnOff", BinkSetSoundOnOff },
-        { "BinkOpen", BinkOpen },
-        { "BinkDoFrame", BinkDoFrame },
-        { "BinkNextFrame", BinkNextFrame },
-        { "BinkWait", BinkWait },
-        { "BinkPause", BinkPause },
-        { "BinkClose", BinkClose },
-        { "BinkGoto", BinkGoto },
-        { "BinkCopyToBuffer", BinkCopyToBuffer },
-        { "BinkSetFrameRate", BinkSetFrameRate },
-        { "BinkSetSimulate", BinkSetSimulate },
-    };
-    for ( const auto& required : requiredExports ) {
-        if ( !required.address ) {
-            LogError() << "Bink export is missing: " << required.name
-                << ". Keeping Gothic's original video player.";
-            if ( loadedByRenderer ) {
-                FreeLibrary( binkModule );
-                binkModule = nullptr;
-            }
-            return;
-        }
-    }
+    DWORD setSoundVolume = reinterpret_cast<DWORD>(&BinkPlayerSetSoundVolume);
+    memcpy( binkPlayerVtable, &setSoundVolume, 4 );
+    PatchAddr( GothicMemoryLocations::zCBinkPlayer::SetSoundVolume_Vtable, binkPlayerVtable );
+    PatchJMP( GothicMemoryLocations::zCBinkPlayer::SetSoundVolume_Func, reinterpret_cast<DWORD>(&BinkPlayerSetSoundVolume) );
 
-    bool hooksPrepared = true;
-    auto patchHook = [&]( DWORD vtableAddress, DWORD functionAddress, auto replacement ) {
-        const DWORD replacementAddress = reinterpret_cast<DWORD>(replacement);
-        const bool vtablePrepared = PatchValue(
-            vtableAddress, replacementAddress );
-        const bool functionPrepared = PatchJMP(
-            functionAddress, replacementAddress );
-        hooksPrepared = vtablePrepared && functionPrepared && hooksPrepared;
-    };
+    DWORD toggleSound = reinterpret_cast<DWORD>(&BinkPlayerToggleSound);
+    memcpy( binkPlayerVtable, &toggleSound, 4 );
+    PatchAddr( GothicMemoryLocations::zCBinkPlayer::ToggleSound_Vtable, binkPlayerVtable );
+    PatchJMP( GothicMemoryLocations::zCBinkPlayer::ToggleSound_Func, reinterpret_cast<DWORD>(&BinkPlayerToggleSound) );
 
-    patchHook(
-        GothicMemoryLocations::zCBinkPlayer::PlayHandleEvents_Vtable,
-        GothicMemoryLocations::zCBinkPlayer::PlayHandleEvents_Func,
-        &BinkPlayerPlayHandleEvents );
-    patchHook(
-        GothicMemoryLocations::zCBinkPlayer::SetSoundVolume_Vtable,
-        GothicMemoryLocations::zCBinkPlayer::SetSoundVolume_Func,
-        &BinkPlayerSetSoundVolume );
-    patchHook(
-        GothicMemoryLocations::zCBinkPlayer::ToggleSound_Vtable,
-        GothicMemoryLocations::zCBinkPlayer::ToggleSound_Func,
-        &BinkPlayerToggleSound );
-    patchHook(
-        GothicMemoryLocations::zCBinkPlayer::Pause_Vtable,
-        GothicMemoryLocations::zCBinkPlayer::Pause_Func,
-        &BinkPlayerPause );
-    patchHook(
-        GothicMemoryLocations::zCBinkPlayer::Unpause_Vtable,
-        GothicMemoryLocations::zCBinkPlayer::Unpause_Func,
-        &BinkPlayerUnpause );
-    patchHook(
-        GothicMemoryLocations::zCBinkPlayer::IsPlaying_Vtable,
-        GothicMemoryLocations::zCBinkPlayer::IsPlaying_Func,
-        &BinkPlayerIsPlaying );
-    patchHook(
-        GothicMemoryLocations::zCBinkPlayer::PlayGotoNextFrame_Vtable,
-        GothicMemoryLocations::zCBinkPlayer::PlayGotoNextFrame_Func,
-        &BinkPlayerPlayGotoNextFrame );
-    patchHook(
-        GothicMemoryLocations::zCBinkPlayer::PlayWaitNextFrame_Vtable,
-        GothicMemoryLocations::zCBinkPlayer::PlayWaitNextFrame_Func,
-        &BinkPlayerPlayWaitNextFrame );
-    patchHook(
-        GothicMemoryLocations::zCBinkPlayer::PlayFrame_Vtable,
-        GothicMemoryLocations::zCBinkPlayer::PlayFrame_Func,
-        &BinkPlayerPlayFrame );
-    patchHook(
-        GothicMemoryLocations::zCBinkPlayer::PlayInit_Vtable,
-        GothicMemoryLocations::zCBinkPlayer::PlayInit_Func,
-        &BinkPlayerPlayInit );
-    patchHook(
-        GothicMemoryLocations::zCBinkPlayer::PlayDeinit_Vtable,
-        GothicMemoryLocations::zCBinkPlayer::PlayDeinit_Func,
-        &BinkPlayerPlayDeinit );
-    patchHook(
-        GothicMemoryLocations::zCBinkPlayer::OpenVideo_Vtable,
-        GothicMemoryLocations::zCBinkPlayer::OpenVideo_Func,
-        &BinkPlayerOpenVideo );
-    patchHook(
-        GothicMemoryLocations::zCBinkPlayer::CloseVideo_Vtable,
-        GothicMemoryLocations::zCBinkPlayer::CloseVideo_Func,
-        &BinkPlayerCloseVideo );
+    DWORD pause = reinterpret_cast<DWORD>(&BinkPlayerPause);
+    memcpy( binkPlayerVtable, &pause, 4 );
+    PatchAddr( GothicMemoryLocations::zCBinkPlayer::Pause_Vtable, binkPlayerVtable );
+    PatchJMP( GothicMemoryLocations::zCBinkPlayer::Pause_Func, reinterpret_cast<DWORD>(&BinkPlayerPause) );
 
-    if ( !hooksPrepared ) {
-        LogError() << "Bink hook patch preparation failed at 0x"
-            << std::hex << GothicPatching::GetFirstFailureAddress()
-            << "; keeping Gothic's original video player.";
-        if ( loadedByRenderer ) {
-            FreeLibrary( binkModule );
-            binkModule = nullptr;
-        }
-        return;
-    }
+    DWORD unpause = reinterpret_cast<DWORD>(&BinkPlayerUnpause);
+    memcpy( binkPlayerVtable, &unpause, 4 );
+    PatchAddr( GothicMemoryLocations::zCBinkPlayer::Unpause_Vtable, binkPlayerVtable );
+    PatchJMP( GothicMemoryLocations::zCBinkPlayer::Unpause_Func, reinterpret_cast<DWORD>(&BinkPlayerUnpause) );
 
-    registered = true;
-    LogInfo() << "Bink video hooks registered.";
+    DWORD isPlaying = reinterpret_cast<DWORD>(&BinkPlayerIsPlaying);
+    memcpy( binkPlayerVtable, &isPlaying, 4 );
+    PatchAddr( GothicMemoryLocations::zCBinkPlayer::IsPlaying_Vtable, binkPlayerVtable );
+    PatchJMP( GothicMemoryLocations::zCBinkPlayer::IsPlaying_Func, reinterpret_cast<DWORD>(&BinkPlayerIsPlaying) );
+    
+    DWORD playGotoNextFrame = reinterpret_cast<DWORD>(&BinkPlayerPlayGotoNextFrame);
+    memcpy( binkPlayerVtable, &playGotoNextFrame, 4 );
+    PatchAddr( GothicMemoryLocations::zCBinkPlayer::PlayGotoNextFrame_Vtable, binkPlayerVtable );
+    PatchJMP( GothicMemoryLocations::zCBinkPlayer::PlayGotoNextFrame_Func, reinterpret_cast<DWORD>(&BinkPlayerPlayGotoNextFrame) );
+
+    DWORD playWaitNextFrame = reinterpret_cast<DWORD>(&BinkPlayerPlayWaitNextFrame);
+    memcpy( binkPlayerVtable, &playWaitNextFrame, 4 );
+    PatchAddr( GothicMemoryLocations::zCBinkPlayer::PlayWaitNextFrame_Vtable, binkPlayerVtable );
+    PatchJMP( GothicMemoryLocations::zCBinkPlayer::PlayWaitNextFrame_Func, reinterpret_cast<DWORD>(&BinkPlayerPlayWaitNextFrame) );
+
+    DWORD playFrame = reinterpret_cast<DWORD>(&BinkPlayerPlayFrame);
+    memcpy( binkPlayerVtable, &playFrame, 4 );
+    PatchAddr( GothicMemoryLocations::zCBinkPlayer::PlayFrame_Vtable, binkPlayerVtable );
+    PatchJMP( GothicMemoryLocations::zCBinkPlayer::PlayFrame_Func, reinterpret_cast<DWORD>(&BinkPlayerPlayFrame) );
+
+    DWORD playInit = reinterpret_cast<DWORD>(&BinkPlayerPlayInit);
+    memcpy( binkPlayerVtable, &playInit, 4 );
+    PatchAddr( GothicMemoryLocations::zCBinkPlayer::PlayInit_Vtable, binkPlayerVtable );
+    PatchJMP( GothicMemoryLocations::zCBinkPlayer::PlayInit_Func, reinterpret_cast<DWORD>(&BinkPlayerPlayInit) );
+
+    DWORD playDeinit = reinterpret_cast<DWORD>(&BinkPlayerPlayDeinit);
+    memcpy( binkPlayerVtable, &playDeinit, 4 );
+    PatchAddr( GothicMemoryLocations::zCBinkPlayer::PlayDeinit_Vtable, binkPlayerVtable );
+    PatchJMP( GothicMemoryLocations::zCBinkPlayer::PlayDeinit_Func, reinterpret_cast<DWORD>(&BinkPlayerPlayDeinit) );
+
+    DWORD openVideo = reinterpret_cast<DWORD>(&BinkPlayerOpenVideo);
+    memcpy( binkPlayerVtable, &openVideo, 4 );
+    PatchAddr( GothicMemoryLocations::zCBinkPlayer::OpenVideo_Vtable, binkPlayerVtable );
+    PatchJMP( GothicMemoryLocations::zCBinkPlayer::OpenVideo_Func, reinterpret_cast<DWORD>(&BinkPlayerOpenVideo) );
+
+    DWORD closeVideo = reinterpret_cast<DWORD>(&BinkPlayerCloseVideo);
+    memcpy( binkPlayerVtable, &closeVideo, 4 );
+    PatchAddr( GothicMemoryLocations::zCBinkPlayer::CloseVideo_Vtable, binkPlayerVtable );
+    PatchJMP( GothicMemoryLocations::zCBinkPlayer::CloseVideo_Func, reinterpret_cast<DWORD>(&BinkPlayerCloseVideo) );
 }

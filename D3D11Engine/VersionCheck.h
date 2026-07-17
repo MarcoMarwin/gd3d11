@@ -2,7 +2,7 @@
 
 namespace VersionCheck {
 
-    /** Validates the files required before renderer initialization. */
-    bool CheckExecutable();
+	/** Checks the executable checksum for the right version */
+	void CheckExecutable();
 
 }

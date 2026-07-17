@@ -2,13 +2,17 @@
 #include <iostream>
 #include <Windows.h>
 #include <sstream>
+#include <vector>
 #include <string>
 #include "Toolbox.h"
-#include <array>
+#include <mutex>
 
 //#include <DxErr.h>
 //#pragma comment(lib, "Dxerr.lib")
 #define USE_LOG
+
+const int MAX_LOG_MESSAGES_TO_CACHE = 200;
+__declspec(selectany) std::string LOGFILE;
 
 //#ifdef BUILD_DESKTOP
 #ifdef BLERGH__
@@ -80,18 +84,39 @@
 /** Stream logger */
 #ifdef USE_LOG
 
-namespace LoggerState {
-    __declspec(selectany) SRWLOCK LogLock = SRWLOCK_INIT;
-    __declspec(selectany) wchar_t LogFile[MAX_PATH + 1] = {};
+namespace LogCache {
+    __declspec(selectany) std::vector<std::string> Cache;
+    __declspec(selectany) std::mutex LogMutex;
+    struct LogFlush {
+        ~LogFlush() {
+            LogMutex.lock();
+            Cache.push_back( "Flushed " + std::to_string( Cache.size() ) + " log messages at program termination!\n" );
+            FlushData();
+            LogMutex.unlock();
+        }
 
-    class ScopedExclusiveLock {
-    public:
-        ScopedExclusiveLock() noexcept { AcquireSRWLockExclusive( &LogLock ); }
-        ~ScopedExclusiveLock() noexcept { ReleaseSRWLockExclusive( &LogLock ); }
+        static void FlushData() {
+            FILE* f;
+            f = fopen( LOGFILE.c_str(), "a" );
 
-        ScopedExclusiveLock( const ScopedExclusiveLock& ) = delete;
-        ScopedExclusiveLock& operator=( const ScopedExclusiveLock& ) = delete;
+            //if (MAX_LOG_MESSAGES_TO_CACHE > 5)
+            //	fputs(" --- Log-Cache flush! --- \n", f);
+
+            // Write down all the data we have
+            for ( UINT i = 0; i < Cache.size(); i++ ) {
+                fputs( Cache[i].c_str(), f );
+
+                //OutputDebugStringA(Cache[i].c_str());
+            }
+
+            fclose( f );
+
+            // Clear the cache
+            Cache.clear();
+        }
     };
+
+    __declspec(selectany) LogFlush fls; // This will be deleted by the CRT when the program ends, thus, calling the destructor, which flushes the remaining cache
 }
 
 class Log {
@@ -106,38 +131,20 @@ public:
         MessageBoxStyle = MessageBox;
     }
 
-    ~Log() noexcept {
+    ~Log() {
         Flush();
     }
 
     /** Clears the logfile */
-    static void Clear() noexcept {
-        try {
-            std::array<wchar_t, MAX_PATH + 1> modulePath{};
-            const DWORD length = GetModuleFileNameW( nullptr, modulePath.data(), MAX_PATH );
-            if ( length == 0 || length >= MAX_PATH ) {
-                LoggerState::ScopedExclusiveLock lock;
-                LoggerState::LogFile[0] = L'\0';
-                return;
-            }
+    static void Clear() {
+        char path[MAX_PATH + 1];
+        GetModuleFileNameA( nullptr, path, MAX_PATH );
+        LOGFILE = std::string( path );
+        LOGFILE = LOGFILE.substr( 0, LOGFILE.find_last_of( '\\' ) + 1 );
+        LOGFILE += "Log.txt";
 
-            std::wstring logPath( modulePath.data(), length );
-            const size_t separator = logPath.find_last_of( L"\\/" );
-            logPath = separator == std::wstring::npos
-                ? std::wstring( L"Log.txt" )
-                : logPath.substr( 0, separator + 1 ) + L"Log.txt";
-
-            LoggerState::ScopedExclusiveLock lock;
-            if ( wcsncpy_s( LoggerState::LogFile, logPath.c_str(), _TRUNCATE ) != 0 ) {
-                LoggerState::LogFile[0] = L'\0';
-                return;
-            }
-            if ( FILE* file = _wfopen( LoggerState::LogFile, L"wb" ) ) {
-                fclose( file );
-            }
-        } catch ( ... ) {
-            LoggerState::ScopedExclusiveLock lock;
-            LoggerState::LogFile[0] = L'\0';
+        if (FILE* f = fopen( LOGFILE.c_str(), "w" )) {
+            (void)fclose( f );
         }
     }
 
@@ -157,35 +164,15 @@ public:
         return *this;
     }
 
+    template<>
     inline Log& operator << ( const wchar_t* wide ) {
-        if ( !wide ) {
-            Message << "(null)";
-            return *this;
-        }
+        char ansiStr[1024];
+        auto len = wcstombs( ansiStr, wide, sizeof( ansiStr ) );
 
-        try {
-            const int required = WideCharToMultiByte(
-                CP_UTF8, WC_ERR_INVALID_CHARS, wide, -1, nullptr, 0, nullptr, nullptr );
-            if ( required <= 0 ) {
-                Message << "<invalid wide string>";
-                return *this;
-            }
-
-            std::string utf8( static_cast<size_t>(required), '\0' );
-            const int converted = WideCharToMultiByte(
-                CP_UTF8, WC_ERR_INVALID_CHARS, wide, -1, utf8.data(), required, nullptr, nullptr );
-            if ( converted <= 0 ) {
-                Message << "<invalid wide string>";
-                return *this;
-            }
-
-            utf8.resize( static_cast<size_t>(converted - 1) );
-            Message << utf8;
-        } catch ( ... ) {
-            Message << "<wide string conversion failed>";
-        }
+        Message << std::string_view( ansiStr, len );
         return *this;
     }
+
 
     inline Log& operator << ( std::ostream& (*fn)(std::ostream&) ) {
         Message << fn;
@@ -200,41 +187,46 @@ public:
 #pragma warning( pop ) 
 
     /** Called when the object is getting destroyed, which happens immediately if simply calling the constructor of this class */
-    inline void Flush() noexcept {
-        if ( Flushed ) {
-            return;
+    inline void Flush() {
+        FILE* f;
+        std::unique_lock<std::mutex> lock( LogCache::LogMutex );
+
+        f = fopen( LOGFILE.c_str(), "a" );
+
+        if ( f ) {
+
+            fputs( Info.str().c_str(), f );
+
+            fputs( Message.str().c_str(), f );
+            fputs( "\n", f );
+
+            fclose( f );
         }
-        Flushed = true;
 
-        try {
-            const std::string info = Info.str();
-            const std::string message = Message.str();
+        /*if (strnicmp(Info.str().c_str(), "Error", sizeof("Error")) == 0)
+        {
+            LastErrorMessage = Info.str() + Message.str();
+        }*/
 
-            {
-                LoggerState::ScopedExclusiveLock lock;
-                if ( LoggerState::LogFile[0] != L'\0' ) {
-                    if ( FILE* file = _wfopen( LoggerState::LogFile, L"ab" ) ) {
-                        fwrite( info.data(), 1, info.size(), file );
-                        fwrite( message.data(), 1, message.size(), file );
-                        fputc( '\n', file );
-                        fclose( file );
-                    }
-                }
-            }
+        /*// Place the message into the cache
+        LogCache::Cache.push_back(Info.str() + Message.str() + "\n");
 
-            switch ( MessageBoxStyle ) {
-            case 1:
-                InfoBox( message.c_str() );
-                break;
-            case 2:
-                WarnBox( message.c_str() );
-                break;
-            case 3:
-                ErrorBox( message.c_str() );
-                break;
-            }
-        } catch ( ... ) {
-            // Logging must never terminate the renderer.
+        // Flush data if the cache is full
+        if (LogCache::Cache.size() >= MAX_LOG_MESSAGES_TO_CACHE)
+            LogCache::LogFlush::FlushData();*/
+
+        switch ( MessageBoxStyle ) {
+        case 1:
+            InfoBox( Message.str().c_str() );
+            break;
+
+        case 2:
+            WarnBox( Message.str().c_str() );
+            break;
+
+        case 3:
+            ErrorBox( Message.str().c_str() );
+            break;
         }
     }
 
@@ -243,7 +235,6 @@ private:
     std::stringstream Info; // Contains an information like "Info", "Warning" or "Error"
     std::stringstream Message; // Text to write into the logfile
     UINT MessageBoxStyle; // Style of the messagebox if needed
-    bool Flushed = false;
 
     //static std::string LastErrorMessage; // The last errormessage
 };

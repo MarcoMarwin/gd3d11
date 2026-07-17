@@ -102,16 +102,6 @@ typedef void( __thiscall* zCSkyControler_ClearBackground )(void*, zColor);
 
 struct zTRndSurfaceDesc;
 
-inline LONG g_DetourAttachStatus = ERROR_SUCCESS;
-
-inline void ResetDetourAttachStatus() {
-    g_DetourAttachStatus = ERROR_SUCCESS;
-}
-
-inline LONG GetDetourAttachStatus() {
-    return g_DetourAttachStatus;
-}
-
 template <typename TOriginal, typename THook>
 inline LONG DetourAttachTyped( TOriginal* originalFunction, THook hookFunction ) {
     static_assert( sizeof( TOriginal ) == sizeof( PVOID ), "Unexpected original function pointer size" );
@@ -127,17 +117,13 @@ inline LONG DetourAttachTyped( TOriginal* originalFunction, THook hookFunction )
     } hookCast;
     hookCast.func = hookFunction;
 
-    const LONG result = DetourAttach( ppOriginal, hookCast.ptr );
-    if ( result != ERROR_SUCCESS && g_DetourAttachStatus == ERROR_SUCCESS ) {
-        g_DetourAttachStatus = result;
-    }
-    return result;
+    return DetourAttach( ppOriginal, hookCast.ptr );
 }
 
 struct HookedFunctionInfo {
 
     /** Init all hooks here */
-    LONG InitHooks();
+    void InitHooks();
 
     zCBspTreeLoadBIN original_zCBspTreeLoadBIN = reinterpret_cast<zCBspTreeLoadBIN>(GothicMemoryLocations::zCBspTree::LoadBIN);
     zCWorldRender original_zCWorldRender = reinterpret_cast<zCWorldRender>(GothicMemoryLocations::zCWorld::Render);

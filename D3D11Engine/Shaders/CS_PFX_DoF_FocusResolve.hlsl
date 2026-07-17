@@ -20,6 +20,9 @@ cbuffer DepthOfFieldConstantBuffer : register( b0 )
     float DoF_NearBlurStrength;
 };
 
+SamplerState SS_Linear : register( s0 );
+Texture2D TX_Depth : register( t0 );
+Texture2D TX_PrevFocus : register( t1 );
 RWTexture2D<float> OutputFocus : register( u0 );
 
 [numthreads(1, 1, 1)]

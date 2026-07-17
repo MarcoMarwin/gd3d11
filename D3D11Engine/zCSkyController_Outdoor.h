@@ -96,16 +96,22 @@ public:
     /** Hooks the functions of this Class */
     static void Hook() {
         // Overwrite the rain-renderfunction and particle-updates
-        REPLACE_RANGE(
-            GothicMemoryLocations::zCSkyController_Outdoor::LOC_ProcessRainFXNOPStart,
-            GothicMemoryLocations::zCSkyController_Outdoor::LOC_ProcessRainFXNOPEnd - 1,
-            INST_NOP );
+        DWORD dwProtect;
+        if ( VirtualProtect( reinterpret_cast<void*>(GothicMemoryLocations::zCSkyController_Outdoor::LOC_ProcessRainFXNOPStart),
+            GothicMemoryLocations::zCSkyController_Outdoor::LOC_ProcessRainFXNOPEnd
+            - GothicMemoryLocations::zCSkyController_Outdoor::LOC_ProcessRainFXNOPStart,
+            PAGE_EXECUTE_READWRITE, &dwProtect ) ) {
+
+            REPLACE_RANGE( GothicMemoryLocations::zCSkyController_Outdoor::LOC_ProcessRainFXNOPStart, GothicMemoryLocations::zCSkyController_Outdoor::LOC_ProcessRainFXNOPEnd - 1, INST_NOP );
+        }
 
         // Replace the check for the lensflare with nops
-        REPLACE_RANGE(
-            GothicMemoryLocations::zCSkyController_Outdoor::LOC_SunVisibleStart,
-            GothicMemoryLocations::zCSkyController_Outdoor::LOC_SunVisibleEnd - 1,
-            INST_NOP );
+        if ( VirtualProtect( reinterpret_cast<void*>(GothicMemoryLocations::zCSkyController_Outdoor::LOC_SunVisibleStart),
+            GothicMemoryLocations::zCSkyController_Outdoor::LOC_SunVisibleEnd - GothicMemoryLocations::zCSkyController_Outdoor::LOC_SunVisibleStart,
+            PAGE_EXECUTE_READWRITE, &dwProtect ) ) {
+
+            REPLACE_RANGE( GothicMemoryLocations::zCSkyController_Outdoor::LOC_SunVisibleStart, GothicMemoryLocations::zCSkyController_Outdoor::LOC_SunVisibleEnd - 1, INST_NOP );
+        }
 
 #ifdef BUILD_GOTHIC_1_08k
 #ifdef BUILD_1_12F

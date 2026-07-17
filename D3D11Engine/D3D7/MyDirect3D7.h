@@ -1,87 +1,62 @@
 #pragma once
 #include "../pch.h"
-#include <new>
-#include <atomic>
 #include "MyDirect3DDevice7.h"
 #include "MyDirect3DVertexBuffer7.h"
 #include "../Engine.h"
 
 class MyDirect3D7 final : public IDirect3D7 {
 public:
-	MyDirect3D7( IDirect3D7* direct3d7 )
-		: RefCount( 1 ) {
+	MyDirect3D7( IDirect3D7* direct3d7 ) {
 		DebugWrite( "MyDirect3D7::MyDirect3D7\n" );
-		(void)direct3d7;
+
+		Direct3d7 = direct3d7;
+		RefCount = 1;
 	}
 
 	/*** IUnknown methods ***/
 	HRESULT __declspec(nothrow) STDMETHODCALLTYPE QueryInterface( REFIID riid, void** ppvObj ) override {
 		DebugWrite( "MyDirect3D7::QueryInterface\n" );
-		if ( !ppvObj ) return E_POINTER;
-		*ppvObj = nullptr;
-		if ( IsEqualIID( riid, IID_IUnknown )
-			|| IsEqualIID( riid, IID_IDirect3D7 ) ) {
-			*ppvObj = static_cast<IDirect3D7*>(this);
-			AddRef();
-			return S_OK;
-		}
-		return E_NOINTERFACE;
+		return S_OK;
 	}
 
 	ULONG __declspec(nothrow) STDMETHODCALLTYPE AddRef() override {
 		DebugWrite( "MyDirect3D7::AddRef\n" );
-		return RefCount.fetch_add( 1, std::memory_order_relaxed ) + 1;
+		return ++RefCount;
 	}
 
 	ULONG __declspec(nothrow) STDMETHODCALLTYPE Release() override {
 		DebugWrite( "MyDirect3D7::Release\n" );
-		const ULONG references =
-			RefCount.fetch_sub( 1, std::memory_order_acq_rel ) - 1;
-		if ( references == 0 ) {
+		if ( --RefCount == 0 ) {
 			delete this;
+			return 0;
 		}
-		return references;
+
+		return RefCount;
 	}
 
 	/*** IDirect3D7 methods ***/
 	HRESULT __declspec(nothrow) STDMETHODCALLTYPE CreateDevice( REFCLSID rclsid, LPDIRECTDRAWSURFACE7 lpDDS, LPDIRECT3DDEVICE7* lplpD3DDevice ) override {
 		DebugWrite( "MyDirect3D7::CreateDevice\n" );
-		(void)rclsid;
-		if ( !lplpD3DDevice ) return E_POINTER;
-		*lplpD3DDevice = nullptr;
+		HRESULT hr = S_OK;
 
-		auto* device =
-			new (std::nothrow) MyDirect3DDevice7( this, lpDDS );
-		if ( !device ) return E_OUTOFMEMORY;
-		*lplpD3DDevice = device;
-		return S_OK;
-	}
-
-	HRESULT __declspec(nothrow) STDMETHODCALLTYPE CreateVertexBuffer(
-		LPD3DVERTEXBUFFERDESC lpVBDesc,
-		LPDIRECT3DVERTEXBUFFER7* lplpD3DVertexBuffer,
-		DWORD dwFlags ) override {
-		DebugWrite( "MyDirect3D7::CreateVertexBuffer\n" );
-		(void)dwFlags;
-		if ( !lplpD3DVertexBuffer ) return E_POINTER;
-		*lplpD3DVertexBuffer = nullptr;
-		if ( !lpVBDesc ) return E_POINTER;
-
-		auto* vertexBuffer =
-			new (std::nothrow) MyDirect3DVertexBuffer7( *lpVBDesc );
-		if ( !vertexBuffer ) return E_OUTOFMEMORY;
-		if ( !vertexBuffer->IsValid() ) {
-			vertexBuffer->Release();
-			return E_FAIL;
+		if ( SUCCEEDED( hr ) ) {
+			*lplpD3DDevice = new MyDirect3DDevice7( this, nullptr );
 		}
 
-		*lplpD3DVertexBuffer = vertexBuffer;
+		return hr;
+	}
+
+	HRESULT __declspec(nothrow) STDMETHODCALLTYPE CreateVertexBuffer( LPD3DVERTEXBUFFERDESC lpVBDesc, LPDIRECT3DVERTEXBUFFER7* lplpD3DVertexBuffer, DWORD dwFlags ) override {
+		DebugWrite( "MyDirect3D7::CreateVertexBuffer\n" );
+
+		// Fake a vertexbuffer
+		*lplpD3DVertexBuffer = new MyDirect3DVertexBuffer7( *lpVBDesc );
+
 		return S_OK;
 	}
 
 	HRESULT __declspec(nothrow) STDMETHODCALLTYPE EnumDevices( LPD3DENUMDEVICESCALLBACK7 lpEnumDevicesCallback, LPVOID lpUserArg ) override {
 		DebugWrite( "MyDirect3D7::EnumDevices\n" );
-		if ( !lpEnumDevicesCallback ) return E_POINTER;
 
         D3DDEVICEDESC7 devDesc;
 		ZeroMemory(&devDesc, sizeof(D3DDEVICEDESC7));
@@ -165,14 +140,13 @@ public:
 		devDesc.dwVertexProcessingCaps = (D3DVTXPCAPS_TEXGEN|D3DVTXPCAPS_MATERIALSOURCE7|D3DVTXPCAPS_DIRECTIONALLIGHTS|D3DVTXPCAPS_POSITIONALLIGHTS|D3DVTXPCAPS_LOCALVIEWER);
 
 		// Pass it to the callback function
-		char description[256] = "DirectX11";
-		char name[256] = "DirectX11";
-		if ( Engine::GraphicsEngine ) {
-			strncpy_s( description,
-				Engine::GraphicsEngine->GetGraphicsDeviceName().c_str(),
-				_TRUNCATE );
-		}
-		(*lpEnumDevicesCallback)( description, name, &devDesc, lpUserArg );
+        char name[256] = "DirectX11";
+        if ( Engine::GraphicsEngine ) {
+            (*lpEnumDevicesCallback)(const_cast<char*>(Engine::GraphicsEngine->GetGraphicsDeviceName().c_str()), name, &devDesc, lpUserArg);
+        } else {
+            char desc[256] = "DirectX11";
+            (*lpEnumDevicesCallback)(desc, name, &devDesc, lpUserArg);
+        }
 		return S_OK;
 	}
 
@@ -183,8 +157,6 @@ public:
 
 	HRESULT __declspec(nothrow) STDMETHODCALLTYPE EnumZBufferFormats( REFCLSID riidDevice, LPD3DENUMPIXELFORMATSCALLBACK lpEnumCallback, LPVOID lpContext ) override {
 		DebugWrite( "MyDirect3D7::EnumZBufferFormats\n" );
-		(void)riidDevice;
-		if ( !lpEnumCallback ) return E_POINTER;
 
         static std::array<DDPIXELFORMAT, 4> zformats = { {
             {32, DDPF_ZBUFFER, 0, 16, 0x00, 0xFFFF, 0x00, 0x00},
@@ -193,15 +165,14 @@ public:
             {32, DDPF_STENCILBUFFER | DDPF_ZBUFFER, 0, 32, 0x08, 0xFFFFFF, 0xFF000000, 0x00},
         } };
 
-        for ( DDPIXELFORMAT& ppf : zformats ) {
-            if ( (*lpEnumCallback)(&ppf, lpContext) == D3DENUMRET_CANCEL )
-                break;
-        }
+        for ( DDPIXELFORMAT& ppf : zformats )
+            (*lpEnumCallback)(&ppf, lpContext);
 
 		return S_OK;
 	}
 
 private:
-	std::atomic<ULONG> RefCount;
+	IDirect3D7* Direct3d7;
+	int RefCount;
 };
 

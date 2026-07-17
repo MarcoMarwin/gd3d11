@@ -5,7 +5,6 @@
 */
 #pragma once
 #include "../pch.h"
-#include <atomic>
 #include <ddraw.h>
 
 class MyDirectDrawSurface7;
@@ -74,25 +73,20 @@ public:
 private:
 
 	/** Current ref-count */
-	std::atomic<ULONG> RefCount;
+	int RefCount;
 
 	/** Mip-level this represents */
 	int MipLevel;
 
 	/** Data pointer of this surface (Only valid during lock)*/
 	unsigned char* Data;
-	std::atomic_bool IsLocked;
 
 	/** Array of further attached surfaces */
-	std::vector<IDirectDrawSurface7*> AttachedSurfaces;
+	std::vector<FakeDirectDrawSurface7*> AttachedSurfaces;
 
 	/** The original desc this was created with */
 	DDSURFACEDESC2 OriginalDesc;
 
 	/** The base resource */
 	MyDirectDrawSurface7* Resource;
-
-	std::atomic<DWORD> Priority;
-	std::atomic<DWORD> Lod;
-	std::atomic<DWORD> Uniqueness;
 };

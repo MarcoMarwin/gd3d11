@@ -86,6 +86,7 @@ target_link_libraries(D3D11Engine PRIVATE
   dxguid
   gdi32
   imm32
+  imagehlp
   ntdll
   shlwapi
   user32

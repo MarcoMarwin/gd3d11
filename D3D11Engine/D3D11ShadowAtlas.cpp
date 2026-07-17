@@ -87,98 +87,77 @@ HRESULT D3D11ShadowAtlas::Init(
     UINT cascade0Size,
     UINT numCascades ) {
 
-    if ( !device ) {
-        return E_INVALIDARG;
-    }
-
-    const auto previousDevice = m_device;
-    const UINT previousCascadeCount = m_numCascades;
     m_device = device;
-    m_numCascades = std::clamp<UINT>( numCascades, 1, MAX_CSM_CASCADES );
+    constexpr UINT MAX_SHADOW_ATLAS_CASCADES = 4;
+    m_numCascades = std::clamp<UINT>( numCascades, 1, MAX_SHADOW_ATLAS_CASCADES );
+    // Cascade 0 must be at least 512 and a power-of-2-friendly value
+    m_cascade0Size = std::max<UINT>( cascade0Size, 512 );
 
-    const HRESULT hr = Resize( cascade0Size );
-    if ( FAILED( hr ) ) {
-        m_device = previousDevice;
-        m_numCascades = previousCascadeCount;
-    }
-    return hr;
+    return Resize( m_cascade0Size );
 }
 
 HRESULT D3D11ShadowAtlas::Resize( UINT cascade0Size ) {
-    if ( !m_device || m_numCascades == 0 ) {
+    if ( !m_device ) {
         LogError() << "ShadowAtlas::Resize - Device not initialized";
         return E_FAIL;
     }
 
-    const UINT maxTextureSize = m_device->GetFeatureLevel() >= D3D_FEATURE_LEVEL_11_0
-        ? D3D11_REQ_TEXTURE2D_U_OR_V_DIMENSION
-        : D3D10_REQ_TEXTURE2D_U_OR_V_DIMENSION;
-    const UINT maxCascadeSize = m_numCascades == 1
-        ? maxTextureSize
-        : maxTextureSize / 2;
+    m_cascade0Size = std::max<UINT>( cascade0Size, 512 );
 
-    D3D11ShadowAtlas layout;
-    layout.m_numCascades = m_numCascades;
-    layout.m_cascade0Size = std::clamp<UINT>( cascade0Size, 512, maxCascadeSize );
-    layout.ComputeLayout();
+    Release();
+    ComputeLayout();
 
-    D3D11_TEXTURE2D_DESC texDesc{};
-    texDesc.Width = layout.m_atlasWidth;
-    texDesc.Height = layout.m_atlasHeight;
+    HRESULT hr = S_OK;
+
+    // Create atlas texture (single Texture2D)
+    D3D11_TEXTURE2D_DESC texDesc = {};
+    texDesc.Width = m_atlasWidth;
+    texDesc.Height = m_atlasHeight;
     texDesc.MipLevels = 1;
     texDesc.ArraySize = 1;
     texDesc.Format = DXGI_FORMAT_R16_TYPELESS;
     texDesc.SampleDesc.Count = 1;
+    texDesc.SampleDesc.Quality = 0;
     texDesc.Usage = D3D11_USAGE_DEFAULT;
     texDesc.BindFlags = D3D11_BIND_DEPTH_STENCIL | D3D11_BIND_SHADER_RESOURCE;
+    texDesc.CPUAccessFlags = 0;
+    texDesc.MiscFlags = 0;
 
-    Microsoft::WRL::ComPtr<ID3D11Texture2D> newTexture;
-    HRESULT hr = m_device->CreateTexture2D( &texDesc, nullptr, newTexture.GetAddressOf() );
-    if ( FAILED( hr ) || !newTexture ) {
+    LE( m_device->CreateTexture2D( &texDesc, nullptr, m_texture.GetAddressOf() ) );
+    if ( FAILED( hr ) || !m_texture ) {
         LogError() << "ShadowAtlas::Resize - Failed to create atlas texture "
-            << layout.m_atlasWidth << "x" << layout.m_atlasHeight << ": 0x"
-            << std::hex << static_cast<unsigned long>(hr);
-        return FAILED( hr ) ? hr : E_FAIL;
+            << m_atlasWidth << "x" << m_atlasHeight;
+        return hr;
     }
+    SetDebugName( m_texture.Get(), "ShadowAtlas_Texture" );
 
-    D3D11_DEPTH_STENCIL_VIEW_DESC dsvDesc{};
+    // Create single DSV for the entire atlas
+    D3D11_DEPTH_STENCIL_VIEW_DESC dsvDesc = {};
     dsvDesc.Format = DXGI_FORMAT_D16_UNORM;
     dsvDesc.ViewDimension = D3D11_DSV_DIMENSION_TEXTURE2D;
+    dsvDesc.Texture2D.MipSlice = 0;
+    dsvDesc.Flags = 0;
 
-    Microsoft::WRL::ComPtr<ID3D11DepthStencilView> newDsv;
-    hr = m_device->CreateDepthStencilView(
-        newTexture.Get(), &dsvDesc, newDsv.GetAddressOf() );
-    if ( FAILED( hr ) || !newDsv ) {
-        LogError() << "ShadowAtlas::Resize - Failed to create DSV: 0x"
-            << std::hex << static_cast<unsigned long>(hr);
-        return FAILED( hr ) ? hr : E_FAIL;
+    LE( m_device->CreateDepthStencilView( m_texture.Get(), &dsvDesc, m_dsv.GetAddressOf() ) );
+    if ( FAILED( hr ) || !m_dsv ) {
+        LogError() << "ShadowAtlas::Resize - Failed to create DSV";
+        return hr;
     }
+    SetDebugName( m_dsv.Get(), "ShadowAtlas_DSV" );
 
-    D3D11_SHADER_RESOURCE_VIEW_DESC srvDesc{};
+    // Create SRV (Texture2D, not array)
+    D3D11_SHADER_RESOURCE_VIEW_DESC srvDesc = {};
     srvDesc.Format = DXGI_FORMAT_R16_UNORM;
     srvDesc.ViewDimension = D3D11_SRV_DIMENSION_TEXTURE2D;
+    srvDesc.Texture2D.MostDetailedMip = 0;
     srvDesc.Texture2D.MipLevels = 1;
 
-    Microsoft::WRL::ComPtr<ID3D11ShaderResourceView> newSrv;
-    hr = m_device->CreateShaderResourceView(
-        newTexture.Get(), &srvDesc, newSrv.GetAddressOf() );
-    if ( FAILED( hr ) || !newSrv ) {
-        LogError() << "ShadowAtlas::Resize - Failed to create SRV: 0x"
-            << std::hex << static_cast<unsigned long>(hr);
-        return FAILED( hr ) ? hr : E_FAIL;
+    LE( m_device->CreateShaderResourceView( m_texture.Get(), &srvDesc, m_srv.GetAddressOf() ) );
+    if ( FAILED( hr ) || !m_srv ) {
+        LogError() << "ShadowAtlas::Resize - Failed to create SRV";
+        return hr;
     }
-
-    SetDebugName( newTexture.Get(), "ShadowAtlas_Texture" );
-    SetDebugName( newDsv.Get(), "ShadowAtlas_DSV" );
-    SetDebugName( newSrv.Get(), "ShadowAtlas_SRV" );
-
-    m_texture = std::move( newTexture );
-    m_dsv = std::move( newDsv );
-    m_srv = std::move( newSrv );
-    m_cascade0Size = layout.m_cascade0Size;
-    m_atlasWidth = layout.m_atlasWidth;
-    m_atlasHeight = layout.m_atlasHeight;
-    m_cascades = layout.m_cascades;
+    SetDebugName( m_srv.Get(), "ShadowAtlas_SRV" );
 
     LogInfo() << "ShadowAtlas: Created " << m_numCascades << " cascades, atlas "
         << m_atlasWidth << "x" << m_atlasHeight
@@ -187,18 +166,16 @@ HRESULT D3D11ShadowAtlas::Resize( UINT cascade0Size ) {
         << (m_numCascades > 2 ? ", C2=" + std::to_string( m_cascades[2].size ) : "")
         << (m_numCascades > 3 ? ", C3=" + std::to_string( m_cascades[3].size ) : "")
         << ")";
+
     return S_OK;
 }
 
 HRESULT D3D11ShadowAtlas::Resize( UINT cascade0Size, UINT numCascades ) {
-    const UINT previousCascadeCount = m_numCascades;
-    m_numCascades = std::clamp<UINT>( numCascades, 1, MAX_CSM_CASCADES );
-    const HRESULT hr = Resize( cascade0Size );
-    if ( FAILED( hr ) ) {
-        m_numCascades = previousCascadeCount;
-    }
-    return hr;
+    constexpr UINT MAX_SHADOW_ATLAS_CASCADES = 4;
+    m_numCascades = std::clamp<UINT>( numCascades, 1, MAX_SHADOW_ATLAS_CASCADES );
+    return Resize( cascade0Size );
 }
+
 ID3D11DepthStencilView* D3D11ShadowAtlas::GetDepthStencilView() const {
     return m_dsv.Get();
 }
@@ -208,13 +185,13 @@ ID3D11ShaderResourceView* D3D11ShadowAtlas::GetShaderResourceView() const {
 }
 
 void D3D11ShadowAtlas::BindToPixelShader( ID3D11DeviceContext1* context, UINT slot ) const {
-    if ( context && m_srv && slot < D3D11_COMMONSHADER_INPUT_RESOURCE_SLOT_COUNT ) {
+    if ( m_srv ) {
         context->PSSetShaderResources( slot, 1, m_srv.GetAddressOf() );
     }
 }
 
 void D3D11ShadowAtlas::BindToVertexShader( ID3D11DeviceContext1* context, UINT slot ) const {
-    if ( context && m_srv && slot < D3D11_COMMONSHADER_INPUT_RESOURCE_SLOT_COUNT ) {
+    if ( m_srv ) {
         context->VSSetShaderResources( slot, 1, m_srv.GetAddressOf() );
     }
 }

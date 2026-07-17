@@ -1,7 +1,6 @@
 #include "D3D11ShadowMap.h"
 #include <algorithm>
 #include <cmath>
-#include <stdexcept>
 #include <DirectXMath.h>
 
 // TODO: Remove circular dependencies
@@ -322,262 +321,165 @@ D3D11ShadowMap::D3D11ShadowMap() {
     
 }
 
-D3D11ShadowMap::~D3D11ShadowMap() {
-    WaitShadowCullingComplete();
-}
+D3D11ShadowMap::~D3D11ShadowMap() {}
 
 bool D3D11ShadowMap::ShouldUseAtlas() const {
     const auto& settings = Engine::GAPI->GetRendererState().RendererSettings;
     // FL10 always needs atlas fallback. On FL11+, this can be toggled at runtime.
     return FeatureLevel10Compatibility || settings.DebugSettings.FeatureSet.UseShadowAtlas;
 }
-namespace {
-    HRESULT CreateShadowSampler( ID3D11Device1* device, bool useAtlas,
-                                 Microsoft::WRL::ComPtr<ID3D11SamplerState>& output ) {
-        if ( !device ) {
-            return E_INVALIDARG;
-        }
+void D3D11ShadowMap::RecreateShadowSampler() {
+    if ( !m_device ) return;
 
-        D3D11_SAMPLER_DESC samplerDesc{};
-        samplerDesc.Filter = D3D11_FILTER_COMPARISON_MIN_MAG_MIP_LINEAR;
-        const D3D11_TEXTURE_ADDRESS_MODE addressMode = useAtlas
-            ? D3D11_TEXTURE_ADDRESS_CLAMP
-            : D3D11_TEXTURE_ADDRESS_BORDER;
-        samplerDesc.BorderColor[0] = 1.0f;
-        samplerDesc.BorderColor[1] = 1.0f;
-        samplerDesc.BorderColor[2] = 1.0f;
-        samplerDesc.BorderColor[3] = 1.0f;
-        samplerDesc.AddressU = addressMode;
-        samplerDesc.AddressV = addressMode;
-        samplerDesc.AddressW = addressMode;
-        samplerDesc.MaxAnisotropy = 1;
-        samplerDesc.ComparisonFunc = D3D11_COMPARISON_LESS_EQUAL;
-        samplerDesc.MinLOD = -FLT_MAX;
-        samplerDesc.MaxLOD = FLT_MAX;
+    // Create sampler
+    D3D11_SAMPLER_DESC samplerDesc = {};
+    samplerDesc.Filter = D3D11_FILTER_COMPARISON_MIN_MAG_MIP_LINEAR;
+    // Atlas cascades are packed sub-rects and therefore use CLAMP.
+    // Array cascades use a lit border so PCF taps cannot wrap to the opposite edge.
+    auto addressMode = m_useAtlas ? D3D11_TEXTURE_ADDRESS_CLAMP : D3D11_TEXTURE_ADDRESS_BORDER;
+    samplerDesc.BorderColor[0] = 1.0f;
+    samplerDesc.BorderColor[1] = 1.0f;
+    samplerDesc.BorderColor[2] = 1.0f;
+    samplerDesc.BorderColor[3] = 1.0f;
+    samplerDesc.AddressU = addressMode;
+    samplerDesc.AddressV = addressMode;
+    samplerDesc.AddressW = addressMode;
+    samplerDesc.MipLODBias = 0;
+    samplerDesc.MaxAnisotropy = 1;
+    samplerDesc.ComparisonFunc = D3D11_COMPARISON_LESS_EQUAL;
+    samplerDesc.MinLOD = -FLT_MAX;
+    samplerDesc.MaxLOD = FLT_MAX;
 
-        Microsoft::WRL::ComPtr<ID3D11SamplerState> sampler;
-        const HRESULT hr = device->CreateSamplerState(
-            &samplerDesc, sampler.GetAddressOf() );
-        if ( FAILED( hr ) || !sampler ) {
-            LogError() << "Failed to create shadow-map sampler: 0x"
-                << std::hex << static_cast<unsigned long>(hr);
-            return FAILED( hr ) ? hr : E_FAIL;
-        }
-        SetDebugName( sampler.Get(), "ShadowmapSamplerState" );
-        output = std::move( sampler );
-        return S_OK;
-    }
+    m_shadowmapSampler.Reset();
+    HRESULT hr;
+    LE( m_device->CreateSamplerState( &samplerDesc, m_shadowmapSampler.GetAddressOf() ) );
+    SetDebugName( m_shadowmapSampler.Get(), "ShadowmapSamplerState" );
 }
 
-HRESULT D3D11ShadowMap::RecreateShadowSampler() {
-    Microsoft::WRL::ComPtr<ID3D11SamplerState> sampler;
-    const HRESULT hr = CreateShadowSampler( m_device.Get(), m_useAtlas, sampler );
-    if ( SUCCEEDED( hr ) ) {
-        m_shadowmapSampler = std::move( sampler );
-    }
-    return hr;
-}
-
-HRESULT D3D11ShadowMap::EnsureShadowMapBackend( int size ) {
-    if ( !m_device || !Engine::GAPI ) {
-        return E_FAIL;
-    }
-
+void D3D11ShadowMap::EnsureShadowMapBackend( int size ) {
+    if ( !m_device ) return;
+     
     const auto& settings = Engine::GAPI->GetRendererState().RendererSettings;
-    const UINT atlasNumCascades = static_cast<UINT>(std::clamp<int>(
-        settings.NumShadowCascades, 1, std::min( 4, MAX_CSM_CASCADES ) ));
-    const bool desiredUseAtlas = ShouldUseAtlas();
-    const int clampedSize = std::clamp<int>(
-        size, 512, FeatureLevel10Compatibility ? 8192 : 16384 );
-    const int atlasCascade0Size = atlasNumCascades <= 1
-        ? clampedSize
-        : (std::max)(512, clampedSize / 4);
+    const UINT atlasNumCascades = static_cast<UINT>( std::clamp<int>( settings.NumShadowCascades, 1, std::min(4, MAX_CSM_CASCADES) ) );
+
+    bool desiredUseAtlas = ShouldUseAtlas();
+    int clampedSize = std::min<int>( std::max<int>( size, 512 ), (FeatureLevel10Compatibility ? 8192 : 16384) );
 
     if ( desiredUseAtlas != m_useAtlas ) {
-        std::unique_ptr<D3D11ShadowAtlas> newAtlas;
-        std::unique_ptr<D3D11CascadedShadowMapBuffer> newCascades;
-        HRESULT hr = S_OK;
-        if ( desiredUseAtlas ) {
-            newAtlas = std::make_unique<D3D11ShadowAtlas>();
-            hr = newAtlas->Init( m_device, atlasCascade0Size, atlasNumCascades );
-        } else {
-            newCascades = std::make_unique<D3D11CascadedShadowMapBuffer>();
-            hr = newCascades->Init( m_device, clampedSize, MAX_CSM_CASCADES );
-        }
-        if ( FAILED( hr ) ) {
-            return hr;
-        }
-
-        Microsoft::WRL::ComPtr<ID3D11SamplerState> newSampler;
-        hr = CreateShadowSampler( m_device.Get(), desiredUseAtlas, newSampler );
-        if ( FAILED( hr ) ) {
-            return hr;
-        }
-
-        auto* graphicsEngine = reinterpret_cast<D3D11GraphicsEngine*>(Engine::GraphicsEngine);
-        if ( graphicsEngine
-            && graphicsEngine->ReloadShaders( ShaderCategory::LightsAndShadows ) != XR_SUCCESS ) {
-            LogError() << "Shadow backend switch aborted because its shaders could not be reloaded.";
-            return E_FAIL;
-        }
-
+        // Switch backend at runtime.
         m_useAtlas = desiredUseAtlas;
-        m_shadowmapSampler = std::move( newSampler );
+
         if ( m_useAtlas ) {
-            m_shadowAtlas = std::move( newAtlas );
             m_cascadedShadowMap.reset();
+            m_shadowAtlas = std::make_unique<D3D11ShadowAtlas>();
+            const int maxAtlasCascade0Size = (atlasNumCascades <= 1) ? clampedSize : (clampedSize / 2);
+            int atlasCascade0Size = std::min<int>( clampedSize, maxAtlasCascade0Size );
+            m_shadowAtlas->Init( m_device, atlasCascade0Size, atlasNumCascades );
         } else {
-            m_cascadedShadowMap = std::move( newCascades );
             m_shadowAtlas.reset();
+            m_cascadedShadowMap = std::make_unique<D3D11CascadedShadowMapBuffer>();
+            m_cascadedShadowMap->Init( m_device, clampedSize, MAX_CSM_CASCADES );
         }
-        return S_OK;
+
+        // Sampler addressing depends on atlas/array path.
+        RecreateShadowSampler();
+
+        // SHADOW_ATLAS is a compile-time shader macro; reload relevant shaders when mode flips.
+        auto* graphicsEngine = reinterpret_cast<D3D11GraphicsEngine*>( Engine::GraphicsEngine );
+        if ( graphicsEngine ) {
+            graphicsEngine->ReloadShaders( ShaderCategory::LightsAndShadows );
+        }
     }
 
-    if ( m_useAtlas ) {
-        if ( !m_shadowAtlas ) {
-            auto atlas = std::make_unique<D3D11ShadowAtlas>();
-            const HRESULT hr = atlas->Init(
-                m_device, atlasCascade0Size, atlasNumCascades );
-            if ( FAILED( hr ) ) {
-                return hr;
-            }
-            m_shadowAtlas = std::move( atlas );
-            return S_OK;
-        }
-        return m_shadowAtlas->Resize( atlasCascade0Size, atlasNumCascades );
+    // Ensure resources exist even if no mode switch occurred.
+    if ( m_useAtlas && !m_shadowAtlas ) {
+        m_shadowAtlas = std::make_unique<D3D11ShadowAtlas>();
+        const int maxAtlasCascade0Size = (atlasNumCascades <= 1) ? clampedSize : (clampedSize / 4);
+        int atlasCascade0Size = std::min<int>( clampedSize, maxAtlasCascade0Size );
+        m_shadowAtlas->Init( m_device, atlasCascade0Size, atlasNumCascades );
+    } else if ( m_useAtlas && m_shadowAtlas ) {
+        const int maxAtlasCascade0Size = (atlasNumCascades <= 1) ? clampedSize : (clampedSize / 4);
+        int atlasCascade0Size = std::min<int>( clampedSize, maxAtlasCascade0Size );
+        m_shadowAtlas->Resize( atlasCascade0Size, atlasNumCascades );
+    } else if ( !m_useAtlas && !m_cascadedShadowMap ) {
+        m_cascadedShadowMap = std::make_unique<D3D11CascadedShadowMapBuffer>();
+        m_cascadedShadowMap->Init( m_device, clampedSize, MAX_CSM_CASCADES );
     }
-
-    if ( !m_cascadedShadowMap ) {
-        auto cascades = std::make_unique<D3D11CascadedShadowMapBuffer>();
-        const HRESULT hr = cascades->Init( m_device, clampedSize, MAX_CSM_CASCADES );
-        if ( FAILED( hr ) ) {
-            return hr;
-        }
-        m_cascadedShadowMap = std::move( cascades );
-        return S_OK;
-    }
-    return m_cascadedShadowMap->Resize( clampedSize );
 }
-XRESULT D3D11ShadowMap::WaitShadowCullingComplete()
+
+void D3D11ShadowMap::WaitShadowCullingComplete()
 {
     ZoneScopedN( "WaitShadowCullingComplete" );
-
-    std::vector<std::future<void>> jobs;
-    {
-        std::lock_guard<LockableBase( std::mutex )> lock( m_CullingJobsMutex );
-        jobs.swap( m_ShadowCullingJobs );
-    }
-
-    XRESULT result = XR_SUCCESS;
-    for ( auto& job : jobs ) {
-        if ( !job.valid() ) continue;
-        try {
-            job.get();
-        } catch ( const std::exception& error ) {
-            LogError() << "Shadow culling job failed: " << error.what();
-            result = XR_FAILED;
-        } catch ( ... ) {
-            LogError() << "Shadow culling job failed unexpectedly.";
-            result = XR_FAILED;
+    std::lock_guard<LockableBase( std::mutex )> lock( m_CullingJobsMutex );
+    for ( auto& job : m_ShadowCullingJobs ) {
+        if ( job.valid() ) {
+            job.wait();
         }
     }
-    return result;
 }
 
-XRESULT D3D11ShadowMap::Init( Microsoft::WRL::ComPtr<ID3D11Device1>& device,
-                              Microsoft::WRL::ComPtr<ID3D11DeviceContext1>& context,
-                              int size ) {
-    if ( !device || !context || !Engine::GAPI || !Engine::GraphicsEngine ) {
-        return XR_INVALID_ARG;
-    }
-
+void D3D11ShadowMap::Init( Microsoft::WRL::ComPtr<ID3D11Device1>& device, Microsoft::WRL::ComPtr<ID3D11DeviceContext1>& context, int size ) {
+    HRESULT hr;
     m_device = device;
     m_context = context;
-    const int clampedSize = std::clamp<int>(
-        size, 512, FeatureLevel10Compatibility ? 8192 : 16384 );
+
+    int s = std::min<int>( std::max<int>( size, 512 ), (FeatureLevel10Compatibility ? 8192 : 16384) );
+
     m_useAtlas = ShouldUseAtlas();
+    RecreateShadowSampler();
 
-    if ( FAILED( RecreateShadowSampler() ) ) {
-        return XR_FAILED;
+    // Dummy cube RT used for fallback to satisfy pixel shader runs that expect a RTV bound
+    m_dummyCubeRT = std::make_unique<RenderToTextureBuffer>( m_device.Get(), 16, 16, DXGI_FORMAT_ENGINE_DEFAULT, nullptr, DXGI_FORMAT_UNKNOWN, DXGI_FORMAT_UNKNOWN, 1, 6 );
+
+    EnsureShadowMapBackend( s );
+
+    for ( int i = 0; i < MAX_CSM_CASCADES; ++i ) {
+        m_RenderQueues[i] = std::make_unique<D3D11RenderQueue>( device.Get(), context.Get() );
     }
 
-    HRESULT dummyResult = E_FAIL;
-    auto dummyCube = std::make_unique<RenderToTextureBuffer>(
-        m_device.Get(), 16, 16, DXGI_FORMAT_ENGINE_DEFAULT, &dummyResult,
-        DXGI_FORMAT_UNKNOWN, DXGI_FORMAT_UNKNOWN, 1, 6 );
-    if ( FAILED( dummyResult ) || !dummyCube->GetRenderTargetView()
-        || !dummyCube->GetShaderResView() || !dummyCube->GetRTVCubemapFace( 0 ) ) {
-        LogError() << "Failed to create the fallback shadow cubemap render target.";
-        return XR_FAILED;
-    }
+    D3D11GraphicsEngineBase* engine = reinterpret_cast<D3D11GraphicsEngineBase*>( Engine::GraphicsEngine );
 
-    if ( FAILED( EnsureShadowMapBackend( clampedSize ) ) ) {
-        LogError() << "Failed to create the world shadow-map backend.";
-        return XR_FAILED;
-    }
+    // Create constantbuffer for the view-matrices
+    D3D11ConstantBuffer* cb = nullptr;
+    LE(engine->CreateConstantBuffer( &cb, nullptr, sizeof( CubemapGSConstantBuffer ) ));
+    m_PointLightCB.reset( cb );
 
-    std::array<std::unique_ptr<D3D11RenderQueue>, MAX_CSM_CASCADES> renderQueues;
-    for ( auto& queue : renderQueues ) {
-        queue = std::make_unique<D3D11RenderQueue>( device.Get(), context.Get() );
-    }
-
-    auto pointLightBuffer = std::make_unique<D3D11ConstantBuffer>(
-        sizeof( CubemapGSConstantBuffer ), nullptr );
-    if ( !pointLightBuffer->IsValid() ) {
-        LogError() << "Failed to create the point-light shadow constant buffer.";
-        return XR_FAILED;
-    }
-
-    m_dummyCubeRT = std::move( dummyCube );
-    m_RenderQueues = std::move( renderQueues );
-    m_PointLightCB = std::move( pointLightBuffer );
-    m_requestedShadowMapSize = clampedSize;
-    m_lastNumCascades = std::clamp<int>(
-        Engine::GAPI->GetRendererState().RendererSettings.NumShadowCascades,
-        1, std::min( 4, MAX_CSM_CASCADES ) );
+    Resize( s );
 
     if ( !FeatureLevel10Compatibility ) {
-        auto tiledDeferred = std::make_unique<D3D11TiledDeferredShading>();
-        if ( tiledDeferred->Init( device, context ) == XR_SUCCESS ) {
-            m_TiledDeferred = std::move( tiledDeferred );
-        } else {
-            LogWarn() << "Tiled deferred lighting is unavailable; using the legacy light path.";
-            m_TiledDeferred.reset();
+        m_TiledDeferred = std::make_unique<D3D11TiledDeferredShading>();
+        m_TiledDeferred->Init( device, context );
+    }
+}
+
+void D3D11ShadowMap::Resize( int size ) {
+
+    if ( !m_device ) return;
+
+    const int maxSize = (FeatureLevel10Compatibility ? 8192 : 16384);
+    const int s = std::min<int>( std::max<int>( size, 512 ), maxSize );
+    const auto& settings = Engine::GAPI->GetRendererState().RendererSettings;
+    const UINT atlasNumCascades = static_cast<UINT>( std::clamp<int>( settings.NumShadowCascades, 1, std::min( 4, MAX_CSM_CASCADES ) ) );
+
+    EnsureShadowMapBackend( s );
+
+    if ( m_useAtlas ) {
+        // Atlas path: with one cascade, use full hardware limit; otherwise reserve width for atlas packing.
+        const int maxAtlasCascade0Size = (atlasNumCascades <= 1) ? maxSize : (maxSize / 4);
+        int atlasCascade0Size = std::min<int>( s, maxAtlasCascade0Size );
+        if ( m_shadowAtlas ) {
+            m_shadowAtlas->Resize( atlasCascade0Size, atlasNumCascades );
+        }
+    } else {
+        // Texture array path
+        if ( m_cascadedShadowMap ) {
+            m_cascadedShadowMap->Resize( s );
         }
     }
-    return XR_SUCCESS;
+
+    m_lastNumCascades = static_cast<int>( atlasNumCascades );
 }
 
-XRESULT D3D11ShadowMap::Resize( int size ) {
-    if ( !m_device || !Engine::GAPI ) return XR_FAILED;
-
-    const int clampedSize = std::clamp<int>(
-        size, 512, FeatureLevel10Compatibility ? 8192 : 16384 );
-    const int desiredCascades = std::clamp<int>(
-        Engine::GAPI->GetRendererState().RendererSettings.NumShadowCascades,
-        1, std::min( 4, MAX_CSM_CASCADES ) );
-    const bool desiredAtlas = ShouldUseAtlas();
-    const bool backendValid = m_useAtlas
-        ? (m_shadowAtlas && m_shadowAtlas->IsValid())
-        : (m_cascadedShadowMap && m_cascadedShadowMap->IsValid());
-    const bool needsResourceChange = !backendValid
-        || desiredAtlas != m_useAtlas
-        || clampedSize != m_requestedShadowMapSize
-        || (desiredAtlas && desiredCascades != m_lastNumCascades);
-    if ( !needsResourceChange ) {
-        m_lastNumCascades = desiredCascades;
-        return XR_SUCCESS;
-    }
-
-    if ( FAILED( EnsureShadowMapBackend( clampedSize ) ) ) {
-        LogError() << "Failed to resize the world shadow map; retaining the previous resources.";
-        return XR_FAILED;
-    }
-
-    m_requestedShadowMapSize = clampedSize;
-    m_lastNumCascades = desiredCascades;
-    return XR_SUCCESS;
-}
 void D3D11ShadowMap::BindToPixelShader( ID3D11DeviceContext1* context, UINT slot ) {
     if ( m_useAtlas ) {
         if ( m_shadowAtlas ) m_shadowAtlas->BindToPixelShader( context, slot );
@@ -586,22 +488,16 @@ void D3D11ShadowMap::BindToPixelShader( ID3D11DeviceContext1* context, UINT slot
     }
 }
 void D3D11ShadowMap::BindSampler( ID3D11DeviceContext1* context, UINT slot ) {
-    if ( context && m_shadowmapSampler && slot < D3D11_COMMONSHADER_SAMPLER_SLOT_COUNT ) context->PSSetSamplers( slot, 1, m_shadowmapSampler.GetAddressOf() );
+    if ( m_shadowmapSampler ) context->PSSetSamplers( slot, 1, m_shadowmapSampler.GetAddressOf() );
 }
 
 void D3D11ShadowMap::BindSamplerToCS( ID3D11DeviceContext1* context, UINT slot ) {
-    if ( context && m_shadowmapSampler && slot < D3D11_COMMONSHADER_SAMPLER_SLOT_COUNT ) context->CSSetSamplers( slot, 1, m_shadowmapSampler.GetAddressOf() );
+    if ( m_shadowmapSampler ) context->CSSetSamplers( slot, 1, m_shadowmapSampler.GetAddressOf() );
 }
 
 XRESULT D3D11ShadowMap::PrepareRender()
 {
     ZoneScopedN("D3D11ShadowMap::PrepareRender");
-    if ( WaitShadowCullingComplete() != XR_SUCCESS ) {
-        return XR_FAILED;
-    }
-    if ( !Engine::GAPI || !m_device || !m_context ) {
-        return XR_FAILED;
-    }
     // Check if shadowmap resources need to be recreated due to setting changes
     {
         auto& settings = Engine::GAPI->GetRendererState().RendererSettings;
@@ -609,19 +505,16 @@ XRESULT D3D11ShadowMap::PrepareRender()
         const int desiredSize = std::min<int>( std::max<int>( settings.ShadowMapSize, 512 ), maxSize );
         const int desiredCascades = std::clamp( settings.NumShadowCascades, 1, MAX_CSM_CASCADES );
 
-        if ( m_requestedShadowMapSize != desiredSize
+        if ( GetSizeX() != desiredSize
             || m_useAtlas != ShouldUseAtlas()
             || m_lastNumCascades != desiredCascades ) {
             LogInfo() << "Shadowmap config changed, resizing to " << desiredSize << "x" << desiredSize;
-            if ( Resize( desiredSize ) != XR_SUCCESS ) {
-                return XR_FAILED;
-            }
+            Resize( desiredSize );
             settings.ShadowMapSize = desiredSize;
         }
     }
 
-    oCGame* game = oCGame::GetGame();
-    zCCamera* camera = game ? static_cast<zCCamera*>(game->_zCSession_camera) : nullptr;
+    zCCamera* camera = (zCCamera*)oCGame::GetGame()->_zCSession_camera;
     if ( !camera ) {
         return XR_SUCCESS;
     }
@@ -854,19 +747,17 @@ XRESULT D3D11ShadowMap::PrepareRender()
         }
     }
 
-    if ( settings.ThreadedShadowCulling && Engine::WorkerThreadPool ) {
-        std::vector<std::future<void>> jobs;
-        try {
-            for ( size_t i = 0; i < static_cast<size_t>(numCascades); ++i ) {
-                if ( !m_RenderQueues[i] ) {
-                    throw std::runtime_error( "Shadow render queue is unavailable." );
-                }
-                m_RenderQueues[i]->Reset();
+    if ( settings.ThreadedShadowCulling ) {
+        std::lock_guard<LockableBase( std::mutex )> lock( m_CullingJobsMutex );
+        m_ShadowCullingJobs.clear();
+
+        for ( size_t i = 0; i < static_cast<size_t>(numCascades); i++ ) {
+            m_RenderQueues[i]->Reset();
             if ( !m_ShouldUpdateCascade[i] ) {
                 continue; // Skip culling for this cascade if we're not updating it this frame
             }
 
-                jobs.push_back( Engine::WorkerThreadPool->enqueue( []( const CancellationToken& token, D3D11ShadowMap* _this, size_t idx ) {
+            m_ShadowCullingJobs.push_back( Engine::WorkerThreadPool->enqueue( []( const CancellationToken& token, D3D11ShadowMap* _this, size_t idx ) {
                 if ( token.isCancelled() ) {
                     return;
                 }
@@ -900,22 +791,9 @@ XRESULT D3D11ShadowMap::PrepareRender()
 
                 Engine::GAPI->CollectVisibleVobs( ctx );
 
-                }, this, i ).future );
-            }
-        } catch ( const std::exception& error ) {
-            for ( auto& job : jobs ) if ( job.valid() ) job.wait();
-            LogError() << "Failed to enqueue shadow culling: " << error.what();
-            return XR_FAILED;
-        } catch ( ... ) {
-            for ( auto& job : jobs ) if ( job.valid() ) job.wait();
-            LogError() << "Failed to enqueue shadow culling unexpectedly.";
-            return XR_FAILED;
+            }, this, i ).future );
         }
-
-        {
-            std::lock_guard<LockableBase( std::mutex )> lock( m_CullingJobsMutex );
-            m_ShadowCullingJobs = std::move( jobs );
-        }
+        
         return XR_SUCCESS;
     }
 
@@ -1278,9 +1156,7 @@ XRESULT D3D11ShadowMap::DrawWorldShadow( )
     auto _ = graphicsEngine->RecordGraphicsEvent( GE_NAME( "DrawWorldShadow" ) );
     ZoneScopedN( "DrawWorldShadow" );
 
-    if ( WaitShadowCullingComplete() != XR_SUCCESS ) {
-        return XR_FAILED;
-    }
+    WaitShadowCullingComplete();
 
     auto& settings = Engine::GAPI->GetRendererState().RendererSettings;
     

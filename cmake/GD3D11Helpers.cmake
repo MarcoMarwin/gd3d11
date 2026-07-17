@@ -212,7 +212,6 @@ function(gd3d11_apply_common_compile_settings target_name)
   endif()
 
   if(MSVC)
-    target_link_options(${target_name} PRIVATE /DYNAMICBASE /NXCOMPAT)
     target_compile_options(${target_name} PRIVATE
       /W3
       /MP

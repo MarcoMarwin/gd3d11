@@ -280,7 +280,9 @@
     <ClInclude Include="D3D11PFX_HeightFog.h">
       <Filter>Engine\D3D11\PFX\Effects</Filter>
     </ClInclude>
-
+    <ClInclude Include="D3D11PFX_DistanceBlur.h">
+      <Filter>Engine\D3D11\PFX\Effects</Filter>
+    </ClInclude>
     <ClInclude Include="D3D11PFX_HDR.h">
       <Filter>Engine\D3D11\PFX\Effects</Filter>
     </ClInclude>
@@ -730,6 +732,7 @@
     <ClInclude Include="RenderGraph.h">
       <Filter>Engine\Graph</Filter>
     </ClInclude>
+    <ClInclude Include="D3D11RenderQueue.h" />
     <ClInclude Include="D3D11PFX_XeGTAO.h">
       <Filter>Engine\D3D11\PFX\Effects</Filter>
     </ClInclude>
@@ -870,7 +873,9 @@
     <ClCompile Include="D3D11PFX_HeightFog.cpp">
       <Filter>Engine\D3D11\PFX\Effects</Filter>
     </ClCompile>
-
+    <ClCompile Include="D3D11PFX_DistanceBlur.cpp">
+      <Filter>Engine\D3D11\PFX\Effects</Filter>
+    </ClCompile>
     <ClCompile Include="D3D11PFX_HDR.cpp">
       <Filter>Engine\D3D11\PFX\Effects</Filter>
     </ClCompile>

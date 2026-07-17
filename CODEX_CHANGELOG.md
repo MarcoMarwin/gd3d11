@@ -550,18 +550,13 @@ Kurze, append-only Dokumentation der von Codex gepushten Renderer-Builds.
 - Grenzen: Render Scale, Aspect-/Viewport-, Kamera- und echte Aufloesungswechsel-Pfade bleiben unveraendert.
 - Pruefung: AGENTS-Regeln gelesen; Buildnummer aus outputs ermittelt; Kirides-Nightly/17.9.7 fuer Performance-Pfade verglichen; Occlusion-/MotionBlur-/ShadowFilter-Reste, Projekt-XML, Render-Scale-/Aspect-Grenze, Escape-Artefakte und git diff --check statisch kontrolliert. Kein vollstaendiger lokaler C++-/Shader-Build.
 
-## Build 133 (Release-Candidate-Renderer, F11-Aufraeumen, Regen/Wasser/Wolken und Schattenstabilitaet)
+## Build 135 (Release-Candidate aus Build 132 mit selektiven 134-Rendererfixes)
 
-- F11-Menue: sichtbare Optionen und Preset-Grenze wurden neu geordnet; entfernte Altoptionen fuer interaktive Vegetation, Vegetations-Gegenlicht und Wasserbewegung sind nicht mehr separat steuerbar, waehrend Wasserbewegung und Vegetations-Gegenlicht dauerhaft aktiv bleiben.
-- Regen/Wetter: Regenwolken, Raincloud-Textur, dynamische Wolken und Rueckkehr zu sonnigem Wetter blenden wieder sauber ineinander, inklusive Savegame-Ladepfad.
-- Schatten: Contact Shadows sind unter FSR3 wieder sichtbar, fuer problematische NPC-/Gesichtsbereiche entschaerft und die Gesichtsschatten werden stabiler/weicher gefiltert.
-- Transparenz/Wet-Ground: transparente Weltgeometrie wird bei Regen/Nacht stabiler behandelt, ohne dass Ground-SSR wieder durch solide Geometrie hindurchscheint.
-- Wasser: Wasserreflektionen bleiben regelbar, Wasserbewegung bleibt immer aktiv; Wasserfarbe, Uferuebergaenge und Regen-/Nacht-Darstellung wurden optisch ausgeglichen.
-- Dynamische Wolken: Konturaufhellungen an Objektkanten werden vermieden; Tiefwolken reichen sauberer an den Horizont, koennen Godrays abschatten/formen und werden in gueltigen Wasser-SSR-Treffern reflektiert.
-- Korrekturpush: Die PowerShell-Bedingungen in den Build- und Package-Actions wurden klammerstabil formuliert; zusaetzlich wurden C++-Compilerbrueche aus dem Release_G1_AVX-Job typ- und signaturstabil korrigiert.
-- Pruefung: AGENTS-Regeln gelesen; Buildnummer aus outputs ermittelt; Kirides-/Build-Vergleiche fuer die betroffenen Renderpfade genutzt; F11-/INI-/Preset-Pfade, Shaderbindings, RenderGraph-Reihenfolge, Ressourcen-Cleanup, Projektpfade und Escape-Artefakte statisch kontrolliert. Kein vollstaendiger lokaler C++-/Shader-Build.
-- Korrekturpush: Release_G1_12f speichert die Morph-Positionshistorie wieder als XMFLOAT3, damit der 1.12f-Job nicht an float3/XMFLOAT3 emplace_back scheitert.
-- Korrekturpush: Die System-DirectDraw-Validierung verlangt CheckFullscreen nicht mehr als Pflicht-Export; dadurch laden Gothic-2-Renderer-DLLs wieder auf Systemen ohne diesen undokumentierten ddraw-Export.
-
-- Korrekturpush: Der Gothic-2-Startpfad nutzt wieder die bewaehrte Build-132-Reihenfolge fuer COM, Hooking und DirectDrawCreateEx, waehrend der CheckFullscreen-Fallback erhalten bleibt.
-- Korrekturpush: Die Gothic-Memory-Patch-Helfer schreiben Start-/Swapchain-Patches wieder permissiver wie Build 132, damit der Gothic-2-Menue-Start nicht durch zu strenge Patchvalidierung blockiert wird.
+- Basis: Build 132 bleibt die stabile Grundlage; Build 134 wurde nur als Referenzdiff genutzt. Startpfad, Launcher, DirectDraw-Proxy, Hooking/Detours und Memory-Patching-Grundlogik bleiben unangetastet.
+- F11-Menue: Grafikmenue neu geordnet, Version auf `D3D11-Version 18.0` gesetzt, Wasser-/Regen-/Wind-Labels bereinigt und Presets auf die sichtbaren Optionen unterhalb der Trennlinie begrenzt.
+- Wetter/Regen: Savegame-Wetterzustand wird zurueckgesetzt/wiederhergestellt, Raincloud-Texturpfad stabilisiert und Regen klingt mit verblassenden Rainclouds sowie rueckkehrenden dynamischen Wolken/klarem Wetter ab.
+- Low Clouds/Godrays/Wasserreflektionen: der optisch relevante Build-134-LowCloud-Rendergraph ist uebernommen, inklusive depth-aware Composite gegen Baum-/Objektkonturen, LowCloud-Godray-Maske und LowCloud-Beruecksichtigung in Wasserreflektionen.
+- FSR3/Transparenz/SSR: Contact Shadows bleiben unter FSR3 sichtbar, werden dort abgeschwaecht und fuer NPC-/Gesichtsbereiche entschaerft; Wet-Ground-SSR und transparente Weltgeometrie nutzen die Schutzmasken gegen Durchschimmern/Flackern.
+- Schatten/Wasser: Character-PCF macht Gesichtsschatten an Nase, Augenhoehlen und Hals/Kopf weicher/stabiler; Wasserfarben und Wasseruebergaenge fuer Tag, Nacht und Regen wurden aus dem 134-Referenzstand selektiv uebernommen.
+- Stabilitaet/Performance: isolierte 134-Fixes fuer RenderTarget-/DepthTarget-Validierung, TexturePool-Lebensdauer, ConstantBuffer-/Shader-Bindings, RenderGraph-Fehlerpfad, CascadedShadowMapBuffer, IndirectBuffer und ThreadPool uebernommen. Riskante breite Umbauten wie D3D11VertexBuffer, D3D11Texture, Launcher/DirectDraw/Hooking und Memory-Patching wurden bewusst nicht uebernommen.
+- Pruefung: AGENTS-Regeln gelesen; Buildnummer aus outputs ermittelt; origin/master mit PortableGit/OpenSSL abgeglichen; verbotene Startpfad-Dateien, OpenMP, Shader-/Projektpfade, F11/INI/Preset-Konsistenz, LowCloud-/Godray-/Wasser-Bindings, Escape-Artefakte und git diff --check statisch kontrolliert. Kein vollstaendiger lokaler C++-/Shader-Build.

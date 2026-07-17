@@ -40,7 +40,7 @@ public:
     static INT2 GetSectionOfPos( const float3& pos );
 
     /** Converts a world polygon triangle fan to a vertex list */
-    static void TriangleFanToList( const ExVertexStruct* input, unsigned int numInputVertices, std::vector<ExVertexStruct>* outVertices );
+    static void TriangleFanToList( ExVertexStruct* input, unsigned int numInputVertices, std::vector<ExVertexStruct>* outVertices );
 
     /** Saves the given section-array to an obj file */
     static void SaveSectionsToObjUnindexed( const char* file, const std::map<int, std::map<int, WorldMeshSectionInfo>>& sections );
@@ -73,8 +73,8 @@ public:
     static void UpdateQuadMarkInfo( QuadMarkInfo* info, zCQuadMark* mark, const float3& position );
 
     /** Indexes the given vertex array */
-    static void IndexVertices( const ExVertexStruct* input, unsigned int numInputVertices, std::vector<ExVertexStruct>& outVertices, std::vector<VERTEX_INDEX>& outIndices );
-    static void IndexVertices( const ExVertexStruct* input, unsigned int numInputVertices, std::vector<ExVertexStruct>& outVertices, std::vector<unsigned int>& outIndices );
+    static void IndexVertices( ExVertexStruct* input, unsigned int numInputVertices, std::vector<ExVertexStruct>& outVertices, std::vector<VERTEX_INDEX>& outIndices );
+    static void IndexVertices( ExVertexStruct* input, unsigned int numInputVertices, std::vector<ExVertexStruct>& outVertices, std::vector<unsigned int>& outIndices );
 
     /** Marks the edges of the mesh */
     static void MarkEdges( std::vector<ExVertexStruct>& vertices, std::vector<VERTEX_INDEX>& indices );
@@ -89,7 +89,7 @@ public:
     static void WrapVertexBuffers( const std::list<std::vector<ExVertexStruct>*>& vertexBuffers, const std::list<std::vector<VERTEX_INDEX>*>& indexBuffers, std::vector<ExVertexStruct>& outVertices, std::vector<unsigned int>& outIndices, std::vector<unsigned int>& outOffsets );
 
     /** Caches a mesh */
-    static XRESULT CacheMesh( const std::map<std::string, std::vector<std::pair<std::vector<ExVertexStruct>, std::vector<VERTEX_INDEX>>>>& geometry, const std::string& file );
+    static void CacheMesh( const std::map<std::string, std::vector<std::pair<std::vector<ExVertexStruct>, std::vector<VERTEX_INDEX>>>> geometry, const std::string& file );
 
     /** Converts ExVertexStruct into a zCPolygon*-Attay */
     static void ConvertExVerticesTozCPolygons( const std::vector<ExVertexStruct>& vertices, const std::vector<VERTEX_INDEX>& indices, zCMaterial* material, std::vector<zCPolygon*>& polyArray );

@@ -222,7 +222,7 @@ private:
 struct RenderToDepthStencilBuffer {
     ~RenderToDepthStencilBuffer() = default;
 
-    /** Wraps pre-existing resources without allocating — used for views into a shared TextureCubeArray */
+    /** Wraps pre-existing resources without allocating  -  used for views into a shared TextureCubeArray */
     RenderToDepthStencilBuffer(
         Microsoft::WRL::ComPtr<ID3D11Texture2D> texture,
         Microsoft::WRL::ComPtr<ID3D11DepthStencilView> dsv,

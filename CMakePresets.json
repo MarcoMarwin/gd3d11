@@ -68,7 +68,10 @@
       "name": "Release_AVX2",
       "inherits": "base-msvc",
       "cacheVariables": {
-        "GD3D11_SIMD": "AVX2"
+        "GD3D11_SIMD": "AVX2",
+        "GD3D11_TRACY_ENABLE": "ON",
+        "GD3D11_TRACY_ON_DEMAND": "ON",
+        "GD3D11_TRACY_CALLSTACK": "8"
       }
     },
     {
@@ -176,7 +179,6 @@
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "RelWithDebInfo",
         "GD3D11_PROFILE": "NOOPT",
-        "GD3D11_PUBLIC_RELEASE": "OFF",
         "GD3D11_TRACY_ENABLE": "ON",
         "GD3D11_TRACY_ON_DEMAND": "ON",
         "GD3D11_TRACY_CALLSTACK": "8"
@@ -186,7 +188,10 @@
       "name": "Release_AVX2_Clang",
       "inherits": "base-clang",
       "cacheVariables": {
-        "GD3D11_SIMD": "AVX2"
+        "GD3D11_SIMD": "AVX2",
+        "GD3D11_TRACY_ENABLE": "ON",
+        "GD3D11_TRACY_ON_DEMAND": "ON",
+        "GD3D11_TRACY_CALLSTACK": "8"
       }
     },
     {

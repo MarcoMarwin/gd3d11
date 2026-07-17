@@ -26,11 +26,14 @@ public:
     static void Hook() {
         zCViewDraw::Hook();
 
-        // Replace the actual mode-change in zCView::SetVirtualMode. Only do the UI-Changes.
-        REPLACE_RANGE(
-            GothicMemoryLocations::zCView::REPL_SetMode_ModechangeStart,
-            GothicMemoryLocations::zCView::REPL_SetMode_ModechangeEnd - 1,
-            INST_NOP );
+        DWORD dwProtect;
+        if ( VirtualProtect( reinterpret_cast<void*>(GothicMemoryLocations::zCView::REPL_SetMode_ModechangeStart),
+            GothicMemoryLocations::zCView::REPL_SetMode_ModechangeEnd
+            - GothicMemoryLocations::zCView::REPL_SetMode_ModechangeStart,
+            PAGE_EXECUTE_READWRITE, &dwProtect ) ) {
+            // Replace the actual mode-change in zCView::SetVirtualMode. Only do the UI-Changes.
+            REPLACE_RANGE( GothicMemoryLocations::zCView::REPL_SetMode_ModechangeStart, GothicMemoryLocations::zCView::REPL_SetMode_ModechangeEnd - 1, INST_NOP );
+        }
 
 #if (defined(BUILD_GOTHIC_1_08k) && !defined(BUILD_1_12F)) || defined(BUILD_GOTHIC_2_6_fix)
         DetourAttachTyped( &HookedFunctions::OriginalFunctions.original_zCViewPrintChars, hooked_PrintChars  );

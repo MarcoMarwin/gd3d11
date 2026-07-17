@@ -6,7 +6,6 @@
 #pragma once
 #include "../pch.h"
 #include <ddraw.h>
-#include <atomic>
 
 enum ETextureType {
     TX_UNDEF,
@@ -99,10 +98,10 @@ public:
     const std::string& GetTextureName();
 
     /** Sets this texture ready to use */
-    void SetReady( const bool ready ) { IsReady.store( ready, std::memory_order_release ); }
+    void SetReady(const bool ready ) { IsReady = ready; }
 
     /** returns if this surface is ready or not */
-    bool IsSurfaceReady() const { return IsReady.load( std::memory_order_acquire ); }
+    bool IsSurfaceReady() const { return IsReady; }
 
     /** Returns true if this surface is used to render a movie to */
     bool IsMovieSurface() const { return LockedData != nullptr; }
@@ -112,17 +111,12 @@ public:
 private:
 
     /** Faked attached surfaces for the mipmaps */
-    std::vector<IDirectDrawSurface7*> attachedSurfaces;
-    std::atomic<ULONG> refCount;
+    std::vector<MyDirectDrawSurface7*> attachedSurfaces;
+    int refCount;
 
     /** Temporary data used during locks */
     unsigned char* LockedData;
-    size_t LockedDataSize;
-    std::atomic_bool IsLocked;
-    std::atomic_bool IsReady; // True if the attached texture was successfully filled with data
-    std::atomic_bool AdditionalResourcesLoaded;
-
-    IDirectDrawClipper* Clipper;
+    bool IsReady; // True if the attached texture was successfully filled with data
 
     /** Original DESC this was created with */
     DDSURFACEDESC2 OriginalSurfaceDesc;
@@ -141,10 +135,6 @@ private:
 
     /** Locktype */
     DWORD LockType;
-
-    std::atomic<DWORD> Priority;
-    std::atomic<DWORD> Lod;
-    std::atomic<DWORD> Uniqueness;
 
     /** zCTexture this is associated with */
     zCTexture* GothicTexture;

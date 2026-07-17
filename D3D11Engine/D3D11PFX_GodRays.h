@@ -16,7 +16,7 @@ public:
                     ID3D11ShaderResourceView* depthCopy,
                     ID3D11ShaderResourceView* lowClouds );
 
-    /** Renders godrays mask+zoom to a ¼-res pool texture, skipping the final additive blit.
+    /** Renders godrays mask+zoom to a quarter-res pool texture, skipping the final additive blit.
         Returns the pool texture SRV via outGodRaysSRV. Returns XR_SUCCESS if godrays were produced. */
     XRESULT RenderToTexture( ID3D11ShaderResourceView* backbuffer,
                              ID3D11ShaderResourceView* depthCopy,

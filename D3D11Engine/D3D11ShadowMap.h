@@ -81,10 +81,10 @@ public:
 
     // Initialize resources. `size` is the initial square shadowmap size.
     // This will create a set of cascades (default cascades count used internally).
-    XRESULT Init( Microsoft::WRL::ComPtr<ID3D11Device1>& device, Microsoft::WRL::ComPtr<ID3D11DeviceContext1>& context, int size );
+    void Init( Microsoft::WRL::ComPtr<ID3D11Device1>& device, Microsoft::WRL::ComPtr<ID3D11DeviceContext1>& context, int size );
 
     // Resize world shadowmap to a new size
-    XRESULT Resize( int size );
+    void Resize( int size );
 
     RenderToTextureBuffer* GetDummyCubeRT() { return m_dummyCubeRT.get(); }
 
@@ -172,17 +172,14 @@ public:
         /* 4 */ { 0.80f, 1.0f }, // Players should really want to use 4 cascades for best quality and furthest
     };
 
-    D3D11RenderQueue* GetRenderQueue( int cascadeIndex ) {
-        if ( cascadeIndex < 0 || static_cast<size_t>(cascadeIndex) >= m_RenderQueues.size() ) return nullptr;
-        return m_RenderQueues[static_cast<size_t>(cascadeIndex)].get();
-    }
+    D3D11RenderQueue* GetRenderQueue( int cascadeIndex ) { return m_RenderQueues[cascadeIndex].get(); }
 
 private:
     bool ShouldUseAtlas() const;
-    HRESULT RecreateShadowSampler();
-    HRESULT EnsureShadowMapBackend( int size );
+    void RecreateShadowSampler();
+    void EnsureShadowMapBackend( int size );
 
-    XRESULT WaitShadowCullingComplete();
+    void WaitShadowCullingComplete();
 
     Microsoft::WRL::ComPtr<ID3D11Device1> m_device;
     Microsoft::WRL::ComPtr<ID3D11DeviceContext1> m_context;
@@ -200,7 +197,6 @@ private:
 
 
     int m_lastNumCascades = 0;
-    int m_requestedShadowMapSize = 0;
     std::array<CameraReplacement, MAX_CSM_CASCADES> m_CascadeCRs;
     std::array<std::unique_ptr<D3D11RenderQueue>, MAX_CSM_CASCADES> m_RenderQueues;
     std::vector<float> m_CascadeSplits;

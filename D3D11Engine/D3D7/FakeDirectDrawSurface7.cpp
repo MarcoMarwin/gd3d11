@@ -3,20 +3,10 @@
 #include "../D3D11Texture.h"
 #include "../Engine.h"
 #include "../GothicAPI.h"
-#include <algorithm>
-#include <limits>
-#include <new>
 
-FakeDirectDrawSurface7::FakeDirectDrawSurface7()
-    : RefCount( 1 ),
-    MipLevel( 0 ),
-    Data( nullptr ),
-    IsLocked( false ),
-    OriginalDesc{},
-    Resource( nullptr ),
-    Priority( 0 ),
-    Lod( 0 ),
-    Uniqueness( 0 ) {
+FakeDirectDrawSurface7::FakeDirectDrawSurface7() : 
+    RefCount(0),
+    Data(nullptr) {
 }
 
 
@@ -30,70 +20,38 @@ FakeDirectDrawSurface7::~FakeDirectDrawSurface7() {
     delete[] Data;
 }
 
-void FakeDirectDrawSurface7::InitFakeSurface( const DDSURFACEDESC2* desc, MyDirectDrawSurface7* resource, int mipLevel ) {
-    if ( !desc || !resource || mipLevel < 0 || mipLevel >= 32 ) {
-        Resource = nullptr;
-        MipLevel = 0;
-        ZeroMemory( &OriginalDesc, sizeof( OriginalDesc ) );
-        return;
-    }
-
+void FakeDirectDrawSurface7::InitFakeSurface( const DDSURFACEDESC2* desc, MyDirectDrawSurface7* Resource, int mipLevel ) {
     OriginalDesc = *desc;
-    Resource = resource;
+    this->Resource = Resource;
     MipLevel = mipLevel;
-    OriginalDesc.dwWidth = (std::max<DWORD>)(
-        static_cast<DWORD>(1), OriginalDesc.dwWidth >> static_cast<unsigned int>(MipLevel) );
-    OriginalDesc.dwHeight = (std::max<DWORD>)(
-        static_cast<DWORD>(1), OriginalDesc.dwHeight >> static_cast<unsigned int>(MipLevel) );
 }
 
 HRESULT FakeDirectDrawSurface7::QueryInterface( REFIID riid, LPVOID* ppvObj ) {
     DebugWrite( "FakeDirectDrawSurface7(%p)::QueryInterface(%s)" );
-    if ( !ppvObj ) return E_POINTER;
-    *ppvObj = nullptr;
-    if ( IsEqualIID( riid, IID_IUnknown )
-        || IsEqualIID( riid, IID_IDirectDrawSurface7 ) ) {
-        *ppvObj = static_cast<IDirectDrawSurface7*>(this);
-        AddRef();
-        return S_OK;
-    }
-    return E_NOINTERFACE;
+    return S_OK;
 }
 
 ULONG FakeDirectDrawSurface7::AddRef() {
     DebugWrite( "FakeDirectDrawSurface7(%p)::AddRef(%i)" );
-    const ULONG previous =
-        RefCount.fetch_add( 1, std::memory_order_acq_rel );
-    if ( previous == 1 && Resource ) Resource->AddRef();
-    return previous + 1;
+    return ++RefCount;
 }
 
 ULONG FakeDirectDrawSurface7::Release() {
+
     DebugWrite( "FakeDirectDrawSurface7(%p)::Release(%i)" );
-    const ULONG previous =
-        RefCount.fetch_sub( 1, std::memory_order_acq_rel );
-    const ULONG references = previous - 1;
-    if ( previous == 2 && Resource ) {
-        MyDirectDrawSurface7* root = Resource;
-        root->Release();
-    } else if ( references == 0 ) {
+
+    if ( --RefCount == 0 ) {
         delete this;
+        return 0;
     }
-    return references;
+
+    return RefCount;
 }
 
 HRESULT FakeDirectDrawSurface7::AddAttachedSurface( LPDIRECTDRAWSURFACE7 lpDDSAttachedSurface ) {
     DebugWrite( "FakeDirectDrawSurface7(%p)::AddAttachedSurface()" );
-    if ( !lpDDSAttachedSurface || lpDDSAttachedSurface == this )
-        return DDERR_INVALIDPARAMS;
-
     lpDDSAttachedSurface->AddRef();
-    try {
-        AttachedSurfaces.push_back( lpDDSAttachedSurface );
-    } catch ( const std::bad_alloc& ) {
-        lpDDSAttachedSurface->Release();
-        return E_OUTOFMEMORY;
-    }
+    AttachedSurfaces.push_back( static_cast<FakeDirectDrawSurface7*>(lpDDSAttachedSurface) );
     return S_OK;
 }
 
@@ -119,31 +77,11 @@ HRESULT FakeDirectDrawSurface7::BltFast( DWORD dwX, DWORD dwY, LPDIRECTDRAWSURFA
 
 HRESULT FakeDirectDrawSurface7::DeleteAttachedSurface( DWORD dwFlags, LPDIRECTDRAWSURFACE7 lpDDSAttachedSurface ) {
     DebugWrite( "FakeDirectDrawSurface7(%p)::DeleteAttachedSurface()" );
-    (void)dwFlags;
-    if ( !lpDDSAttachedSurface ) return DDERR_INVALIDPARAMS;
-
-    const auto it = std::find(
-        AttachedSurfaces.begin(), AttachedSurfaces.end(), lpDDSAttachedSurface );
-    if ( it == AttachedSurfaces.end() ) return DDERR_NOTFOUND;
-    (*it)->Release();
-    AttachedSurfaces.erase( it );
     return S_OK;
 }
 
 HRESULT FakeDirectDrawSurface7::EnumAttachedSurfaces( LPVOID lpContext, LPDDENUMSURFACESCALLBACK7 lpEnumSurfacesCallback ) {
     DebugWrite( "FakeDirectDrawSurface7(%p)::EnumAttachedSurfaces()" );
-    if ( !lpEnumSurfacesCallback ) return DDERR_INVALIDPARAMS;
-
-    for ( IDirectDrawSurface7* surface : AttachedSurfaces ) {
-        DDSURFACEDESC2 desc{};
-        desc.dwSize = sizeof( desc );
-        const HRESULT result = surface->GetSurfaceDesc( &desc );
-        if ( FAILED( result ) ) return result;
-        if ( lpEnumSurfacesCallback( surface, &desc, lpContext )
-            == DDENUMRET_CANCEL ) {
-            break;
-        }
-    }
     return S_OK;
 }
 
@@ -159,13 +97,12 @@ HRESULT FakeDirectDrawSurface7::Flip( LPDIRECTDRAWSURFACE7 lpDDSurfaceTargetOver
 
 HRESULT FakeDirectDrawSurface7::GetAttachedSurface( LPDDSCAPS2 lpDDSCaps2, LPDIRECTDRAWSURFACE7* lplpDDAttachedSurface ) {
     DebugWrite( "FakeDirectDrawSurface7(%p)::GetAttachedSurface()" );
-    if ( !lplpDDAttachedSurface ) return E_POINTER;
-    *lplpDDAttachedSurface = nullptr;
-    if ( !lpDDSCaps2 ) return DDERR_INVALIDPARAMS;
-    if ( AttachedSurfaces.empty() ) return DDERR_NOTFOUND;
 
-    *lplpDDAttachedSurface = AttachedSurfaces.front();
-    AttachedSurfaces.front()->AddRef();
+    if ( AttachedSurfaces.empty() )
+        return E_FAIL;
+
+    *lplpDDAttachedSurface = AttachedSurfaces[0]; // Mipmap chains only have one entry
+    AttachedSurfaces[0]->AddRef();
     return S_OK;
 }
 
@@ -176,31 +113,23 @@ HRESULT FakeDirectDrawSurface7::GetBltStatus( DWORD dwFlags ) {
 
 HRESULT FakeDirectDrawSurface7::GetCaps( LPDDSCAPS2 lpDDSCaps2 ) {
     DebugWrite( "FakeDirectDrawSurface7(%p)::GetCaps()" );
-    if ( !lpDDSCaps2 ) return E_POINTER;
     *lpDDSCaps2 = OriginalDesc.ddsCaps;
     return S_OK;
 }
 
 HRESULT FakeDirectDrawSurface7::GetClipper( LPDIRECTDRAWCLIPPER* lplpDDClipper ) {
     DebugWrite( "FakeDirectDrawSurface7(%p)::GetClipper()" );
-    if ( !lplpDDClipper ) return E_POINTER;
-    *lplpDDClipper = nullptr;
-    return DDERR_NOCLIPPERATTACHED;
+    return S_OK;
 }
 
 HRESULT FakeDirectDrawSurface7::GetColorKey( DWORD dwFlags, LPDDCOLORKEY lpDDColorKey ) {
     DebugWrite( "FakeDirectDrawSurface7(%p)::GetColorKey()" );
-    (void)dwFlags;
-    if ( !lpDDColorKey ) return E_POINTER;
-    ZeroMemory( lpDDColorKey, sizeof( *lpDDColorKey ) );
-    return DDERR_NOCOLORKEY;
+    return S_OK;
 }
 
 HRESULT FakeDirectDrawSurface7::GetDC( HDC* lphDC ) {
     DebugWrite( "FakeDirectDrawSurface7(%p)::GetDC()" );
-    if ( !lphDC ) return E_POINTER;
-    *lphDC = nullptr;
-    return DDERR_NODC;
+    return S_OK;
 }
 
 HRESULT FakeDirectDrawSurface7::GetFlipStatus( DWORD dwFlags ) {
@@ -210,28 +139,20 @@ HRESULT FakeDirectDrawSurface7::GetFlipStatus( DWORD dwFlags ) {
 
 HRESULT FakeDirectDrawSurface7::GetOverlayPosition( LPLONG lplX, LPLONG lplY ) {
     DebugWrite( "FakeDirectDrawSurface7(%p)::GetOverlayPosition()" );
-    if ( !lplX || !lplY ) return E_POINTER;
-    *lplX = 0;
-    *lplY = 0;
     return S_OK;
 }
 
 HRESULT FakeDirectDrawSurface7::GetPalette( LPDIRECTDRAWPALETTE* lplpDDPalette ) {
     DebugWrite( "FakeDirectDrawSurface7(%p)::GetPalette()" );
-    if ( !lplpDDPalette ) return E_POINTER;
-    *lplpDDPalette = nullptr;
-    return DDERR_NOPALETTEATTACHED;
+    return S_OK;
 }
 
 HRESULT FakeDirectDrawSurface7::GetPixelFormat( LPDDPIXELFORMAT lpDDPixelFormat ) {
     DebugWrite( "FakeDirectDrawSurface7(%p)::GetPixelFormat()" );
-    if ( !lpDDPixelFormat ) return E_POINTER;
-    *lpDDPixelFormat = OriginalDesc.ddpfPixelFormat;
     return S_OK;
 }
 
 HRESULT FakeDirectDrawSurface7::GetSurfaceDesc( LPDDSURFACEDESC2 lpDDSurfaceDesc ) {
-    if ( !lpDDSurfaceDesc ) return E_POINTER;
     *lpDDSurfaceDesc = OriginalDesc;
     return S_OK;
 }
@@ -248,64 +169,36 @@ HRESULT FakeDirectDrawSurface7::IsLost() {
 
 HRESULT FakeDirectDrawSurface7::Lock( LPRECT lpDestRect, LPDDSURFACEDESC2 lpDDSurfaceDesc, DWORD dwFlags, HANDLE hEvent ) {
     DebugWrite( "FakeDirectDrawSurface7(%p)::Lock(%s, %s)" );
-    (void)lpDestRect;
-    (void)dwFlags;
-    (void)hEvent;
-    if ( !lpDDSurfaceDesc ) return DDERR_INVALIDPARAMS;
-
-    bool expected = false;
-    if ( !IsLocked.compare_exchange_strong(
-        expected, true, std::memory_order_acq_rel ) ) {
-        return DDERR_SURFACEBUSY;
-    }
-
     *lpDDSurfaceDesc = OriginalDesc;
-    lpDDSurfaceDesc->lpSurface = nullptr;
-    lpDDSurfaceDesc->lPitch = 0;
 
-    D3D11Texture* texture = Resource ? Resource->GetEngineTexture() : nullptr;
-    if ( !texture ) {
-        IsLocked.store( false, std::memory_order_release );
-        return DDERR_CANTLOCKSURFACE;
-    }
-
-    const UINT dataSize = texture->GetSizeInBytes( MipLevel );
-    const UINT rowPitch = texture->GetRowPitchBytes( MipLevel );
-    if ( dataSize == 0 || rowPitch == 0
-        || rowPitch > static_cast<UINT>((std::numeric_limits<LONG>::max)()) ) {
-        IsLocked.store( false, std::memory_order_release );
-        return DDERR_CANTLOCKSURFACE;
-    }
-
-    delete[] Data;
-    Data = new (std::nothrow) unsigned char[dataSize];
-    if ( !Data ) {
-        IsLocked.store( false, std::memory_order_release );
-        return DDERR_OUTOFMEMORY;
-    }
-
+    // Allocate some temporary data
+    delete [] Data;
+    Data = new unsigned char[Resource->GetEngineTexture()->GetSizeInBytes( MipLevel )];
     lpDDSurfaceDesc->lpSurface = Data;
-    lpDDSurfaceDesc->lPitch = static_cast<LONG>(rowPitch);
+    lpDDSurfaceDesc->lPitch = Resource->GetEngineTexture()->GetRowPitchBytes( MipLevel );
+
+    int px = (OriginalDesc.dwWidth >> MipLevel);
+    int py = (OriginalDesc.dwHeight >> MipLevel);
+
+    lpDDSurfaceDesc->dwWidth = px;
+    lpDDSurfaceDesc->dwHeight = py;
+
     return S_OK;
 }
 
 HRESULT FakeDirectDrawSurface7::Unlock( LPRECT lpRect ) {
     DebugWrite( "FakeDirectDrawSurface7::Unlock" );
-    (void)lpRect;
-    if ( !IsLocked.exchange( false, std::memory_order_acq_rel ) )
-        return DDERR_NOTLOCKED;
 
-    D3D11Texture* texture = Resource ? Resource->GetEngineTexture() : nullptr;
-    XRESULT updateResult = XR_FAILED;
-    if ( Engine::GAPI && texture && Data ) {
-        updateResult = Engine::GAPI->GetMainThreadID() != GetCurrentThreadId()
-            ? texture->UpdateDataDeferred( Data, MipLevel )
-            : texture->UpdateData( Data, MipLevel );
+    if ( Engine::GAPI->GetMainThreadID() != GetCurrentThreadId() ) {
+        Resource->GetEngineTexture()->UpdateDataDeferred( Data, MipLevel );
+    } else {
+        Resource->GetEngineTexture()->UpdateData( Data, MipLevel );
     }
 
-    delete[] Data;
+    delete [] Data;
     Data = nullptr;
-    return updateResult == XR_SUCCESS ? S_OK : DDERR_GENERIC;
+
+    return S_OK;
 }
 
 HRESULT FakeDirectDrawSurface7::ReleaseDC( HDC hDC ) {
@@ -355,9 +248,7 @@ HRESULT FakeDirectDrawSurface7::UpdateOverlayZOrder( DWORD dwFlags, LPDIRECTDRAW
 
 HRESULT FakeDirectDrawSurface7::GetDDInterface( LPVOID* lplpDD ) {
     DebugWrite( "FakeDirectDrawSurface7(%p)::GetDDInterface()" );
-    if ( !lplpDD ) return E_POINTER;
-    *lplpDD = nullptr;
-    return DDERR_UNSUPPORTED;
+    return S_OK;
 }
 
 HRESULT FakeDirectDrawSurface7::PageLock( DWORD dwFlags ) {
@@ -382,11 +273,7 @@ HRESULT FakeDirectDrawSurface7::SetPrivateData( REFGUID guidTag, LPVOID lpData, 
 
 HRESULT FakeDirectDrawSurface7::GetPrivateData( REFGUID guidTag, LPVOID lpBuffer, LPDWORD lpcbBufferSize ) {
     DebugWrite( "FakeDirectDrawSurface7(%p)::GetPrivateData()" );
-    (void)guidTag;
-    (void)lpBuffer;
-    if ( !lpcbBufferSize ) return E_POINTER;
-    *lpcbBufferSize = 0;
-    return DDERR_NOTFOUND;
+    return S_OK;
 }
 
 HRESULT FakeDirectDrawSurface7::FreePrivateData( REFGUID guidTag ) {
@@ -396,39 +283,30 @@ HRESULT FakeDirectDrawSurface7::FreePrivateData( REFGUID guidTag ) {
 
 HRESULT FakeDirectDrawSurface7::GetUniquenessValue( LPDWORD lpValue ) {
     DebugWrite( "FakeDirectDrawSurface7(%p)::GetUniquenessValue()" );
-    if ( !lpValue ) return E_POINTER;
-    *lpValue = Uniqueness.load( std::memory_order_relaxed );
     return S_OK;
 }
 
 HRESULT FakeDirectDrawSurface7::ChangeUniquenessValue() {
     DebugWrite( "FakeDirectDrawSurface7(%p)::ChangeUniquenessValue()" );
-    Uniqueness.fetch_add( 1, std::memory_order_relaxed );
     return S_OK;
 }
 
 HRESULT FakeDirectDrawSurface7::SetPriority( DWORD dwPriority ) {
     DebugWrite( "FakeDirectDrawSurface7(%p)::SetPriority()" );
-    Priority.store( dwPriority, std::memory_order_relaxed );
     return S_OK;
 }
 
 HRESULT FakeDirectDrawSurface7::GetPriority( LPDWORD dwPriority ) {
     DebugWrite( "FakeDirectDrawSurface7(%p)::GetPriority()" );
-    if ( !dwPriority ) return E_POINTER;
-    *dwPriority = Priority.load( std::memory_order_relaxed );
     return S_OK;
 }
 
 HRESULT FakeDirectDrawSurface7::SetLOD( DWORD dwLOD ) {
     DebugWrite( "FakeDirectDrawSurface7(%p)::SetLOD()" );
-    Lod.store( dwLOD, std::memory_order_relaxed );
     return S_OK;
 }
 
 HRESULT FakeDirectDrawSurface7::GetLOD( LPDWORD dwLOD ) {
     DebugWrite( "FakeDirectDrawSurface7(%p)::GetLOD()" );
-    if ( !dwLOD ) return E_POINTER;
-    *dwLOD = Lod.load( std::memory_order_relaxed );
     return S_OK;
 }

@@ -36,7 +36,7 @@ struct LightGrid {
 
 class D3D11TiledDeferredShading {
 public:
-    XRESULT Init( const Microsoft::WRL::ComPtr<ID3D11Device1>& device, const Microsoft::WRL::ComPtr<ID3D11DeviceContext1>& context );
+    void Init( const Microsoft::WRL::ComPtr<ID3D11Device1>& device, const Microsoft::WRL::ComPtr<ID3D11DeviceContext1>& context );
 
     XRESULT DrawPointlightLights(
         std::vector<VobLightInfo*>& lights,
@@ -72,8 +72,8 @@ public:
     RenderToDepthStencilBuffer* GetSlotTarget( int slot );
 
 private:
-    bool EnsureBuffers( uint32_t numTilesX, uint32_t numTilesY );
-    bool EnsureShadowArray( uint32_t shadowCubeSize );
+    void EnsureBuffers( uint32_t numTilesX, uint32_t numTilesY );
+    void EnsureShadowArray( uint32_t shadowCubeSize );
 
     Microsoft::WRL::ComPtr<ID3D11Device1> m_device;
     Microsoft::WRL::ComPtr<ID3D11DeviceContext1> m_context;

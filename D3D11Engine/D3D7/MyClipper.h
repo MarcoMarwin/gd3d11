@@ -1,7 +1,6 @@
 #pragma once
 #include "../pch.h"
 #include <ddraw.h>
-#include <atomic>
 
 class MyClipper final : public IDirectDrawClipper {
 public:
@@ -10,42 +9,29 @@ public:
 
 	/*** IUnknown methods ***/
 	HRESULT __declspec(nothrow) __stdcall QueryInterface( THIS_ REFIID riid, LPVOID FAR* ppvObj ) override {
-		if ( !ppvObj ) return E_POINTER;
-		*ppvObj = nullptr;
-		if ( IsEqualIID( riid, IID_IUnknown )
-			|| IsEqualIID( riid, IID_IDirectDrawClipper ) ) {
-			*ppvObj = static_cast<IDirectDrawClipper*>(this);
-			AddRef();
-			return S_OK;
-		}
-		return E_NOINTERFACE;
+		return S_OK;
 	}
 
 	ULONG __declspec(nothrow) __stdcall AddRef() override {
-		return refCount.fetch_add( 1, std::memory_order_relaxed ) + 1;
+		return ++refCount;
 	}
 
 	ULONG __declspec(nothrow) __stdcall Release() override {
-		const ULONG references =
-			refCount.fetch_sub( 1, std::memory_order_acq_rel ) - 1;
-		if ( references == 0 ) {
+		if ( --refCount == 0 ) {
 			delete this;
+			return 0;
 		}
-		return references;
+
+		return refCount;
 	}
 
 	/*** IDirectDrawClipper methods ***/
 	HRESULT __declspec(nothrow) __stdcall GetClipList( THIS_ LPRECT x, LPRGNDATA y, LPDWORD z ) override {
-		(void)x;
-		(void)y;
-		if ( !z ) return E_POINTER;
-		*z = 0;
-		return DDERR_NOCLIPLIST;
+		return S_OK;
 	}
 
 	HRESULT __declspec(nothrow) __stdcall GetHWnd( HWND* handle ) override {
-		if ( !handle ) return E_POINTER;
-		*handle = hWnd.load( std::memory_order_acquire );
+		*handle = hWnd;
 		return S_OK;
 	}
 
@@ -53,9 +39,7 @@ public:
 		return S_OK;
 	}
 
-	HRESULT __declspec(nothrow) __stdcall IsClipListChanged( THIS_ BOOL FAR* changed ) override {
-		if ( !changed ) return E_POINTER;
-		*changed = FALSE;
+	HRESULT __declspec(nothrow) __stdcall IsClipListChanged( THIS_ BOOL FAR* x ) override {
 		return S_OK;
 	}
 
@@ -64,11 +48,11 @@ public:
 	}
 
 	HRESULT __declspec(nothrow) __stdcall SetHWnd( THIS_ DWORD x, HWND handle ) override {
-		hWnd.store( handle, std::memory_order_release );
+		hWnd = handle;
 		return S_OK;
 	}
 
 private:
-	std::atomic<HWND> hWnd;
-	std::atomic<ULONG> refCount;
+	HWND hWnd;
+	int refCount;
 };

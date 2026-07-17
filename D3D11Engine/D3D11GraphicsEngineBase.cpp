@@ -30,23 +30,16 @@ D3D11GraphicsEngineBase::~D3D11GraphicsEngineBase() {
 
 /** Called when the game created its window */
 XRESULT D3D11GraphicsEngineBase::SetWindow( HWND hWnd ) {
-    if ( !hWnd || !IsWindow( hWnd ) || Resolution.x <= 0 || Resolution.y <= 0 ) {
-        return XR_INVALID_ARG;
-    }
     LogInfo() << "Creating swapchain";
-    const HWND previousWindow = OutputWindow;
     OutputWindow = hWnd;
-    const XRESULT result = OnResize( Resolution );
-    if ( result != XR_SUCCESS ) OutputWindow = previousWindow;
-    return result;
+
+    OnResize( Resolution );
+
+    return XR_SUCCESS;
 }
 
 /** Called to set the current viewport */
 XRESULT D3D11GraphicsEngineBase::SetViewport( const ViewportInfo& viewportInfo ) {
-    if ( !GetContext() || viewportInfo.Width <= 0 || viewportInfo.Height <= 0
-        || !std::isfinite( viewportInfo.MinZ ) || !std::isfinite( viewportInfo.MaxZ )
-        || viewportInfo.MinZ < 0.0f || viewportInfo.MaxZ > 1.0f
-        || viewportInfo.MinZ > viewportInfo.MaxZ ) return XR_INVALID_ARG;
     // Set the viewport
     D3D11_VIEWPORT viewport = {};
 
@@ -67,57 +60,79 @@ D3D11ShaderManager& D3D11GraphicsEngineBase::GetShaderManager() { return *Shader
 
 /** Creates a vertexbuffer object (Not registered inside) */
 XRESULT D3D11GraphicsEngineBase::CreateVertexBuffer( D3D11VertexBuffer** outBuffer ) {
-    if ( !outBuffer ) return XR_INVALID_ARG;
-    *outBuffer = new (std::nothrow) D3D11VertexBuffer;
-    return *outBuffer ? XR_SUCCESS : XR_FAILED;
+    *outBuffer = new D3D11VertexBuffer;
+    return XR_SUCCESS;
 }
 
 /** Creates a texture object (Not registered inside) */
 XRESULT D3D11GraphicsEngineBase::CreateTexture( D3D11Texture** outTexture ) {
-    if ( !outTexture ) return XR_INVALID_ARG;
-    *outTexture = new (std::nothrow) D3D11Texture;
-    return *outTexture ? XR_SUCCESS : XR_FAILED;
+    *outTexture = new D3D11Texture;
+    return XR_SUCCESS;
 }
 
 /** Creates a constantbuffer object (Not registered inside) */
 XRESULT D3D11GraphicsEngineBase::CreateConstantBuffer( D3D11ConstantBuffer** outCB, void* data, int size ) {
-    if ( !outCB || size <= 0 ) return XR_INVALID_ARG;
-    *outCB = nullptr;
-    std::unique_ptr<D3D11ConstantBuffer> buffer(
-        new (std::nothrow) D3D11ConstantBuffer( static_cast<unsigned int>(size), data ) );
-    if ( !buffer || !buffer->IsValid() ) return XR_FAILED;
-    *outCB = buffer.release();
+    *outCB = new D3D11ConstantBuffer( size, data );
     return XR_SUCCESS;
 }
 
 /** Presents the current frame to the screen */
 XRESULT D3D11GraphicsEngineBase::Present() {
-    if ( !Engine::GAPI || !GetContext() || !GetDevice() || !SwapChain || !LineRenderer
-        || Resolution.x <= 0 || Resolution.y <= 0 ) {
-        PresentPending = false;
-        return XR_FAILED;
-    }
-    if ( SetViewport( ViewportInfo( 0, 0, Resolution.x, Resolution.y ) ) != XR_SUCCESS ) {
-        PresentPending = false;
-        return XR_FAILED;
-    }
+    // Set default viewport
+    SetViewport( ViewportInfo( 0, 0, Resolution.x, Resolution.y ) );
+
+    // Reset State
     SetDefaultStates();
+
+    // Draw debug-lines
     LineRenderer->Flush();
-    const bool vsync = Engine::GAPI->GetRendererState().RendererSettings.EnableVSync;
-    const HRESULT result = SwapChain->Present( vsync ? 1u : 0u, 0 );
+
+    // Draw ant tweak bar
+    // Engine::AntTweakBar->Draw();
+
+    bool vsync = Engine::GAPI->GetRendererState().RendererSettings.EnableVSync;
+    if ( SwapChain->Present( vsync ? 1 : 0, 0 ) == DXGI_ERROR_DEVICE_REMOVED ) {
+        switch ( GetDevice()->GetDeviceRemovedReason() ) {
+        case DXGI_ERROR_DEVICE_HUNG:
+            LogErrorBox() << "Device Removed! (DXGI_ERROR_DEVICE_HUNG)";
+            exit( 0 );
+            break;
+
+        case DXGI_ERROR_DEVICE_REMOVED:
+            LogErrorBox() << "Device Removed! (DXGI_ERROR_DEVICE_REMOVED)";
+            exit( 0 );
+            break;
+
+        case DXGI_ERROR_DEVICE_RESET:
+            LogErrorBox() << "Device Removed! (DXGI_ERROR_DEVICE_RESET)";
+            exit( 0 );
+            break;
+
+        case DXGI_ERROR_DRIVER_INTERNAL_ERROR:
+            LogErrorBox() << "Device Removed! (DXGI_ERROR_DRIVER_INTERNAL_ERROR)";
+            exit( 0 );
+            break;
+
+        case DXGI_ERROR_INVALID_CALL:
+            LogErrorBox() << "Device Removed! (DXGI_ERROR_INVALID_CALL)";
+            exit( 0 );
+            break;
+
+        case S_OK:
+            LogInfo() << "Device removed, but we're fine!";
+            break;
+
+        default:
+            LogWarnBox() << "Device Removed! (Unknown reason)";
+        }
+    }
+
+    // We did our present, set the next frame ready
     PresentPending = false;
-    if ( result == DXGI_ERROR_DEVICE_REMOVED || result == DXGI_ERROR_DEVICE_RESET ) {
-        LogErrorBox() << "Direct3D device lost. Reason: 0x" << std::hex
-            << static_cast<unsigned long>(GetDevice()->GetDeviceRemovedReason());
-        return XR_FAILED;
-    }
-    if ( FAILED( result ) ) {
-        LogError() << "Swapchain presentation failed. HRESULT: 0x" << std::hex
-            << static_cast<unsigned long>(result);
-        return XR_FAILED;
-    }
+
     return XR_SUCCESS;
 }
+
 /** Called when we started to render the world */
 XRESULT D3D11GraphicsEngineBase::OnStartWorldRendering() {
     if ( PresentPending )
@@ -215,29 +230,17 @@ XRESULT D3D11GraphicsEngineBase::DrawVertexArray( ExVertexStruct* vertices, unsi
 
 /** Sets the active pixel shader object */
 XRESULT D3D11GraphicsEngineBase::SetActivePixelShader( PShaderID shader ) {
-    ActivePS = ShaderManager ? ShaderManager->GetPShader( shader ) : nullptr;
-    if ( !ActivePS || !ActivePS->GetShader() ) {
-        ActivePS.reset();
-        return XR_FAILED;
-    }
+    ActivePS = ShaderManager->GetPShader( shader );
     return XR_SUCCESS;
 }
 
 XRESULT D3D11GraphicsEngineBase::SetActiveVertexShader( VShaderID shader ) {
-    ActiveVS = ShaderManager ? ShaderManager->GetVShader( shader ) : nullptr;
-    if ( !ActiveVS || !ActiveVS->GetShader() ) {
-        ActiveVS.reset();
-        return XR_FAILED;
-    }
+    ActiveVS = ShaderManager->GetVShader( shader );
     return XR_SUCCESS;
 }
 
 XRESULT D3D11GraphicsEngineBase::SetActiveGShader( GShaderID shader ) {
-    ActiveGS = ShaderManager ? ShaderManager->GetGShader( shader ) : nullptr;
-    if ( !ActiveGS || !ActiveGS->GetShader() ) {
-        ActiveGS.reset();
-        return XR_FAILED;
-    }
+    ActiveGS = ShaderManager->GetGShader( shader );
     return XR_SUCCESS;
 }
 

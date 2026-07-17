@@ -80,7 +80,6 @@ public:
     UINT GetAtlasWidth() const { return m_atlasWidth; }
     UINT GetAtlasHeight() const { return m_atlasHeight; }
     UINT GetNumCascades() const { return m_numCascades; }
-    bool IsValid() const { return m_texture && m_srv && m_dsv && m_cascade0Size > 0 && m_atlasWidth > 0 && m_atlasHeight > 0 && m_numCascades > 0; }
 
     const ShadowAtlasCascadeInfo& GetCascadeInfo( UINT cascadeIndex ) const;
     const D3D11_VIEWPORT& GetCascadeViewport( UINT cascadeIndex ) const;
