@@ -1,6 +1,7 @@
 #include "pch.h"
 #include <algorithm>
 #include <cmath>
+#include <limits>
 #include "D3D11TiledDeferredShading.h"
 
 #include "D3D11GraphicsEngine.h"
@@ -18,93 +19,92 @@
 using namespace DirectX;
 using Microsoft::WRL::ComPtr;
 
-void D3D11TiledDeferredShading::Init(
+XRESULT D3D11TiledDeferredShading::Init(
     const ComPtr<ID3D11Device1>& device,
     const ComPtr<ID3D11DeviceContext1>& context ) {
     m_device = device;
     m_context = context;
-
-    // Light buffer: dynamic structured buffer for uploading per-frame light data
-    {
-        D3D11_BUFFER_DESC desc = {};
-        desc.ByteWidth = MAX_TILED_LIGHTS * sizeof( TiledPointLight );
-        desc.Usage = D3D11_USAGE_DYNAMIC;
-        desc.BindFlags = D3D11_BIND_SHADER_RESOURCE;
-        desc.CPUAccessFlags = D3D11_CPU_ACCESS_WRITE;
-        desc.MiscFlags = D3D11_RESOURCE_MISC_BUFFER_STRUCTURED;
-        desc.StructureByteStride = sizeof( TiledPointLight );
-
-        HRESULT hr = m_device->CreateBuffer( &desc, nullptr, m_LightBuffer.ReleaseAndGetAddressOf() );
-        if ( FAILED( hr ) || m_LightBuffer.Get() == nullptr ) {
-            LogError() << "Failed to create tiled deferred light buffer. HRESULT: " << std::hex << hr;
-            return;
-        }
-        SetDebugName( m_LightBuffer.Get(), "TiledDeferred_LightBuffer" );
-
-        D3D11_SHADER_RESOURCE_VIEW_DESC srvDesc = {};
-        srvDesc.Format = DXGI_FORMAT_UNKNOWN;
-        srvDesc.ViewDimension = D3D11_SRV_DIMENSION_BUFFER;
-        srvDesc.Buffer.ElementWidth = MAX_TILED_LIGHTS;
-
-        hr = m_device->CreateShaderResourceView( m_LightBuffer.Get(), &srvDesc, m_LightBufferSRV.ReleaseAndGetAddressOf() );
-        if ( FAILED( hr ) || m_LightBufferSRV.Get() == nullptr ) {
-            LogError() << "Failed to create tiled deferred light buffer SRV. HRESULT: " << std::hex << hr;
-            m_LightBuffer.Reset();
-            return;
-        }
-        SetDebugName( m_LightBufferSRV.Get(), "TiledDeferred_LightBuffer_SRV" );
+    if ( !m_device || !m_context ) {
+        return XR_INVALID_ARG;
     }
 
-    // Index counter: single uint for atomic allocation
-    {
-        D3D11_BUFFER_DESC desc = {};
-        desc.ByteWidth = sizeof( uint32_t ) * 4; // Pad to 16 bytes
-        desc.Usage = D3D11_USAGE_DEFAULT;
-        desc.BindFlags = D3D11_BIND_UNORDERED_ACCESS;
-        desc.MiscFlags = D3D11_RESOURCE_MISC_BUFFER_STRUCTURED;
-        desc.StructureByteStride = sizeof( uint32_t );
+    m_LightBuffer.Reset();
+    m_LightBufferSRV.Reset();
+    m_IndexCounter.Reset();
+    m_IndexCounterUAV.Reset();
 
-        HRESULT hr = m_device->CreateBuffer( &desc, nullptr, m_IndexCounter.ReleaseAndGetAddressOf() );
-        if ( FAILED( hr ) || m_IndexCounter.Get() == nullptr ) {
-            LogError() << "Failed to create tiled deferred index counter. HRESULT: " << std::hex << hr;
-            return;
-        }
-        SetDebugName( m_IndexCounter.Get(), "TiledDeferred_IndexCounter" );
+    D3D11_BUFFER_DESC lightDesc{};
+    lightDesc.ByteWidth = MAX_TILED_LIGHTS * sizeof( TiledPointLight );
+    lightDesc.Usage = D3D11_USAGE_DYNAMIC;
+    lightDesc.BindFlags = D3D11_BIND_SHADER_RESOURCE;
+    lightDesc.CPUAccessFlags = D3D11_CPU_ACCESS_WRITE;
+    lightDesc.MiscFlags = D3D11_RESOURCE_MISC_BUFFER_STRUCTURED;
+    lightDesc.StructureByteStride = sizeof( TiledPointLight );
 
-        D3D11_UNORDERED_ACCESS_VIEW_DESC uavDesc = {};
-        uavDesc.Format = DXGI_FORMAT_UNKNOWN;
-        uavDesc.ViewDimension = D3D11_UAV_DIMENSION_BUFFER;
-        uavDesc.Buffer.NumElements = 4;
-
-        hr = m_device->CreateUnorderedAccessView( m_IndexCounter.Get(), &uavDesc, m_IndexCounterUAV.ReleaseAndGetAddressOf() );
-        if ( FAILED( hr ) || m_IndexCounterUAV.Get() == nullptr ) {
-            LogError() << "Failed to create tiled deferred index counter UAV. HRESULT: " << std::hex << hr;
-            m_IndexCounter.Reset();
-            return;
-        }
-        SetDebugName( m_IndexCounterUAV.Get(), "TiledDeferred_IndexCounter_UAV" );
+    HRESULT hr = m_device->CreateBuffer( &lightDesc, nullptr, m_LightBuffer.GetAddressOf() );
+    if ( FAILED( hr ) ) {
+        LogError() << "Failed to create tiled deferred light buffer. HRESULT: 0x"
+            << std::hex << static_cast<unsigned long>(hr);
+        return XR_FAILED;
     }
 
-    // Shadow cube array is lazy-created on first AllocateSlot() to save memory when shadows are off
+    D3D11_SHADER_RESOURCE_VIEW_DESC lightSRVDesc{};
+    lightSRVDesc.Format = DXGI_FORMAT_UNKNOWN;
+    lightSRVDesc.ViewDimension = D3D11_SRV_DIMENSION_BUFFER;
+    lightSRVDesc.Buffer.NumElements = MAX_TILED_LIGHTS;
+    hr = m_device->CreateShaderResourceView(
+        m_LightBuffer.Get(), &lightSRVDesc, m_LightBufferSRV.GetAddressOf() );
+    if ( FAILED( hr ) ) {
+        LogError() << "Failed to create tiled deferred light buffer SRV. HRESULT: 0x"
+            << std::hex << static_cast<unsigned long>(hr);
+        m_LightBuffer.Reset();
+        return XR_FAILED;
+    }
+
+    D3D11_BUFFER_DESC counterDesc{};
+    counterDesc.ByteWidth = sizeof( uint32_t ) * 4u;
+    counterDesc.Usage = D3D11_USAGE_DEFAULT;
+    counterDesc.BindFlags = D3D11_BIND_UNORDERED_ACCESS;
+    counterDesc.MiscFlags = D3D11_RESOURCE_MISC_BUFFER_STRUCTURED;
+    counterDesc.StructureByteStride = sizeof( uint32_t );
+
+    hr = m_device->CreateBuffer( &counterDesc, nullptr, m_IndexCounter.GetAddressOf() );
+    if ( FAILED( hr ) ) {
+        LogError() << "Failed to create tiled deferred index counter. HRESULT: 0x"
+            << std::hex << static_cast<unsigned long>(hr);
+        return XR_FAILED;
+    }
+
+    D3D11_UNORDERED_ACCESS_VIEW_DESC counterUAVDesc{};
+    counterUAVDesc.Format = DXGI_FORMAT_UNKNOWN;
+    counterUAVDesc.ViewDimension = D3D11_UAV_DIMENSION_BUFFER;
+    counterUAVDesc.Buffer.NumElements = 4;
+    hr = m_device->CreateUnorderedAccessView(
+        m_IndexCounter.Get(), &counterUAVDesc, m_IndexCounterUAV.GetAddressOf() );
+    if ( FAILED( hr ) ) {
+        LogError() << "Failed to create tiled deferred index counter UAV. HRESULT: 0x"
+            << std::hex << static_cast<unsigned long>(hr);
+        m_IndexCounter.Reset();
+        return XR_FAILED;
+    }
+
+    SetDebugName( m_LightBuffer.Get(), "TiledDeferred_LightBuffer" );
+    SetDebugName( m_LightBufferSRV.Get(), "TiledDeferred_LightBuffer_SRV" );
+    SetDebugName( m_IndexCounter.Get(), "TiledDeferred_IndexCounter" );
+    SetDebugName( m_IndexCounterUAV.Get(), "TiledDeferred_IndexCounter_UAV" );
+    return XR_SUCCESS;
 }
-
-void D3D11TiledDeferredShading::EnsureShadowArray( uint32_t shadowCubeSize ) {
+bool D3D11TiledDeferredShading::EnsureShadowArray( uint32_t shadowCubeSize ) {
     shadowCubeSize = std::clamp<uint32_t>( shadowCubeSize, 64, 512 );
-    if ( m_ShadowArrayCreated && m_ShadowCubeSize == shadowCubeSize ) return;
-
-    if ( m_ShadowArrayCreated && m_ShadowCubeSize != shadowCubeSize ) {
-        m_SlotInUse.reset();
-        for ( auto& dsv : m_SlotDSVs ) dsv.Reset();
-        for ( auto& view : m_SlotViews ) view.reset();
-        m_ShadowCubeArraySRV.Reset();
-        m_ShadowCubeArray.Reset();
-        m_ShadowArrayCreated = false;
+    if ( m_ShadowArrayCreated && m_ShadowCubeSize == shadowCubeSize
+        && m_ShadowCubeArray && m_ShadowCubeArraySRV ) {
+        return true;
+    }
+    if ( !m_device ) {
+        return false;
     }
 
-    m_ShadowCubeSize = shadowCubeSize;
-
-    // TextureCubeArray as depth render target + shader resource (no copies needed)
-    D3D11_TEXTURE2D_DESC desc = {};
+    D3D11_TEXTURE2D_DESC desc{};
     desc.Width = shadowCubeSize;
     desc.Height = shadowCubeSize;
     desc.MipLevels = 1;
@@ -115,15 +115,15 @@ void D3D11TiledDeferredShading::EnsureShadowArray( uint32_t shadowCubeSize ) {
     desc.BindFlags = D3D11_BIND_DEPTH_STENCIL | D3D11_BIND_SHADER_RESOURCE;
     desc.MiscFlags = D3D11_RESOURCE_MISC_TEXTURECUBE;
 
-    HRESULT hr = m_device->CreateTexture2D( &desc, nullptr, m_ShadowCubeArray.ReleaseAndGetAddressOf() );
-    if ( FAILED( hr ) || m_ShadowCubeArray.Get() == nullptr ) {
-        LogError() << "Failed to create tiled shadow cube array. HRESULT: " << std::hex << hr;
-        return;
+    ComPtr<ID3D11Texture2D> newShadowArray;
+    HRESULT hr = m_device->CreateTexture2D( &desc, nullptr, newShadowArray.GetAddressOf() );
+    if ( FAILED( hr ) ) {
+        LogError() << "Failed to create tiled shadow cube array. HRESULT: 0x"
+            << std::hex << static_cast<unsigned long>(hr);
+        return false;
     }
-    SetDebugName( m_ShadowCubeArray.Get(), "TiledDeferred_ShadowCubeArray" );
 
-    // SRV for sampling in the tiled shading CS
-    D3D11_SHADER_RESOURCE_VIEW_DESC srvDesc = {};
+    D3D11_SHADER_RESOURCE_VIEW_DESC srvDesc{};
     srvDesc.Format = DXGI_FORMAT_R16_UNORM;
     srvDesc.ViewDimension = D3D11_SRV_DIMENSION_TEXTURECUBEARRAY;
     srvDesc.TextureCubeArray.MostDetailedMip = 0;
@@ -131,53 +131,62 @@ void D3D11TiledDeferredShading::EnsureShadowArray( uint32_t shadowCubeSize ) {
     srvDesc.TextureCubeArray.First2DArrayFace = 0;
     srvDesc.TextureCubeArray.NumCubes = MAX_SHADOW_CUBEMAPS;
 
-    hr = m_device->CreateShaderResourceView( m_ShadowCubeArray.Get(), &srvDesc, m_ShadowCubeArraySRV.ReleaseAndGetAddressOf() );
-    if ( FAILED( hr ) || m_ShadowCubeArraySRV.Get() == nullptr ) {
-        LogError() << "Failed to create tiled shadow cube array SRV. HRESULT: " << std::hex << hr;
-        m_ShadowCubeArray.Reset();
-        return;
+    ComPtr<ID3D11ShaderResourceView> newShadowArraySRV;
+    hr = m_device->CreateShaderResourceView(
+        newShadowArray.Get(), &srvDesc, newShadowArraySRV.GetAddressOf() );
+    if ( FAILED( hr ) ) {
+        LogError() << "Failed to create tiled shadow cube array SRV. HRESULT: 0x"
+            << std::hex << static_cast<unsigned long>(hr);
+        return false;
     }
-    SetDebugName( m_ShadowCubeArraySRV.Get(), "TiledDeferred_ShadowCubeArray_SRV" );
 
-    // Per-slot DSVs (6 faces each) and RenderToDepthStencilBuffer view wrappers
-    for ( uint32_t slot = 0; slot < MAX_SHADOW_CUBEMAPS; slot++ ) {
-        D3D11_DEPTH_STENCIL_VIEW_DESC dsvDesc = {};
+    std::array<ComPtr<ID3D11DepthStencilView>, MAX_SHADOW_CUBEMAPS> newSlotDSVs;
+    std::array<std::unique_ptr<RenderToDepthStencilBuffer>, MAX_SHADOW_CUBEMAPS> newSlotViews;
+    for ( uint32_t slot = 0; slot < MAX_SHADOW_CUBEMAPS; ++slot ) {
+        D3D11_DEPTH_STENCIL_VIEW_DESC dsvDesc{};
         dsvDesc.Format = DXGI_FORMAT_D16_UNORM;
         dsvDesc.ViewDimension = D3D11_DSV_DIMENSION_TEXTURE2DARRAY;
         dsvDesc.Texture2DArray.FirstArraySlice = slot * 6;
         dsvDesc.Texture2DArray.ArraySize = 6;
         dsvDesc.Texture2DArray.MipSlice = 0;
 
-        hr = m_device->CreateDepthStencilView( m_ShadowCubeArray.Get(), &dsvDesc, m_SlotDSVs[slot].ReleaseAndGetAddressOf() );
-        if ( FAILED( hr ) || m_SlotDSVs[slot].Get() == nullptr ) {
-            LogError() << "Failed to create tiled shadow cube array DSV. HRESULT: " << std::hex << hr;
-            for ( auto& dsv : m_SlotDSVs ) dsv.Reset();
-            for ( auto& view : m_SlotViews ) view.reset();
-            m_ShadowCubeArraySRV.Reset();
-            m_ShadowCubeArray.Reset();
-            return;
+        hr = m_device->CreateDepthStencilView(
+            newShadowArray.Get(), &dsvDesc, newSlotDSVs[slot].GetAddressOf() );
+        if ( FAILED( hr ) ) {
+            LogError() << "Failed to create tiled shadow cube array DSV. HRESULT: 0x"
+                << std::hex << static_cast<unsigned long>(hr);
+            return false;
         }
 
-        // View wrapper for RenderShadowCube() interface (uses GetSizeX() and GetDepthStencilView())
-        m_SlotViews[slot] = std::make_unique<RenderToDepthStencilBuffer>(
-            m_ShadowCubeArray, m_SlotDSVs[slot], nullptr,
-            shadowCubeSize, shadowCubeSize );
+        newSlotViews[slot] = std::make_unique<RenderToDepthStencilBuffer>(
+            newShadowArray, newSlotDSVs[slot], newShadowArraySRV, shadowCubeSize, shadowCubeSize );
     }
 
+    m_SlotInUse.reset();
+    m_ShadowCubeArray = std::move( newShadowArray );
+    m_ShadowCubeArraySRV = std::move( newShadowArraySRV );
+    m_SlotDSVs = std::move( newSlotDSVs );
+    m_SlotViews = std::move( newSlotViews );
+    m_ShadowCubeSize = shadowCubeSize;
     m_ShadowArrayCreated = true;
-}
 
+    SetDebugName( m_ShadowCubeArray.Get(), "TiledDeferred_ShadowCubeArray" );
+    SetDebugName( m_ShadowCubeArraySRV.Get(), "TiledDeferred_ShadowCubeArray_SRV" );
+    return true;
+}
 int D3D11TiledDeferredShading::AllocateSlot( uint32_t shadowCubeSize ) {
-    EnsureShadowArray( shadowCubeSize );
-    for ( uint32_t i = 0; i < MAX_SHADOW_CUBEMAPS; i++ ) {
-        if ( !m_SlotInUse[i] ) {
+    if ( !EnsureShadowArray( shadowCubeSize ) ) {
+        return -1;
+    }
+
+    for ( uint32_t i = 0; i < MAX_SHADOW_CUBEMAPS; ++i ) {
+        if ( !m_SlotInUse[i] && m_SlotViews[i] ) {
             m_SlotInUse[i] = true;
             return static_cast<int>(i);
         }
     }
     return -1;
 }
-
 void D3D11TiledDeferredShading::FreeSlot( int slot ) {
     if ( slot >= 0 && static_cast<uint32_t>(slot) < MAX_SHADOW_CUBEMAPS )
         m_SlotInUse[slot] = false;
@@ -189,75 +198,134 @@ RenderToDepthStencilBuffer* D3D11TiledDeferredShading::GetSlotTarget( int slot )
     return nullptr;
 }
 
-void D3D11TiledDeferredShading::EnsureBuffers( uint32_t numTilesX, uint32_t numTilesY ) {
-    uint32_t totalTiles = numTilesX * numTilesY;
+bool D3D11TiledDeferredShading::EnsureBuffers( uint32_t numTilesX, uint32_t numTilesY ) {
+    if ( !m_device || numTilesX == 0 || numTilesY == 0 ) {
+        return false;
+    }
 
-    if ( numTilesX == m_lastNumTilesX && numTilesY == m_lastNumTilesY )
-        return;
+    const bool existingResourcesValid = m_LightIndexList && m_LightIndexListSRV
+        && m_LightIndexListUAV && m_LightGrid && m_LightGridSRV && m_LightGridUAV;
+    if ( numTilesX == m_lastNumTilesX && numTilesY == m_lastNumTilesY
+        && existingResourcesValid ) {
+        return true;
+    }
 
+    const uint64_t totalTiles64 = static_cast<uint64_t>(numTilesX) * numTilesY;
+    const uint64_t indexEntries64 = totalTiles64 * MAX_LIGHTS_PER_TILE;
+    const uint64_t indexBytes64 = indexEntries64 * sizeof( uint32_t );
+    const uint64_t gridBytes64 = totalTiles64 * sizeof( LightGrid );
+    if ( totalTiles64 == 0 || totalTiles64 > std::numeric_limits<UINT>::max()
+        || indexEntries64 > std::numeric_limits<UINT>::max()
+        || indexBytes64 > std::numeric_limits<UINT>::max()
+        || gridBytes64 > std::numeric_limits<UINT>::max() ) {
+        LogError() << "Tiled deferred buffer dimensions overflow.";
+        return false;
+    }
+
+    const UINT totalTiles = static_cast<UINT>(totalTiles64);
+    const UINT indexEntries = static_cast<UINT>(indexEntries64);
+
+    ComPtr<ID3D11Buffer> newIndexList;
+    ComPtr<ID3D11ShaderResourceView> newIndexListSRV;
+    ComPtr<ID3D11UnorderedAccessView> newIndexListUAV;
+
+    D3D11_BUFFER_DESC indexDesc{};
+    indexDesc.ByteWidth = static_cast<UINT>(indexBytes64);
+    indexDesc.Usage = D3D11_USAGE_DEFAULT;
+    indexDesc.BindFlags = D3D11_BIND_SHADER_RESOURCE | D3D11_BIND_UNORDERED_ACCESS;
+    indexDesc.MiscFlags = D3D11_RESOURCE_MISC_BUFFER_STRUCTURED;
+    indexDesc.StructureByteStride = sizeof( uint32_t );
+
+    HRESULT hr = m_device->CreateBuffer( &indexDesc, nullptr, newIndexList.GetAddressOf() );
+    if ( FAILED( hr ) ) {
+        LogError() << "Failed to create tiled light index buffer. HRESULT: 0x"
+            << std::hex << static_cast<unsigned long>(hr);
+        return false;
+    }
+
+    D3D11_SHADER_RESOURCE_VIEW_DESC indexSRVDesc{};
+    indexSRVDesc.Format = DXGI_FORMAT_UNKNOWN;
+    indexSRVDesc.ViewDimension = D3D11_SRV_DIMENSION_BUFFER;
+    indexSRVDesc.Buffer.NumElements = indexEntries;
+    hr = m_device->CreateShaderResourceView(
+        newIndexList.Get(), &indexSRVDesc, newIndexListSRV.GetAddressOf() );
+    if ( FAILED( hr ) ) {
+        LogError() << "Failed to create tiled light index SRV. HRESULT: 0x"
+            << std::hex << static_cast<unsigned long>(hr);
+        return false;
+    }
+
+    D3D11_UNORDERED_ACCESS_VIEW_DESC indexUAVDesc{};
+    indexUAVDesc.Format = DXGI_FORMAT_UNKNOWN;
+    indexUAVDesc.ViewDimension = D3D11_UAV_DIMENSION_BUFFER;
+    indexUAVDesc.Buffer.NumElements = indexEntries;
+    hr = m_device->CreateUnorderedAccessView(
+        newIndexList.Get(), &indexUAVDesc, newIndexListUAV.GetAddressOf() );
+    if ( FAILED( hr ) ) {
+        LogError() << "Failed to create tiled light index UAV. HRESULT: 0x"
+            << std::hex << static_cast<unsigned long>(hr);
+        return false;
+    }
+
+    ComPtr<ID3D11Buffer> newLightGrid;
+    ComPtr<ID3D11ShaderResourceView> newLightGridSRV;
+    ComPtr<ID3D11UnorderedAccessView> newLightGridUAV;
+
+    D3D11_BUFFER_DESC gridDesc{};
+    gridDesc.ByteWidth = static_cast<UINT>(gridBytes64);
+    gridDesc.Usage = D3D11_USAGE_DEFAULT;
+    gridDesc.BindFlags = D3D11_BIND_SHADER_RESOURCE | D3D11_BIND_UNORDERED_ACCESS;
+    gridDesc.MiscFlags = D3D11_RESOURCE_MISC_BUFFER_STRUCTURED;
+    gridDesc.StructureByteStride = sizeof( LightGrid );
+
+    hr = m_device->CreateBuffer( &gridDesc, nullptr, newLightGrid.GetAddressOf() );
+    if ( FAILED( hr ) ) {
+        LogError() << "Failed to create tiled light grid buffer. HRESULT: 0x"
+            << std::hex << static_cast<unsigned long>(hr);
+        return false;
+    }
+
+    D3D11_SHADER_RESOURCE_VIEW_DESC gridSRVDesc{};
+    gridSRVDesc.Format = DXGI_FORMAT_UNKNOWN;
+    gridSRVDesc.ViewDimension = D3D11_SRV_DIMENSION_BUFFER;
+    gridSRVDesc.Buffer.NumElements = totalTiles;
+    hr = m_device->CreateShaderResourceView(
+        newLightGrid.Get(), &gridSRVDesc, newLightGridSRV.GetAddressOf() );
+    if ( FAILED( hr ) ) {
+        LogError() << "Failed to create tiled light grid SRV. HRESULT: 0x"
+            << std::hex << static_cast<unsigned long>(hr);
+        return false;
+    }
+
+    D3D11_UNORDERED_ACCESS_VIEW_DESC gridUAVDesc{};
+    gridUAVDesc.Format = DXGI_FORMAT_UNKNOWN;
+    gridUAVDesc.ViewDimension = D3D11_UAV_DIMENSION_BUFFER;
+    gridUAVDesc.Buffer.NumElements = totalTiles;
+    hr = m_device->CreateUnorderedAccessView(
+        newLightGrid.Get(), &gridUAVDesc, newLightGridUAV.GetAddressOf() );
+    if ( FAILED( hr ) ) {
+        LogError() << "Failed to create tiled light grid UAV. HRESULT: 0x"
+            << std::hex << static_cast<unsigned long>(hr);
+        return false;
+    }
+
+    m_LightIndexList = std::move( newIndexList );
+    m_LightIndexListSRV = std::move( newIndexListSRV );
+    m_LightIndexListUAV = std::move( newIndexListUAV );
+    m_LightGrid = std::move( newLightGrid );
+    m_LightGridSRV = std::move( newLightGridSRV );
+    m_LightGridUAV = std::move( newLightGridUAV );
     m_lastNumTilesX = numTilesX;
     m_lastNumTilesY = numTilesY;
 
-
-    // Light index list: global flat array of light indices
-    {
-        const uint32_t MAX_LIGHT_INDEX_ENTRIES = MAX_LIGHTS_PER_TILE * totalTiles;
-
-        D3D11_BUFFER_DESC desc = {};
-        desc.ByteWidth = MAX_LIGHT_INDEX_ENTRIES * sizeof( uint32_t );
-        desc.Usage = D3D11_USAGE_DEFAULT;
-        desc.BindFlags = D3D11_BIND_SHADER_RESOURCE | D3D11_BIND_UNORDERED_ACCESS;
-        desc.MiscFlags = D3D11_RESOURCE_MISC_BUFFER_STRUCTURED;
-        desc.StructureByteStride = sizeof( uint32_t );
-
-        m_device->CreateBuffer( &desc, nullptr, m_LightIndexList.ReleaseAndGetAddressOf() );
-        SetDebugName( m_LightIndexList.Get(), "TiledDeferred_LightIndexList" );
-
-        D3D11_SHADER_RESOURCE_VIEW_DESC srvDesc = {};
-        srvDesc.Format = DXGI_FORMAT_UNKNOWN;
-        srvDesc.ViewDimension = D3D11_SRV_DIMENSION_BUFFER;
-        srvDesc.Buffer.ElementWidth = MAX_LIGHT_INDEX_ENTRIES;
-
-        m_device->CreateShaderResourceView( m_LightIndexList.Get(), &srvDesc, m_LightIndexListSRV.ReleaseAndGetAddressOf() );
-        SetDebugName( m_LightIndexListSRV.Get(), "TiledDeferred_LightIndexList_SRV" );
-
-        D3D11_UNORDERED_ACCESS_VIEW_DESC uavDesc = {};
-        uavDesc.Format = DXGI_FORMAT_UNKNOWN;
-        uavDesc.ViewDimension = D3D11_UAV_DIMENSION_BUFFER;
-        uavDesc.Buffer.NumElements = MAX_LIGHT_INDEX_ENTRIES;
-
-        m_device->CreateUnorderedAccessView( m_LightIndexList.Get(), &uavDesc, m_LightIndexListUAV.ReleaseAndGetAddressOf() );
-        SetDebugName( m_LightIndexListUAV.Get(), "TiledDeferred_LightIndexList_UAV" );
-    }
-
-    // Recreate light grid buffer for new tile count
-    D3D11_BUFFER_DESC desc = {};
-    desc.ByteWidth = totalTiles * sizeof( LightGrid );
-    desc.Usage = D3D11_USAGE_DEFAULT;
-    desc.BindFlags = D3D11_BIND_SHADER_RESOURCE | D3D11_BIND_UNORDERED_ACCESS;
-    desc.MiscFlags = D3D11_RESOURCE_MISC_BUFFER_STRUCTURED;
-    desc.StructureByteStride = sizeof( LightGrid );
-
-    m_device->CreateBuffer( &desc, nullptr, m_LightGrid.ReleaseAndGetAddressOf() );
+    SetDebugName( m_LightIndexList.Get(), "TiledDeferred_LightIndexList" );
+    SetDebugName( m_LightIndexListSRV.Get(), "TiledDeferred_LightIndexList_SRV" );
+    SetDebugName( m_LightIndexListUAV.Get(), "TiledDeferred_LightIndexList_UAV" );
     SetDebugName( m_LightGrid.Get(), "TiledDeferred_LightGrid" );
-
-    D3D11_SHADER_RESOURCE_VIEW_DESC srvDesc = {};
-    srvDesc.Format = DXGI_FORMAT_UNKNOWN;
-    srvDesc.ViewDimension = D3D11_SRV_DIMENSION_BUFFER;
-    srvDesc.Buffer.ElementWidth = totalTiles;
-
-    m_device->CreateShaderResourceView( m_LightGrid.Get(), &srvDesc, m_LightGridSRV.ReleaseAndGetAddressOf() );
     SetDebugName( m_LightGridSRV.Get(), "TiledDeferred_LightGrid_SRV" );
-
-    D3D11_UNORDERED_ACCESS_VIEW_DESC uavDesc = {};
-    uavDesc.Format = DXGI_FORMAT_UNKNOWN;
-    uavDesc.ViewDimension = D3D11_UAV_DIMENSION_BUFFER;
-    uavDesc.Buffer.NumElements = totalTiles;
-
-    m_device->CreateUnorderedAccessView( m_LightGrid.Get(), &uavDesc, m_LightGridUAV.ReleaseAndGetAddressOf() );
     SetDebugName( m_LightGridUAV.Get(), "TiledDeferred_LightGrid_UAV" );
+    return true;
 }
-
 XRESULT D3D11TiledDeferredShading::DrawPointlightLights(
     std::vector<VobLightInfo*>& lights,
     RenderToTextureBuffer& color,
@@ -265,97 +333,117 @@ XRESULT D3D11TiledDeferredShading::DrawPointlightLights(
     RenderToTextureBuffer& specular,
     RenderToTextureBuffer& depthCopy ) {
 
-    auto graphicsEngine = reinterpret_cast<D3D11GraphicsEngine*>(Engine::GraphicsEngine);
-    auto _ = graphicsEngine->RecordGraphicsEvent( GE_NAME( "TiledPointlightLights" ) );
-    auto& context = graphicsEngine->GetContext();
-
-    // ---- Pass 1: Pack lights + cull ----
-    auto cullResult = CullLights( lights, depthCopy );
-
-    INT2 resolution = Engine::GraphicsEngine->GetResolution();
-    uint32_t numTilesX = (resolution.x + TILE_SIZE - 1) / TILE_SIZE;
-    uint32_t numTilesY = (resolution.y + TILE_SIZE - 1) / TILE_SIZE;
-
-    // ---- Pass 2: Tiled Shading (compute) ----
-    if ( cullResult.TiledLightCount > 0 ) {
-        auto& settings = Engine::GAPI->GetRendererState().RendererSettings;
-        XMMATRIX viewRaw = Engine::GAPI->GetViewMatrixXM();
-
-        // Unbind HDR as RTV before binding as UAV
-        ID3D11RenderTargetView* nullRTV = nullptr;
-        context->OMSetRenderTargets( 1, &nullRTV, nullptr );
-
-        auto csTiledShading = graphicsEngine->GetShaderManager().GetCShader( CShaderID::CS_TiledShading );
-        csTiledShading->Apply();
-
-        // Fill and bind shading constant buffer
-        TiledShadingConstantBuffer shadeCB = {};
-        shadeCB.ViewportSize = float2( static_cast<float>(resolution.x), static_cast<float>(resolution.y) );
-        {
-            auto& proj = Engine::GAPI->GetProjectionMatrix();
-            shadeCB.ProjParams = float4( 1.0f / proj._11, 1.0f / proj._22, proj._43, proj._33 );
-        }
-        shadeCB.LimitLightIntensity = settings.LimitLightIntesity ? 1 : 0;
-        shadeCB.NumTilesX = numTilesX;
-        XMStoreFloat4x4( &shadeCB.InvView, XMMatrixInverse( nullptr, viewRaw ) );
-
-        csTiledShading->GetBuffer( "TiledShadingConstantBuffer" ).Update( &shadeCB ).Bind();
-        if ( GSky* sky = Engine::GAPI->GetSky() ) {
-            auto& atmoCB = sky->GetAtmosphereCB();
-            csTiledShading->GetBuffer( "Atmosphere" ).Update( &atmoCB ).Bind();
-        }
-
-        // Bind GBuffer SRVs to CS
-        context->CSSetShaderResources( 0, 1, color.GetShaderResView().GetAddressOf() );
-        context->CSSetShaderResources( 1, 1, normals.GetShaderResView().GetAddressOf() );
-        context->CSSetShaderResources( 2, 1, depthCopy.GetShaderResView().GetAddressOf() );
-        context->CSSetShaderResources( 7, 1, specular.GetShaderResView().GetAddressOf() );
-
-        // Bind linear sampler to CS slot 0 (required for GBuffer SampleLevel calls)
-        ID3D11SamplerState* linearSampler = graphicsEngine->GetDefaultSamplerState();
-        context->CSSetSamplers( 0, 1, &linearSampler );
-
-        // Bind tiled data SRVs
-        context->CSSetShaderResources( 8, 1, m_LightBufferSRV.GetAddressOf() );
-        context->CSSetShaderResources( 9, 1, m_LightGridSRV.GetAddressOf() );
-        context->CSSetShaderResources( 10, 1, m_LightIndexListSRV.GetAddressOf() );
-
-        // Bind comparison sampler unconditionally — the runtime validates at Dispatch
-        // even if the shader branches around SampleCmpLevelZero
-        graphicsEngine->GetShadowMaps()->BindSamplerToCS( context.Get(), 2 );
-
-        // Bind shadow cubemap array SRV
-        if ( cullResult.HasShadowedTiledLights && m_ShadowArrayCreated ) {
-            context->CSSetShaderResources( 11, 1, m_ShadowCubeArraySRV.GetAddressOf() );
-        }
-
-        // Bind HDR UAV
-        auto& hdrUAV = graphicsEngine->GetHDRBackBuffer().GetUnorderedAccessView();
-        context->CSSetUnorderedAccessViews( 0, 1, hdrUAV.GetAddressOf(), nullptr );
-
-        context->Dispatch( numTilesX, numTilesY, 1 );
-
-        // Unbind everything
-        ID3D11UnorderedAccessView* nullUAV = nullptr;
-        context->CSSetUnorderedAccessViews( 0, 1, &nullUAV, nullptr );
-        ID3D11ShaderResourceView* nullSRVs[12] = {};
-        context->CSSetShaderResources( 0, 12, nullSRVs );
-        context->CSSetShader( nullptr, nullptr, 0 );
-
-        // Restore HDR as RTV
-        context->OMSetRenderTargets( 1, graphicsEngine->GetHDRBackBuffer().GetRenderTargetView().GetAddressOf(),
-            graphicsEngine->GetDepthBuffer()->GetDepthStencilView().Get() );
+    auto* graphicsEngine = reinterpret_cast<D3D11GraphicsEngine*>(Engine::GraphicsEngine);
+    if ( !graphicsEngine || !color.IsValid() || !normals.IsValid()
+        || !specular.IsValid() || !depthCopy.IsValid() ) {
+        return XR_INVALID_ARG;
     }
 
-    // Draw lights that couldn't go through the tiled path (mismatched shadow cube size, overflow)
+    auto _ = graphicsEngine->RecordGraphicsEvent( GE_NAME( "TiledPointlightLights" ) );
+    const auto& context = graphicsEngine->GetContext();
+    if ( !context ) {
+        return XR_FAILED;
+    }
+
+    auto cullResult = CullLights( lights, depthCopy );
+    const INT2 resolution = Engine::GraphicsEngine->GetResolution();
+    if ( resolution.x <= 0 || resolution.y <= 0 ) {
+        cullResult.TiledLightCount = 0;
+        cullResult.LegacyLights = lights;
+    }
+
+    if ( cullResult.TiledLightCount > 0 ) {
+        const uint32_t numTilesX = (static_cast<uint32_t>(resolution.x) + TILE_SIZE - 1u) / TILE_SIZE;
+        const uint32_t numTilesY = (static_cast<uint32_t>(resolution.y) + TILE_SIZE - 1u) / TILE_SIZE;
+        auto csTiledShading = graphicsEngine->GetShaderManager().GetCShader( CShaderID::CS_TiledShading );
+        auto& hdrBuffer = graphicsEngine->GetHDRBackBuffer();
+        D3D11ConstantBuffer* shadingBuffer = csTiledShading
+            ? csTiledShading->GetBuffer( "TiledShadingConstantBuffer" ).GetRawBuffer()
+            : nullptr;
+
+        const bool resourcesValid = csTiledShading && shadingBuffer
+            && m_LightBufferSRV && m_LightGridSRV && m_LightIndexListSRV
+            && hdrBuffer.IsValid() && hdrBuffer.GetUnorderedAccessView()
+            && graphicsEngine->GetShadowMaps()
+            && (!cullResult.HasShadowedTiledLights
+                || (m_ShadowArrayCreated && m_ShadowCubeArraySRV));
+        if ( !resourcesValid || csTiledShading->Apply() != XR_SUCCESS ) {
+            LogWarn() << "Tiled shading resources are unavailable; using the legacy light path.";
+            cullResult.TiledLightCount = 0;
+            cullResult.HasShadowedTiledLights = false;
+            cullResult.LegacyLights = lights;
+        } else {
+            auto& settings = Engine::GAPI->GetRendererState().RendererSettings;
+            const XMMATRIX viewRaw = Engine::GAPI->GetViewMatrixXM();
+
+            TiledShadingConstantBuffer shadeCB{};
+            shadeCB.ViewportSize = float2( static_cast<float>(resolution.x), static_cast<float>(resolution.y) );
+            {
+                const auto& proj = Engine::GAPI->GetProjectionMatrix();
+                shadeCB.ProjParams = float4( 1.0f / proj._11, 1.0f / proj._22, proj._43, proj._33 );
+            }
+            shadeCB.LimitLightIntensity = settings.LimitLightIntesity ? 1 : 0;
+            shadeCB.NumTilesX = numTilesX;
+            XMStoreFloat4x4( &shadeCB.InvView, XMMatrixInverse( nullptr, viewRaw ) );
+            csTiledShading->GetBuffer( "TiledShadingConstantBuffer" ).Update( &shadeCB ).Bind();
+
+            if ( GSky* sky = Engine::GAPI->GetSky() ) {
+                auto& atmoCB = sky->GetAtmosphereCB();
+                csTiledShading->GetBuffer( "Atmosphere" ).Update( &atmoCB ).Bind();
+            }
+
+            ID3D11RenderTargetView* nullRTV = nullptr;
+            context->OMSetRenderTargets( 1, &nullRTV, nullptr );
+
+            ID3D11ShaderResourceView* colorSRV = color.GetShaderResView().Get();
+            ID3D11ShaderResourceView* normalsSRV = normals.GetShaderResView().Get();
+            ID3D11ShaderResourceView* depthSRV = depthCopy.GetShaderResView().Get();
+            ID3D11ShaderResourceView* specularSRV = specular.GetShaderResView().Get();
+            context->CSSetShaderResources( 0, 1, &colorSRV );
+            context->CSSetShaderResources( 1, 1, &normalsSRV );
+            context->CSSetShaderResources( 2, 1, &depthSRV );
+            context->CSSetShaderResources( 7, 1, &specularSRV );
+
+            ID3D11SamplerState* linearSampler = graphicsEngine->GetDefaultSamplerState();
+            context->CSSetSamplers( 0, 1, &linearSampler );
+
+            ID3D11ShaderResourceView* lightSRV = m_LightBufferSRV.Get();
+            ID3D11ShaderResourceView* gridSRV = m_LightGridSRV.Get();
+            ID3D11ShaderResourceView* indexSRV = m_LightIndexListSRV.Get();
+            context->CSSetShaderResources( 8, 1, &lightSRV );
+            context->CSSetShaderResources( 9, 1, &gridSRV );
+            context->CSSetShaderResources( 10, 1, &indexSRV );
+
+            graphicsEngine->GetShadowMaps()->BindSamplerToCS( context.Get(), 2 );
+            if ( cullResult.HasShadowedTiledLights ) {
+                ID3D11ShaderResourceView* shadowSRV = m_ShadowCubeArraySRV.Get();
+                context->CSSetShaderResources( 11, 1, &shadowSRV );
+            }
+
+            ID3D11UnorderedAccessView* hdrUAV = hdrBuffer.GetUnorderedAccessView().Get();
+            context->CSSetUnorderedAccessViews( 0, 1, &hdrUAV, nullptr );
+            context->Dispatch( numTilesX, numTilesY, 1 );
+
+            ID3D11UnorderedAccessView* nullUAV = nullptr;
+            context->CSSetUnorderedAccessViews( 0, 1, &nullUAV, nullptr );
+            ID3D11ShaderResourceView* nullSRVs[12]{};
+            context->CSSetShaderResources( 0, 12, nullSRVs );
+            context->CSSetShader( nullptr, nullptr, 0 );
+
+            ID3D11RenderTargetView* hdrRTV = hdrBuffer.GetRenderTargetView().Get();
+            context->OMSetRenderTargets(
+                1, &hdrRTV, graphicsEngine->GetDepthBuffer()->GetDepthStencilView().Get() );
+        }
+    }
+
     if ( !cullResult.LegacyLights.empty() ) {
         D3D11LegacyDeferredShading legacy;
-        legacy.DrawPointlightLights( cullResult.LegacyLights, color, normals, specular, depthCopy );
+        return legacy.DrawPointlightLights(
+            cullResult.LegacyLights, color, normals, specular, depthCopy );
     }
 
     return XR_SUCCESS;
 }
-
 D3D11TiledDeferredShading::CullResult D3D11TiledDeferredShading::CullLights(
     std::vector<VobLightInfo*>& lights,
     RenderToTextureBuffer& depthCopy ) {
@@ -390,30 +478,49 @@ D3D11TiledDeferredShading::CullResult D3D11TiledDeferredShading::CullLights(
 
     CullResult result = {};
 
-    if ( m_LightBuffer.Get() == nullptr || m_LightBufferSRV.Get() == nullptr
-        || m_IndexCounter.Get() == nullptr || m_IndexCounterUAV.Get() == nullptr ) {
-        LogError() << "Tiled deferred resources are missing; skipping tiled light culling.";
+    if ( !context || !depthCopy.IsValid() || resolution.x <= 0 || resolution.y <= 0 ) {
+        result.LegacyLights = lights;
         return result;
     }
 
-    EnsureBuffers( numTilesX, numTilesY );
+    if ( !m_LightBuffer || !m_LightBufferSRV || !m_IndexCounter || !m_IndexCounterUAV ) {
+        LogError() << "Tiled deferred resources are missing; using legacy light culling.";
+        result.LegacyLights = lights;
+        return result;
+    }
 
+    if ( !EnsureBuffers( numTilesX, numTilesY ) ) {
+        LogError() << "Tiled deferred resize failed; using legacy lighting.";
+        result.LegacyLights = lights;
+        return result;
+    }
     // Partition lights: all lights go tiled where possible.
     // Shadowed lights with a tiled slot render directly into the shared array (no copies).
     // Shadowed lights without a tiled slot (256x256 or overflow) fall back to legacy.
     bool hasShadowedTiledLights = false;
 
     // Map light buffer
-    D3D11_MAPPED_SUBRESOURCE mapped;
-    if ( !SUCCEEDED( context->Map( m_LightBuffer.Get(), 0, D3D11_MAP_WRITE_DISCARD, 0, &mapped ) ) ) {
-        LogError() << "Failed to map light buffer.";
+    D3D11_MAPPED_SUBRESOURCE mapped{};
+    const HRESULT mapResult = context->Map(
+        m_LightBuffer.Get(), 0, D3D11_MAP_WRITE_DISCARD, 0, &mapped );
+    if ( FAILED( mapResult ) ) {
+        LogError() << "Failed to map tiled light buffer. HRESULT: 0x"
+            << std::hex << static_cast<unsigned long>(mapResult);
+        result.LegacyLights = lights;
         return result;
     }
-    TiledPointLight* lightData = reinterpret_cast<TiledPointLight*>(mapped.pData);
-
+    if ( !mapped.pData ) {
+        context->Unmap( m_LightBuffer.Get(), 0 );
+        result.LegacyLights = lights;
+        return result;
+    }
+    TiledPointLight* lightData = static_cast<TiledPointLight*>(mapped.pData);
     const auto camPos = Engine::GAPI->GetCameraPositionXM();
 
     for ( auto const& light : lights ) {
+        if ( !light || !light->Vob ) {
+            continue;
+        }
         zCVobLight* vob = light->Vob;
 
         if ( !vob->IsEnabled() ) continue;
@@ -434,8 +541,10 @@ D3D11TiledDeferredShading::CullResult D3D11TiledDeferredShading::CullLights(
             hasShadow = false;
         }
 
-        if ( result.TiledLightCount >= MAX_TILED_LIGHTS )
+        if ( result.TiledLightCount >= MAX_TILED_LIGHTS ) {
+            result.LegacyLights.push_back( light );
             continue;
+        }
 
         vob->DoAnimation();
 
@@ -504,7 +613,17 @@ D3D11TiledDeferredShading::CullResult D3D11TiledDeferredShading::CullLights(
     // Dispatch CS_LightCulling if we have lights
     if ( result.TiledLightCount > 0 ) {
         auto csLightCull = graphicsEngine->GetShaderManager().GetCShader( CShaderID::CS_LightCulling );
-        csLightCull->Apply();
+        D3D11ConstantBuffer* cullingBuffer = csLightCull
+            ? csLightCull->GetBuffer( "LightCullingConstantBuffer" ).GetRawBuffer()
+            : nullptr;
+        if ( !csLightCull || !cullingBuffer || !m_LightGridUAV || !m_LightIndexListUAV
+            || csLightCull->Apply() != XR_SUCCESS ) {
+            LogWarn() << "Tiled light-culling shader is unavailable; using legacy lighting.";
+            result.TiledLightCount = 0;
+            result.HasShadowedTiledLights = false;
+            result.LegacyLights = lights;
+            return result;
+        }
 
         LightCullingConstantBuffer cullCB = {};
         cullCB.Proj = Engine::GAPI->GetProjectionMatrix();

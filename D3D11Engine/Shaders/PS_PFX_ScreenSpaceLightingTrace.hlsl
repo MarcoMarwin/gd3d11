@@ -83,8 +83,18 @@ bool TraceRay(float3 origin, float3 dir, float maxDistance, int steps, float jit
 float ComputeContact(float2 uv, float depth)
 {
     if (SSL_EnableContact < 0.5f || SSL_ContactStrength <= 0.001f || IsGeometry(depth) < 0.5f || WaterMask(uv) > 0.02f) return 0.0f;
+
     float4 materialInfo = MaterialInfo(uv);
     if (IsAlphaTestedMaterial(materialInfo) > 0.5f) return 0.0f;
+
+    float materialClass = materialInfo.r;
+    if (materialClass < -0.5f && materialClass > -2.0f)
+    {
+        // NPC depth remains available to TraceRay as an occluder, but NPC
+        // surfaces do not receive the screen-space contact-shadow term.
+        return 0.0f;
+    }
+
     float3 vp = ViewPosition(uv, depth);
     float3 n = ViewNormal(uv);
     float3 l = normalize(SSL_LightDirectionVS);
@@ -92,8 +102,6 @@ float ComputeContact(float2 uv, float depth)
     if (nl <= 0.02f) return 0.0f;
     float facing = smoothstep(0.02f, 0.30f, nl);
 
-    float materialClass = materialInfo.r;
-    float npcMaterial = (materialClass < -0.5f && materialClass > -2.0f) ? 1.0f : 0.0f;
     float contactTracePhase = 0.5f;
     float jitter = contactTracePhase;
 
@@ -101,25 +109,18 @@ float ComputeContact(float2 uv, float depth)
     // across frames; FSR3 then receives a stable alpha mask instead of shimmer.
     float viewDistanceFade = 1.0f - smoothstep(1200.0f, 2600.0f, vp.z);
     if (viewDistanceFade <= 0.001f) return 0.0f;
-    float worldMaxDistance = clamp(vp.z * 0.0065f, 18.0f, 105.0f);
-    float npcMaxDistance = clamp(vp.z * 0.0035f, 10.0f, 38.0f);
-    float maxDistance = lerp(worldMaxDistance, npcMaxDistance, npcMaterial);
-    float originOffset = lerp(1.2f, 4.0f, npcMaterial);
-    float minThickness = lerp(2.2f, 2.8f, npcMaterial);
-    float thicknessScale = lerp(0.052f, 0.026f, npcMaterial);
-    float maxThickness = lerp(22.0f, 8.0f, npcMaterial);
+    float maxDistance = clamp(vp.z * 0.0065f, 18.0f, 105.0f);
 
-    float2 hitUV; float hitDistance;
+    float2 hitUV;
+    float hitDistance;
     // Dense near-field samples make shallow tabletop contacts less view-angle dependent.
-    if (!TraceRay(vp + n * originOffset, l, maxDistance, 12, jitter, minThickness, thicknessScale, maxThickness, 1.0f, hitUV, hitDistance)) return 0.0f;
+    if (!TraceRay(vp + n * 1.2f, l, maxDistance, 12, jitter, 2.2f, 0.052f, 22.0f, 1.0f, hitUV, hitDistance)) return 0.0f;
+
     float3 hn = ViewNormal(hitUV);
     float occluderFacing = saturate(dot(hn, -l));
-    float worldNormalGate = lerp(0.68f, 1.0f, occluderFacing);
-    float npcNormalGate = lerp(0.40f, 0.92f, occluderFacing);
-    float normalGate = lerp(worldNormalGate, npcNormalGate, npcMaterial);
+    float normalGate = lerp(0.68f, 1.0f, occluderFacing);
     float distanceFade = 1.0f - smoothstep(maxDistance * 0.38f, maxDistance, hitDistance);
-    float npcStrength = lerp(1.0f, 0.55f, npcMaterial);
-    return saturate(facing * normalGate * distanceFade * viewDistanceFade * SSL_ContactStrength * npcStrength);
+    return saturate(facing * normalGate * distanceFade * viewDistanceFade * SSL_ContactStrength);
 }
 
 float3 ComputeGI(float2 uv, float depth, float3 baseColor)

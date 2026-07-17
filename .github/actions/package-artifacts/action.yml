@@ -1,4 +1,5 @@
 name: 'Package artifacts'
+description: 'Validate and package the complete GD3D11 release artifact set.'
 
 outputs:
   artifact-id:
@@ -12,25 +13,33 @@ runs:
       id: calc-path
       shell: pwsh
       run: |
+        $ErrorActionPreference = "Stop"
         $buildPrefix = ""
         $buildNumberPath = ".github/nightly-build-number.txt"
-        if (Test-Path $buildNumberPath) {
-          $buildNumber = (Get-Content $buildNumberPath -Raw).Trim()
-          if ($buildNumber) {
-            $buildPrefix = "build-$buildNumber-"
+        if (Test-Path -LiteralPath $buildNumberPath -PathType Leaf) {
+          $buildNumber = (Get-Content -LiteralPath $buildNumberPath -Raw).Trim()
+          if ($buildNumber -notmatch '^[0-9]{3}$') {
+            throw "Invalid nightly build number: $buildNumber"
           }
+          $buildPrefix = "build-$buildNumber-"
         }
 
         if ($env:GITHUB_REF_TYPE -eq "tag") {
           $tagOrGitShortHash = $env:GITHUB_REF_NAME
+          if ($tagOrGitShortHash -notmatch '^[A-Za-z0-9][A-Za-z0-9._+-]{0,95}$') {
+            throw "Unsafe tag name for package path: $tagOrGitShortHash"
+          }
         } else {
-          $shortHash = $env:GITHUB_SHA.Substring(0, 9)
+          if ($env:GITHUB_SHA -notmatch '^[0-9a-fA-F]{9,64}$') {
+            throw "Invalid Git commit hash."
+          }
+          $shortHash = $env:GITHUB_SHA.Substring(0, 9).ToLowerInvariant()
           $tagOrGitShortHash = "git-$shortHash"
         }
-        $dirName = "GD3D11-$buildPrefix$tagOrGitShortHash"
 
-        "release-dir=$dirName" >> $env:GITHUB_OUTPUT
-        "download-dir=downloaded-artifacts" >> $env:GITHUB_OUTPUT
+        $dirName = "GD3D11-$buildPrefix$tagOrGitShortHash"
+        "release-dir=$dirName" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+        "download-dir=downloaded-artifacts" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
 
     - name: Download build artifacts
       uses: actions/download-artifact@v7
@@ -38,41 +47,117 @@ runs:
         path: ${{ steps.calc-path.outputs.download-dir }}
         merge-multiple: true
 
-    - name: Prepare Release Structure
+    - name: Prepare release structure
       shell: pwsh
+      env:
+        GD3D11_RELEASE_DIR: ${{ steps.calc-path.outputs.release-dir }}
+        GD3D11_ARTIFACT_DIR: ${{ steps.calc-path.outputs.download-dir }}
       run: |
-        $relDir = "${{ steps.calc-path.outputs.release-dir }}"
-        $artifactDir = "${{ steps.calc-path.outputs.download-dir }}"
-        $binDir = "$relDir/GD3D11/Bin"
+        $ErrorActionPreference = "Stop"
+        $relDir = $env:GD3D11_RELEASE_DIR
+        $artifactDir = $env:GD3D11_ARTIFACT_DIR
+        $binDir = Join-Path $relDir "GD3D11/Bin"
 
-        New-Item -Path $binDir -ItemType Directory -Force
-        
-        Copy-Item -Path "D3D11Engine/Shaders" -Destination "$relDir/GD3D11/Shaders/" -Recurse -Force
-        $xeGtaoShaderLicense = "$relDir/GD3D11/Shaders/XeGTAO/LICENSE.txt"
-        if (Test-Path -Path $xeGtaoShaderLicense) {
-          Remove-Item -Path $xeGtaoShaderLicense -Force
+        $expectedArtifacts = @(
+          "ddraw.dll", "ddraw.pdb",
+          "g2a.dll", "g2a.pdb",
+          "g2a_avx.dll", "g2a_avx.pdb",
+          "g2a_avx2.dll", "g2a_avx2.pdb",
+          "g1.dll", "g1.pdb",
+          "g1a.dll", "g1a.pdb",
+          "g1_avx.dll", "g1_avx.pdb",
+          "g1_avx2.dll", "g1_avx2.pdb",
+          "g2_spacer.dll", "g2_spacer.pdb",
+          "g1_spacer.dll", "g1_spacer.pdb"
+        )
+        foreach ($artifactName in $expectedArtifacts) {
+          $artifactPath = Join-Path $artifactDir $artifactName
+          if (-not (Test-Path -LiteralPath $artifactPath -PathType Leaf)) {
+            throw "Required build artifact is missing: $artifactName"
+          }
         }
-        Copy-Item -Path "blobs/Fonts" -Destination "$relDir/GD3D11/Fonts/" -Recurse -Force
-        Copy-Item -Path "blobs/Licences.txt" -Destination "$relDir/GD3D11/Licences.txt" -Force
-        Copy-Item -Path "blobs/Meshes" -Destination "$relDir/GD3D11/Meshes/" -Recurse -Force
-        Copy-Item -Path "blobs/Textures" -Destination "$relDir/GD3D11/Textures/" -Recurse -Force
-        Copy-Item -Path "blobs/libs/*" -Destination "$relDir/" -Recurse -Force
-        Copy-Item -Path "blobs/bin/wine-d2d1.dll" -Destination "$relDir/GD3D11/Bin/d2d1.dll" -Force
 
-        Copy-Item -Path "$artifactDir/*" -Destination $binDir -Force
-        Move-Item -Path "$binDir/ddraw.dll" -Destination "$relDir/" -Force
-        Move-Item -Path "$binDir/ddraw.pdb" -Destination "$relDir/" -Force
+        $actualArtifacts = @(
+          Get-ChildItem -LiteralPath $artifactDir -File | ForEach-Object Name
+        )
+        $unexpectedArtifacts = @(
+          $actualArtifacts | Where-Object { $_ -notin $expectedArtifacts }
+        )
+        if ($actualArtifacts.Count -ne $expectedArtifacts.Count
+            -or $unexpectedArtifacts.Count -ne 0) {
+          throw "Downloaded artifacts do not match the release matrix: $unexpectedArtifacts"
+        }
 
-    - name: Create final Zip
+        $requiredRuntimeFiles = @(
+          "blobs/Meshes/unitSphere.obj",
+          "blobs/Textures/Moon.dds",
+          "blobs/Textures/RainCloud.dds",
+          "blobs/Textures/SkyDay.dds",
+          "blobs/Textures/SkyDay_G1.dds",
+          "blobs/Textures/starsh.dds"
+        )
+        foreach ($runtimeFile in $requiredRuntimeFiles) {
+          if (!(Test-Path -LiteralPath $runtimeFile -PathType Leaf)) {
+            throw "Required runtime asset is missing: $runtimeFile"
+          }
+        }
+
+        New-Item -Path $binDir -ItemType Directory -Force | Out-Null
+        Copy-Item -LiteralPath "D3D11Engine/Shaders" -Destination "$relDir/GD3D11/Shaders" -Recurse
+        Copy-Item -LiteralPath "blobs/Fonts" -Destination "$relDir/GD3D11/Fonts" -Recurse
+        Copy-Item -LiteralPath "blobs/Licences.txt" -Destination "$relDir/GD3D11/Licences.txt"
+        Copy-Item -LiteralPath "blobs/Meshes" -Destination "$relDir/GD3D11/Meshes" -Recurse
+        Copy-Item -LiteralPath "blobs/Textures" -Destination "$relDir/GD3D11/Textures" -Recurse
+        Get-ChildItem -LiteralPath "blobs/libs" -File | ForEach-Object {
+          Copy-Item -LiteralPath $_.FullName -Destination $relDir
+        }
+        Copy-Item -LiteralPath "blobs/bin/wine-d2d1.dll" -Destination "$binDir/d2d1.dll"
+
+        foreach ($artifactName in $expectedArtifacts) {
+          Copy-Item -LiteralPath (Join-Path $artifactDir $artifactName) -Destination $binDir
+        }
+        Move-Item -LiteralPath "$binDir/ddraw.dll" -Destination "$relDir/ddraw.dll"
+        Move-Item -LiteralPath "$binDir/ddraw.pdb" -Destination "$relDir/ddraw.pdb"
+
+        Get-ChildItem -LiteralPath $relDir -File -Filter "*.pdb" -Recurse | Remove-Item -Force
+        $checksumFiles = @(Get-ChildItem -LiteralPath $relDir -File -Recurse | Sort-Object FullName)
+        $checksumLines = foreach ($file in $checksumFiles) {
+          $relativePath = [IO.Path]::GetRelativePath($relDir, $file.FullName).Replace('\', '/')
+          $hash = (Get-FileHash -LiteralPath $file.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+          "$hash  $relativePath"
+        }
+        if (-not $checksumLines) {
+          throw "Release package contains no files."
+        }
+        [IO.File]::WriteAllLines(
+          (Join-Path $relDir "SHA256SUMS.txt"),
+          [string[]]$checksumLines,
+          [Text.UTF8Encoding]::new($false)
+        )
+
+    - name: Create final zip
       shell: pwsh
+      env:
+        GD3D11_RELEASE_DIR: ${{ steps.calc-path.outputs.release-dir }}
       run: |
-        $relDir = "${{ steps.calc-path.outputs.release-dir }}"
-        7z a -tzip -mx=7 -mmt=on "-xr!*.pdb" "$relDir.zip" "./$relDir/*"
-    - name: Upload Zip artifact
+        $ErrorActionPreference = "Stop"
+        $relDir = $env:GD3D11_RELEASE_DIR
+        $zipPath = "$relDir.zip"
+        if (Test-Path -LiteralPath $zipPath) {
+          Remove-Item -LiteralPath $zipPath -Force
+        }
+
+        & 7z a -tzip -mx=7 -mmt=on "-xr!*.pdb" $zipPath "./$relDir/*"
+        if ($LASTEXITCODE -ne 0
+            -or -not (Test-Path -LiteralPath $zipPath -PathType Leaf)) {
+          throw "Failed to create release archive: $zipPath"
+        }
+
+    - name: Upload zip artifact
       id: artifact-upload
       uses: actions/upload-artifact@v6
       with:
         name: ${{ steps.calc-path.outputs.release-dir }}
-        path: "*.zip"
+        path: ${{ steps.calc-path.outputs.release-dir }}.zip
         if-no-files-found: error
         compression-level: 0

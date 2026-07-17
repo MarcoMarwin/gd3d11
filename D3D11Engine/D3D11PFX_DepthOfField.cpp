@@ -13,12 +13,100 @@
 #include "GothicAPI.h"
 #include "TexturePool.h"
 #include "zCVob.h"
+#include <algorithm>
+#include <array>
 #include <cmath>
 
 extern bool FeatureLevel10Compatibility;
 
+namespace {
+    class ScopedTrackedRendererState {
+    public:
+        ScopedTrackedRendererState( D3D11GraphicsEngine* graphicsEngine, GothicAPI* gapi )
+            : GraphicsEngine( graphicsEngine ),
+            GAPI( gapi ),
+            BlendState( gapi->GetRendererState().BlendState ),
+            DepthState( gapi->GetRendererState().DepthState ),
+            RasterizerState( gapi->GetRendererState().RasterizerState ) {
+        }
+
+        ~ScopedTrackedRendererState() {
+            Restore();
+        }
+
+        bool Restore() {
+            if ( Restored ) return true;
+            Restored = true;
+            if ( !GraphicsEngine || !GAPI ) return false;
+
+            auto& state = GAPI->GetRendererState();
+            state.BlendState = BlendState;
+            state.DepthState = DepthState;
+            state.RasterizerState = RasterizerState;
+            state.BlendState.SetDirty();
+            state.DepthState.SetDirty();
+            state.RasterizerState.SetDirty();
+            return GraphicsEngine->UpdateRenderStates() == XR_SUCCESS;
+        }
+
+    private:
+        D3D11GraphicsEngine* GraphicsEngine;
+        GothicAPI* GAPI;
+        GothicBlendStateInfo BlendState;
+        GothicDepthBufferStateInfo DepthState;
+        GothicRasterizerStateInfo RasterizerState;
+        bool Restored = false;
+    };
+
+    class ScopedPixelResourceClear {
+    public:
+        explicit ScopedPixelResourceClear( ID3D11DeviceContext* context )
+            : Context( context ) {
+        }
+
+        ~ScopedPixelResourceClear() {
+            if ( !Context ) return;
+            std::array<ID3D11ShaderResourceView*, 4> nullResources{};
+            Context->PSSetShaderResources(
+                0, static_cast<UINT>(nullResources.size()), nullResources.data() );
+        }
+
+    private:
+        Microsoft::WRL::ComPtr<ID3D11DeviceContext> Context;
+    };
+
+    void ClearComputeIO( ID3D11DeviceContext* context ) {
+        if ( !context ) return;
+        std::array<ID3D11ShaderResourceView*, 4> nullResources{};
+        ID3D11UnorderedAccessView* nullUAV = nullptr;
+        context->CSSetShaderResources(
+            0, static_cast<UINT>(nullResources.size()), nullResources.data() );
+        context->CSSetUnorderedAccessViews( 0, 1, &nullUAV, nullptr );
+    }
+
+    class ScopedComputeBindingCleanup {
+    public:
+        explicit ScopedComputeBindingCleanup( ID3D11DeviceContext* context )
+            : Context( context ) {
+            if ( Context ) Context->CSGetSamplers( 0, 1, OldSampler.GetAddressOf() );
+        }
+
+        ~ScopedComputeBindingCleanup() {
+            if ( !Context ) return;
+            ClearComputeIO( Context.Get() );
+            Context->CSSetShader( nullptr, nullptr, 0 );
+            ID3D11SamplerState* oldSampler = OldSampler.Get();
+            Context->CSSetSamplers( 0, 1, &oldSampler );
+        }
+
+    private:
+        Microsoft::WRL::ComPtr<ID3D11DeviceContext> Context;
+        Microsoft::WRL::ComPtr<ID3D11SamplerState> OldSampler;
+    };
+}
 static bool HasCenteredNearbyNpc( float maxViewDistance, bool relaxedCenter ) {
-    if ( maxViewDistance <= 0.0f ) {
+    if ( !Engine::GAPI || !Engine::GraphicsEngine
+        || !std::isfinite( maxViewDistance ) || maxViewDistance <= 0.0f ) {
         return false;
     }
 
@@ -30,8 +118,12 @@ static bool HasCenteredNearbyNpc( float maxViewDistance, bool relaxedCenter ) {
         return false;
     }
 
-    XMFLOAT3 cameraPosition;
+    XMFLOAT3 cameraPosition{};
     XMStoreFloat3( &cameraPosition, Engine::GAPI->GetCameraPositionXM() );
+    if ( !std::isfinite( cameraPosition.x ) || !std::isfinite( cameraPosition.y )
+        || !std::isfinite( cameraPosition.z ) ) {
+        return false;
+    }
 
     // A small cross of screen-centre rays is substantially more robust than
     // projecting one torso/head point. Very close characters fill the centre
@@ -56,6 +148,11 @@ static bool HasCenteredNearbyNpc( float maxViewDistance, bool relaxedCenter ) {
         const float maximum[3] = { bounds.Max.x, bounds.Max.y, bounds.Max.z };
 
         for ( int axis = 0; axis < 3; ++axis ) {
+            if ( !std::isfinite( origin[axis] ) || !std::isfinite( dir[axis] )
+                || !std::isfinite( minimum[axis] ) || !std::isfinite( maximum[axis] )
+                || minimum[axis] > maximum[axis] ) {
+                return false;
+            }
             if ( std::abs( dir[axis] ) < 1e-6f ) {
                 if ( origin[axis] < minimum[axis] || origin[axis] > maximum[axis] ) {
                     return false;
@@ -82,7 +179,12 @@ static bool HasCenteredNearbyNpc( float maxViewDistance, bool relaxedCenter ) {
         XMVECTOR rayPosition;
         XMVECTOR rayDirectionVector;
         Engine::GAPI->UnprojectXM( pixel, rayPosition, rayDirectionVector );
-        XMFLOAT3 rayDirection;
+        const float directionLengthSq = XMVectorGetX(
+            XMVector3LengthSq( rayDirectionVector ) );
+        if ( !std::isfinite( directionLengthSq ) || directionLengthSq <= 1.0e-12f ) {
+            continue;
+        }
+        XMFLOAT3 rayDirection{};
         XMStoreFloat3( &rayDirection, XMVector3Normalize( rayDirectionVector ) );
 
         for ( const SkeletalVobInfo* candidate : candidates ) {
@@ -100,30 +202,40 @@ static bool HasCenteredNearbyNpc( float maxViewDistance, bool relaxedCenter ) {
     return false;
 }
 static DepthOfFieldConstantBuffer BuildDepthOfFieldConstants( float adaptiveFocusBlend ) {
-    auto& settings = Engine::GAPI->GetRendererState().RendererSettings;
+    const auto& settings = Engine::GAPI->GetRendererState().RendererSettings;
+    const auto finiteOr = []( float value, float fallback ) {
+        return std::isfinite( value ) ? value : fallback;
+    };
 
-    DepthOfFieldConstantBuffer cb = {};
-    cb.DoF_FocusDistance = settings.DoFFocusDistance;
-    cb.DoF_FocusRange = settings.DoFFocusRange;
-    const float strengthScale = std::clamp( settings.DoFBokehRadius / 8.0f, 0.004375f, 4.0f );
-    const float nearBlurBlend = std::clamp( adaptiveFocusBlend, 0.0f, 1.0f );
-    // Adaptive focusing affects only the near field. The configured far blur
-    // and its focus distance remain untouched at all times.
+    DepthOfFieldConstantBuffer cb{};
+    cb.DoF_FocusDistance = (std::max)(finiteOr( settings.DoFFocusDistance, 1.0f ), 0.0f);
+    cb.DoF_FocusRange = (std::max)(finiteOr( settings.DoFFocusRange, 1.0f ), 1.0f);
+    const float radius = finiteOr( settings.DoFBokehRadius, 8.0f );
+    const float strengthScale = std::clamp( radius / 8.0f, 0.004375f, 4.0f );
+    const float nearBlurBlend = std::clamp( finiteOr( adaptiveFocusBlend, 1.0f ), 0.0f, 1.0f );
     cb.DoF_BokehRadius = 8.0f * strengthScale;
     cb.DoF_MaxBlur = 12.0f * strengthScale;
 
-    auto& proj = Engine::GAPI->GetProjectionMatrix();
-    cb.DoF_ProjParams = float4( 1.0f / proj._11, 1.0f / proj._22, proj._34, proj._33 );
-    cb.DoF_NearPlane = Engine::GAPI->GetRendererState().RendererInfo.NearPlane;
-    cb.DoF_FarPlane = Engine::GAPI->GetRendererState().RendererInfo.FarPlane;
-    cb.DoF_NearBlurDistance = settings.DoFNearBlurDistance * nearBlurBlend;
-    cb.DoF_NearBlurStrength = settings.DoFNearBlurStrength * nearBlurBlend;
+    const auto& proj = Engine::GAPI->GetProjectionMatrix();
+    const float inverseX = std::abs( proj._11 ) > 1e-6f ? 1.0f / proj._11 : 0.0f;
+    const float inverseY = std::abs( proj._22 ) > 1e-6f ? 1.0f / proj._22 : 0.0f;
+    cb.DoF_ProjParams = float4(
+        finiteOr( inverseX, 0.0f ), finiteOr( inverseY, 0.0f ),
+        finiteOr( proj._34, 0.0f ), finiteOr( proj._33, 0.0f ) );
+    cb.DoF_NearPlane = (std::max)(finiteOr(
+        Engine::GAPI->GetRendererState().RendererInfo.NearPlane, 0.1f ), 0.01f);
+    cb.DoF_FarPlane = (std::max)(finiteOr(
+        Engine::GAPI->GetRendererState().RendererInfo.FarPlane, cb.DoF_NearPlane + 1.0f),
+        cb.DoF_NearPlane + 1.0f);
+    cb.DoF_NearBlurDistance = (std::max)(finiteOr(
+        settings.DoFNearBlurDistance, cb.DoF_NearPlane), cb.DoF_NearPlane) * nearBlurBlend;
+    cb.DoF_NearBlurStrength = std::clamp(
+        finiteOr( settings.DoFNearBlurStrength, 0.0f ), 0.0f, 4.0f ) * nearBlurBlend;
     return cb;
 }
 
 D3D11PFX_DepthOfField::D3D11PFX_DepthOfField( D3D11PfxRenderer* rnd )
     : D3D11PFX_Effect( rnd )
-    , m_FocusIndex( 0 )
     , m_AutoFocusBlend( 1.0f )
     , m_AutoFocusTransitionStart( 1.0f )
     , m_AutoFocusTransitionElapsed( 0.0f )
@@ -136,44 +248,58 @@ D3D11PFX_DepthOfField::D3D11PFX_DepthOfField( D3D11PfxRenderer* rnd )
     , m_NpcFocusSuppressed( false )
     , m_AutoFocusSuppressed( false ) {
     auto* engine = reinterpret_cast<D3D11GraphicsEngine*>(Engine::GraphicsEngine);
+    const auto device = engine ? engine->GetDevice() : nullptr;
+    const auto context = engine ? engine->GetContext() : nullptr;
+    if ( !device || !context ) return;
 
-    D3D11_TEXTURE2D_DESC texDesc = {};
-    texDesc.Width = 1;
-    texDesc.Height = 1;
-    texDesc.MipLevels = 1;
-    texDesc.ArraySize = 1;
-    texDesc.Format = DXGI_FORMAT_R32_FLOAT;
-    texDesc.SampleDesc.Count = 1;
-    texDesc.Usage = D3D11_USAGE_DEFAULT;
-    texDesc.BindFlags = D3D11_BIND_RENDER_TARGET | D3D11_BIND_SHADER_RESOURCE
+    D3D11_TEXTURE2D_DESC desc{};
+    desc.Width = 1;
+    desc.Height = 1;
+    desc.MipLevels = 1;
+    desc.ArraySize = 1;
+    desc.Format = DXGI_FORMAT_R32_FLOAT;
+    desc.SampleDesc.Count = 1;
+    desc.Usage = D3D11_USAGE_DEFAULT;
+    desc.BindFlags = D3D11_BIND_RENDER_TARGET | D3D11_BIND_SHADER_RESOURCE
         | (FeatureLevel10Compatibility ? 0 : D3D11_BIND_UNORDERED_ACCESS);
 
-    for ( int i = 0; i < 2; i++ ) {
-        HRESULT hr = engine->GetDevice()->CreateTexture2D( &texDesc, nullptr, m_FocusTexture[i].GetAddressOf() );
-        if ( FAILED( hr ) || m_FocusTexture[i].Get() == nullptr ) { LogError() << "DoF: CreateTexture2D failed for FocusTexture[" << i << "]. HRESULT: " << std::hex << hr; return; }
-
-        hr = engine->GetDevice()->CreateShaderResourceView( m_FocusTexture[i].Get(), nullptr, m_FocusSRV[i].GetAddressOf() );
-        if ( FAILED( hr ) || m_FocusSRV[i].Get() == nullptr ) { LogError() << "DoF: CreateSRV failed for FocusTexture[" << i << "]. HRESULT: " << std::hex << hr; return; }
-
-        hr = engine->GetDevice()->CreateRenderTargetView( m_FocusTexture[i].Get(), nullptr, m_FocusRTV[i].GetAddressOf() );
-        if ( FAILED( hr ) || m_FocusRTV[i].Get() == nullptr ) { LogError() << "DoF: CreateRTV failed for FocusTexture[" << i << "]. HRESULT: " << std::hex << hr; return; }
-
-        if ( !FeatureLevel10Compatibility ) {
-            D3D11_UNORDERED_ACCESS_VIEW_DESC uavDesc = {};
-            uavDesc.Format = DXGI_FORMAT_R32_FLOAT;
-            uavDesc.ViewDimension = D3D11_UAV_DIMENSION_TEXTURE2D;
-            uavDesc.Texture2D.MipSlice = 0;
-            hr = engine->GetDevice()->CreateUnorderedAccessView( m_FocusTexture[i].Get(), &uavDesc, m_FocusUAV[i].GetAddressOf() );
-            if ( FAILED( hr ) || m_FocusUAV[i].Get() == nullptr ) { LogError() << "DoF: CreateUAV failed for FocusTexture[" << i << "]. HRESULT: " << std::hex << hr; return; }
-        }
-    }
-}
-
-void D3D11PFX_DepthOfField::UpdateAdaptiveFocus( float configuredNearDistance ) {
-    const float deltaTime = std::clamp( Engine::GAPI->GetFrameTimeSec(), 0.0f, 0.1f );
-    if ( deltaTime <= 0.0f ) {
+    Microsoft::WRL::ComPtr<ID3D11Texture2D> texture;
+    Microsoft::WRL::ComPtr<ID3D11ShaderResourceView> srv;
+    Microsoft::WRL::ComPtr<ID3D11RenderTargetView> rtv;
+    Microsoft::WRL::ComPtr<ID3D11UnorderedAccessView> uav;
+    if ( FAILED( device->CreateTexture2D( &desc, nullptr, texture.GetAddressOf() ) )
+        || FAILED( device->CreateShaderResourceView(
+            texture.Get(), nullptr, srv.GetAddressOf() ) )
+        || FAILED( device->CreateRenderTargetView(
+            texture.Get(), nullptr, rtv.GetAddressOf() ) ) ) {
         return;
     }
+
+    if ( !FeatureLevel10Compatibility ) {
+        D3D11_UNORDERED_ACCESS_VIEW_DESC uavDesc{};
+        uavDesc.Format = DXGI_FORMAT_R32_FLOAT;
+        uavDesc.ViewDimension = D3D11_UAV_DIMENSION_TEXTURE2D;
+        if ( FAILED( device->CreateUnorderedAccessView(
+                texture.Get(), &uavDesc, uav.GetAddressOf() ) ) ) {
+            return;
+        }
+    }
+
+    const float initialFocus[4] = { 1.0f, 0.0f, 0.0f, 1.0f };
+    context->ClearRenderTargetView( rtv.Get(), initialFocus );
+    m_FocusTexture = std::move( texture );
+    m_FocusSRV = std::move( srv );
+    m_FocusRTV = std::move( rtv );
+    m_FocusUAV = std::move( uav );
+    m_Initialized = true;
+}
+void D3D11PFX_DepthOfField::UpdateAdaptiveFocus( float configuredNearDistance ) {
+    if ( !Engine::GAPI ) return;
+    const float rawDeltaTime = Engine::GAPI->GetFrameTimeSec();
+    if ( !std::isfinite( rawDeltaTime ) || rawDeltaTime <= 0.0f ) return;
+    const float deltaTime = std::min( rawDeltaTime, 0.1f );
+    configuredNearDistance = std::isfinite( configuredNearDistance )
+        ? std::max( configuredNearDistance, 0.0f ) : 0.0f;
 
     // Preserve the existing NPC-centre recognition and its enter/exit debounce.
     const bool relaxedCenter = m_NpcFocusSuppressed || m_AutoFocusBlend < 0.999f;
@@ -190,23 +316,39 @@ void D3D11PFX_DepthOfField::UpdateAdaptiveFocus( float configuredNearDistance ) 
         m_NpcFocusHoldElapsed = 0.0f;
     }
 
-    XMFLOAT3 cameraPosition;
+    XMFLOAT3 cameraPosition{};
     XMStoreFloat3( &cameraPosition, Engine::GAPI->GetCameraPositionXM() );
-    XMFLOAT3 cameraForward;
-    const XMMATRIX inverseView = XMMatrixInverse( nullptr, Engine::GAPI->GetViewMatrixXM() );
-    XMStoreFloat3( &cameraForward, XMVector3Normalize( inverseView.r[2] ) );
+    XMVECTOR determinant{};
+    const XMMATRIX inverseView = XMMatrixInverse(
+        &determinant, Engine::GAPI->GetViewMatrixXM() );
+    const float determinantValue = XMVectorGetX( determinant );
+    const float forwardLengthSq = XMVectorGetX(
+        XMVector3LengthSq( inverseView.r[2] ) );
+    XMFLOAT3 cameraForward{};
+    if ( std::isfinite( forwardLengthSq ) && forwardLengthSq > 1.0e-12f ) {
+        XMStoreFloat3( &cameraForward, XMVector3Normalize( inverseView.r[2] ) );
+    }
 
+    const bool cameraPoseValid = std::isfinite( determinantValue )
+        && std::abs( determinantValue ) > 1.0e-12f
+        && std::isfinite( cameraPosition.x ) && std::isfinite( cameraPosition.y )
+        && std::isfinite( cameraPosition.z ) && std::isfinite( cameraForward.x )
+        && std::isfinite( cameraForward.y ) && std::isfinite( cameraForward.z );
     bool cameraStill = false;
-    if ( m_HasPreviousCameraPose ) {
-        const XMVECTOR positionDelta = XMLoadFloat3( &cameraPosition ) - XMLoadFloat3( &m_PreviousCameraPosition );
+    if ( cameraPoseValid && m_HasPreviousCameraPose ) {
+        const XMVECTOR positionDelta = XMLoadFloat3( &cameraPosition )
+            - XMLoadFloat3( &m_PreviousCameraPosition );
         const float movedDistance = XMVectorGetX( XMVector3Length( positionDelta ) );
         const float forwardDot = XMVectorGetX( XMVector3Dot(
             XMLoadFloat3( &cameraForward ), XMLoadFloat3( &m_PreviousCameraForward ) ) );
-        cameraStill = movedDistance <= 2.0f && forwardDot >= 0.99998f;
+        cameraStill = std::isfinite( movedDistance ) && std::isfinite( forwardDot )
+            && movedDistance <= 2.0f && forwardDot >= 0.99998f;
     }
-    m_PreviousCameraPosition = cameraPosition;
-    m_PreviousCameraForward = cameraForward;
-    m_HasPreviousCameraPose = true;
+    if ( cameraPoseValid ) {
+        m_PreviousCameraPosition = cameraPosition;
+        m_PreviousCameraForward = cameraForward;
+    }
+    m_HasPreviousCameraPose = cameraPoseValid;
 
     const bool dialogActive = !Engine::GAPI->DialogFinished();
     if ( !dialogActive && cameraStill ) {
@@ -241,224 +383,264 @@ void D3D11PFX_DepthOfField::UpdateAdaptiveFocus( float configuredNearDistance ) 
         + (targetBlend - m_AutoFocusTransitionStart) * smoothTransition;
 }
 XRESULT D3D11PFX_DepthOfField::Render( ID3D11ShaderResourceView* backbuffer ) {
-    D3D11GraphicsEngine* engine = reinterpret_cast<D3D11GraphicsEngine*>(Engine::GraphicsEngine);
+    if ( !backbuffer || !FxRenderer ) return XR_INVALID_ARG;
 
-    engine->SetDefaultStates();
-
-    Microsoft::WRL::ComPtr<ID3D11RenderTargetView> oldRTV;
-    Microsoft::WRL::ComPtr<ID3D11DepthStencilView> oldDSV;
-    engine->GetContext()->OMGetRenderTargets( 1, oldRTV.GetAddressOf(), oldDSV.GetAddressOf() );
-    auto& rendererSettings = Engine::GAPI->GetRendererState().RendererSettings;
-    UpdateAdaptiveFocus( rendererSettings.DoFNearBlurDistance );
-
-    if ( m_FocusSRV[0].Get() == nullptr || m_FocusSRV[1].Get() == nullptr || m_FocusRTV[0].Get() == nullptr || m_FocusRTV[1].Get() == nullptr
-        || ( !FeatureLevel10Compatibility && ( m_FocusUAV[0].Get() == nullptr || m_FocusUAV[1].Get() == nullptr ) ) ) {
+    auto* engine = reinterpret_cast<D3D11GraphicsEngine*>(Engine::GraphicsEngine);
+    auto* gapi = Engine::GAPI;
+    const auto context = engine ? engine->GetContext() : nullptr;
+    auto* depthBuffer = engine ? engine->GetDepthBuffer() : nullptr;
+    if ( !m_Initialized || !engine || !gapi || !context
+        || !depthBuffer || !depthBuffer->IsValid()
+        || !m_FocusTexture || !m_FocusSRV || !m_FocusRTV
+        || (!FeatureLevel10Compatibility && !m_FocusUAV) ) {
         return XR_FAILED;
     }
 
-    if ( !FeatureLevel10Compatibility ) {
-        auto res = RenderCS( backbuffer );
-        engine->GetContext()->OMSetRenderTargets( 1, oldRTV.GetAddressOf(), oldDSV.Get() );
-        return res;
+    const INT2 resolution = engine->GetResolution();
+    const DXGI_FORMAT format = engine->GetBackBufferFormat();
+    if ( resolution.x < 2 || resolution.y < 2
+        || format == DXGI_FORMAT_UNKNOWN ) {
+        return XR_FAILED;
     }
 
-    auto vs = engine->GetShaderManager().GetVShader( VShaderID::VS_PFX );
-    auto focusPS = engine->GetShaderManager().GetPShader( PShaderID::PS_PFX_DoF_FocusResolve );
-    auto blurPS = engine->GetShaderManager().GetPShader(
+    auto& rendererSettings = gapi->GetRendererState().RendererSettings;
+    UpdateAdaptiveFocus( rendererSettings.DoFNearBlurDistance );
+    if ( !FeatureLevel10Compatibility ) return RenderCS( backbuffer );
+
+    TexturePool* texturePool = FxRenderer->GetTexturePool();
+    if ( !texturePool ) return XR_FAILED;
+    const INT2 halfResolution(
+        std::max( 1, (resolution.x + 1) / 2 ),
+        std::max( 1, (resolution.y + 1) / 2 ) );
+    auto halfBuffer = texturePool->Acquire( TexturePool::Description{
+        halfResolution.x, halfResolution.y, format } );
+    auto compositeBuffer = FxRenderer->GetTempBuffer();
+    if ( !halfBuffer || !compositeBuffer || !halfBuffer->IsValid()
+        || !compositeBuffer->IsValid() ) {
+        return XR_FAILED;
+    }
+
+    const auto fullscreenVS = engine->GetShaderManager().GetVShader( VShaderID::VS_PFX );
+    const auto focusPS = engine->GetShaderManager().GetPShader(
+        PShaderID::PS_PFX_DoF_FocusResolve );
+    const auto blurPS = engine->GetShaderManager().GetPShader(
         rendererSettings.DoFGaussBlur
             ? PShaderID::PS_PFX_DoF_Gauss
             : PShaderID::PS_PFX_DoF );
-    auto compositePS = engine->GetShaderManager().GetPShader( PShaderID::PS_PFX_DoF_Composite );
+    const auto compositePS = engine->GetShaderManager().GetPShader(
+        PShaderID::PS_PFX_DoF_Composite );
+    if ( !fullscreenVS || !focusPS || !blurPS || !compositePS
+        || !fullscreenVS->GetShader() || !focusPS->GetShader()
+        || !blurPS->GetShader() || !compositePS->GetShader() ) {
+        return XR_FAILED;
+    }
 
-    vs->Apply();
+    const DepthOfFieldConstantBuffer constants =
+        BuildDepthOfFieldConstants( m_AutoFocusBlend );
+    auto focusConstants = focusPS->GetBuffer( "DepthOfFieldConstantBuffer" );
+    auto blurConstants = blurPS->GetBuffer( "DepthOfFieldConstantBuffer" );
+    auto compositeConstants = compositePS->GetBuffer( "DepthOfFieldConstantBuffer" );
+    focusConstants.Update( &constants );
+    blurConstants.Update( &constants );
+    compositeConstants.Update( &constants );
+    if ( !focusConstants.Succeeded() || !blurConstants.Succeeded()
+        || !compositeConstants.Succeeded() ) {
+        return XR_FAILED;
+    }
 
+    Microsoft::WRL::ComPtr<ID3D11RenderTargetView> outputRTV;
+    context->OMGetRenderTargets( 1, outputRTV.GetAddressOf(), nullptr );
+    if ( !outputRTV ) return XR_FAILED;
 
-    DepthOfFieldConstantBuffer cb = BuildDepthOfFieldConstants( m_AutoFocusBlend );
+    D3D11PFXOutputStateGuard outputState( context.Get() );
+    if ( !outputState.IsValid() ) return XR_FAILED;
+    ScopedTrackedRendererState rendererState( engine, gapi );
+    ScopedPixelResourceClear clearResources( context.Get() );
 
-    // --- Pass 0: Focus Resolve (1x1 deterministic focus) ---
-    int prevIdx = m_FocusIndex;
-    int curIdx = 1 - m_FocusIndex;
+    XRESULT result = [&]() -> XRESULT {
+        engine->SetDefaultStates();
+        if ( fullscreenVS->Apply() != XR_SUCCESS
+            || focusPS->Apply() != XR_SUCCESS ) {
+            return XR_FAILED;
+        }
+        focusConstants.Bind();
+        if ( !focusConstants.Succeeded()
+            || engine->SetViewport( ViewportInfo( 0, 0, INT2( 1, 1 ) ) ) != XR_SUCCESS ) {
+            return XR_FAILED;
+        }
 
-    focusPS->Apply();
-    focusPS->GetBuffer( "DepthOfFieldConstantBuffer" ).Update( &cb ).Bind();
+        ID3D11RenderTargetView* focusRTV = m_FocusRTV.Get();
+        context->OMSetRenderTargets( 1, &focusRTV, nullptr );
+        if ( FxRenderer->DrawFullScreenQuad() != XR_SUCCESS ) return XR_FAILED;
 
-    D3D11_VIEWPORT oldVP;
-    UINT numVP = 1;
-    engine->GetContext()->RSGetViewports( &numVP, &oldVP );
-    D3D11_VIEWPORT focusVP = { 0, 0, 1, 1, 0, 1 };
-    engine->GetContext()->RSSetViewports( 1, &focusVP );
+        if ( blurPS->Apply() != XR_SUCCESS ) return XR_FAILED;
+        blurConstants.Bind();
+        if ( !blurConstants.Succeeded()
+            || engine->SetViewport(
+                ViewportInfo( 0, 0, halfResolution ) ) != XR_SUCCESS ) {
+            return XR_FAILED;
+        }
 
-    engine->GetContext()->OMSetRenderTargets( 1, m_FocusRTV[curIdx].GetAddressOf(), nullptr );
-    engine->GetDepthBuffer()->BindToPixelShader( engine->GetContext().Get(), 0 );
-    engine->GetContext()->PSSetShaderResources( 1, 1, m_FocusSRV[prevIdx].GetAddressOf() );
+        ID3D11RenderTargetView* halfRTV = halfBuffer->GetRenderTargetView().Get();
+        context->OMSetRenderTargets( 1, &halfRTV, nullptr );
+        ID3D11ShaderResourceView* blurResources[3] = {
+            backbuffer, depthBuffer->GetShaderResView().Get(), m_FocusSRV.Get()
+        };
+        context->PSSetShaderResources( 0, 3, blurResources );
+        if ( FxRenderer->DrawFullScreenQuad() != XR_SUCCESS ) return XR_FAILED;
 
-    FxRenderer->DrawFullScreenQuad();
+        std::array<ID3D11ShaderResourceView*, 4> nullResources{};
+        context->PSSetShaderResources(
+            0, static_cast<UINT>(nullResources.size()), nullResources.data() );
 
-    m_FocusIndex = curIdx;
-    engine->GetContext()->RSSetViewports( 1, &oldVP );
+        if ( compositePS->Apply() != XR_SUCCESS ) return XR_FAILED;
+        compositeConstants.Bind();
+        if ( !compositeConstants.Succeeded()
+            || engine->SetViewport(
+                ViewportInfo( 0, 0, resolution ) ) != XR_SUCCESS ) {
+            return XR_FAILED;
+        }
 
-    ID3D11ShaderResourceView* nullSRV2[2] = { nullptr, nullptr };
-    engine->GetContext()->PSSetShaderResources( 0, 2, nullSRV2 );
+        ID3D11RenderTargetView* compositeRTV =
+            compositeBuffer->GetRenderTargetView().Get();
+        context->OMSetRenderTargets( 1, &compositeRTV, nullptr );
+        ID3D11ShaderResourceView* compositeResources[4] = {
+            backbuffer, halfBuffer->GetShaderResView().Get(),
+            depthBuffer->GetShaderResView().Get(), m_FocusSRV.Get()
+        };
+        context->PSSetShaderResources( 0, 4, compositeResources );
+        if ( FxRenderer->DrawFullScreenQuad() != XR_SUCCESS ) return XR_FAILED;
 
-    // --- Pass 1: Half-res bokeh blur ---
-    auto res = engine->GetResolution();
-    DXGI_FORMAT bbufferFormat = engine->GetBackBufferFormat();
-    auto halfBuffer = FxRenderer->GetTexturePool()->Acquire(
-        TexturePool::Description{ res.x / 2, res.y / 2, bbufferFormat } );
+        context->PSSetShaderResources(
+            0, static_cast<UINT>(nullResources.size()), nullResources.data() );
+        return FxRenderer->CopyTextureToRTV(
+            compositeBuffer->GetShaderResView(), outputRTV, resolution );
+    }();
 
-    D3D11_VIEWPORT halfVP = { 0, 0, static_cast<float>(res.x / 2), static_cast<float>(res.y / 2), 0, 1 };
-    engine->GetContext()->RSSetViewports( 1, &halfVP );
-
-    blurPS->Apply();
-    blurPS->GetBuffer( "DepthOfFieldConstantBuffer" ).Update( &cb ).Bind();
-
-    engine->GetContext()->OMSetRenderTargets( 1, halfBuffer->GetRenderTargetView().GetAddressOf(), nullptr );
-
-    // t0 = full-res scene, t1 = full-res depth, t2 = focus (1x1)
-    engine->GetContext()->PSSetShaderResources( 0, 1, &backbuffer );
-    engine->GetDepthBuffer()->BindToPixelShader( engine->GetContext().Get(), 1 );
-    engine->GetContext()->PSSetShaderResources( 2, 1, m_FocusSRV[m_FocusIndex].GetAddressOf() );
-
-    FxRenderer->DrawFullScreenQuad();
-
-    ID3D11ShaderResourceView* nullSRVs[4] = { nullptr, nullptr, nullptr, nullptr };
-    engine->GetContext()->PSSetShaderResources( 0, 4, nullSRVs );
-    engine->GetContext()->RSSetViewports( 1, &oldVP );
-
-    // --- Pass 2: Full-res composite (render to temp, then blit to avoid read-write hazard) ---
-    auto compositeBuffer = FxRenderer->GetTempBuffer();
-
-    compositePS->Apply();
-    compositePS->GetBuffer( "DepthOfFieldConstantBuffer" ).Update( &cb ).Bind();
-
-    engine->GetContext()->OMSetRenderTargets( 1, compositeBuffer->GetRenderTargetView().GetAddressOf(), nullptr );
-
-    // t0 = full-res scene, t1 = half-res blur, t2 = full-res depth, t3 = focus (1x1)
-    engine->GetContext()->PSSetShaderResources( 0, 1, &backbuffer );
-    ID3D11ShaderResourceView* halfSRV = halfBuffer->GetShaderResView().Get();
-    engine->GetContext()->PSSetShaderResources( 1, 1, &halfSRV );
-    engine->GetDepthBuffer()->BindToPixelShader( engine->GetContext().Get(), 2 );
-    engine->GetContext()->PSSetShaderResources( 3, 1, m_FocusSRV[m_FocusIndex].GetAddressOf() );
-
-    FxRenderer->DrawFullScreenQuad();
-
-    engine->GetContext()->PSSetShaderResources( 0, 4, nullSRVs );
-
-    // Blit composite result to backbuffer
-    FxRenderer->CopyTextureToRTV( compositeBuffer->GetShaderResView(), oldRTV, res );
-
-    engine->GetContext()->OMSetRenderTargets( 1, oldRTV.GetAddressOf(), oldDSV.Get() );
-
-    return XR_SUCCESS;
+    if ( !rendererState.Restore() ) result = XR_FAILED;
+    return result;
 }
 
-/** Compute shader path for FL11+ */
 XRESULT D3D11PFX_DepthOfField::RenderCS( ID3D11ShaderResourceView* backbuffer ) {
-    D3D11GraphicsEngine* engine = reinterpret_cast<D3D11GraphicsEngine*>(Engine::GraphicsEngine);
-    auto& context = engine->GetContext();
+    if ( !backbuffer || !FxRenderer ) return XR_INVALID_ARG;
 
-    engine->SetDefaultStates();
+    auto* engine = reinterpret_cast<D3D11GraphicsEngine*>(Engine::GraphicsEngine);
+    auto* gapi = Engine::GAPI;
+    const auto context = engine ? engine->GetContext() : nullptr;
+    auto* depthBuffer = engine ? engine->GetDepthBuffer() : nullptr;
+    TexturePool* texturePool = FxRenderer->GetTexturePool();
+    if ( !engine || !gapi || !context || !depthBuffer || !depthBuffer->IsValid()
+        || !texturePool || !m_FocusSRV || !m_FocusUAV ) {
+        return XR_FAILED;
+    }
 
-    Microsoft::WRL::ComPtr<ID3D11RenderTargetView> oldRTV;
-    Microsoft::WRL::ComPtr<ID3D11DepthStencilView> oldDSV;
-    context->OMGetRenderTargets( 1, oldRTV.GetAddressOf(), oldDSV.GetAddressOf() );
+    const INT2 resolution = engine->GetResolution();
+    const DXGI_FORMAT format = engine->GetBackBufferFormat();
+    if ( resolution.x < 2 || resolution.y < 2
+        || format == DXGI_FORMAT_UNKNOWN ) {
+        return XR_FAILED;
+    }
 
-    ID3D11RenderTargetView* nullRtv = nullptr;
-    engine->GetContext()->OMSetRenderTargets( 1, &nullRtv, nullptr );
+    const INT2 halfResolution(
+        std::max( 1, (resolution.x + 1) / 2 ),
+        std::max( 1, (resolution.y + 1) / 2 ) );
+    constexpr uint32_t computeTextureFlags =
+        D3D11_BIND_UNORDERED_ACCESS | D3D11_BIND_SHADER_RESOURCE;
+    auto halfBuffer = texturePool->Acquire( TexturePool::Description{
+        halfResolution.x, halfResolution.y, format, computeTextureFlags } );
+    auto compositeBuffer = texturePool->Acquire( TexturePool::Description{
+        resolution.x, resolution.y, format, computeTextureFlags } );
+    if ( !halfBuffer || !compositeBuffer || !halfBuffer->IsValid()
+        || !compositeBuffer->IsValid() ) {
+        return XR_FAILED;
+    }
 
-    auto& rendererSettings = Engine::GAPI->GetRendererState().RendererSettings;
+    auto& settings = gapi->GetRendererState().RendererSettings;
+    const auto focusCS = engine->GetShaderManager().GetCShader(
+        CShaderID::CS_PFX_DoF_FocusResolve );
+    const auto blurCS = engine->GetShaderManager().GetCShader(
+        settings.DoFGaussBlur ? CShaderID::CS_PFX_DoF_Gauss : CShaderID::CS_PFX_DoF );
+    const auto compositeCS = engine->GetShaderManager().GetCShader(
+        CShaderID::CS_PFX_DoF_Composite );
+    ID3D11SamplerState* defaultSampler = engine->GetDefaultSamplerState();
+    if ( !focusCS || !blurCS || !compositeCS || !defaultSampler
+        || !focusCS->GetShader() || !blurCS->GetShader()
+        || !compositeCS->GetShader() ) {
+        return XR_FAILED;
+    }
 
-    DepthOfFieldConstantBuffer cb = BuildDepthOfFieldConstants( m_AutoFocusBlend );
+    const DepthOfFieldConstantBuffer constants =
+        BuildDepthOfFieldConstants( m_AutoFocusBlend );
+    auto focusConstants = focusCS->GetBuffer( "DepthOfFieldConstantBuffer" );
+    auto blurConstants = blurCS->GetBuffer( "DepthOfFieldConstantBuffer" );
+    auto compositeConstants = compositeCS->GetBuffer( "DepthOfFieldConstantBuffer" );
+    focusConstants.Update( &constants );
+    blurConstants.Update( &constants );
+    compositeConstants.Update( &constants );
+    if ( !focusConstants.Succeeded() || !blurConstants.Succeeded()
+        || !compositeConstants.Succeeded() ) {
+        return XR_FAILED;
+    }
 
-    auto defaultSampler = engine->GetDefaultSamplerState();
-    ID3D11UnorderedAccessView* nullUAV = nullptr;
-    ID3D11ShaderResourceView* nullSRVs[4] = { nullptr, nullptr, nullptr, nullptr };
+    Microsoft::WRL::ComPtr<ID3D11RenderTargetView> outputRTV;
+    context->OMGetRenderTargets( 1, outputRTV.GetAddressOf(), nullptr );
+    if ( !outputRTV ) return XR_FAILED;
 
-    // --- Pass 0: Focus Resolve (1x1 compute) ---
-    int prevIdx = m_FocusIndex;
-    int curIdx = 1 - m_FocusIndex;
+    D3D11PFXOutputStateGuard outputState( context.Get() );
+    if ( !outputState.IsValid() ) return XR_FAILED;
+    ScopedTrackedRendererState rendererState( engine, gapi );
+    ScopedComputeBindingCleanup bindingCleanup( context.Get() );
 
-    auto focusCS = engine->GetShaderManager().GetCShader( CShaderID::CS_PFX_DoF_FocusResolve );
-    focusCS->Apply();
-    focusCS->GetBuffer( "DepthOfFieldConstantBuffer" ).Update( &cb ).Bind();
+    XRESULT result = [&]() -> XRESULT {
+        engine->SetDefaultStates();
+        context->OMSetRenderTargets( 0, nullptr, nullptr );
+        ClearComputeIO( context.Get() );
+        context->CSSetSamplers( 0, 1, &defaultSampler );
 
-    context->CSSetSamplers( 0, 1, &defaultSampler );
+        if ( focusCS->Apply() != XR_SUCCESS ) return XR_FAILED;
+        focusConstants.Bind();
+        if ( !focusConstants.Succeeded() ) return XR_FAILED;
+        ID3D11UnorderedAccessView* focusUAV = m_FocusUAV.Get();
+        context->CSSetUnorderedAccessViews( 0, 1, &focusUAV, nullptr );
+        context->Dispatch( 1, 1, 1 );
+        ClearComputeIO( context.Get() );
 
-    ID3D11ShaderResourceView* focusSRVs[2] = {
-        engine->GetDepthBuffer()->GetShaderResView().Get(),
-        m_FocusSRV[prevIdx].Get()
-    };
-    context->CSSetShaderResources( 0, 2, focusSRVs );
-    context->CSSetUnorderedAccessViews( 0, 1, m_FocusUAV[curIdx].GetAddressOf(), nullptr );
+        if ( blurCS->Apply() != XR_SUCCESS ) return XR_FAILED;
+        blurConstants.Bind();
+        if ( !blurConstants.Succeeded() ) return XR_FAILED;
+        ID3D11ShaderResourceView* blurResources[3] = {
+            backbuffer, depthBuffer->GetShaderResView().Get(), m_FocusSRV.Get()
+        };
+        ID3D11UnorderedAccessView* halfUAV =
+            halfBuffer->GetUnorderedAccessView().Get();
+        context->CSSetShaderResources( 0, 3, blurResources );
+        context->CSSetUnorderedAccessViews( 0, 1, &halfUAV, nullptr );
+        context->Dispatch(
+            static_cast<UINT>((halfResolution.x + 7) / 8),
+            static_cast<UINT>((halfResolution.y + 7) / 8), 1 );
+        ClearComputeIO( context.Get() );
 
-    context->Dispatch( 1, 1, 1 );
+        if ( compositeCS->Apply() != XR_SUCCESS ) return XR_FAILED;
+        compositeConstants.Bind();
+        if ( !compositeConstants.Succeeded() ) return XR_FAILED;
+        ID3D11ShaderResourceView* compositeResources[4] = {
+            backbuffer, halfBuffer->GetShaderResView().Get(),
+            depthBuffer->GetShaderResView().Get(), m_FocusSRV.Get()
+        };
+        ID3D11UnorderedAccessView* compositeUAV =
+            compositeBuffer->GetUnorderedAccessView().Get();
+        context->CSSetShaderResources( 0, 4, compositeResources );
+        context->CSSetUnorderedAccessViews( 0, 1, &compositeUAV, nullptr );
+        context->Dispatch(
+            static_cast<UINT>((resolution.x + 7) / 8),
+            static_cast<UINT>((resolution.y + 7) / 8), 1 );
+        ClearComputeIO( context.Get() );
+        context->CSSetShader( nullptr, nullptr, 0 );
 
-    context->CSSetUnorderedAccessViews( 0, 1, &nullUAV, nullptr );
-    context->CSSetShaderResources( 0, 2, nullSRVs );
+        return FxRenderer->CopyTextureToRTV(
+            compositeBuffer->GetShaderResView(), outputRTV, resolution );
+    }();
 
-    m_FocusIndex = curIdx;
-
-    // --- Pass 1: Half-res bokeh blur ---
-    auto res = engine->GetResolution();
-    DXGI_FORMAT bbufferFormat = engine->GetBackBufferFormat();
-    auto halfBuffer = FxRenderer->GetTexturePool()->Acquire(
-        TexturePool::Description{ res.x / 2, res.y / 2, bbufferFormat,
-            D3D11_BIND_UNORDERED_ACCESS | D3D11_BIND_SHADER_RESOURCE } );
-
-    auto blurCS = engine->GetShaderManager().GetCShader(
-        rendererSettings.DoFGaussBlur
-            ? CShaderID::CS_PFX_DoF_Gauss
-            : CShaderID::CS_PFX_DoF );
-    blurCS->Apply();
-    blurCS->GetBuffer( "DepthOfFieldConstantBuffer" ).Update( &cb ).Bind();
-
-    context->CSSetSamplers( 0, 1, &defaultSampler );
-
-    // t0 = full-res scene, t1 = full-res depth, t2 = focus (1x1)
-    ID3D11ShaderResourceView* blurSRVs[3] = {
-        backbuffer,
-        engine->GetDepthBuffer()->GetShaderResView().Get(),
-        m_FocusSRV[m_FocusIndex].Get()
-    };
-    context->CSSetShaderResources( 0, 3, blurSRVs );
-    context->CSSetUnorderedAccessViews( 0, 1, halfBuffer->GetUnorderedAccessView().GetAddressOf(), nullptr );
-
-    context->Dispatch( (res.x / 2 + 7) / 8, (res.y / 2 + 7) / 8, 1 );
-
-    context->CSSetUnorderedAccessViews( 0, 1, &nullUAV, nullptr );
-    context->CSSetShaderResources( 0, 3, nullSRVs );
-
-    // --- Pass 2: Full-res composite ---
-    auto compositeBuffer = FxRenderer->GetTexturePool()->Acquire(
-        TexturePool::Description{ res.x, res.y, bbufferFormat,
-            D3D11_BIND_UNORDERED_ACCESS | D3D11_BIND_SHADER_RESOURCE } );
-
-    auto compositeCS = engine->GetShaderManager().GetCShader( CShaderID::CS_PFX_DoF_Composite );
-    compositeCS->Apply();
-    compositeCS->GetBuffer( "DepthOfFieldConstantBuffer" ).Update( &cb ).Bind();
-
-    context->CSSetSamplers( 0, 1, &defaultSampler );
-
-    // t0 = full-res scene, t1 = half-res blur, t2 = full-res depth, t3 = focus (1x1)
-    ID3D11ShaderResourceView* compositeSRVs[4] = {
-        backbuffer,
-        halfBuffer->GetShaderResView().Get(),
-        engine->GetDepthBuffer()->GetShaderResView().Get(),
-        m_FocusSRV[m_FocusIndex].Get()
-    };
-    context->CSSetShaderResources( 0, 4, compositeSRVs );
-    context->CSSetUnorderedAccessViews( 0, 1, compositeBuffer->GetUnorderedAccessView().GetAddressOf(), nullptr );
-
-    context->Dispatch( (res.x + 7) / 8, (res.y + 7) / 8, 1 );
-
-    context->CSSetUnorderedAccessViews( 0, 1, &nullUAV, nullptr );
-    context->CSSetShaderResources( 0, 4, nullSRVs );
-    context->CSSetShader( nullptr, nullptr, 0 );
-
-    // Blit composite result to backbuffer
-    FxRenderer->CopyTextureToRTV( compositeBuffer->GetShaderResView(), oldRTV, res );
-
-    engine->GetContext()->OMSetRenderTargets( 1, oldRTV.GetAddressOf(), oldDSV.Get() );
-
-    return XR_SUCCESS;
+    if ( !rendererState.Restore() ) result = XR_FAILED;
+    return result;
 }

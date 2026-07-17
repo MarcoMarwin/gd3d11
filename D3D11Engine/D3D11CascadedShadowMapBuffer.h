@@ -67,6 +67,12 @@ public:
 
     /** Get the underlying texture */
     ID3D11Texture2D* GetTexture() const { return m_texture.Get(); }
+    bool IsValid() const {
+        if ( !m_texture || !m_srv || m_size == 0 || m_numCascades == 0
+            || m_numCascades > m_cascadeDSVs.size() ) return false;
+        for ( UINT i = 0; i < m_numCascades; ++i ) if ( !m_cascadeDSVs[i] ) return false;
+        return true;
+    }
 
 private:
     void Release();

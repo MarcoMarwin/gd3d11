@@ -9,8 +9,8 @@ enum XRESULT : int;
 
 class D3D11IndirectBuffer {
 public:
-    D3D11IndirectBuffer();
-    ~D3D11IndirectBuffer();
+    D3D11IndirectBuffer() = default;
+    ~D3D11IndirectBuffer() = default;
 
     /** Layed out for D3D11*/
     enum ECPUAccessFlags {
@@ -32,6 +32,7 @@ public:
         M_WRITE = 2,
         M_READ_WRITE = 3,
         M_WRITE_DISCARD = 4,
+        M_WRITE_NO_OVERWRITE = 5,
     };
 
     /** Layed out for D3D11*/
@@ -63,6 +64,7 @@ public:
 
     /** Returns the size in bytes of this buffer */
     unsigned int GetSizeInBytes() const;
+    bool IsValid() const { return IndirectBuffer.Get() != nullptr && SizeInBytes != 0; }
 
 private:
     /** Indirect buffer object */
@@ -72,5 +74,6 @@ private:
     Microsoft::WRL::ComPtr<ID3D11UnorderedAccessView> UnorderedAccessView;
 
     /** Size of the buffer in bytes */
-    unsigned int SizeInBytes;
+    unsigned int SizeInBytes = 0;
+    bool IsMapped = false;
 };

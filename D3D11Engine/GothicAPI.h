@@ -732,6 +732,7 @@ public:
 
     /** Adds a mip map generation deferred command */
     void AddMipMapGeneration( D3D11Texture* texture );
+    void RemoveMipMapGeneration( D3D11Texture* texture );
 
     /** Gets a list of the mip map generation commands for this frame */
     std::list<D3D11Texture*>& GetMipMapGeneration() {return FrameMipMapGenerations;}

@@ -5,10 +5,66 @@
 #include "assimp\scene.h"
 #include "Engine.h"
 #include "GothicAPI.h"
+#include "MeshCacheFormat.h"
+
+
+#include <algorithm>
+#include <cctype>
+#include <cmath>
+#include <fstream>
+#include <filesystem>
+#include <limits>
+#include <memory>
 
 #pragma comment(lib, "assimp-vc143-mt.lib")
 
 using namespace Assimp;
+namespace {
+    class MeshCacheReader {
+    public:
+        explicit MeshCacheReader( const std::vector<uint8_t>& data )
+            : m_cursor( data.data() ), m_remaining( data.size() ) {
+        }
+
+        template <typename T>
+        bool Read( T& value ) {
+            return ReadBytes( &value, sizeof( value ) );
+        }
+
+        bool ReadBytes( void* destination, size_t size ) {
+            if ( size > m_remaining || (size != 0 && !destination) ) {
+                return false;
+            }
+            if ( size != 0 ) {
+                memcpy( destination, m_cursor, size );
+                m_cursor += size;
+                m_remaining -= size;
+            }
+            return true;
+        }
+
+        size_t Remaining() const {
+            return m_remaining;
+        }
+
+    private:
+        const uint8_t* m_cursor;
+        size_t m_remaining;
+    };
+
+    bool IsFiniteVertex( const ExVertexStruct& vertex ) {
+        return std::isfinite( vertex.Position.x )
+            && std::isfinite( vertex.Position.y )
+            && std::isfinite( vertex.Position.z )
+            && std::isfinite( vertex.Normal.x )
+            && std::isfinite( vertex.Normal.y )
+            && std::isfinite( vertex.Normal.z )
+            && std::isfinite( vertex.TexCoord.x )
+            && std::isfinite( vertex.TexCoord.y )
+            && std::isfinite( vertex.TexCoord2.x )
+            && std::isfinite( vertex.TexCoord2.y );
+    }
+}
 
 GMesh::GMesh() {}
 
@@ -21,116 +77,150 @@ GMesh::~GMesh() {
 
 /** Load a mesh from file */
 XRESULT GMesh::LoadMesh( const std::string& file, float scale ) {
-    char dir[260];
-    GetCurrentDirectoryA( 260, dir );
-    LogInfo() << "Loading custom mesh " << dir << "\\" << file;
+    if ( file.empty() || !std::isfinite( scale ) ) {
+        return XR_INVALID_ARG;
+    }
 
-    // Check file format
-    if ( file.substr( file.find_last_of( "." ) + 1 ) == "mcache" ) {
-        // Load cached format
+    char directory[MAX_PATH]{};
+    GetCurrentDirectoryA( static_cast<DWORD>(std::size( directory )), directory );
+    LogInfo() << "Loading custom mesh " << directory << "\\" << file;
+
+    std::string extension = std::filesystem::path( file ).extension().string();
+    std::transform( extension.begin(), extension.end(), extension.begin(),
+        []( unsigned char character ) { return static_cast<char>(std::tolower( character )); } );
+    if ( extension == ".mcache" ) {
         return LoadCached( file );
     }
 
-    Importer imp;
-    imp.SetPropertyInteger( AI_CONFIG_PP_SLM_VERTEX_LIMIT, 0xFFFF - 1 );
-    const aiScene* s = imp.ReadFile( file, aiProcessPreset_TargetRealtime_Fast | aiProcess_SplitLargeMeshes );
-    if ( !s ) {
-        LogError() << "Failed to open custom Mesh: " << file;
-        LogError() << " - " << imp.GetErrorString();
+    Importer importer;
+    importer.SetPropertyInteger( AI_CONFIG_PP_SLM_VERTEX_LIMIT, 0xFFFF - 1 );
+    const aiScene* scene = importer.ReadFile(
+        file, aiProcessPreset_TargetRealtime_Fast | aiProcess_SplitLargeMeshes );
+    if ( !scene || !scene->mMeshes || scene->mNumMeshes == 0 ) {
+        LogError() << "Failed to open custom mesh: " << file;
+        LogError() << " - " << importer.GetErrorString();
         return XR_FAILED;
     }
 
-    LogInfo() << "Loading " << std::to_string( s->mNumMeshes ) << " submeshes";
-
-    // Little helper for the case that the .mtl went wrong
-    if ( s->mNumMaterials <= 3 ) {
-        LogWarn() << "Mesh contains only " << s->mNumMaterials << " materials! This may not be what the creator wanted, please check your"
-            ".mtl-File and the mtllib-reference in the .obj-File. Remember to delete the cache-file after a change!";
+    LogInfo() << "Loading " << scene->mNumMeshes << " submeshes";
+    if ( scene->mNumMaterials <= 3 ) {
+        LogWarn() << "Mesh contains only " << scene->mNumMaterials
+            << " materials; check the material library and delete stale cache files after changes.";
     }
 
-    int startIndex = 0;
-    for ( unsigned int i = 0; i < s->mNumMeshes; i++ ) {
-        aiString t;
-        s->mMaterials[s->mMeshes[i]->mMaterialIndex]->GetTexture( aiTextureType::aiTextureType_DIFFUSE, 0, &t );
+    std::vector<std::unique_ptr<MeshInfo>> decodedMeshes;
+    std::vector<std::string> decodedTextures;
+    try {
+        decodedMeshes.reserve( scene->mNumMeshes );
+        decodedTextures.reserve( scene->mNumMeshes );
 
-        std::string texture = t.C_Str();
-        const size_t last_slash_idx = texture.find_last_of( "\\/" );
-        if ( std::string::npos != last_slash_idx ) {
-            texture.erase( 0, last_slash_idx + 1 );
-        }
-
-        // Remove extension if present.
-        const size_t period_idx = texture.rfind( '.' );
-        if ( std::string::npos != period_idx ) {
-            texture.erase( period_idx );
-        }
-
-        if ( s->mMeshes[i]->mNumFaces * 3 >= 0xFFFF ) {
-            LogWarn() << "Mesh with Texture '" << texture << "' has more than 0xFFFF vertices!";
-            continue;
-        }
-
-        MeshInfo* mi = new MeshInfo;
-
-        ExVertexStruct* vertices = new ExVertexStruct[s->mMeshes[i]->mNumVertices];
-        VERTEX_INDEX* indices = new VERTEX_INDEX[s->mMeshes[i]->mNumFaces * 3];
-
-        for ( unsigned int n = 0; n < s->mMeshes[i]->mNumVertices; n++ ) {
-            if ( s->mMeshes[i]->HasNormals() ) {
-                vertices[n].Normal = float3( s->mMeshes[i]->mNormals[n].x, s->mMeshes[i]->mNormals[n].y, s->mMeshes[i]->mNormals[n].z );
+        for ( unsigned int meshIndex = 0; meshIndex < scene->mNumMeshes; ++meshIndex ) {
+            const aiMesh* sourceMesh = scene->mMeshes[meshIndex];
+            if ( !sourceMesh || !sourceMesh->mVertices || sourceMesh->mNumVertices == 0
+                || sourceMesh->mNumVertices > MeshCacheFormat::MaxVerticesPerSubmesh
+                || !sourceMesh->mFaces || sourceMesh->mNumFaces == 0 ) {
+                LogError() << "Custom mesh contains an invalid submesh.";
+                return XR_FAILED;
             }
 
-            if ( s->mMeshes[i]->HasTextureCoords( 0 ) ) {
-                vertices[n].TexCoord = float2( s->mMeshes[i]->mTextureCoords[0][n].x, s->mMeshes[i]->mTextureCoords[0][n].y );
+            const uint64_t indexCount64 = static_cast<uint64_t>(sourceMesh->mNumFaces) * 3u;
+            if ( indexCount64 > MeshCacheFormat::MaxIndicesPerSubmesh ) {
+                LogError() << "Custom mesh submesh contains too many indices.";
+                return XR_FAILED;
+            }
+            const uint32_t indexCount = static_cast<uint32_t>(indexCount64);
+
+            std::string textureName;
+            if ( scene->mMaterials && sourceMesh->mMaterialIndex < scene->mNumMaterials
+                && scene->mMaterials[sourceMesh->mMaterialIndex] ) {
+                aiString texturePath;
+                scene->mMaterials[sourceMesh->mMaterialIndex]->GetTexture(
+                    aiTextureType_DIFFUSE, 0, &texturePath );
+                textureName = std::filesystem::path( texturePath.C_Str() ).stem().string();
             }
 
-            if ( s->mMeshes[i]->HasTextureCoords( 1 ) ) {
-                vertices[n].TexCoord2 = float2( s->mMeshes[i]->mTextureCoords[1][n].x, s->mMeshes[i]->mTextureCoords[1][n].y );
+            std::vector<ExVertexStruct> vertices( sourceMesh->mNumVertices );
+            for ( unsigned int vertexIndex = 0; vertexIndex < sourceMesh->mNumVertices; ++vertexIndex ) {
+                ExVertexStruct& vertex = vertices[vertexIndex];
+                vertex.Position = float3(
+                    sourceMesh->mVertices[vertexIndex].x * scale,
+                    sourceMesh->mVertices[vertexIndex].y * scale,
+                    sourceMesh->mVertices[vertexIndex].z * scale );
+                vertex.Normal = float3( 0.0f, 1.0f, 0.0f );
+                vertex.TexCoord = float2( 0.0f, 0.0f );
+                vertex.TexCoord2 = float2( 0.0f, 0.0f );
+                vertex.Color = 0xFFFFFFFF;
+
+                if ( sourceMesh->HasNormals() ) {
+                    vertex.Normal = float3(
+                        sourceMesh->mNormals[vertexIndex].x,
+                        sourceMesh->mNormals[vertexIndex].y,
+                        sourceMesh->mNormals[vertexIndex].z );
+                }
+                if ( sourceMesh->HasTextureCoords( 0 ) ) {
+                    vertex.TexCoord = float2(
+                        sourceMesh->mTextureCoords[0][vertexIndex].x,
+                        sourceMesh->mTextureCoords[0][vertexIndex].y );
+                }
+                if ( sourceMesh->HasTextureCoords( 1 ) ) {
+                    vertex.TexCoord2 = float2(
+                        sourceMesh->mTextureCoords[1][vertexIndex].x,
+                        sourceMesh->mTextureCoords[1][vertexIndex].y );
+                }
+                if ( !IsFiniteVertex( vertex ) ) {
+                    LogError() << "Custom mesh contains non-finite vertex data.";
+                    return XR_FAILED;
+                }
             }
 
-            vertices[n].Color = 0xFFFFFFFF;
-            vertices[n].Position = float3( s->mMeshes[i]->mVertices[n].x * scale, s->mMeshes[i]->mVertices[n].y * scale, s->mMeshes[i]->mVertices[n].z * scale );
-        }
+            std::vector<VERTEX_INDEX> indices( indexCount );
+            for ( unsigned int faceIndex = 0; faceIndex < sourceMesh->mNumFaces; ++faceIndex ) {
+                const aiFace& face = sourceMesh->mFaces[faceIndex];
+                if ( face.mNumIndices != 3 || !face.mIndices ) {
+                    LogError() << "Custom mesh is not triangulated.";
+                    return XR_FAILED;
+                }
 
-        for ( unsigned int n = 0; n < s->mMeshes[i]->mNumFaces; n++ ) {
-            if ( s->mMeshes[i]->mFaces[n].mNumIndices != 3 ) {
-                LogError() << "Mesh not triangulated!";
-                continue;
+                for ( unsigned int corner = 0; corner < 3; ++corner ) {
+                    if ( face.mIndices[corner] >= sourceMesh->mNumVertices ) {
+                        LogError() << "Custom mesh contains an out-of-range index.";
+                        return XR_FAILED;
+                    }
+                    indices[faceIndex * 3u + corner] =
+                        static_cast<VERTEX_INDEX>(face.mIndices[corner]);
+                }
             }
 
-            indices[3 * n] = s->mMeshes[i]->mFaces[n].mIndices[0] - startIndex;
-            indices[3 * n + 1] = s->mMeshes[i]->mFaces[n].mIndices[1] - startIndex;
-            indices[3 * n + 2] = s->mMeshes[i]->mFaces[n].mIndices[2] - startIndex;
+            auto mesh = std::make_unique<MeshInfo>();
+            if ( mesh->Create(
+                vertices.data(), static_cast<unsigned int>(vertices.size()),
+                indices.data(), static_cast<unsigned int>(indices.size()) ) != XR_SUCCESS ) {
+                LogError() << "Custom mesh GPU buffers could not be created.";
+                return XR_FAILED;
+            }
+
+            decodedTextures.push_back( std::move( textureName ) );
+            decodedMeshes.push_back( std::move( mesh ) );
         }
-
-        std::string stex = texture;
-        std::string ext;
-        std::string name = stex;
-
-        // Extract the file extension and its name
-        int extpos = stex.find_last_of( "." );
-        if ( extpos >= 0 ) {
-            ext = &stex[extpos + 1];
-            //LogInfo() << "Got file ext: " << ext;
-
-            name.resize( name.size() - (ext.size() + 1) ); // Strip file extension
-            //LogInfo() << "Got file name: " << name;
-        }
-
-        mi->Create( vertices, s->mMeshes[i]->mNumVertices, indices, s->mMeshes[i]->mNumFaces * 3 );
-        Meshes.push_back( mi );
-
-        Textures.push_back( name );
-
-        delete[] vertices;
-        delete[] indices;
-
-        //startIndex += s->mMeshes[i]->mNumFaces * 3;
+    } catch ( const std::bad_alloc& ) {
+        return XR_FAILED;
     }
 
+    if ( decodedMeshes.empty() || decodedMeshes.size() != decodedTextures.size() ) {
+        return XR_FAILED;
+    }
+
+    for ( MeshInfo* mesh : Meshes ) {
+        delete mesh;
+    }
+    Meshes.clear();
+    Textures = std::move( decodedTextures );
+    Meshes.reserve( decodedMeshes.size() );
+    for ( auto& mesh : decodedMeshes ) {
+        Meshes.push_back( mesh.release() );
+    }
     return XR_SUCCESS;
 }
-
 /** Draws all buffers this holds */
 void GMesh::DrawMesh() {
     for ( unsigned int i = 0; i < Meshes.size(); i++ ) {
@@ -140,62 +230,214 @@ void GMesh::DrawMesh() {
 
 /** Loads the cache-file-format */
 XRESULT GMesh::LoadCached( const std::string& file ) {
-    FILE* f = fopen( file.c_str(), "rb" );
-
     LogInfo() << "Loading cached mesh: " << file;
 
-    if ( !f ) {
+    std::ifstream stream( file, std::ios::binary | std::ios::ate );
+    if ( !stream ) {
         LogWarn() << "Failed to find cache file: " << file;
         return XR_FAILED;
     }
 
-    // Read version
-    int Version;
-    fread( &Version, sizeof( Version ), 1, f );
-
-    // Read num textures
-    int numTextures;
-    fread( &numTextures, sizeof( numTextures ), 1, f );
-
-    for ( int t = 0; t < numTextures; t++ ) {
-        // Read texture name
-        unsigned char numTxNameChars;
-        fread( &numTxNameChars, sizeof( numTxNameChars ), 1, f );
-
-        char tx[256] = {};
-        if ( numTxNameChars > 255 ) {
-            fread( tx, 255, 1, f );
-            fseek( f, static_cast<long>(numTxNameChars - 255), SEEK_CUR );
-        } else {
-            fread( tx, numTxNameChars, 1, f );
-        }
-
-        // Read num submeshes
-        unsigned char numSubmeshes;
-        fread( &numSubmeshes, sizeof( numSubmeshes ), 1, f );
-
-        for ( int i = 0; i < numSubmeshes; i++ ) {
-            MeshInfo* mi = new MeshInfo;
-
-            // Read vertices
-            int numVertices;
-            fread( &numVertices, sizeof( numVertices ), 1, f );
-            mi->Vertices.resize( numVertices );
-            fread( &mi->Vertices[0], sizeof( ExVertexStruct ) * numVertices, 1, f );
-
-            // Read indices
-            int numIndices;
-            fread( &numIndices, sizeof( numIndices ), 1, f );
-            mi->Indices.resize( numIndices );
-            fread( &mi->Indices[0], sizeof( VERTEX_INDEX ) * mi->Indices.size(), 1, f );
-
-            // Add to GMesh
-            Meshes.push_back( mi );
-            Textures.push_back( std::string( tx ) );
-        }
+    const std::streamoff fileLength = stream.tellg();
+    if ( fileLength <= 0
+        || static_cast<uint64_t>(fileLength) > MeshCacheFormat::MaxFileBytes
+        || static_cast<uint64_t>(fileLength) > std::numeric_limits<size_t>::max() ) {
+        LogError() << "Mesh cache has an invalid file size: " << file;
+        return XR_FAILED;
     }
 
-    fclose( f );
+    std::vector<uint8_t> fileData;
+    try {
+        fileData.resize( static_cast<size_t>(fileLength) );
+    } catch ( const std::bad_alloc& ) {
+        return XR_FAILED;
+    }
+
+    stream.seekg( 0, std::ios::beg );
+    if ( !stream.read(
+        reinterpret_cast<char*>(fileData.data()),
+        static_cast<std::streamsize>(fileData.size()) ) ) {
+        LogError() << "Mesh cache could not be read completely: " << file;
+        return XR_FAILED;
+    }
+
+    MeshCacheReader reader( fileData );
+    int32_t version = 0;
+    if ( !reader.Read( version ) ) {
+        return XR_FAILED;
+    }
+
+    bool legacyFormat = false;
+    uint32_t textureCount = 0;
+    if ( version == MeshCacheFormat::CurrentVersion ) {
+        uint32_t magic = 0;
+        uint32_t vertexStride = 0;
+        uint32_t indexStride = 0;
+        if ( !reader.Read( magic ) || !reader.Read( vertexStride )
+            || !reader.Read( indexStride ) || !reader.Read( textureCount )
+            || magic != MeshCacheFormat::Magic
+            || vertexStride != sizeof( ExVertexStruct )
+            || indexStride != sizeof( VERTEX_INDEX ) ) {
+            LogError() << "Mesh cache header is incompatible: " << file;
+            return XR_FAILED;
+        }
+    } else if ( version == MeshCacheFormat::LegacyVersion ) {
+        legacyFormat = true;
+        int32_t legacyTextureCount = 0;
+        if ( !reader.Read( legacyTextureCount ) || legacyTextureCount < 0 ) {
+            return XR_FAILED;
+        }
+        textureCount = static_cast<uint32_t>(legacyTextureCount);
+    } else {
+        LogError() << "Unsupported mesh cache version " << version << ": " << file;
+        return XR_FAILED;
+    }
+
+    if ( textureCount > MeshCacheFormat::MaxTextures ) {
+        LogError() << "Mesh cache contains too many textures: " << file;
+        return XR_FAILED;
+    }
+
+    std::vector<std::unique_ptr<MeshInfo>> decodedMeshes;
+    std::vector<std::string> decodedTextures;
+    uint64_t decodedBytes = 0;
+
+    try {
+        for ( uint32_t textureIndex = 0; textureIndex < textureCount; ++textureIndex ) {
+            uint32_t nameLength = 0;
+            if ( legacyFormat ) {
+                uint8_t legacyNameLength = 0;
+                if ( !reader.Read( legacyNameLength ) ) {
+                    return XR_FAILED;
+                }
+                nameLength = legacyNameLength;
+            } else if ( !reader.Read( nameLength ) ) {
+                return XR_FAILED;
+            }
+
+            if ( nameLength > MeshCacheFormat::MaxTextureNameBytes
+                || nameLength > reader.Remaining() ) {
+                return XR_FAILED;
+            }
+
+            std::string textureName( nameLength, '\0' );
+            if ( nameLength != 0
+                && !reader.ReadBytes( textureName.data(), nameLength ) ) {
+                return XR_FAILED;
+            }
+            if ( textureName.find( '\0' ) != std::string::npos ) {
+                LogError() << "Mesh cache texture name contains an embedded null byte.";
+                return XR_FAILED;
+            }
+
+            uint32_t submeshCount = 0;
+            if ( legacyFormat ) {
+                uint8_t legacySubmeshCount = 0;
+                if ( !reader.Read( legacySubmeshCount ) ) {
+                    return XR_FAILED;
+                }
+                submeshCount = legacySubmeshCount;
+            } else if ( !reader.Read( submeshCount ) ) {
+                return XR_FAILED;
+            }
+            if ( submeshCount > MeshCacheFormat::MaxSubmeshesPerTexture ) {
+                return XR_FAILED;
+            }
+
+            for ( uint32_t submeshIndex = 0; submeshIndex < submeshCount; ++submeshIndex ) {
+                uint32_t vertexCount = 0;
+                uint32_t indexCount = 0;
+                if ( legacyFormat ) {
+                    int32_t legacyVertexCount = 0;
+                    if ( !reader.Read( legacyVertexCount ) || legacyVertexCount <= 0 ) {
+                        return XR_FAILED;
+                    }
+                    vertexCount = static_cast<uint32_t>(legacyVertexCount);
+                } else if ( !reader.Read( vertexCount ) || vertexCount == 0 ) {
+                    return XR_FAILED;
+                }
+
+                if ( vertexCount > MeshCacheFormat::MaxVerticesPerSubmesh ) {
+                    return XR_FAILED;
+                }
+                const uint64_t vertexBytes =
+                    static_cast<uint64_t>(vertexCount) * sizeof( ExVertexStruct );
+                if ( vertexBytes > reader.Remaining()
+                    || decodedBytes > MeshCacheFormat::MaxDecodedBytes - vertexBytes ) {
+                    return XR_FAILED;
+                }
+
+                auto mesh = std::make_unique<MeshInfo>();
+                mesh->Vertices.resize( vertexCount );
+                if ( !reader.ReadBytes( mesh->Vertices.data(), static_cast<size_t>(vertexBytes) ) ) {
+                    return XR_FAILED;
+                }
+                decodedBytes += vertexBytes;
+
+                if ( legacyFormat ) {
+                    int32_t legacyIndexCount = 0;
+                    if ( !reader.Read( legacyIndexCount ) || legacyIndexCount <= 0 ) {
+                        return XR_FAILED;
+                    }
+                    indexCount = static_cast<uint32_t>(legacyIndexCount);
+                } else if ( !reader.Read( indexCount ) || indexCount == 0 ) {
+                    return XR_FAILED;
+                }
+
+                if ( indexCount > MeshCacheFormat::MaxIndicesPerSubmesh
+                    || indexCount % 3u != 0 ) {
+                    return XR_FAILED;
+                }
+                const uint64_t indexBytes =
+                    static_cast<uint64_t>(indexCount) * sizeof( VERTEX_INDEX );
+                if ( indexBytes > reader.Remaining()
+                    || decodedBytes > MeshCacheFormat::MaxDecodedBytes - indexBytes ) {
+                    return XR_FAILED;
+                }
+
+                mesh->Indices.resize( indexCount );
+                if ( !reader.ReadBytes( mesh->Indices.data(), static_cast<size_t>(indexBytes) ) ) {
+                    return XR_FAILED;
+                }
+                decodedBytes += indexBytes;
+
+                for ( const ExVertexStruct& vertex : mesh->Vertices ) {
+                    if ( !IsFiniteVertex( vertex ) ) {
+                        LogError() << "Mesh cache contains non-finite vertex data.";
+                        return XR_FAILED;
+                    }
+                }
+                for ( const VERTEX_INDEX index : mesh->Indices ) {
+                    if ( index >= vertexCount ) {
+                        LogError() << "Mesh cache contains an out-of-range index.";
+                        return XR_FAILED;
+                    }
+                }
+
+                decodedTextures.push_back( textureName );
+                decodedMeshes.push_back( std::move( mesh ) );
+            }
+        }
+    } catch ( const std::bad_alloc& ) {
+        LogError() << "Mesh cache allocation failed: " << file;
+        return XR_FAILED;
+    }
+
+    if ( reader.Remaining() != 0 || decodedMeshes.empty()
+        || decodedMeshes.size() != decodedTextures.size() ) {
+        LogError() << "Mesh cache payload is malformed: " << file;
+        return XR_FAILED;
+    }
+
+    for ( MeshInfo* mesh : Meshes ) {
+        delete mesh;
+    }
+    Meshes.clear();
+    Textures = std::move( decodedTextures );
+    Meshes.reserve( decodedMeshes.size() );
+    for ( auto& mesh : decodedMeshes ) {
+        Meshes.push_back( mesh.release() );
+    }
 
     return XR_SUCCESS;
 }

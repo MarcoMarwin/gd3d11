@@ -10,7 +10,7 @@ public:
         const GothicDepthBufferStateInfo& ds = state;
         Values = ds;
 
-        D3D11_DEPTH_STENCIL_DESC depthStencilDesc;
+        D3D11_DEPTH_STENCIL_DESC depthStencilDesc{};
 
         // Depth test parameters
         depthStencilDesc.DepthEnable = ds.DepthBufferEnabled;
@@ -39,10 +39,22 @@ public:
         depthStencilDesc.BackFace.StencilPassOp = D3D11_STENCIL_OP_KEEP;
         depthStencilDesc.BackFace.StencilFunc = D3D11_COMPARISON_ALWAYS;
 
-        reinterpret_cast<D3D11GraphicsEngineBase*>(Engine::GraphicsEngine)->GetDevice()->CreateDepthStencilState( &depthStencilDesc, State.ReleaseAndGetAddressOf() );
+        auto* engine = reinterpret_cast<D3D11GraphicsEngineBase*>(Engine::GraphicsEngine);
+        if ( !engine || !engine->GetDevice() ) {
+            LogError() << "Cannot create depth-stencil state without a D3D11 device.";
+            return;
+        }
+        const HRESULT hr = engine->GetDevice()->CreateDepthStencilState(
+            &depthStencilDesc, State.ReleaseAndGetAddressOf() );
+        if ( FAILED( hr ) ) {
+            LogError() << "Failed to create depth-stencil state: 0x"
+                << std::hex << static_cast<unsigned long>(hr);
+        }
     }
 
-    ~D3D11DepthBufferState() override {}
+    ~D3D11DepthBufferState() override = default;
+
+    bool IsValid() const { return State != nullptr; }
 
     Microsoft::WRL::ComPtr<ID3D11DepthStencilState> State;
     GothicDepthBufferStateInfo Values;
@@ -54,7 +66,7 @@ public:
         const GothicBlendStateInfo& bs = state;
         Values = bs;
 
-        D3D11_BLEND_DESC blendDesc;
+        D3D11_BLEND_DESC blendDesc{};
         // Set to default
         blendDesc.AlphaToCoverageEnable = bs.AlphaToCoverage;
         blendDesc.IndependentBlendEnable = FALSE;
@@ -72,10 +84,22 @@ public:
         blendDesc.RenderTarget[0].BlendOpAlpha = static_cast<D3D11_BLEND_OP>(bs.BlendOpAlpha);
         blendDesc.RenderTarget[0].BlendEnable = bs.BlendEnabled;
 
-        reinterpret_cast<D3D11GraphicsEngineBase*>(Engine::GraphicsEngine)->GetDevice()->CreateBlendState( &blendDesc, State.ReleaseAndGetAddressOf() );
+        auto* engine = reinterpret_cast<D3D11GraphicsEngineBase*>(Engine::GraphicsEngine);
+        if ( !engine || !engine->GetDevice() ) {
+            LogError() << "Cannot create blend state without a D3D11 device.";
+            return;
+        }
+        const HRESULT hr = engine->GetDevice()->CreateBlendState(
+            &blendDesc, State.ReleaseAndGetAddressOf() );
+        if ( FAILED( hr ) ) {
+            LogError() << "Failed to create blend state: 0x"
+                << std::hex << static_cast<unsigned long>(hr);
+        }
     }
 
-    ~D3D11BlendStateInfo() override {}
+    ~D3D11BlendStateInfo() override = default;
+
+    bool IsValid() const { return State != nullptr; }
 
     Microsoft::WRL::ComPtr<ID3D11BlendState> State;
     GothicBlendStateInfo Values;
@@ -87,7 +111,7 @@ public:
         const GothicRasterizerStateInfo& rs = state;
         Values = rs;
 
-        D3D11_RASTERIZER_DESC rasterizerDesc;
+        D3D11_RASTERIZER_DESC rasterizerDesc{};
         rasterizerDesc.CullMode = static_cast<D3D11_CULL_MODE>(rs.CullMode);
 
         if ( rs.Wireframe )
@@ -104,10 +128,22 @@ public:
         rasterizerDesc.MultisampleEnable = false;
         rasterizerDesc.AntialiasedLineEnable = true;
 
-        reinterpret_cast<D3D11GraphicsEngineBase*>(Engine::GraphicsEngine)->GetDevice()->CreateRasterizerState( &rasterizerDesc, State.ReleaseAndGetAddressOf() );
+        auto* engine = reinterpret_cast<D3D11GraphicsEngineBase*>(Engine::GraphicsEngine);
+        if ( !engine || !engine->GetDevice() ) {
+            LogError() << "Cannot create rasterizer state without a D3D11 device.";
+            return;
+        }
+        const HRESULT hr = engine->GetDevice()->CreateRasterizerState(
+            &rasterizerDesc, State.ReleaseAndGetAddressOf() );
+        if ( FAILED( hr ) ) {
+            LogError() << "Failed to create rasterizer state: 0x"
+                << std::hex << static_cast<unsigned long>(hr);
+        }
     }
 
-    ~D3D11RasterizerStateInfo() override {}
+    ~D3D11RasterizerStateInfo() override = default;
+
+    bool IsValid() const { return State != nullptr; }
 
     Microsoft::WRL::ComPtr<ID3D11RasterizerState> State;
     GothicRasterizerStateInfo Values;

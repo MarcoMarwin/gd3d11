@@ -549,3 +549,13 @@ Kurze, append-only Dokumentation der von Codex gepushten Renderer-Builds.
 - Settings: tote `DrawThreaded`-Einstellung wurde entfernt; `SortRenderQueue` bleibt unveraendert.
 - Grenzen: Render Scale, Aspect-/Viewport-, Kamera- und echte Aufloesungswechsel-Pfade bleiben unveraendert.
 - Pruefung: AGENTS-Regeln gelesen; Buildnummer aus outputs ermittelt; Kirides-Nightly/17.9.7 fuer Performance-Pfade verglichen; Occlusion-/MotionBlur-/ShadowFilter-Reste, Projekt-XML, Render-Scale-/Aspect-Grenze, Escape-Artefakte und git diff --check statisch kontrolliert. Kein vollstaendiger lokaler C++-/Shader-Build.
+
+## Build 133 (Release-Candidate-Renderer, F11-Aufraeumen, Regen/Wasser/Wolken und Schattenstabilitaet)
+
+- F11-Menue: sichtbare Optionen und Preset-Grenze wurden neu geordnet; entfernte Altoptionen fuer interaktive Vegetation, Vegetations-Gegenlicht und Wasserbewegung sind nicht mehr separat steuerbar, waehrend Wasserbewegung und Vegetations-Gegenlicht dauerhaft aktiv bleiben.
+- Regen/Wetter: Regenwolken, Raincloud-Textur, dynamische Wolken und Rueckkehr zu sonnigem Wetter blenden wieder sauber ineinander, inklusive Savegame-Ladepfad.
+- Schatten: Contact Shadows sind unter FSR3 wieder sichtbar, fuer problematische NPC-/Gesichtsbereiche entschaerft und die Gesichtsschatten werden stabiler/weicher gefiltert.
+- Transparenz/Wet-Ground: transparente Weltgeometrie wird bei Regen/Nacht stabiler behandelt, ohne dass Ground-SSR wieder durch solide Geometrie hindurchscheint.
+- Wasser: Wasserreflektionen bleiben regelbar, Wasserbewegung bleibt immer aktiv; Wasserfarbe, Uferuebergaenge und Regen-/Nacht-Darstellung wurden optisch ausgeglichen.
+- Dynamische Wolken: Konturaufhellungen an Objektkanten werden vermieden; Tiefwolken reichen sauberer an den Horizont, koennen Godrays abschatten/formen und werden in gueltigen Wasser-SSR-Treffern reflektiert.
+- Pruefung: AGENTS-Regeln gelesen; Buildnummer aus outputs ermittelt; Kirides-/Build-Vergleiche fuer die betroffenen Renderpfade genutzt; F11-/INI-/Preset-Pfade, Shaderbindings, RenderGraph-Reihenfolge, Ressourcen-Cleanup, Projektpfade und Escape-Artefakte statisch kontrolliert. Kein vollstaendiger lokaler C++-/Shader-Build.

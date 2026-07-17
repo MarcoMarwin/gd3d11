@@ -1,28 +1,23 @@
 #pragma once
 #include "D3D11PFX_Effect.h"
+#include <memory>
 
 struct RenderToTextureBuffer;
-class D3D11PFX_HDR :
-    public D3D11PFX_Effect {
+class D3D11PFX_HDR : public D3D11PFX_Effect {
 public:
-    D3D11PFX_HDR( D3D11PfxRenderer* rnd );
+    explicit D3D11PFX_HDR( D3D11PfxRenderer* rnd );
     ~D3D11PFX_HDR() override;
 
-    /** Draws this effect to the given buffer */
-    XRESULT Render( RenderToTextureBuffer* fxbuffer ) override { return XR_FAILED; };
+    XRESULT Render( RenderToTextureBuffer* fxbuffer ) override { return XR_FAILED; }
     XRESULT Render( ID3D11RenderTargetView* output, ID3D11ShaderResourceView* backbuffer );
     void ResetAdaptation();
 
 protected:
-    /** Calcualtes the luminance */
     RenderToTextureBuffer* CalcLuminance();
+    XRESULT CreateBloom( RenderToTextureBuffer* lum, RenderToTextureBuffer* bloomTempBuffer );
 
-    /** Builds the multi-resolution bloom pyramid into TempBufferDS4_1 */
-    void CreateBloom( RenderToTextureBuffer* lum, RenderToTextureBuffer* bloomTempBuffer );
-
-    RenderToTextureBuffer* LumBuffer1;
-    RenderToTextureBuffer* LumBuffer2;
-    RenderToTextureBuffer* LumBuffer3;
-    int ActiveLumBuffer;
+    std::unique_ptr<RenderToTextureBuffer> LumBuffer1;
+    std::unique_ptr<RenderToTextureBuffer> LumBuffer2;
+    std::unique_ptr<RenderToTextureBuffer> LumBuffer3;
+    int ActiveLumBuffer = 0;
 };
-

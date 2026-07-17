@@ -63,7 +63,11 @@ public:
     }
 
     zCSubMesh* GetSubmesh( int n ) {
-        return reinterpret_cast<zCSubMesh*>(reinterpret_cast<DWORD>(GetSubmeshes()) + zCSubMesh::CLASS_SIZE * n);
+        zCSubMesh* submeshes = GetSubmeshes();
+        const int count = GetNumSubmeshes();
+        if ( !submeshes || n < 0 || n >= count ) return nullptr;
+        return reinterpret_cast<zCSubMesh*>(reinterpret_cast<uintptr_t>(submeshes)
+            + static_cast<size_t>(zCSubMesh::CLASS_SIZE) * static_cast<size_t>(n));
     }
 
     zCSubMesh* GetSubmeshes() {
@@ -76,16 +80,19 @@ public:
 
     /** Constructs a readable mesh from the data given in the progmesh */
     void ConstructVertexBuffer( std::vector<ExVertexStruct>* vertices ) {
-        zCArrayAdapt<float3>* pl = GetPositionList();
-        vertices->reserve( pl->NumInArray );
-
-        for ( int i = 0; i < pl->NumInArray; i++ ) {
-            ExVertexStruct vx;
-            vx.Position = pl->Get( i );
-            vx.Normal = float3( 0, 0, 0 );
-            vx.TexCoord = float2( 0, 0 );
-            vx.Color = 0xFFFFFFFF;
-            vertices->push_back( vx );
+        if ( !vertices ) return;
+        vertices->clear();
+        zCArrayAdapt<float3>* positions = GetPositionList();
+        if ( !positions || !positions->Array || positions->NumInArray <= 0 ) return;
+        vertices->reserve( static_cast<size_t>(positions->NumInArray) );
+        for ( int i = 0; i < positions->NumInArray; ++i ) {
+            ExVertexStruct vertex{};
+            vertex.Position = positions->Array[i];
+            vertex.Normal = float3( 0.0f, 0.0f, 0.0f );
+            vertex.TexCoord = float2( 0.0f, 0.0f );
+            vertex.TexCoord2 = float2( 0.0f, 0.0f );
+            vertex.Color = 0xFFFFFFFF;
+            vertices->emplace_back( vertex );
         }
     }
 };

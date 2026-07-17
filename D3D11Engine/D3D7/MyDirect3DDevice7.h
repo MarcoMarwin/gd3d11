@@ -2,6 +2,12 @@
 #include "d3d.h"
 #include "MyDirect3DVertexBuffer7.h"
 #include <stdio.h>
+#include <atomic>
+#include <algorithm>
+#include <cmath>
+#include <cstring>
+#include <limits>
+#include <new>
 #include "../Engine.h"
 #include "../Logger.h"
 #include "MyDirectDrawSurface7.h"
@@ -31,12 +37,17 @@ const int DRAW_PRIM_INDEX_BUFFER_SIZE = 4096 * sizeof( VERTEX_INDEX );
 
 class MyDirect3DDevice7 final : public IDirect3DDevice7 {
 public:
-	MyDirect3DDevice7( IDirect3D7* direct3D7, IDirect3DDevice7* direct3DDevice7 ) {
+	MyDirect3DDevice7( IDirect3D7* direct3D7, IDirectDrawSurface7* renderTarget )
+		: Direct3D7( direct3D7 ), RenderTarget( renderTarget ), RefCount( 1 ) {
 		DebugWrite( "MyDirect3DDevice7::MyDirect3DDevice7" );
-
-		RefCount = 1;
+		if ( Direct3D7 ) Direct3D7->AddRef();
+		if ( RenderTarget ) RenderTarget->AddRef();
+		BoundTextures.fill( nullptr );
 
 		ZeroMemory(&FakeDeviceDesc, sizeof(D3DDEVICEDESC7));
+		ZeroMemory(&CurrentViewport, sizeof(CurrentViewport));
+		CurrentViewport.dvMinZ = 0.0f;
+		CurrentViewport.dvMaxZ = 1.0f;
 		FakeDeviceDesc.dwDevCaps = (D3DDEVCAPS_FLOATTLVERTEX|D3DDEVCAPS_EXECUTESYSTEMMEMORY|D3DDEVCAPS_TLVERTEXSYSTEMMEMORY|D3DDEVCAPS_TEXTUREVIDEOMEMORY|D3DDEVCAPS_DRAWPRIMTLVERTEX
 			|D3DDEVCAPS_CANRENDERAFTERFLIP|D3DDEVCAPS_DRAWPRIMITIVES2|D3DDEVCAPS_DRAWPRIMITIVES2EX|D3DDEVCAPS_HWTRANSFORMANDLIGHT|D3DDEVCAPS_HWRASTERIZATION);
 		FakeDeviceDesc.dpcLineCaps.dwSize = sizeof(D3DPRIMCAPS);
@@ -117,95 +128,192 @@ public:
 		FakeDeviceDesc.dwVertexProcessingCaps = (D3DVTXPCAPS_TEXGEN|D3DVTXPCAPS_MATERIALSOURCE7|D3DVTXPCAPS_DIRECTIONALLIGHTS|D3DVTXPCAPS_POSITIONALLIGHTS|D3DVTXPCAPS_LOCALVIEWER);
 	}
 
+	~MyDirect3DDevice7() {
+		for ( IDirectDrawSurface7* texture : BoundTextures ) {
+			if ( texture ) texture->Release();
+		}
+		if ( RenderTarget ) RenderTarget->Release();
+		if ( Direct3D7 ) Direct3D7->Release();
+	}
+
+
 	/*** IUnknown methods ***/
 	HRESULT __declspec(nothrow) STDMETHODCALLTYPE QueryInterface( REFIID riid, void** ppvObj ) override {
 		DebugWrite( "MyDirect3DDevice7::QueryInterface" );
-		return S_OK;
+		if ( !ppvObj ) return E_POINTER;
+		*ppvObj = nullptr;
+		if ( IsEqualIID( riid, IID_IUnknown )
+			|| IsEqualIID( riid, IID_IDirect3DDevice7 ) ) {
+			*ppvObj = static_cast<IDirect3DDevice7*>(this);
+			AddRef();
+			return S_OK;
+		}
+		return E_NOINTERFACE;
 	}
 
 	ULONG __declspec(nothrow) STDMETHODCALLTYPE AddRef() override {
 		DebugWrite( "MyDirect3DDevice7::AddRef" );
-		return ++RefCount;
+		return RefCount.fetch_add( 1, std::memory_order_relaxed ) + 1;
 	}
 
 	ULONG __declspec(nothrow) STDMETHODCALLTYPE Release() override {
 		DebugWrite( "MyDirect3DDevice7::Release" );
-		if ( --RefCount == 0 ) {
+		const ULONG references =
+			RefCount.fetch_sub( 1, std::memory_order_acq_rel ) - 1;
+		if ( references == 0 ) {
 			delete this;
-			return 0;
 		}
-
-		return RefCount;
+		return references;
 	}
 
 	/*** IDirect3DDevice7 methods ***/
 	HRESULT __declspec(nothrow) STDMETHODCALLTYPE GetCaps( LPD3DDEVICEDESC7 lpD3DDevDesc ) override {
 		DebugWrite( "MyDirect3DDevice7::GetCaps" );
-
-		// Tell Gothic what it wants to hear
+		if ( !lpD3DDevDesc ) return E_POINTER;
 		*lpD3DDevDesc = FakeDeviceDesc;
-
 		return S_OK;
 	}
 
 	HRESULT __declspec(nothrow) STDMETHODCALLTYPE GetClipPlane( DWORD Index, float* pPlane ) override {
 		DebugWrite( "MyDirect3DDevice7::GetClipPlane" );
+		if ( !pPlane ) return E_POINTER;
+		if ( Index >= 6 ) return E_INVALIDARG;
+		std::fill_n( pPlane, 4, 0.0f );
 		return S_OK;
 	}
 
 	HRESULT __declspec(nothrow) STDMETHODCALLTYPE SetClipPlane( DWORD dwIndex, D3DVALUE* pPlaneEquation ) override {
 		DebugWrite( "MyDirect3DDevice7::SetClipPlane" );
+		if ( !pPlaneEquation ) return E_POINTER;
+		if ( dwIndex >= 6 ) return E_INVALIDARG;
 		return S_OK;
 	}
 
 	HRESULT __declspec(nothrow) STDMETHODCALLTYPE GetClipStatus( LPD3DCLIPSTATUS lpD3DClipStatus ) override {
 		DebugWrite( "MyDirect3DDevice7::GetClipStatus" );
+		if ( !lpD3DClipStatus ) return E_POINTER;
+		ZeroMemory( lpD3DClipStatus, sizeof( *lpD3DClipStatus ) );
 		return S_OK;
 	}
 
 	HRESULT __declspec(nothrow) STDMETHODCALLTYPE SetClipStatus( LPD3DCLIPSTATUS lpD3DClipStatus ) override {
 		DebugWrite( "MyDirect3DDevice7::SetClipStatus" );
-		return S_OK;
+		return lpD3DClipStatus ? S_OK : E_POINTER;
 	}
 
 	HRESULT __declspec(nothrow) STDMETHODCALLTYPE GetDirect3D( IDirect3D7** ppD3D ) override {
 		DebugWrite( "MyDirect3DDevice7::GetDirect3D" );
-		*ppD3D = nullptr;
+		if ( !ppD3D ) return E_POINTER;
+		*ppD3D = Direct3D7;
+		if ( !Direct3D7 ) return E_UNEXPECTED;
+		Direct3D7->AddRef();
 		return S_OK;
 	}
 
 	HRESULT __declspec(nothrow) STDMETHODCALLTYPE GetInfo( DWORD dwDevInfoID, LPVOID pDevInfoStruct, DWORD dwSize ) override {
 		DebugWrite( "MyDirect3DDevice7::GetInfo" );
-		return S_OK;
+		(void)dwDevInfoID;
+		if ( dwSize != 0 && !pDevInfoStruct ) return E_POINTER;
+		return E_NOTIMPL;
 	}
 
 	HRESULT __declspec(nothrow) STDMETHODCALLTYPE GetLight( DWORD dwLightIndex, LPD3DLIGHT7 lpLight ) override {
 		DebugWrite( "MyDirect3DDevice7::GetLight" );
+		(void)dwLightIndex;
+		if ( !lpLight ) return E_POINTER;
+		ZeroMemory( lpLight, sizeof( *lpLight ) );
 		return S_OK;
 	}
 
 	HRESULT __declspec(nothrow) STDMETHODCALLTYPE GetLightEnable( DWORD Index, BOOL* pEnable ) override {
 		DebugWrite( "MyDirect3DDevice7::GetLightEnable" );
+		(void)Index;
+		if ( !pEnable ) return E_POINTER;
+		*pEnable = FALSE;
 		return S_OK;
 	}
 
 	HRESULT __declspec(nothrow) STDMETHODCALLTYPE GetMaterial( LPD3DMATERIAL7 lpMaterial ) override {
 		DebugWrite( "MyDirect3DDevice7::GetMaterial" );
+		if ( !lpMaterial ) return E_POINTER;
+		ZeroMemory( lpMaterial, sizeof( *lpMaterial ) );
 		return S_OK;
 	}
 
 	HRESULT __declspec(nothrow) STDMETHODCALLTYPE SetMaterial( LPD3DMATERIAL7 lpMaterial ) override {
 		DebugWrite( "MyDirect3DDevice7::SetMaterial" );
-		return S_OK;
+		return lpMaterial ? S_OK : E_POINTER;
 	}
 
 	HRESULT __declspec(nothrow) STDMETHODCALLTYPE GetRenderState( D3DRENDERSTATETYPE State, DWORD* pValue ) override {
 		DebugWrite( "MyDirect3DDevice7::GetRenderState" );
+		if ( !pValue ) return E_POINTER;
+		*pValue = 0;
+		if ( !Engine::GAPI ) return E_UNEXPECTED;
+
+		const GothicRendererState& state = Engine::GAPI->GetRendererState();
+		switch ( State ) {
+		case D3DRENDERSTATE_FOGENABLE:
+			*pValue = state.GraphicsState.FF_FogWeight != 0.0f;
+			break;
+		case D3DRENDERSTATE_FOGSTART:
+			std::memcpy( pValue, &state.GraphicsState.FF_FogNear, sizeof( *pValue ) );
+			break;
+		case D3DRENDERSTATE_FOGEND:
+			std::memcpy( pValue, &state.GraphicsState.FF_FogFar, sizeof( *pValue ) );
+			break;
+		case D3DRENDERSTATE_FOGCOLOR:
+			*pValue = float4( state.GraphicsState.FF_FogColor ).ToDWORD();
+			break;
+		case D3DRENDERSTATE_AMBIENT:
+			*pValue = float4( state.GraphicsState.FF_AmbientLighting ).ToDWORD();
+			break;
+		case D3DRENDERSTATE_ZENABLE:
+			*pValue = state.DepthState.DepthBufferEnabled;
+			break;
+		case D3DRENDERSTATE_ZWRITEENABLE:
+			*pValue = state.DepthState.DepthWriteEnabled;
+			break;
+		case D3DRENDERSTATE_ALPHATESTENABLE:
+			*pValue = (state.GraphicsState.FF_GSwitches & GSWITCH_ALPHAREF) != 0;
+			break;
+		case D3DRENDERSTATE_SRCBLEND:
+			*pValue = static_cast<DWORD>(state.BlendState.SrcBlend);
+			break;
+		case D3DRENDERSTATE_DESTBLEND:
+			*pValue = static_cast<DWORD>(state.BlendState.DestBlend);
+			break;
+		case D3DRENDERSTATE_ZFUNC:
+			*pValue = static_cast<DWORD>(state.DepthState.DepthBufferCompareFunc);
+			break;
+		case D3DRENDERSTATE_ALPHAREF:
+			*pValue = static_cast<DWORD>(std::clamp(
+				state.GraphicsState.FF_AlphaRef, 0.0f, 1.0f ) * 255.0f + 0.5f);
+			break;
+		case D3DRENDERSTATE_ALPHABLENDENABLE:
+			*pValue = state.BlendState.BlendEnabled;
+			break;
+		case D3DRENDERSTATE_ZBIAS:
+			*pValue = static_cast<DWORD>(state.RasterizerState.ZBias);
+			break;
+		case D3DRENDERSTATE_CULLMODE:
+			*pValue = static_cast<DWORD>(state.RasterizerState.CullMode);
+			break;
+		case D3DRENDERSTATE_TEXTUREFACTOR:
+			*pValue = state.GraphicsState.FF_TextureFactor.ToDWORD();
+			break;
+		case D3DRENDERSTATE_LIGHTING:
+			*pValue = (state.GraphicsState.FF_GSwitches & GSWITCH_LIGHING) != 0;
+			break;
+		default:
+			break;
+		}
 		return S_OK;
 	}
 
 	HRESULT __declspec(nothrow) STDMETHODCALLTYPE SetRenderState( D3DRENDERSTATETYPE State, DWORD Value ) override {
 		DebugWrite( "MyDirect3DDevice7::SetRenderState" );
+		if ( !Engine::GAPI ) return E_UNEXPECTED;
 
 		GothicRendererState& state = Engine::GAPI->GetRendererState();
 
@@ -216,11 +324,11 @@ public:
 			break;
 
 		case D3DRENDERSTATETYPE::D3DRENDERSTATE_FOGSTART:
-			state.GraphicsState.FF_FogNear = *reinterpret_cast<float*>(&Value);
+			std::memcpy( &state.GraphicsState.FF_FogNear, &Value, sizeof( Value ) );
 			break;
 
 		case D3DRENDERSTATETYPE::D3DRENDERSTATE_FOGEND:
-			state.GraphicsState.FF_FogFar = *reinterpret_cast<float*>(&Value);
+			std::memcpy( &state.GraphicsState.FF_FogFar, &Value, sizeof( Value ) );
 			break;
 
 		case D3DRENDERSTATETYPE::D3DRENDERSTATE_FOGCOLOR:
@@ -253,6 +361,10 @@ public:
             state.DepthState.SetDirty();
             break;
         }
+		case D3DRENDERSTATE_ZWRITEENABLE:
+			state.DepthState.DepthWriteEnabled = Value != 0;
+			state.DepthState.SetDirty();
+			break;
 		case D3DRENDERSTATE_ALPHATESTENABLE: state.GraphicsState.SetGraphicsSwitch( GSWITCH_ALPHAREF, Value != 0 );	break;
 		case D3DRENDERSTATE_SRCBLEND: state.BlendState.SrcBlend = static_cast<GothicBlendStateInfo::EBlendFunc>(Value); state.BlendState.SetDirty(); break;
 		case D3DRENDERSTATE_DESTBLEND: state.BlendState.DestBlend = static_cast<GothicBlendStateInfo::EBlendFunc>(Value); state.BlendState.SetDirty(); break;
@@ -260,7 +372,7 @@ public:
 		case D3DRENDERSTATE_ZFUNC: state.DepthState.DepthBufferCompareFunc = static_cast<GothicDepthBufferStateInfo::ECompareFunc>(Value); state.DepthState.SetDirty(); break;
 		case D3DRENDERSTATE_ALPHAREF: state.GraphicsState.FF_AlphaRef = static_cast<float>(Value) / 255.0f; break; // Ref for masked
 		case D3DRENDERSTATE_ALPHABLENDENABLE: state.BlendState.BlendEnabled = Value != 0; state.BlendState.SetDirty(); break;
-		case D3DRENDERSTATE_ZBIAS: state.RasterizerState.ZBias = Value; state.DepthState.SetDirty(); break;
+		case D3DRENDERSTATE_ZBIAS: state.RasterizerState.ZBias = static_cast<int>(Value); state.RasterizerState.SetDirty(); break;
 		case D3DRENDERSTATE_TEXTUREFACTOR: state.GraphicsState.FF_TextureFactor = float4( Value ); break;
 		case D3DRENDERSTATE_LIGHTING: state.GraphicsState.SetGraphicsSwitch( GSWITCH_LIGHING, Value != 0 ); break;
 		}
@@ -270,38 +382,83 @@ public:
 
 	HRESULT __declspec(nothrow) STDMETHODCALLTYPE GetRenderTarget( LPDIRECTDRAWSURFACE7* lplpRenderTarget ) override {
 		DebugWrite( "MyDirect3DDevice7::GetRenderTarget" );
+		if ( !lplpRenderTarget ) return E_POINTER;
+		*lplpRenderTarget = RenderTarget;
+		if ( !RenderTarget ) return DDERR_NOTFOUND;
+		RenderTarget->AddRef();
 		return S_OK;
 	}
 
 	HRESULT __declspec(nothrow) STDMETHODCALLTYPE SetRenderTarget( LPDIRECTDRAWSURFACE7 lpNewRenderTarget, DWORD dwFlags ) override {
 		DebugWrite( "MyDirect3DDevice7::SetRenderTarget" );
+		(void)dwFlags;
+		if ( !lpNewRenderTarget ) return E_POINTER;
+		lpNewRenderTarget->AddRef();
+		if ( RenderTarget ) RenderTarget->Release();
+		RenderTarget = lpNewRenderTarget;
 		return S_OK;
 	}
 
 	HRESULT __declspec(nothrow) STDMETHODCALLTYPE GetTexture( DWORD dwStage, LPDIRECTDRAWSURFACE7* lplpTexture ) override {
 		DebugWrite( "MyDirect3DDevice7::GetTexture" );
+		if ( !lplpTexture ) return E_POINTER;
+		*lplpTexture = nullptr;
+		if ( dwStage >= BoundTextures.size() ) return E_INVALIDARG;
+		*lplpTexture = BoundTextures[dwStage];
+		if ( *lplpTexture ) (*lplpTexture)->AddRef();
 		return S_OK;
 	}
 
 	HRESULT __declspec(nothrow) STDMETHODCALLTYPE SetTexture( DWORD dwStage, LPDIRECTDRAWSURFACE7 lplpTexture ) override {
 		DebugWrite( "MyDirect3DDevice7::SetTexture" );
+		if ( dwStage >= 8 ) return E_INVALIDARG;
+		if ( !Engine::GraphicsEngine ) return E_UNEXPECTED;
 
-		// Bind the texture
-		MyDirectDrawSurface7* surface = static_cast<MyDirectDrawSurface7*>(lplpTexture);
-		if ( surface ) {
-			surface->BindToSlot( dwStage );
+		if ( lplpTexture ) {
+			static_cast<MyDirectDrawSurface7*>(lplpTexture)->BindToSlot(
+				static_cast<int>(dwStage) );
+			lplpTexture->AddRef();
+		} else {
+			Engine::GraphicsEngine->UnbindTexture( dwStage );
 		}
-
+		if ( BoundTextures[dwStage] ) BoundTextures[dwStage]->Release();
+		BoundTextures[dwStage] = lplpTexture;
 		return S_OK;
 	}
 
 	HRESULT __declspec(nothrow) STDMETHODCALLTYPE GetTextureStageState( DWORD Stage, D3DTEXTURESTAGESTATETYPE Type, DWORD* pValue ) override {
 		DebugWrite( "MyDirect3DDevice7::GetTextureStageState" );
+		if ( !pValue ) return E_POINTER;
+		*pValue = 0;
+		if ( Stage >= 8 ) return E_INVALIDARG;
+		if ( !Engine::GAPI ) return E_UNEXPECTED;
+
+		const GothicRendererState& state = Engine::GAPI->GetRendererState();
+		if ( Stage < 2 ) {
+			const FixedFunctionStage& stage = state.GraphicsState.FF_Stages[Stage];
+			switch ( Type ) {
+			case D3DTSS_COLOROP: *pValue = static_cast<DWORD>(stage.ColorOp); break;
+			case D3DTSS_COLORARG1: *pValue = static_cast<DWORD>(stage.ColorArg1); break;
+			case D3DTSS_COLORARG2: *pValue = static_cast<DWORD>(stage.ColorArg2); break;
+			case D3DTSS_ALPHAOP: *pValue = static_cast<DWORD>(stage.AlphaOp); break;
+			case D3DTSS_ALPHAARG1: *pValue = static_cast<DWORD>(stage.AlphaArg1); break;
+			case D3DTSS_ALPHAARG2: *pValue = static_cast<DWORD>(stage.AlphaArg2); break;
+			case D3DTSS_ADDRESSU: *pValue = static_cast<DWORD>(state.SamplerState.AddressU); break;
+			case D3DTSS_ADDRESSV: *pValue = static_cast<DWORD>(state.SamplerState.AddressV); break;
+			case D3DTSS_ADDRESS:
+				*pValue = state.SamplerState.AddressU == state.SamplerState.AddressV
+					? static_cast<DWORD>(state.SamplerState.AddressU) : 0;
+				break;
+			default: break;
+			}
+		}
 		return S_OK;
 	}
 
 	HRESULT __declspec(nothrow) STDMETHODCALLTYPE SetTextureStageState( DWORD Stage, D3DTEXTURESTAGESTATETYPE Type, DWORD Value ) override {
 		DebugWrite( "MyDirect3DDevice7::SetTextureStageState" );
+		if ( Stage >= 8 ) return E_INVALIDARG;
+		if ( !Engine::GAPI ) return E_UNEXPECTED;
 
 		GothicRendererState& state = Engine::GAPI->GetRendererState();
 		switch ( Type ) {
@@ -329,12 +486,12 @@ public:
 
 		case D3DTSS_ALPHAARG1:
 			if ( Stage < 2 )
-				state.GraphicsState.FF_Stages[Stage].ColorArg1 = static_cast<FixedFunctionStage::ETextureArg>(Value);
+				state.GraphicsState.FF_Stages[Stage].AlphaArg1 = static_cast<FixedFunctionStage::ETextureArg>(Value);
 			break;
 
 		case D3DTSS_ALPHAARG2:
 			if ( Stage < 2 )
-				state.GraphicsState.FF_Stages[Stage].ColorArg2 = static_cast<FixedFunctionStage::ETextureArg>(Value);
+				state.GraphicsState.FF_Stages[Stage].AlphaArg2 = static_cast<FixedFunctionStage::ETextureArg>(Value);
 			break;
 
 		case D3DTSS_BUMPENVMAT00: break;
@@ -380,11 +537,35 @@ public:
 
 	HRESULT __declspec(nothrow) STDMETHODCALLTYPE GetTransform( D3DTRANSFORMSTATETYPE State, D3DMATRIX* pMatrix ) override {
 		DebugWrite( "MyDirect3DDevice7::GetTransform" );
+		if ( !pMatrix ) return E_POINTER;
+		if ( !Engine::GAPI ) return E_UNEXPECTED;
+
+		const GothicTransformInfo& transforms =
+			Engine::GAPI->GetRendererState().TransformState;
+		const XMFLOAT4X4* source = nullptr;
+		switch ( State ) {
+		case D3DTRANSFORMSTATE_WORLD:
+			source = &transforms.TransformWorld;
+			break;
+		case D3DTRANSFORMSTATE_VIEW:
+			source = &transforms.TransformView;
+			break;
+		case D3DTRANSFORMSTATE_PROJECTION:
+			source = &transforms.TransformProjUnjittered;
+			break;
+		default:
+			return E_INVALIDARG;
+		}
+		XMStoreFloat4x4(
+			reinterpret_cast<XMFLOAT4X4*>(pMatrix),
+			XMMatrixTranspose( XMLoadFloat4x4( source ) ) );
 		return S_OK;
 	}
 
 	HRESULT __declspec(nothrow) STDMETHODCALLTYPE SetTransform( D3DTRANSFORMSTATETYPE dtstTransformStateType, LPD3DMATRIX lpD3DMatrix ) override {
 		DebugWrite( "MyDirect3DDevice7::SetTransform" );
+		if ( !lpD3DMatrix ) return E_POINTER;
+		if ( !Engine::GAPI ) return E_UNEXPECTED;
 
 		GothicRendererState& state = Engine::GAPI->GetRendererState();
 		switch ( dtstTransformStateType ) {
@@ -419,22 +600,46 @@ public:
 
 	HRESULT __declspec(nothrow) STDMETHODCALLTYPE GetViewport( LPD3DVIEWPORT7 lpViewport ) override {
 		DebugWrite( "MyDirect3DDevice7::GetViewport" );
+		if ( !lpViewport ) return E_POINTER;
+		*lpViewport = CurrentViewport;
 		return S_OK;
 	}
 
 	HRESULT __declspec(nothrow) STDMETHODCALLTYPE SetViewport( LPD3DVIEWPORT7 lpViewport ) override {
 		DebugWrite( "MyDirect3DDevice7::SetViewport" );
+		if ( !lpViewport ) return E_POINTER;
+		if ( !Engine::GAPI || !Engine::GraphicsEngine ) return E_UNEXPECTED;
 
-		float scale = std::max( 0.1f, Engine::GAPI->GetRendererState().RendererSettings.GothicUIScale );
+		const float scale = std::max(
+			0.1f,
+			Engine::GAPI->GetRendererState().RendererSettings.GothicUIScale );
+		if ( !std::isfinite( scale )
+			|| !std::isfinite( lpViewport->dvMinZ )
+			|| !std::isfinite( lpViewport->dvMaxZ )
+			|| lpViewport->dvMinZ > lpViewport->dvMaxZ ) {
+			return E_INVALIDARG;
+		}
+
+		const double scaledX = static_cast<double>(lpViewport->dwX) * scale;
+		const double scaledY = static_cast<double>(lpViewport->dwY) * scale;
+		const double scaledWidth = static_cast<double>(lpViewport->dwWidth) * scale;
+		const double scaledHeight = static_cast<double>(lpViewport->dwHeight) * scale;
+		const double maxViewportValue =
+			static_cast<double>((std::numeric_limits<UINT>::max)());
+		if ( scaledX > maxViewportValue || scaledY > maxViewportValue
+			|| scaledWidth > maxViewportValue || scaledHeight > maxViewportValue ) {
+			return E_INVALIDARG;
+		}
 
 		ViewportInfo vp;
-		vp.TopLeftX = static_cast<UINT>(lpViewport->dwX * scale);
-		vp.TopLeftY = static_cast<UINT>(lpViewport->dwY * scale);
-		vp.Height = static_cast<UINT>(lpViewport->dwHeight * scale);
-		vp.Width = static_cast<UINT>(lpViewport->dwWidth * scale);
+		vp.TopLeftX = static_cast<UINT>(scaledX);
+		vp.TopLeftY = static_cast<UINT>(scaledY);
+		vp.Height = static_cast<UINT>(scaledHeight);
+		vp.Width = static_cast<UINT>(scaledWidth);
 		vp.MinZ = lpViewport->dvMinZ;
 		vp.MaxZ = lpViewport->dvMaxZ;
 
+		CurrentViewport = *lpViewport;
 		Engine::GraphicsEngine->SetViewport( vp );
 
 		return S_OK;
@@ -447,7 +652,7 @@ public:
 
 	HRESULT __declspec(nothrow) STDMETHODCALLTYPE BeginScene() override {
 		DebugWrite( "MyDirect3DDevice7::BeginScene" );
-
+		if ( !Engine::GraphicsEngine ) return E_UNEXPECTED;
 		Engine::GraphicsEngine->OnBeginFrame();
 		return S_OK;
 	}
@@ -469,11 +674,19 @@ public:
 
 	HRESULT __declspec(nothrow) STDMETHODCALLTYPE ComputeSphereVisibility( LPD3DVECTOR lpCenters, LPD3DVALUE lpRadii, DWORD dwNumSpheres, DWORD dwFlags, LPDWORD lpdwReturnValues ) override {
 		DebugWrite( "MyDirect3DDevice7::ComputeSphereVisibility" );
+		(void)dwFlags;
+		if ( dwNumSpheres == 0 ) return S_OK;
+		if ( !lpCenters || !lpRadii || !lpdwReturnValues ) return E_POINTER;
+		if ( dwNumSpheres > 10000000u ) return E_INVALIDARG;
+		std::fill_n( lpdwReturnValues, dwNumSpheres, 0u );
 		return S_OK;
 	}
 
 	HRESULT __declspec(nothrow) STDMETHODCALLTYPE CreateStateBlock( D3DSTATEBLOCKTYPE d3dsbType, LPDWORD lpdwBlockHandle ) override {
 		DebugWrite( "MyDirect3DDevice7::CreateStateBlock" );
+		(void)d3dsbType;
+		if ( !lpdwBlockHandle ) return E_POINTER;
+		*lpdwBlockHandle = 1;
 		return S_OK;
 	}
 
@@ -499,10 +712,19 @@ public:
 
 	HRESULT __declspec(nothrow) STDMETHODCALLTYPE DrawPrimitive( D3DPRIMITIVETYPE dptPrimitiveType, DWORD dwVertexTypeDesc, LPVOID lpvVertices, DWORD dwVertexCount, DWORD dwFlags ) override {
 		DebugWrite( "MyDirect3DDevice7::DrawPrimitive" );
+		(void)dwFlags;
+		if ( dwVertexCount == 0 ) return S_OK;
+		if ( !lpvVertices ) return E_POINTER;
+		if ( !Engine::GAPI || !Engine::GraphicsEngine ) return E_UNEXPECTED;
+		if ( dwVertexCount > 10000000u ) return E_INVALIDARG;
 
 		// Convert them into ExVertices
 		static std::vector<ExVertexStruct> exv;
-		exv.resize( dwVertexCount );
+		try {
+			exv.resize( dwVertexCount );
+		} catch ( const std::bad_alloc& ) {
+			return E_OUTOFMEMORY;
+		}
 
 		switch ( dwVertexTypeDesc ) {
         case GOTHIC_FVF_XYZRHW_DIF_T1: {
@@ -543,8 +765,8 @@ public:
                 ? VShaderID::VS_TransformedEx_MAX_Z
                 : VShaderID::VS_TransformedEx;
 
-			Engine::GraphicsEngine->SetActiveVertexShader( VShaderID::VS_TransformedEx );
-			Engine::GraphicsEngine->BindViewportInformation( VShaderID::VS_TransformedEx, 0 );
+			Engine::GraphicsEngine->SetActiveVertexShader( vs );
+			Engine::GraphicsEngine->BindViewportInformation( vs, 0 );
 			break;
         }
 
@@ -556,12 +778,20 @@ public:
 		if ( dptPrimitiveType == D3DPT_TRIANGLEFAN ) {
 			static std::vector<ExVertexStruct> vertexList;
 			vertexList.clear();
-			WorldConverter::TriangleFanToList( &exv[0], dwVertexCount, &vertexList );
-
-			Engine::GraphicsEngine->DrawVertexArray( &vertexList[0], vertexList.size() );
+			try {
+				WorldConverter::TriangleFanToList(
+					exv.data(), dwVertexCount, &vertexList );
+			} catch ( const std::bad_alloc& ) {
+				exv.clear();
+				return E_OUTOFMEMORY;
+			}
+			if ( !vertexList.empty() ) {
+				Engine::GraphicsEngine->DrawVertexArray(
+					vertexList.data(), vertexList.size() );
+			}
 		} else {
 			if ( dptPrimitiveType == D3DPT_TRIANGLELIST )
-				Engine::GraphicsEngine->DrawVertexArray( &exv[0], dwVertexCount );
+				Engine::GraphicsEngine->DrawVertexArray( exv.data(), dwVertexCount );
 		}
 
 		exv.clear(); // static, keep the memory allocated
@@ -576,13 +806,23 @@ public:
 
 	HRESULT __declspec(nothrow) STDMETHODCALLTYPE DrawPrimitiveVB( D3DPRIMITIVETYPE d3dptPrimitiveType, LPDIRECT3DVERTEXBUFFER7 lpd3dVertexBuffer, DWORD dwStartVertex, DWORD dwNumVertices, DWORD dwFlags ) override {
 		DebugWrite( "MyDirect3DDevice7::DrawPrimitiveVB" );
+		(void)dwFlags;
+		if ( !lpd3dVertexBuffer ) return E_POINTER;
+		if ( !Engine::GAPI || !Engine::GraphicsEngine ) return E_UNEXPECTED;
+		if ( dwNumVertices == 0 ) return S_OK;
 		if ( d3dptPrimitiveType < 4 )
 		{
 			return S_OK;
 		}
 
-		D3DVERTEXBUFFERDESC desc;
-		lpd3dVertexBuffer->GetVertexBufferDesc( &desc );
+		D3DVERTEXBUFFERDESC desc{};
+		const HRESULT descResult =
+			lpd3dVertexBuffer->GetVertexBufferDesc( &desc );
+		if ( FAILED( descResult ) ) return descResult;
+		if ( dwStartVertex > desc.dwNumVertices
+			|| dwNumVertices > desc.dwNumVertices - dwStartVertex ) {
+			return E_INVALIDARG;
+		}
 
 		switch ( desc.dwFVF ) {
         case GOTHIC_FVF_XYZRHW_DIF_T1: {
@@ -613,6 +853,7 @@ public:
 
 	HRESULT __declspec(nothrow) STDMETHODCALLTYPE EndScene() override {
 		DebugWrite( "MyDirect3DDevice7::EndScene" );
+		if ( !Engine::GraphicsEngine ) return E_UNEXPECTED;
 
 		hook_infunc
 
@@ -625,6 +866,8 @@ public:
 
 	HRESULT __declspec(nothrow) STDMETHODCALLTYPE EndStateBlock( LPDWORD lpdwBlockHandle ) override {
 		DebugWrite( "MyDirect3DDevice7::EndStateBlock" );
+		if ( !lpdwBlockHandle ) return E_POINTER;
+		*lpdwBlockHandle = 1;
 		return S_OK;
 	}
 
@@ -653,8 +896,11 @@ public:
             {32, DDPF_FOURCC, FOURCC_DXT5, 0, 0x00, 0x00, 0x00, 0x00},
         } };
 
-        for ( DDPIXELFORMAT& ppf : tformats )
-            (*lpd3dEnumPixelProc)(&ppf, lpArg);
+        if ( !lpd3dEnumPixelProc ) return E_POINTER;
+        for ( DDPIXELFORMAT& ppf : tformats ) {
+            if ( (*lpd3dEnumPixelProc)(&ppf, lpArg) == D3DENUMRET_CANCEL )
+                break;
+        }
 
 		return S_OK;
 	}
@@ -676,6 +922,8 @@ public:
 
 	HRESULT __declspec(nothrow) STDMETHODCALLTYPE ValidateDevice( DWORD* pNumPasses ) override {
 		DebugWrite( "MyDirect3DDevice7::ValidateDevice" );
+		if ( !pNumPasses ) return E_POINTER;
+		*pNumPasses = 1;
 		return S_OK;
 	}
 
@@ -686,10 +934,15 @@ public:
 
 	HRESULT __declspec(nothrow) STDMETHODCALLTYPE SetLight( DWORD dwLightIndex, LPD3DLIGHT7 lpLight ) override {
 		DebugWrite( "MyDirect3DDevice7::SetLight" );
-		return S_OK;
+		(void)dwLightIndex;
+		return lpLight ? S_OK : E_POINTER;
 	}
 
 private:
 	D3DDEVICEDESC7 FakeDeviceDesc;
-	int RefCount;
+	IDirect3D7* Direct3D7;
+	IDirectDrawSurface7* RenderTarget;
+	std::array<IDirectDrawSurface7*, 8> BoundTextures;
+	D3DVIEWPORT7 CurrentViewport;
+	std::atomic<ULONG> RefCount;
 };

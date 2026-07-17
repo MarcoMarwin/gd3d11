@@ -181,11 +181,8 @@ protected:
 
     /** FixedFunction-State render states */
     Microsoft::WRL::ComPtr<ID3D11RasterizerState> FFRasterizerState;
-    size_t FFRasterizerStateHash;
     Microsoft::WRL::ComPtr<ID3D11BlendState> FFBlendState;
-    size_t FFBlendStateHash;
     Microsoft::WRL::ComPtr<ID3D11DepthStencilState> FFDepthStencilState;
-    size_t FFDepthStencilStateHash;
 
     /** Debug line-renderer */
     std::unique_ptr<D3D11LineRenderer> LineRenderer;

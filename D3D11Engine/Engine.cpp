@@ -5,6 +5,7 @@
 #include "HookExceptionFilter.h"
 #include "ThreadPool.h"
 #include "ImGuiShim.h"
+#include <atomic>
 
 //#define TESTING
 
@@ -12,58 +13,125 @@ namespace Engine {
 
     /** Refresh worker threadpool */
     void RefreshWorkerThreadpool() {
-        delete WorkerThreadPool;
-        WorkerThreadPool = new ThreadPool(L"GD3D11-Worker");
+        try {
+            auto replacement = std::make_unique<ThreadPool>( L"GD3D11-Worker" );
+            ThreadPool* previous = WorkerThreadPool;
+            WorkerThreadPool = replacement.release();
+            delete previous;
+        } catch ( const std::exception& error ) {
+            LogError() << "Failed to refresh worker thread pool: " << error.what();
+        } catch ( ... ) {
+            LogError() << "Failed to refresh worker thread pool.";
+        }
     }
 
     /** Creates main graphics engine */
-    void CreateGraphicsEngine() {
-        LogInfo() << "Creating Main graphics engine";
-
-        GraphicsEngine = new D3D11GraphicsEngine;
-
-        if ( !GraphicsEngine ) {
-            LogErrorBox() << "Failed to create GraphicsEngine! Out of memory!";
-            exit( 0 );
+    XRESULT CreateGraphicsEngine() {
+        if ( GraphicsEngine ) {
+            return XR_SUCCESS;
+        }
+        if ( !GAPI ) {
+            LogError() << "Cannot create the graphics engine before GothicAPI.";
+            return XR_FAILED;
         }
 
-        ImGuiHandle = new ImGuiShim;
+        struct InitializationGuard {
+            bool committed = false;
+            ~InitializationGuard() {
+                if ( !committed ) {
+                    Engine::GraphicsEngine = nullptr;
+                    Engine::ImGuiHandle = nullptr;
+                    Engine::RenderingThreadPool = nullptr;
+                    Engine::WorkerThreadPool = nullptr;
+                }
+            }
+        } guard;
 
-        XLE( GraphicsEngine->Init() );
+        try {
+            LogInfo() << "Creating Main graphics engine";
+            auto graphicsEngine = std::make_unique<D3D11GraphicsEngine>();
+            auto imgui = std::make_unique<ImGuiShim>();
 
-        // Create threadpool
-        RenderingThreadPool = new ThreadPool(L"GD3D11-Render");
-        WorkerThreadPool = new ThreadPool(L"GD3D11-Worker");
+            GraphicsEngine = graphicsEngine.get();
+            ImGuiHandle = imgui.get();
+            const XRESULT result = graphicsEngine->Init();
+            if ( result != XR_SUCCESS ) {
+                LogError() << "Graphics engine initialization failed with code " << result << ".";
+                return result;
+            }
+
+            auto renderingPool = std::make_unique<ThreadPool>( L"GD3D11-Render" );
+            auto workerPool = std::make_unique<ThreadPool>( L"GD3D11-Worker" );
+            RenderingThreadPool = renderingPool.get();
+            WorkerThreadPool = workerPool.get();
+
+            graphicsEngine.release();
+            imgui.release();
+            renderingPool.release();
+            workerPool.release();
+            guard.committed = true;
+            return XR_SUCCESS;
+        } catch ( const std::exception& error ) {
+            LogError() << "Graphics engine initialization threw an exception: " << error.what();
+            return XR_FAILED;
+        } catch ( ... ) {
+            LogError() << "Graphics engine initialization failed unexpectedly.";
+            return XR_FAILED;
+        }
     }
 
     /** Creates the Global GAPI-Object */
-    void CreateGothicAPI() {
-        LogInfo() << "GD3D11 " << VERSION_STRING;
+    XRESULT CreateGothicAPI() {
+        if ( GAPI ) {
+            return XR_SUCCESS;
+        }
 
-        LogInfo() << "Loading modules for stacktracer";
-        MyStackWalker::GetSingleton(); // Inits the static object in there
+        try {
+            LogInfo() << "GD3D11 " << VERSION_STRING;
+            LogInfo() << "Loading modules for stacktracer";
+            MyStackWalker::GetSingleton();
 
-        LogInfo() << "Initializing GothicAPI";
-
-        GAPI = new GothicAPI;
-        if ( !GAPI ) {
-            LogErrorBox() << "Failed to create GothicAPI!";
-            exit( 0 );
+            LogInfo() << "Initializing GothicAPI";
+            auto gothicApi = std::make_unique<GothicAPI>();
+            GAPI = gothicApi.release();
+            return XR_SUCCESS;
+        } catch ( const std::exception& error ) {
+            LogError() << "Failed to create GothicAPI: " << error.what();
+            return XR_FAILED;
+        } catch ( ... ) {
+            LogError() << "Failed to create GothicAPI.";
+            return XR_FAILED;
         }
     }
 
     /** Called when the game is about to close */
     void OnShutDown() {
+        static std::atomic_flag shutdownStarted = ATOMIC_FLAG_INIT;
+        if ( shutdownStarted.test_and_set( std::memory_order_acq_rel ) ) {
+            return;
+        }
+
         LogInfo() << "Shutting down...";
 
-        // TODO: remove this hack in the future, just a temporary workaround to fix crash on shutdown with the need to kill process via TaskManager
-        // Just killing before GraphicsEngine is not enough.
-        exit( 0 );
+        ThreadPool* renderingPool = RenderingThreadPool;
+        RenderingThreadPool = nullptr;
+        delete renderingPool;
 
-        SAFE_DELETE( Engine::RenderingThreadPool );
-        SAFE_DELETE( Engine::GAPI );
-        SAFE_DELETE( Engine::WorkerThreadPool );
-        SAFE_DELETE( Engine::GraphicsEngine );
+        ThreadPool* workerPool = WorkerThreadPool;
+        WorkerThreadPool = nullptr;
+        delete workerPool;
+
+        ImGuiShim* imgui = ImGuiHandle;
+        delete imgui;
+        ImGuiHandle = nullptr;
+
+        BaseGraphicsEngine* graphicsEngine = GraphicsEngine;
+        delete graphicsEngine;
+        GraphicsEngine = nullptr;
+
+        GothicAPI* gothicApi = GAPI;
+        delete gothicApi;
+        GAPI = nullptr;
     }
 
 };

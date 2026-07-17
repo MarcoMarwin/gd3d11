@@ -206,6 +206,11 @@ XRESULT D3D11PFX_FSR3::Apply(
     bool enableSharpening,
     float sharpness )
 {
+    if ( !color || !depth || !motionVectors || !output
+        || inputSize.x <= 0 || inputSize.y <= 0 || outputSize.x <= 0 || outputSize.y <= 0 ) {
+        LogError() << "FSR3: Invalid dispatch resources or dimensions.";
+        return XR_INVALID_ARG;
+    }
     if ( !Init( inputSize, outputSize ) ) {
         LogError() << "FSR3: Failed to initialize.";
         return XR_FAILED;
@@ -245,6 +250,10 @@ XRESULT D3D11PFX_FSR3::Apply(
         DXGI_FORMAT_R32_UINT,
         D3D11_BIND_UNORDERED_ACCESS | D3D11_BIND_RENDER_TARGET | D3D11_BIND_SHADER_RESOURCE
     } );
+    if ( !dilatedMotionVectors || !dilatedDepth || !reconstructedPrevNearestDepth ) {
+        LogError() << "FSR3: Failed to allocate shared dispatch resources.";
+        return XR_FAILED;
+    }
 
     FfxFsr3UpscalerDispatchDescription dispatch = {};
     dispatch.commandList = ffxGetCommandListDX11( context );
@@ -301,6 +310,7 @@ XRESULT D3D11PFX_FSR3::Apply(
     UnbindComputeResources( context );
     if ( result != FFX_OK ) {
         LogError() << "FSR3: Upscaling dispatch failed (" << result << ").";
+        Destroy();
         return XR_FAILED;
     }
 

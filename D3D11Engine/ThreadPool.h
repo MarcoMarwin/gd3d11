@@ -136,45 +136,57 @@ private:
 inline ThreadPool::ThreadPool(const wchar_t* poolIdentifier, size_t threads)
     : stop(false)
 {
-    numThreads = threads;
+    numThreads = (std::max)(threads, static_cast<size_t>(1));
+    const std::wstring identifier = std::wstring(L"GD3D11-")
+        + (poolIdentifier ? poolIdentifier : L"Worker");
+    workers.reserve(numThreads);
 
-    std::wstring identifier = std::wstring(L"GD3D11-") + std::wstring(poolIdentifier);
-    for (size_t i = 0; i < threads; ++i)
-        workers.emplace_back(
-            [](ThreadPool* pool, size_t workerId, const std::wstring& descriptionPrefix)
-            {
-                SetThreadDescription( GetCurrentThread(), (descriptionPrefix+std::to_wstring(workerId)).c_str() );
-                for (;;)
+    try {
+        for (size_t i = 0; i < numThreads; ++i) {
+            workers.emplace_back(
+                [](ThreadPool* pool, size_t workerId, const std::wstring& descriptionPrefix)
                 {
-                    std::function<void()> task;
+                    SetThreadDescription(
+                        GetCurrentThread(),
+                        (descriptionPrefix + std::to_wstring(workerId)).c_str() );
+                    for (;;) {
+                        std::function<void()> task;
 
-                    {
-                        std::unique_lock<std::mutex> lock(pool->queue_mutex);
-                        pool->condition.wait(lock,
-                                             [pool] { return pool->stop || !pool->tasks.empty(); });
-
-                        pool->activeTasks.fetch_add(1);
-                        if (pool->stop && pool->tasks.empty())
                         {
-                            pool->activeTasks.fetch_sub(1);
-                            return;
+                            std::unique_lock<std::mutex> lock(pool->queue_mutex);
+                            pool->condition.wait(lock,
+                                [pool] { return pool->stop || !pool->tasks.empty(); });
+
+                            pool->activeTasks.fetch_add(1);
+                            if (pool->stop && pool->tasks.empty()) {
+                                pool->activeTasks.fetch_sub(1);
+                                return;
+                            }
+
+                            task = std::move(pool->tasks.front().first);
+                            pool->tasks.pop();
                         }
 
-                        // Extract just the function to execute
-                        task = std::move(pool->tasks.front().first);
-                        pool->tasks.pop();
+                        {
+                            ZoneScopedN( "ThreadPool Worker Task" );
+                            task();
+                        }
+                        pool->activeTasks.fetch_sub(1);
                     }
-
-                    {
-                        ZoneScopedN( "ThreadPool Worker Task" );
-                        task();
-                    }
-                    pool->activeTasks.fetch_sub(1);
-                }
-            }, this, i, identifier
-        );
+                }, this, i, identifier );
+        }
+    } catch (...) {
+        {
+            std::lock_guard<std::mutex> lock(queue_mutex);
+            stop = true;
+        }
+        condition.notify_all();
+        for (std::thread& worker : workers) {
+            if (worker.joinable()) worker.join();
+        }
+        throw;
+    }
 }
-
 inline ThreadPool::~ThreadPool()
 {
     {

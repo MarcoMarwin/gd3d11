@@ -167,88 +167,122 @@ D3D11VShader::D3D11VShader() = default;
 D3D11VShader::~D3D11VShader() = default;
 
 /** Loads shader */
-XRESULT D3D11VShader::LoadShader( const ShaderInfo& si, const std::vector<D3D_SHADER_MACRO>& macros, const char* filePath ) {
-    HRESULT hr;
-    D3D11GraphicsEngineBase* engine = reinterpret_cast<D3D11GraphicsEngineBase*>(Engine::GraphicsEngine);
+XRESULT D3D11VShader::LoadShader(
+    const ShaderInfo& shaderInfo,
+    const std::vector<D3D_SHADER_MACRO>& macros,
+    const char* filePath ) {
+    auto* engine = reinterpret_cast<D3D11GraphicsEngineBase*>(Engine::GraphicsEngine);
+    const auto device = engine ? engine->GetDevice() : nullptr;
+    if ( !filePath || !*filePath || !device ) return XR_INVALID_ARG;
 
-    Microsoft::WRL::ComPtr<ID3DBlob> vsBlob;
+    if ( Engine::GAPI
+        && Engine::GAPI->GetRendererState().RendererSettings.EnableDebugLog ) {
+        LogInfo() << "Compiling vertex shader: " << shaderInfo.name;
+    }
 
-
-    LogInfo() << "Compilling vertex shader: " << si.name;
-
-    // Compile shader
-    if ( FAILED( D3D11ShaderManager::CompileShaderFromFile( filePath, !si.entryPoint.empty() ? si.entryPoint.c_str() : "VSMain", (FeatureLevel10Compatibility ? "vs_4_0" : "vs_5_0"), vsBlob.GetAddressOf(), macros)) ) {
+    const char* entryPoint = shaderInfo.entryPoint.empty()
+        ? "VSMain" : shaderInfo.entryPoint.c_str();
+    const char* profile = FeatureLevel10Compatibility ? "vs_4_0" : "vs_5_0";
+    Microsoft::WRL::ComPtr<ID3DBlob> shaderBlob;
+    const HRESULT compileResult = D3D11ShaderManager::CompileShaderFromFile(
+        filePath, entryPoint, profile, shaderBlob.GetAddressOf(), macros );
+    if ( FAILED( compileResult ) || !shaderBlob
+        || !shaderBlob->GetBufferPointer() || shaderBlob->GetBufferSize() == 0 ) {
         return XR_FAILED;
     }
-    
+
+    Microsoft::WRL::ComPtr<ID3D11VertexShader> shader;
+    HRESULT createResult = device->CreateVertexShader(
+        shaderBlob->GetBufferPointer(), shaderBlob->GetBufferSize(), nullptr,
+        shader.GetAddressOf() );
+    if ( FAILED( createResult ) || !shader ) {
+        LogError() << "Failed to create vertex shader " << shaderInfo.name
+            << ": 0x" << std::hex
+            << static_cast<unsigned long>(createResult);
+        return XR_FAILED;
+    }
+
+    Microsoft::WRL::ComPtr<ID3D11InputLayout> inputLayout;
+    if ( shaderInfo.layout != VERTEX_INPUT_LAYOUT_NONE ) {
+        const auto layout = lookupTable.find( shaderInfo.layout );
+        if ( layout == lookupTable.end() ) {
+            LogError() << "Invalid input layout for vertex shader "
+                << shaderInfo.name << ": "
+                << static_cast<unsigned int>(shaderInfo.layout);
+            return XR_INVALID_ARG;
+        }
+
+        createResult = device->CreateInputLayout(
+            layout->second.first,
+            static_cast<UINT>(layout->second.second),
+            shaderBlob->GetBufferPointer(),
+            shaderBlob->GetBufferSize(),
+            inputLayout.GetAddressOf() );
+        if ( FAILED( createResult ) || !inputLayout ) {
+            LogError() << "Failed to create input layout for "
+                << shaderInfo.name << ": 0x" << std::hex
+                << static_cast<unsigned long>(createResult);
+            return XR_FAILED;
+        }
+    }
+
+    if ( FAILED( ReflectShaderResources( shaderBlob.Get() ) ) ) {
+        return XR_FAILED;
+    }
+
+    SetDebugName(
+        shader.Get(), shaderInfo.name.empty() ? filePath : shaderInfo.name.c_str() );
+    VertexShader = std::move( shader );
+    InputLayout = std::move( inputLayout );
 #ifdef DEBUG_D3D11
     this->filePath = filePath;
 #endif
-
-    if ( ReflectShaderResources( vsBlob.Get() ) != XR_SUCCESS ) {
-        return XR_FAILED;
-    }
-    
-    // Create the shader
-    LE( engine->GetDevice()->CreateVertexShader( vsBlob->GetBufferPointer(),
-        vsBlob->GetBufferSize(), nullptr, VertexShader.ReleaseAndGetAddressOf() ) );
-
-    SetDebugName( VertexShader.Get(), si.name );
-
-    if ( si.layout <= 0 ) {
-        // No layout, skip input layout creation
-        // Likely VS_PFX or similar, where we work with SV_VertexID
-        return XR_SUCCESS;
-    }
-    
-    auto layout = lookupTable.find( si.layout );
-
-    if ( layout == lookupTable.end() ) {
-        LogError() << "Input layout index out of range: " << si.layout;
-
-        std::stringstream ss;
-        ss << "Invalid input layout index"  << std::endl
-            << "Shader: " << si.name << std::endl
-            << "Input layout index: " << si.layout << std::endl
-            << "Max supported layout index: " << (std::size( lookupTable ) - 1);
-        ErrorBox( ss.str().c_str() );
-        return XR_FAILED;
-    }
-
-    LE( engine->GetDevice()->CreateInputLayout( layout->second.first, layout->second.second, vsBlob->GetBufferPointer(),
-        vsBlob->GetBufferSize(), InputLayout.ReleaseAndGetAddressOf() ) );
-
     return XR_SUCCESS;
 }
-
-/** Applys the shaders */
+/** Applies the shader. */
 XRESULT D3D11VShader::Apply() {
-    auto context = reinterpret_cast<D3D11GraphicsEngineBase*>(Engine::GraphicsEngine)->GetContext().Get();
+    auto* engine = reinterpret_cast<D3D11GraphicsEngineBase*>(Engine::GraphicsEngine);
+    const auto context = engine ? engine->GetContext() : nullptr;
+    if ( !context || !VertexShader ) return XR_FAILED;
 
     context->IASetInputLayout( InputLayout.Get() );
     context->VSSetShader( VertexShader.Get(), nullptr, 0 );
-
     return XR_SUCCESS;
 }
 
-void D3D11VShader::BindResource(StringID name, ID3D11ShaderResourceView* srv) {
-    const int inputIndex = GetInputIndex(name);
-    if (inputIndex != -1)
-        reinterpret_cast<D3D11GraphicsEngineBase*>(Engine::GraphicsEngine)->GetContext()->VSSetShaderResources( inputIndex, 1, &srv );
+void D3D11VShader::BindResource( StringID name, ID3D11ShaderResourceView* srv ) {
+    const int inputIndex = GetInputIndex( name );
+    auto* engine = reinterpret_cast<D3D11GraphicsEngineBase*>(Engine::GraphicsEngine);
+    const auto context = engine ? engine->GetContext() : nullptr;
+    if ( inputIndex < 0 || inputIndex >= D3D11_COMMONSHADER_INPUT_RESOURCE_SLOT_COUNT
+        || !context ) {
+        return;
+    }
+    context->VSSetShaderResources( static_cast<UINT>(inputIndex), 1, &srv );
 }
 
-void D3D11VShader::BindSampler(StringID name, ID3D11SamplerState* sampler) {
-    const int inputIndex = GetInputIndex(name);
-    if (inputIndex != -1)
-        reinterpret_cast<D3D11GraphicsEngineBase*>(Engine::GraphicsEngine)->GetContext()->VSSetSamplers( inputIndex, 1, &sampler );
+void D3D11VShader::BindSampler( StringID name, ID3D11SamplerState* sampler ) {
+    const int inputIndex = GetInputIndex( name );
+    auto* engine = reinterpret_cast<D3D11GraphicsEngineBase*>(Engine::GraphicsEngine);
+    const auto context = engine ? engine->GetContext() : nullptr;
+    if ( inputIndex < 0 || inputIndex >= D3D11_COMMONSHADER_SAMPLER_SLOT_COUNT
+        || !context ) {
+        return;
+    }
+    context->VSSetSamplers( static_cast<UINT>(inputIndex), 1, &sampler );
 }
 
-void D3D11VShader::BindBuffer(StringID name, D3D11ConstantBuffer* buffer) {
-    if (auto idx = GetInputIndex(name); idx != -1) {
-        buffer->BindToVertexShader(idx);
+void D3D11VShader::BindBuffer( StringID name, D3D11ConstantBuffer* buffer ) {
+    const int inputIndex = GetInputIndex( name );
+    if ( inputIndex >= 0 && inputIndex < D3D11_COMMONSHADER_CONSTANT_BUFFER_API_SLOT_COUNT
+        && buffer && buffer->IsValid() ) {
+        buffer->BindToVertexShader( inputIndex );
     }
 }
 
-void D3D11VShader::BindBuffer(UINT slot, D3D11ConstantBuffer* buffer) {
-    buffer->BindToVertexShader(slot);
+void D3D11VShader::BindBuffer( UINT slot, D3D11ConstantBuffer* buffer ) {
+    if ( slot < D3D11_COMMONSHADER_CONSTANT_BUFFER_API_SLOT_COUNT
+        && buffer && buffer->IsValid() ) {
+        buffer->BindToVertexShader( static_cast<int>(slot) );
+    }
 }

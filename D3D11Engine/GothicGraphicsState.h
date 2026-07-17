@@ -15,6 +15,11 @@ const int GSWITCH_FSR3_REACTIVE = 32;
 const int GSWITCH_FSR3_DIALOG_REACTIVE = 64;
 const int GSWITCH_DISABLE_RAIN_EFFECTS = 128;
 constexpr float VISUAL_FX_DRAW_RADIUS_FIXED = 10000.0f;
+constexpr UINT MAX_RAIN_PARTICLES = 262144u;
+
+constexpr UINT SanitizeRainParticleCount( UINT count ) noexcept {
+    return count > MAX_RAIN_PARTICLES ? MAX_RAIN_PARTICLES : count;
+}
 
 enum RenderStage {
     STAGE_DRAW_UNKNOWN = 0,
@@ -130,43 +135,37 @@ __declspec(align(4)) struct GothicPipelineState {
         HashThis( reinterpret_cast<char*>(this), StructSize );
     }
 
-    /** Hashes the whole struct */
-    void HashThis( char* data, int size ) {
+    /** Hashes the derived state payload without reading beyond its object. */
+    void HashThis( const char* data, int size ) {
         Hash = 0;
+        if ( !data || size <= static_cast<int>(sizeof( GothicPipelineState )) ) return;
 
-        // Start hashing at the data of the other structs, skip the data of this one
-        for ( int i = sizeof( GothicPipelineState ); i < size; i += 4 ) {
-            DWORD d;
-            memcpy( &d, data + i, 4 );
-
-            Toolbox::hash_combine( Hash, d );
+        size_t offset = sizeof( GothicPipelineState );
+        const size_t payloadEnd = static_cast<size_t>(size);
+        for ( ; offset + sizeof( DWORD ) <= payloadEnd; offset += sizeof( DWORD ) ) {
+            DWORD value = 0;
+            memcpy( &value, data + offset, sizeof( value ) );
+            Toolbox::hash_combine( Hash, value );
+        }
+        if ( offset < payloadEnd ) {
+            DWORD tail = 0;
+            memcpy( &tail, data + offset, payloadEnd - offset );
+            Toolbox::hash_combine( Hash, tail );
         }
     }
 
-    bool operator==( const GothicPipelineState& o ) const {
-        return Hash == o.Hash;
+    bool operator==( const GothicPipelineState& other ) const noexcept {
+        return Hash == other.Hash;
     }
 
-    bool StateDirty;
-    size_t Hash;
-    int StructSize;
+    bool StateDirty = false;
+    size_t Hash = 0;
+    int StructSize = sizeof( GothicPipelineState );
 };
 
 struct GothicPipelineKeyHasher {
-    static const size_t bucket_size = 10; // mean bucket size that the container should try not to exceed
-    static const size_t min_buckets = (1 << 10); // minimum number of buckets, power of 2, >0
-
-    static std::size_t hash_value( float value ) {
-        std::hash<float> hasher;
-        return hasher( value );
-    }
-
-    static void hash_combine( std::size_t& seed, float value ) {
-        seed ^= hash_value( value ) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
-    }
-
-    std::size_t operator()( const GothicPipelineState& k ) const {
-        return k.Hash;
+    std::size_t operator()( const GothicPipelineState& key ) const noexcept {
+        return key.Hash;
     }
 };
 
@@ -215,6 +214,12 @@ struct GothicDepthBufferStateInfo : public GothicPipelineState {
     bool Padding0;
     bool Padding1;
     ECompareFunc DepthBufferCompareFunc;
+
+    bool operator==( const GothicDepthBufferStateInfo& other ) const noexcept {
+        return DepthBufferEnabled == other.DepthBufferEnabled
+            && DepthWriteEnabled == other.DepthWriteEnabled
+            && DepthBufferCompareFunc == other.DepthBufferCompareFunc;
+    }
 
     /** Deletes all cached states */
     static void DeleteCachedObjects() {
@@ -361,6 +366,15 @@ struct GothicBlendStateInfo : public GothicPipelineState {
     bool ColorWritesEnabled;
     bool Padding;
 
+    bool operator==( const GothicBlendStateInfo& other ) const noexcept {
+        return SrcBlend == other.SrcBlend && DestBlend == other.DestBlend
+            && BlendOp == other.BlendOp && SrcBlendAlpha == other.SrcBlendAlpha
+            && DestBlendAlpha == other.DestBlendAlpha && BlendOpAlpha == other.BlendOpAlpha
+            && BlendEnabled == other.BlendEnabled
+            && AlphaToCoverage == other.AlphaToCoverage
+            && ColorWritesEnabled == other.ColorWritesEnabled;
+    }
+
     /** Deletes all cached states */
     static void DeleteCachedObjects() {
         for ( const auto& [k, blendState] : GothicStateCache::s_BlendStateMap ) {
@@ -435,6 +449,12 @@ struct GothicRasterizerStateInfo : public GothicPipelineState {
     bool Padding;
     int ZBias;
 
+    bool operator==( const GothicRasterizerStateInfo& other ) const noexcept {
+        return CullMode == other.CullMode && FrontCounterClockwise == other.FrontCounterClockwise
+            && DepthClipEnable == other.DepthClipEnable && Wireframe == other.Wireframe
+            && ZBias == other.ZBias;
+    }
+
     /** Deletes all cached states */
     static void DeleteCachedObjects() {
         for ( const auto& [k, rasterizerState] : GothicStateCache::s_RasterizerStateMap ) {
@@ -477,6 +497,7 @@ struct GothicTransformInfo {
         XMStoreFloat4x4( &TransformWorld, idMatrix );
         XMStoreFloat4x4( &TransformView, idMatrix );
         XMStoreFloat4x4( &TransformProj, idMatrix );
+        XMStoreFloat4x4( &TransformProjUnjittered, idMatrix );
     }
 
     /** This is actually world * view. Gothic never sets the view matrix */
@@ -572,9 +593,9 @@ struct GothicRendererSettings {
     }
 
     float GetContactShadowFixedStrength() const {
-        const bool temporalReconstructionActive = AntiAliasingMode == E_AntiAliasingMode::AA_FSR3
-            && Upscaler == E_Upscaler::UPSCALER_FSR_3;
-        return temporalReconstructionActive ? 0.35f : 0.50f;
+        // Keep the trace signal strong enough for spatial and temporal filtering.
+        // FSR3 attenuation is applied once after reconstruction in composition.
+        return 0.50f;
     }
 
     /** Sets the default values for this struct */
@@ -684,8 +705,6 @@ struct GothicRendererSettings {
         EnableSSR = true;
         SSRStrength = 1.0f; // UI-normalized: 1.0 equals the former 1.4 slider value.
         WaterCubemapStrength = 1.0f;
-        EnableSSS = true;
-        SSSIntensity = 1.0f; // Default Backlit Vegetation intensity.
         EnableContactShadows = true;
         EnableScreenSpaceGI = false;
         ScreenSpaceGIStrength = 1.0f;
@@ -701,8 +720,6 @@ struct GothicRendererSettings {
         DoFNearBlurStrength = 2.0f;
 
         WindQuality = WIND_QUALITY_ADVANCED;
-        HeroAffectsObjects = true;
-        HeroAffectsObjectsStrength = 1.0f;
         EnablePointlightShadows = PLS_UPDATE_DYNAMIC;
         PartialDynamicShadowUpdates = true;
         EnableTiledLighting = false;
@@ -811,7 +828,6 @@ struct GothicRendererSettings {
         AnimateStaticVobs = true;
         RunInSpacerNet = false;
         BinkVideoRunning = false;
-        EnableWaterAnimation = true;
 
         GraphicsPreset = E_GraphicsPreset::GRAPHICS_CUSTOM;
         D3D11Language = E_D3D11Language::D3D11_LANGUAGE_ENGLISH;
@@ -892,8 +908,6 @@ struct GothicRendererSettings {
     bool DrawFog;
     float FogRange;
     int WindQuality;
-    bool HeroAffectsObjects;
-    float HeroAffectsObjectsStrength;
     bool DrawG1ForestPortals;
     bool DrawRainThroughTransformFeedback;
     bool EnableHDR;
@@ -922,8 +936,6 @@ struct GothicRendererSettings {
     bool EnableSSR;
     float SSRStrength;
     float WaterCubemapStrength;
-    bool EnableSSS;
-    float SSSIntensity;
     bool EnableContactShadows;
     bool EnableScreenSpaceGI;
     float ScreenSpaceGIStrength;
@@ -1040,7 +1052,6 @@ struct GothicRendererSettings {
     bool AnimateStaticVobs;
     bool RunInSpacerNet;
     bool BinkVideoRunning;
-    bool EnableWaterAnimation;
     E_AntiAliasingMode AntiAliasingMode;
     E_SharpeningMode SharpeningMode;
     E_GraphicsPreset GraphicsPreset;
@@ -1139,8 +1150,6 @@ struct GothicRendererSettings {
 
 struct GothicRendererInfo {
     GothicRendererInfo() {
-        VOBVerticesDataSize = 0;
-        SkeletalVerticesDataSize = 0;
         Reset();
     }
 
@@ -1195,8 +1204,6 @@ struct GothicRendererInfo {
     int FrameDrawnLights;
     int WorldMeshDrawCalls;
 
-    unsigned int VOBVerticesDataSize;
-    unsigned int SkeletalVerticesDataSize;
     RenderStage RenderStage;
     
     bool IsRenderStageDx11() const {

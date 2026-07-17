@@ -178,14 +178,6 @@ class zCModel : public zCVisual {
 public:
     /** Hooks the functions of this Class */
     static void Hook() {
-        /*#ifndef BUILD_GOTHIC_1_08k
-                DWORD dwProtect;
-                VirtualProtect((void *)GothicMemoryLocations::zCModel::AdvanceAnis, GothicMemoryLocations::zCModel::SIZE_AdvanceAnis, PAGE_EXECUTE_READWRITE, &dwProtect);
-
-                byte unsmoothAnisFix[] = {0x75, 0x00, 0xC7, 0x44, 0x24, 0x78, 0x01, 0x00, 0x00, 0x00}; // Replaces a jnz in AdvanceAnis - Thanks to killer-m!
-                memcpy((void *)GothicMemoryLocations::zCModel::RPL_AniQuality, unsmoothAnisFix, sizeof(unsmoothAnisFix));
-        #endif*/
-
 #ifdef BUILD_GOTHIC_2_6_fix
         DetourAttachTyped( &HookedFunctions::OriginalFunctions.original_zCModelGetLowestLODNumPolys, Hooked_zCModelGetLowestLODNumPolys  );
         DetourAttachTyped( &HookedFunctions::OriginalFunctions.original_zCModelGetLowestLODPoly, Hooked_zCModelGetLowestLODPoly  );

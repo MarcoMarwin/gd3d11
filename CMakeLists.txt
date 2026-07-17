@@ -2,6 +2,14 @@ cmake_minimum_required(VERSION 3.24)
 
 project(GD3D11 LANGUAGES C CXX)
 
+if(NOT WIN32)
+  message(FATAL_ERROR "GD3D11 supports Windows targets only")
+endif()
+
+if(NOT CMAKE_SIZEOF_VOID_P EQUAL 4)
+  message(FATAL_ERROR "GD3D11 requires a 32-bit toolchain (Win32/x86)")
+endif()
+
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_SOURCE_DIR}/cmake")
 include(GD3D11Helpers)
 
@@ -40,6 +48,21 @@ gd3d11_validate_enum(GD3D11_GAME "G2;G1;G1_12F")
 gd3d11_validate_enum(GD3D11_SIMD "SSE2;AVX;AVX2")
 gd3d11_validate_enum(GD3D11_PROFILE "RELEASE;NOOPT")
 gd3d11_validate_enum(GD3D11_COMPILER "AUTO;MSVC;CLANG")
+
+if(GD3D11_TRACY_ON_DEMAND AND NOT GD3D11_TRACY_ENABLE)
+  message(FATAL_ERROR "GD3D11_TRACY_ON_DEMAND requires GD3D11_TRACY_ENABLE")
+endif()
+if(NOT GD3D11_TRACY_CALLSTACK STREQUAL ""
+  AND NOT GD3D11_TRACY_CALLSTACK MATCHES "^[1-9][0-9]*$")
+  message(FATAL_ERROR "GD3D11_TRACY_CALLSTACK must be a positive integer")
+endif()
+if(NOT GD3D11_TRACY_CALLSTACK STREQUAL "" AND NOT GD3D11_TRACY_ENABLE)
+  message(FATAL_ERROR "GD3D11_TRACY_CALLSTACK requires GD3D11_TRACY_ENABLE")
+endif()
+if(GD3D11_PUBLIC_RELEASE AND GD3D11_TRACY_ENABLE)
+  message(FATAL_ERROR "Tracy must be disabled in public release builds")
+endif()
+
 gd3d11_validate_compiler_selection()
 
 if(CMAKE_CONFIGURATION_TYPES)

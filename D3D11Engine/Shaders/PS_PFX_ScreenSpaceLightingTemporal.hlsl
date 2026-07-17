@@ -28,7 +28,13 @@ struct PS_INPUT { float2 vTexcoord : TEXCOORD0; float3 vEyeRay : TEXCOORD1; floa
 struct PS_OUTPUT { float4 Lighting : SV_TARGET0; float4 Depth : SV_TARGET1; };
 
 float ViewZ(float depth) { return SSL_ProjParams.z / (depth - SSL_ProjParams.w); }
-float IsAlphaTestedMaterial(float2 uv) { return TX_Material.SampleLevel(SS_Linear, saturate(uv), 0).g < 0.0f ? 1.0f : 0.0f; }
+float IsContactReceiverExcluded(float2 uv)
+{
+    float2 materialInfo = TX_Material.SampleLevel(SS_Linear, saturate(uv), 0).rg;
+    float alphaTested = materialInfo.y < 0.0f ? 1.0f : 0.0f;
+    float npc = (materialInfo.x < -0.5f && materialInfo.x > -2.0f) ? 1.0f : 0.0f;
+    return max(alphaTested, npc);
+}
 
 float4 NeighborhoodCurrent(float2 uv, out float4 minV, out float4 maxV)
 {
@@ -61,9 +67,9 @@ float4 NeighborhoodCurrent(float2 uv, out float4 minV, out float4 maxV)
     return sum / max(weightSum, 0.0001f);
 }
 
-float SoftContact(float2 uv, float currentAlpha)
+float SoftContact(float2 uv, float currentAlpha, float excludedReceiver)
 {
-    if (IsAlphaTestedMaterial(uv) > 0.5f)
+    if (excludedReceiver > 0.5f)
         return 0.0f;
 
     float centerDepth = TX_Depth.SampleLevel(SS_Linear, uv, 0).r;
@@ -81,7 +87,7 @@ float SoftContact(float2 uv, float currentAlpha)
     [unroll]
     for (int i = 0; i < 4; ++i) {
         float2 sampleUV = saturate(uv + offsets[i] * SSL_InvResolution * 2.0f);
-        if (IsAlphaTestedMaterial(sampleUV) > 0.5f)
+        if (IsContactReceiverExcluded(sampleUV) > 0.5f)
             continue;
         float sampleDepth = TX_Depth.SampleLevel(SS_Linear, sampleUV, 0).r;
         float dz = abs(ViewZ(sampleDepth) - centerZ);
@@ -101,11 +107,12 @@ PS_OUTPUT PSMain(PS_INPUT input)
 {
     PS_OUTPUT output;
     float2 uv = input.vTexcoord;
+    float excludedContactReceiver = IsContactReceiverExcluded(uv);
     float4 minV, maxV;
     float4 current = NeighborhoodCurrent(uv, minV, maxV);
     [branch]
     if (SSL_EnableContact > 0.5f)
-        current.a = SoftContact(uv, current.a);
+        current.a = SoftContact(uv, current.a, excludedContactReceiver);
     else
         current.a = 0.0f;
     float depth = TX_Depth.SampleLevel(SS_Linear, uv, 0).r;
@@ -146,7 +153,7 @@ PS_OUTPUT PSMain(PS_INPUT input)
     output.Lighting.rgb = lerp(current.rgb, history.rgb, historyWeight);
     output.Lighting.a = lerp(current.a, history.a, contactHistoryWeight);
     output.Lighting.rgb = max(output.Lighting.rgb, 0.0f);
-    output.Lighting.a = saturate(output.Lighting.a);
+    output.Lighting.a = excludedContactReceiver > 0.5f ? 0.0f : saturate(output.Lighting.a);
     output.Depth = float4(depth, depth, depth, depth);
     return output;
 }

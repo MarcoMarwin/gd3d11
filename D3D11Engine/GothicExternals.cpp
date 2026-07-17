@@ -5,6 +5,9 @@
 #include "zCParser.h"
 #include "zSTRING.h"
 
+#include <algorithm>
+#include <cmath>
+
 /**
  * ImGui C-API Wrapper Implementation für Daedalus-Scripting
  * 
@@ -17,7 +20,10 @@
 // ============================================================================
 
 static bool IsImGuiReady() {
-    return Engine::ImGuiHandle != nullptr && Engine::ImGuiHandle->Initiated;
+    return Engine::ImGuiHandle != nullptr
+        && Engine::ImGuiHandle->Initiated
+        && Engine::GraphicsEngine != nullptr
+        && ImGui::GetCurrentContext() != nullptr;
 }
 
 static void _VirtualToScreen(int vx, int vy, float& x, float& y) {
@@ -44,13 +50,16 @@ static float _VirtualToScreenY(int vy) {
 static int _ScreenToVirtualX(float x) {
     const auto res = Engine::GraphicsEngine->GetResolution();
     constexpr float VIRTUAL_WIDTH = 4096;
+    if ( res.x <= 0 || !std::isfinite( x ) ) {
+        return 0;
+    }
     return static_cast<int>((x / static_cast<float>(res.x)) * VIRTUAL_WIDTH);
 }
 // ============================================================================
 // Window Management
 // ============================================================================
 extern "C" __declspec(dllexport) void __cdecl imgui_set_next_window_pos( int virtualX, int virtualY, int cond, float pivotX, float pivotY ) {
-    if (!IsImGuiReady()) {
+    if ( !IsImGuiReady() || !std::isfinite( pivotX ) || !std::isfinite( pivotY ) ) {
         return;
     }
     float xF = 0;
@@ -71,17 +80,17 @@ extern "C" __declspec(dllexport) void __cdecl imgui_set_next_window_size( int vi
 }
 
 extern "C" __declspec(dllexport) void __cdecl imgui_set_next_window_bg_alpha( float value) {
-    if (!IsImGuiReady()) {
+    if ( !IsImGuiReady() || !std::isfinite( value ) ) {
         return;
     }
-    ImGui::SetNextWindowBgAlpha(value );
+    ImGui::SetNextWindowBgAlpha( (std::max)(0.0f, (std::min)(value, 1.0f)) );
 }
 
 extern "C" __declspec(dllexport) void __cdecl imgui_set_item_tooltip( const char* text ) {
-    if (!IsImGuiReady()) {
+    if ( !IsImGuiReady() || !text ) {
         return;
     }
-    ImGui::SetItemTooltip("%s", text);
+    ImGui::SetItemTooltip( "%s", text );
 }
 
 extern "C" __declspec(dllexport) void __cdecl imgui_set_next_window_collapsed( int boolValue, int cond) {
@@ -92,26 +101,34 @@ extern "C" __declspec(dllexport) void __cdecl imgui_set_next_window_collapsed( i
 }
 
 extern "C" __declspec(dllexport) int __cdecl imgui_begin(const char* title, int* openPtr, int windowflags ) {
-    if (!IsImGuiReady() || title == nullptr) {
+    if ( !IsImGuiReady() || !title ) {
         return 0;
     }
-    auto ret = ImGui::Begin(title, reinterpret_cast<bool*>(openPtr), windowflags) ? 1 : 0;
-    if ( ret ) {
+    bool open = !openPtr || *openPtr != 0;
+    const int result = ImGui::Begin( title, openPtr ? &open : nullptr, windowflags ) ? 1 : 0;
+    if ( openPtr ) {
+        *openPtr = open ? 1 : 0;
+    }
+    if ( result ) {
         Engine::ImGuiHandle->LibShowBlockingThisFrame = true;
     }
-    return ret;
+    return result;
 }
 
 extern "C" __declspec(dllexport) int __cdecl imgui_begin_overlay( const char* title, int* openPtr, int windowflags ) {
-    if ( !IsImGuiReady() || title == nullptr ) {
+    if ( !IsImGuiReady() || !title ) {
         return 0;
     }
     windowflags |= ImGuiWindowFlags_NoFocusOnAppearing;
-    auto ret = ImGui::Begin( title, reinterpret_cast<bool*>(openPtr), windowflags ) ? 1 : 0;
-    if ( ret ) {
+    bool open = !openPtr || *openPtr != 0;
+    const int result = ImGui::Begin( title, openPtr ? &open : nullptr, windowflags ) ? 1 : 0;
+    if ( openPtr ) {
+        *openPtr = open ? 1 : 0;
+    }
+    if ( result ) {
         Engine::ImGuiHandle->LibShowNonBlockingThisFrame = true;
     }
-    return ret;
+    return result;
 }
 
 extern "C" __declspec(dllexport) void __cdecl imgui_end() {
@@ -166,17 +183,20 @@ extern "C" __declspec(dllexport) int __cdecl imgui_checkbox(const char* label, i
 }
 
 extern "C" __declspec(dllexport) int __cdecl imgui_slider_float(const char* label, float* value, float min_value, float max_value) {
-    if (!IsImGuiReady() || label == nullptr || value == nullptr) {
+    if ( !IsImGuiReady() || !label || !value || !std::isfinite( *value )
+        || !std::isfinite( min_value ) || !std::isfinite( max_value ) || min_value > max_value ) {
         return 0;
     }
-    return ImGui::SliderFloat(label, value, min_value, max_value) ? 1 : 0;
+    return ImGui::SliderFloat( label, value, min_value, max_value ) ? 1 : 0;
 }
 
 extern "C" __declspec(dllexport) int __cdecl imgui_input_text(const char* label, char* buffer, int buffer_size) {
-    if (!IsImGuiReady() || label == nullptr || buffer == nullptr || buffer_size <= 0) {
+    constexpr int MAX_SCRIPT_TEXT_BUFFER = 1024 * 1024;
+    if ( !IsImGuiReady() || !label || !buffer
+        || buffer_size <= 0 || buffer_size > MAX_SCRIPT_TEXT_BUFFER ) {
         return 0;
     }
-    return ImGui::InputText(label, buffer, static_cast<size_t>(buffer_size)) ? 1 : 0;
+    return ImGui::InputText( label, buffer, static_cast<size_t>(buffer_size) ) ? 1 : 0;
 }
 
 // ============================================================================
@@ -184,7 +204,7 @@ extern "C" __declspec(dllexport) int __cdecl imgui_input_text(const char* label,
 // ============================================================================
 
 extern "C" __declspec(dllexport) void __cdecl imgui_same_line(float offset_x, float spacing) {
-    if (!IsImGuiReady()) {
+    if ( !IsImGuiReady() || !std::isfinite( offset_x ) || !std::isfinite( spacing ) ) {
         return;
     }
     // ImGui::SameLine verwendet -1.0f als Standard für "keine Änderung"
@@ -309,7 +329,7 @@ extern "C" __declspec(dllexport) int __cdecl imgui_get_content_region_avail_x() 
 }
 
 extern "C" __declspec(dllexport) void __cdecl imgui_begin_table( int count, const char* id, int tableFlags, int outerX, int outerY, int innerWidth) {
-    if (!IsImGuiReady()) {
+    if ( !IsImGuiReady() || !id || count <= 0 || count > 64 ) {
         return;
     }
     float x;
@@ -338,22 +358,22 @@ extern "C" __declspec(dllexport) void __cdecl imgui_table_next_row(int rowFlags,
         return;
     }
 
-    ImGui::TableNextRow(rowFlags, _VirtualToScreenY(minRowHeight));
+    ImGui::TableNextRow( rowFlags, _VirtualToScreenY((std::max)(minRowHeight, 0)) );
 }
 extern "C" __declspec(dllexport) void __cdecl imgui_table_set_column_index(int index) {
-    if (!IsImGuiReady()) {
+    if ( !IsImGuiReady() || index < 0 ) {
         return;
     }
 
-    ImGui::TableSetColumnIndex(index);
+    ImGui::TableSetColumnIndex( index );
 }
 
 extern "C" __declspec(dllexport) void __cdecl imgui_table_setup_column(const char* label, int flags, int init_width_or_weight, int user_id) {
-    if (!IsImGuiReady()) {
+    if ( !IsImGuiReady() || !label ) {
         return;
     }
 
-    ImGui::TableSetupColumn(label, flags, _VirtualToScreenX(init_width_or_weight), user_id);
+    ImGui::TableSetupColumn( label, flags, _VirtualToScreenX(init_width_or_weight), user_id );
 }
 
 static int GDX_ImGui_Begin() {
@@ -366,7 +386,7 @@ static int GDX_ImGui_Begin() {
     parser->GetParameter(pOpen);
     parser->GetParameter(label);
 
-    int ret = imgui_begin( label.ToChar(), (int*)pOpen, flags);
+    int ret = imgui_begin( label.ToChar(), reinterpret_cast<int*>(static_cast<uintptr_t>(pOpen)), flags);
     parser->SetReturn( ret );
     return 0;
 }
@@ -430,7 +450,8 @@ static int GDX_ImGui_BeginOverlay() {
     parser->GetParameter(windowflags);
     parser->GetParameter(pOpen);
     parser->GetParameter(title);
-    int ret = imgui_begin_overlay(title.ToChar(), &pOpen, windowflags);
+    int ret = imgui_begin_overlay(
+        title.ToChar(), reinterpret_cast<int*>(static_cast<uintptr_t>(pOpen)), windowflags);
     parser->SetReturn(ret);
     return 0;
 }

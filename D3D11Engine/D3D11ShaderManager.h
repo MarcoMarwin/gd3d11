@@ -6,6 +6,7 @@
 #include "D3D11GShader.h"
 #include "D3D11CShader.h"
 #include <functional>
+#include <mutex>
 #include <type_traits>
 #include <string_view>
 
@@ -94,24 +95,68 @@ public:
     XRESULT DeleteShaders();
     void UpdateShaderInfo( ShaderInfo& shader );
 
-    /** Return a specific shader */
-    std::shared_ptr<D3D11VShader> GetVShader( VShaderID id ) { return VShaders[static_cast<size_t>(id)]; }
-    std::shared_ptr<D3D11PShader> GetPShader( PShaderID id ) { return PShaders[static_cast<size_t>(id)]; }
-    std::shared_ptr<D3D11GShader> GetGShader( GShaderID id ) { return GShaders[static_cast<size_t>(id)]; }
-    std::shared_ptr<D3D11CShader> GetCShader( CShaderID id ) { return CShaders[static_cast<size_t>(id)]; }
+    /** Return a specific shader. The shared_ptr copy keeps hot-reloaded shaders alive for callers. */
+    std::shared_ptr<D3D11VShader> GetVShader( VShaderID id ) {
+        std::lock_guard<std::mutex> lock( _VShaderMutex );
+        const size_t index = static_cast<size_t>(id);
+        return index < VShaders.size() ? VShaders[index] : nullptr;
+    }
+    std::shared_ptr<D3D11PShader> GetPShader( PShaderID id ) {
+        std::lock_guard<std::mutex> lock( _PShaderMutex );
+        const size_t index = static_cast<size_t>(id);
+        return index < PShaders.size() ? PShaders[index] : nullptr;
+    }
+    std::shared_ptr<D3D11GShader> GetGShader( GShaderID id ) {
+        std::lock_guard<std::mutex> lock( _GShaderMutex );
+        const size_t index = static_cast<size_t>(id);
+        return index < GShaders.size() ? GShaders[index] : nullptr;
+    }
+    std::shared_ptr<D3D11CShader> GetCShader( CShaderID id ) {
+        std::lock_guard<std::mutex> lock( _CShaderMutex );
+        const size_t index = static_cast<size_t>(id);
+        return index < CShaders.size() ? CShaders[index] : nullptr;
+    }
 
 private:
     XRESULT CompileShader( ShaderInfo& si );
 
-    void UpdateVShader( size_t index, D3D11VShader* shader ) { std::unique_lock<std::mutex> lock( _VShaderMutex ); VShaders[index].reset( shader ); }
-    void UpdatePShader( size_t index, D3D11PShader* shader ) { std::unique_lock<std::mutex> lock( _PShaderMutex );  PShaders[index].reset( shader ); }
-    void UpdateGShader( size_t index, D3D11GShader* shader ) { std::unique_lock<std::mutex> lock( _GShaderMutex );  GShaders[index].reset( shader ); }
-    void UpdateCShader( size_t index, D3D11CShader* shader ) { std::unique_lock<std::mutex> lock( _CShaderMutex );  CShaders[index].reset( shader ); }
+    void UpdateVShader( size_t index, D3D11VShader* shader ) {
+        std::shared_ptr<D3D11VShader> replacement( shader );
+        std::lock_guard<std::mutex> lock( _VShaderMutex );
+        if ( index < VShaders.size() ) VShaders[index] = std::move( replacement );
+    }
+    void UpdatePShader( size_t index, D3D11PShader* shader ) {
+        std::shared_ptr<D3D11PShader> replacement( shader );
+        std::lock_guard<std::mutex> lock( _PShaderMutex );
+        if ( index < PShaders.size() ) PShaders[index] = std::move( replacement );
+    }
+    void UpdateGShader( size_t index, D3D11GShader* shader ) {
+        std::shared_ptr<D3D11GShader> replacement( shader );
+        std::lock_guard<std::mutex> lock( _GShaderMutex );
+        if ( index < GShaders.size() ) GShaders[index] = std::move( replacement );
+    }
+    void UpdateCShader( size_t index, D3D11CShader* shader ) {
+        std::shared_ptr<D3D11CShader> replacement( shader );
+        std::lock_guard<std::mutex> lock( _CShaderMutex );
+        if ( index < CShaders.size() ) CShaders[index] = std::move( replacement );
+    }
 
-    bool IsVShaderKnown( size_t index ) { std::unique_lock<std::mutex> lock( _VShaderMutex ); return VShaders[index] != nullptr; }
-    bool IsPShaderKnown( size_t index ) { std::unique_lock<std::mutex> lock( _PShaderMutex ); return PShaders[index] != nullptr; }
-    bool IsGShaderKnown( size_t index ) { std::unique_lock<std::mutex> lock( _GShaderMutex ); return GShaders[index] != nullptr; }
-    bool IsCShaderKnown( size_t index ) { std::unique_lock<std::mutex> lock( _CShaderMutex ); return CShaders[index] != nullptr; }
+    bool IsVShaderKnown( size_t index ) {
+        std::lock_guard<std::mutex> lock( _VShaderMutex );
+        return index < VShaders.size() && VShaders[index] != nullptr;
+    }
+    bool IsPShaderKnown( size_t index ) {
+        std::lock_guard<std::mutex> lock( _PShaderMutex );
+        return index < PShaders.size() && PShaders[index] != nullptr;
+    }
+    bool IsGShaderKnown( size_t index ) {
+        std::lock_guard<std::mutex> lock( _GShaderMutex );
+        return index < GShaders.size() && GShaders[index] != nullptr;
+    }
+    bool IsCShaderKnown( size_t index ) {
+        std::lock_guard<std::mutex> lock( _CShaderMutex );
+        return index < CShaders.size() && CShaders[index] != nullptr;
+    }
 
 private:
     std::vector<ShaderInfo> Shaders;							//Initial shader list for loading
@@ -124,6 +169,7 @@ private:
     std::mutex _PShaderMutex;
     std::mutex _GShaderMutex;
     std::mutex _CShaderMutex;
+    std::mutex _ReloadMutex;
 
     /** Shader categories to reload next frame (OR-ed together from multiple calls) */
     ShaderCategory ShaderCategoriesToReloadNextFrame;

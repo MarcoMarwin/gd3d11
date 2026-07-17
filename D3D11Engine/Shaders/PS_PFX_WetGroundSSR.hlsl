@@ -65,14 +65,28 @@ float3 SampleRoughReflection(float2 uv, float2 distortion)
     return color;
 }
 
-float SampleWetSSRBlockMask(float2 uv)
+float SampleWetSSRBlockMask(float2 pixelPosition)
 {
-    float mask = TX_WaterMask.SampleLevel(SS_Linear, uv, 0).r;
-    mask = max(mask, TX_WaterMask.SampleLevel(SS_Linear, uv + float2(WG_InvResolution.x, 0.0f), 0).r);
-    mask = max(mask, TX_WaterMask.SampleLevel(SS_Linear, uv - float2(WG_InvResolution.x, 0.0f), 0).r);
-    mask = max(mask, TX_WaterMask.SampleLevel(SS_Linear, uv + float2(0.0f, WG_InvResolution.y), 0).r);
-    mask = max(mask, TX_WaterMask.SampleLevel(SS_Linear, uv - float2(0.0f, WG_InvResolution.y), 0).r);
+    uint width, height;
+    TX_WaterMask.GetDimensions(width, height);
+    int2 maxPixel = int2((int)width - 1, (int)height - 1);
+    int2 center = clamp(int2(pixelPosition), int2(0, 0), maxPixel);
+    float mask = TX_WaterMask.Load(int3(center, 0)).r;
+    mask = max(mask, TX_WaterMask.Load(int3(clamp(center + int2(1, 0), int2(0, 0), maxPixel), 0)).r);
+    mask = max(mask, TX_WaterMask.Load(int3(clamp(center - int2(1, 0), int2(0, 0), maxPixel), 0)).r);
+    mask = max(mask, TX_WaterMask.Load(int3(clamp(center + int2(0, 1), int2(0, 0), maxPixel), 0)).r);
+    mask = max(mask, TX_WaterMask.Load(int3(clamp(center - int2(0, 1), int2(0, 0), maxPixel), 0)).r);
     return mask;
+}
+
+float DecodeWetSSRBlock(float encodedMask)
+{
+    // 0.25 is regular water. Alpha-aware transparent geometry occupies 0.80..1.0.
+    if (encodedMask < 0.75f)
+        return saturate(encodedMask / 0.25f);
+
+    float transparencyCoverage = saturate((encodedMask - 0.80f) / 0.20f);
+    return smoothstep(0.015f, 0.10f, transparencyCoverage);
 }
 
 float2 CalculateRainRipples(float2 wetUV, float time)
@@ -88,7 +102,8 @@ float4 PSMain(PS_INPUT input) : SV_TARGET
 {
     float2 uv = input.vTexcoord;
     float3 sceneColor = TX_Scene.SampleLevel(SS_Linear, uv, 0).rgb;
-    if (SampleWetSSRBlockMask(uv) > 0.05f)
+    float wetSSRVisibility = 1.0f - DecodeWetSSRBlock(SampleWetSSRBlockMask(input.vPosition.xy));
+    if (wetSSRVisibility <= 0.001f)
         return float4(sceneColor, 1.0f);
 
 
@@ -106,7 +121,7 @@ float4 PSMain(PS_INPUT input) : SV_TARGET
         return float4(sceneColor, 1.0f);
 
     float rainExposure = GetRainExposure(wsPosition);
-    float wetMask = upwardMask * rainExposure * saturate(WG_Wetness);
+    float wetMask = upwardMask * rainExposure * saturate(WG_Wetness) * wetSSRVisibility;
     if (wetMask <= 0.01f)
         return float4(sceneColor, 1.0f);
 

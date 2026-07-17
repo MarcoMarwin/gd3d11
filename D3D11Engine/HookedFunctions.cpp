@@ -35,11 +35,14 @@
 #include "StackWalker.h"
 #include "zSndMss.h"
 
+#include <cctype>
+
 bool IsRunningUnderUnion = false;
 bool CreatingThumbnail = false;
 
 /** Init all hooks here */
-void HookedFunctionInfo::InitHooks() {
+LONG HookedFunctionInfo::InitHooks() {
+    ResetDetourAttachStatus();
     LogInfo() << "Initializing hooks";
 
     HMODULE shw32dll = GetModuleHandleA("shw32.dll");
@@ -99,10 +102,8 @@ void HookedFunctionInfo::InitHooks() {
     PatchAddr( 0x004381E1, "\x55" );
     PatchAddr( 0x00438218, "\xEB\x15" );
 
-    char ThubmnailAddrChar[5] = {0};
-    DWORD ThubmnailAddr = reinterpret_cast<DWORD>(&CreatingThumbnail);
-    memcpy( ThubmnailAddrChar, &ThubmnailAddr, 4 );
-    PatchAddr( 0x0042B4AB, ThubmnailAddrChar );
+    const DWORD thumbnailAddress = reinterpret_cast<DWORD>(&CreatingThumbnail);
+    PatchValue( 0x0042B4AB, thumbnailAddress );
 
     LogInfo() << "Patching: Fix screen hung due to DX7 api invalidating our swapchain";
     PatchAddr( 0x0075B5A7, "\xE9\x59\x02\x00\x00\x90" );
@@ -112,12 +113,11 @@ void HookedFunctionInfo::InitHooks() {
 #else
     LogInfo() << "Patching: BroadCast fix";
     {
-        char* zSPYwnd[5];
-        DWORD zSPY = reinterpret_cast<DWORD>(FindWindowA( nullptr, "[zSpy]" ));
-        memcpy( zSPYwnd, &zSPY, 4 );
-        PatchAddr( 0x00447F5A, zSPYwnd );
-        PatchAddr( 0x00449280, zSPYwnd );
-        PatchAddr( 0x004480AF, zSPYwnd );
+        const DWORD zSpyWindow =
+            reinterpret_cast<DWORD>(FindWindowA( nullptr, "[zSpy]" ));
+        PatchValue( 0x00447F5A, zSpyWindow );
+        PatchValue( 0x00449280, zSpyWindow );
+        PatchValue( 0x004480AF, zSpyWindow );
     }
 
     LogInfo() << "Patching: LOW_FPS_NaN_check";
@@ -166,17 +166,15 @@ void HookedFunctionInfo::InitHooks() {
 
     LogInfo() << "Patching: Show correct tris on toggle frame";
     {
-        char* trisHndl[5];
-        DWORD trisHandle = reinterpret_cast<DWORD>(&Engine::GAPI->GetRendererState().RendererInfo.FrameDrawnTriangles);
-        memcpy( trisHndl, &trisHandle, 4 );
+        const DWORD triangleCounterAddress = reinterpret_cast<DWORD>(
+            &Engine::GAPI->GetRendererState().RendererInfo.FrameDrawnTriangles );
         PatchAddr( 0x0063DA2E, "\xA1\xD0\x5E\x8C\x00\x90\x90\x90\x90\x90\x90" );
-        PatchAddr( 0x0063DA2F, trisHndl );
+        PatchValue( 0x0063DA2F, triangleCounterAddress );
     }
     {
-        char* GetProcAddressHndl[5];
-        DWORD GetProcAddressHandle = reinterpret_cast<DWORD>(&hooked_GetProcAddress);
-        memcpy( GetProcAddressHndl, &GetProcAddressHandle, 4 );
-        PatchAddr( 0x007D0104, GetProcAddressHndl );
+        const DWORD getProcAddressHook =
+            reinterpret_cast<DWORD>(&hooked_GetProcAddress);
+        PatchValue( 0x007D0104, getProcAddressHook );
     }
 
     LogInfo() << "Patching: Decouple barrier from sky";
@@ -205,10 +203,8 @@ void HookedFunctionInfo::InitHooks() {
     PatchAddr( 0x004342B5, "\x55" );
     PatchAddr( 0x004342E0, "\xEB\x15" );
 
-    char ThubmnailAddrChar[5] = {0};
-    DWORD ThubmnailAddr = reinterpret_cast<DWORD>(&CreatingThumbnail);
-    memcpy( ThubmnailAddrChar, &ThubmnailAddr, 4 );
-    PatchAddr( 0x004289F8, ThubmnailAddrChar );
+    const DWORD thumbnailAddress = reinterpret_cast<DWORD>(&CreatingThumbnail);
+    PatchValue( 0x004289F8, thumbnailAddress );
 
     LogInfo() << "Patching: Fix screen hung due to DX7 api invalidating our swapchain";
     PatchAddr( 0x0071EE02, "\xE9\x38\x02\x00\x00\x90" );
@@ -240,12 +236,11 @@ void HookedFunctionInfo::InitHooks() {
 
     LogInfo() << "Patching: BroadCast fix";
     {
-        char* zSPYwnd[5];
-        DWORD zSPY = reinterpret_cast<DWORD>(FindWindowA( nullptr, "[zSpy]" ));
-        memcpy( zSPYwnd, &zSPY, 4 );
-        PatchAddr( 0x0044C5DA, zSPYwnd );
-        PatchAddr( 0x0044D9A0, zSPYwnd );
-        PatchAddr( 0x0044C72F, zSPYwnd );
+        const DWORD zSpyWindow =
+            reinterpret_cast<DWORD>(FindWindowA( nullptr, "[zSpy]" ));
+        PatchValue( 0x0044C5DA, zSpyWindow );
+        PatchValue( 0x0044D9A0, zSpyWindow );
+        PatchValue( 0x0044C72F, zSpyWindow );
     }
 
     LogInfo() << "Patching: Interupt gamestart sound";
@@ -308,17 +303,15 @@ void HookedFunctionInfo::InitHooks() {
 
     LogInfo() << "Patching: Show correct tris on toggle frame";
     {
-        char* trisHndl[5];
-        DWORD trisHandle = reinterpret_cast<DWORD>(&Engine::GAPI->GetRendererState().RendererInfo.FrameDrawnTriangles);
-        memcpy( trisHndl, &trisHandle, 4 );
+        const DWORD triangleCounterAddress = reinterpret_cast<DWORD>(
+            &Engine::GAPI->GetRendererState().RendererInfo.FrameDrawnTriangles );
         PatchAddr( 0x006C80F2, "\x36\x8B\x3D\x08\x2F\x98\x00" );
-        PatchAddr( 0x006C80F5, trisHndl );
+        PatchValue( 0x006C80F5, triangleCounterAddress );
     }
     {
-        char* GetProcAddressHndl[5];
-        DWORD GetProcAddressHandle = reinterpret_cast<DWORD>(&hooked_GetProcAddress);
-        memcpy( GetProcAddressHndl, &GetProcAddressHandle, 4 );
-        PatchAddr( 0x0082E298, GetProcAddressHndl );
+        const DWORD getProcAddressHook =
+            reinterpret_cast<DWORD>(&hooked_GetProcAddress);
+        PatchValue( 0x0082E298, getProcAddressHook );
     }
     
     // Show DirectX11 as currently used graphic device
@@ -345,10 +338,8 @@ void HookedFunctionInfo::InitHooks() {
     PatchAddr( 0x0043728E, "\x55" );
     PatchAddr( 0x004372B9, "\xEB\x15" );
 
-    char ThubmnailAddrChar[5] = {0};
-    DWORD ThubmnailAddr = reinterpret_cast<DWORD>(&CreatingThumbnail);
-    memcpy( ThubmnailAddrChar, &ThubmnailAddr, 4 );
-    PatchAddr( 0x0042A5AD, ThubmnailAddrChar );
+    const DWORD thumbnailAddress = reinterpret_cast<DWORD>(&CreatingThumbnail);
+    PatchValue( 0x0042A5AD, thumbnailAddress );
 
     LogInfo() << "Patching: Fix screen hung due to DX7 api invalidating our swapchain";
     PatchAddr( 0x006576D2, "\xE9\x38\x02\x00\x00\x90" );
@@ -385,6 +376,14 @@ void HookedFunctionInfo::InitHooks() {
     // oCMagFrontier::GetDistanceAddonWorld
     PatchAddr( 0x00474681, "\xBF\x00\x00\x00\x00" ); // replace MOV EDI, 0x1 with MOV EDI, 0x0
 #endif
+    const LONG patchStatus = GothicPatching::GetPatchStatus();
+    if ( patchStatus != ERROR_SUCCESS ) {
+        LogError() << "Failed to prepare Gothic memory patch at 0x"
+            << std::hex << GothicPatching::GetFirstFailureAddress()
+            << ". Error " << std::dec << patchStatus << ".";
+        return patchStatus;
+    }
+    return GetDetourAttachStatus();
 }
 
 /** Function hooks */
@@ -419,9 +418,15 @@ void __fastcall HookedFunctionInfo::hooked_SetLightmap( void* polygonPtr ) {
 }
 
 FARPROC WINAPI HookedFunctionInfo::hooked_GetProcAddress( HMODULE mod, const char* procName ) {
+    if ( !procName || IS_INTRESOURCE( procName ) ) {
+        return GetProcAddress( mod, procName );
+    }
+
     if ( Engine::GAPI && _stricmp( procName, "GDX_SetFogColor" ) == 0 ) {
         std::string gameName = Engine::GAPI->GetGameName();
-        std::transform( gameName.begin(), gameName.end(), gameName.begin(), toupper );
+        std::transform( gameName.begin(), gameName.end(), gameName.begin(), []( unsigned char character ) {
+            return static_cast<char>(std::toupper( character ));
+        } );
         if ( gameName.find( "VINV" ) != std::string::npos ) {
             // Remove "incompatible with DX11" message in "Shadows of the past" modification
             return reinterpret_cast<FARPROC>(0);
@@ -432,10 +437,17 @@ FARPROC WINAPI HookedFunctionInfo::hooked_GetProcAddress( HMODULE mod, const cha
 
 #if defined(BUILD_GOTHIC_1_08k) && !defined(BUILD_1_12F)
 void HookedFunctionInfo::InitAnimatedInventoryHooks() {
-    if ( *reinterpret_cast<BYTE*>(0x67303D) != 0xD8 ) {
+    constexpr DWORD PatchAddress = 0x67303D;
+    if ( !GothicPatching::IsPatchRangeValid( PatchAddress, sizeof( BYTE ) ) ) {
+        GothicPatching::RecordFailure( ERROR_INVALID_ADDRESS, PatchAddress );
+        return;
+    }
+
+    if ( *reinterpret_cast<const BYTE*>(PatchAddress) != 0xD8 ) {
         // Remove Animated_Inventory SystemPack memory jump and insert our function instead that doesn't fuckup items world matrix
-        PatchAddr( 0x67303D, "\xD8\x1D\xA4\x08\x7D\x00" );
-        DWORD FixAnimation = reinterpret_cast<DWORD>(VirtualAlloc( nullptr, 32, (MEM_RESERVE | MEM_COMMIT), PAGE_EXECUTE_READWRITE ));
+        PatchAddr( PatchAddress, "\xD8\x1D\xA4\x08\x7D\x00" );
+        const DWORD FixAnimation = reinterpret_cast<DWORD>(
+            GothicPatching::AllocateTrampoline( 32 ) );
         if ( FixAnimation ) {
             PatchAddr( FixAnimation, "\x8B\xCF\xE8\x00\x00\x00\x00\xE9\x00\x00\x00\x00\x6A\x01\x8B\xCF\xE8\x00\x00\x00\x00\xE9\x00\x00\x00\x00" );
             PatchCall( FixAnimation + 2, reinterpret_cast<DWORD>(&HookedFunctionInfo::hooked_RotateInInventory) );

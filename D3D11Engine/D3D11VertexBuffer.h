@@ -38,6 +38,7 @@ public:
         M_WRITE = 2,
         M_READ_WRITE = 3,
         M_WRITE_DISCARD = 4,
+        M_WRITE_NO_OVERWRITE = 5,
     };
 
     /** Layed out for D3D11*/
@@ -53,7 +54,7 @@ public:
     XRESULT Init( void* initData, unsigned int sizeInBytes, EBindFlags EBindFlags = B_VERTEXBUFFER, EUsageFlags usage = EUsageFlags::U_DEFAULT, ECPUAccessFlags cpuAccess = ECPUAccessFlags::CA_NONE, const std::string& fileName = "", unsigned int structuredByteSize = 0 );
 
     /** Updates the vertexbuffer with the given data */
-    XRESULT UpdateBuffer( void* data, UINT size = 0 );
+    XRESULT UpdateBuffer( const void* data, UINT size = 0 );
 
     /** Maps the buffer */
     XRESULT Map( int flags, void** dataPtr, UINT* size );
@@ -72,6 +73,7 @@ public:
 
     /** Returns the size in bytes of this buffer */
     unsigned int GetSizeInBytes() const;
+    bool IsValid() const { return VertexBuffer.Get() != nullptr; }
 
     /** Returns the SRV of this buffer, if it represents a structured buffer */
     Microsoft::WRL::ComPtr<ID3D11ShaderResourceView>& GetShaderResourceView();
@@ -91,4 +93,7 @@ private:
 
     /** Size of the buffer in bytes */
     unsigned int SizeInBytes;
+
+    /** D3D11 resources must not be mapped more than once at a time. */
+    bool IsMapped = false;
 };

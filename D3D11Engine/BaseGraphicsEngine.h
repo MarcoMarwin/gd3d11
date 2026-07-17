@@ -198,7 +198,7 @@ public:
     virtual INT2 GetBackbufferResolution() { return GetResolution(); }
 
     /** Returns the data of the backbuffer */
-    virtual void GetBackbufferData( bool thumbnail, byte** data, INT2& buffersize, int& pixelsize ) {}
+    virtual XRESULT GetBackbufferData( bool thumbnail, byte** data, INT2& buffersize, int& pixelsize ) { return XR_FAILED; }
 
     /** Draws a fullscreenquad, copying the given texture to the viewport */
     virtual void DrawQuad( INT2 position, INT2 size ) {}

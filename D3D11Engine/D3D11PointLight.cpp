@@ -34,15 +34,9 @@ D3D11PointLight::D3D11PointLight( VobLightInfo* info, bool dynamicLight ) {
 }
 
 D3D11PointLight::~D3D11PointLight() {
-    // Make sure we are out of the init-queue
-    m_PendingInit.cancel( ); // ensure any pending job is cancelled such that we get to InitDone state
-
+    // The single in-flight job owns this object only through the wait below.
+    m_PendingInit.cancel();
     if ( m_PendingInit.future.valid() ) {
-        
-        for ( size_t i = 0; i < 3; ++i) {
-            LogInfo() << "Waiting for pending init to finish before destroying light... Attempt " << (i+1);
-            m_PendingInit.future.wait_for( std::chrono::milliseconds(100) );
-        }
         m_PendingInit.future.wait();
     }
 
@@ -55,6 +49,7 @@ D3D11PointLight::~D3D11PointLight() {
 }
 
 void D3D11PointLight::AcquireShadowMap( DepthStencilPool* pool, int resolution ) {
+    if ( !pool || resolution <= 0 ) return;
     if ( m_DepthCubemap && m_CurrentResolution == resolution ) return;
 
     // If we have a map but it's the wrong size, return it to the pool first
@@ -70,7 +65,12 @@ void D3D11PointLight::AcquireShadowMap( DepthStencilPool* pool, int resolution )
     desc.SRVFormat = DXGI_FORMAT_R16_UNORM;
     desc.ArraySize = 6;
 
-    m_DepthCubemap = pool->Acquire( desc );
+    auto shadowMap = pool->Acquire( desc );
+    if ( !shadowMap ) {
+        LogError() << "Failed to acquire point-light shadow map.";
+        return;
+    }
+    m_DepthCubemap = std::move( shadowMap );
     m_CurrentResolution = resolution;
 
     // don't reset DrawnOnce here, or NPCs won't show up in the first frame a shadow gets a different LOD
@@ -160,7 +160,12 @@ void D3D11PointLight::AcquireStaticAsideShadowMap( DepthStencilPool* pool, int r
     desc.SRVFormat = DXGI_FORMAT_R16_UNORM;
     desc.ArraySize = 6;
 
-    m_StaticDepthCubemap = pool->Acquire( desc );
+    auto shadowMap = pool->Acquire( desc );
+    if ( !shadowMap ) {
+        LogError() << "Failed to acquire static point-light shadow map.";
+        return;
+    }
+    m_StaticDepthCubemap = std::move( shadowMap );
     m_StaticShadowReady = false;
 }
 
@@ -470,26 +475,59 @@ void D3D11PointLight::Invalidate() {
 }
 
 void D3D11PointLight::StartReInit() {
-    if ( !WorldCacheInvalid ) {
+    if ( !WorldCacheInvalid.load( std::memory_order_acquire ) ) {
         return;
     }
 
-    if ( !DynamicLight ) {
-        InitDone = false;
+    if ( DynamicLight ) {
+        InitResources();
+        return;
+    }
 
-        // Add to queue
-        m_PendingInit.cancel( ); // Cancel any pending init first, we only care about the latest one
-        m_PendingInit = Engine::WorkerThreadPool->enqueue( [this] (const CancellationToken& token)
-        {
-            if (token.isCancelled()) {
-                InitDone = true;
+    // Repeated shadow-target changes do not require parallel cache builds. A running
+    // build already targets the same light and is allowed to finish.
+    if ( m_PendingInit.future.valid() ) {
+        if ( m_PendingInit.future.wait_for( std::chrono::milliseconds( 0 ) ) != std::future_status::ready ) {
+            return;
+        }
+
+        try {
+            m_PendingInit.future.get();
+        } catch ( const std::exception& e ) {
+            LogError() << "Point-light cache initialization failed: " << e.what();
+        } catch ( ... ) {
+            LogError() << "Point-light cache initialization failed with an unknown error.";
+        }
+        m_PendingInit = {};
+
+        if ( !WorldCacheInvalid.load( std::memory_order_acquire ) ) {
+            return;
+        }
+    }
+
+    InitDone.store( false, std::memory_order_release );
+    try {
+        m_PendingInit = Engine::WorkerThreadPool->enqueue( [this]( const CancellationToken& token ) {
+            if ( token.isCancelled() ) {
+                InitDone.store( true, std::memory_order_release );
                 return;
             }
-            InitResources();
-        } );
 
-    } else {
-        InitResources();
+            try {
+                InitResources();
+            } catch ( const std::exception& e ) {
+                LogError() << "Point-light cache initialization failed: " << e.what();
+                WorldCacheInvalid.store( true, std::memory_order_release );
+                InitDone.store( true, std::memory_order_release );
+            } catch ( ... ) {
+                LogError() << "Point-light cache initialization failed with an unknown error.";
+                WorldCacheInvalid.store( true, std::memory_order_release );
+                InitDone.store( true, std::memory_order_release );
+            }
+        } );
+    } catch ( const std::exception& e ) {
+        LogError() << "Unable to queue point-light cache initialization: " << e.what();
+        InitDone.store( true, std::memory_order_release );
     }
 }
 

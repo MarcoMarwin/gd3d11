@@ -92,7 +92,7 @@ protected:
     std::list<VobInfo*> VobCache;
     std::list<SkeletalVobInfo*> SkeletalVobCache;
     std::vector<std::pair<MeshKey, MeshInfo*>> WorldMeshCache;
-    bool WorldCacheInvalid;
+    std::atomic<bool> WorldCacheInvalid{ true };
 
     VobLightInfo* LightInfo;
     DepthStencilHandle m_DepthCubemap;
@@ -102,7 +102,7 @@ protected:
     XMFLOAT3 LastUpdatePosition;
     DWORD LastUpdateColor;
     bool DynamicLight;
-    std::atomic<bool> InitDone;
+    std::atomic<bool> InitDone{ false };
     bool DrawnOnce;
     bool m_StaticShadowReady = false;
     int m_LastShadowMode = -1;

@@ -35,10 +35,10 @@ namespace Engine {
     void RefreshWorkerThreadpool();
 
     /** Creates main graphics engine */
-    void CreateGraphicsEngine();
+    XRESULT CreateGraphicsEngine();
 
     /** Creates the Global GAPI-Object */
-    void CreateGothicAPI();
+    XRESULT CreateGothicAPI();
 
     /** Called when the game is about to close */
     void OnShutDown();

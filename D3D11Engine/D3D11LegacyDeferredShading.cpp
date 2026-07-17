@@ -177,7 +177,12 @@ XRESULT D3D11LegacyDeferredShading::DrawPointlightLights(
         plcb.PL_LightScreenPos.y = plcb.PL_LightScreenPos.y / -2.0f + 0.5f;
 
         auto& activePlBuf = (graphicsEngine->GetActivePS() == psPointLightDynShadow) ? plDynBuf : plBuf;
-        activePlBuf.Update( &plcb ).Bind();
+        if ( !activePlBuf.Update( &plcb ).Bind().Succeeded()
+            || !activePlBuf.GetRawBuffer()
+            || !activePlBuf.GetRawBuffer()->IsValid() ) {
+            LogError() << "Legacy deferred shading: Failed to update the point-light constant buffer.";
+            return XR_FAILED;
+        }
         activePlBuf.GetRawBuffer()->BindToVertexShader( 1 );
 
         if ( settings.EnablePointlightShadows > 0 ) {

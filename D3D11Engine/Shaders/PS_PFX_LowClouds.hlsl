@@ -38,14 +38,46 @@ struct PS_INPUT
     float4 vPosition : SV_POSITION;
 };
 
+struct PS_OUTPUT
+{
+    float4 Clouds : SV_TARGET0;
+    float Depth : SV_TARGET1;
+};
+
 float3 VSPositionFromDepth( float depth, float2 vTexCoord )
 {
     return ReconstructVSPositionFromDepthReverseZInfinite( depth, vTexCoord, HF_ProjParams.xy );
 }
 
-float4 PSMain( PS_INPUT Input ) : SV_TARGET
+float LoadClosestDepth2x2( float2 texcoord )
 {
-    float expDepth = TX_Depth.Sample( SS_Linear, Input.vTexcoord ).r;
+    uint depthWidth;
+    uint depthHeight;
+    TX_Depth.GetDimensions( depthWidth, depthHeight );
+
+    int2 depthSize = max( int2( depthWidth, depthHeight ), int2( 1, 1 ) );
+    int2 maxPixel = depthSize - int2( 1, 1 );
+    int2 upperPixel = int2( floor(
+        texcoord * float2( depthSize ) + 0.5f ) );
+    int2 basePixel = upperPixel - int2( 1, 1 );
+
+    int2 pixel00 = clamp( basePixel, int2( 0, 0 ), maxPixel );
+    int2 pixel10 = clamp( basePixel + int2( 1, 0 ), int2( 0, 0 ), maxPixel );
+    int2 pixel01 = clamp( basePixel + int2( 0, 1 ), int2( 0, 0 ), maxPixel );
+    int2 pixel11 = clamp( basePixel + int2( 1, 1 ), int2( 0, 0 ), maxPixel );
+
+    float depth00 = TX_Depth.Load( int3( pixel00, 0 ) ).r;
+    float depth10 = TX_Depth.Load( int3( pixel10, 0 ) ).r;
+    float depth01 = TX_Depth.Load( int3( pixel01, 0 ) ).r;
+    float depth11 = TX_Depth.Load( int3( pixel11, 0 ) ).r;
+
+    // Reversed-Z: the largest value is the closest surface in this 2x2 footprint.
+    return max( max( depth00, depth10 ), max( depth01, depth11 ) );
+}
+
+PS_OUTPUT PSMain( PS_INPUT Input )
+{
+    float expDepth = LoadClosestDepth2x2( Input.vTexcoord );
     float skyPixel = 1.0f - step( 0.00001f, expDepth );
     float3 worldPosition = VSPositionFromDepth( expDepth, Input.vTexcoord );
     worldPosition = mul( float4( worldPosition, 1.0f ), HF_InvView ).xyz;
@@ -90,5 +122,9 @@ float4 PSMain( PS_INPUT Input ) : SV_TARGET
     float lightDiskOcclusion = saturate( lightDiskMask * cloudCoverAtLight ) * lerp( 0.78f, 0.995f, lightCoreMask );
 
     float layerAlpha = saturate( clouds.a + lightDiskOcclusion * ( 1.0f - clouds.a ) );
-    return float4( clouds.rgb * clouds.a, layerAlpha );
+
+    PS_OUTPUT output;
+    output.Clouds = float4( clouds.rgb * clouds.a, layerAlpha );
+    output.Depth = expDepth;
+    return output;
 }

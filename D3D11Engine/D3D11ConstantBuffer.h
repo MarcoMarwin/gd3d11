@@ -20,9 +20,11 @@ public:
 
     /** Returns whether this buffer has been updated since the last bind */
     bool IsDirty();
+    bool IsValid() const { return Buffer.Get() != nullptr; }
+    UINT GetSize() const { return OriginalSize; }
 
 private:
     Microsoft::WRL::ComPtr<ID3D11Buffer> Buffer;
-    int OriginalSize; // Buffersize must be a multiple of 16
-    bool BufferDirty;
+    UINT OriginalSize = 0; // Buffersize must be a multiple of 16
+    bool BufferDirty = false;
 };

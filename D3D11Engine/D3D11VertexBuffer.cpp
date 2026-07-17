@@ -4,6 +4,8 @@
 #include "D3D11GraphicsEngineBase.h"
 #include "Engine.h"
 #include <meshoptimizer/src/meshoptimizer.h>
+#include <cmath>
+#include <cstring>
 #include <limits>
 #include <vector>
 #include "D3D11_Helpers.h"
@@ -36,6 +38,23 @@ namespace {
         return true;
     }
 
+    bool ValidateIndices( const VERTEX_INDEX* indices, unsigned int numIndices,
+        unsigned int numVertices, const char* operation ) {
+        for ( unsigned int i = 0; i < numIndices; ++i ) {
+            if ( indices[i] >= numVertices ) {
+                LogError() << operation << ": index " << indices[i]
+                    << " is outside the vertex range " << numVertices;
+                return false;
+            }
+        }
+        return true;
+    }
+
+    bool IsValidVertexDataSize( unsigned int numVertices, unsigned int stride ) {
+        return numVertices == 0
+            || static_cast<size_t>(stride) <= (std::numeric_limits<size_t>::max)() / numVertices;
+    }
+
     float DequantizeSnorm( int v, int bits ) {
         const int maxValue = (1 << (bits - 1)) - 1;
         if ( v > maxValue ) {
@@ -56,148 +75,205 @@ namespace {
             return;
         }
 
-        ExVertexStruct* keyVertices = reinterpret_cast<ExVertexStruct*>(outKeyBuffer.data());
         for ( unsigned int i = 0; i < numVertices; ++i ) {
-            ExVertexStruct& v = keyVertices[i];
+            ExVertexStruct v{};
+            const size_t offset = static_cast<size_t>(i) * stride;
+            memcpy( &v, srcVertices + offset, sizeof( v ) );
 
-            v.Normal.x = DequantizeSnorm( meshopt_quantizeSnorm( v.Normal.x, kNormalQuantizationBits ), kNormalQuantizationBits );
-            v.Normal.y = DequantizeSnorm( meshopt_quantizeSnorm( v.Normal.y, kNormalQuantizationBits ), kNormalQuantizationBits );
-            v.Normal.z = DequantizeSnorm( meshopt_quantizeSnorm( v.Normal.z, kNormalQuantizationBits ), kNormalQuantizationBits );
+            if ( std::isfinite( v.Normal.x ) ) {
+                v.Normal.x = DequantizeSnorm( meshopt_quantizeSnorm( v.Normal.x, kNormalQuantizationBits ), kNormalQuantizationBits );
+            }
+            if ( std::isfinite( v.Normal.y ) ) {
+                v.Normal.y = DequantizeSnorm( meshopt_quantizeSnorm( v.Normal.y, kNormalQuantizationBits ), kNormalQuantizationBits );
+            }
+            if ( std::isfinite( v.Normal.z ) ) {
+                v.Normal.z = DequantizeSnorm( meshopt_quantizeSnorm( v.Normal.z, kNormalQuantizationBits ), kNormalQuantizationBits );
+            }
 
-            v.TexCoord.x = meshopt_dequantizeHalf( meshopt_quantizeHalf( v.TexCoord.x ) );
-            v.TexCoord.y = meshopt_dequantizeHalf( meshopt_quantizeHalf( v.TexCoord.y ) );
-            v.TexCoord2.x = meshopt_dequantizeHalf( meshopt_quantizeHalf( v.TexCoord2.x ) );
-            v.TexCoord2.y = meshopt_dequantizeHalf( meshopt_quantizeHalf( v.TexCoord2.y ) );
+            if ( std::isfinite( v.TexCoord.x ) ) v.TexCoord.x = meshopt_dequantizeHalf( meshopt_quantizeHalf( v.TexCoord.x ) );
+            if ( std::isfinite( v.TexCoord.y ) ) v.TexCoord.y = meshopt_dequantizeHalf( meshopt_quantizeHalf( v.TexCoord.y ) );
+            if ( std::isfinite( v.TexCoord2.x ) ) v.TexCoord2.x = meshopt_dequantizeHalf( meshopt_quantizeHalf( v.TexCoord2.x ) );
+            if ( std::isfinite( v.TexCoord2.y ) ) v.TexCoord2.y = meshopt_dequantizeHalf( meshopt_quantizeHalf( v.TexCoord2.y ) );
+
+            memcpy( outKeyBuffer.data() + offset, &v, sizeof( v ) );
         }
     }
 }
 
 /** Creates the vertexbuffer with the given arguments */
-XRESULT D3D11VertexBuffer::Init( void* initData, unsigned int sizeInBytes, EBindFlags EBindFlags, EUsageFlags usage, ECPUAccessFlags cpuAccess, const std::string& fileName, unsigned int structuredByteSize ) {
-    HRESULT hr;
+XRESULT D3D11VertexBuffer::Init( void* initData, unsigned int sizeInBytes, EBindFlags bindFlags, EUsageFlags usage, ECPUAccessFlags cpuAccess, const std::string& fileName, unsigned int structuredByteSize ) {
     D3D11GraphicsEngineBase* engine = reinterpret_cast<D3D11GraphicsEngineBase*>(Engine::GraphicsEngine);
-
-    if ( sizeInBytes == 0 ) {
-        LogError() << "VertexBuffer size can't be 0!";
+    if ( !engine || !engine->GetDevice() || sizeInBytes == 0 || IsMapped ) {
+        LogError() << "Invalid vertex-buffer creation request.";
+        return XR_INVALID_ARG;
     }
 
-    SizeInBytes = sizeInBytes;
+    const UINT nativeBindFlags = static_cast<UINT>(bindFlags);
+    constexpr UINT supportedBindFlags = D3D11_BIND_VERTEX_BUFFER | D3D11_BIND_INDEX_BUFFER
+        | D3D11_BIND_STREAM_OUTPUT | D3D11_BIND_SHADER_RESOURCE | D3D11_BIND_UNORDERED_ACCESS;
+    const UINT nativeCPUAccess = static_cast<UINT>(cpuAccess);
+    const bool validUsage = usage == U_DEFAULT || usage == U_DYNAMIC || usage == U_IMMUTABLE;
+    const bool validCPUAccess = (nativeCPUAccess & ~(D3D11_CPU_ACCESS_READ | D3D11_CPU_ACCESS_WRITE)) == 0;
+    const bool validUsageAccess = (usage == U_DYNAMIC && nativeCPUAccess == D3D11_CPU_ACCESS_WRITE)
+        || ((usage == U_DEFAULT || usage == U_IMMUTABLE) && nativeCPUAccess == 0);
+    if ( nativeBindFlags == 0 || (nativeBindFlags & ~supportedBindFlags) != 0
+        || !validUsage || !validCPUAccess || !validUsageAccess ) {
+        LogError() << "Invalid vertex-buffer bind, usage, or CPU-access flags.";
+        return XR_INVALID_ARG;
+    }
 
-    // Create our own vertexbuffer
-    D3D11_BUFFER_DESC bufferDesc;
+    const bool wantsSRV = (nativeBindFlags & D3D11_BIND_SHADER_RESOURCE) != 0;
+    const bool wantsUAV = (nativeBindFlags & D3D11_BIND_UNORDERED_ACCESS) != 0;
+    if ( wantsSRV && (structuredByteSize == 0 || structuredByteSize > 2048
+        || (structuredByteSize % sizeof( uint32_t )) != 0
+        || (sizeInBytes % structuredByteSize) != 0) ) {
+        LogError() << "Structured vertex-buffer size/stride mismatch.";
+        return XR_INVALID_ARG;
+    }
+    if ( !wantsSRV && structuredByteSize != 0 ) {
+        LogError() << "A structured vertex stride requires shader-resource binding.";
+        return XR_INVALID_ARG;
+    }
+    if ( wantsUAV && !wantsSRV && (sizeInBytes % sizeof( uint32_t )) != 0 ) {
+        LogError() << "Raw UAV vertex-buffer size must be divisible by four.";
+        return XR_INVALID_ARG;
+    }
+
+    D3D11_BUFFER_DESC bufferDesc{};
     bufferDesc.ByteWidth = sizeInBytes;
     bufferDesc.Usage = static_cast<D3D11_USAGE>(usage);
-    bufferDesc.BindFlags = static_cast<D3D11_USAGE>(EBindFlags);
-    bufferDesc.CPUAccessFlags = static_cast<D3D11_USAGE>(cpuAccess);
-    bufferDesc.MiscFlags = 0;
-    bufferDesc.StructureByteStride = structuredByteSize;
-
-    // Check for structured buffer
-    if ( (EBindFlags & EBindFlags::B_SHADER_RESOURCE) != 0 ) {
+    bufferDesc.BindFlags = nativeBindFlags;
+    bufferDesc.CPUAccessFlags = nativeCPUAccess;
+    if ( wantsSRV ) {
         bufferDesc.MiscFlags |= D3D11_RESOURCE_MISC_BUFFER_STRUCTURED;
-    }
-
-    // Check for unordered access
-    if ( (EBindFlags & EBindFlags::B_UNORDERED_ACCESS) != 0 ) {
+        bufferDesc.StructureByteStride = structuredByteSize;
+    } else if ( wantsUAV ) {
         bufferDesc.MiscFlags |= D3D11_RESOURCE_MISC_BUFFER_ALLOW_RAW_VIEWS;
     }
 
-    // In case we dont have data, allocate some to satisfy D3D11
-    char* data = nullptr;
-    if ( !initData ) {
-        data = new char[bufferDesc.ByteWidth];
-        memset( data, 0, bufferDesc.ByteWidth );
+    if ( usage == U_IMMUTABLE && !initData ) {
+        LogError() << "Immutable vertex buffers require initial data.";
+        return XR_INVALID_ARG;
+    }
+    D3D11_SUBRESOURCE_DATA initialData{};
+    initialData.pSysMem = initData;
 
-        initData = data;
+    Microsoft::WRL::ComPtr<ID3D11Buffer> newBuffer;
+    HRESULT hr = engine->GetDevice()->CreateBuffer(
+        &bufferDesc, initData ? &initialData : nullptr, newBuffer.GetAddressOf() );
+    if ( FAILED( hr ) ) {
+        LogError() << "Failed to create vertex buffer " << fileName << ": 0x" << std::hex << static_cast<unsigned long>(hr);
+        return XR_FAILED;
     }
 
-    D3D11_SUBRESOURCE_DATA InitData;
-    InitData.pSysMem = initData;
-    InitData.SysMemPitch = 0;
-    InitData.SysMemSlicePitch = 0;
-
-    LE( engine->GetDevice()->CreateBuffer( &bufferDesc, &InitData, VertexBuffer.ReleaseAndGetAddressOf() ) );
-    if ( !VertexBuffer.Get() ) {
-        delete[] data;
-        return XR_SUCCESS;
-    }
-
-    // Check for structured buffer again to create the SRV
-    if ( (EBindFlags & EBindFlags::B_SHADER_RESOURCE) != 0 && structuredByteSize > 0 ) {
-        D3D11_SHADER_RESOURCE_VIEW_DESC srvDesc = {};
+    Microsoft::WRL::ComPtr<ID3D11ShaderResourceView> newSRV;
+    if ( wantsSRV ) {
+        D3D11_SHADER_RESOURCE_VIEW_DESC srvDesc{};
         srvDesc.Format = DXGI_FORMAT_UNKNOWN;
         srvDesc.ViewDimension = D3D11_SRV_DIMENSION_BUFFER;
-        srvDesc.Buffer.ElementWidth = sizeInBytes / structuredByteSize;
-
-        engine->GetDevice()->CreateShaderResourceView( VertexBuffer.Get(), &srvDesc, ShaderResourceView.ReleaseAndGetAddressOf() );
-        SetDebugName( ShaderResourceView.Get(), fileName+"_SRV");
+        srvDesc.Buffer.FirstElement = 0;
+        srvDesc.Buffer.NumElements = sizeInBytes / structuredByteSize;
+        hr = engine->GetDevice()->CreateShaderResourceView( newBuffer.Get(), &srvDesc, newSRV.GetAddressOf() );
+        if ( FAILED( hr ) ) {
+            LogError() << "Failed to create vertex-buffer SRV " << fileName << ": 0x" << std::hex << static_cast<unsigned long>(hr);
+            return XR_FAILED;
+        }
     }
 
-    // Check for unordered access again to create the UAV
-    if ( (EBindFlags & EBindFlags::B_UNORDERED_ACCESS) != 0 ) {
-        D3D11_UNORDERED_ACCESS_VIEW_DESC uavDesc = {};
-        uavDesc.Format = DXGI_FORMAT_R32_TYPELESS;
+    Microsoft::WRL::ComPtr<ID3D11UnorderedAccessView> newUAV;
+    if ( wantsUAV ) {
+        D3D11_UNORDERED_ACCESS_VIEW_DESC uavDesc{};
         uavDesc.ViewDimension = D3D11_UAV_DIMENSION_BUFFER;
-        uavDesc.Buffer.Flags = D3D11_BUFFER_UAV_FLAG_RAW;
         uavDesc.Buffer.FirstElement = 0;
-        uavDesc.Buffer.NumElements = sizeInBytes / structuredByteSize;
-
-        engine->GetDevice()->CreateUnorderedAccessView( VertexBuffer.Get(), &uavDesc, UnorderedAccessView.ReleaseAndGetAddressOf() );
-        SetDebugName( UnorderedAccessView.Get(), fileName + "_UAV" );
+        if ( wantsSRV ) {
+            uavDesc.Format = DXGI_FORMAT_UNKNOWN;
+            uavDesc.Buffer.NumElements = sizeInBytes / structuredByteSize;
+        } else {
+            uavDesc.Format = DXGI_FORMAT_R32_TYPELESS;
+            uavDesc.Buffer.Flags = D3D11_BUFFER_UAV_FLAG_RAW;
+            uavDesc.Buffer.NumElements = sizeInBytes / sizeof( uint32_t );
+        }
+        hr = engine->GetDevice()->CreateUnorderedAccessView( newBuffer.Get(), &uavDesc, newUAV.GetAddressOf() );
+        if ( FAILED( hr ) ) {
+            LogError() << "Failed to create vertex-buffer UAV " << fileName << ": 0x" << std::hex << static_cast<unsigned long>(hr);
+            return XR_FAILED;
+        }
     }
 
+    VertexBuffer = std::move( newBuffer );
+    ShaderResourceView = std::move( newSRV );
+    UnorderedAccessView = std::move( newUAV );
+    SizeInBytes = sizeInBytes;
+    IsMapped = false;
     SetDebugName( VertexBuffer.Get(), fileName );
-
-    delete[] data;
-
+    SetDebugName( ShaderResourceView.Get(), fileName + "_SRV" );
+    SetDebugName( UnorderedAccessView.Get(), fileName + "_UAV" );
     return XR_SUCCESS;
 }
-
 /** Updates the vertexbuffer with the given data */
-XRESULT D3D11VertexBuffer::UpdateBuffer( void* data, UINT size ) {
-    if ( SizeInBytes < size ) {
-        size = SizeInBytes;
+XRESULT D3D11VertexBuffer::UpdateBuffer( const void* data, UINT size ) {
+    if ( !VertexBuffer || !data ) return XR_INVALID_ARG;
+    if ( size == 0 ) size = SizeInBytes;
+    if ( size > SizeInBytes ) return XR_INVALID_ARG;
+
+    void* mappedData = nullptr;
+    UINT mappedSize = 0;
+
+    if ( XR_SUCCESS != Map( EMapFlags::M_WRITE_DISCARD, &mappedData, &mappedSize ) ) {
+        return XR_FAILED;
+    }
+    if ( !mappedData || size > mappedSize ) {
+        Unmap();
+        return XR_FAILED;
     }
 
-    void* mappedData;
-    UINT bsize;
-
-    if ( XR_SUCCESS == Map( EMapFlags::M_WRITE_DISCARD, &mappedData, &bsize ) ) {
-        if ( mappedData ) {
-            if ( size ) {
-                size = std::min(size, bsize);
-            }
-            if ( size < bsize ) {
-                ZeroMemory( mappedData, SizeInBytes );
-            }
-            // Copy data
-            if ( data ) {
-                memcpy( mappedData, data, size );
-            }
-        }
-
-        return Unmap();
-    }
-
-    return XR_FAILED;
+    if ( size < mappedSize ) ZeroMemory( mappedData, mappedSize );
+    memcpy( mappedData, data, size );
+    return Unmap();
 }
 
 /** Maps the buffer */
 XRESULT D3D11VertexBuffer::Map( int flags, void** dataPtr, UINT* size ) {
-    D3D11_MAPPED_SUBRESOURCE res;
-    if ( FAILED( reinterpret_cast<D3D11GraphicsEngineBase*>(Engine::GraphicsEngine)->GetContext()->Map( VertexBuffer.Get(), 0, static_cast<D3D11_MAP>(flags), 0, &res ) ) ) {
+    if ( !dataPtr || !size ) {
+        return XR_INVALID_ARG;
+    }
+    *dataPtr = nullptr;
+    *size = 0;
+    if ( !VertexBuffer ) {
+        return XR_FAILED;
+    }
+    if ( IsMapped ) return XR_FAILED;
+    if ( flags != M_READ && flags != M_WRITE && flags != M_READ_WRITE
+        && flags != M_WRITE_DISCARD && flags != M_WRITE_NO_OVERWRITE ) {
+        return XR_INVALID_ARG;
+    }
+
+    D3D11_MAPPED_SUBRESOURCE res{};
+    auto* engine = reinterpret_cast<D3D11GraphicsEngineBase*>(Engine::GraphicsEngine);
+    auto context = engine ? engine->GetContext() : nullptr;
+    if ( !context ) return XR_FAILED;
+
+    const HRESULT mapResult = context->Map(
+        VertexBuffer.Get(), 0, static_cast<D3D11_MAP>(flags), 0, &res );
+    if ( FAILED( mapResult ) ) return XR_FAILED;
+    if ( !res.pData ) {
+        context->Unmap( VertexBuffer.Get(), 0 );
         return XR_FAILED;
     }
 
+    IsMapped = true;
     *dataPtr = res.pData;
     *size = SizeInBytes;
-
     return XR_SUCCESS;
 }
 
 /** Unmaps the buffer */
 XRESULT D3D11VertexBuffer::Unmap() {
-    reinterpret_cast<D3D11GraphicsEngineBase*>(Engine::GraphicsEngine)->GetContext()->Unmap( VertexBuffer.Get(), 0 );
+    auto* engine = reinterpret_cast<D3D11GraphicsEngineBase*>(Engine::GraphicsEngine);
+    if ( !IsMapped ) return XR_INVALID_ARG;
+    if ( !VertexBuffer || !engine || !engine->GetContext() ) return XR_FAILED;
+    engine->GetContext()->Unmap( VertexBuffer.Get(), 0 );
+    IsMapped = false;
     return XR_SUCCESS;
 }
 
@@ -208,25 +284,25 @@ Microsoft::WRL::ComPtr <ID3D11Buffer>& D3D11VertexBuffer::GetVertexBuffer() {
 
 /** Optimizes the given set of vertices */
 XRESULT D3D11VertexBuffer::OptimizeVertices( VERTEX_INDEX* indices, byte* vertices, unsigned int numIndices, unsigned int numVertices, unsigned int stride, std::vector<VERTEX_INDEX>* outShadowIndices ) {
-    if ( !indices || !vertices || numIndices == 0 || numVertices == 0 || stride == 0 ) {
-        if ( outShadowIndices ) {
-            outShadowIndices->clear();
-        }
+    if ( numIndices == 0 || numVertices == 0 ) {
+        if ( outShadowIndices ) outShadowIndices->clear();
         return XR_SUCCESS;
     }
-
-    // meshoptimizer supports per-vertex element sizes up to 256 bytes.
-    if ( stride > 256 ) {
-        if ( outShadowIndices ) {
-            outShadowIndices->clear();
-        }
-        return XR_SUCCESS;
+    if ( !indices || !vertices || stride == 0 || stride > 256
+        || !IsValidVertexDataSize( numVertices, stride ) ) {
+        if ( outShadowIndices ) outShadowIndices->clear();
+        return XR_INVALID_ARG;
     }
 
-    const unsigned int maxVertexIndex = static_cast<unsigned int>(std::numeric_limits<VERTEX_INDEX>::max());
-    if ( numVertices > maxVertexIndex + 1 ) {
+    const size_t maxVertexCount = static_cast<size_t>((std::numeric_limits<VERTEX_INDEX>::max)()) + 1u;
+    if ( numVertices > maxVertexCount ) {
         LogError() << "OptimizeVertices: numVertices exceeds VERTEX_INDEX range";
+        if ( outShadowIndices ) outShadowIndices->clear();
         return XR_FAILED;
+    }
+    if ( !ValidateIndices( indices, numIndices, numVertices, "OptimizeVertices" ) ) {
+        if ( outShadowIndices ) outShadowIndices->clear();
+        return XR_INVALID_ARG;
     }
 
     ZoneScoped;
@@ -236,6 +312,10 @@ XRESULT D3D11VertexBuffer::OptimizeVertices( VERTEX_INDEX* indices, byte* vertic
 
     std::vector<unsigned int> remap( numVertices );
     const size_t fetchedVertexCount = meshopt_optimizeVertexFetchRemap( remap.data(), indexData.data(), numIndices, numVertices );
+    if ( fetchedVertexCount == 0 || fetchedVertexCount > numVertices ) {
+        if ( outShadowIndices ) outShadowIndices->clear();
+        return XR_FAILED;
+    }
 
     std::vector<unsigned int> remappedIndices( numIndices );
     meshopt_remapIndexBuffer( remappedIndices.data(), indexData.data(), numIndices, remap.data() );
@@ -277,18 +357,19 @@ XRESULT D3D11VertexBuffer::OptimizeVertices( VERTEX_INDEX* indices, byte* vertic
 
 /** Optimizes the given set of vertices */
 XRESULT D3D11VertexBuffer::OptimizeFaces( VERTEX_INDEX* indices, byte* vertices, unsigned int numIndices, unsigned int numVertices, unsigned int stride ) {
-    if ( !indices || !vertices || numIndices < 3 || numVertices == 0 || (numIndices % 3) != 0 || stride == 0 ) {
-        return XR_SUCCESS;
+    if ( numIndices == 0 || numVertices == 0 ) return XR_SUCCESS;
+    if ( !indices || !vertices || numIndices < 3 || (numIndices % 3) != 0
+        || stride == 0 || stride > 256 || !IsValidVertexDataSize( numVertices, stride ) ) {
+        return XR_INVALID_ARG;
     }
 
-    if ( stride > 256 ) {
-        return XR_SUCCESS;
-    }
-
-    const unsigned int maxVertexIndex = static_cast<unsigned int>(std::numeric_limits<VERTEX_INDEX>::max());
-    if ( numVertices > maxVertexIndex + 1 ) {
+    const size_t maxVertexCount = static_cast<size_t>((std::numeric_limits<VERTEX_INDEX>::max)()) + 1u;
+    if ( numVertices > maxVertexCount ) {
         LogError() << "OptimizeFaces: numVertices exceeds VERTEX_INDEX range";
         return XR_FAILED;
+    }
+    if ( !ValidateIndices( indices, numIndices, numVertices, "OptimizeFaces" ) ) {
+        return XR_INVALID_ARG;
     }
 
     ZoneScoped;
@@ -318,28 +399,30 @@ XRESULT D3D11VertexBuffer::OptimizeFaces( VERTEX_INDEX* indices, byte* vertices,
     memcpy( reindexedVertices.data(), vertices, reindexedVertices.size() );
     meshopt_remapVertexBuffer( reindexedVertices.data(), vertices, numVertices, stride, remap.data() );
 
-    memcpy( vertices, reindexedVertices.data(), reindexedVertices.size() );
     indexData.swap( reindexedIndices );
 
     // Step 2: Vertex cache optimization.
     meshopt_optimizeVertexCache( indexData.data(), indexData.data(), numIndices, indexedVertexCount );
 
     // Step 3 (optional): Overdraw optimization.
-    if ( stride >= sizeof( float ) * 3 ) {
+    if ( stride == sizeof( ExVertexStruct ) ) {
         meshopt_optimizeOverdraw( indexData.data(),
             indexData.data(),
             numIndices,
-            reinterpret_cast<const float*>(vertices),
+            reinterpret_cast<const float*>(reindexedVertices.data()),
             indexedVertexCount,
             stride,
             kOverdrawThreshold );
     }
 
-    if ( !ConvertIndicesToVertexIndex( indexData, indices, numIndices ) ) {
+    std::vector<VERTEX_INDEX> optimizedIndices( numIndices );
+    if ( !ConvertIndicesToVertexIndex( indexData, optimizedIndices.data(), optimizedIndices.size() ) ) {
         LogError() << "OptimizeFaces: remapped index exceeds VERTEX_INDEX range";
         return XR_FAILED;
     }
 
+    memcpy( vertices, reindexedVertices.data(), reindexedVertices.size() );
+    memcpy( indices, optimizedIndices.data(), optimizedIndices.size() * sizeof( VERTEX_INDEX ) );
     return XR_SUCCESS;
 }
 
