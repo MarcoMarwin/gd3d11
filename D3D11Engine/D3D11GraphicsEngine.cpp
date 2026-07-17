@@ -8705,18 +8705,19 @@ XRESULT D3D11GraphicsEngine::DrawSky() {
     Engine::GAPI->SetWorldTransformXM( world );
     Engine::GAPI->SetViewTransformXM( Engine::GAPI->GetViewMatrixXM() );
 
-    if ( sky->GetAtmosphereCB().AC_CameraHeight > sky->GetAtmosphereCB().AC_OuterRadius ) {
-        SetActivePixelShader( PShaderID::PS_AtmosphereOuter );
-    } else {
-        SetActivePixelShader( PShaderID::PS_Atmosphere );
+    const PShaderID atmosphereShader =
+        sky->GetAtmosphereCB().AC_CameraHeight > sky->GetAtmosphereCB().AC_OuterRadius
+        ? PShaderID::PS_AtmosphereOuter
+        : PShaderID::PS_Atmosphere;
+    if ( SetActivePixelShader( atmosphereShader ) != XR_SUCCESS
+        || SetActiveVertexShader( VShaderID::VS_ExWS ) != XR_SUCCESS
+        || !ActivePS || !ActiveVS ) {
+        return XR_FAILED;
     }
-
-    SetActiveVertexShader( VShaderID::VS_ExWS );
 
     ActivePS->GetBuffer("Atmosphere")
         .Update(&sky->GetAtmosphereCB())
         .Bind();
-
     VS_ExConstantBuffer_PerInstance cbi = {};
     XMStoreFloat4x4( &cbi.World, world );
     cbi.Color = float4( 1.0f, 1.0f, 1.0f, 1.0f );
@@ -8768,11 +8769,21 @@ XRESULT D3D11GraphicsEngine::DrawSky() {
     if ( rainCloudTex ) {
         srvs[3] = rainCloudTex->GetShaderResourceView().Get();
     }
+    if ( !srvs[3] ) {
+        srvs[3] = srvs[0];
+    }
 
-    GetContext()->PSSetShaderResources( 0, std::size( srvs ), srvs);
+    if ( !srvs[0] || !srvs[1] || !srvs[2] || !sky->GetSkyDome()
+        || sky->GetSkyDome()->GetMeshes().empty() ) {
+        return XR_FAILED;
+    }
+    if ( ActiveVS->Apply() != XR_SUCCESS || ActivePS->Apply() != XR_SUCCESS ) {
+        return XR_FAILED;
+    }
 
-    if ( sky->GetSkyDome() ) sky->GetSkyDome()->DrawMesh();
+    GetContext()->PSSetShaderResources( 0, static_cast<UINT>(std::size( srvs )), srvs );
 
+    sky->GetSkyDome()->DrawMesh();
     #if defined(BUILD_GOTHIC_1_08k) && !defined(BUILD_1_12F)
     {
         SetDefaultStates();
