@@ -550,23 +550,16 @@ Kurze, append-only Dokumentation der von Codex gepushten Renderer-Builds.
 - Grenzen: Render Scale, Aspect-/Viewport-, Kamera- und echte Aufloesungswechsel-Pfade bleiben unveraendert.
 - Pruefung: AGENTS-Regeln gelesen; Buildnummer aus outputs ermittelt; Kirides-Nightly/17.9.7 fuer Performance-Pfade verglichen; Occlusion-/MotionBlur-/ShadowFilter-Reste, Projekt-XML, Render-Scale-/Aspect-Grenze, Escape-Artefakte und git diff --check statisch kontrolliert. Kein vollstaendiger lokaler C++-/Shader-Build.
 
-## Build 135 (Release-Candidate aus Build 132 mit selektiven 134-Rendererfixes)
+## Build 137
 
-- Basis: Build 132 bleibt die stabile Grundlage; Build 134 wurde nur als Referenzdiff genutzt. Startpfad, Launcher, DirectDraw-Proxy, Hooking/Detours und Memory-Patching-Grundlogik bleiben unangetastet.
-- F11-Menue: Grafikmenue neu geordnet, Version auf `D3D11-Version 18.0` gesetzt, Wasser-/Regen-/Wind-Labels bereinigt und Presets auf die sichtbaren Optionen unterhalb der Trennlinie begrenzt.
-- Wetter/Regen: Savegame-Wetterzustand wird zurueckgesetzt/wiederhergestellt, Raincloud-Texturpfad stabilisiert und Regen klingt mit verblassenden Rainclouds sowie rueckkehrenden dynamischen Wolken/klarem Wetter ab.
-- Low Clouds/Godrays/Wasserreflektionen: der optisch relevante Build-134-LowCloud-Rendergraph ist uebernommen, inklusive depth-aware Composite gegen Baum-/Objektkonturen, LowCloud-Godray-Maske und LowCloud-Beruecksichtigung in Wasserreflektionen.
-- FSR3/Transparenz/SSR: Contact Shadows bleiben unter FSR3 sichtbar, werden dort abgeschwaecht und fuer NPC-/Gesichtsbereiche entschaerft; Wet-Ground-SSR und transparente Weltgeometrie nutzen die Schutzmasken gegen Durchschimmern/Flackern.
-- Schatten/Wasser: Character-PCF macht Gesichtsschatten an Nase, Augenhoehlen und Hals/Kopf weicher/stabiler; Wasserfarben und Wasseruebergaenge fuer Tag, Nacht und Regen wurden aus dem 134-Referenzstand selektiv uebernommen.
-- Stabilitaet/Performance: isolierte 134-Fixes fuer RenderTarget-/DepthTarget-Validierung, TexturePool-Lebensdauer, ConstantBuffer-/Shader-Bindings, RenderGraph-Fehlerpfad, CascadedShadowMapBuffer, IndirectBuffer und ThreadPool uebernommen. Riskante breite Umbauten wie D3D11VertexBuffer, D3D11Texture, Launcher/DirectDraw/Hooking und Memory-Patching wurden bewusst nicht uebernommen.
-- Pruefung: AGENTS-Regeln gelesen; Buildnummer aus outputs ermittelt; origin/master mit PortableGit/OpenSSL abgeglichen; verbotene Startpfad-Dateien, OpenMP, Shader-/Projektpfade, F11/INI/Preset-Konsistenz, LowCloud-/Godray-/Wasser-Bindings, Escape-Artefakte und git diff --check statisch kontrolliert. Kein vollstaendiger lokaler C++-/Shader-Build.
-- Korrekturpush: Release_G1-Compilefehler behoben (D3D11Texture::IsValid-Aufruf im Raincloud-Pfad durch vorhandene SRV-Validierung ersetzt, deutschen F11-Hinweis-String gegen zu langes \x-Escape abgesichert) und den Build-134-LowCloud-Horizont-Fill fuer dynamische Wolken ergaenzt.
-- Korrekturpush: Contact-Shadow-Trace fuer NPC-Receiver wieder analog Build 134 gesetzt; NPC-Tiefe kann occluden, NPC-Oberflaechen erhalten aber selbst keinen Screen-Space-Contact-Shadow-Term.
-- Korrekturpush: Shader-Startfehler behoben, indem `ResolveLowCloudLayer` wieder 134-identisch in `AtmosphericScattering.h` vorhanden ist; transparente Wet-SSR-Weltgeometrie nutzt wieder den 134-alpha-aware `PS_TransparencyWetMask`-Pfad.
-- Korrekturpush: Atmosphere-Sky-Pfad bindet und applied `PS_Atmosphere`/`VS_ExWS` vor dem SkyDome-Draw wieder explizit; SkyDay/starsh/Moon/RainCloud-Slots werden validiert und RainCloud bekommt nur als Ausfallsicherung den Day-Sky-Fallback, damit fehlende RainCloud-SRV nicht den kompletten Himmel ausblendet.
-- Korrekturpush: Sky-Ressourcenpfad gegen Build 134 korrigiert: `DrawSky()` bleibt 134-identisch, `D3D11Texture::IsValid()` wurde minimal ergaenzt und `GSky` laedt/validiert SkyDay, starsh, Moon und RainCloud wieder mit 134-Guard inklusive Retry, damit ungueltige Start-SRVs nicht dauerhaft Himmel, Sonne/Mond und Rainclouds ausblenden.
-
-- Korrekturpush: Sky-/Atmosphere-/PostFX-Pfad wieder konsistent auf Build-134-Optik gebracht: `GSky`, Sky-Textur-/Mesh-Loader, Atmosphere-/Composition-Shader und PFX-Composition-Bindings sind 134-gleich; der nicht-134-`InitSky()`-Pfad ist entfernt, damit SkyDay/starsh/Moon/RainCloud wieder ueber den 134-Pfad laufen.
-
-- Korrekturpush: Release_G1_AVX-Kompilierfehler nach der 134-PostFX-Angleichung behoben: SMAA/HeightFog sind 134-gleich, TextureConversions ist const-correct, `GothicAPI::RemoveMipMapGeneration` wurde als kleiner 134-Stabilitaetsblock ergaenzt und der ungenutzte DistanceBlur ist vollstaendig aus Dateien, Projekt, ShaderIDs und Shaderregistrierung entfernt.
-- Korrekturpush: Release_G1_AVX-Regen-Compilefehler behoben, indem der zu `D3D11Effect.cpp` passende 134-Block `MAX_RAIN_PARTICLES`/`SanitizeRainParticleCount` in `GothicGraphicsState.h` ergaenzt wurde.
+- Reset auf Build 132 als stabile Basis.
+- Build 134/136-Render-, Sky-, Wetter-, FSR3- und Shader-Portierungen bewusst verworfen.
+- Keine Startpfad-, Launcher-, DirectDraw-, Hooking-, Detours- oder Memory-Patching-Aenderungen aus 134 uebernommen.
+- F11-Menue: Vegetations-/Wasser-/Regenoptionen bereinigt, Wasserreflektionen und Regendarstellung umbenannt, D3D11-Version 18.0 angezeigt und Presets auf sichtbare Optionen unterhalb der Trennlinie begrenzt.
+- Vegetation: Objektinteraktion wird automatisch ueber Windeffekte gesteuert, Backlight bleibt dauerhaft aktiv und der Interaktionsradius entspricht 0,5 m.
+- Regen/Wetter: Savegame-Laden setzt den Wetterzustand stabil zurueck, RainClouds bleiben bei Regen sichtbar und Regen klingt mit Wolken-/Sonnen-Rueckkehr sauber ab.
+- FSR3/Contact Shadows: Contact Shadows bleiben unter FSR3 sichtbar, werden dort abgeschwaecht und NPC-/Gesichtsreceiver werden deutlich entschaerft beziehungsweise ausgeschlossen.
+- Transparenz/Wet Ground SSR: transparente Weltgeometrie bekommt eine eigene Wet-Blocker-Maske, damit Regen-/Nachtflackern und Durchschimmern durch solide Geometrie reduziert werden, ohne funktionierende Sperrmasken zu entfernen.
+- Dynamische Wolken/Wasser/Schatten: Wolken-Compositing nutzt tiefenbewusstes Upsampling gegen helle/dunkle Objektkanten, Wasser ist bei Tag/Nacht/Regen neutraler abgestimmt und NPC-nahe Schatten werden stabiler weichgefiltert.
+- Text: der deutsche F11-Hinweis nutzt CP1252-kompatible Umlaute fuer Gothics Textausgabe.
+- Pruefung: AGENTS-Regeln gelesen; Buildnummer aus outputs ermittelt; Projekt-XML, Shader-/Projektpfade, Shaderregistrierungen, F11-/INI-/Preset-Pfade, Regen-/RainCloud-Pfade, FSR3-/Contact-Shadow-Gates, Transparenz-/Wet-SSR-Bindings, Escape-Artefakte und git diff --check statisch kontrolliert. Kein vollstaendiger lokaler C++-/Shader-Build.

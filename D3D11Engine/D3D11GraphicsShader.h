@@ -9,7 +9,7 @@
 
 class D3D11GraphicsShader;
 class D3D11ConstantBuffer;
-constexpr size_t MAX_SHADER_CB = D3D11_COMMONSHADER_CONSTANT_BUFFER_API_SLOT_COUNT;
+constexpr size_t MAX_SHADER_CB = 6;
 constexpr size_t INVALID_SHADER_CB_SLOT = 255;
 
 struct GraphicsShaderConstantBuffer
@@ -17,9 +17,8 @@ struct GraphicsShaderConstantBuffer
 public:
     GraphicsShaderConstantBuffer()
         : buffer( nullptr ),
-        shader( nullptr ),
-        slot( INVALID_SHADER_CB_SLOT ),
-        succeeded( false )
+        slot( -1 ),
+        shader( nullptr )
     {
     }
 
@@ -27,34 +26,35 @@ public:
         D3D11ConstantBuffer* buffer,
         UINT slot,
         D3D11GraphicsShader* shader)
-        : buffer( buffer ),
-        shader( shader ),
-        slot( slot ),
-        succeeded( buffer && shader && slot < MAX_SHADER_CB )
+        : buffer(buffer),
+    slot(slot),
+    shader(shader)
     {}
 
-    GraphicsShaderConstantBuffer& Update( const void* data ) {
-        if ( !succeeded || !buffer || !buffer->UpdateBuffer( data ) ) succeeded = false;
+    GraphicsShaderConstantBuffer& Update(const void* data) {
+        if ( buffer ) {
+            buffer->UpdateBuffer(data);
+        }
         return *this;
     }
 
-    GraphicsShaderConstantBuffer& Update( const void* data, UINT size ) {
-        if ( !succeeded || !buffer || !buffer->UpdateBuffer( data, size ) ) succeeded = false;
+    GraphicsShaderConstantBuffer& Update(const void* data, UINT size) {
+        if ( buffer ) {
+            buffer->UpdateBuffer(data, size);
+        }
         return *this;
     }
     GraphicsShaderConstantBuffer& Bind();
-    GraphicsShaderConstantBuffer& Bind( UINT slot );
+    GraphicsShaderConstantBuffer& Bind(UINT slot);
     constexpr D3D11ConstantBuffer* GetRawBuffer() const { return buffer; }
     constexpr UINT GetSlot() const { return slot; }
-    constexpr bool Succeeded() const { return succeeded; }
 private:
     D3D11ConstantBuffer* buffer;
     D3D11GraphicsShader* shader;
     UINT slot;
-    bool succeeded;
 };
 
-class D3D11GraphicsShader 
+class D3D11GraphicsShader
     : public GraphicsShader
 {
 public:
@@ -62,7 +62,7 @@ public:
     ~D3D11GraphicsShader() override = default;
     /** Returns the input index for the given semantic name */
     int32_t GetInputIndex( StringID name ) override;
-    
+
     std::array<std::unique_ptr<D3D11ConstantBuffer>, MAX_SHADER_CB>& GetConstantBuffer() { return ConstantBuffers; }
 
     virtual void BindResource(StringID name, ID3D11ShaderResourceView* srv) = 0;
@@ -71,7 +71,7 @@ public:
     virtual void BindBuffer(UINT slot, D3D11ConstantBuffer* buffer) = 0;
     virtual GraphicsShaderConstantBuffer GetBuffer(StringID name);
     virtual GraphicsShaderConstantBuffer GetBuffer(UINT slot);
-    
+
     virtual XRESULT Apply() = 0;
 protected:
     gtl::flat_hash_map<StringID, int32_t> InputSemanticToIndex;
@@ -80,6 +80,6 @@ protected:
     std::array<byte, MAX_SHADER_CB> ConstantBufferIndexBySlot;
 
     virtual HRESULT ReflectShaderResources( ID3DBlob* shaderBlob );
-    virtual HRESULT OnReflectShader( ID3DBlob* blob, ID3D11ShaderReflection* pReflection, const D3D11_SHADER_DESC& shaderDesc );
+    virtual void OnReflectShader( ID3DBlob* blob, ID3D11ShaderReflection* pReflection,  const D3D11_SHADER_DESC& shaderDesc );
     virtual void OnReflectShaderResource( ID3D11ShaderReflection* pReflection, const D3D11_SHADER_DESC& shaderDesc, const D3D11_SHADER_INPUT_BIND_DESC& resourceDesc );
 };

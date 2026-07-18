@@ -260,7 +260,7 @@ float4 PSMain(PS_INPUT Input) : SV_TARGET
 	// Get specular parameters
     float4 gb3 = TX_SI_SP.Sample(SS_Linear, uv);
     float twoSidedBacklitMaterial = gb3.x < -2.0f ? 1.0f : 0.0f;
-    float npcMaterial = (gb3.x < -0.5f && gb3.x > -2.0f) ? 1.0f : 0.0f;
+    float npcMaterial = (gb3.x < -0.5f && gb3.x >= -2.0f) ? 1.0f : 0.0f;
     float specIntensity = twoSidedBacklitMaterial > 0.5f ? max(-gb3.x - 3.0f, 0.0f)
         : (npcMaterial > 0.5f ? max(-gb3.x - 1.0f, 0.0f) : gb3.x);
     float alphaTestedMaterial = gb3.y < 0.0f ? 1.0f : 0.0f;

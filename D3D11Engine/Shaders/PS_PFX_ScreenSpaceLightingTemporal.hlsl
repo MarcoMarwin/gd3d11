@@ -32,7 +32,7 @@ float IsContactReceiverExcluded(float2 uv)
 {
     float2 materialInfo = TX_Material.SampleLevel(SS_Linear, saturate(uv), 0).rg;
     float alphaTested = materialInfo.y < 0.0f ? 1.0f : 0.0f;
-    float npc = (materialInfo.x < -0.5f && materialInfo.x > -2.0f) ? 1.0f : 0.0f;
+    float npc = (materialInfo.x < -0.5f && materialInfo.x >= -2.0f) ? 1.0f : 0.0f;
     return max(alphaTested, npc);
 }
 

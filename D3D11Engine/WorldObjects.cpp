@@ -1,8 +1,5 @@
 #include "pch.h"
 #include "WorldObjects.h"
-#include <limits>
-#include <memory>
-#include <new>
 #include "GothicAPI.h"
 #include "Engine.h"
 #include "BaseGraphicsEngine.h"
@@ -41,18 +38,7 @@ bool VobInfo::ComputeIndoorLightMask() const {
 }
 
 void VobInfo::UpdateState() {
-    if ( !Vob ) {
-        WorldMatrix = g_MatIdentity;
-        LastRenderPosition = {};
-        IsIndoorVob = false;
-        IndoorLightMask = false;
-        HasIndoorLightMaskSample = false;
-        GroundColor = 0xFFFFFFFF;
-        return;
-    }
-
-    const XMFLOAT4X4* const worldMatrix = Vob->GetWorldMatrixPtr();
-    WorldMatrix = worldMatrix ? *worldMatrix : g_MatIdentity;
+    WorldMatrix = *Vob->GetWorldMatrixPtr();
     LastRenderPosition = Vob->GetPositionWorld();
 
     const bool currentIndoorVob = Vob->IsIndoorVob();
@@ -64,19 +50,13 @@ void VobInfo::UpdateState() {
         IsIndoorVob = currentIndoorVob;
     }
 
+    // Colorize the vob according to the underlaying polygon
     if ( IndoorLightMask ) {
+        // All lightmapped polys have this color, so just use it
         GroundColor = DEFAULT_LIGHTMAP_POLY_COLOR;
-        return;
-    }
-
-    GroundColor = 0xFFFFFFFF;
-    zCPolygon* const groundPolygon = Vob->GetGroundPoly();
-    if ( !groundPolygon || groundPolygon->GetNumPolyVertices() <= 0 ) {
-        return;
-    }
-    zCVertFeature** const features = groundPolygon->getFeatures();
-    if ( features && features[0] ) {
-        GroundColor = features[0]->lightStatic;
+    } else {
+        // Get the color of the first found feature of the ground poly
+        GroundColor = Vob->GetGroundPoly() ? Vob->GetGroundPoly()->getFeatures()[0]->lightStatic : 0xFFFFFFFF;
     }
 }
 
@@ -88,12 +68,7 @@ void SkeletalVobInfo::UpdateVobConstantBuffer(VS_ExConstantBuffer_PerInstance& c
 }
 
 void SkeletalVobInfo::UpdateState() {
-    if ( !Vob ) {
-        WorldMatrix = g_MatIdentity;
-        return;
-    }
-    const XMFLOAT4X4* const worldMatrix = Vob->GetWorldMatrixPtr();
-    WorldMatrix = worldMatrix ? *worldMatrix : g_MatIdentity;
+    WorldMatrix = *Vob->GetWorldMatrixPtr();
 }
 
 SectionInstanceCache::~SectionInstanceCache() {
@@ -101,6 +76,8 @@ SectionInstanceCache::~SectionInstanceCache() {
 }
 
 MeshInfo::~MeshInfo() {
+    //Engine::GAPI->GetRendererState().RendererInfo.VOBVerticesDataSize -= Indices.size() * sizeof(VERTEX_INDEX);
+    //Engine::GAPI->GetRendererState().RendererInfo.VOBVerticesDataSize -= Vertices.size() * sizeof(ExVertexStruct);
 
     delete MeshVertexBuffer;
     delete MeshIndexBuffer;
@@ -108,6 +85,9 @@ MeshInfo::~MeshInfo() {
 }
 
 SkeletalMeshInfo::~SkeletalMeshInfo() {
+    Engine::GAPI->GetRendererState().RendererInfo.SkeletalVerticesDataSize -= Indices.size() * sizeof( VERTEX_INDEX );
+    Engine::GAPI->GetRendererState().RendererInfo.SkeletalVerticesDataSize -= Vertices.size() * sizeof( ExSkelVertexStruct );
+
     delete MeshVertexBuffer;
     delete MeshIndexBuffer;
 }
@@ -120,41 +100,33 @@ void SectionInstanceCache::ClearCacheForStatic( MeshVisualInfo* pm ) {
     }
 }
 
+/** Saves this sections mesh to a file */
+void WorldMeshSectionInfo::SaveSectionMeshToFile( const std::string& name ) {
+    FILE* f;
+    fopen_s( &f, name.c_str(), "wb" );
+
+    if ( !f )
+        return;
+}
+
 /** Creates buffers for this mesh info */
 XRESULT MeshInfo::Create( ExVertexStruct* vertices, unsigned int numVertices, VERTEX_INDEX* indices, unsigned int numIndices ) {
-    if ( !vertices || !indices || numVertices == 0 || numIndices == 0
-        || numVertices > std::numeric_limits<UINT>::max() / sizeof( ExVertexStruct )
-        || numIndices > std::numeric_limits<UINT>::max() / sizeof( VERTEX_INDEX )
-        || !Engine::GraphicsEngine ) {
-        return XR_INVALID_ARG;
-    }
+    Vertices.resize( numVertices );
+    memcpy( &Vertices[0], vertices, numVertices * sizeof( ExVertexStruct ) );
 
-    std::vector<ExVertexStruct> newVertices;
-    std::vector<VERTEX_INDEX> newIndices;
-    try {
-        newVertices.assign( vertices, vertices + numVertices );
-        newIndices.assign( indices, indices + numIndices );
-    } catch ( const std::bad_alloc& ) {
-        return XR_FAILED;
-    }
+    Indices.resize( numIndices );
+    memcpy( &Indices[0], indices, numIndices * sizeof( VERTEX_INDEX ) );
 
-    auto newVertexBuffer = std::make_unique<D3D11VertexBuffer>();
-    auto newIndexBuffer = std::make_unique<D3D11VertexBuffer>();
-    if ( newVertexBuffer->Init(
-            vertices, numVertices * sizeof( ExVertexStruct ) ) != XR_SUCCESS
-        || newIndexBuffer->Init(
-            indices, numIndices * sizeof( VERTEX_INDEX ),
-            D3D11VertexBuffer::B_INDEXBUFFER ) != XR_SUCCESS ) {
-        return XR_FAILED;
-    }
+    // Create the buffers
+    Engine::GraphicsEngine->CreateVertexBuffer( &MeshVertexBuffer );
+    Engine::GraphicsEngine->CreateVertexBuffer( &MeshIndexBuffer );
 
-    SAFE_DELETE( MeshVertexBuffer );
-    SAFE_DELETE( MeshIndexBuffer );
-    MeshVertexBuffer = newVertexBuffer.release();
-    MeshIndexBuffer = newIndexBuffer.release();
-    Vertices = std::move( newVertices );
-    Indices = std::move( newIndices );
+    // Init and fill it
+    MeshVertexBuffer->Init( vertices, numVertices * sizeof( ExVertexStruct ) );
+    MeshIndexBuffer->Init( indices, numIndices * sizeof( VERTEX_INDEX ), D3D11VertexBuffer::B_INDEXBUFFER );
 
+    Engine::GAPI->GetRendererState().RendererInfo.VOBVerticesDataSize += numVertices * sizeof( ExVertexStruct );
+    Engine::GAPI->GetRendererState().RendererInfo.VOBVerticesDataSize += numIndices * sizeof( VERTEX_INDEX );
 
     return XR_SUCCESS;
 }

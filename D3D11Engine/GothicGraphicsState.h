@@ -15,11 +15,6 @@ const int GSWITCH_FSR3_REACTIVE = 32;
 const int GSWITCH_FSR3_DIALOG_REACTIVE = 64;
 const int GSWITCH_DISABLE_RAIN_EFFECTS = 128;
 constexpr float VISUAL_FX_DRAW_RADIUS_FIXED = 10000.0f;
-constexpr UINT MAX_RAIN_PARTICLES = 262144u;
-
-constexpr UINT SanitizeRainParticleCount( UINT count ) noexcept {
-    return count > MAX_RAIN_PARTICLES ? MAX_RAIN_PARTICLES : count;
-}
 
 enum RenderStage {
     STAGE_DRAW_UNKNOWN = 0,
@@ -577,9 +572,7 @@ struct GothicRendererSettings {
     }
 
     float GetContactShadowFixedStrength() const {
-        const bool temporalReconstructionActive = AntiAliasingMode == E_AntiAliasingMode::AA_FSR3
-            && Upscaler == E_Upscaler::UPSCALER_FSR_3;
-        return temporalReconstructionActive ? 0.35f : 0.50f;
+        return 0.50f;
     }
 
     /** Sets the default values for this struct */

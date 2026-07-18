@@ -20,6 +20,9 @@ cbuffer DepthOfFieldConstantBuffer : register( b0 )
     float DoF_NearBlurStrength;
 };
 
+SamplerState SS_Linear : register( s0 );
+Texture2D TX_Depth : register( t0 );
+Texture2D TX_PrevFocus : register( t1 );
 struct PS_INPUT
 {
     float2 vTexcoord : TEXCOORD0;

@@ -6,7 +6,9 @@
 // Textures and Samplers
 //--------------------------------------------------------------------------------------
 SamplerState SS_Linear : register( s0 );
+SamplerState SS_samMirror : register( s1 );
 Texture2D	TX_Texture0 : register( t0 );
+Texture2D	TX_Depth : register( t1 );
 
 cbuffer PfxSharpenConstantBuffer : register( b0 )
 {

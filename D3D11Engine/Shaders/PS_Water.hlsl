@@ -61,7 +61,6 @@ Texture2D	TX_Depth : register( t2 );
 TextureCube	TX_ReflectionCube : register( t3 );
 Texture2D	TX_Distortion : register( t4 );
 Texture2D	TX_Scene : register( t5 );
-Texture2D	TX_LowClouds : register( t6 );
 
 //--------------------------------------------------------------------------------------
 // Input / Output structures
@@ -94,160 +93,133 @@ PS_OUTPUT PSMain( PS_INPUT Input )
 
 	float surfaceViewZ = Input.vTexcoord2.x;
 	float sceneViewZ = LinearizeWaterDepth(TX_Depth.Sample(SS_Linear, screenUV).r);
-	float viewRayScale = clamp(abs(Input.vTexcoord2.y) / max(abs(surfaceViewZ), 1.0f), 1.0f, 8.0f);
-	float waterThickness = clamp(max(sceneViewZ - surfaceViewZ, 0.0f) * viewRayScale, 0.0f, 6000.0f);
+	float viewRayScale = clamp(
+		abs(Input.vTexcoord2.y) / max(abs(surfaceViewZ), 1.0f), 1.0f, 8.0f);
+	float waterThickness = clamp(
+		max(sceneViewZ - surfaceViewZ, 0.0f) * viewRayScale, 0.0f, 6000.0f);
 	float shoreDerivative = max(fwidth(waterThickness), 1.0f);
 	float shoreFadeEnd = clamp(max(65.0f, shoreDerivative * 1.25f), 65.0f, 160.0f);
-	float shoreVisibility = SmootherStep01(saturate((waterThickness - 1.0f) / max(shoreFadeEnd - 1.0f, 1.0f)));
+	float shoreVisibility = SmootherStep01(
+		saturate((waterThickness - 1.0f) / max(shoreFadeEnd - 1.0f, 1.0f)));
+	float shallowDepth = shoreVisibility;
 
+	// Camera direction and reflection control are independent from wave motion.
 	float3 viewDirection = normalize(Input.vWorldPosition - RI_CameraPosition);
-	float waterViewDistance = abs(Input.vTexcoord2.y);
 	float waterMaterialAllowsSSR = 1.0f - step(0.5f, WM_DisableSSR);
-	float waterMaterialAllowsRain = 1.0f - step(0.5f, WM_DisableRainEffects);
-	float rainAmount = saturate(AC_RainFXWeight) * waterMaterialAllowsRain;
-	float nightAmount = saturate((-AC_LightPos.y + 0.12f) * 2.2f);
-	float reflectionStrength = max(0.0f, AC_SSRStrength) * step(0.5f, AC_EnableSSR) * waterMaterialAllowsSSR;
+	float reflectionStrength = max(0.0f, AC_SSRStrength)
+		* step(0.5f, AC_EnableSSR) * waterMaterialAllowsSSR;
 	bool waterSSRActive = reflectionStrength > 0.0001f;
 
-	// Keep the existing wave animation, but reduce distant repetition and let rain roughen it smoothly.
+	// Calculate distortion vectors
 	float2 worldTexCoord = Input.vWorldPosition.xz / 1000.0f;
-	float3 distortionSmall = TX_Distortion.Sample(SS_Linear, worldTexCoord * DIST_SMALL_SCALE + RI_Time * DIST_SMALL_SPEED).xyz * 2.0f - 1.0f;
-	distortionSmall += TX_Distortion.Sample(SS_Linear, worldTexCoord * float2(-1.0f, 0.7f) * DIST_SMALL_SCALE + RI_Time * DIST_SMALL_SPEED * 2.0f).xyz * 2.0f - 1.0f;
+	float3 distortionSmall = TX_Distortion.Sample(SS_Linear, worldTexCoord * DIST_SMALL_SCALE + RI_Time * DIST_SMALL_SPEED).xyz * 2 - 1;
+	distortionSmall += TX_Distortion.Sample(SS_Linear, worldTexCoord * float2(-1,0.7) * DIST_SMALL_SCALE + RI_Time * DIST_SMALL_SPEED * 2).xyz * 2 - 1;
 	distortionSmall *= 0.5f;
 
-	float3 distortionBig = TX_Distortion.Sample(SS_Linear, worldTexCoord * DIST_BIG_SCALE + RI_Time * DIST_BIG_SPEED).xyz * 2.0f - 1.0f;
-	distortionBig += TX_Distortion.Sample(SS_Linear, worldTexCoord * float2(-1.0f, 0.7f) * DIST_BIG_SCALE + RI_Time * DIST_BIG_SPEED * 1.2f).xyz * 2.0f - 1.0f;
+	float3 distortionBig = TX_Distortion.Sample(SS_Linear, worldTexCoord * DIST_BIG_SCALE + RI_Time * DIST_BIG_SPEED).xyz * 2 - 1;
+	distortionBig += TX_Distortion.Sample(SS_Linear, worldTexCoord * float2(-1,0.7) * DIST_BIG_SCALE + RI_Time * DIST_BIG_SPEED * 1.2).xyz * 2 - 1;
 	distortionBig *= 0.5f;
 
-	float farWaveScale = lerp(1.0f, 0.58f, SmootherStep01(saturate((waterViewDistance - 14000.0f) / 38000.0f)));
-	float waveSlopeScale = farWaveScale * lerp(1.0f, 1.12f, rainAmount);
-	float refractionDepthFade = SmootherStep01(saturate((waterThickness - 12.0f) / 98.0f));
-	float refractionDistortion = shoreVisibility * refractionDepthFade * waveSlopeScale;
-	float2 distUV = screenUV + (distortionSmall.xy + distortionBig.xy) * DIST_SMALL_AMOUNT * refractionDistortion;
+	float refractionDepthFade =
+		SmootherStep01(saturate((waterThickness - 12.0f) / 98.0f));
+	float refractionDistortion = shoreVisibility * refractionDepthFade;
+	float2 distUV = screenUV
+		+ (distortionSmall.xy + distortionBig.xy) * DIST_SMALL_AMOUNT * refractionDistortion;
 
-	float3 diffuse = TX_Diffuse.Sample(
-		SS_Linear,
-		Input.vTexcoord + distortionSmall.xy * DIST_SMALL_AMOUNT * 0.5f * waveSlopeScale).rgb;
+	// Distorted diffuse
+	float3 diffuse = TX_Diffuse.Sample(SS_Linear, Input.vTexcoord + distortionSmall.xy * DIST_SMALL_AMOUNT * 0.5f).rgb;
 
-	float depthRefracted = LinearizeWaterDepth(TX_Depth.Sample(SS_Linear, distUV).r);
+	// Refracted depth
+	float depthRefracted = TX_Depth.Sample(SS_Linear, distUV).r;
+	depthRefracted = RI_Projection._43 / (depthRefracted - RI_Projection._33);
+
 	distUV = CleanRefraction(distUV, screenUV, depthRefracted);
 	distUV = saturate(distUV);
 
-	float3 wavesFres = normalize(float3(
-		distortionBig.x * waveSlopeScale,
-		distortionBig.z * 10.0f,
-		distortionBig.y * waveSlopeScale));
-	float3 wavesSmall = normalize(float3(
-		distortionSmall.x * waveSlopeScale,
-		distortionSmall.z * 10.0f,
-		distortionSmall.y * waveSlopeScale));
+	// Wave vector
+	float3 wavesDist = normalize(distortionSmall.xzy * float3(1,100,1));
+	float3 wavesFres = normalize(distortionBig.xzy * float3(1,10,1));
 
-	float3 sceneClean = TX_Scene.Sample(SS_Linear, screenUV).rgb;
-	float3 sceneRefracted = TX_Scene.Sample(SS_Linear, distUV).rgb;
-	float NdotV = saturate(dot(-viewDirection, wavesFres));
-	float fresnel = 0.02f + 0.98f * pow(1.0f - NdotV, 5.0f);
-	float3 reflectVector = reflect(-viewDirection, wavesFres);
+	// Scene color
+	float3 scene = TX_Scene.Sample(SS_Linear, distUV).rgb;
+	float3 sceneClean = TX_Scene.Sample(SS_Linear, lerp(distUV, screenUV, pow(1-shallowDepth, 20.0f))).rgb;
 
-	// The cubemap predates dynamic weather. Regrade it continuously so it cannot show clear,
-	// saturated daytime water during rain or turn the sea electric blue at night.
-	float3 reflectionCube = max(TX_ReflectionCube.Sample(SS_Linear, reflectVector).rgb, float3(0.0f, 0.0f, 0.0f));
-	float cubeLuma = dot(reflectionCube, float3(0.2126f, 0.7152f, 0.0722f));
-	float3 cubeGray = float3(cubeLuma, cubeLuma, cubeLuma);
-	float3 rainCloudTint = max(AC_LowCloudRainColor, float3(0.0f, 0.0f, 0.0f));
-	float3 dayRainReflection = lerp(cubeGray * 0.46f, float3(0.18f, 0.20f, 0.21f), 0.55f)
-		* lerp(float3(1.0f, 1.0f, 1.0f), rainCloudTint, 0.30f);
-	float3 clearNightReflection = lerp(reflectionCube * 0.025f, float3(0.004f, 0.009f, 0.023f), 0.72f);
-	float3 rainNightReflection = max(AC_NightRainSkyColor * 0.32f, float3(0.006f, 0.008f, 0.012f));
-	float3 dayReflection = lerp(reflectionCube, dayRainReflection, rainAmount);
-	float3 nightReflection = lerp(clearNightReflection, rainNightReflection, rainAmount);
-	float3 fallbackReflection = lerp(dayReflection, nightReflection, nightAmount);
+	// Fresnel from waves
+	float fresnel = min(0.5f, saturate(pow(1.0f - saturate(dot(-viewDirection, wavesFres)), 10.0f)));
 
+	// Reflection
+	float3 reflect_vec = reflect(-viewDirection, wavesFres);
+
+	// sample reflection cube
+	float3 reflection = TX_ReflectionCube.Sample(SS_Linear, reflect_vec).xyz;
 	float3 reflectionSSR = float3(0.0f, 0.0f, 0.0f);
 	float ssrRawWeight = 0.0f;
+	float ssrWeight = 0.0f;
 	float ssrHitQuality = 0.0f;
 	float3 ssrHitWorldPosition = Input.vWorldPosition;
 	float ssrHitValid = 0.0f;
-	float ssrHitIsSky = 0.0f;
-	float2 ssrHitUV = screenUV;
 
-	if (waterSSRActive)
-	{
+
+	if (waterSSRActive) {
 		float3 rayPos = Input.vWorldPosition;
 		float3 rayDir = reflect(viewDirection, wavesFres);
 		float stepSize = 40.0f;
 		int maxSteps = 40;
 
-		for (int i = 1; i <= maxSteps; i++)
-		{
+		for (int i = 1; i <= maxSteps; i++) {
 			rayPos += rayDir * stepSize;
 			stepSize *= 1.1f;
 
 			float4 projPos = mul(float4(rayPos, 1.0f), RI_ViewProj);
-			if (projPos.w <= 0.001f)
-				break;
-
 			projPos.xyz /= projPos.w;
+
 			float2 uv = projPos.xy * float2(0.5f, -0.5f) + 0.5f;
 			if (uv.x < 0.0f || uv.x > 1.0f || uv.y < 0.0f || uv.y > 1.0f || projPos.z < 0.0f || projPos.z > 1.0f)
 				break;
 
-			float rawDepthSample = TX_Depth.SampleLevel(SS_Linear, uv, 0).r;
-			if (rawDepthSample <= 0.000001f)
-			{
-				reflectionSSR = TX_Scene.SampleLevel(SS_Linear, uv, 0).rgb;
-				ssrHitValid = 1.0f;
-				ssrHitIsSky = 1.0f;
-				ssrHitUV = uv;
-				float2 skyEdgeFade = saturate(abs(uv - 0.5f) * 2.0f);
-				float skyEdgeDistance = max(skyEdgeFade.x, skyEdgeFade.y);
-				ssrRawWeight = 1.0f - smoothstep(0.76f, 1.0f, skyEdgeDistance);
-				ssrHitQuality = 0.72f;
-				break;
-			}
-
-			float sampleZ = LinearizeWaterDepth(rawDepthSample);
+			float depthSample = TX_Depth.SampleLevel(SS_Linear, uv, 0).r;
+			float sampleZ = RI_Projection._43 / (depthSample - RI_Projection._33);
 			float rayZ = projPos.w;
 			float depthDiff = rayZ - sampleZ;
 
-			if (depthDiff > 0.0f && depthDiff < (stepSize * 2.0f))
-			{
+			if (depthDiff > 0.0f && depthDiff < (stepSize * 2.0f)) {
 				float3 minPos = rayPos - rayDir * stepSize;
 				float3 maxPos = rayPos;
 				float3 midPos = rayPos;
 
 				[unroll]
-				for (int j = 0; j < 5; j++)
-				{
+				for (int j = 0; j < 5; j++) {
 					midPos = (minPos + maxPos) * 0.5f;
 					float4 projMid = mul(float4(midPos, 1.0f), RI_ViewProj);
-					projMid.xyz /= max(projMid.w, 0.001f);
-					float2 uvMid = saturate(projMid.xy * float2(0.5f, -0.5f) + 0.5f);
-					float zMid = LinearizeWaterDepth(TX_Depth.SampleLevel(SS_Linear, uvMid, 0).r);
+					projMid.xyz /= projMid.w;
+					float2 uvMid = projMid.xy * float2(0.5f, -0.5f) + 0.5f;
+					float dMid = TX_Depth.SampleLevel(SS_Linear, uvMid, 0).r;
+					float zMid = RI_Projection._43 / (dMid - RI_Projection._33);
 
-					if (projMid.w - zMid > 0.0f)
+					if (projMid.w - zMid > 0.0f) {
 						maxPos = midPos;
-					else
+					} else {
 						minPos = midPos;
+					}
 				}
 
 				float4 projFinal = mul(float4(midPos, 1.0f), RI_ViewProj);
-				projFinal.xyz /= max(projFinal.w, 0.001f);
-				uv = saturate(projFinal.xy * float2(0.5f, -0.5f) + 0.5f);
+				projFinal.xyz /= projFinal.w;
+				uv = projFinal.xy * float2(0.5f, -0.5f) + 0.5f;
 
 				float2 px = 1.0f / RI_ViewportSize;
-				float zL = LinearizeWaterDepth(TX_Depth.SampleLevel(SS_Linear, saturate(uv + float2(-2.0f,  0.0f) * px), 0).r);
-				float zR = LinearizeWaterDepth(TX_Depth.SampleLevel(SS_Linear, saturate(uv + float2( 2.0f,  0.0f) * px), 0).r);
-				float zU = LinearizeWaterDepth(TX_Depth.SampleLevel(SS_Linear, saturate(uv + float2( 0.0f, -2.0f) * px), 0).r);
-				float zD = LinearizeWaterDepth(TX_Depth.SampleLevel(SS_Linear, saturate(uv + float2( 0.0f,  2.0f) * px), 0).r);
+				float zL = RI_Projection._43 / (TX_Depth.SampleLevel(SS_Linear, saturate(uv + float2(-2.0f, 0.0f) * px), 0).r - RI_Projection._33);
+				float zR = RI_Projection._43 / (TX_Depth.SampleLevel(SS_Linear, saturate(uv + float2( 2.0f, 0.0f) * px), 0).r - RI_Projection._33);
+				float zU = RI_Projection._43 / (TX_Depth.SampleLevel(SS_Linear, saturate(uv + float2(0.0f, -2.0f) * px), 0).r - RI_Projection._33);
+				float zD = RI_Projection._43 / (TX_Depth.SampleLevel(SS_Linear, saturate(uv + float2(0.0f,  2.0f) * px), 0).r - RI_Projection._33);
 				float hitEdge = max(abs(zL - zR), abs(zU - zD));
 				float edgeTolerance = max(60.0f, abs(sampleZ) * 0.018f);
 				float edgeQuality = 1.0f - smoothstep(edgeTolerance, edgeTolerance * 4.0f, hitEdge);
 				float nearHitQuality = smoothstep(700.0f, 2200.0f, abs(sampleZ));
 
-				reflectionSSR = TX_Scene.SampleLevel(SS_Linear, uv, 0).rgb;
+				reflectionSSR = TX_Scene.SampleLevel(SS_Linear, uv, 0).xyz;
 				ssrHitWorldPosition = midPos;
 				ssrHitValid = 1.0f;
-				ssrHitUV = uv;
 				float2 edgeFade = saturate(abs(uv - 0.5f) * 2.0f);
 				float edgeDistance = max(edgeFade.x, edgeFade.y);
 				ssrRawWeight = 1.0f - smoothstep(0.78f, 1.0f, edgeDistance);
@@ -257,99 +229,105 @@ PS_OUTPUT PSMain( PS_INPUT Input )
 		}
 	}
 
+	// Keep the old screen-space water reflection as the base layer, even where dynamic SSR must fade out.
+	// Dynamic HDR/light reflections are still suppressed near contact edges to avoid player/NPC artifacts.
+	float ssrNearFade = smoothstep(100.0f, 450.0f, abs(Input.vTexcoord2.y));
+	float ssrContactFade = smoothstep(0.04f, 0.22f, shallowDepth);
+	float ssrBaseWeight = ssrRawWeight * lerp(0.45f, 1.0f, ssrNearFade) * lerp(0.55f, 1.0f, ssrContactFade) * ssrHitQuality;
+	ssrWeight = ssrRawWeight * ssrNearFade * ssrContactFade * ssrHitQuality;
+	// Darken the scene, to make a wet surface
+	float f = 1-saturate(pow(1-shallowDepth, 8.0f) + clamp(pow(distortionSmall.y, 2), 0.5f, 1.0f));
+	float nightAmount = saturate((-AC_LightPos.y + 0.12f) * 2.2f);
+
+	float waterMaterialAllowsRain = 1.0f - step(0.5f, WM_DisableRainEffects);
+	float rainAmount = saturate(AC_RainFXWeight) * waterMaterialAllowsRain;
+	float edgeTransmission = lerp(0.88f, 0.64f, nightAmount);
+	edgeTransmission = lerp(edgeTransmission, 0.74f, rainAmount);
+	float3 sceneWet = lerp(sceneClean, sceneClean * edgeTransmission, f);
+
+	// Neutral/cool attenuation replaces the old strongly red-brown multiplier.
+	float3 clearWaterAttenuation = float3(0.78f, 0.86f, 0.90f);
+	float3 rainWaterAttenuation = float3(0.66f, 0.72f, 0.74f);
+	scene = lerp(scene, scene * lerp(clearWaterAttenuation, rainWaterAttenuation, rainAmount), f);
+
+	float pxDistance = Input.vTexcoord2.y;
+	scene = lerp(scene, diffuse, 0.73f * max(pow(fresnel,8.0f), 0.5f));
+	float ssrFresnel = lerp(0.55f, 0.80f, saturate(pow(1.0f - saturate(dot(-viewDirection, wavesFres)), 2.0f)));
+
+	float cubeWeight = waterSSRActive ? saturate(1.0f - ssrWeight * saturate(reflectionStrength)) : 1.0f;
+	float3 reflectionSSRColor = max(reflectionSSR, float3(0.0f, 0.0f, 0.0f));
 	if (ssrHitValid > 0.5f)
 	{
-		float4 reflectedLowClouds = TX_LowClouds.SampleLevel(SS_Linear, ssrHitUV, 0);
-		reflectedLowClouds = ResolveLowCloudLayer(reflectedLowClouds, reflectionSSR);
-		reflectionSSR = reflectionSSR * (1.0f - reflectedLowClouds.a) + reflectedLowClouds.rgb;
-	}
-
-	float ssrNearFade = smoothstep(100.0f, 450.0f, waterViewDistance);
-	float ssrContactFade = SmootherStep01(saturate((waterThickness - 18.0f) / 67.0f)) * shoreVisibility;
-	float ssrBaseWeight = ssrRawWeight
-		* lerp(0.45f, 1.0f, ssrNearFade)
-		* lerp(0.55f, 1.0f, ssrContactFade)
-		* ssrHitQuality;
-	float ssrWeight = ssrRawWeight * ssrNearFade * ssrContactFade * ssrHitQuality;
-
-	float3 reflectionSSRColor = max(reflectionSSR, float3(0.0f, 0.0f, 0.0f));
-	float rainFogVisibility = 1.0f;
-	if (ssrHitValid > 0.5f && ssrHitIsSky < 0.5f)
-	{
 		float3 rainAtmosphereColor = ApplyAtmosphericScatteringGround(ssrHitWorldPosition, reflectionSSRColor);
-		reflectionSSRColor = lerp(reflectionSSRColor, rainAtmosphereColor, rainAmount);
-
+		reflectionSSRColor = lerp(reflectionSSRColor, rainAtmosphereColor, saturate(AC_RainFXWeight));
+	}
+	float reflectionLuma = dot(reflectionSSRColor, float3(0.2126f, 0.7152f, 0.0722f));
+	// Preserve HDR light-source reflections; only tame extreme outliers on the dynamic layer.
+	reflectionSSRColor *= rcp(1.0f + max(0.0f, reflectionLuma - 6.0f) * 0.12f);
+	// Dynamic SSR is the only screen-space reflection layer now. The cubemap is the fallback
+	// whenever the strength is zero or the near/contact SSR masks suppress actor artifacts.
+	float waterViewDistance = length(Input.vWorldPosition - AC_WorldCameraPos);
+	float rainReflectionFog = saturate(AC_RainFXWeight) * waterMaterialAllowsRain;
+	float rainCubemapVisibility = lerp(1.0f, 0.12f, rainReflectionFog) * (1.0f - rainReflectionFog * smoothstep(5000.0f, 22000.0f, waterViewDistance));
+	scene.rgb += reflection * cubeWeight * rainCubemapVisibility * fresnel * lerp(1.0f, diffuse, 0.6f) * saturate(reflectionStrength) * shoreVisibility;
+	float ssrBlend = saturate(ssrWeight * ssrFresnel * reflectionStrength * 0.78f * lerp(0.85f, 1.10f, nightAmount));
+	float rainFogVisibility = 1.0f;
+	if (ssrHitValid > 0.5f)
+	{
 		float hitDistance = length(ssrHitWorldPosition - AC_WorldCameraPos);
-		float rainFogOcclusion = rainAmount * smoothstep(5000.0f, 22000.0f, hitDistance);
+		float rainFogOcclusion = rainReflectionFog * smoothstep(5000.0f, 22000.0f, hitDistance);
 		rainFogVisibility = 1.0f - rainFogOcclusion;
 		rainFogVisibility *= rainFogVisibility;
 	}
+	ssrBlend *= rainFogVisibility;
+	float3 color = lerp(scene, sceneClean, pow(saturate(pxDistance / 35000.0f), 4.0f));
+	color = lerp(color, sceneWet, (1-shallowDepth));
 
-	float reflectionLuma = dot(reflectionSSRColor, float3(0.2126f, 0.7152f, 0.0722f));
-	reflectionSSRColor *= rcp(1.0f + max(0.0f, reflectionLuma - 6.0f) * 0.12f);
-	float ssrConfidence = saturate(ssrWeight * rainFogVisibility * lerp(1.0f, 0.82f, rainAmount));
-	float3 reflectionColor = lerp(fallbackReflection, reflectionSSRColor, ssrConfidence);
+	color.rgb = ApplyAtmosphericScatteringGround(Input.vWorldPosition, color.rgb);
 
-	// Depth-dependent absorption keeps shallow sand visible without tinting the whole sea brown.
-	float3 clearAbsorption = float3(0.00240f, 0.00115f, 0.00062f);
-	float3 rainAbsorption = float3(0.00300f, 0.00155f, 0.00088f);
-	float3 transmittance = exp(-lerp(clearAbsorption, rainAbsorption, rainAmount) * waterThickness);
+	// Do spec lighting
+	float3 sunOrange = float3(0.6,0.3,0.1) * 2.0f;
+	float3 sunColor = lerp(sunOrange, 1.0f, AC_LightPos.y) * 5.0f;
 
-	float3 clearDayScattering = float3(0.035f, 0.120f, 0.150f);
-	float3 rainDayScattering = float3(0.040f, 0.075f, 0.082f);
-	float3 clearNightScattering = float3(0.0035f, 0.0080f, 0.0200f);
-	float3 rainNightScattering = max(AC_NightRainSkyColor * 0.30f, float3(0.0045f, 0.0060f, 0.0090f));
-	float3 dayScattering = lerp(clearDayScattering, rainDayScattering, rainAmount);
-	float3 nightScattering = lerp(clearNightScattering, rainNightScattering, rainAmount);
-	float3 scatteringColor = lerp(dayScattering, nightScattering, nightAmount);
-
-	float diffuseLuma = dot(diffuse, float3(0.2126f, 0.7152f, 0.0722f));
-	scatteringColor *= lerp(0.94f, 1.06f, saturate(diffuseLuma * 1.4f));
-	float3 waterVolume = sceneRefracted * transmittance + scatteringColor * (1.0f - transmittance);
-	waterVolume = lerp(sceneClean, waterVolume, shoreVisibility);
-
-	// A mild distance blend removes the old horizontal color band without hiding the horizon.
-	float farWaterBlend = SmootherStep01(saturate((waterViewDistance - 20000.0f) / 45000.0f)) * shoreVisibility;
-	float horizonReflectionWeight = saturate(fresnel * reflectionStrength * 0.35f);
-	float3 horizonWaterColor = lerp(scatteringColor, fallbackReflection, horizonReflectionWeight);
-	waterVolume = lerp(waterVolume, horizonWaterColor, farWaterBlend * 0.38f);
-
-	float oceanTint = saturate(WM_IsOceanWater * WM_OceanWaterTintStrength);
-	waterVolume = lerp(
-		waterVolume,
-		waterVolume * max(WM_OceanWaterTint, float3(0.0f, 0.0f, 0.0f)),
-		oceanTint);
-
-	float reflectionAmount = saturate(fresnel * reflectionStrength) * shoreVisibility;
-	float3 color = lerp(waterVolume, reflectionColor, reflectionAmount);
-
-	// Keep sun and moon glints tied to the same reflection control and weather visibility.
-	float3 sunOrange = float3(0.6f, 0.3f, 0.1f) * 2.0f;
-	float3 sunColor = lerp(sunOrange, float3(1.0f, 1.0f, 1.0f), AC_LightPos.y) * 5.0f;
-	float3 reflectVectorSmall = reflect(-viewDirection, wavesSmall);
-	float cosSpec = clamp(dot(reflectVectorSmall, -AC_LightPos.xyz), 0.0f, 1.0f);
-	float sunSpot = pow(cosSpec, 500.0f) * 0.5f;
+	float3 reflect_vecSmall = reflect(-viewDirection, normalize(distortionSmall.xzy * float3(1,10,1)));
+	float cos_spec = clamp(dot(reflect_vecSmall, -AC_LightPos.xyz * float3(1,1,1)), 0, 1);
+	float sun_spot = pow(cos_spec, 500.0f) * 0.5f;
 	float weatherLightVisibility = GetRainSkyVisibility();
 	float sunVisibility = smoothstep(-0.04f, 0.08f, AC_LightPos.y) * weatherLightVisibility;
-	sunSpot *= sunVisibility;
-
+	sun_spot *= sunVisibility;
+	// If screen-space water reflection has found opaque geometry, let that reflection win over procedural light glints.
 	float sunSpotSSRBlock = saturate(max(ssrBaseWeight, ssrHitQuality * 0.75f) * ssrHitValid * 1.85f);
-	sunSpot *= 1.0f - sunSpotSSRBlock;
-	float reflectionControl = saturate(reflectionStrength) * shoreVisibility;
-	color += sunColor * sunSpot * reflectionControl;
+	// Camera-depth rays cannot determine world-space sun visibility: foreground geometry
+	// must not cut a glint on water behind it. SSR alone masks reflected scene geometry.
+	sun_spot *= 1.0f - sunSpotSSRBlock;
+	color.rgb += sunColor * sun_spot * saturate(reflectionStrength) * shoreVisibility;
 
 	float moonVisibility = smoothstep(-0.04f, 0.08f, AC_MoonPos.y) * weatherLightVisibility;
-	float3 moonLightVector = -AC_MoonPos.xyz;
-	float3 moonRayDirection = moonLightVector / max(length(moonLightVector), 0.001f);
-	float moonCosSpec = clamp(dot(reflectVectorSmall, moonRayDirection), 0.0f, 1.0f);
-	float moonSpot = pow(moonCosSpec, 360.0f) * 0.22f * moonVisibility;
-	moonSpot *= 1.0f - sunSpotSSRBlock;
+	float3 moonLightVec = -AC_MoonPos.xyz;
+	float3 moonRayDir = moonLightVec / max(length(moonLightVec), 0.001f);
+	float moonCosSpec = clamp(dot(reflect_vecSmall, moonRayDir), 0, 1);
+	float moon_spot = pow(moonCosSpec, 360.0f) * 0.22f * moonVisibility;
+	moon_spot *= 1.0f - sunSpotSSRBlock;
 	float3 moonColor = float3(0.58f, 0.66f, 1.0f) * 1.15f;
-	color += moonColor * moonSpot * reflectionControl;
+	color.rgb += moonColor * moon_spot * saturate(reflectionStrength) * shoreVisibility;
 
-	output.color = float4(max(color, float3(0.0f, 0.0f, 0.0f)), 1.0f);
-	// Preserve the special rain-disabled mask, while normal water blends cleanly into the shore.
-	output.waterMask = lerp(0.25f * shoreVisibility, 1.0f, step(0.5f, WM_DisableRainEffects));
+	//darken / lighten water based on the day / night cycle
+	float darknessFactor = 2.0f;
+	darknessFactor -= AC_LightPos.y;
+	darknessFactor = lerp(darknessFactor, max(1.22f, darknessFactor * 0.58f), nightAmount);
+
+	// TX_Scene already contains the fully lit and atmospherically shaded scene.
+	// Blend SSR last so shallow-water coloring and water darkening cannot erase light reflections.
+	float3 finalColor = color / darknessFactor;
+	finalColor = lerp(finalColor, reflectionSSRColor, ssrBlend);
+	float oceanTint = saturate(WM_IsOceanWater * WM_OceanWaterTintStrength);
+	finalColor = lerp(finalColor, finalColor * max(WM_OceanWaterTint, float3(0.0f, 0.0f, 0.0f)), oceanTint);
+	output.color = float4(finalColor, 1);
+	// Regular water blocks wet-ground SSR (0.25), while frozen water also blocks
+	// rain particles and the remaining rain-only water response (1.0).
+	output.waterMask = lerp(0.25f, 1.0f, step(0.5f, WM_DisableRainEffects));
+	// Water and SSR reflections change without reliable object motion vectors, so feed
+	// FSR3 a moderate reactive value. Full 1.0 is too unstable on animated water.
 	output.fsr3ReactiveMask = 0.45f;
 	return output;
 }

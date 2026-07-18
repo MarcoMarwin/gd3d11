@@ -19,7 +19,7 @@ public:
     struct Description {
         int Width, Height;
         DXGI_FORMAT Format;
-        uint32_t textureFlags = 0; // D3D11_BIND_* flags
+        DXGI_USAGE textureFlags = (DXGI_USAGE)0; // Custom flags for special usage (e.g., render target, shader resource, etc.)
 
         // Comparator for finding matching textures in the pool
         bool operator==( const Description& other ) const {
@@ -39,8 +39,7 @@ private:
     };
 
     ID3D11Device* m_device;
-    // Handles keep their entry alive after Clear() removes it from the cache.
-    std::vector<std::shared_ptr<PooledTexture>> m_pool;
+    std::vector<std::unique_ptr<PooledTexture>> m_pool;
     uint64_t m_currentFrame = 0;
     const uint64_t m_maxUnusedFrames = 60; // Auto-clear threshold
 
@@ -51,33 +50,19 @@ public:
     // using TextureHandle = std::unique_ptr<RenderToTextureBuffer, std::function<void( RenderToTextureBuffer* )>>;
 
     TextureHandle Acquire( const Description& desc ) {
-        if ( !m_device || desc.Width <= 0 || desc.Height <= 0
-            || desc.Format == DXGI_FORMAT_UNKNOWN ) {
-            LogError() << "TexturePool received an invalid texture description.";
-            return TextureHandle( nullptr, []( RenderToTextureBuffer* ) {} );
-        }
-
-        std::shared_ptr<PooledTexture> found;
+        PooledTexture* found = nullptr;
 
         for ( auto& entry : m_pool ) {
             if ( !entry->InUse && entry->Desc == desc ) {
-                found = entry;
+                found = entry.get();
                 break;
             }
         }
 
         if ( !found ) {
-            auto texture = std::make_shared<RenderToTextureBuffer>(
-                m_device, desc.Width, desc.Height, desc.Format, nullptr,
-                DXGI_FORMAT_UNKNOWN, DXGI_FORMAT_UNKNOWN, 1, 1, static_cast<uint32_t>(desc.textureFlags) );
-            if ( !texture->IsValid() ) {
-                LogError() << "TexturePool failed to allocate a texture.";
-                return TextureHandle( nullptr, []( RenderToTextureBuffer* ) {} );
-            }
-
-            m_pool.push_back( std::make_shared<PooledTexture>(
-                PooledTexture{ std::move( texture ), desc, m_currentFrame, true } ) );
-            found = m_pool.back();
+            // Create new texture if none available in pool
+            m_pool.push_back( std::make_unique<PooledTexture>( PooledTexture{ std::make_shared<RenderToTextureBuffer>(m_device, desc.Width, desc.Height, desc.Format, nullptr, DXGI_FORMAT_UNKNOWN, DXGI_FORMAT_UNKNOWN, 1, 1, desc.textureFlags), desc, m_currentFrame, true } ) );
+            found = m_pool.back().get();
 #if defined(_DEBUG) || defined(PROFILE)|| defined(DEBUG_D3D11)
             static uint64_t textureCounter = 0;
             textureCounter++;
@@ -92,8 +77,7 @@ public:
         found->LastFrameUsed = m_currentFrame;
 
         // Return RAII handle with custom deleter to "return" to pool
-        RenderToTextureBuffer* texture = found->Texture.get();
-        return TextureHandle( texture, [found = std::move( found )]( RenderToTextureBuffer* ) {
+        return TextureHandle( found->Texture.get(), [found]( RenderToTextureBuffer* ) {
             found->InUse = false;
         } );
     }
@@ -108,8 +92,8 @@ public:
     }
 
     void Clear() {
-        // Active handles retain their entries until they are returned.
-        m_pool.clear();
+        // prune texture cache on resize.
+        m_pool.erase( std::remove_if( m_pool.begin(), m_pool.end(), []( const auto& entry ) { return true; } ), m_pool.end() );
     }
 
     size_t GetActiveCount() const {
@@ -149,8 +133,7 @@ private:
     };
 
     ID3D11Device* m_device;
-    // Handles keep their entry alive after Clear() removes it from the cache.
-    std::vector<std::shared_ptr<PooledDepthStencil>> m_pool;
+    std::vector<std::unique_ptr<PooledDepthStencil>> m_pool;
     uint64_t m_currentFrame = 0;
     const uint64_t m_maxUnusedFrames = 60; // Auto-clear threshold
 
@@ -158,34 +141,24 @@ public:
     DepthStencilPool( ID3D11Device* device ) : m_device( device ) {}
 
     DepthStencilHandle Acquire( const Description& desc ) {
-        if ( !m_device || desc.Width == 0 || desc.Height == 0
-            || desc.Format == DXGI_FORMAT_UNKNOWN
-            || (desc.ArraySize != 1 && desc.ArraySize != 6) ) {
-            LogError() << "DepthStencilPool received an invalid buffer description.";
-            return DepthStencilHandle( nullptr, []( RenderToDepthStencilBuffer* ) {} );
-        }
-
-        std::shared_ptr<PooledDepthStencil> found;
+        PooledDepthStencil* found = nullptr;
 
         for ( auto& entry : m_pool ) {
             if ( !entry->InUse && entry->Desc == desc ) {
-                found = entry;
+                found = entry.get();
                 break;
             }
         }
 
         if ( !found ) {
-            auto buffer = std::make_shared<RenderToDepthStencilBuffer>(
-                m_device, desc.Width, desc.Height, desc.Format, nullptr,
-                desc.DSVFormat, desc.SRVFormat, desc.ArraySize );
-            if ( !buffer->IsValid() ) {
-                LogError() << "DepthStencilPool failed to allocate a buffer.";
-                return DepthStencilHandle( nullptr, []( RenderToDepthStencilBuffer* ) {} );
-            }
-
-            m_pool.push_back( std::make_shared<PooledDepthStencil>(
-                PooledDepthStencil{ std::move( buffer ), desc, m_currentFrame, true } ) );
-            found = m_pool.back();
+            // Create new depth stencil buffer if none available in pool
+            m_pool.push_back( std::make_unique<PooledDepthStencil>( PooledDepthStencil{
+                std::make_shared<RenderToDepthStencilBuffer>( m_device, desc.Width, desc.Height, desc.Format, nullptr, desc.DSVFormat, desc.SRVFormat, desc.ArraySize ),
+                desc,
+                m_currentFrame,
+                true
+                } ) );
+            found = m_pool.back().get();
 
 #if defined(_DEBUG) || defined(PROFILE)|| defined(DEBUG_D3D11)
             static uint64_t dsCounter = 0;
@@ -207,8 +180,7 @@ public:
         found->LastFrameUsed = m_currentFrame;
 
         // Return RAII handle with custom deleter to "return" to pool
-        RenderToDepthStencilBuffer* buffer = found->Buffer.get();
-        return DepthStencilHandle( buffer, [found = std::move( found )]( RenderToDepthStencilBuffer* ) {
+        return DepthStencilHandle( found->Buffer.get(), [found]( RenderToDepthStencilBuffer* ) {
             found->InUse = false;
         } );
     }
@@ -275,7 +247,7 @@ public:
     }
 
     void Clear() {
-        // Active handles retain their entries until they are returned.
+        // prune cache on resize or level change
         m_pool.clear();
     }
 

@@ -462,6 +462,9 @@ float SampleCascadeShadowStablePCF(float4 vShadowSamplingPos, float2 projectedTe
 #endif
 }
 
+// Stable, symmetric receiver filter for animated characters. It keeps the
+// near-cascade comparison cost at 16 taps, but avoids hard Poisson-shaped
+// texel fields on faces, necks and other small animated surfaces.
 static const float g_CharacterPCFOffsets[4] = {
     -1.5f, -0.5f, 0.5f, 1.5f
 };
@@ -470,9 +473,6 @@ static const float g_CharacterPCFWeights[4] = {
     1.0f, 3.0f, 3.0f, 1.0f
 };
 
-// Stable, symmetric receiver filter for animated characters. It keeps the
-// existing 16 comparison taps but distributes them as a tent kernel, avoiding
-// the hard Poisson-shaped texel fields that are especially visible on faces.
 float SampleCascadeShadowCharacterPCF(float4 vShadowSamplingPos, float2 projectedTexCoords,
                                       int cascadeIndex, float bias, float texelSize, float softness)
 {
@@ -487,18 +487,19 @@ float SampleCascadeShadowCharacterPCF(float4 vShadowSamplingPos, float2 projecte
         for (int x = 0; x < 4; ++x)
         {
             float sampleWeight = g_CharacterPCFWeights[x] * g_CharacterPCFWeights[y];
-            float2 sampleOffset = float2(g_CharacterPCFOffsets[x], g_CharacterPCFOffsets[y]) * sampleSpacing;
-            weightedShadow += SampleShadowMapCmp(projectedTexCoords + sampleOffset, cascadeIndex,
+            float2 sampleOffset =
+                float2(g_CharacterPCFOffsets[x], g_CharacterPCFOffsets[y]) * sampleSpacing;
+            weightedShadow += SampleShadowMapCmp(
+                projectedTexCoords + sampleOffset, cascadeIndex,
                 vShadowSamplingPos.z - bias) * sampleWeight;
         }
     }
 
     return weightedShadow * (1.0f / 64.0f);
 }
-
 float SampleCascadeShadowSoft(float4 vShadowSamplingPos, float2 projectedTexCoords,
                               int cascadeIndex, float bias, float2 screenPos, float softness,
-                              float characterReceiver)
+                              float forceStablePCF)
 {
     if (projectedTexCoords.x < 0.0f || projectedTexCoords.x > 1.0f ||
         projectedTexCoords.y < 0.0f || projectedTexCoords.y > 1.0f)
@@ -506,57 +507,65 @@ float SampleCascadeShadowSoft(float4 vShadowSamplingPos, float2 projectedTexCoor
         return 1.0f;
     }
 
+    float shadow = 1.0f;
     float texelSize = 1.0f / GetCascadeShadowResolution(cascadeIndex);
     float filterRadius = texelSize * softness;
 
-    if (characterReceiver > 0.5f)
+    if (forceStablePCF > 0.5f && cascadeIndex < CSM_PCF_LIMIT)
     {
         return saturate(SampleCascadeShadowCharacterPCF(
             vShadowSamplingPos, projectedTexCoords, cascadeIndex, bias, texelSize, softness));
     }
 
-    float shadow = 1.0f;
 #if SHD_FILTER_PCSS
-    float noiseVal;
-    float2x2 rotMat = GetPoissonRotationMatrixRForCascade(screenPos, cascadeIndex, noiseVal);
-    float zReceiver = vShadowSamplingPos.z - bias;
-
-    float pcssRadius = EstimatePCSSFilterRadius(projectedTexCoords.xy, zReceiver,
-        cascadeIndex, SQ_LightSize, rotMat, texelSize, screenPos);
-    pcssRadius *= SQ_ShadowSoftness;
-
-    if (pcssRadius < 0.0f)
+    if (forceStablePCF > 0.5f)
     {
-        shadow = 1.0f;
+        shadow = SampleCascadeShadowStablePCF(
+            vShadowSamplingPos, projectedTexCoords, cascadeIndex, bias, screenPos, filterRadius);
     }
     else
     {
-        float sum = 0.0f;
-        if (cascadeIndex < CSM_PCF_LIMIT)
+        float noiseVal;
+        float2x2 rotMat = GetPoissonRotationMatrixRForCascade(screenPos, cascadeIndex, noiseVal);
+        float zReceiver = vShadowSamplingPos.z - bias;
+
+        float pcssRadius = EstimatePCSSFilterRadius(projectedTexCoords.xy, zReceiver,
+            cascadeIndex, SQ_LightSize, rotMat, texelSize, screenPos);
+        pcssRadius *= SQ_ShadowSoftness;
+
+        if (pcssRadius < 0.0f)
         {
-            float finalRadius = pcssRadius * lerp(0.85f, 1.15f, noiseVal);
-            int startIdx = GetBlueNoiseStartIndex(screenPos, cascadeIndex, 32, 11);
-            [unroll]
-            for (int i = 0; i < PCSS_FILTER_TAPS_NEAR; i++)
-            {
-                int sampleIdx = (startIdx + i * 9) & 31;
-                float2 offset = mul(rotMat, g_PoissonDisk32[sampleIdx]) * finalRadius;
-                sum += SampleShadowMapCmp(projectedTexCoords.xy + offset, cascadeIndex, zReceiver);
-            }
-            shadow = sum / (float)max(PCSS_FILTER_TAPS_NEAR, 1);
+            shadow = 1.0f;
         }
         else
         {
-            float finalRadius = pcssRadius * lerp(0.95f, 1.05f, noiseVal);
-            int startIdx = GetBlueNoiseStartIndex(screenPos, cascadeIndex, 16, 17);
-            [unroll]
-            for (int i = 0; i < PCSS_FILTER_TAPS_FAR; i++)
+            float sum = 0.0f;
+            if (cascadeIndex < CSM_PCF_LIMIT)
             {
-                int sampleIdx = (startIdx + i * 5) & 15;
-                float2 offset = mul(rotMat, g_PoissonDisk16[sampleIdx]) * finalRadius;
-                sum += SampleShadowMapCmp(projectedTexCoords.xy + offset, cascadeIndex, zReceiver);
+                float finalRadius = pcssRadius * lerp(0.85f, 1.15f, noiseVal);
+                int startIdx = GetBlueNoiseStartIndex(screenPos, cascadeIndex, 32, 11);
+                [unroll]
+                for (int i = 0; i < PCSS_FILTER_TAPS_NEAR; i++)
+                {
+                    int sampleIdx = (startIdx + i * 9) & 31;
+                    float2 offset = mul(rotMat, g_PoissonDisk32[sampleIdx]) * finalRadius;
+                    sum += SampleShadowMapCmp(projectedTexCoords.xy + offset, cascadeIndex, zReceiver);
+                }
+                shadow = sum / (float)max(PCSS_FILTER_TAPS_NEAR, 1);
             }
-            shadow = sum / (float)max(PCSS_FILTER_TAPS_FAR, 1);
+            else
+            {
+                float finalRadius = pcssRadius * lerp(0.95f, 1.05f, noiseVal);
+                int startIdx = GetBlueNoiseStartIndex(screenPos, cascadeIndex, 16, 17);
+                [unroll]
+                for (int i = 0; i < PCSS_FILTER_TAPS_FAR; i++)
+                {
+                    int sampleIdx = (startIdx + i * 5) & 15;
+                    float2 offset = mul(rotMat, g_PoissonDisk16[sampleIdx]) * finalRadius;
+                    sum += SampleShadowMapCmp(projectedTexCoords.xy + offset, cascadeIndex, zReceiver);
+                }
+                shadow = sum / (float)max(PCSS_FILTER_TAPS_FAR, 1);
+            }
         }
     }
 #elif SHD_FILTER_16TAP_PCF
@@ -623,7 +632,7 @@ float ComputeShadowValue(float2 uv, float3 wsPosition, Texture2D shadowmap, Samp
 // CSM: Shadow-Sampling with soft shadows and cascade blending
 // Uses SQ_ShadowSoftness for configurable shadow edge softness
 //--------------------------------------------------------------------------------------
-float ComputeCascadedShadowValueSoft(float3 wsPosition, float viewSpaceZ, float vertLighting, float bias, float2 screenPos, float characterReceiver)
+float ComputeCascadedShadowValueSoft(float3 wsPosition, float viewSpaceZ, float vertLighting, float bias, float2 screenPos, float forceStablePCF)
 {
     float shadow = vertLighting;
     // Apply distance-based softness scaling
@@ -652,7 +661,7 @@ float ComputeCascadedShadowValueSoft(float3 wsPosition, float viewSpaceZ, float 
     // 2. Only sample textures if a valid cascade was found
     if (selectedCascade >= 0)
     {
-        shadow = SampleCascadeShadowSoft(vShadowPos, projCoords, selectedCascade, bias, screenPos, softness, characterReceiver);
+        shadow = SampleCascadeShadowSoft(vShadowPos, projCoords, selectedCascade, bias, screenPos, softness, forceStablePCF);
 
         // 3. Check if we need to blend with the next cascade
         if (selectedCascade < NUM_CSM_CASCADES - 1 && blendFactor > 0.0f)
@@ -666,7 +675,7 @@ float ComputeCascadedShadowValueSoft(float3 wsPosition, float viewSpaceZ, float 
 
             if (nextInBounds > 0.5f)
             {
-                float shadowNext = SampleCascadeShadowSoft(nextShadowPos, nextProjCoords, selectedCascade + 1, bias, screenPos, softness, characterReceiver);
+                float shadowNext = SampleCascadeShadowSoft(nextShadowPos, nextProjCoords, selectedCascade + 1, bias, screenPos, softness, forceStablePCF);
                 shadow = lerp(shadow, shadowNext, blendFactor);
             }
         }

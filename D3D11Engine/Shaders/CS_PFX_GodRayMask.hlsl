@@ -6,7 +6,6 @@
 SamplerState SS_Linear : register( s0 );
 Texture2D TX_Texture0 : register( t0 ); // Backbuffer
 Texture2D TX_Depth : register( t1 ); // Depth
-Texture2D TX_LowClouds : register( t2 ); // Premultiplied low-cloud layer
 
 RWTexture2D<float4> OutputTexture : register( u0 );
 
@@ -25,13 +24,7 @@ void CSMain( uint3 DTid : SV_DispatchThreadID )
     float4 depth = TX_Depth.SampleLevel( SS_Linear, uv, 0 );
 
     if ( depth.r < 0.00001f ) // likely sky pixel
-    {
-        float cloudAlpha = saturate(TX_LowClouds.SampleLevel(SS_Linear, uv, 0).a);
-        float cloudTransmission = 1.0f - smoothstep(0.08f, 0.92f, cloudAlpha);
-        OutputTexture[DTid.xy] = color * cloudTransmission;
-    }
+        OutputTexture[DTid.xy] = color;
     else
-    {
         OutputTexture[DTid.xy] = float4( 0, 0, 0, 0 );
-    }
 }

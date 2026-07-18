@@ -357,9 +357,7 @@ public:
 
     /** Draws the given mesh infos as water */
     void DrawWaterSurfaces() override;
-    void DrawWaterSurfaces( ID3D11RenderTargetView* waterMaskRTV,
-                            ID3D11RenderTargetView* fsr3ReactiveMaskRTV = nullptr,
-                            ID3D11ShaderResourceView* lowCloudLayerSRV = nullptr );
+    void DrawWaterSurfaces( ID3D11RenderTargetView* waterMaskRTV, ID3D11RenderTargetView* fsr3ReactiveMaskRTV = nullptr );
 
     /** Handles an UI-Event */
     void OnUIEvent( EUIEvent uiEvent ) override;

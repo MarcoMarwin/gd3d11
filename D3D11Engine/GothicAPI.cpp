@@ -845,6 +845,7 @@ void GothicAPI::OnGameStart() {
     InitializeCriticalSection( &ResourceCriticalSection );
 
     SkyRenderer = std::make_unique<GSky>();
+    SkyRenderer->InitSky();
 
     Inventory = std::make_unique<GInventory>();
 
@@ -1384,8 +1385,10 @@ void GothicAPI::OnWorldLoaded() {
     // The removed F11 control stays at Kirides' former maximum value (10).
     RendererState.RendererSettings.VisualFXDrawRadius = VISUAL_FX_DRAW_RADIUS_FIXED;
 
-    // Reset wetness
-    if ( GSky* sky = GetSky() ) sky->ResetWeatherState();
+    // Re-seed weather transitions from the freshly loaded savegame/world.
+    if ( GSky* sky = GetSky() ) {
+        sky->ResetWeatherState();
+    }
     SceneWetness = GetRainFXWeight();
 
 #ifndef PUBLIC_RELEASE
@@ -5840,12 +5843,14 @@ XRESULT GothicAPI::SaveMenuSettings( const std::string& file ) {
     WritePrivateProfileStringA( "General", "DoFBokehRadius", float_to_string( s.DoFBokehRadius, 2 ).c_str(), ini.c_str() );
     WritePrivateProfileStringA( "General", "AllowNormalmaps", std::to_string( s.AllowNormalmaps ? TRUE : FALSE ).c_str(), ini.c_str() );
     WritePrivateProfileStringA( "General", "EnableParallaxOcclusionMapping", std::to_string( s.EnableParallaxOcclusionMapping ? TRUE : FALSE ).c_str(), ini.c_str() );
+    WritePrivateProfileStringA( "General", "EnableSSR", std::to_string( s.EnableSSR ? TRUE : FALSE ).c_str(), ini.c_str() );
     WritePrivateProfileStringA( "General", "SSRStrength", std::to_string( s.SSRStrength ).c_str(), ini.c_str() );
     WritePrivateProfileStringA( "General", "EnableContactShadows", std::to_string( s.EnableContactShadows ? TRUE : FALSE ).c_str(), ini.c_str() );
     WritePrivateProfileStringA( "General", "ContactShadowStrength", nullptr, ini.c_str() );
     WritePrivateProfileStringA( "General", "EnableScreenSpaceGI", std::to_string( s.EnableScreenSpaceGI ? TRUE : FALSE ).c_str(), ini.c_str() );
     WritePrivateProfileStringA( "General", "ScreenSpaceGIStrength", float_to_string( s.ScreenSpaceGIStrength, 2 ).c_str(), ini.c_str() );
-    // Vegetation backlight is always enabled; no user INI toggle.
+    WritePrivateProfileStringA( "General", "EnableSSS", nullptr, ini.c_str() );
+    WritePrivateProfileStringA( "General", "SSSIntensity", nullptr, ini.c_str() );
 
     /*
     * F11 draw-distance settings are saved globally in UserSettings.ini
@@ -5874,8 +5879,9 @@ XRESULT GothicAPI::SaveMenuSettings( const std::string& file ) {
     WritePrivateProfileStringA( "Detail", nullptr, nullptr, ini.c_str() );
     WritePrivateProfileStringA( "Display", "WindQuality", std::to_string( s.WindQuality ).c_str(), ini.c_str() );
     WritePrivateProfileStringA( "Display", "WindStrength", std::to_string( s.GlobalWindStrength ).c_str(), ini.c_str() );
-    // Water animation is always enabled; no user INI toggle.
-    // Interactive vegetation follows wind effects and is not persisted separately.
+    WritePrivateProfileStringA( "Display", "WaterWaveAnimation", nullptr, ini.c_str() );
+    WritePrivateProfileStringA( "Display", "HeroAffectsObjects", nullptr, ini.c_str() );
+    WritePrivateProfileStringA( "Display", "HeroAffectsObjectsStrength", nullptr, ini.c_str() );
 
     WritePrivateProfileStringA( "Shadows", "ShadowMapSize", std::to_string( s.ShadowMapSize ).c_str(), ini.c_str() );
     WritePrivateProfileStringA( "Shadows", "ShadowSoftness", std::to_string( s.ShadowSoftness ).c_str(), ini.c_str() );
@@ -5900,7 +5906,7 @@ XRESULT GothicAPI::SaveMenuSettings( const std::string& file ) {
 
     const char* hiddenDisplayKeys[] = {
         "ForceFOV", "FOVHoriz", "FOVVert", "Gamma", "Brightness", "HDR_Monitor", "UIScale",
-        "TiledLighting", "RendererMode", "HeroAffectsObjectsStrength"
+        "TiledLighting", "RendererMode"
     };
     for ( const char* key : hiddenDisplayKeys ) {
         WritePrivateProfileStringA( "Display", key, nullptr, ini.c_str() );
@@ -5980,6 +5986,7 @@ XRESULT GothicAPI::LoadMenuSettings( const std::string& file ) {
         s.DrawG1ForestPortals = ds.DrawG1ForestPortals;
         s.DrawRainThroughTransformFeedback = ds.DrawRainThroughTransformFeedback;
         s.SSRStrength = std::clamp( GetPrivateProfileFloatA( "General", "SSRStrength", ds.SSRStrength, ini ), 0.0f, 2.0f );
+        s.EnableSSR = GetPrivateProfileBoolA( "General", "EnableSSR", s.SSRStrength > 0.0f, ini );
         s.WaterCubemapStrength = ds.WaterCubemapStrength;
         s.EnableContactShadows = GetPrivateProfileBoolA( "General", "EnableContactShadows", ds.EnableContactShadows, ini );
         s.EnableScreenSpaceGI = GetPrivateProfileBoolA( "General", "EnableScreenSpaceGI", ds.EnableScreenSpaceGI, ini );
@@ -5987,7 +5994,7 @@ XRESULT GothicAPI::LoadMenuSettings( const std::string& file ) {
         s.EnableParticleLighting = ds.EnableParticleLighting;
         s.ParticleLightingStrength = ds.ParticleLightingStrength;
         s.EnableSSS = true;
-        s.SSSIntensity = s.EnableSSS ? ds.SSSIntensity : 0.0f;
+        s.SSSIntensity = 1.0f;
 
         /*
         * F11 draw-distance settings are loaded globally from UserSettings.ini
@@ -6084,8 +6091,9 @@ XRESULT GothicAPI::LoadMenuSettings( const std::string& file ) {
         s.WindQuality = GetPrivateProfileIntA( "Display", "WindQuality", 0, ini.c_str() );
         s.GlobalWindStrength = std::clamp( GetPrivateProfileFloatA( "Display", "WindStrength", ds.GlobalWindStrength, ini ), 0.0f, 2.0f );
         s.EnableWaterAnimation = true;
-        s.HeroAffectsObjects = s.WindQuality != GothicRendererSettings::EWindQuality::WIND_QUALITY_NONE;
-        s.HeroAffectsObjectsStrength = s.HeroAffectsObjects ? ds.HeroAffectsObjectsStrength : 0.0f;
+        s.HeroAffectsObjects =
+            s.WindQuality != GothicRendererSettings::EWindQuality::WIND_QUALITY_NONE;
+        s.HeroAffectsObjectsStrength = s.HeroAffectsObjects ? 1.0f : 0.0f;
         s.DynamicCloudDensity = ds.DynamicCloudDensity;
         s.DynamicCloudScale = ds.DynamicCloudScale;
         s.DynamicCloudHeight = ds.DynamicCloudHeight;
@@ -6115,8 +6123,8 @@ XRESULT GothicAPI::LoadMenuSettings( const std::string& file ) {
         if ( !s.EnableDoF ) s.DoFBokehRadius = 0.0f;
         if ( !s.EnableSSR ) s.SSRStrength = 0.0f;
         if ( !s.EnableScreenSpaceGI ) s.ScreenSpaceGIStrength = 0.0f;
-        s.SSSIntensity = s.EnableSSS ? ds.SSSIntensity : 0.0f;
-        s.HeroAffectsObjectsStrength = s.HeroAffectsObjects ? ds.HeroAffectsObjectsStrength : 0.0f;
+        s.SSSIntensity = 1.0f;
+        s.HeroAffectsObjectsStrength = s.HeroAffectsObjects ? 1.0f : 0.0f;
         if ( s.WindQuality == GothicRendererSettings::EWindQuality::WIND_QUALITY_NONE ) s.GlobalWindStrength = 0.0f;
         if ( s.AoMode == AOMode::AO_NONE ) s.AOStrength = 0.0f;
         s.XegtaoSettings = ds.XegtaoSettings;
@@ -6216,8 +6224,12 @@ XRESULT GothicAPI::LoadMenuSettings( const std::string& file ) {
     s.WorldAOStrength = ds.WorldAOStrength;
     s.HDR_Monitor = ds.HDR_Monitor;
     s.GothicUIScale = ds.GothicUIScale;
-    s.SSSIntensity = s.EnableSSS ? ds.SSSIntensity : 0.0f;
-    s.HeroAffectsObjectsStrength = s.HeroAffectsObjects ? ds.HeroAffectsObjectsStrength : 0.0f;
+    s.EnableWaterAnimation = true;
+    s.EnableSSS = true;
+    s.SSSIntensity = 1.0f;
+    s.HeroAffectsObjects =
+        s.WindQuality != GothicRendererSettings::EWindQuality::WIND_QUALITY_NONE;
+    s.HeroAffectsObjectsStrength = s.HeroAffectsObjects ? 1.0f : 0.0f;
     s.NightRainMidColor = ds.NightRainMidColor;
     s.NightRainFarColor = ds.NightRainFarColor;
     s.NightRainSkyColor = ds.NightRainSkyColor;
@@ -6293,20 +6305,9 @@ void GothicAPI::AddStagingTexture( UINT mip, ID3D11Texture2D* stagingTexture, ID
 
 /** Adds a mip map generation deferred command */
 void GothicAPI::AddMipMapGeneration( D3D11Texture* texture ) {
-    if ( !texture ) return;
-    EnterResourceCriticalSection();
-    if ( std::find( FrameMipMapGenerations.begin(),
-            FrameMipMapGenerations.end(), texture ) == FrameMipMapGenerations.end() ) {
-        FrameMipMapGenerations.push_back( texture );
-    }
-    LeaveResourceCriticalSection();
-}
-
-void GothicAPI::RemoveMipMapGeneration( D3D11Texture* texture ) {
-    if ( !texture ) return;
-    EnterResourceCriticalSection();
-    FrameMipMapGenerations.remove( texture );
-    LeaveResourceCriticalSection();
+    Engine::GAPI->EnterResourceCriticalSection();
+    FrameMipMapGenerations.push_back( texture );
+    Engine::GAPI->LeaveResourceCriticalSection();
 }
 
 /** Adds a texture to the list of the loaded textures for this frame */
@@ -6735,7 +6736,7 @@ bool GothicAPI::IsGermanMenuLanguage() {
 
 /** Prints information about the mod to the screen for a couple of seconds */
 void GothicAPI::PrintModInfo() {
-    const char germanPrompt[] = "Dr\xFC" "cke F11 f\xFC" "r Grafikeinstellungen";
+    const char* germanPrompt = "Dr\xFC" "cke F11 f\xFC" "r Grafikeinstellungen";
     PrintMessageTimed( INT2( 5, 5 ), IsGermanMenuLanguage()
         ? germanPrompt
         : "Press F11 for graphics settings", 8000.0f );
@@ -6743,25 +6744,27 @@ void GothicAPI::PrintModInfo() {
 
 /** Returns the current weight of the rain-fx. The bigger value of ours and gothics is returned. */
 float GothicAPI::GetRainFXWeight() {
-    float myRainFxWeight = RendererState.RendererSettings.RainSceneWettness;
-    float gRainFxWeight = 0.0f;
+    auto sanitizeWeight = []( float value ) {
+        return std::isfinite( value ) ? std::clamp( value, 0.0f, 1.0f ) : 0.0f;
+    };
 
-    if ( oCGame* ogame = oCGame::GetGame() ) {
-        if ( zCWorld* world = ogame->_zCSession_world ) {
+    const float rendererRainWeight =
+        sanitizeWeight( RendererState.RendererSettings.RainSceneWettness );
+    float gothicRainWeight = 0.0f;
+
+    if ( oCGame* game = oCGame::GetGame() ) {
+        if ( zCWorld* world = game->_zCSession_world ) {
             if ( zCSkyController_Outdoor* skyController = world->GetSkyControllerOutdoor() ) {
-                if ( skyController->GetWeatherType() == zTWeather::zTWEATHER_RAIN
-                    || skyController->GetWeatherType() == zTWeather::zTWEATHER_SNOW ) {
-                    gRainFxWeight = skyController->GetRainFXWeight();
+                const zTWeather weather = skyController->GetWeatherType();
+                if ( weather == zTWeather::zTWEATHER_RAIN
+                    || weather == zTWeather::zTWEATHER_SNOW ) {
+                    gothicRainWeight = sanitizeWeight( skyController->GetRainFXWeight() / 0.85f );
                 }
             }
         }
     }
 
-    // This doesn't seem to go as high as 1 or just very slowly. Scale it so it does go up quicker.
-    gRainFxWeight = std::min( gRainFxWeight / 0.85f, 1.0f );
-
-    // Return the higher of the two, so we get the chance to overwrite it
-    return std::max( myRainFxWeight, gRainFxWeight );
+    return (std::max)(rendererRainWeight, gothicRainWeight);
 }
 
 /** Returns the wetness of the scene. Lasts longer than RainFXWeight */

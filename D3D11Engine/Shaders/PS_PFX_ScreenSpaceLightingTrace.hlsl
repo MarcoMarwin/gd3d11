@@ -88,7 +88,7 @@ float ComputeContact(float2 uv, float depth)
     if (IsAlphaTestedMaterial(materialInfo) > 0.5f) return 0.0f;
 
     float materialClass = materialInfo.r;
-    if (materialClass < -0.5f && materialClass > -2.0f)
+    if (materialClass < -0.5f && materialClass >= -2.0f)
     {
         // NPC depth remains available to TraceRay as an occluder, but NPC
         // surfaces do not receive the screen-space contact-shadow term.

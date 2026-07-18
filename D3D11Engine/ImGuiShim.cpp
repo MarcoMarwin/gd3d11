@@ -785,10 +785,20 @@ namespace
         s.SharpenFactor = UsesTemporalSharpeningBoost( s ) ? 1.0f : 0.2f;
     }
 }
+namespace {
+    bool IsWindEffectsControlVisible() {
+#ifdef BUILD_GOTHIC_2_6_fix
+        return true;
+#elif defined(BUILD_GOTHIC_1_08k) && !defined(BUILD_1_12F)
+        return haveWindAnimations;
+#else
+        return false;
+#endif
+    }
+}
 struct GraphicsPresetComparable {
     int textureMaxSize;
     int ShadowMapSize;
-    int PointlightShadowMapSize;
     float ShadowSoftness;
     int AoMode;
     bool EnableContactShadows;
@@ -812,14 +822,12 @@ GraphicsPresetComparable MakeGraphicsPresetComparable(
     return {
         s.textureMaxSize,
         NormalizeShadowMapSize( s.ShadowMapSize ),
-        NormalizePointlightShadowMapSize(
-            s.PointlightShadowMapSize ),
         s.ShadowSoftness,
         static_cast<int>(s.AoMode),
         s.EnableContactShadows,
         s.EnableScreenSpaceGI,
         s.EnableDoF,
-        s.WindQuality,
+        IsWindEffectsControlVisible() ? s.WindQuality : 0,
         s.EnableSSR,
         s.EnableGodRays,
         ObjectDrawDistanceMetersToUi(
@@ -830,7 +838,7 @@ GraphicsPresetComparable MakeGraphicsPresetComparable(
         s.DoFBokehRadius,
         s.GodRayStrength,
         s.SSRStrength,
-        s.GlobalWindStrength,
+        IsWindEffectsControlVisible() ? s.GlobalWindStrength : 0.0f,
     };
 }
 
@@ -839,7 +847,6 @@ bool GraphicsPresetComparableEqual(
     const GraphicsPresetComparable& b ) {
     return a.textureMaxSize == b.textureMaxSize
         && a.ShadowMapSize == b.ShadowMapSize
-        && a.PointlightShadowMapSize == b.PointlightShadowMapSize
         && a.ShadowSoftness == b.ShadowSoftness
         && a.AoMode == b.AoMode
         && a.EnableContactShadows == b.EnableContactShadows
@@ -866,8 +873,6 @@ void ApplyGraphicsPresets( GothicRendererSettings& s, bool applyRuntimeUpdates =
     }
 
     // Presets only own the quality controls displayed below the menu separator.
-    s.EnableShadows = true;
-    s.EnablePointlightShadows = GothicRendererSettings::PLS_UPDATE_DYNAMIC;
     s.EnableSSR = true;
     s.EnableGodRays = true;
 
@@ -877,7 +882,7 @@ void ApplyGraphicsPresets( GothicRendererSettings& s, bool applyRuntimeUpdates =
     s.GodRayStrength = 1.0f;
     s.SSRStrength = 1.0f;
     s.DoFBokehRadius = 3.5f;
-    s.GlobalWindStrength = 1.0f;
+    if ( IsWindEffectsControlVisible() ) s.GlobalWindStrength = 1.0f;
     s.ShadowSoftness = 1.0f;
 
     switch ( preset ) {
@@ -887,7 +892,7 @@ void ApplyGraphicsPresets( GothicRendererSettings& s, bool applyRuntimeUpdates =
         s.EnableContactShadows = false;
         s.EnableScreenSpaceGI = false;
         s.EnableDoF = false;
-        s.WindQuality = GothicRendererSettings::EWindQuality::WIND_QUALITY_ADVANCED;
+        if ( IsWindEffectsControlVisible() ) s.WindQuality = GothicRendererSettings::EWindQuality::WIND_QUALITY_ADVANCED;
         s.OutdoorSmallVobDrawRadius = ObjectDrawDistanceUiToMeters( 2 );
         s.SectionDrawRadius = 3;
         s.textureMaxSize = static_cast<int>(TX_QUALITY::High);
@@ -898,7 +903,7 @@ void ApplyGraphicsPresets( GothicRendererSettings& s, bool applyRuntimeUpdates =
         s.EnableContactShadows = true;
         s.EnableScreenSpaceGI = false;
         s.EnableDoF = true;
-        s.WindQuality = GothicRendererSettings::EWindQuality::WIND_QUALITY_ADVANCED;
+        if ( IsWindEffectsControlVisible() ) s.WindQuality = GothicRendererSettings::EWindQuality::WIND_QUALITY_ADVANCED;
         s.OutdoorSmallVobDrawRadius = ObjectDrawDistanceUiToMeters( 4 );
         s.SectionDrawRadius = 4;
         s.textureMaxSize = static_cast<int>(TX_QUALITY::MAX);
@@ -909,7 +914,7 @@ void ApplyGraphicsPresets( GothicRendererSettings& s, bool applyRuntimeUpdates =
         s.EnableContactShadows = true;
         s.EnableScreenSpaceGI = false;
         s.EnableDoF = true;
-        s.WindQuality = GothicRendererSettings::EWindQuality::WIND_QUALITY_ADVANCED;
+        if ( IsWindEffectsControlVisible() ) s.WindQuality = GothicRendererSettings::EWindQuality::WIND_QUALITY_ADVANCED;
         s.OutdoorSmallVobDrawRadius = ObjectDrawDistanceUiToMeters( 6 );
         s.SectionDrawRadius = 5;
         s.textureMaxSize = static_cast<int>(TX_QUALITY::MAX);
@@ -920,7 +925,7 @@ void ApplyGraphicsPresets( GothicRendererSettings& s, bool applyRuntimeUpdates =
         s.EnableContactShadows = true;
         s.EnableScreenSpaceGI = true;
         s.EnableDoF = true;
-        s.WindQuality = GothicRendererSettings::EWindQuality::WIND_QUALITY_ADVANCED;
+        if ( IsWindEffectsControlVisible() ) s.WindQuality = GothicRendererSettings::EWindQuality::WIND_QUALITY_ADVANCED;
         s.OutdoorSmallVobDrawRadius = ObjectDrawDistanceUiToMeters( 8 );
         s.SectionDrawRadius = 6;
         s.textureMaxSize = static_cast<int>(TX_QUALITY::MAX);
@@ -934,13 +939,15 @@ void ApplyGraphicsPresets( GothicRendererSettings& s, bool applyRuntimeUpdates =
     if ( !s.EnableGodRays ) s.GodRayStrength = 0.0f;
     if ( !s.EnableSSR ) s.SSRStrength = 0.0f;
     if ( !s.EnableDoF ) s.DoFBokehRadius = 0.0f;
-    if ( s.WindQuality == GothicRendererSettings::EWindQuality::WIND_QUALITY_NONE ) s.GlobalWindStrength = 0.0f;
+    if ( IsWindEffectsControlVisible() && s.WindQuality == GothicRendererSettings::EWindQuality::WIND_QUALITY_NONE ) s.GlobalWindStrength = 0.0f;
 
     s.ShadowMapSize = NormalizeShadowMapSize( s.ShadowMapSize );
-    s.PointlightShadowMapSize = PointlightShadowSizeForWorldShadowSize( s.ShadowMapSize );
 
-    if (FeatureLevel10Compatibility) {
-        ApplyFeatureLevel10Downgrades(s);
+    if ( FeatureLevel10Compatibility ) {
+        // Preset dependency stays inside the visible AO control; display/AA settings
+        // are handled by the normal hardware compatibility path outside the preset.
+        s.AoMode = AOMode::AO_NONE;
+        s.AOStrength = 0.0f;
     }
 
     if ( applyRuntimeUpdates ) {
@@ -1001,6 +1008,13 @@ namespace
         s.EnablePointlightShadows = GothicRendererSettings::EPointLightShadowMode::PLS_UPDATE_DYNAMIC;
         s.ShadowMapSize = NormalizeShadowMapSize( s.ShadowMapSize );
         s.PointlightShadowMapSize = NormalizePointlightShadowMapSize( s.PointlightShadowMapSize );
+        s.EnableWaterAnimation = true;
+        s.EnableSSS = true;
+        s.SSSIntensity = 1.0f;
+        const bool windEffectsEnabled =
+            s.WindQuality != GothicRendererSettings::EWindQuality::WIND_QUALITY_NONE;
+        s.HeroAffectsObjects = windEffectsEnabled;
+        s.HeroAffectsObjectsStrength = windEffectsEnabled ? 1.0f : 0.0f;
         s.HDRToneMapStrength = std::clamp( s.HDRToneMapStrength, 0.0f, 2.0f );
         // Disabled coupled controls must always display their true zero effect state.
         if ( !s.EnableHDR ) s.HDRToneMapStrength = 0.0f;
@@ -1008,14 +1022,9 @@ namespace
         if ( !s.EnableScreenSpaceGI ) s.ScreenSpaceGIStrength = 0.0f;
         if ( !s.EnableGodRays ) s.GodRayStrength = 0.0f;
         if ( !s.EnableSSR ) s.SSRStrength = 0.0f;
-        s.SSSIntensity = s.EnableSSS ? 1.0f : 0.0f;
+
         if ( !s.EnableDoF ) s.DoFBokehRadius = 0.0f;
         if ( s.WindQuality == GothicRendererSettings::EWindQuality::WIND_QUALITY_NONE ) s.GlobalWindStrength = 0.0f;
-        s.EnableSSS = true;
-        s.SSSIntensity = 1.0f;
-        s.EnableWaterAnimation = true;
-        s.HeroAffectsObjects = s.WindQuality != GothicRendererSettings::EWindQuality::WIND_QUALITY_NONE;
-        s.HeroAffectsObjectsStrength = s.HeroAffectsObjects ? 1.0f : 0.0f;
         s.OutdoorSmallVobDrawRadius = ObjectDrawDistanceUiToMeters( ObjectDrawDistanceMetersToUi( s.OutdoorSmallVobDrawRadius ) );
         s.ForceFOV = false;
         s.FOVHoriz = 100.0f;

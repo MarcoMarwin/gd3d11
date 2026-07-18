@@ -53,8 +53,6 @@ public:
     /** Returns the shader resource view */
     const Microsoft::WRL::ComPtr<ID3D11ShaderResourceView>& GetShaderResourceView() { return ShaderResourceView; }
 
-    bool IsValid() const { return Texture.Get() != nullptr && ShaderResourceView.Get() != nullptr; }
-
     /** Creates a thumbnail for this */
     XRESULT CreateThumbnail();
 
@@ -71,14 +69,14 @@ public:
 
 private:
     /** The ID of this texture */
-    UINT16 ID = 0;
+    UINT16 ID;
 
     /** D3D11 objects */
     Microsoft::WRL::ComPtr<ID3D11Texture2D> Texture;
     Microsoft::WRL::ComPtr<ID3D11ShaderResourceView> ShaderResourceView;
-    DXGI_FORMAT TextureFormat = DXGI_FORMAT_UNKNOWN;
-    INT2 TextureSize{};
-    int MipMapCount = 0;
+    DXGI_FORMAT TextureFormat;
+    INT2 TextureSize;
+    int MipMapCount;
 
     /** Thumbnail */
     Microsoft::WRL::ComPtr<ID3D11Texture2D> Thumbnail;
