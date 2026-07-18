@@ -372,7 +372,8 @@ bool D3D11ForwardPlusRenderer::BindShaderForTexture(
     auto newShader = activePS;
     const bool normalmapsEnabled = Engine::GAPI->GetRendererState().RendererSettings.AllowNormalmaps;
     const bool hasNormalmap = normalmapsEnabled && texture->GetSurface()->GetNormalmap() != nullptr;
-    const bool useWetNormalFallback = allowWetNormalFallback && !hasNormalmap && Engine::GAPI->GetSceneWetness() > 1e-6f;
+    static_cast<void>( allowWetNormalFallback );
+    const bool useWetNormalFallback = false;
     const bool useNormalmapShader = hasNormalmap || useWetNormalFallback;
     const bool hasFxMap = hasNormalmap && texture->GetSurface()->GetFxMap();
 

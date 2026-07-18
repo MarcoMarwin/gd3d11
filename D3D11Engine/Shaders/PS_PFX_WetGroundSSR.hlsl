@@ -31,6 +31,7 @@ Texture2D TX_Normals : register(t2);
 Texture2D TX_RainShadow : register(t3);
 Texture2D TX_Distortion : register(t4);
 Texture2D TX_WaterMask : register(t5);
+Texture2D TX_Specular : register(t6);
 
 struct PS_INPUT
 {
@@ -89,13 +90,14 @@ float DecodeWetSSRBlock(float encodedMask)
     return smoothstep(0.015f, 0.10f, transparencyCoverage);
 }
 
-float2 CalculateRainRipples(float2 wetUV, float time)
+float CalculateRainSparkle(float2 screenUV, float2 wetUV, float time)
 {
-    float2 rippleA = TX_Distortion.SampleLevel(SS_Linear, wetUV * 2.70f + time * float2(0.0705f, -0.0465f), 0).xy * 2.0f - 1.0f;
-    float2 rippleB = TX_Distortion.SampleLevel(SS_Linear, wetUV * 5.10f + time * float2(-0.0585f, 0.0780f), 0).yx * 2.0f - 1.0f;
-    float waveA = sin((rippleA.x + rippleA.y + time * 2.55f) * 6.2831853f);
-    float waveB = sin((rippleB.x - rippleB.y - time * 1.05f) * 6.2831853f);
-    return rippleA * waveA * 0.55f + rippleB * waveB * 0.35f;
+    float frame = floor(time * 22.0f);
+    float noiseA = TX_Distortion.SampleLevel(SS_Linear, screenUV * 145.0f + frame * float2(0.071f, 0.113f), 0).x;
+    float noiseB = TX_Distortion.SampleLevel(SS_Linear, wetUV * 36.0f + frame * float2(-0.037f, 0.053f), 0).y;
+    float grains = smoothstep(0.68f, 0.96f, noiseA * 0.65f + noiseB * 0.35f);
+    float breakup = TX_Distortion.SampleLevel(SS_Linear, screenUV * 310.0f + frame * float2(0.019f, -0.029f), 0).z;
+    return grains * lerp(0.55f, 1.0f, breakup);
 }
 
 float4 PSMain(PS_INPUT input) : SV_TARGET
@@ -120,20 +122,24 @@ float4 PSMain(PS_INPUT input) : SV_TARGET
     if (upwardMask <= 0.01f)
         return float4(sceneColor, 1.0f);
 
+    float2 materialSpecular = TX_Specular.SampleLevel(SS_Linear, uv, 0).xy;
+    float materialWetEligibility = smoothstep(0.12f, 0.30f, materialSpecular.x) * smoothstep(10.0f, 45.0f, materialSpecular.y);
+    if (materialWetEligibility <= 0.01f)
+        return float4(sceneColor, 1.0f);
+
     float rainExposure = GetRainExposure(wsPosition);
-    float wetMask = upwardMask * rainExposure * saturate(WG_Wetness) * wetSSRVisibility;
+    float wetMask = upwardMask * rainExposure * saturate(WG_Wetness) * wetSSRVisibility * materialWetEligibility;
     if (wetMask <= 0.01f)
         return float4(sceneColor, 1.0f);
 
     float2 wetUV = wsPosition.xz / 1100.0f;
-    float2 distortion = TX_Distortion.SampleLevel(SS_Linear, wetUV + WG_Time * float2(0.0065f, -0.0045f), 0).xy * 2.0f - 1.0f;
-    distortion += (TX_Distortion.SampleLevel(SS_Linear, wetUV * 0.63f + WG_Time * float2(-0.0035f, 0.0055f), 0).xy * 2.0f - 1.0f) * 0.5f;
+    float2 distortion = TX_Distortion.SampleLevel(SS_Linear, wetUV, 0).xy * 2.0f - 1.0f;
+    distortion += (TX_Distortion.SampleLevel(SS_Linear, wetUV * 0.63f + float2(0.137f, 0.421f), 0).xy * 2.0f - 1.0f) * 0.5f;
     float rainRippleWeight = wetMask * saturate(WG_RainFXWeight) * smoothstep(0.05f, 0.45f, WG_Wetness);
-    float2 rippleDistortion = CalculateRainRipples(wetUV, WG_Time) * rainRippleWeight;
-    // Ground reflections should drift mainly with the rain direction, not sweep sideways.
-    float2 softenedRippleDistortion = float2(rippleDistortion.x * 0.12f, rippleDistortion.y);
-    float2 combinedDistortion = float2(distortion.x * 0.30f, distortion.y) + softenedRippleDistortion * 1.35f;
-    float3 wetNormal = normalize(wsNormal + float3(combinedDistortion.x, 0.0f, combinedDistortion.y) * 0.10f);
+    float rainSparkle = CalculateRainSparkle(uv, wetUV, WG_Time) * rainRippleWeight;
+    // Keep reflected geometry still. Rain adds only fine temporal grain, not moving UV/normal waves.
+    float2 combinedDistortion = distortion * 0.12f;
+    float3 wetNormal = normalize(wsNormal + float3(combinedDistortion.x, 0.0f, combinedDistortion.y) * 0.045f);
 
     float3 viewRay = normalize(wsPosition - WG_CameraPosition);
     float3 rayDirection = normalize(reflect(viewRay, wetNormal));
@@ -178,8 +184,9 @@ float4 PSMain(PS_INPUT input) : SV_TARGET
     if (hitWeight <= 0.0f)
         return float4(sceneColor, 1.0f);
 
-    float2 reflectedUV = saturate(hitUV + float2(rippleDistortion.x * 0.0015f, rippleDistortion.y * 0.012f));
+    float2 reflectedUV = saturate(hitUV);
     float3 reflectedColor = SampleRoughReflection(reflectedUV, combinedDistortion);
+    reflectedColor *= lerp(1.0f, lerp(0.90f, 1.10f, rainSparkle), saturate(WG_RainFXWeight) * 0.38f);
     float reflectionLuma = dot(reflectedColor, float3(0.2126f, 0.7152f, 0.0722f));
     reflectedColor *= rcp(1.0f + max(0.0f, reflectionLuma - 1.0f) * 0.7f);
 

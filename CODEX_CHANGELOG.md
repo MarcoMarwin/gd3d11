@@ -576,3 +576,14 @@ Kurze, append-only Dokumentation der von Codex gepushten Renderer-Builds.
 - Korrekturpush: Regenwasser bei Tag/Nacht wurde grauer/blauer abgestimmt, LowCloud-Baumkonturen und der LowCloud-Horizont-Fill wurden nachgezogen, und LowClouds maskieren Godrays bei tief stehender Sonne staerker.
 - Korrekturpush: der Resize-Pfad selbst bleibt unveraendert; Texture-Pool-Clear entfernt keine aktiven Targets mehr, um den R6025-Absturz beim Aufloesungswechsel zu vermeiden.
 - Korrekturpush: `D3D11PFX_GodRays.cpp` verwendet fuer die Atmosphere-CB-Abfragen wieder einen nicht-const `GSky`-Pointer, damit `Release_G1_AVX` nach dem Godray-LowSun-Boost kompiliert.
+
+## Build 139 (Wasserreflektionen, Regen-/Cloud-Stabilisierung und Materialdaten)
+
+- Wasser: `NW_WATER_LAKE01` bleibt im Ocean-Wasserpfad; Wasserreflektionen und kameranahe Objekt-/NPC-Kontakte werden stabilisiert, ohne auf den alten Legacy-Wasserpfad zurueckzugehen.
+- Wasser/Regen/Nacht: Meerwasser wird bei Regen staerker an den grauen beziehungsweise blau-dunklen Wetter-/Nachtschleier gebunden; der Atmosphere-Unterhorizont wird tiefer gehalten, damit Sky-Farben nicht zu frueh orange/schwarz durch das Wasser laufen.
+- Wasserfaelle: Wasserfall-Foam wird aus Distanz dauerhaft angefordert, damit Wasserfalltexturen nicht erst nah an der Kamera erscheinen.
+- Regenhimmel/Clouds: der Sonnenspot wird bei Regen komplett ueber `AC_SunVisibility` ausgeblendet; dynamische Wolken bleiben optisch erhalten, werden nachts aber weich vom Horizont angehoben, und diskrete Regen-Cloud-Sample-Spruenge wurden entfernt.
+- Rain Ground SSR: Bodenreflektionen nutzen die GBuffer-Specular-Werte als Materialfilter; bewegtes Wabern wurde entfernt und durch feines Regen-Krizzeln ersetzt.
+- Materialien: `system\GD3D11\textures\materials.json` wurde als bereinigte Fallback-Datenbank eingebaut; Wasser, Foam, Alpha/Vegetation und IceDragon-Schnee erzeugen kein Rain-Ground-SSR, und Materialwerte werden im Loader gekappt.
+- Normal-/Displacementmaps: echte Normalmaps werden nur genutzt, wenn das Material sie erlaubt; der alte Wet-Distortion-Normalfallback ist abgeschaltet, `displacementFactor=0` bleibt wirklich 0, und Displacementmaps werden bei 0 nicht geladen/gebunden.
+- Pruefung: AGENTS-Regeln gelesen; Buildnummer aus outputs ermittelt; Materialien-JSON geparst und auf Wertebereiche, Keys, IceDragon-/Wasser-SSR-Treffer geprueft; Material-/Normal-/POM-Bindings, Wet-Ground-SSR-Bindings, Shader-Escape-Artefakte und git diff --check statisch kontrolliert. Kein vollstaendiger lokaler C++-/Shader-Build.

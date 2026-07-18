@@ -224,10 +224,29 @@ namespace {
             || hasNameToken( "nw_city_oillamp_01" );
     }
 
+    float ClampMaterialScalar( float value, float fallback, float minValue, float maxValue ) {
+        if ( !std::isfinite( value ) ) {
+            return fallback;
+        }
+        if ( value < minValue ) {
+            return minValue;
+        }
+        if ( value > maxValue ) {
+            return maxValue;
+        }
+        return value;
+    }
+
     void ApplyMaterialCompatibility( MaterialInfo::Buffer& buffer, int version ) {
         if ( version < 2 && buffer.DisplacementFactor == 0.0f ) {
             buffer.DisplacementFactor = 0.7f;
         }
+
+        MaterialInfo defaults;
+        buffer.SpecularIntensity = ClampMaterialScalar( buffer.SpecularIntensity, defaults.buffer.SpecularIntensity, 0.0f, 1.0f );
+        buffer.SpecularPower = ClampMaterialScalar( buffer.SpecularPower, defaults.buffer.SpecularPower, 1.0f, 256.0f );
+        buffer.NormalmapStrength = ClampMaterialScalar( buffer.NormalmapStrength, defaults.buffer.NormalmapStrength, 0.0f, 3.0f );
+        buffer.DisplacementFactor = ClampMaterialScalar( buffer.DisplacementFactor, defaults.buffer.DisplacementFactor, 0.0f, 4.0f );
         buffer.Color = float4( 1, 1, 1, 1 );
     }
 

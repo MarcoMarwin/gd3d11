@@ -123,6 +123,12 @@ void MyDirectDrawSurface7::LoadAdditionalResources( zCTexture* ownedTexture ) {
         return;
     }
 
+    MaterialInfo* materialInfo = Engine::GAPI->GetMaterialInfoFrom( ownedTexture, TextureName );
+    if ( materialInfo && materialInfo->buffer.NormalmapStrength <= 0.0001f ) {
+        return;
+    }
+    const bool allowDisplacementMap = !materialInfo || materialInfo->buffer.DisplacementFactor > 0.0001f;
+
     D3D11Texture* fxMapTexture = nullptr;
     D3D11Texture* nrmmapTexture = nullptr;
     D3D11Texture* displacementTexture = nullptr;
@@ -234,7 +240,7 @@ void MyDirectDrawSurface7::LoadAdditionalResources( zCTexture* ownedTexture ) {
         }
     }
 
-    if ( nrmmapTexture ) {
+    if ( nrmmapTexture && allowDisplacementMap ) {
         j = 0;
         replacementsFolder.clear();
         replacementsFolder.append("system\\GD3D11\\textures\\replacements\\Displacementmaps_").append(std::to_string(j));

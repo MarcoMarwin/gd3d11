@@ -65,7 +65,6 @@
 
 namespace wrl = Microsoft::WRL;
 
-const float DEFAULT_NORMALMAP_STRENGTH = 0.10f;
 const XMFLOAT4 UNDERWATER_COLOR_MOD = XMFLOAT4( 0.5f, 0.7f, 1.0f, 1.0f );
 
 static const GUID IID_IDXGIVkInteropAdapter = { 0x3A6D8F2C, 0xB0E8, 0x4AB4, { 0xB4, 0xDC, 0x4F, 0xD2, 0x48, 0x91, 0xBF, 0xA5 } };
@@ -117,9 +116,26 @@ static void UpdateCharacterInteractionPositions( VS_ExConstantBuffer_Wind& windB
         &windBuff.interactionPositions[1] );
 }
 
-static ID3D11ShaderResourceView* GetParallaxDisplacementSRV( MyDirectDrawSurface7* surface ) {
+static bool MaterialAllowsNormalmap( const MaterialInfo* info ) {
+    return !info || info->buffer.NormalmapStrength > 0.0001f;
+}
+
+static bool MaterialAllowsDisplacement( const MaterialInfo* info ) {
+    return !info || info->buffer.DisplacementFactor > 0.0001f;
+}
+
+static ID3D11ShaderResourceView* GetMaterialNormalmapSRV( MyDirectDrawSurface7* surface, const MaterialInfo* info ) {
+    const auto& settings = Engine::GAPI->GetRendererState().RendererSettings;
+    if ( !surface || !settings.AllowNormalmaps || !MaterialAllowsNormalmap( info ) || !surface->GetNormalmap() ) {
+        return nullptr;
+    }
+    return surface->GetNormalmap()->GetShaderResourceView().Get();
+}
+
+static ID3D11ShaderResourceView* GetParallaxDisplacementSRV( MyDirectDrawSurface7* surface, const MaterialInfo* info ) {
     const auto& settings = Engine::GAPI->GetRendererState().RendererSettings;
     if ( !surface || !settings.AllowNormalmaps || !settings.EnableParallaxOcclusionMapping
+        || !MaterialAllowsNormalmap( info ) || !MaterialAllowsDisplacement( info )
         || !surface->GetNormalmap() || !surface->GetDisplacementmap() ) {
         return nullptr;
     }
@@ -130,30 +146,18 @@ static MaterialInfo::Buffer GetEffectiveMaterialBuffer( const MaterialInfo* info
     MaterialInfo defaults;
     MaterialInfo::Buffer buffer = info ? info->buffer : defaults.buffer;
 
+    if ( !surface || !surface->GetNormalmap() || buffer.NormalmapStrength <= 0.0001f ) {
+        buffer.NormalmapStrength = 0.0f;
+    }
+
     const auto& settings = Engine::GAPI->GetRendererState().RendererSettings;
-    if ( surface && surface->GetDisplacementmap() ) {
-        // A present *_disp.dds is the primary opt-in for POM. If old material data
-        // contains displacementFactor=0, keep the map testable by falling back to
-        // the default material strength instead of silently disabling POM.
-        if ( buffer.DisplacementFactor <= 0.0001f ) {
-            buffer.DisplacementFactor = defaults.buffer.DisplacementFactor;
-        }
+    if ( surface && surface->GetNormalmap() && surface->GetDisplacementmap() && buffer.DisplacementFactor > 0.0001f ) {
         buffer.DisplacementFactor *= std::clamp( settings.ParallaxOcclusionStrength, 0.0f, 4.0f );
+    } else {
+        buffer.DisplacementFactor = 0.0f;
     }
 
     return buffer;
-}
-static ID3D11ShaderResourceView* GetWetNormalFallbackSRV( MyDirectDrawSurface7* surface, D3D11Texture* distortionTexture ) {
-    if ( !surface || !distortionTexture || Engine::GAPI->GetSceneWetness() <= 1e-6f ) {
-        return nullptr;
-    }
-
-    const auto& settings = Engine::GAPI->GetRendererState().RendererSettings;
-    if ( settings.AllowNormalmaps && surface->GetNormalmap() ) {
-        return nullptr;
-    }
-
-    return distortionTexture->GetShaderResourceView().Get();
 }
 
 static void UpdateRefractionViewProjection( RefractionInfoConstantBuffer& buffer ) {
@@ -2570,18 +2574,8 @@ bool D3D11GraphicsEngine::BindTextureNRFX( zCTexture* tex, bool bindShader, bool
         }
     }
 
-    // Bind a normalmap only when the material really has one. Wet scenes keep
-    // the old rain distortion fallback, but dry materials without normalmaps
-    // stay without a fallback texture.
-    if ( D3D11Texture* nrm = tex->GetSurface()->GetNormalmap() ) {
-        srvs[1] = nrm->GetShaderResourceView().Get();
-    } else if ( ID3D11ShaderResourceView* wetFallback = GetWetNormalFallbackSRV( tex->GetSurface(), DistortionTexture.get() ) ) {
-        if ( info &&
-            info->buffer.NormalmapStrength != DEFAULT_NORMALMAP_STRENGTH ) {
-            info->buffer.NormalmapStrength = DEFAULT_NORMALMAP_STRENGTH;
-        }
-        srvs[1] = wetFallback;
-    }
+    // Bind a normalmap only when the material explicitly allows one and a real map exists.
+    srvs[1] = GetMaterialNormalmapSRV( tex->GetSurface(), info );
 
     if ( info && GetActivePS() ) {
         auto materialBuffer = GetEffectiveMaterialBuffer( info, tex->GetSurface() );
@@ -2598,7 +2592,7 @@ bool D3D11GraphicsEngine::BindTextureNRFX( zCTexture* tex, bool bindShader, bool
         srvs[2] = fxmap->GetShaderResourceView().Get();
         fxmap->BindToPixelShader( 2 );
     }
-    srvs[3] = GetParallaxDisplacementSRV( tex->GetSurface() );
+    srvs[3] = GetParallaxDisplacementSRV( tex->GetSurface(), info );
     GetContext()->PSSetShaderResources( 0, 3, srvs );
     GetContext()->PSSetShaderResources( 13, 1, &srvs[3] );
 
@@ -4435,15 +4429,20 @@ XRESULT D3D11GraphicsEngine::OnStartWorldRendering() {
         graph.AddPass( RG_PASS_NAME("Wet Ground SSR"), [&]( RGBuilder& builder, RenderPass& pass ) {
             builder.Read( normalsResource );
             builder.Read( waterMaskResource );
+            builder.Read( specularResource );
             builder.Read( backBufferHandle );
             builder.Write( backBufferHandle );
 
-            pass.m_executeCallback = [this, backBufferHandle, normalsResource, waterMaskResource](const RenderGraph& graph) {
+            pass.m_executeCallback = [this, backBufferHandle, normalsResource, waterMaskResource, specularResource](const RenderGraph& graph) {
                 TracyD3D11ZoneCGX( "D3D11GraphicsEngine::Wet Ground SSR" );
                 auto* backBuffer = graph.GetPhysicalTexture( backBufferHandle );
                 auto* normals = graph.GetPhysicalTexture( normalsResource );
                 auto* waterMask = graph.GetPhysicalTexture( waterMaskResource );
+                auto* specular = graph.GetPhysicalTexture( specularResource );
                 auto tempBuffer = PfxRenderer->GetTempBuffer();
+                if ( !backBuffer || !normals || !waterMask || !specular || !tempBuffer ) {
+                    return;
+                }
 
                 GetContext()->CopyResource( tempBuffer->GetTexture().Get(), backBuffer->GetTexture().Get() );
                 PfxRenderer->RenderWetGroundSSR(
@@ -4451,7 +4450,8 @@ XRESULT D3D11GraphicsEngine::OnStartWorldRendering() {
                     tempBuffer->GetShaderResView().Get(),
                     GetDepthBufferCopy()->GetShaderResView().Get(),
                     normals->GetShaderResView().Get(),
-                    waterMask->GetShaderResView().Get() );
+                    waterMask->GetShaderResView().Get(),
+                    specular->GetShaderResView().Get() );
             };
         });
     }
@@ -5324,7 +5324,8 @@ XRESULT D3D11GraphicsEngine::DrawMeshInfoListAlphablended(
             PsSimpleFFdata ffdata = { };
             ffdata.textureFactor = ComputeTransparencyTextureFactor( meshKey.Material );
 
-            if (texture->CacheIn( 0.6f ) != zRES_CACHED_IN) {
+            const bool isWaterfallFoam = meshKey.Info && meshKey.Info->MaterialType == MaterialInfo::MT_WaterfallFoam;
+            if (texture->CacheIn( isWaterfallFoam ? -1.0f : 0.6f ) != zRES_CACHED_IN) {
                 // Draw what? black? :)
                 continue;
             }
@@ -5335,20 +5336,11 @@ XRESULT D3D11GraphicsEngine::DrawMeshInfoListAlphablended(
             // Get diffuse and normalmap
             srv[0] = surface->GetEngineTexture()
                 ->GetShaderResourceView().Get();
-            srv[1] = Engine::GAPI->GetRendererState().RendererSettings.AllowNormalmaps && surface->GetNormalmap()
-                ? surface->GetNormalmap()->GetShaderResourceView().Get()
-                : nullptr;
+            srv[1] = GetMaterialNormalmapSRV( surface, meshKey.Info );
             srv[2] = surface->GetFxMap()
                 ? surface->GetFxMap()->GetShaderResourceView().Get()
                 : nullptr;
-            srv[3] = GetParallaxDisplacementSRV( surface );
-            if ( !srv[1] ) {
-                srv[1] = GetWetNormalFallbackSRV( surface, DistortionTexture.get() );
-                if ( srv[1] && meshKey.Info &&
-                    meshKey.Info->buffer.NormalmapStrength != DEFAULT_NORMALMAP_STRENGTH ) {
-                    meshKey.Info->buffer.NormalmapStrength = DEFAULT_NORMALMAP_STRENGTH;
-                }
-            }
+            srv[3] = GetParallaxDisplacementSRV( surface, meshKey.Info );
 
             int alphaFunc = meshKey.Material->GetAlphaFunc();
 
@@ -5709,6 +5701,17 @@ XRESULT D3D11GraphicsEngine::DrawWorldMesh( bool noTextures ) {
                         continue;
                     }
 
+                    const bool isWaterfallFoam = worldMesh.first.Info && worldMesh.first.Info->MaterialType == MaterialInfo::MT_WaterfallFoam;
+                    if ( isWaterfallFoam ) {
+                        if ( !isZPrepass ) {
+                            aniTex->CacheIn( -1.0f );
+                            const float distanceSq = ComputeWorldMeshDistanceSqFromCamera( renderItem, worldMesh.second, cameraPosition );
+                            const std::pair<MeshKey, MeshInfo*> transparencyMesh = { worldMesh.first, worldMesh.second };
+                            waterfallTransparencyMeshes.push_back( { transparencyMesh, distanceSq } );
+                        }
+                        continue;
+                    }
+
                     if ( aniTex->CacheIn( 0.6f ) != zRES_CACHED_IN ) {
                         continue;
                     }
@@ -5719,11 +5722,6 @@ XRESULT D3D11GraphicsEngine::DrawWorldMesh( bool noTextures ) {
                     if ( worldMesh.first.Info->MaterialType == MaterialInfo::MT_Portal ) {
                         if ( !isZPrepass ) {
                             portalTransparencyMeshes.push_back( { transparencyMesh, distanceSq } );
-                        }
-                        continue;
-                    } else if ( worldMesh.first.Info->MaterialType == MaterialInfo::MT_WaterfallFoam ) {
-                        if ( !isZPrepass ) {
-                            waterfallTransparencyMeshes.push_back( { transparencyMesh, distanceSq } );
                         }
                         continue;
                     }
@@ -5889,20 +5887,11 @@ XRESULT D3D11GraphicsEngine::DrawWorldMesh( bool noTextures ) {
 
                 // Get diffuse and normalmap
                 srv[0] = surface->GetEngineTexture()->GetShaderResourceView().Get();
-                srv[1] = Engine::GAPI->GetRendererState().RendererSettings.AllowNormalmaps && surface->GetNormalmap()
-                    ? surface->GetNormalmap()->GetShaderResourceView().Get()
-                    : nullptr;
+                srv[1] = GetMaterialNormalmapSRV( surface, info );
                 srv[2] = surface->GetFxMap()
                     ? surface->GetFxMap()->GetShaderResourceView().Get()
                     : nullptr;
-                srv[3] = GetParallaxDisplacementSRV( surface );
-                if ( !srv[1] ) {
-                    srv[1] = GetWetNormalFallbackSRV( surface, DistortionTexture.get() );
-                    if ( srv[1] && info &&
-                        info->buffer.NormalmapStrength != DEFAULT_NORMALMAP_STRENGTH ) {
-                        info->buffer.NormalmapStrength = DEFAULT_NORMALMAP_STRENGTH;
-                    }
-                }
+                srv[3] = GetParallaxDisplacementSRV( surface, info );
 
                 // Bind diffuse/normal/fx like 026; POM displacement uses t13.
                 GetContext()->PSSetShaderResources( 0, 3, srv );
@@ -8111,25 +8100,14 @@ XRESULT D3D11GraphicsEngine::DrawVOBsInstanced() {
 
                         // Get diffuse and normalmap
                         srv[0] = surface->GetEngineTexture()->GetShaderResourceView().Get();
-                        srv[1] = surface->GetNormalmap()
-                            ? surface->GetNormalmap()->GetShaderResourceView().Get()
-                            : nullptr;
+                        srv[1] = GetMaterialNormalmapSRV( surface, info );
                         srv[2] = surface->GetFxMap()
                             ? surface->GetFxMap()->GetShaderResourceView().Get()
                             : nullptr;
-                        srv[3] = GetParallaxDisplacementSRV( surface );
-                        if ( !srv[1] && ( wantShader && !isZPrepass ) ) {
-                            if ( ID3D11ShaderResourceView* wetFallback = GetWetNormalFallbackSRV( surface, DistortionTexture.get() ) ) {
-                                if ( info && info->buffer.NormalmapStrength != DEFAULT_NORMALMAP_STRENGTH ) {
-                                    info->buffer.NormalmapStrength = DEFAULT_NORMALMAP_STRENGTH;
-                                    lastMatInfo = info;
-                                }
-                                srv[1] = wetFallback;
-                            }
-                        }
+                        srv[3] = GetParallaxDisplacementSRV( surface, info );
 
                         const bool materialMarkerChanged = materialClassMarker != lastMaterialClassMarker;
-                        // Wet scenes can use the distortion texture as a temporary normalmap fallback.
+                        // Material data decides whether a real normalmap participates; no wet distortion fallback is used.
                         if ( lastTex != tx
                             || lastNrmTex != srv[1]
                             || lastFxTex != srv[2]
@@ -8361,16 +8339,11 @@ XRESULT D3D11GraphicsEngine::DrawFrameAlphaMeshes()
 
             // Get diffuse and normalmap
             srv[0] = surface->GetEngineTexture()->GetShaderResourceView().Get();
-            srv[1] = surface->GetNormalmap()
-                ? surface->GetNormalmap()->GetShaderResourceView().Get()
-                : nullptr;
+            srv[1] = GetMaterialNormalmapSRV( surface, mk.Info );
             srv[2] = surface->GetFxMap()
                 ? surface->GetFxMap()->GetShaderResourceView().Get()
                 : nullptr;
-            srv[3] = GetParallaxDisplacementSRV( surface );
-            if ( !srv[1] ) {
-                srv[1] = GetWetNormalFallbackSRV( surface, DistortionTexture.get() );
-            }
+            srv[3] = GetParallaxDisplacementSRV( surface, mk.Info );
 
             // Bind diffuse/normal/fx like 026; POM displacement uses t13.
             GetContext()->PSSetShaderResources( 0, 3, srv );
@@ -8500,12 +8473,10 @@ XRESULT D3D11GraphicsEngine::DrawPolyStrips( bool noTextures ) {
 
             // Get diffuse and normalmap
             srv[0] = surface->GetEngineTexture()->GetShaderResourceView().Get();
-            srv[1] = surface->GetNormalmap() ? surface->GetNormalmap()->GetShaderResourceView().Get() : NULL;
+            MaterialInfo* info = Engine::GAPI->GetMaterialInfoFrom( tx );
+            srv[1] = GetMaterialNormalmapSRV( surface, info );
             srv[2] = surface->GetFxMap() ? surface->GetFxMap()->GetShaderResourceView().Get() : NULL;
-            srv[3] = GetParallaxDisplacementSRV( surface );
-            if ( !srv[1] ) {
-                srv[1] = GetWetNormalFallbackSRV( surface, DistortionTexture.get() );
-            }
+            srv[3] = GetParallaxDisplacementSRV( surface, info );
 
             // Bind diffuse/normal/fx like 026; POM displacement uses t13.
             Context->PSSetShaderResources( 0, 3, srv );
@@ -8525,7 +8496,6 @@ XRESULT D3D11GraphicsEngine::DrawPolyStrips( bool noTextures ) {
                 UpdateRenderStates();
             }
 
-            MaterialInfo* info = Engine::GAPI->GetMaterialInfoFrom( tx );
             auto materialBuffer = GetEffectiveMaterialBuffer( info, tx->GetSurface() );
             materialInfoBuffer.Update( &materialBuffer, sizeof( materialBuffer ) );
 

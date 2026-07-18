@@ -81,12 +81,13 @@ XRESULT D3D11PfxRenderer::RenderWetGroundSSR(
     ID3D11ShaderResourceView* sceneSRV,
     ID3D11ShaderResourceView* depthSRV,
     ID3D11ShaderResourceView* normalsSRV,
-    ID3D11ShaderResourceView* waterMaskSRV ) {
+    ID3D11ShaderResourceView* waterMaskSRV,
+    ID3D11ShaderResourceView* specularSRV ) {
     auto* engine = reinterpret_cast<D3D11GraphicsEngine*>(Engine::GraphicsEngine);
     auto& context = engine->GetContext();
     auto* rainShadow = engine->Effects ? engine->Effects->GetRainShadowmap() : nullptr;
     auto* shadowMaps = engine->GetShadowMaps();
-    if ( !outputRTV || !sceneSRV || !depthSRV || !normalsSRV || !waterMaskSRV || !rainShadow || !shadowMaps ) {
+    if ( !outputRTV || !sceneSRV || !depthSRV || !normalsSRV || !waterMaskSRV || !specularSRV || !rainShadow || !shadowMaps ) {
         return XR_FAILED;
     }
 
@@ -130,6 +131,7 @@ XRESULT D3D11PfxRenderer::RenderWetGroundSSR(
     context->PSSetShaderResources( 0, 4, resources );
     engine->GetDistortionTexture()->BindToPixelShader( 4 );
     context->PSSetShaderResources( 5, 1, &waterMaskSRV );
+    context->PSSetShaderResources( 6, 1, &specularSRV );
 
     ID3D11SamplerState* samplers[2] = {
         engine->GetClampSamplerState(),

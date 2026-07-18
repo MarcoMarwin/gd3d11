@@ -53,7 +53,8 @@ public:
                                 ID3D11ShaderResourceView* sceneSRV,
                                 ID3D11ShaderResourceView* depthSRV,
                                 ID3D11ShaderResourceView* normalsSRV,
-                                ID3D11ShaderResourceView* waterMaskSRV );
+                                ID3D11ShaderResourceView* waterMaskSRV,
+                                ID3D11ShaderResourceView* specularSRV );
 
     /** Copies the given texture to the given RTV */
     XRESULT CopyTextureToRTV( const Microsoft::WRL::ComPtr<ID3D11ShaderResourceView>& texture, const Microsoft::WRL::ComPtr<ID3D11RenderTargetView>& rtv, INT2 targetResolution = INT2( 0, 0 ), bool useCustomPS = false, INT2 offset = INT2( 0, 0 ), ID3D11RenderTargetView* extraRTV = nullptr );
