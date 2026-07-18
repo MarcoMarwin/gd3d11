@@ -569,3 +569,4 @@ Kurze, append-only Dokumentation der von Codex gepushten Renderer-Builds.
 - Korrekturpush: Sky-/Atmosphere-/PostFX-Pfad wieder konsistent auf Build-134-Optik gebracht: `GSky`, Sky-Textur-/Mesh-Loader, Atmosphere-/Composition-Shader und PFX-Composition-Bindings sind 134-gleich; der nicht-134-`InitSky()`-Pfad ist entfernt, damit SkyDay/starsh/Moon/RainCloud wieder ueber den 134-Pfad laufen.
 
 - Korrekturpush: Release_G1_AVX-Kompilierfehler nach der 134-PostFX-Angleichung behoben: SMAA/HeightFog sind 134-gleich, TextureConversions ist const-correct, `GothicAPI::RemoveMipMapGeneration` wurde als kleiner 134-Stabilitaetsblock ergaenzt und der ungenutzte DistanceBlur ist vollstaendig aus Dateien, Projekt, ShaderIDs und Shaderregistrierung entfernt.
+- Korrekturpush: Release_G1_AVX-Regen-Compilefehler behoben, indem der zu `D3D11Effect.cpp` passende 134-Block `MAX_RAIN_PARTICLES`/`SanitizeRainParticleCount` in `GothicGraphicsState.h` ergaenzt wurde.
