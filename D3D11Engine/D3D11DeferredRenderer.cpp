@@ -152,8 +152,6 @@ bool D3D11DeferredRenderer::BindShaderForTexture( D3D11ShaderManager& shaderMana
 
     auto active = activePS;
     auto newShader = activePS;
-    bool bindParticleAtmosphere = false;
-
     bool blendAdd = zMatAlphaFunc == zMAT_ALPHA_FUNC_ADD;
     bool blendBlend = zMatAlphaFunc == zMAT_ALPHA_FUNC_BLEND;
     bool linZ = (Engine::GAPI->GetRendererState().GraphicsState.FF_GSwitches & GSWITCH_LINEAR_DEPTH) != 0;
@@ -170,8 +168,7 @@ bool D3D11DeferredRenderer::BindShaderForTexture( D3D11ShaderManager& shaderMana
     } else if ( linZ ) {
         newShader = shaderManager.GetPShader( PShaderID::PS_LinDepth );
     } else if ( blendAdd || blendBlend ) {
-        newShader = shaderManager.GetPShader( PShaderID::PS_ParticleSimple_FF );
-        bindParticleAtmosphere = true;
+        newShader = shaderManager.GetPShader( PShaderID::PS_Simple_FF );
     } else if ( texture->HasAlphaChannel() || forceAlphaTest ) {
         if ( hasFxMap ) {
             newShader = shaderManager.GetPShader( resolvedDiffuseNormalmappedAlphatestFxMap );
@@ -199,7 +196,7 @@ bool D3D11DeferredRenderer::BindShaderForTexture( D3D11ShaderManager& shaderMana
         activePS = newShader;
         activePS->Apply();
     }
-    if ( materialType == MaterialInfo::MT_WaterfallFoam || bindParticleAtmosphere ) {
+    if ( materialType == MaterialInfo::MT_WaterfallFoam ) {
         if ( GSky* sky = Engine::GAPI->GetSky() ) {
             activePS->GetBuffer( "Atmosphere" ).Update( &sky->GetAtmosphereCB() ).Bind();
         }

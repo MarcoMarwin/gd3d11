@@ -62,7 +62,6 @@ enum class PShaderID : size_t {
     PS_PFX_UnderwaterFinal,
     PS_PFX_Alpha_Blend,
     PS_PFX_CinemaScope,
-    PS_PFX_DistanceBlur,
     PS_PFX_LumConvert,
     PS_PFX_LumAdapt,
     PS_PFX_HDR,

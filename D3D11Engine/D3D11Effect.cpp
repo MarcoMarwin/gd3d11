@@ -18,12 +18,31 @@
 #include "D3D11GraphicsEngine.h"
 #include "oCGame.h"
 #include "zFILE_VDFS.h"
+#include <array>
+#include <new>
 
 constexpr float snowSpeedFactor = 0.15f;
 
 namespace {
     const float2 snowScale( 3.0f, 3.0f );
     const float2 rainScale( 30.0f / 10.0f, 30.0f / 8.0f );
+    constexpr float MAX_RAIN_RANGE = 100000.0f;
+    constexpr float MAX_RAIN_VELOCITY = 100000.0f;
+
+    float SanitizeRainRange( float value, float fallback ) {
+        return std::isfinite( value ) && value > 0.0f
+            ? (std::min)(value, MAX_RAIN_RANGE)
+            : fallback;
+    }
+
+    XMFLOAT3 SanitizeRainVelocity( const XMFLOAT3& velocity ) {
+        auto sanitize = []( float value ) {
+            return std::isfinite( value )
+                ? (std::max)(-MAX_RAIN_VELOCITY, (std::min)(value, MAX_RAIN_VELOCITY))
+                : 0.0f;
+        };
+        return XMFLOAT3( sanitize( velocity.x ), sanitize( velocity.y ), sanitize( velocity.z ) );
+    }
 }
 
 D3D11Effect::D3D11Effect() {
@@ -87,8 +106,9 @@ HRESULT LoadTextureArray( Microsoft::WRL::ComPtr<ID3D11Device1> pd3dDevice, Micr
 void D3D11Effect::FillRandomRaindropData( std::vector<RainParticleDynamic>& dynamicData, std::vector<RainParticleStatic>& staticData ) {
     /** Base taken from Nvidias Rain-Sample **/
 
-    float radius = Engine::GAPI->GetRendererState().RendererSettings.RainRadiusRange;
-    float height = Engine::GAPI->GetRendererState().RendererSettings.RainHeightRange;
+    const auto& settings = Engine::GAPI->GetRendererState().RendererSettings;
+    const float radius = SanitizeRainRange( settings.RainRadiusRange, 5000.0f );
+    const float height = SanitizeRainRange( settings.RainHeightRange, 1000.0f );
 
     for ( size_t i = 0; i < dynamicData.size(); i++ ) {
         // Vogel-disc distribution avoids conspicuous pairs while retaining a
@@ -124,9 +144,111 @@ void D3D11Effect::FillRandomRaindropData( std::vector<RainParticleDynamic>& dyna
     }
 }
 
+XRESULT D3D11Effect::EnsureRainBuffers( UINT numParticles, bool useCompute ) {
+    auto* engine = reinterpret_cast<D3D11GraphicsEngineBase*>(Engine::GraphicsEngine);
+    if ( !engine || !Engine::GAPI || numParticles == 0 || numParticles > MAX_RAIN_PARTICLES ) {
+        return XR_INVALID_ARG;
+    }
+
+    auto& settings = Engine::GAPI->GetRendererState().RendererSettings;
+    settings.RainRadiusRange = SanitizeRainRange( settings.RainRadiusRange, 5000.0f );
+    settings.RainHeightRange = SanitizeRainRange( settings.RainHeightRange, 1000.0f );
+    settings.RainGlobalVelocity = SanitizeRainVelocity( settings.RainGlobalVelocity );
+
+    const UINT alignedCount = useCompute ? ((numParticles + 127u) / 128u) * 128u : numParticles;
+    const UINT previousAlignedCount = ((RainBufferParticleCount + 127u) / 128u) * 128u;
+    const bool hasRequiredBuffers = RainBufferStatic && RainBufferDrawFrom
+        && (useCompute || (RainBufferInitial && RainBufferStreamTo));
+    const bool particleCapacityChanged = useCompute
+        ? previousAlignedCount != alignedCount
+        : RainBufferParticleCount != numParticles;
+
+    if ( hasRequiredBuffers
+        && RainBuffersUseCompute == useCompute
+        && RainBufferRadius == settings.RainRadiusRange
+        && RainBufferHeight == settings.RainHeightRange
+        && !particleCapacityChanged ) {
+        RainBufferParticleCount = numParticles;
+        return XR_SUCCESS;
+    }
+
+    try {
+        std::vector<RainParticleDynamic> dynamicParticles( alignedCount );
+        std::vector<RainParticleStatic> staticParticles( alignedCount );
+        FillRandomRaindropData( dynamicParticles, staticParticles );
+
+        auto newStatic = std::make_unique<D3D11VertexBuffer>();
+        auto newDrawFrom = std::make_unique<D3D11VertexBuffer>();
+        std::unique_ptr<D3D11VertexBuffer> newInitial;
+        std::unique_ptr<D3D11VertexBuffer> newStreamTo;
+
+        const unsigned int staticBytes = static_cast<unsigned int>(staticParticles.size() * sizeof( RainParticleStatic ));
+        const unsigned int dynamicBytes = static_cast<unsigned int>(dynamicParticles.size() * sizeof( RainParticleDynamic ));
+        const auto staticUsage = useCompute ? D3D11VertexBuffer::U_DEFAULT : D3D11VertexBuffer::U_IMMUTABLE;
+
+        if ( newStatic->Init( staticParticles.data(), staticBytes,
+                D3D11VertexBuffer::B_SHADER_RESOURCE, staticUsage, D3D11VertexBuffer::CA_NONE,
+                useCompute ? "D3D11Effect::DrawRain_CS::RainBufferStatic" : "D3D11Effect::DrawRain::RainBufferStatic",
+                sizeof( RainParticleStatic ) ) != XR_SUCCESS ) {
+            return XR_FAILED;
+        }
+
+        if ( useCompute ) {
+            if ( newDrawFrom->Init( dynamicParticles.data(), dynamicBytes,
+                    static_cast<D3D11VertexBuffer::EBindFlags>(D3D11VertexBuffer::B_VERTEXBUFFER | D3D11VertexBuffer::B_UNORDERED_ACCESS),
+                    D3D11VertexBuffer::U_DEFAULT, D3D11VertexBuffer::CA_NONE,
+                    "D3D11Effect::DrawRain_CS::RainBufferDrawFrom", sizeof( float ) ) != XR_SUCCESS ) {
+                return XR_FAILED;
+            }
+        } else {
+            newInitial = std::make_unique<D3D11VertexBuffer>();
+            newStreamTo = std::make_unique<D3D11VertexBuffer>();
+
+            if ( newInitial->Init( dynamicParticles.data(), dynamicBytes,
+                    D3D11VertexBuffer::B_VERTEXBUFFER, D3D11VertexBuffer::U_DEFAULT,
+                    D3D11VertexBuffer::CA_NONE, "D3D11Effect::DrawRain::RainBufferInitial" ) != XR_SUCCESS
+                || newDrawFrom->Init( dynamicParticles.data(), dynamicBytes,
+                    static_cast<D3D11VertexBuffer::EBindFlags>(D3D11VertexBuffer::B_VERTEXBUFFER | D3D11VertexBuffer::B_STREAM_OUT),
+                    D3D11VertexBuffer::U_DEFAULT, D3D11VertexBuffer::CA_NONE,
+                    "D3D11Effect::DrawRain::RainBufferDrawFrom" ) != XR_SUCCESS
+                || newStreamTo->Init( dynamicParticles.data(), dynamicBytes,
+                    static_cast<D3D11VertexBuffer::EBindFlags>(D3D11VertexBuffer::B_VERTEXBUFFER | D3D11VertexBuffer::B_STREAM_OUT),
+                    D3D11VertexBuffer::U_DEFAULT, D3D11VertexBuffer::CA_NONE,
+                    "D3D11Effect::DrawRain::RainBufferStreamTo" ) != XR_SUCCESS ) {
+                return XR_FAILED;
+            }
+        }
+
+        if ( LoadRainResources() != XR_SUCCESS ) {
+            return XR_FAILED;
+        }
+
+        delete RainBufferStatic;
+        delete RainBufferInitial;
+        delete RainBufferDrawFrom;
+        delete RainBufferStreamTo;
+        RainBufferStatic = newStatic.release();
+        RainBufferInitial = newInitial.release();
+        RainBufferDrawFrom = newDrawFrom.release();
+        RainBufferStreamTo = newStreamTo.release();
+        RainBufferRadius = settings.RainRadiusRange;
+        RainBufferHeight = settings.RainHeightRange;
+        RainBufferParticleCount = numParticles;
+        RainBuffersUseCompute = useCompute;
+        RainStreamOutFirstFrame = true;
+        return XR_SUCCESS;
+    } catch ( const std::bad_alloc& ) {
+        LogError() << "Rain: Not enough memory to allocate " << alignedCount << " particles.";
+        return XR_FAILED;
+    }
+}
+
 /** Draws GPU-Based rain */
 XRESULT D3D11Effect::DrawRain( bool outputResolution, bool useRainExclusionMask ) {
-    D3D11GraphicsEngineBase* e = reinterpret_cast<D3D11GraphicsEngineBase*>(Engine::GraphicsEngine);
+    auto* e = reinterpret_cast<D3D11GraphicsEngineBase*>(Engine::GraphicsEngine);
+    if ( !e || !Engine::GAPI || !e->GetContext() ) {
+        return XR_FAILED;
+    }
     GothicRendererState& state = Engine::GAPI->GetRendererState();
 
     // Get shaders
@@ -143,50 +265,20 @@ XRESULT D3D11Effect::DrawRain( bool outputResolution, bool useRainExclusionMask 
 
     // artificially increase the number of particles for snow, to make it look better.
     // Snowflakes are bigger and slower than raindrops, so we can get away with less particles for rain, but for snow we need more to make it look good.
-    UINT numParticles = state.RendererSettings.RainNumParticles;
-
-    static float lastRadius = state.RendererSettings.RainRadiusRange;
-    static float lastHeight = state.RendererSettings.RainHeightRange;
-    static UINT lastNumParticles = numParticles;
-    static bool firstFrame = true;
-
-    // Create resources if not already done
-    if ( !RainBufferDrawFrom || lastHeight != state.RendererSettings.RainHeightRange
-        || lastRadius != state.RendererSettings.RainRadiusRange ||
-        lastNumParticles != numParticles ) {
-        delete RainBufferStatic;
-        delete RainBufferDrawFrom;
-        delete RainBufferStreamTo;
-        delete RainBufferInitial;
-
-        e->CreateVertexBuffer( &RainBufferStatic );
-        e->CreateVertexBuffer( &RainBufferDrawFrom );
-        e->CreateVertexBuffer( &RainBufferStreamTo );
-        e->CreateVertexBuffer( &RainBufferInitial );
-
-        // Fill the vectors with random raindrop data
-        std::vector<RainParticleDynamic> dynamicParticles( numParticles );
-        std::vector<RainParticleStatic> staticParticles( numParticles );
-        FillRandomRaindropData( dynamicParticles, staticParticles );
-
-        // Create immutable structured buffer (SRV only, for StructuredBuffer<> access in shaders)
-        RainBufferStatic->Init( &staticParticles[0], staticParticles.size() * sizeof( RainParticleStatic ), D3D11VertexBuffer::B_SHADER_RESOURCE, D3D11VertexBuffer::U_IMMUTABLE, D3D11VertexBuffer::CA_NONE, "D3D11Effect::DrawRain::RainBufferStatic", sizeof( RainParticleStatic ) );
-
-        // Create mutable vertexbuffers (position + velocity only)
-        RainBufferInitial->Init( &dynamicParticles[0], dynamicParticles.size() * sizeof( RainParticleDynamic ), (D3D11VertexBuffer::EBindFlags)(D3D11VertexBuffer::B_VERTEXBUFFER), D3D11VertexBuffer::U_DEFAULT, D3D11VertexBuffer::CA_NONE, "D3D11Effect::DrawRain::RainBufferInitial" );
-        RainBufferDrawFrom->Init( &dynamicParticles[0], dynamicParticles.size() * sizeof( RainParticleDynamic ), (D3D11VertexBuffer::EBindFlags)(D3D11VertexBuffer::B_VERTEXBUFFER | D3D11VertexBuffer::B_STREAM_OUT), D3D11VertexBuffer::U_DEFAULT, D3D11VertexBuffer::CA_NONE, "D3D11Effect::DrawRain::RainBufferDrawFrom" );
-        RainBufferStreamTo->Init( &dynamicParticles[0], dynamicParticles.size() * sizeof( RainParticleDynamic ), (D3D11VertexBuffer::EBindFlags)(D3D11VertexBuffer::B_VERTEXBUFFER | D3D11VertexBuffer::B_STREAM_OUT), D3D11VertexBuffer::U_DEFAULT, D3D11VertexBuffer::CA_NONE, "D3D11Effect::DrawRain::RainBufferStreamTo" );
-
-        firstFrame = true;
-
-        LoadRainResources();
+    UINT numParticles = SanitizeRainParticleCount( state.RendererSettings.RainNumParticles );
+    state.RendererSettings.RainNumParticles = numParticles;
+    if ( numParticles == 0 ) {
+        return XR_SUCCESS;
     }
-
-    lastHeight = state.RendererSettings.RainHeightRange;
-    lastRadius = state.RendererSettings.RainRadiusRange;
-    lastNumParticles = numParticles;
-
-    auto velocity = state.RendererSettings.RainGlobalVelocity;
+    if ( !streamOutGS || !particleAdvanceVS || !particleVS || !rainPS || !Engine::GAPI->GetSky() ) {
+        LogError() << "Rain: Required stream-out shaders or sky state are unavailable.";
+        return XR_FAILED;
+    }
+    if ( EnsureRainBuffers( numParticles, false ) != XR_SUCCESS ) {
+        LogError() << "Rain: Failed to create stream-out resources.";
+        return XR_FAILED;
+    }
+    auto velocity = SanitizeRainVelocity( state.RendererSettings.RainGlobalVelocity );
     if ( isSnow ) {
         // make snow a lot slower
         velocity = XMFLOAT3( velocity.x * snowSpeedFactor, velocity.y * snowSpeedFactor, velocity.z * snowSpeedFactor );
@@ -207,60 +299,88 @@ XRESULT D3D11Effect::DrawRain( bool outputResolution, bool useRainExclusionMask 
     acb.AR_Pad1.y = !outputResolution
         && state.RendererSettings.AntiAliasingMode == GothicRendererSettings::AA_FSR3
         && state.RendererSettings.Upscaler == GothicRendererSettings::UPSCALER_FSR_3 ? 1.0f : 0.0f;
-    acb.AR_Pad1.z = outputResolution
-        ? static_cast<float>(e->GetResolution().x) / static_cast<float>(e->GetBackbufferResolution().x)
+    const INT2 backbufferResolution = e->GetBackbufferResolution();
+    acb.AR_Pad1.z = outputResolution && backbufferResolution.x > 0
+        ? static_cast<float>(e->GetResolution().x) / static_cast<float>(backbufferResolution.x)
         : 0.0f;
     auto advRainBuf = particleAdvanceVS->GetBuffer( "AdvanceRainConstantBuffer" );
-    advRainBuf.Update( &acb ).Bind();
+    if ( !advRainBuf.Update( &acb ).Bind().Succeeded()
+        || !advRainBuf.GetRawBuffer()
+        || !advRainBuf.GetRawBuffer()->IsValid() ) {
+        LogError() << "Rain: Failed to update the advance constant buffer.";
+        return XR_FAILED;
+    }
     advRainBuf.GetRawBuffer()->BindToPixelShader( 1 );
 
-    if ( firstFrame || (state.RendererSettings.RainMoveParticles && !Engine::GAPI->IsGamePaused()) ) {
-        D3D11VertexBuffer* b = nullptr;
-
-        // Use initial-data if we don't have something in the stream-buffers yet
-        if ( firstFrame )
-            b = RainBufferInitial;
-        else
-            b = RainBufferDrawFrom;
-
-        firstFrame = false;
+    if ( RainStreamOutFirstFrame || (state.RendererSettings.RainMoveParticles && !Engine::GAPI->IsGamePaused()) ) {
+        D3D11VertexBuffer* sourceBuffer = RainStreamOutFirstFrame ? RainBufferInitial : RainBufferDrawFrom;
+        if ( !sourceBuffer
+            || !sourceBuffer->GetVertexBuffer()
+            || !RainBufferStatic
+            || !RainBufferStatic->GetShaderResourceView()
+            || !RainBufferStreamTo
+            || !RainBufferStreamTo->GetVertexBuffer() ) {
+            LogError() << "Rain: Stream-out buffers became unavailable.";
+            return XR_FAILED;
+        }
+        if ( particleAdvanceVS->Apply() != XR_SUCCESS || streamOutGS->Apply() != XR_SUCCESS ) {
+            LogError() << "Rain: Failed to apply stream-out shaders.";
+            return XR_FAILED;
+        }
 
         UINT stride = sizeof( RainParticleDynamic );
         UINT offset = 0;
 
-        // Bind buffer to draw from last frame
-        e->GetContext()->IASetVertexBuffers( 0, 1, b->GetVertexBuffer().GetAddressOf(), &stride, &offset );
-
-        // Bind immutable particle data as StructuredBuffer SRV for the advance VS
+        // No fallible setup follows SOSetTargets, so every bound target is always released below.
+        e->GetContext()->IASetVertexBuffers( 0, 1, sourceBuffer->GetVertexBuffer().GetAddressOf(), &stride, &offset );
         e->GetContext()->VSSetShaderResources( 1, 1, RainBufferStatic->GetShaderResourceView().GetAddressOf() );
-
-        // Set stream target
         e->GetContext()->SOSetTargets( 1, RainBufferStreamTo->GetVertexBuffer().GetAddressOf(), &offset );
-
-        // Apply shaders
         e->GetContext()->PSSetShader( nullptr, nullptr, 0 );
-        particleAdvanceVS->Apply();
-        streamOutGS->Apply();
-
-        // Rendering points only
         e->GetContext()->IASetPrimitiveTopology( D3D11_PRIMITIVE_TOPOLOGY_POINTLIST );
         e->SetDefaultStates();
         e->UpdateRenderStates();
-
-        // Advance particle system in VS and stream out the data
         e->GetContext()->DrawInstanced( 1, numParticles, 0, 0 );
 
-        // Unset streamout target
-        Microsoft::WRL::ComPtr<ID3D11Buffer> bobjStream;
-        e->GetContext()->SOSetTargets( 1, bobjStream.ReleaseAndGetAddressOf(), 0 );
-
-        // Swap buffers
+        ID3D11Buffer* noStreamTarget = nullptr;
+        e->GetContext()->SOSetTargets( 1, &noStreamTarget, nullptr );
         std::swap( RainBufferDrawFrom, RainBufferStreamTo );
+        RainStreamOutFirstFrame = false;
+    }
+
+    // Prepare all fallible draw resources before modifying the tracked render state.
+    ParticleGSInfoConstantBuffer gcb = {};
+    gcb.CameraPosition = Engine::GAPI->GetCameraPosition();
+    gcb.PGS_RainFxWeight = Engine::GAPI->GetRainFXWeight();
+    gcb.PGS_RainHeight = state.RendererSettings.RainHeightRange;
+    gcb.PGS_RainScale = isSnow ? snowScale : rainScale;
+    if ( !isSnow && acb.AR_Pad1.y > 0.5f ) {
+        gcb.PGS_RainScale.x *= 1.6f;
+        gcb.PGS_RainScale.y *= 1.1f;
+    }
+
+    ParticlePointShadingConstantBuffer scb = {};
+    scb.View = GetRainShadowmapCameraRepl().ViewReplacement;
+    scb.Projection = GetRainShadowmapCameraRepl().ProjectionReplacement;
+
+    auto particleInfoBuffer = particleVS->GetBuffer( "ParticleGSInfo" );
+    auto particleShadingBuffer = particleVS->GetBuffer( "ParticlePointShadingConstantBuffer" );
+    if ( !RainShadowmap
+        || !RainShadowmap->IsValid()
+        || !RainBufferDrawFrom
+        || !RainBufferDrawFrom->GetVertexBuffer()
+        || !RainBufferStatic
+        || !RainBufferStatic->GetShaderResourceView()
+        || !m_RainDropShadowSamplerState
+        || !(isSnow ? SnowTextureArraySRV.Get() : RainTextureArraySRV.Get())
+        || !particleInfoBuffer.Update( &gcb ).Bind().Succeeded()
+        || !particleShadingBuffer.Update( &scb ).Bind().Succeeded()
+        || particleVS->Apply() != XR_SUCCESS
+        || rainPS->Apply() != XR_SUCCESS ) {
+        LogError() << "Rain: Failed to prepare particle draw resources.";
+        return XR_FAILED;
     }
 
     // ---- Draw the rain ----
-    // Set alphablending
-
     state.BlendState.SetAlphaBlending();
     state.BlendState.SetDirty();
 
@@ -285,28 +405,7 @@ XRESULT D3D11Effect::DrawRain( bool outputResolution, bool useRainExclusionMask 
         e->GetContext()->OMSetBlendState( rainBlendState, blendFactor, 0xffffffff );
     }
 
-    // Apply particle shaders
     e->GetContext()->GSSetShader( nullptr, 0, 0 );
-    particleVS->Apply();
-    rainPS->Apply();
-
-    // Setup constantbuffers
-    ParticleGSInfoConstantBuffer gcb = {};
-    gcb.CameraPosition = Engine::GAPI->GetCameraPosition();
-    gcb.PGS_RainFxWeight = Engine::GAPI->GetRainFXWeight();
-    gcb.PGS_RainHeight = state.RendererSettings.RainHeightRange;
-    gcb.PGS_RainScale = isSnow ? snowScale : rainScale;
-    if ( !isSnow && acb.AR_Pad1.y > 0.5f ) {
-        gcb.PGS_RainScale.x *= 1.6f;
-        gcb.PGS_RainScale.y *= 1.1f;
-    }
-
-    particleVS->GetBuffer( "ParticleGSInfo" ).Update( &gcb ).Bind();
-
-    ParticlePointShadingConstantBuffer scb = {};
-    scb.View = GetRainShadowmapCameraRepl().ViewReplacement;
-    scb.Projection = GetRainShadowmapCameraRepl().ProjectionReplacement;
-    particleVS->GetBuffer( "ParticlePointShadingConstantBuffer" ).Update( &scb ).Bind();
 
     RainShadowmap->BindToVertexShader( e->GetContext().Get(), 0 );
 
@@ -340,7 +439,10 @@ XRESULT D3D11Effect::DrawRain( bool outputResolution, bool useRainExclusionMask 
 }
 
 XRESULT D3D11Effect::DrawRain_CS( bool outputResolution, bool useRainExclusionMask ) {
-    D3D11GraphicsEngineBase* e = reinterpret_cast<D3D11GraphicsEngineBase*>(Engine::GraphicsEngine);
+    auto* e = reinterpret_cast<D3D11GraphicsEngineBase*>(Engine::GraphicsEngine);
+    if ( !e || !Engine::GAPI || !e->GetContext() ) {
+        return XR_FAILED;
+    }
     GothicRendererState& state = Engine::GAPI->GetRendererState();
 
     // Get shaders
@@ -356,42 +458,20 @@ XRESULT D3D11Effect::DrawRain_CS( bool outputResolution, bool useRainExclusionMa
 
     // artificially increase the number of particles for snow, to make it look better.
     // Snowflakes are bigger and slower than raindrops, so we can get away with less particles for rain, but for snow we need more to make it look good.
-    UINT numParticles = state.RendererSettings.RainNumParticles;
-
-    static float lastRadius = state.RendererSettings.RainRadiusRange;
-    static float lastHeight = state.RendererSettings.RainHeightRange;
-    static UINT lastNumParticles = numParticles;
-
-    if ( !RainBufferDrawFrom || lastHeight != state.RendererSettings.RainHeightRange
-        || lastRadius != state.RendererSettings.RainRadiusRange ||
-        (lastNumParticles + 127) / 128 != (numParticles + 127) / 128 ) {
-        delete RainBufferStatic;
-        delete RainBufferDrawFrom;
-
-        e->CreateVertexBuffer( &RainBufferStatic );
-        e->CreateVertexBuffer( &RainBufferDrawFrom );
-
-        UINT alignedCount = ((numParticles + 127) / 128) * 128;
-
-        // Fill the vectors with random raindrop data
-        std::vector<RainParticleDynamic> dynamicParticles( alignedCount );
-        std::vector<RainParticleStatic> staticParticles( alignedCount );
-        FillRandomRaindropData( dynamicParticles, staticParticles );
-
-        // Create immutable structured buffer (SRV only, for StructuredBuffer<> access in shaders)
-        RainBufferStatic->Init( &staticParticles[0], staticParticles.size() * sizeof( RainParticleStatic ), D3D11VertexBuffer::B_SHADER_RESOURCE, D3D11VertexBuffer::U_DEFAULT, D3D11VertexBuffer::CA_NONE, "D3D11Effect::DrawRain_CS::RainBufferStatic", sizeof( RainParticleStatic ) );
-
-        // Create mutable vertexbuffer (position + velocity, with UAV for compute shader access)
-        RainBufferDrawFrom->Init( &dynamicParticles[0], dynamicParticles.size() * sizeof( RainParticleDynamic ), (D3D11VertexBuffer::EBindFlags)(D3D11VertexBuffer::B_VERTEXBUFFER | D3D11VertexBuffer::B_UNORDERED_ACCESS), D3D11VertexBuffer::U_DEFAULT, D3D11VertexBuffer::CA_NONE, "D3D11Effect::DrawRain_CS::RainBufferDrawFrom", sizeof( float ) );
-
-        LoadRainResources();
+    UINT numParticles = SanitizeRainParticleCount( state.RendererSettings.RainNumParticles );
+    state.RendererSettings.RainNumParticles = numParticles;
+    if ( numParticles == 0 ) {
+        return XR_SUCCESS;
     }
-
-    lastHeight = state.RendererSettings.RainHeightRange;
-    lastRadius = state.RendererSettings.RainRadiusRange;
-    lastNumParticles = numParticles;
-
-    auto velocity = state.RendererSettings.RainGlobalVelocity;
+    if ( !advanceRainCS || !particleVS || !rainPS || !Engine::GAPI->GetSky() ) {
+        LogError() << "Rain: Required compute shaders or sky state are unavailable.";
+        return XR_FAILED;
+    }
+    if ( EnsureRainBuffers( numParticles, true ) != XR_SUCCESS ) {
+        LogError() << "Rain: Failed to create compute resources.";
+        return XR_FAILED;
+    }
+    auto velocity = SanitizeRainVelocity( state.RendererSettings.RainGlobalVelocity );
     if ( isSnow ) {
         // make snow a lot slower
         velocity = XMFLOAT3(velocity.x * snowSpeedFactor, velocity.y * snowSpeedFactor, velocity.z * snowSpeedFactor );
@@ -407,38 +487,83 @@ XRESULT D3D11Effect::DrawRain_CS( bool outputResolution, bool useRainExclusionMa
     acb.AR_Height = state.RendererSettings.RainHeightRange;
     acb.AR_CameraPosition = Engine::GAPI->GetCameraPosition();
     acb.AR_GlobalVelocity = velocity;
-    acb.AR_MoveRainParticles = numParticles;
+    acb.AR_MoveRainParticles = state.RendererSettings.RainMoveParticles ? 1 : 0;
     acb.AR_Pad1.x = useRainExclusionMask ? 1.0f : 0.0f;
     acb.AR_Pad1.y = !outputResolution
         && state.RendererSettings.AntiAliasingMode == GothicRendererSettings::AA_FSR3
         && state.RendererSettings.Upscaler == GothicRendererSettings::UPSCALER_FSR_3 ? 1.0f : 0.0f;
-    acb.AR_Pad1.z = outputResolution
-        ? static_cast<float>(e->GetResolution().x) / static_cast<float>(e->GetBackbufferResolution().x)
+    const INT2 backbufferResolution = e->GetBackbufferResolution();
+    acb.AR_Pad1.z = outputResolution && backbufferResolution.x > 0
+        ? static_cast<float>(e->GetResolution().x) / static_cast<float>(backbufferResolution.x)
         : 0.0f;
 
-    advanceRainCS->GetBuffer( "AdvanceRainConstantBuffer" ).Update( &acb );
-    advanceRainCS->GetBuffer( "AdvanceRainConstantBuffer" ).GetRawBuffer()->BindToPixelShader( 1 );
+    auto advanceBuffer = advanceRainCS->GetBuffer( "AdvanceRainConstantBuffer" );
+    if ( !advanceBuffer.Update( &acb ).Succeeded()
+        || !advanceBuffer.GetRawBuffer()
+        || !advanceBuffer.GetRawBuffer()->IsValid() ) {
+        LogError() << "Rain: Failed to update the compute advance constant buffer.";
+        return XR_FAILED;
+    }
+    advanceBuffer.GetRawBuffer()->BindToPixelShader( 1 );
+
     if ( state.RendererSettings.RainMoveParticles && !Engine::GAPI->IsGamePaused() ) {
-        advanceRainCS->Apply();
-        advanceRainCS->GetBuffer( "AdvanceRainConstantBuffer" ).Bind();
+        if ( !RainBufferStatic
+            || !RainBufferStatic->GetShaderResourceView()
+            || !RainBufferDrawFrom
+            || !RainBufferDrawFrom->GetUnorderedAccessView()
+            || !advanceBuffer.Bind().Succeeded()
+            || advanceRainCS->Apply() != XR_SUCCESS ) {
+            LogError() << "Rain: Failed to prepare the compute advance pass.";
+            return XR_FAILED;
+        }
 
         e->GetContext()->CSSetShaderResources( 0, 1, RainBufferStatic->GetShaderResourceView().GetAddressOf() );
         e->GetContext()->CSSetUnorderedAccessViews( 0, 1, RainBufferDrawFrom->GetUnorderedAccessView().GetAddressOf(), nullptr );
         e->GetContext()->Dispatch( (numParticles + 127) / 128, 1, 1 );
 
-        // Unbind compute shader elements
-        Microsoft::WRL::ComPtr<ID3D11Buffer> emptyBuf;
-        Microsoft::WRL::ComPtr<ID3D11UnorderedAccessView> emptyUAV;
-        Microsoft::WRL::ComPtr<ID3D11ShaderResourceView> emptySRV;
-        e->GetContext()->CSSetConstantBuffers( 0, 1, emptyBuf.GetAddressOf() );
-        e->GetContext()->CSSetShaderResources( 0, 1, emptySRV.GetAddressOf() );
-        e->GetContext()->CSSetUnorderedAccessViews( 0, 1, emptyUAV.GetAddressOf(), nullptr );
+        ID3D11Buffer* noBuffer = nullptr;
+        ID3D11UnorderedAccessView* noUAV = nullptr;
+        ID3D11ShaderResourceView* noSRV = nullptr;
+        e->GetContext()->CSSetConstantBuffers( 0, 1, &noBuffer );
+        e->GetContext()->CSSetShaderResources( 0, 1, &noSRV );
+        e->GetContext()->CSSetUnorderedAccessViews( 0, 1, &noUAV, nullptr );
         e->GetContext()->CSSetShader( nullptr, nullptr, 0 );
     }
 
-    // ---- Draw the rain ----
-    // Set alphablending
+    // Prepare all fallible draw resources before modifying the tracked render state.
+    ParticleGSInfoConstantBuffer gcb = {};
+    gcb.CameraPosition = Engine::GAPI->GetCameraPosition();
+    gcb.PGS_RainFxWeight = Engine::GAPI->GetRainFXWeight();
+    gcb.PGS_RainHeight = state.RendererSettings.RainHeightRange;
+    gcb.PGS_RainScale = isSnow ? snowScale : rainScale;
+    if ( !isSnow && acb.AR_Pad1.y > 0.5f ) {
+        gcb.PGS_RainScale.x *= 1.6f;
+        gcb.PGS_RainScale.y *= 1.1f;
+    }
 
+    ParticlePointShadingConstantBuffer scb = {};
+    scb.View = GetRainShadowmapCameraRepl().ViewReplacement;
+    scb.Projection = GetRainShadowmapCameraRepl().ProjectionReplacement;
+
+    auto particleInfoBuffer = particleVS->GetBuffer( "ParticleGSInfo" );
+    auto particleShadingBuffer = particleVS->GetBuffer( "ParticlePointShadingConstantBuffer" );
+    if ( !RainShadowmap
+        || !RainShadowmap->IsValid()
+        || !RainBufferDrawFrom
+        || !RainBufferDrawFrom->GetVertexBuffer()
+        || !RainBufferStatic
+        || !RainBufferStatic->GetShaderResourceView()
+        || !m_RainDropShadowSamplerState
+        || !(isSnow ? SnowTextureArraySRV.Get() : RainTextureArraySRV.Get())
+        || !particleInfoBuffer.Update( &gcb ).Bind().Succeeded()
+        || !particleShadingBuffer.Update( &scb ).Bind().Succeeded()
+        || particleVS->Apply() != XR_SUCCESS
+        || rainPS->Apply() != XR_SUCCESS ) {
+        LogError() << "Rain: Failed to prepare compute-particle draw resources.";
+        return XR_FAILED;
+    }
+
+    // ---- Draw the rain ----
     state.BlendState.SetAlphaBlending();
     state.BlendState.SetDirty();
 
@@ -462,28 +587,6 @@ XRESULT D3D11Effect::DrawRain_CS( bool outputResolution, bool useRainExclusionMa
         const FLOAT blendFactor[4] = {};
         e->GetContext()->OMSetBlendState( rainBlendState, blendFactor, 0xffffffff );
     }
-
-    // Apply particle shaders
-    particleVS->Apply();
-    rainPS->Apply();
-
-    // Setup constantbuffers
-    ParticleGSInfoConstantBuffer gcb = {};
-    gcb.CameraPosition = Engine::GAPI->GetCameraPosition();
-    gcb.PGS_RainFxWeight = Engine::GAPI->GetRainFXWeight();
-    gcb.PGS_RainHeight = state.RendererSettings.RainHeightRange;
-    gcb.PGS_RainScale = isSnow ? snowScale : rainScale;
-    if ( !isSnow && acb.AR_Pad1.y > 0.5f ) {
-        gcb.PGS_RainScale.x *= 1.6f;
-        gcb.PGS_RainScale.y *= 1.1f;
-    }
-
-    particleVS->GetBuffer( "ParticleGSInfo" ).Update( &gcb ).Bind();
-
-    ParticlePointShadingConstantBuffer scb = {};
-    scb.View = GetRainShadowmapCameraRepl().ViewReplacement;
-    scb.Projection = GetRainShadowmapCameraRepl().ProjectionReplacement;
-    particleVS->GetBuffer( "ParticlePointShadingConstantBuffer" ).Update( &scb ).Bind();
 
     RainShadowmap->BindToVertexShader( e->GetContext().Get(), 0 );
 
@@ -515,66 +618,103 @@ XRESULT D3D11Effect::DrawRain_CS( bool outputResolution, bool useRainExclusionMa
     return XR_SUCCESS;
 }
 
-XRESULT D3D11Effect::LoadRainResources()
-{
-    D3D11GraphicsEngineBase* e = reinterpret_cast<D3D11GraphicsEngineBase*>(Engine::GraphicsEngine);
+XRESULT D3D11Effect::LoadRainResources() {
+    auto* engine = reinterpret_cast<D3D11GraphicsEngineBase*>(Engine::GraphicsEngine);
+    if ( !engine || !engine->GetDevice() || !engine->GetContext() ) {
+        return XR_FAILED;
+    }
 
-    std::string path;
-    path.resize( MAX_PATH );
-    path.resize(GetModuleFileNameA( nullptr, path.data(), path.size()-1 ));
-
-    std::filesystem::path basePath = std::filesystem::path( path ).parent_path() / "GD3D11" / "Textures";
-    
-    if ( !RainTextureArray.Get() ) {
-        HRESULT hr = S_OK;
-        // Load textures...
-        LogInfo() << "Loading rain-drop textures";
-        ZoneScopedN( "LoadRainTextures" );
-        LE( LoadTextureArray( e->GetDevice().Get(), e->GetContext().Get(), "\\_work\\Data\\Textures\\GD3D11\\Raindrops\\cv0_vPositive_", 370, &RainTextureArray, &RainTextureArraySRV ) );
-        if (!SUCCEEDED(hr)) {
-            // try old file paths
-            LE( LoadTextureArray( e->GetDevice().Get(), e->GetContext().Get(), (basePath / "Raindrops"/"cv0_vPositive_").string().c_str(), 370, &RainTextureArray, &RainTextureArraySRV ) );
+    try {
+        std::filesystem::path basePath;
+        std::array<char, MAX_PATH> modulePath{};
+        const DWORD pathLength = GetModuleFileNameA( nullptr, modulePath.data(), static_cast<DWORD>(modulePath.size()) );
+        if ( pathLength > 0 && pathLength < modulePath.size() ) {
+            basePath = std::filesystem::path( std::string( modulePath.data(), pathLength ) ).parent_path()
+                / "GD3D11" / "Textures";
         }
-    }
 
-    if ( !SnowTextureArray.Get() ) {
-        HRESULT hr = S_OK;
-        // Load textures...
-        LogInfo() << "Loading snow flake textures";
-        ZoneScopedN( "LoadSnowTextures" );
-        LE( LoadTextureArray( e->GetDevice().Get(), e->GetContext().Get(), "\\_work\\Data\\Textures\\GD3D11\\Snowflakes\\Snow_", 256, &SnowTextureArray, &SnowTextureArraySRV ) );
-        if (!SUCCEEDED(hr)) {
-            LE( LoadTextureArray( e->GetDevice().Get(), e->GetContext().Get(), (basePath / "Snowflakes"/"Snow_").string().c_str(), 256, &SnowTextureArray, &SnowTextureArraySRV ) );
+        auto loadTextureSet = [&]( const char* label, const char* vdfsPrefix,
+                                   const std::filesystem::path& diskPrefix, int textureCount,
+                                   Microsoft::WRL::ComPtr<ID3D11Texture2D>& texture,
+                                   Microsoft::WRL::ComPtr<ID3D11ShaderResourceView>& srv ) -> bool {
+            if ( texture && srv ) {
+                return true;
+            }
+
+            Microsoft::WRL::ComPtr<ID3D11Texture2D> newTexture;
+            Microsoft::WRL::ComPtr<ID3D11ShaderResourceView> newSrv;
+            HRESULT hr = LoadTextureArray( engine->GetDevice(), engine->GetContext(), vdfsPrefix,
+                textureCount, newTexture.GetAddressOf(), newSrv.GetAddressOf() );
+            if ( FAILED( hr ) && !diskPrefix.empty() ) {
+                newTexture.Reset();
+                newSrv.Reset();
+                const std::string diskPath = diskPrefix.string();
+                hr = LoadTextureArray( engine->GetDevice(), engine->GetContext(), diskPath.c_str(),
+                    textureCount, newTexture.GetAddressOf(), newSrv.GetAddressOf() );
+            }
+            if ( FAILED( hr ) || !newTexture || !newSrv ) {
+                LogError() << "Rain: Failed to load " << label << " texture array (0x"
+                    << std::hex << static_cast<unsigned long>(hr) << ").";
+                return false;
+            }
+
+            texture = std::move( newTexture );
+            srv = std::move( newSrv );
+            return true;
+        };
+
+        if ( !loadTextureSet( "raindrop", "\\_work\\Data\\Textures\\GD3D11\\Raindrops\\cv0_vPositive_",
+                basePath.empty() ? std::filesystem::path{} : basePath / "Raindrops" / "cv0_vPositive_",
+                370, RainTextureArray, RainTextureArraySRV )
+            || !loadTextureSet( "snowflake", "\\_work\\Data\\Textures\\GD3D11\\Snowflakes\\Snow_",
+                basePath.empty() ? std::filesystem::path{} : basePath / "Snowflakes" / "Snow_",
+                256, SnowTextureArray, SnowTextureArraySRV ) ) {
+            return XR_FAILED;
         }
+
+        if ( !RainShadowmap || !RainShadowmap->IsValid() ) {
+            auto newShadowmap = std::make_unique<RenderToDepthStencilBuffer>( engine->GetDevice().Get(), 2048, 2048,
+                DXGI_FORMAT_R16_TYPELESS, nullptr, DXGI_FORMAT_D16_UNORM, DXGI_FORMAT_R16_UNORM );
+            if ( !newShadowmap->IsValid() ) {
+                LogError() << "Rain: Failed to create the rain shadow map.";
+                return XR_FAILED;
+            }
+            SetDebugName( newShadowmap->GetDepthStencilView().Get(), "RainShadowmap->DepthStencilView" );
+            SetDebugName( newShadowmap->GetShaderResView().Get(), "RainShadowmap->ShaderResView" );
+            SetDebugName( newShadowmap->GetTexture().Get(), "RainShadowmap->Texture" );
+            RainShadowmap = std::move( newShadowmap );
+        }
+
+        if ( !m_RainDropShadowSamplerState ) {
+            D3D11_SAMPLER_DESC samplerDesc{};
+            samplerDesc.Filter = D3D11_FILTER_COMPARISON_MIN_MAG_MIP_LINEAR;
+            samplerDesc.AddressU = D3D11_TEXTURE_ADDRESS_WRAP;
+            samplerDesc.AddressV = D3D11_TEXTURE_ADDRESS_WRAP;
+            samplerDesc.AddressW = D3D11_TEXTURE_ADDRESS_WRAP;
+            samplerDesc.MaxAnisotropy = 1;
+            samplerDesc.ComparisonFunc = D3D11_COMPARISON_LESS_EQUAL;
+            samplerDesc.MinLOD = -FLT_MAX;
+            samplerDesc.MaxLOD = FLT_MAX;
+
+            Microsoft::WRL::ComPtr<ID3D11SamplerState> newSampler;
+            const HRESULT hr = engine->GetDevice()->CreateSamplerState( &samplerDesc, newSampler.GetAddressOf() );
+            if ( FAILED( hr ) ) {
+                LogError() << "Rain: Failed to create shadow sampler (0x"
+                    << std::hex << static_cast<unsigned long>(hr) << ").";
+                return XR_FAILED;
+            }
+            SetDebugName( newSampler.Get(), "RainDropSamplerState" );
+            m_RainDropShadowSamplerState = std::move( newSampler );
+        }
+
+        return XR_SUCCESS;
+    } catch ( const std::bad_alloc& ) {
+        LogError() << "Rain: Not enough memory while loading effect resources.";
+        return XR_FAILED;
+    } catch ( const std::filesystem::filesystem_error& error ) {
+        LogError() << "Rain: Failed to resolve texture paths: " << error.what();
+        return XR_FAILED;
     }
-
-    if ( !RainShadowmap.get() ) {
-        const int s = 2048;
-        RainShadowmap = std::make_unique<RenderToDepthStencilBuffer>( e->GetDevice().Get(), s, s, DXGI_FORMAT_R16_TYPELESS, nullptr, DXGI_FORMAT_D16_UNORM, DXGI_FORMAT_R16_UNORM );
-        SetDebugName( RainShadowmap->GetDepthStencilView().Get(), "RainShadowmap->DepthStencilView" );
-        SetDebugName( RainShadowmap->GetShaderResView().Get(), "RainShadowmap->ShaderResView" );
-        SetDebugName( RainShadowmap->GetTexture().Get(), "RainShadowmap->Texture" );
-    }
-
-    if ( !m_RainDropShadowSamplerState ) {
-        // same as in D3D11ShadowMap.cpp
-        D3D11_SAMPLER_DESC samplerDesc = {};
-        samplerDesc.Filter = D3D11_FILTER_COMPARISON_MIN_MAG_MIP_LINEAR;
-        samplerDesc.AddressU = D3D11_TEXTURE_ADDRESS_WRAP;
-        samplerDesc.AddressV = D3D11_TEXTURE_ADDRESS_WRAP;
-        samplerDesc.AddressW = D3D11_TEXTURE_ADDRESS_WRAP;
-        samplerDesc.MipLODBias = 0;
-        samplerDesc.MaxAnisotropy = 1;
-        samplerDesc.ComparisonFunc = D3D11_COMPARISON_LESS_EQUAL;
-        samplerDesc.MinLOD = -FLT_MAX;
-        samplerDesc.MaxLOD = FLT_MAX;
-
-        HRESULT hr;
-        LE( e->GetDevice()->CreateSamplerState(&samplerDesc, m_RainDropShadowSamplerState.GetAddressOf()));
-        SetDebugName( m_RainDropShadowSamplerState.Get(), "RainDropSamplerState" );
-    }
-
-    return XR_SUCCESS;
 }
 
 /** Renders the rain-shadowmap */
@@ -582,25 +722,33 @@ XRESULT D3D11Effect::DrawRainShadowmap() {
     D3D11GraphicsEngine* e = reinterpret_cast<D3D11GraphicsEngine*>(Engine::GraphicsEngine); // TODO: This has to be a cast to D3D11GraphicsEngineBase!
     //D3D11GraphicsEngineBase* e = (D3D11GraphicsEngineBase*)Engine::GraphicsEngine; //RenderShadowmaps to be moved then to D3D11GraphicsEngineBase
 
-    if ( !RainShadowmap ) {
-        const int s = 2048;
-        RainShadowmap = std::make_unique<RenderToDepthStencilBuffer>( e->GetDevice().Get(), s, s,
-            DXGI_FORMAT_R16_TYPELESS, nullptr, DXGI_FORMAT_D16_UNORM, DXGI_FORMAT_R16_UNORM );
-        SetDebugName( RainShadowmap->GetDepthStencilView().Get(), "RainShadowmap->DepthStencilView" );
-        SetDebugName( RainShadowmap->GetShaderResView().Get(), "RainShadowmap->ShaderResView" );
-        SetDebugName( RainShadowmap->GetTexture().Get(), "RainShadowmap->Texture" );
+    if ( !e || !Engine::GAPI || !e->GetDevice() || !e->GetContext() ) {
+        return XR_FAILED;
     }
 
-    if ( !RainShadowmap ) {
-        return XR_SUCCESS;
+    if ( !RainShadowmap || !RainShadowmap->IsValid() ) {
+        const int s = 2048;
+        auto newShadowmap = std::make_unique<RenderToDepthStencilBuffer>( e->GetDevice().Get(), s, s,
+            DXGI_FORMAT_R16_TYPELESS, nullptr, DXGI_FORMAT_D16_UNORM, DXGI_FORMAT_R16_UNORM );
+        if ( !newShadowmap->IsValid() ) {
+            LogError() << "Rain: Failed to create the rain shadow map.";
+            return XR_FAILED;
+        }
+        SetDebugName( newShadowmap->GetDepthStencilView().Get(), "RainShadowmap->DepthStencilView" );
+        SetDebugName( newShadowmap->GetShaderResView().Get(), "RainShadowmap->ShaderResView" );
+        SetDebugName( newShadowmap->GetTexture().Get(), "RainShadowmap->Texture" );
+        RainShadowmap = std::move( newShadowmap );
     }
 
     CameraReplacement& cr = RainShadowmapCameraRepl;
 
     // Get the section we are currently in
     XMVECTOR p = Engine::GAPI->GetCameraPositionXM();
-    XMVECTOR rainVelocity = XMLoadFloat3( &Engine::GAPI->GetRendererState().RendererSettings.RainGlobalVelocity );
-    if ( XMVectorGetX( XMVector3LengthSq( rainVelocity ) ) < 0.0001f ) {
+    const XMFLOAT3 safeVelocity = SanitizeRainVelocity(
+        Engine::GAPI->GetRendererState().RendererSettings.RainGlobalVelocity );
+    XMVECTOR rainVelocity = XMLoadFloat3( &safeVelocity );
+    const float velocityLengthSq = XMVectorGetX( XMVector3LengthSq( rainVelocity ) );
+    if ( !std::isfinite( velocityLengthSq ) || velocityLengthSq < 0.0001f ) {
         rainVelocity = XMVectorSet( 0, -1, 0, 0 );
     }
     XMVECTOR dir = XMVector3Normalize( rainVelocity * -1.0f );
@@ -704,138 +852,186 @@ XRESULT D3D11Effect::DrawRainShadowmap() {
 // LoadTextureArray loads a texture array and associated view from a series
 // of textures on disk.
 //--------------------------------------------------------------------------------------
-HRESULT LoadTextureArray( Microsoft::WRL::ComPtr<ID3D11Device1> pd3dDevice, Microsoft::WRL::ComPtr<ID3D11DeviceContext1> context, const char* sTexturePrefix, int iNumTextures, ID3D11Texture2D** ppTex2D, ID3D11ShaderResourceView** ppSRV ) {
-    if ( !ppTex2D ) {
-        LogError() << "invalid argument: ppTex2D. should not be null";
-        return E_FAIL;
+HRESULT LoadTextureArray( Microsoft::WRL::ComPtr<ID3D11Device1> pd3dDevice,
+                          Microsoft::WRL::ComPtr<ID3D11DeviceContext1> context,
+                          const char* sTexturePrefix, int iNumTextures,
+                          ID3D11Texture2D** ppTex2D, ID3D11ShaderResourceView** ppSRV ) {
+    constexpr long MAX_PACKED_TEXTURE_BYTES = 512L * 1024L * 1024L;
+    constexpr long MAX_SLICE_TEXTURE_BYTES = 256L * 1024L * 1024L;
+
+    if ( !pd3dDevice || !context || !sTexturePrefix || !sTexturePrefix[0]
+        || iNumTextures <= 0 || iNumTextures > D3D11_REQ_TEXTURE2D_ARRAY_AXIS_DIMENSION
+        || !ppTex2D || !ppSRV || *ppTex2D || *ppSRV ) {
+        LogError() << "Rain: Invalid texture-array load request.";
+        return E_INVALIDARG;
     }
 
-    HRESULT hr = S_OK;
-    
-    // First, try to load from the single packed DDS file via VDFS
-    std::string singleFilePath = "";
-    if ( strstr( sTexturePrefix, "Raindrops" ) ) {
-        singleFilePath = R"(\system\GD3D11\Textures\raindrops.dds)";
-    } else if ( strstr( sTexturePrefix, "Snowflakes" ) ) {
-        singleFilePath = R"(\system\GD3D11\Textures\snowflakes.dds)";
-    }
-    
-    if ( !singleFilePath.empty() ) {
-        auto file = zFILE_VDFS::Create( singleFilePath.c_str() );
-        if ( file->Exists() && file->Open( false ) == 0 ) {
-            auto size = file->Size();
-            std::vector<uint8_t> storage( size );
-            file->Read( storage.data(), size );
-            file->Close();
-            
-            Microsoft::WRL::ComPtr<ID3D11Resource> pRes;
-            hr = CreateDDSTextureFromMemoryEx(
-                pd3dDevice.Get(),
-                storage.data(),
-                size,
-                0,
-                D3D11_USAGE_DEFAULT,
-                D3D11_BIND_SHADER_RESOURCE,
-                0,
-                0,
-                DDS_LOADER_DEFAULT,
-                pRes.GetAddressOf(),
-                ppSRV
-            );
-            if ( SUCCEEDED( hr ) ) {
-                Microsoft::WRL::ComPtr<ID3D11Texture2D> pTexture;
-                hr = pRes.As( &pTexture );
-                if ( SUCCEEDED( hr ) ) {
-                    *ppTex2D = pTexture.Detach();
-                    LogInfo() << "Successfully loaded texture array from single VDFS file: " << singleFilePath;
-                    return S_OK;
-                }
-            }
-            LogWarn() << "Failed to load single packed DDS file from VDFS memory: " << singleFilePath << ", falling back to individual files...";
+    try {
+        std::string singleFilePath;
+        if ( strstr( sTexturePrefix, "Raindrops" ) ) {
+            singleFilePath = R"(\system\GD3D11\Textures\raindrops.dds)";
+        } else if ( strstr( sTexturePrefix, "Snowflakes" ) ) {
+            singleFilePath = R"(\system\GD3D11\Textures\snowflakes.dds)";
         }
-    }
 
-    // Fallback: load individual files
-    D3D11_TEXTURE2D_DESC desc = {};
-    DXGI_FORMAT texFormat = DXGI_FORMAT_UNKNOWN;
-    CHAR str[MAX_PATH];
+        if ( !singleFilePath.empty() ) {
+            auto file = zFILE_VDFS::Create( singleFilePath.c_str() );
+            if ( file && file->Exists() && file->Open( false ) == zERROR_NONE ) {
+                const long fileSize = file->Size();
+                if ( fileSize > 0 && fileSize <= MAX_PACKED_TEXTURE_BYTES ) {
+                    std::vector<uint8_t> storage( static_cast<size_t>(fileSize) );
+                    const long bytesRead = file->Read( storage.data(), fileSize );
+                    file->Close();
 
-    std::vector<uint8_t> storage{};
-    for ( int i = 0; i < iNumTextures; i++ ) {
-        sprintf( str, "%s%.4d.dds", sTexturePrefix, i );
-
-        auto file = zFILE_VDFS::Create( str );
-        if ( !file->Exists() ) {
-            LogError() << "File does not exist: " << str;
-            return E_FAIL;
-        }
-        auto retOpen = file->Open( false );
-        if ( retOpen != 0 ) {
-            LogError() << "Failed to open filepath: " << str;
-            return E_FAIL;
-        }
-        auto size = file->Size();
-
-        if ( storage.size() < size ) {
-            storage.resize( size*2 );
-        }
-        auto numRead = file->Read( storage.data(), size );
-        auto retClose = file->Close();
-
-        Microsoft::WRL::ComPtr<ID3D11Resource> pRes;
-        LE( CreateDDSTextureFromMemoryEx( pd3dDevice.Get(), storage.data(), size, 0, D3D11_USAGE_STAGING, 0, D3D11_CPU_ACCESS_WRITE, 0, DDS_LOADER_DEFAULT, pRes.GetAddressOf(), nullptr));
-        if ( pRes.Get() ) {
-            Microsoft::WRL::ComPtr<ID3D11Texture2D> pTemp;
-            pRes.As( &pTemp );
-            if ( !pTemp.Get() ) {
-                LogError() << "Could not get ID3D11Texture2D!";
-                return E_FAIL;
-            }
-            pTemp->GetDesc( &desc );
-
-            if ( !(*ppTex2D) ) {
-                if ( desc.Format == DXGI_FORMAT_BC4_UNORM || desc.Format == DXGI_FORMAT_R8_UNORM ) {
-                    texFormat = desc.Format;
+                    if ( bytesRead == fileSize ) {
+                        Microsoft::WRL::ComPtr<ID3D11Resource> resource;
+                        Microsoft::WRL::ComPtr<ID3D11ShaderResourceView> srv;
+                        HRESULT hr = CreateDDSTextureFromMemoryEx(
+                            pd3dDevice.Get(), storage.data(), storage.size(), 0,
+                            D3D11_USAGE_DEFAULT, D3D11_BIND_SHADER_RESOURCE, 0, 0,
+                            DDS_LOADER_DEFAULT, resource.GetAddressOf(), srv.GetAddressOf() );
+                        Microsoft::WRL::ComPtr<ID3D11Texture2D> texture;
+                        if ( SUCCEEDED( hr ) ) {
+                            hr = resource.As( &texture );
+                        }
+                        if ( SUCCEEDED( hr ) && texture && srv ) {
+                            D3D11_TEXTURE2D_DESC desc{};
+                            texture->GetDesc( &desc );
+                            if ( desc.ArraySize >= static_cast<UINT>(iNumTextures)
+                                && desc.Width > 0 && desc.Height > 0 && desc.MipLevels > 0 ) {
+                                *ppTex2D = texture.Detach();
+                                *ppSRV = srv.Detach();
+                                LogInfo() << "Loaded texture array from VDFS: " << singleFilePath;
+                                return S_OK;
+                            }
+                            hr = E_FAIL;
+                        }
+                        LogWarn() << "Rain: Packed DDS is invalid (0x"
+                            << std::hex << static_cast<unsigned long>(hr) << "): " << singleFilePath;
+                    } else {
+                        LogWarn() << "Rain: Short read for packed DDS: " << singleFilePath;
+                    }
                 } else {
-                    return E_FAIL;
+                    file->Close();
+                    LogWarn() << "Rain: Packed DDS has an invalid size: " << singleFilePath;
                 }
+            }
+        }
 
-                desc.Usage = D3D11_USAGE_DEFAULT;
-                desc.BindFlags = D3D11_BIND_SHADER_RESOURCE;
-                desc.CPUAccessFlags = 0;
-                desc.ArraySize = iNumTextures;
-                LE( pd3dDevice->CreateTexture2D( &desc, nullptr, ppTex2D ) );
-                if ( !(*ppTex2D) )
-                    return E_FAIL;
+        Microsoft::WRL::ComPtr<ID3D11Texture2D> textureArray;
+        D3D11_TEXTURE2D_DESC referenceDesc{};
+        DXGI_FORMAT textureFormat = DXGI_FORMAT_UNKNOWN;
+        std::vector<uint8_t> storage;
+
+        for ( int textureIndex = 0; textureIndex < iNumTextures; ++textureIndex ) {
+            std::array<char, MAX_PATH> path{};
+            const int pathLength = sprintf_s( path.data(), path.size(), "%s%.4d.dds", sTexturePrefix, textureIndex );
+            if ( pathLength <= 0 || static_cast<size_t>(pathLength) >= path.size() ) {
+                LogError() << "Rain: Texture path is too long.";
+                return HRESULT_FROM_WIN32( ERROR_FILENAME_EXCED_RANGE );
             }
 
-            if ( texFormat != desc.Format )
+            auto file = zFILE_VDFS::Create( path.data() );
+            if ( !file || !file->Exists() || file->Open( false ) != zERROR_NONE ) {
+                LogError() << "Rain: Failed to open texture slice: " << path.data();
+                return HRESULT_FROM_WIN32( ERROR_FILE_NOT_FOUND );
+            }
+
+            const long fileSize = file->Size();
+            if ( fileSize <= 0 || fileSize > MAX_SLICE_TEXTURE_BYTES ) {
+                file->Close();
+                LogError() << "Rain: Invalid texture-slice size: " << path.data();
                 return E_FAIL;
-
-            for ( UINT iMip = 0; iMip < desc.MipLevels; iMip++ ) {
-                context->CopySubresourceRegion( (*ppTex2D),
-                    D3D11CalcSubresource( iMip, i, desc.MipLevels ),
-                    0,
-                    0,
-                    0,
-                    pTemp.Get(),
-                    iMip,
-                    nullptr );
             }
 
-            pRes.Reset();
-            pTemp.Reset();
-        } else {
+            storage.resize( static_cast<size_t>(fileSize) );
+            const long bytesRead = file->Read( storage.data(), fileSize );
+            file->Close();
+            if ( bytesRead != fileSize ) {
+                LogError() << "Rain: Short read for texture slice: " << path.data();
+                return E_FAIL;
+            }
+
+            Microsoft::WRL::ComPtr<ID3D11Resource> resource;
+            HRESULT hr = CreateDDSTextureFromMemoryEx(
+                pd3dDevice.Get(), storage.data(), storage.size(), 0,
+                D3D11_USAGE_STAGING, 0, D3D11_CPU_ACCESS_WRITE, 0,
+                DDS_LOADER_DEFAULT, resource.GetAddressOf(), nullptr );
+            if ( FAILED( hr ) || !resource ) {
+                LogError() << "Rain: Failed to decode texture slice " << path.data()
+                    << " (0x" << std::hex << static_cast<unsigned long>(hr) << ").";
+                return FAILED( hr ) ? hr : E_FAIL;
+            }
+
+            Microsoft::WRL::ComPtr<ID3D11Texture2D> sourceTexture;
+            hr = resource.As( &sourceTexture );
+            if ( FAILED( hr ) || !sourceTexture ) {
+                return FAILED( hr ) ? hr : E_NOINTERFACE;
+            }
+
+            D3D11_TEXTURE2D_DESC desc{};
+            sourceTexture->GetDesc( &desc );
+            if ( desc.Width == 0 || desc.Height == 0 || desc.MipLevels == 0 || desc.ArraySize != 1
+                || (desc.Format != DXGI_FORMAT_BC4_UNORM && desc.Format != DXGI_FORMAT_R8_UNORM) ) {
+                LogError() << "Rain: Unsupported texture-slice layout: " << path.data();
+                return E_FAIL;
+            }
+
+            if ( !textureArray ) {
+                referenceDesc = desc;
+                textureFormat = desc.Format;
+                D3D11_TEXTURE2D_DESC arrayDesc = desc;
+                arrayDesc.Usage = D3D11_USAGE_DEFAULT;
+                arrayDesc.BindFlags = D3D11_BIND_SHADER_RESOURCE;
+                arrayDesc.CPUAccessFlags = 0;
+                arrayDesc.MiscFlags = 0;
+                arrayDesc.ArraySize = static_cast<UINT>(iNumTextures);
+                hr = pd3dDevice->CreateTexture2D( &arrayDesc, nullptr, textureArray.GetAddressOf() );
+                if ( FAILED( hr ) ) {
+                    LogError() << "Rain: Failed to create texture array (0x"
+                        << std::hex << static_cast<unsigned long>(hr) << ").";
+                    return hr;
+                }
+            } else if ( desc.Width != referenceDesc.Width || desc.Height != referenceDesc.Height
+                || desc.MipLevels != referenceDesc.MipLevels || desc.Format != textureFormat
+                || desc.SampleDesc.Count != referenceDesc.SampleDesc.Count
+                || desc.SampleDesc.Quality != referenceDesc.SampleDesc.Quality ) {
+                LogError() << "Rain: Texture slices have incompatible layouts.";
+                return E_FAIL;
+            }
+
+            for ( UINT mip = 0; mip < desc.MipLevels; ++mip ) {
+                context->CopySubresourceRegion(
+                    textureArray.Get(), D3D11CalcSubresource( mip, textureIndex, desc.MipLevels ),
+                    0, 0, 0, sourceTexture.Get(), mip, nullptr );
+            }
+        }
+
+        if ( !textureArray ) {
             return E_FAIL;
         }
+
+        D3D11_SHADER_RESOURCE_VIEW_DESC srvDesc{};
+        srvDesc.Format = textureFormat;
+        srvDesc.ViewDimension = D3D11_SRV_DIMENSION_TEXTURE2DARRAY;
+        srvDesc.Texture2DArray.MostDetailedMip = 0;
+        srvDesc.Texture2DArray.MipLevels = referenceDesc.MipLevels;
+        srvDesc.Texture2DArray.FirstArraySlice = 0;
+        srvDesc.Texture2DArray.ArraySize = static_cast<UINT>(iNumTextures);
+
+        Microsoft::WRL::ComPtr<ID3D11ShaderResourceView> srv;
+        const HRESULT hr = pd3dDevice->CreateShaderResourceView( textureArray.Get(), &srvDesc, srv.GetAddressOf() );
+        if ( FAILED( hr ) ) {
+            LogError() << "Rain: Failed to create texture-array SRV (0x"
+                << std::hex << static_cast<unsigned long>(hr) << ").";
+            return hr;
+        }
+
+        *ppTex2D = textureArray.Detach();
+        *ppSRV = srv.Detach();
+        return S_OK;
+    } catch ( const std::bad_alloc& ) {
+        LogError() << "Rain: Not enough memory to load texture array.";
+        return E_OUTOFMEMORY;
     }
-
-    D3D11_SHADER_RESOURCE_VIEW_DESC SRVDesc = {};
-    SRVDesc.Format = desc.Format;
-    SRVDesc.ViewDimension = D3D11_SRV_DIMENSION_TEXTURE2DARRAY;
-    SRVDesc.Texture2DArray.MipLevels = desc.MipLevels;
-    SRVDesc.Texture2DArray.ArraySize = iNumTextures;
-    LE( pd3dDevice->CreateShaderResourceView( *ppTex2D, &SRVDesc, ppSRV ) );
-
-    return hr;
 }

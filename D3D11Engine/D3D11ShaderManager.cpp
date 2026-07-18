@@ -127,9 +127,8 @@ XRESULT D3D11ShaderManager::Init() {
         .with_layout( VERTEX_INPUT_LAYOUT_1 )
         .with_category( ShaderCategory::Water )
         .with_macros( [](std::vector<D3D_SHADER_MACRO>& list) {
-            const auto& s = Engine::GAPI->GetRendererState().RendererSettings;
 #ifdef BUILD_GOTHIC_2_6_fix
-            list.push_back( {"SHD_WATERANI", s.EnableWaterAnimation ? "1" : "0"} );
+            list.push_back( {"SHD_WATERANI", "1"} );
 #else
             list.push_back( {"SHD_WATERANI", "0"} );
 #endif
@@ -178,17 +177,20 @@ XRESULT D3D11ShaderManager::Init() {
         .with_macros( [](std::vector<D3D_SHADER_MACRO>& list) {
             const auto& s = Engine::GAPI->GetRendererState().RendererSettings;
 #ifdef BUILD_GOTHIC_2_6_fix
-            list.push_back( {"SHD_WIND",      s.WindQuality == GothicRendererSettings::EWindQuality::WIND_QUALITY_ADVANCED ? "1" : "0"} );
-            list.push_back( {"SHD_INFLUENCE", s.HeroAffectsObjects ? "1" : "0"} );
-            list.push_back( {"WIND_META_SRV", (!FeatureLevel10Compatibility && (s.WindQuality == GothicRendererSettings::EWindQuality::WIND_QUALITY_ADVANCED || s.HeroAffectsObjects)) ? "1" : "0"} );
+            const bool windEnabled = s.WindQuality == GothicRendererSettings::EWindQuality::WIND_QUALITY_ADVANCED;
+            list.push_back( {"SHD_WIND",      windEnabled ? "1" : "0"} );
+            list.push_back( {"SHD_INFLUENCE", windEnabled ? "1" : "0"} );
+            list.push_back( {"WIND_META_SRV", (!FeatureLevel10Compatibility && windEnabled) ? "1" : "0"} );
 #elif defined(BUILD_1_12F)
             list.push_back( {"SHD_WIND",      "0"} );
             list.push_back( {"SHD_INFLUENCE", "0"} );
             list.push_back( {"WIND_META_SRV", "0"} );
 #else
-            list.push_back( {"SHD_WIND",      (haveWindAnimations && s.WindQuality == GothicRendererSettings::EWindQuality::WIND_QUALITY_ADVANCED) ? "1" : "0"} );
-            list.push_back( {"SHD_INFLUENCE", (haveWindAnimations && s.HeroAffectsObjects) ? "1" : "0"} );
-            list.push_back( {"WIND_META_SRV", (!FeatureLevel10Compatibility && haveWindAnimations && (s.WindQuality == GothicRendererSettings::EWindQuality::WIND_QUALITY_ADVANCED || s.HeroAffectsObjects)) ? "1" : "0"} );
+            const bool windEnabled = haveWindAnimations
+                && s.WindQuality == GothicRendererSettings::EWindQuality::WIND_QUALITY_ADVANCED;
+            list.push_back( {"SHD_WIND",      windEnabled ? "1" : "0"} );
+            list.push_back( {"SHD_INFLUENCE", windEnabled ? "1" : "0"} );
+            list.push_back( {"WIND_META_SRV", (!FeatureLevel10Compatibility && windEnabled) ? "1" : "0"} );
 #endif
         }) );
 
@@ -261,8 +263,6 @@ XRESULT D3D11ShaderManager::Init() {
     Shaders.push_back( ShaderInfo::make<PShaderID::PS_PFX_Alpha_Blend>( "PS_PFX_Alpha_Blend.hlsl" )  );
 
     Shaders.push_back( ShaderInfo::make<PShaderID::PS_PFX_CinemaScope>( "PS_PFX_CinemaScope.hlsl" )  );
-
-    Shaders.push_back( ShaderInfo::make<PShaderID::PS_PFX_DistanceBlur>( "PS_PFX_DistanceBlur.hlsl" ) );
     Shaders.push_back( ShaderInfo::make<PShaderID::PS_PFX_LumConvert>( "PS_PFX_LumConvert.hlsl" ) );
     Shaders.push_back( ShaderInfo::make<PShaderID::PS_PFX_LumAdapt>( "PS_PFX_LumAdapt.hlsl" )  );
 

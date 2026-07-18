@@ -6293,9 +6293,20 @@ void GothicAPI::AddStagingTexture( UINT mip, ID3D11Texture2D* stagingTexture, ID
 
 /** Adds a mip map generation deferred command */
 void GothicAPI::AddMipMapGeneration( D3D11Texture* texture ) {
-    Engine::GAPI->EnterResourceCriticalSection();
-    FrameMipMapGenerations.push_back( texture );
-    Engine::GAPI->LeaveResourceCriticalSection();
+    if ( !texture ) return;
+    EnterResourceCriticalSection();
+    if ( std::find( FrameMipMapGenerations.begin(),
+            FrameMipMapGenerations.end(), texture ) == FrameMipMapGenerations.end() ) {
+        FrameMipMapGenerations.push_back( texture );
+    }
+    LeaveResourceCriticalSection();
+}
+
+void GothicAPI::RemoveMipMapGeneration( D3D11Texture* texture ) {
+    if ( !texture ) return;
+    EnterResourceCriticalSection();
+    FrameMipMapGenerations.remove( texture );
+    LeaveResourceCriticalSection();
 }
 
 /** Adds a texture to the list of the loaded textures for this frame */

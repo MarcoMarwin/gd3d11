@@ -30,6 +30,7 @@ protected:
 
     /** Fills vectors of random raindrop data, split into mutable and immutable parts */
     void FillRandomRaindropData( std::vector<RainParticleDynamic>& dynamicData, std::vector<RainParticleStatic>& staticData );
+    XRESULT EnsureRainBuffers( UINT numParticles, bool useCompute );
     ID3D11BlendState* GetRainReactiveBlendState();
 
     /** Rain */
@@ -37,6 +38,11 @@ protected:
     D3D11VertexBuffer* RainBufferInitial;
     D3D11VertexBuffer* RainBufferDrawFrom;
     D3D11VertexBuffer* RainBufferStreamTo;
+    float RainBufferRadius = -1.0f;
+    float RainBufferHeight = -1.0f;
+    UINT RainBufferParticleCount = 0;
+    bool RainBuffersUseCompute = false;
+    bool RainStreamOutFirstFrame = true;
 
     Microsoft::WRL::ComPtr<ID3D11Texture2D> RainTextureArray;
     Microsoft::WRL::ComPtr<ID3D11ShaderResourceView> RainTextureArraySRV;
