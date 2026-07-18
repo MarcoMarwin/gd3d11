@@ -92,8 +92,9 @@ public:
     }
 
     void Clear() {
-        // prune texture cache on resize.
-        m_pool.erase( std::remove_if( m_pool.begin(), m_pool.end(), []( const auto& entry ) { return true; } ), m_pool.end() );
+        // Prune cached textures on resize, but keep resources still owned by live RAII handles.
+        // Clearing an in-use entry would leave the handle's deleter pointing at freed pool metadata.
+        m_pool.erase( std::remove_if( m_pool.begin(), m_pool.end(), []( const auto& entry ) { return !entry->InUse; } ), m_pool.end() );
     }
 
     size_t GetActiveCount() const {
@@ -247,8 +248,8 @@ public:
     }
 
     void Clear() {
-        // prune cache on resize or level change
-        m_pool.clear();
+        // Prune cached depth buffers on resize, but keep resources still owned by live RAII handles.
+        m_pool.erase( std::remove_if( m_pool.begin(), m_pool.end(), []( const auto& entry ) { return !entry->InUse; } ), m_pool.end() );
     }
 
     size_t GetActiveCount() const {

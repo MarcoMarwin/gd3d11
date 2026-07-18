@@ -27,7 +27,7 @@ void CSMain( uint3 DTid : SV_DispatchThreadID )
     if ( depth.r < 0.00001f ) // likely sky pixel
     {
         float cloudAlpha = saturate(TX_LowClouds.SampleLevel(SS_Linear, uv, 0).a);
-        float cloudTransmission = 1.0f - smoothstep(0.08f, 0.92f, cloudAlpha);
+        float cloudTransmission = 1.0f - smoothstep(0.03f, 0.62f, cloudAlpha);
         OutputTexture[DTid.xy] = color * cloudTransmission;
     }
     else

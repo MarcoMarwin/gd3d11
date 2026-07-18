@@ -95,6 +95,7 @@ PS_OUTPUT PSMain( PS_INPUT Input )
 	float surfaceViewZ = Input.vTexcoord2.x;
 	float sceneViewZ = LinearizeWaterDepth(TX_Depth.Sample(SS_Linear, screenUV).r);
 	float viewRayScale = clamp(abs(Input.vTexcoord2.y) / max(abs(surfaceViewZ), 1.0f), 1.0f, 8.0f);
+	float shallowDepth = saturate(max(sceneViewZ - surfaceViewZ, 0.0f) * 0.01f);
 	float waterThickness = clamp(max(sceneViewZ - surfaceViewZ, 0.0f) * viewRayScale, 0.0f, 6000.0f);
 	float shoreDerivative = max(fwidth(waterThickness), 1.0f);
 	float shoreFadeEnd = clamp(max(65.0f, shoreDerivative * 1.25f), 65.0f, 160.0f);
@@ -106,8 +107,12 @@ PS_OUTPUT PSMain( PS_INPUT Input )
 	float waterMaterialAllowsRain = 1.0f - step(0.5f, WM_DisableRainEffects);
 	float rainAmount = saturate(AC_RainFXWeight) * waterMaterialAllowsRain;
 	float nightAmount = saturate((-AC_LightPos.y + 0.12f) * 2.2f);
-	float reflectionStrength = max(0.0f, AC_SSRStrength) * step(0.5f, AC_EnableSSR) * waterMaterialAllowsSSR;
-	bool waterSSRActive = reflectionStrength > 0.0001f;
+	float ssrReflectionStrength = max(0.0f, AC_SSRStrength) * step(0.5f, AC_EnableSSR) * waterMaterialAllowsSSR;
+	float cubeReflectionStrength = lerp(
+		0.30f,
+		max(0.30f, saturate(ssrReflectionStrength * 0.82f)),
+		step(0.5f, AC_EnableSSR));
+	bool waterSSRActive = ssrReflectionStrength > 0.0001f;
 
 	// Keep the existing wave animation, but reduce distant repetition and let rain roughen it smoothly.
 	float2 worldTexCoord = Input.vWorldPosition.xz / 1000.0f;
@@ -157,7 +162,7 @@ PS_OUTPUT PSMain( PS_INPUT Input )
 	float3 dayRainReflection = lerp(cubeGray * 0.46f, float3(0.18f, 0.20f, 0.21f), 0.55f)
 		* lerp(float3(1.0f, 1.0f, 1.0f), rainCloudTint, 0.30f);
 	float3 clearNightReflection = lerp(reflectionCube * 0.025f, float3(0.004f, 0.009f, 0.023f), 0.72f);
-	float3 rainNightReflection = max(AC_NightRainSkyColor * 0.32f, float3(0.006f, 0.008f, 0.012f));
+	float3 rainNightReflection = max(AC_NightRainSkyColor * 0.46f, float3(0.012f, 0.018f, 0.030f));
 	float3 dayReflection = lerp(reflectionCube, dayRainReflection, rainAmount);
 	float3 nightReflection = lerp(clearNightReflection, rainNightReflection, rainAmount);
 	float3 fallbackReflection = lerp(dayReflection, nightReflection, nightAmount);
@@ -194,14 +199,21 @@ PS_OUTPUT PSMain( PS_INPUT Input )
 			float rawDepthSample = TX_Depth.SampleLevel(SS_Linear, uv, 0).r;
 			if (rawDepthSample <= 0.000001f)
 			{
-				reflectionSSR = TX_Scene.SampleLevel(SS_Linear, uv, 0).rgb;
-				ssrHitValid = 1.0f;
-				ssrHitIsSky = 1.0f;
-				ssrHitUV = uv;
-				float2 skyEdgeFade = saturate(abs(uv - 0.5f) * 2.0f);
-				float skyEdgeDistance = max(skyEdgeFade.x, skyEdgeFade.y);
-				ssrRawWeight = 1.0f - smoothstep(0.76f, 1.0f, skyEdgeDistance);
-				ssrHitQuality = 0.72f;
+				// Build 132 used the cubemap as stable sky fallback. Keep that behavior and
+				// add only low-cloud coverage from screen space, never raw sky/sun pixels.
+				float4 skyLowClouds = TX_LowClouds.SampleLevel(SS_Linear, uv, 0);
+				if (skyLowClouds.a > 0.001f)
+				{
+					skyLowClouds = ResolveLowCloudLayer(skyLowClouds, fallbackReflection);
+					reflectionSSR = fallbackReflection * (1.0f - skyLowClouds.a) + skyLowClouds.rgb;
+					ssrHitValid = 1.0f;
+					ssrHitIsSky = 1.0f;
+					ssrHitUV = uv;
+					float2 skyEdgeFade = saturate(abs(uv - 0.5f) * 2.0f);
+					float skyEdgeDistance = max(skyEdgeFade.x, skyEdgeFade.y);
+					ssrRawWeight = 1.0f - smoothstep(0.78f, 1.0f, skyEdgeDistance);
+					ssrHitQuality = saturate(skyLowClouds.a) * 0.35f;
+				}
 				break;
 			}
 
@@ -257,7 +269,7 @@ PS_OUTPUT PSMain( PS_INPUT Input )
 		}
 	}
 
-	if (ssrHitValid > 0.5f)
+	if (ssrHitValid > 0.5f && ssrHitIsSky < 0.5f)
 	{
 		float4 reflectedLowClouds = TX_LowClouds.SampleLevel(SS_Linear, ssrHitUV, 0);
 		reflectedLowClouds = ResolveLowCloudLayer(reflectedLowClouds, reflectionSSR);
@@ -265,7 +277,7 @@ PS_OUTPUT PSMain( PS_INPUT Input )
 	}
 
 	float ssrNearFade = smoothstep(100.0f, 450.0f, waterViewDistance);
-	float ssrContactFade = SmootherStep01(saturate((waterThickness - 18.0f) / 67.0f)) * shoreVisibility;
+	float ssrContactFade = smoothstep(0.04f, 0.22f, shallowDepth);
 	float ssrBaseWeight = ssrRawWeight
 		* lerp(0.45f, 1.0f, ssrNearFade)
 		* lerp(0.55f, 1.0f, ssrContactFade)
@@ -287,8 +299,73 @@ PS_OUTPUT PSMain( PS_INPUT Input )
 
 	float reflectionLuma = dot(reflectionSSRColor, float3(0.2126f, 0.7152f, 0.0722f));
 	reflectionSSRColor *= rcp(1.0f + max(0.0f, reflectionLuma - 6.0f) * 0.12f);
-	float ssrConfidence = saturate(ssrWeight * rainFogVisibility * lerp(1.0f, 0.82f, rainAmount));
-	float3 reflectionColor = lerp(fallbackReflection, reflectionSSRColor, ssrConfidence);
+	float ssrFresnel = lerp(0.55f, 0.80f, saturate(pow(1.0f - NdotV, 2.0f)));
+	float ssrBlend = saturate(ssrWeight * ssrFresnel * ssrReflectionStrength * 0.78f * lerp(0.85f, 1.10f, nightAmount) * rainFogVisibility);
+	float3 reflectionColor = fallbackReflection;
+
+	if (WM_IsOceanWater < 0.5f)
+	{
+		float legacyShallowDepth = saturate(max(sceneViewZ - surfaceViewZ, 0.0f) * 0.01f);
+		float2 legacyDistUV = screenUV + distortionSmall.xy * DIST_SMALL_AMOUNT + distortionBig.xy * DIST_SMALL_AMOUNT;
+		float legacyDepthRefracted = LinearizeWaterDepth(TX_Depth.Sample(SS_Linear, legacyDistUV).r);
+		legacyDistUV = CleanRefraction(legacyDistUV, screenUV, legacyDepthRefracted);
+		legacyDistUV = saturate(legacyDistUV);
+
+		float3 legacyDiffuse = TX_Diffuse.Sample(SS_Linear, Input.vTexcoord + distortionSmall.xy * DIST_SMALL_AMOUNT * 0.5f).rgb;
+		float3 legacyWavesFres = normalize(distortionBig.xzy * float3(1.0f, 10.0f, 1.0f));
+		float3 legacyWavesSmall = normalize(distortionSmall.xzy * float3(1.0f, 10.0f, 1.0f));
+		float legacyFresnel = min(0.5f, saturate(pow(1.0f - saturate(dot(-viewDirection, legacyWavesFres)), 10.0f)));
+
+		float3 legacyScene = TX_Scene.Sample(SS_Linear, legacyDistUV).rgb;
+		float3 legacySceneClean = TX_Scene.Sample(SS_Linear, lerp(legacyDistUV, screenUV, pow(1.0f - legacyShallowDepth, 20.0f))).rgb;
+		float legacyWetFactor = 1.0f - saturate(pow(1.0f - legacyShallowDepth, 8.0f) + clamp(pow(distortionSmall.y, 2.0f), 0.5f, 1.0f));
+		float legacyEnhancedWater = step(0.5f, AC_EnableSSR) * waterMaterialAllowsSSR;
+		float3 legacySceneWet = lerp(legacySceneClean, legacySceneClean * lerp(0.01f, 0.38f, nightAmount * legacyEnhancedWater), legacyWetFactor);
+		legacyScene = lerp(legacyScene, legacyScene * float3(4.0f, 0.2f, 0.1f) * 0.05f, legacyWetFactor);
+		legacyScene = lerp(legacyScene, legacyDiffuse, 0.73f * max(pow(legacyFresnel, 8.0f), 0.5f));
+
+		float legacySsrFresnel = lerp(0.55f, 0.80f, saturate(pow(1.0f - saturate(dot(-viewDirection, legacyWavesFres)), 2.0f)));
+		float legacyCubeWeight = waterSSRActive ? saturate(1.0f - ssrWeight * saturate(ssrReflectionStrength)) : 1.0f;
+		float legacyRainCubemapVisibility = lerp(1.0f, 0.12f, rainAmount) * (1.0f - rainAmount * smoothstep(5000.0f, 22000.0f, waterViewDistance));
+		legacyScene.rgb += reflectionCube * cubeReflectionStrength * legacyCubeWeight * legacyRainCubemapVisibility * legacyFresnel * lerp(1.0f, legacyDiffuse, 0.6f);
+		float legacySsrBlend = saturate(ssrWeight * legacySsrFresnel * ssrReflectionStrength * 0.78f * lerp(0.85f, 1.10f, nightAmount) * rainFogVisibility);
+
+		float legacyPxDistance = Input.vTexcoord2.y;
+		float3 legacyColor = lerp(legacyScene, legacySceneClean, pow(saturate(legacyPxDistance / 35000.0f), 4.0f));
+		legacyColor = lerp(legacyColor, legacySceneWet, 1.0f - legacyShallowDepth);
+		legacyColor.rgb = ApplyAtmosphericScatteringGround(Input.vWorldPosition, legacyColor.rgb);
+
+		float3 sunOrange = float3(0.6f, 0.3f, 0.1f) * 2.0f;
+		float3 sunColor = lerp(sunOrange, float3(1.0f, 1.0f, 1.0f), AC_LightPos.y) * 5.0f;
+		float3 legacyReflectVectorSmall = reflect(-viewDirection, legacyWavesSmall);
+		float cosSpec = clamp(dot(legacyReflectVectorSmall, -AC_LightPos.xyz), 0.0f, 1.0f);
+		float sunSpot = pow(cosSpec, 500.0f) * 0.5f;
+		float weatherLightVisibility = GetRainSkyVisibility();
+		float sunVisibility = smoothstep(-0.04f, 0.08f, AC_LightPos.y) * weatherLightVisibility;
+		sunSpot *= sunVisibility;
+		float sunSpotSSRBlock = saturate(max(ssrBaseWeight, ssrHitQuality * 0.75f) * ssrHitValid * 1.85f);
+		sunSpot *= 1.0f - sunSpotSSRBlock;
+		legacyColor.rgb += sunColor * sunSpot;
+
+		float moonVisibility = smoothstep(-0.04f, 0.08f, AC_MoonPos.y) * weatherLightVisibility;
+		float3 moonLightVector = -AC_MoonPos.xyz;
+		float3 moonRayDirection = moonLightVector / max(length(moonLightVector), 0.001f);
+		float moonCosSpec = clamp(dot(legacyReflectVectorSmall, moonRayDirection), 0.0f, 1.0f);
+		float moonSpot = pow(moonCosSpec, 360.0f) * 0.22f * moonVisibility;
+		moonSpot *= 1.0f - sunSpotSSRBlock;
+		float3 moonColor = float3(0.58f, 0.66f, 1.0f) * 1.15f;
+		legacyColor.rgb += moonColor * moonSpot;
+
+		float legacyDarknessFactor = 2.0f - AC_LightPos.y;
+		legacyDarknessFactor = lerp(legacyDarknessFactor, max(1.22f, legacyDarknessFactor * 0.58f), nightAmount * legacyEnhancedWater);
+		float3 legacyFinalColor = legacyColor / max(legacyDarknessFactor, 0.001f);
+		legacyFinalColor = lerp(legacyFinalColor, reflectionSSRColor, legacySsrBlend);
+
+		output.color = float4(max(legacyFinalColor, float3(0.0f, 0.0f, 0.0f)), 1.0f);
+		output.waterMask = lerp(0.25f, 1.0f, step(0.5f, WM_DisableRainEffects));
+		output.fsr3ReactiveMask = 0.45f;
+		return output;
+	}
 
 	// Depth-dependent absorption keeps shallow sand visible without tinting the whole sea brown.
 	float3 clearAbsorption = float3(0.00240f, 0.00115f, 0.00062f);
@@ -296,9 +373,9 @@ PS_OUTPUT PSMain( PS_INPUT Input )
 	float3 transmittance = exp(-lerp(clearAbsorption, rainAbsorption, rainAmount) * waterThickness);
 
 	float3 clearDayScattering = float3(0.035f, 0.120f, 0.150f);
-	float3 rainDayScattering = float3(0.040f, 0.075f, 0.082f);
+	float3 rainDayScattering = float3(0.052f, 0.080f, 0.096f);
 	float3 clearNightScattering = float3(0.0035f, 0.0080f, 0.0200f);
-	float3 rainNightScattering = max(AC_NightRainSkyColor * 0.30f, float3(0.0045f, 0.0060f, 0.0090f));
+	float3 rainNightScattering = max(AC_NightRainMidColor * 1.05f + AC_NightRainSkyColor * 0.20f, float3(0.018f, 0.030f, 0.052f));
 	float3 dayScattering = lerp(clearDayScattering, rainDayScattering, rainAmount);
 	float3 nightScattering = lerp(clearNightScattering, rainNightScattering, rainAmount);
 	float3 scatteringColor = lerp(dayScattering, nightScattering, nightAmount);
@@ -310,7 +387,7 @@ PS_OUTPUT PSMain( PS_INPUT Input )
 
 	// A mild distance blend removes the old horizontal color band without hiding the horizon.
 	float farWaterBlend = SmootherStep01(saturate((waterViewDistance - 20000.0f) / 45000.0f)) * shoreVisibility;
-	float horizonReflectionWeight = saturate(fresnel * reflectionStrength * 0.35f);
+	float horizonReflectionWeight = saturate(fresnel * cubeReflectionStrength * 0.35f);
 	float3 horizonWaterColor = lerp(scatteringColor, fallbackReflection, horizonReflectionWeight);
 	waterVolume = lerp(waterVolume, horizonWaterColor, farWaterBlend * 0.38f);
 
@@ -320,7 +397,17 @@ PS_OUTPUT PSMain( PS_INPUT Input )
 		waterVolume * max(WM_OceanWaterTint, float3(0.0f, 0.0f, 0.0f)),
 		oceanTint);
 
-	float reflectionAmount = saturate(fresnel * reflectionStrength) * shoreVisibility;
+	// Tie ocean water to the same 360-degree rain haze as the sky so it does not
+	// inherit brown terrain tones at rainy day/night distances.
+	float rainWaterRegradeWeight = rainAmount * shoreVisibility * lerp(0.54f, 0.78f, nightAmount);
+	float3 dayRainWaterHaze = float3(0.080f, 0.105f, 0.116f);
+	float3 nightRainWaterHaze = max(AC_NightRainMidColor * 1.15f + AC_NightRainSkyColor * 0.28f, float3(0.024f, 0.038f, 0.064f));
+	float3 rainWaterHaze = lerp(dayRainWaterHaze, nightRainWaterHaze, nightAmount);
+	float waterVolumeLuma = dot(waterVolume, float3(0.2126f, 0.7152f, 0.0722f));
+	float3 rainRegradedWater = rainWaterHaze * lerp(0.72f, 1.24f, saturate(waterVolumeLuma * 4.0f));
+	waterVolume = lerp(waterVolume, rainRegradedWater, rainWaterRegradeWeight);
+
+	float reflectionAmount = saturate(fresnel * cubeReflectionStrength) * shoreVisibility;
 	float3 color = lerp(waterVolume, reflectionColor, reflectionAmount);
 
 	// Keep sun and moon glints tied to the same reflection control and weather visibility.
@@ -335,7 +422,7 @@ PS_OUTPUT PSMain( PS_INPUT Input )
 
 	float sunSpotSSRBlock = saturate(max(ssrBaseWeight, ssrHitQuality * 0.75f) * ssrHitValid * 1.85f);
 	sunSpot *= 1.0f - sunSpotSSRBlock;
-	float reflectionControl = saturate(reflectionStrength) * shoreVisibility;
+	float reflectionControl = saturate(cubeReflectionStrength) * shoreVisibility;
 	color += sunColor * sunSpot * reflectionControl;
 
 	float moonVisibility = smoothstep(-0.04f, 0.08f, AC_MoonPos.y) * weatherLightVisibility;
@@ -346,6 +433,11 @@ PS_OUTPUT PSMain( PS_INPUT Input )
 	moonSpot *= 1.0f - sunSpotSSRBlock;
 	float3 moonColor = float3(0.58f, 0.66f, 1.0f) * 1.15f;
 	color += moonColor * moonSpot * reflectionControl;
+
+	float colorLuma = dot(color, float3(0.2126f, 0.7152f, 0.0722f));
+	float3 finalRainRegrade = rainWaterHaze * lerp(0.78f, 1.30f, saturate(colorLuma * 4.0f));
+	color = lerp(color, reflectionSSRColor, ssrBlend);
+	color = lerp(color, finalRainRegrade, rainWaterRegradeWeight * lerp(0.35f, 0.62f, nightAmount));
 
 	output.color = float4(max(color, float3(0.0f, 0.0f, 0.0f)), 1.0f);
 	// Preserve the special rain-disabled mask, while normal water blends cleanly into the shore.

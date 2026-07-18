@@ -33,7 +33,7 @@ float4 PSMain( PS_INPUT Input ) : SV_TARGET
 	if(!(depth > 0.0f))
 	{
 		float cloudAlpha = saturate(TX_LowClouds.Sample(SS_Linear, Input.vTexcoord).a);
-		float cloudTransmission = 1.0f - smoothstep(0.08f, 0.92f, cloudAlpha);
+		float cloudTransmission = 1.0f - smoothstep(0.03f, 0.62f, cloudAlpha);
 		return color * cloudTransmission;
 	}
 	

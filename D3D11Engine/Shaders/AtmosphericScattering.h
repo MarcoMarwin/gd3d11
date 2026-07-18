@@ -299,7 +299,9 @@ float4 ComputeWorldLowCloudVolume(float3 cameraWorld, float3 endWorld, float cam
 	float marchDistance = lerp(min(cameraDistance, 105000.0f), 78000.0f, skyPixel) * cloudDistanceScale;
 	float startDistance = lerp(7000.0f, 14500.0f, skyPixel) * cloudDistanceScale;
 	float skyHorizonWeight = lerp(1.0f, lerp(0.12f, 1.0f, 1.0f - SmootherStep01(saturate((rayDir.y - 0.20f) / 0.52f))), skyPixel);
-	if (abs(rayDir.y) > 0.035f)
+	float skyHorizonFill = skyPixel * (1.0f - SmootherStep01(
+		saturate((abs(rayDir.y) - 0.008f) / 0.115f)));
+	if (abs(rayDir.y) > 0.035f && skyHorizonFill < 0.001f)
 	{
 		float t0 = (layerMin - cameraWorld.y) / rayDir.y;
 		float t1 = (layerMax - cameraWorld.y) / rayDir.y;
@@ -343,19 +345,27 @@ float4 ComputeWorldLowCloudVolume(float3 cameraWorld, float3 endWorld, float cam
 		float stepJitter = LowCloudHash21(float2(i * 17.0f, i * 29.0f) + float2(11.0f, 37.0f)) - 0.5f;
 		float sampleDistance = startDistance + (i + 0.58f + stepJitter * 0.24f) * stepLength;
 		float3 sampleWorld = cameraWorld + rayDir * sampleDistance;
+		// Fill the visual gap at the sea/sky horizon without moving real geometry clouds.
+		float horizonFillDistance = SmootherStep01(saturate(
+			(sampleDistance - 26000.0f * cloudDistanceScale)
+			/ max(8000.0f, 36000.0f * cloudDistanceScale)));
+		float3 cloudSampleWorld = sampleWorld;
+		cloudSampleWorld.y += max(
+			cloudBase + 1900.0f * cloudHeightScale - cloudSampleWorld.y, 0.0f)
+			* skyHorizonFill * horizonFillDistance;
 		float nearCloudFadeStart = lerp(7800.0f, 18000.0f, skyPixel) * cloudDistanceScale;
 		float nearCloudFadeEnd = lerp(18000.0f, 32000.0f, skyPixel) * cloudDistanceScale;
 		float farCloudFadeStart = lerp(105000.0f, 72000.0f, skyPixel) * cloudDistanceScale;
 		float farCloudFadeEnd = lerp(140000.0f, 98000.0f, skyPixel) * cloudDistanceScale;
 		float distanceFade = smoothstep(nearCloudFadeStart, nearCloudFadeEnd, sampleDistance) * (1.0f - smoothstep(farCloudFadeStart, farCloudFadeEnd, sampleDistance));
-		float density = ComputeWorldLowCloudDensity(sampleWorld, baseFogHeight) * distanceFade * skyHorizonWeight;
+		float density = ComputeWorldLowCloudDensity(cloudSampleWorld, baseFogHeight) * distanceFade * skyHorizonWeight;
 
-		float upperSelfLight = smoothstep(cloudBase + 2600.0f * cloudHeightScale, cloudBase + 9400.0f * cloudHeightScale, sampleWorld.y);
+		float upperSelfLight = smoothstep(cloudBase + 2600.0f * cloudHeightScale, cloudBase + 9400.0f * cloudHeightScale, cloudSampleWorld.y);
 		float selfShadow = lerp(0.46f, 0.94f, upperSelfLight) * lerp(1.0f, 0.72f, saturate(density * 1.20f));
 		float3 litColor = lerp(nightLit, dayLit, dayWeight);
 		float3 shadowColor = lerp(nightShadow, dayShadow, dayWeight);
 		float3 cloudColor = lerp(shadowColor, litColor, selfShadow);
-		float upperSunLayer = smoothstep(cloudBase + 3900.0f * cloudHeightScale, cloudBase + 9200.0f * cloudHeightScale, sampleWorld.y);
+		float upperSunLayer = smoothstep(cloudBase + 3900.0f * cloudHeightScale, cloudBase + 9200.0f * cloudHeightScale, cloudSampleWorld.y);
 		float viewSunForward = pow(saturate(dot(rayDir, lightDir) * 0.5f + 0.5f), 4.0f);
 		float sunTopLight = upperSunLayer * dayWeight * saturate(lightDir.y * 1.35f) * selfShadow * lerp(1.0f, 0.45f, rainWeight) * max(0.0f, AC_LowCloudSunLight);
 		cloudColor += float3(0.155f, 0.156f, 0.140f) * sunTopLight * lerp(0.38f, 0.88f, viewSunForward);
@@ -546,8 +556,9 @@ float3 ApplyAtmosphericScatteringSky(float3 worldPosition)
 	
 	// Finally, scale the Mie and Rayleigh colors and set up the varying variables for the pixel shader
 	float3 c0 = vFrontColor * (vInvWavelength * AC_KrESun);
-	// Rain clouds occlude only the concentrated Mie sun glow; the base sky transition stays intact.
-	float3 c1 = vFrontColor * AC_KmESun * GetRainSkyVisibility();
+	// Keep the sun glow profile stable during weather transitions; the rain cloud
+	// deck handles occlusion instead of shrinking the Mie lobe itself.
+	float3 c1 = vFrontColor * AC_KmESun;
 	
 	
 	

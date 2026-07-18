@@ -274,21 +274,7 @@ namespace
         }
 
         const std::string name = texture->GetNameWithoutExt();
-        if ( TextureNameContainsMarker( name, "RIVER" )
-            || TextureNameContainsMarker( name, "FLUSS" )
-            || TextureNameContainsMarker( name, "BACH" )
-            || TextureNameContainsMarker( name, "STREAM" )
-            || TextureNameContainsMarker( name, "WATERFALL" )
-            || TextureNameContainsMarker( name, "WASSERFALL" ) ) {
-            return false;
-        }
-
-        return TextureNameContainsMarker( name, "OCEAN" )
-            || TextureNameContainsMarker( name, "SEA" )
-            || TextureNameContainsMarker( name, "MEER" )
-            || TextureNameContainsMarker( name, "SEAWATER" )
-            || TextureNameContainsMarker( name, "HARBOUR" )
-            || TextureNameContainsMarker( name, "HARBOR" );
+        return TextureNameContainsMarker( name, "NW_WATER_LAKE01" );
     }
 
     void FillWaterMaterialInfo( WaterMaterialInfoConstantBuffer& wmcb, zCTexture* texture ) {

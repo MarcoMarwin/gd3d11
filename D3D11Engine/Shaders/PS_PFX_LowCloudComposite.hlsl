@@ -25,6 +25,30 @@ float LoadLowCloudDepth( int2 cloudPixel, int2 cloudSize )
     return TX_LowCloudDepth.Load( int3( cloudPixel, 0 ) ).r;
 }
 
+float GetNearbySkyCoverage( int2 targetPixel, int2 depthSize )
+{
+    const float skyDepthEpsilon = 0.00001f;
+    float skyCoverage = 0.0f;
+    float totalWeight = 0.0f;
+
+    [unroll]
+    for ( int y = -1; y <= 1; ++y )
+    {
+        [unroll]
+        for ( int x = -1; x <= 1; ++x )
+        {
+            int2 samplePixel = clamp(
+                targetPixel + int2( x, y ),
+                int2( 0, 0 ), depthSize - int2( 1, 1 ) );
+            float depth = TX_FullDepth.Load( int3( samplePixel, 0 ) ).r;
+            float weight = (x == 0 && y == 0) ? 1.0f : 0.75f;
+            skyCoverage += (depth < skyDepthEpsilon ? 1.0f : 0.0f) * weight;
+            totalWeight += weight;
+        }
+    }
+
+    return skyCoverage / max( totalWeight, 0.00001f );
+}
 float GetLowCloudDepthWeight( float targetDepth, float sourceDepth )
 {
     const float skyDepthEpsilon = 0.00001f;
@@ -150,17 +174,29 @@ float4 SampleDepthAwareLowClouds(
         return bestClouds;
     }
 
-    // Very distant alpha-tested vegetation often contributes a foreground depth pixel
-    // while the half-res low-cloud layer only saw sky around it. In that case, keeping
-    // clouds out makes the tree contour reveal raw sky. For far silhouettes, use the
-    // nearby cloud layer as the background veil instead of punching a cloud hole.
-    if ( !targetIsSky && targetDepth < 0.020f )
+    float4 fallbackClouds = TX_LowClouds.SampleLevel( SS_Linear, texcoord, 0 );
+    if ( fallbackClouds.a <= 0.001f )
     {
-        float4 fallbackClouds = TX_LowClouds.SampleLevel( SS_Linear, texcoord, 0 );
-        if ( fallbackClouds.a > 0.001f )
-        {
-            return fallbackClouds;
-        }
+        return float4( 0.0f, 0.0f, 0.0f, 0.0f );
+    }
+
+    // Real sky pixels inside alpha-tested tree gaps must still receive the cloud
+    // background even when the half-res depth tap was polluted by nearby foliage.
+    if ( targetIsSky )
+    {
+        return fallbackClouds;
+    }
+
+    // Distant foliage silhouettes can also miss every compatible low-res tap. Limit
+    // the fallback to far edge pixels with nearby sky so solid geometry is not washed.
+    float nearbySkyCoverage = GetNearbySkyCoverage( targetPixel, depthSize );
+    float farSilhouetteWeight = 1.0f - smoothstep( 0.06f, 0.18f, targetDepth );
+    float edgeBackgroundWeight = saturate( nearbySkyCoverage * 2.5f ) * farSilhouetteWeight;
+    if ( edgeBackgroundWeight > 0.001f )
+    {
+        fallbackClouds.rgb *= edgeBackgroundWeight;
+        fallbackClouds.a *= edgeBackgroundWeight;
+        return fallbackClouds;
     }
 
     return float4( 0.0f, 0.0f, 0.0f, 0.0f );
