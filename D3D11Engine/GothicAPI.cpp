@@ -845,7 +845,6 @@ void GothicAPI::OnGameStart() {
     InitializeCriticalSection( &ResourceCriticalSection );
 
     SkyRenderer = std::make_unique<GSky>();
-    SkyRenderer->InitSky();
 
     Inventory = std::make_unique<GInventory>();
 

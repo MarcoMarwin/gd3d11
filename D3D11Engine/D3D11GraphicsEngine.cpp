@@ -4245,8 +4245,9 @@ XRESULT D3D11GraphicsEngine::OnStartWorldRendering() {
     bool compositionContactShadows = rendererState.RendererSettings.EnableContactShadows;
     bool compositionSSGI = rendererState.RendererSettings.EnableScreenSpaceGI && rendererState.RendererSettings.ScreenSpaceGIStrength > 0.0f;
     bool compositionNeedsGeometry = compositionContactShadows || compositionSSGI;
-    bool compositionNeedsDepth = compositionHeightFog || compositionNeedsGeometry;
-    bool compositionActive = compositionGodRays || compositionNeedsDepth;
+    bool compositionNeedsDepth = compositionHeightFog;
+    bool compositionActive = compositionGodRays || compositionNeedsDepth
+        || compositionNeedsGeometry;
 
     const bool fsr3UpscalingActive = GetDevice()->GetFeatureLevel() >= D3D_FEATURE_LEVEL_11_0
         && rendererState.RendererSettings.Upscaler == GothicRendererSettings::UPSCALER_FSR_3
@@ -4878,39 +4879,49 @@ XRESULT D3D11GraphicsEngine::OnStartWorldRendering() {
     if ( compositionActive ) {
         graph.AddPass( RG_PASS_NAME("PostFX Composition"), [&]( RGBuilder& builder, RenderPass& pass ) {
             builder.Read( backBufferHandle );
-            if ( compositionNeedsGeometry ) {
-                builder.Read( normalsResource );
-                builder.Read( waterMaskResource );
-            }
             builder.Write( backBufferHandle );
 
-            pass.m_executeCallback = [this, backBufferHandle, normalsResource, compositionNeedsDepth, compositionNeedsGeometry,
-                                      compositionHeightFog, waterMaskResource, &compositionGodRaysSRV, &compositionScreenSpaceLightingSRV](const RenderGraph& graph) {
+            pass.m_executeCallback = [this, backBufferHandle, compositionNeedsDepth, compositionNeedsGeometry,
+                                      compositionHeightFog, &compositionGodRaysSRV, &compositionScreenSpaceLightingSRV](const RenderGraph& graph) {
                 TracyD3D11ZoneCGX( "D3D11GraphicsEngine::PostFX Composition" );
 
-                auto backBuffer = graph.GetPhysicalTexture(backBufferHandle);
-                // Copy backbuffer to a temp texture so it can be read as SRV while writing to RTV.
-                auto tempBuffer = PfxRenderer->GetTempBuffer();
-                GetContext()->CopyResource( tempBuffer->GetTexture().Get(), backBuffer->GetTexture().Get() );
+                auto context = GetContext();
+                auto* backBuffer = graph.GetPhysicalTexture( backBufferHandle );
+                auto tempBuffer = PfxRenderer ? PfxRenderer->GetTempBuffer() : TextureHandle{};
+                auto* depthBuffer = compositionNeedsDepth ? GetDepthBuffer() : nullptr;
+                if ( !context || !PfxRenderer
+                    || !backBuffer || !backBuffer->IsValid()
+                    || !tempBuffer || !tempBuffer->IsValid()
+                    || !backBuffer->GetTexture() || !tempBuffer->GetTexture()
+                    || (compositionNeedsDepth
+                        && (!depthBuffer || !depthBuffer->IsValid()))
+                    || (compositionNeedsGeometry
+                        && !compositionScreenSpaceLightingSRV) ) {
+                    return;
+                }
 
-                // Gather SRVs for composition
-                ID3D11ShaderResourceView* depthSRV = compositionNeedsDepth ? GetDepthBuffer()->GetShaderResView().Get() : nullptr;
-                auto normalsTexture = compositionNeedsGeometry ? graph.GetPhysicalTexture(normalsResource) : nullptr;
-                ID3D11ShaderResourceView* normalsSRV = normalsTexture ? normalsTexture->GetShaderResView().Get() : nullptr;
-                auto waterMaskTexture = compositionNeedsGeometry ? graph.GetPhysicalTexture(waterMaskResource) : nullptr;
-                ID3D11ShaderResourceView* waterMaskSRV = waterMaskTexture ? waterMaskTexture->GetShaderResView().Get() : nullptr;
+                // Copy the scene so it can be read while the graph target is written.
+                context->CopyResource(
+                    tempBuffer->GetTexture().Get(), backBuffer->GetTexture().Get() );
+                ID3D11ShaderResourceView* depthSRV = depthBuffer
+                    ? depthBuffer->GetShaderResView().Get() : nullptr;
 
-                PfxRenderer->RenderPostFXComposition(
+                const XRESULT compositionResult =
+                    PfxRenderer->RenderPostFXComposition(
                     backBuffer->GetRenderTargetView().Get(),
                     tempBuffer->GetShaderResView().Get(),
                     compositionGodRaysSRV,
                     depthSRV,
-                    normalsSRV,
-                    waterMaskSRV,
                     compositionScreenSpaceLightingSRV,
                     compositionHeightFog );
 
-                GetContext()->PSSetSamplers( 0, 1, DefaultSamplerState.GetAddressOf() );
+                if ( DefaultSamplerState ) {
+                    context->PSSetSamplers(
+                        0, 1, DefaultSamplerState.GetAddressOf() );
+                }
+                if ( compositionResult != XR_SUCCESS ) {
+                    return;
+                }
             };
         });
     }

@@ -65,81 +65,7 @@ GSky::GSky() {
     ZeroMemory( &AtmosphereCB, sizeof( AtmosphereCB ) );
 }
 
-GSky::~GSky() {
-    for ( unsigned int i = 0; i < SkyTextures.size(); i++ ) {
-        SAFE_DELETE( SkyTextures[i] );
-    }
-}
-
-/** Creates needed resources by the sky */
-XRESULT GSky::InitSky() {
-    const float sizeX = 500000;
-    const float sizeY = 10000;
-
-    SkyPlaneVertices[0].Position = float3( -sizeX, sizeY, -sizeX ); // 0
-    SkyPlaneVertices[1].Position = float3( +sizeX, sizeY, -sizeX ); // 1
-    SkyPlaneVertices[2].Position = float3( -sizeX, sizeY, +sizeX ); // 2
-
-    SkyPlaneVertices[3].Position = float3( +sizeX, sizeY, -sizeX ); // 1
-    SkyPlaneVertices[4].Position = float3( +sizeX, sizeY, +sizeX ); // 3
-    SkyPlaneVertices[5].Position = float3( -sizeX, sizeY, +sizeX ); // 2
-
-    const float scale = 20.0f;
-    XMFLOAT2 displacement;
-    float4 color = float4( 1, 1, 1, 1 );
-
-    // Construct vertices
-    // 0
-    SkyPlaneVertices[0].TexCoord = float2( displacement );
-    SkyPlaneVertices[0].Color = color.ToDWORD();
-
-    // 1
-    FXMVECTOR xm_displacement = XMLoadFloat2( &displacement );
-    XMFLOAT2 SkyPlaneVertices1;
-    XMStoreFloat2( &SkyPlaneVertices1, (XMVectorSet( scale, 0, 0, 0 ) + xm_displacement) );
-    SkyPlaneVertices[1].TexCoord = SkyPlaneVertices1;
-    SkyPlaneVertices[1].Color = color.ToDWORD();
-
-    // 2
-    XMFLOAT2 SkyPlaneVertices2;
-    XMStoreFloat2( &SkyPlaneVertices2, (XMVectorSet( 0, scale, 0, 0 ) + xm_displacement) );
-    SkyPlaneVertices[2].TexCoord = SkyPlaneVertices2;
-    SkyPlaneVertices[2].Color = color.ToDWORD();
-
-    // ---
-
-    // 1
-    SkyPlaneVertices[3].TexCoord = SkyPlaneVertices1;
-    SkyPlaneVertices[3].Color = color.ToDWORD();
-
-    // 3
-    XMFLOAT2 SkyPlaneVertices4;
-    XMStoreFloat2( &SkyPlaneVertices4, (XMVectorSet( scale, scale, 0, 0 ) + xm_displacement) );
-    SkyPlaneVertices[4].TexCoord = SkyPlaneVertices4;
-    SkyPlaneVertices[4].Color = color.ToDWORD();
-
-    // 2
-    SkyPlaneVertices[5].TexCoord = SkyPlaneVertices2;
-    SkyPlaneVertices[5].Color = color.ToDWORD();
-
-    return XR_SUCCESS;
-}
-
-/** Returns the skyplane */
-MeshInfo* GSky::GetSkyPlane() {
-    return SkyPlane.get();
-}
-
-/** Adds a sky texture. Sky textures must be in order to make the daytime work */
-XRESULT GSky::AddSkyTexture( const std::string& file ) {
-    D3D11Texture* t;
-    XLE( Engine::GraphicsEngine->CreateTexture( &t ) );
-    XLE( t->Init( file ) );
-
-    SkyTextures.push_back( t );
-
-    return XR_SUCCESS;
-}
+GSky::~GSky() = default;
 
 /** Loads the sky resources */
 XRESULT GSky::LoadSkyResources() {
@@ -178,12 +104,7 @@ XRESULT GSky::LoadSkyResources() {
             return XR_FAILED;
         }
 
-        VERTEX_INDEX indices[] = { 0, 1, 2, 3, 4, 5 };
-        auto newSkyPlane = std::make_unique<MeshInfo>();
-        newSkyPlane->Create( SkyPlaneVertices, 6, indices, 6 );
-
         SkyDome = std::move( newSkyDome );
-        SkyPlane = std::move( newSkyPlane );
         CloudTexture = std::move( newCloudTexture );
         RainCloudTexture = std::move( newRainCloudTexture );
         NightTexture = std::move( newNightTexture );
@@ -225,7 +146,6 @@ void GSky::SetSkyTexture( ESkyTexture texture ) {
     }
 
     CloudTexture = std::move( newCloudTexture );
-    CloudTexture_Zen = nullptr;
     DaySkyTexture = texture;
     Atmosphere.WaveLengths = waveLengths;
     ApplyDaySkyColorProfile();
@@ -248,7 +168,6 @@ void GSky::SetCustomCloudAndNightTexture( int idx, bool isNightTexture, bool isO
         if ( LoadRendererSkyTexture(
                 "system\\GD3D11\\Textures\\starsh.dds", newNightTexture ) == XR_SUCCESS ) {
             NightTexture = std::move( newNightTexture );
-            NightTexture_Zen = nullptr;
         }
         return;
     }
@@ -271,10 +190,8 @@ void GSky::SetCustomCloudAndNightTexture( int idx, bool isNightTexture, bool isO
 
     if ( isNightTexture ) {
         NightTexture = std::move( newTexture );
-        NightTexture_Zen = nullptr;
     } else {
         CloudTexture = std::move( newTexture );
-        CloudTexture_Zen = nullptr;
         DaySkyTexture = isOldWorld ? ESkyTexture::ST_OldWorld : ESkyTexture::ST_NewWorld;
         Atmosphere.WaveLengths = isOldWorld
             ? float3( 0.54f, 0.56f, 0.60f )
@@ -323,28 +240,6 @@ void GSky::SetCustomSkyTexture_ZenGin( bool isNightTexture, zCTexture* texture, 
 
 void GSky::SetCustomSkyWavelengths( float X, float Y, float Z ) {
     Atmosphere.WaveLengths = float3( X, Y, Z );
-}
-
-/** Returns the sky-texture for the passed daytime (0..1) */
-void GSky::GetTextureOfDaytime( float time, D3D11Texture** t1, D3D11Texture** t2, float* factor ) {
-    if ( !SkyTextures.size() )
-        return;
-
-    time -= floor( time ); // Fractionalize, put into 0..1 range
-
-    // Get the index of the current texture
-    float index = time * (SkyTextures.size() - 0.5f);
-
-    // Get indices of the current and the next texture
-    int i0 = static_cast<int>(index);
-    int i1 = static_cast<unsigned int>(index + 1) < SkyTextures.size() ? static_cast<int>(index) + 1 : 0;
-
-    // Calculate weight
-    float weight = index - i0;
-
-    *t1 = SkyTextures[i0];
-    *t2 = SkyTextures[i1];
-    *factor = weight;
 }
 
 /** Renders the sky */
@@ -427,6 +322,9 @@ XRESULT GSky::RenderSky() {
                 AtmosphericRainReleasing = true;
                 AtmosphericRainDropStartMs = 0;
             }
+        } else if ( !AtmosphericRainReleasing ) {
+            AtmosphericRainDropStartMs = 0;
+            AtmosphericRainSettledStartMs = 0;
         }
 
         if ( AtmosphericRainReleasing ) {
@@ -445,10 +343,6 @@ XRESULT GSky::RenderSky() {
             } else {
                 AtmosphericRainSettledStartMs = 0;
             }
-        }
-        else if ( !AtmosphericRainReleasing ) {
-            AtmosphericRainDropStartMs = 0;
-            AtmosphericRainSettledStartMs = 0;
         }
     }
     AtmosphericRainSettingEnabled = rainEnabled;
@@ -584,9 +478,9 @@ XRESULT GSky::RenderSky() {
     }
     AtmosphereCB.AC_RainFXWeight = AtmosphericRainWeight;
     AtmosphereCB.AC_EnableSSR = Engine::GAPI->GetRendererState().RendererSettings.EnableSSR ? 1.0f : 0.0f;
-    AtmosphereCB.AC_EnableSSS = Engine::GAPI->GetRendererState().RendererSettings.EnableSSS ? 1.0f : 0.0f;
+    AtmosphereCB.AC_EnableSSS = 1.0f;
     AtmosphereCB.AC_SSRStrength = Engine::GAPI->GetRendererState().RendererSettings.SSRStrength * 0.84f;
-    AtmosphereCB.AC_SSSIntensity = Engine::GAPI->GetRendererState().RendererSettings.SSSIntensity;
+    AtmosphereCB.AC_SSSIntensity = 1.0f;
     const auto& rendererSettings = Engine::GAPI->GetRendererState().RendererSettings;
     AtmosphereCB.AC_WaterCubemapStrength = rendererSettings.WaterCubemapStrength;
     AtmosphereCB.AC_EnableNightAtmosphere = 1.0f;
@@ -597,15 +491,11 @@ XRESULT GSky::RenderSky() {
     AtmosphereCB.AC_NightDarkeningMax = rendererSettings.NightDarkeningMax;
     // AC_SunVisibility was filled together with the moon visibility above.
     AtmosphereCB.AC_WorldCameraPos = camPos;
-    AtmosphereCB.AC_EnableContactShadows = rendererSettings.EnableContactShadows ? 1.0f : 0.0f;
     AtmosphereCB.AC_EnableScreenSpaceGI = (rendererSettings.EnableScreenSpaceGI && rendererSettings.ScreenSpaceGIStrength > 0.0f) ? 1.0f : 0.0f;
     AtmosphereCB.AC_SkyEffectsEnabled = rendererSettings.EnableRain ? 1.0f : 0.0f;
-    AtmosphereCB.AC_ContactShadowStrength = (rendererSettings.EnableContactShadows ? rendererSettings.GetContactShadowFixedStrength() : 0.0f) * GetMainLightVisibility();
     AtmosphereCB.AC_ScreenSpaceGIStrength = rendererSettings.ScreenSpaceGIStrength;
     AtmosphereCB.AC_EnableParticleLighting = rendererSettings.EnableParticleLighting ? 1.0f : 0.0f;
     AtmosphereCB.AC_ParticleLightingStrength = rendererSettings.ParticleLightingStrength * 1.5f;
-    AtmosphereCB.AC_PadParticle0 = 0.0f;
-    AtmosphereCB.AC_PadParticle1 = 0.0f;
     AtmosphereCB.AC_NightRainMidColor = rendererSettings.NightRainMidColor;
     AtmosphereCB.AC_NightRainWorldHazeStrength = rendererSettings.NightRainWorldHazeStrength;
     AtmosphereCB.AC_NightRainFarColor = rendererSettings.NightRainFarColor;
@@ -638,10 +528,19 @@ XRESULT GSky::RenderSky() {
     return XR_SUCCESS;
 }
 
+/** Returns the loaded sky-Dome */
+GMesh* GSky::GetSkyDome() {
+    return SkyDome.get();
+}
+
 void GSky::ResetWeatherState() {
-    const bool rainEnabled = Engine::GAPI && Engine::GAPI->GetRendererState().RendererSettings.EnableRain;
+    const bool rainEnabled = Engine::GAPI
+        && Engine::GAPI->GetRendererState().RendererSettings.EnableRain;
     float rainWeight = rainEnabled ? Engine::GAPI->GetRainFXWeight() : 0.0f;
-    if ( !std::isfinite( rainWeight ) ) rainWeight = 0.0f;
+    if ( !std::isfinite( rainWeight ) ) {
+        rainWeight = 0.0f;
+    }
+
     AtmosphericRainWeight = std::clamp( rainWeight, 0.0f, 1.0f );
     AtmosphericRainLastUpdateMs = GetTickCount();
     AtmosphericRainDropStartMs = 0;
@@ -652,18 +551,6 @@ void GSky::ResetWeatherState() {
     AtmosphericRainSettingEnabled = rainEnabled;
 }
 
-/** Returns the loaded sky-Dome */
-GMesh* GSky::GetSkyDome() {
-    return SkyDome.get();
-}
-
-/** Returns the current sky-light color */
-float4 GSky::GetSkylightColor() {
-    zCSkyController_Outdoor* sc = oCGame::GetGame()->_zCSession_world->GetSkyControllerOutdoor();
-    return float4( 1, 1, 1, 1 );
-}
-
-/** Returns the cloud texture */
 D3D11Texture* GSky::GetRainCloudTexture() {
     return IsValidSkyTexture( RainCloudTexture ) ? RainCloudTexture.get() : nullptr;
 }

@@ -154,8 +154,6 @@ PS_OUTPUT PSMain(PS_INPUT input)
     output.Lighting.a = lerp(current.a, history.a, contactHistoryWeight);
     output.Lighting.rgb = max(output.Lighting.rgb, 0.0f);
     output.Lighting.a = excludedContactReceiver > 0.5f ? 0.0f : saturate(output.Lighting.a);
-    // FSR3 amplifies temporal contact-shadow shimmer; keep the effect visible but gentler.
-    output.Lighting.a *= lerp( 1.0f, 0.70f, fsr3 );
     output.Depth = float4(depth, depth, depth, depth);
     return output;
 }
