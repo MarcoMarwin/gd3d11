@@ -11,6 +11,40 @@
 #include "zCSkyController_Outdoor.h"
 #include "zCWorld.h"
 #include "corecrt_io.h"
+#include <cmath>
+#include <new>
+
+namespace {
+    XRESULT LoadRendererSkyTexture(
+        const std::string& file,
+        std::unique_ptr<D3D11Texture>& destination
+    ) {
+        if ( !Engine::GraphicsEngine || file.empty() ) {
+            return XR_INVALID_ARG;
+        }
+
+        D3D11Texture* rawTexture = nullptr;
+        const XRESULT createResult = Engine::GraphicsEngine->CreateTexture( &rawTexture );
+        std::unique_ptr<D3D11Texture> texture( rawTexture );
+        if ( createResult != XR_SUCCESS || !texture ) {
+            LogError() << "Sky: Failed to create texture object for " << file;
+            return createResult != XR_SUCCESS ? createResult : XR_FAILED;
+        }
+
+        const XRESULT loadResult = texture->Init( file );
+        if ( loadResult != XR_SUCCESS || !texture->IsValid() ) {
+            LogError() << "Sky: Failed to load texture " << file;
+            return loadResult != XR_SUCCESS ? loadResult : XR_FAILED;
+        }
+
+        destination = std::move( texture );
+        return XR_SUCCESS;
+    }
+
+    bool IsValidSkyTexture( const std::unique_ptr<D3D11Texture>& texture ) {
+        return texture && texture->IsValid();
+    }
+}
 
 GSky::GSky() {
     Atmosphere.Kr = 0.0075f;
@@ -109,43 +143,58 @@ XRESULT GSky::AddSkyTexture( const std::string& file ) {
 
 /** Loads the sky resources */
 XRESULT GSky::LoadSkyResources() {
-    SkyDome = std::make_unique<GMesh>();
-    SkyDome->LoadMesh( "system\\GD3D11\\meshes\\unitSphere.obj" );
+    if ( !Engine::GraphicsEngine ) {
+        return XR_FAILED;
+    }
 
-    LogInfo() << "Loading sky textures...";
-
-    D3D11Texture* cloudTex;
-    XLE( Engine::GraphicsEngine->CreateTexture( &cloudTex ) );
-    CloudTexture.reset( cloudTex );
+    try {
+        auto newSkyDome = std::make_unique<GMesh>();
+        if ( newSkyDome->LoadMesh( "system\\GD3D11\\meshes\\unitSphere.obj" ) != XR_SUCCESS
+            || newSkyDome->GetMeshes().empty() ) {
+            LogError() << "Sky: Failed to load the sky dome.";
+            return XR_FAILED;
+        }
 
 #ifdef BUILD_GOTHIC_1_08k
-    DaySkyTexture = ESkyTexture::ST_OldWorld;
-    XLE( CloudTexture->Init( "system\\GD3D11\\Textures\\SkyDay_G1.dds" ) );
+        const ESkyTexture desiredDaySky = ESkyTexture::ST_OldWorld;
 #else
-    DaySkyTexture = ESkyTexture::ST_NewWorld;
-    XLE( CloudTexture->Init( "system\\GD3D11\\Textures\\SkyDay.dds" ) );
+        const ESkyTexture desiredDaySky = DaySkyTexture;
 #endif
+        const char* dayTexturePath = desiredDaySky == ESkyTexture::ST_OldWorld
+            ? "system\\GD3D11\\Textures\\SkyDay_G1.dds"
+            : "system\\GD3D11\\Textures\\SkyDay.dds";
 
-    D3D11Texture* rainCloudTex;
-    XLE( Engine::GraphicsEngine->CreateTexture( &rainCloudTex ) );
-    RainCloudTexture.reset( rainCloudTex );
-    XLE( RainCloudTexture->Init( "system\\GD3D11\\Textures\\RainCloud.dds" ) );
+        std::unique_ptr<D3D11Texture> newCloudTexture;
+        std::unique_ptr<D3D11Texture> newRainCloudTexture;
+        std::unique_ptr<D3D11Texture> newNightTexture;
+        std::unique_ptr<D3D11Texture> newMoonTexture;
+        if ( LoadRendererSkyTexture( dayTexturePath, newCloudTexture ) != XR_SUCCESS
+            || LoadRendererSkyTexture(
+                "system\\GD3D11\\Textures\\RainCloud.dds", newRainCloudTexture ) != XR_SUCCESS
+            || LoadRendererSkyTexture(
+                "system\\GD3D11\\Textures\\starsh.dds", newNightTexture ) != XR_SUCCESS
+            || LoadRendererSkyTexture(
+                "system\\GD3D11\\Textures\\Moon.dds", newMoonTexture ) != XR_SUCCESS ) {
+            return XR_FAILED;
+        }
 
-    D3D11Texture* nightTex;
-    XLE( Engine::GraphicsEngine->CreateTexture( &nightTex ) );
-    NightTexture.reset( nightTex );
+        VERTEX_INDEX indices[] = { 0, 1, 2, 3, 4, 5 };
+        auto newSkyPlane = std::make_unique<MeshInfo>();
+        newSkyPlane->Create( SkyPlaneVertices, 6, indices, 6 );
 
-    XLE( NightTexture->Init( "system\\GD3D11\\Textures\\starsh.dds" ) );
-    D3D11Texture* moonTex;
-    XLE( Engine::GraphicsEngine->CreateTexture( &moonTex ) );
-    MoonTexture.reset( moonTex );
-    XLE( MoonTexture->Init( "system\\GD3D11\\Textures\\Moon.dds" ) );
-
-    VERTEX_INDEX indices[] = { 0, 1, 2, 3, 4, 5 };
-    SkyPlane = std::make_unique<MeshInfo>();
-    SkyPlane->Create( SkyPlaneVertices, 6, indices, 6 );
-
-    return XR_SUCCESS;
+        SkyDome = std::move( newSkyDome );
+        SkyPlane = std::move( newSkyPlane );
+        CloudTexture = std::move( newCloudTexture );
+        RainCloudTexture = std::move( newRainCloudTexture );
+        NightTexture = std::move( newNightTexture );
+        MoonTexture = std::move( newMoonTexture );
+        DaySkyTexture = desiredDaySky;
+        LogInfo() << "Sky resources loaded.";
+        return XR_SUCCESS;
+    } catch ( const std::bad_alloc& ) {
+        LogError() << "Sky: Not enough memory to load resources.";
+        return XR_FAILED;
+    }
 }
 
 void GSky::ApplyDaySkyColorProfile() {
@@ -154,87 +203,121 @@ void GSky::ApplyDaySkyColorProfile() {
 
 /** Sets the current sky texture */
 void GSky::SetSkyTexture( ESkyTexture texture ) {
-    DaySkyTexture = texture;
-
-    D3D11Texture* cloudTex;
-    XLE( Engine::GraphicsEngine->CreateTexture( &cloudTex ) );
-    CloudTexture.reset( cloudTex );
-
-    // Load the specific new texture
+    const char* texturePath = nullptr;
+    float3 waveLengths;
     switch ( texture ) {
     case ESkyTexture::ST_NewWorld:
-        XLE( CloudTexture->Init( "system\\GD3D11\\Textures\\SkyDay.dds" ) );
-        Atmosphere.WaveLengths = float3( 0.63f, 0.57f, 0.50f );
+        texturePath = "system\\GD3D11\\Textures\\SkyDay.dds";
+        waveLengths = float3( 0.63f, 0.57f, 0.50f );
         break;
-
     case ESkyTexture::ST_OldWorld:
-        XLE( CloudTexture->Init( "system\\GD3D11\\Textures\\SkyDay_G1.dds" ) );
-        Atmosphere.WaveLengths = float3( 0.54f, 0.56f, 0.60f );
+        texturePath = "system\\GD3D11\\Textures\\SkyDay_G1.dds";
+        waveLengths = float3( 0.54f, 0.56f, 0.60f );
         break;
+    default:
+        LogError() << "Sky: Invalid day-sky selection.";
+        return;
     }
 
+    std::unique_ptr<D3D11Texture> newCloudTexture;
+    if ( LoadRendererSkyTexture( texturePath, newCloudTexture ) != XR_SUCCESS ) {
+        return;
+    }
+
+    CloudTexture = std::move( newCloudTexture );
+    CloudTexture_Zen = nullptr;
+    DaySkyTexture = texture;
+    Atmosphere.WaveLengths = waveLengths;
     ApplyDaySkyColorProfile();
 }
 
 /** Sets the custom cloud sky texture */
 void GSky::SetCustomCloudAndNightTexture( int idx, bool isNightTexture, bool isOldWorld ) {
-    if ( idx == -1 ) {
-        if ( isNightTexture) {
-            D3D11Texture* nightTex;
-            XLE( Engine::GraphicsEngine->CreateTexture( &nightTex ) );
-            NightTexture.reset( nightTex );
-            XLE( NightTexture->Init( "system\\GD3D11\\Textures\\starsh.dds" ) );
-        } else {
-            SetSkyTexture( isOldWorld ? ESkyTexture::ST_OldWorld : ESkyTexture::ST_NewWorld );
-        }
-    } else {
-        std::string textureFile; 
-        textureFile.append( "system\\GD3D11\\Textures\\CustomSky\\" )
-            .append( isNightTexture ? "SkyNight_G" : "SkyDay_G" )
-            .append( std::to_string( isOldWorld ? 1 : 2 ) )
-            .append( "_" )
-            .append( std::to_string( idx ) )
-            .append( ".dds" );
+    if ( idx < -1 ) {
+        LogError() << "Sky: Invalid custom texture index.";
+        return;
+    }
 
-        if ( _access( textureFile.c_str(), 0 ) != -1 ) {
-            if ( isNightTexture ) {
-                D3D11Texture* nightTex;
-                XLE( Engine::GraphicsEngine->CreateTexture( &nightTex ) );
-                NightTexture.reset( nightTex );
-                XLE( NightTexture->Init( textureFile ) );
-            } else {
-                D3D11Texture* cloudTex;
-                XLE( Engine::GraphicsEngine->CreateTexture( &cloudTex ) );
-                CloudTexture.reset( cloudTex );
-                XLE( CloudTexture->Init( textureFile ) );
-                DaySkyTexture = isOldWorld ? ESkyTexture::ST_OldWorld : ESkyTexture::ST_NewWorld;
-                Atmosphere.WaveLengths = isOldWorld ? float3( 0.54f, 0.56f, 0.60f ) : float3( 0.63f, 0.57f, 0.50f );
-                ApplyDaySkyColorProfile();
-            }
+    if ( idx == -1 ) {
+        if ( !isNightTexture ) {
+            SetSkyTexture( isOldWorld ? ESkyTexture::ST_OldWorld : ESkyTexture::ST_NewWorld );
+            return;
         }
+
+        std::unique_ptr<D3D11Texture> newNightTexture;
+        if ( LoadRendererSkyTexture(
+                "system\\GD3D11\\Textures\\starsh.dds", newNightTexture ) == XR_SUCCESS ) {
+            NightTexture = std::move( newNightTexture );
+            NightTexture_Zen = nullptr;
+        }
+        return;
+    }
+
+    std::string textureFile = "system\\GD3D11\\Textures\\CustomSky\\";
+    textureFile.append( isNightTexture ? "SkyNight_G" : "SkyDay_G" )
+        .append( std::to_string( isOldWorld ? 1 : 2 ) )
+        .append( "_" )
+        .append( std::to_string( idx ) )
+        .append( ".dds" );
+    if ( _access( textureFile.c_str(), 0 ) == -1 ) {
+        LogWarn() << "Sky: Custom texture does not exist: " << textureFile;
+        return;
+    }
+
+    std::unique_ptr<D3D11Texture> newTexture;
+    if ( LoadRendererSkyTexture( textureFile, newTexture ) != XR_SUCCESS ) {
+        return;
+    }
+
+    if ( isNightTexture ) {
+        NightTexture = std::move( newTexture );
+        NightTexture_Zen = nullptr;
+    } else {
+        CloudTexture = std::move( newTexture );
+        CloudTexture_Zen = nullptr;
+        DaySkyTexture = isOldWorld ? ESkyTexture::ST_OldWorld : ESkyTexture::ST_NewWorld;
+        Atmosphere.WaveLengths = isOldWorld
+            ? float3( 0.54f, 0.56f, 0.60f )
+            : float3( 0.63f, 0.57f, 0.50f );
+        ApplyDaySkyColorProfile();
     }
 }
 
 /** Sets the custom sky texture */
 void GSky::SetCustomSkyTexture_ZenGin( bool isNightTexture, zCTexture* texture, bool isOldWorld ) {
-    if ( !texture ) {
-        if ( isNightTexture ) {
-            D3D11Texture* nightTex;
-            XLE( Engine::GraphicsEngine->CreateTexture( &nightTex ) );
-            NightTexture.reset( nightTex );
-            XLE( NightTexture->Init( "system\\GD3D11\\Textures\\starsh.dds" ) );
-            NightTexture_Zen = nullptr;
-        } else {
-            SetSkyTexture( isOldWorld ? ESkyTexture::ST_OldWorld : ESkyTexture::ST_NewWorld );
-            CloudTexture_Zen = nullptr;
-        }
-    } else {
+    if ( texture ) {
         (isNightTexture ? NightTexture_Zen : CloudTexture_Zen) = texture;
         if ( !isNightTexture ) {
             DaySkyTexture = isOldWorld ? ESkyTexture::ST_OldWorld : ESkyTexture::ST_NewWorld;
-            Atmosphere.WaveLengths = isOldWorld ? float3( 0.54f, 0.56f, 0.60f ) : float3( 0.63f, 0.57f, 0.50f );
+            Atmosphere.WaveLengths = isOldWorld
+                ? float3( 0.54f, 0.56f, 0.60f )
+                : float3( 0.63f, 0.57f, 0.50f );
             ApplyDaySkyColorProfile();
         }
+        return;
+    }
+
+    std::unique_ptr<D3D11Texture> rendererTexture;
+    const char* texturePath = isNightTexture
+        ? "system\\GD3D11\\Textures\\starsh.dds"
+        : (isOldWorld
+            ? "system\\GD3D11\\Textures\\SkyDay_G1.dds"
+            : "system\\GD3D11\\Textures\\SkyDay.dds");
+    if ( LoadRendererSkyTexture( texturePath, rendererTexture ) != XR_SUCCESS ) {
+        return;
+    }
+
+    if ( isNightTexture ) {
+        NightTexture = std::move( rendererTexture );
+        NightTexture_Zen = nullptr;
+    } else {
+        CloudTexture = std::move( rendererTexture );
+        CloudTexture_Zen = nullptr;
+        DaySkyTexture = isOldWorld ? ESkyTexture::ST_OldWorld : ESkyTexture::ST_NewWorld;
+        Atmosphere.WaveLengths = isOldWorld
+            ? float3( 0.54f, 0.56f, 0.60f )
+            : float3( 0.63f, 0.57f, 0.50f );
+        ApplyDaySkyColorProfile();
     }
 }
 
@@ -266,8 +349,28 @@ void GSky::GetTextureOfDaytime( float time, D3D11Texture** t1, D3D11Texture** t2
 
 /** Renders the sky */
 XRESULT GSky::RenderSky() {
-    if ( !SkyDome ) {
-        XLE( LoadSkyResources() );
+    if ( !Engine::GAPI ) {
+        return XR_FAILED;
+    }
+
+    const bool resourcesReady = SkyDome && !SkyDome->GetMeshes().empty()
+        && IsValidSkyTexture( CloudTexture )
+        && IsValidSkyTexture( RainCloudTexture )
+        && IsValidSkyTexture( NightTexture )
+        && IsValidSkyTexture( MoonTexture );
+    if ( !resourcesReady ) {
+        const DWORD now = GetTickCount();
+        constexpr DWORD SKY_RESOURCE_RETRY_MS = 1000;
+        if ( SkyResourceLastAttemptMs != 0
+            && now - SkyResourceLastAttemptMs < SKY_RESOURCE_RETRY_MS ) {
+            return XR_FAILED;
+        }
+
+        SkyResourceLastAttemptMs = now;
+        if ( LoadSkyResources() != XR_SUCCESS ) {
+            return XR_FAILED;
+        }
+        SkyResourceLastAttemptMs = 0;
     }
 
     XMFLOAT3 camPos = Engine::GAPI->GetCameraPosition();
@@ -561,32 +664,39 @@ float4 GSky::GetSkylightColor() {
 }
 
 /** Returns the cloud texture */
+D3D11Texture* GSky::GetRainCloudTexture() {
+    return IsValidSkyTexture( RainCloudTexture ) ? RainCloudTexture.get() : nullptr;
+}
+
+/** Returns the cloud texture */
 D3D11Texture* GSky::GetCloudTexture() {
-    if ( CloudTexture_Zen ) {
-        if ( CloudTexture_Zen->CacheIn( -1 ) == zRES_CACHED_IN ) {
-            if ( MyDirectDrawSurface7* dds7 = CloudTexture_Zen->GetSurface() ) {
-                return dds7->GetEngineTexture();
+    if ( CloudTexture_Zen && CloudTexture_Zen->CacheIn( -1 ) == zRES_CACHED_IN ) {
+        if ( MyDirectDrawSurface7* surface = CloudTexture_Zen->GetSurface() ) {
+            if ( D3D11Texture* texture = surface->GetEngineTexture();
+                texture && texture->IsValid() ) {
+                return texture;
             }
         }
     }
-    return CloudTexture.get();
+    return IsValidSkyTexture( CloudTexture ) ? CloudTexture.get() : nullptr;
 }
 
 /** Returns the cloud texture */
 D3D11Texture* GSky::GetNightTexture() {
-    if ( NightTexture_Zen ) {
-        if ( NightTexture_Zen->CacheIn( -1 ) == zRES_CACHED_IN ) {
-            if ( MyDirectDrawSurface7* dds7 = NightTexture_Zen->GetSurface() ) {
-                return dds7->GetEngineTexture();
+    if ( NightTexture_Zen && NightTexture_Zen->CacheIn( -1 ) == zRES_CACHED_IN ) {
+        if ( MyDirectDrawSurface7* surface = NightTexture_Zen->GetSurface() ) {
+            if ( D3D11Texture* texture = surface->GetEngineTexture();
+                texture && texture->IsValid() ) {
+                return texture;
             }
         }
     }
-    return NightTexture.get();
+    return IsValidSkyTexture( NightTexture ) ? NightTexture.get() : nullptr;
 }
 
 /** Returns the renderer-owned copy of Gothic's moon texture. */
 D3D11Texture* GSky::GetMoonTexture() {
-    return MoonTexture.get();
+    return IsValidSkyTexture( MoonTexture ) ? MoonTexture.get() : nullptr;
 }
 
 bool GSky::IsMoonLightActive() const {

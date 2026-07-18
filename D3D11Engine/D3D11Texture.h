@@ -53,6 +53,8 @@ public:
     /** Returns the shader resource view */
     const Microsoft::WRL::ComPtr<ID3D11ShaderResourceView>& GetShaderResourceView() { return ShaderResourceView; }
 
+    bool IsValid() const { return Texture.Get() != nullptr && ShaderResourceView.Get() != nullptr; }
+
     /** Creates a thumbnail for this */
     XRESULT CreateThumbnail();
 

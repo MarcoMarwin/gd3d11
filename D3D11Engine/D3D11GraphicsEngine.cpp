@@ -35,6 +35,8 @@
 #include <SpriteBatch.h>
 #include <locale>
 #include <codecvt>
+#include <algorithm>
+#include <iterator>
 #include <cmath>
 #include <wrl\client.h>
 #include "D3D11_Helpers.h"
@@ -8647,8 +8649,14 @@ void D3D11GraphicsEngine::SetDefaultStates( bool force ) {
 
 /** Draws the sky using the GSky-Object */
 XRESULT D3D11GraphicsEngine::DrawSky() {
+    if ( !Engine::GAPI || !Context || !ShaderManager ) {
+        return XR_FAILED;
+    }
+
     GSky* sky = Engine::GAPI->GetSky();
-    sky->RenderSky();
+    if ( !sky || sky->RenderSky() != XR_SUCCESS ) {
+        return XR_FAILED;
+    }
 
     auto& rendererState = Engine::GAPI->GetRendererState();
     if ( !rendererState.RendererSettings.AtmosphericScattering ) {
@@ -8715,15 +8723,36 @@ XRESULT D3D11GraphicsEngine::DrawSky() {
         return XR_FAILED;
     }
 
-    ActivePS->GetBuffer("Atmosphere")
-        .Update(&sky->GetAtmosphereCB())
-        .Bind();
+    auto atmosphereBuffer = ActivePS->GetBuffer( "Atmosphere" );
     VS_ExConstantBuffer_PerInstance cbi = {};
     XMStoreFloat4x4( &cbi.World, world );
     cbi.Color = float4( 1.0f, 1.0f, 1.0f, 1.0f );
-    ActiveVS->GetBuffer("Matrices_PerInstances")
-        .Update(&cbi, sizeof( cbi ))
-        .Bind();
+    auto instanceBuffer = ActiveVS->GetBuffer( "Matrices_PerInstances" );
+    if ( !atmosphereBuffer.Update( &sky->GetAtmosphereCB() ).Bind().Succeeded()
+        || !instanceBuffer.Update( &cbi, sizeof( cbi ) ).Bind().Succeeded() ) {
+        return XR_FAILED;
+    }
+
+    D3D11Texture* cloudsTexture = sky->GetCloudTexture();
+    D3D11Texture* nightTexture = sky->GetNightTexture();
+    D3D11Texture* moonTexture = sky->GetMoonTexture();
+    D3D11Texture* rainCloudTexture = sky->GetRainCloudTexture();
+    GMesh* skyDome = sky->GetSkyDome();
+    if ( !cloudsTexture || !nightTexture || !moonTexture || !rainCloudTexture
+        || !skyDome || skyDome->GetMeshes().empty() ) {
+        return XR_FAILED;
+    }
+
+    ID3D11ShaderResourceView* skyResources[] = {
+        cloudsTexture->GetShaderResourceView().Get(),
+        nightTexture->GetShaderResourceView().Get(),
+        moonTexture->GetShaderResourceView().Get(),
+        rainCloudTexture->GetShaderResourceView().Get(),
+    };
+    if ( std::any_of( std::begin( skyResources ), std::end( skyResources ),
+        []( ID3D11ShaderResourceView* resource ) { return resource == nullptr; } ) ) {
+        return XR_FAILED;
+    }
 
     rendererState.BlendState.SetDefault();
     rendererState.BlendState.BlendEnabled = true;
@@ -8747,43 +8776,14 @@ XRESULT D3D11GraphicsEngine::DrawSky() {
 
     SetupVS_ExMeshDrawCall();
     SetupVS_ExConstantBuffer();
-
-    ID3D11ShaderResourceView* srvs[4]{};
-    // Apply sky texture
-    D3D11Texture* cloudsTex = Engine::GAPI->GetSky()->GetCloudTexture();
-    if ( cloudsTex ) {
-        srvs[0] = cloudsTex->GetShaderResourceView().Get();
-    }
-
-    D3D11Texture* nightTex = Engine::GAPI->GetSky()->GetNightTexture();
-    if ( nightTex ) {
-        srvs[1] = nightTex->GetShaderResourceView().Get();
-    }
-
-    D3D11Texture* moonTex = sky->GetMoonTexture();
-    if ( moonTex ) {
-        srvs[2] = moonTex->GetShaderResourceView().Get();
-    }
-
-    D3D11Texture* rainCloudTex = sky->GetRainCloudTexture();
-    if ( rainCloudTex ) {
-        srvs[3] = rainCloudTex->GetShaderResourceView().Get();
-    }
-    if ( !srvs[3] ) {
-        srvs[3] = srvs[0];
-    }
-
-    if ( !srvs[0] || !srvs[1] || !srvs[2] || !sky->GetSkyDome()
-        || sky->GetSkyDome()->GetMeshes().empty() ) {
-        return XR_FAILED;
-    }
     if ( ActiveVS->Apply() != XR_SUCCESS || ActivePS->Apply() != XR_SUCCESS ) {
         return XR_FAILED;
     }
 
-    GetContext()->PSSetShaderResources( 0, static_cast<UINT>(std::size( srvs )), srvs );
+    GetContext()->PSSetShaderResources(
+        0, static_cast<UINT>(std::size( skyResources )), skyResources );
+    skyDome->DrawMesh();
 
-    sky->GetSkyDome()->DrawMesh();
     #if defined(BUILD_GOTHIC_1_08k) && !defined(BUILD_1_12F)
     {
         SetDefaultStates();
