@@ -9,6 +9,7 @@ SamplerState SS_Linear : register( s0 );
 SamplerState SS_samMirror : register( s1 );
 Texture2D	TX_Texture0 : register( t0 );
 Texture2D	TX_Depth : register( t1 );
+Texture2D	TX_LowClouds : register( t2 );
 
 //--------------------------------------------------------------------------------------
 // Input / Output structures
@@ -30,7 +31,11 @@ float4 PSMain( PS_INPUT Input ) : SV_TARGET
 	// Sky detection via depth buffer (reversed-Z: sky has depth == 0.0)
 	float depth = TX_Depth.Sample(SS_Linear, Input.vTexcoord).r;
 	if(!(depth > 0.0f))
-		return color;
+	{
+		float cloudAlpha = saturate(TX_LowClouds.Sample(SS_Linear, Input.vTexcoord).a);
+		float cloudTransmission = 1.0f - smoothstep(0.08f, 0.92f, cloudAlpha);
+		return color * cloudTransmission;
+	}
 	
 	return float4(0,0,0,0);
 }

@@ -563,3 +563,11 @@ Kurze, append-only Dokumentation der von Codex gepushten Renderer-Builds.
 - Dynamische Wolken/Wasser/Schatten: Wolken-Compositing nutzt tiefenbewusstes Upsampling gegen helle/dunkle Objektkanten, Wasser ist bei Tag/Nacht/Regen neutraler abgestimmt und NPC-nahe Schatten werden stabiler weichgefiltert.
 - Text: der deutsche F11-Hinweis nutzt CP1252-kompatible Umlaute fuer Gothics Textausgabe.
 - Pruefung: AGENTS-Regeln gelesen; Buildnummer aus outputs ermittelt; Projekt-XML, Shader-/Projektpfade, Shaderregistrierungen, F11-/INI-/Preset-Pfade, Regen-/RainCloud-Pfade, FSR3-/Contact-Shadow-Gates, Transparenz-/Wet-SSR-Bindings, Escape-Artefakte und git diff --check statisch kontrolliert. Kein vollstaendiger lokaler C++-/Shader-Build.
+## Build 138 (LowClouds in Wasser-SSR/Godrays und Wasserlook aus Build 134)
+
+- LowClouds: dynamische Wolken werden vor Wasser und Godrays als eigene Layer-/Depth-Ressource erzeugt und spaeter tiefenbewusst ueber das Bild komponiert.
+- Wasser-SSR: der Wasser-Pixelshader uebernimmt den Build-134-Wasserlook und kann LowClouds in SSR-Treffern reflektieren; die bestehende WaterMaterialInfo-Logik fuer Ocean-Tint, Wasserfall-SSR-Sperren und Regenmasken bleibt erhalten.
+- Godrays: LowClouds werden in Pixel- und Compute-Godray-Masken beruecksichtigt, damit Wolken die Lichtstrahlen sichtbar formen koennen.
+- LowCloud-Kanten: entfernte alpha-getestete Vegetation bekommt beim LowCloud-Compositing einen konservativen Farbfallback, damit an Baumkonturen nicht roher Sky durchscheint, wenn Wolken dahinter liegen.
+- Konsistenz: der seltene Standalone-Godray-Fallback verwendet wieder den Depth-SRV statt des alten Normal-SRV-Parameters.
+- Pruefung: AGENTS-Regeln gelesen; Buildnummer aus outputs ermittelt; Wasser-/LowCloud-/Godray-Bindings, WaterMaterialInfo-Pfade, Merge-Marker, PowerShell-Escape-Artefakte und git diff --check statisch kontrolliert. Kein vollstaendiger lokaler C++-/Shader-Build.

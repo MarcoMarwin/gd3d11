@@ -30,7 +30,8 @@ D3D11PFX_GodRays::D3D11PFX_GodRays( D3D11PfxRenderer* rnd ) : D3D11PFX_Effect( r
 /** Draws this effect to the given buffer */
 XRESULT D3D11PFX_GodRays::Render(
     ID3D11ShaderResourceView* backbuffer,
-    ID3D11ShaderResourceView* depth ) {
+    ID3D11ShaderResourceView* depth,
+    ID3D11ShaderResourceView* lowClouds ) {
     if ( Engine::GAPI->GetSky()->GetAtmosphereSettings().LightDirection.y <= 0 ) {
         return XR_SUCCESS; // Don't render the godrays in the night-time
     }
@@ -44,7 +45,7 @@ XRESULT D3D11PFX_GodRays::Render(
     engine->GetContext()->OMGetRenderTargets( 1, oldRTV.GetAddressOf(), oldDSV.GetAddressOf() );
 
     if ( !FeatureLevel10Compatibility ) {
-        auto res = RenderCS( backbuffer, depth );
+        auto res = RenderCS( backbuffer, depth, lowClouds );
         engine->GetContext()->OMSetRenderTargets( 1, oldRTV.GetAddressOf(), oldDSV.Get() );
         return res;
     }
@@ -97,11 +98,12 @@ XRESULT D3D11PFX_GodRays::Render(
 	// Draw downscaled mask
 	engine->GetContext()->OMSetRenderTargets( 1, tempBuffer->GetRenderTargetView().GetAddressOf(), nullptr );
 
-    ID3D11ShaderResourceView* srvs[2] {
+    ID3D11ShaderResourceView* srvs[3] {
         backbuffer,
         depth,
+        lowClouds,
     };
-    engine->GetContext()->PSSetShaderResources( 0, 2, srvs );
+    engine->GetContext()->PSSetShaderResources( 0, 3, srvs );
 
     engine->SetViewport({ 0,0, INT2(tempBuffer->GetSizeX(), tempBuffer->GetSizeY()) });
 
@@ -125,11 +127,12 @@ XRESULT D3D11PFX_GodRays::Render(
 
     engine->SetViewport({ 0,0, engine->GetResolution() });
 
-    ID3D11ShaderResourceView* nullSRVs[2] {
+    ID3D11ShaderResourceView* nullSRVs[3] {
+        nullptr,
         nullptr,
         nullptr,
     };
-    engine->GetContext()->PSSetShaderResources( 0, 2, nullSRVs );
+    engine->GetContext()->PSSetShaderResources( 0, 3, nullSRVs );
 
 	engine->GetContext()->OMSetRenderTargets( 1, oldRTV.GetAddressOf(), oldDSV.Get() );
 
@@ -139,7 +142,8 @@ XRESULT D3D11PFX_GodRays::Render(
 /** Compute shader path for FL11+ */
 XRESULT D3D11PFX_GodRays::RenderCS(
     ID3D11ShaderResourceView* backbuffer,
-    ID3D11ShaderResourceView* depthCopy ) {
+    ID3D11ShaderResourceView* depthCopy,
+    ID3D11ShaderResourceView* lowClouds ) {
 
     D3D11GraphicsEngine* engine = reinterpret_cast<D3D11GraphicsEngine*>(Engine::GraphicsEngine);
     auto& context = engine->GetContext();
@@ -208,8 +212,8 @@ XRESULT D3D11PFX_GodRays::RenderCS(
 
     context->CSSetSamplers( 0, 1, &clampSampler );
 
-    ID3D11ShaderResourceView* maskSRVs[2] = { backbuffer, depthCopy };
-    context->CSSetShaderResources( 0, 2, maskSRVs );
+    ID3D11ShaderResourceView* maskSRVs[3] = { backbuffer, depthCopy, lowClouds };
+    context->CSSetShaderResources( 0, 3, maskSRVs );
     context->CSSetUnorderedAccessViews( 0, 1, maskBuffer->GetUnorderedAccessView().GetAddressOf(), nullptr );
 
     context->Dispatch( (ds4Size.x + 7) / 8, (ds4Size.y + 7) / 8, 1 );
@@ -217,8 +221,8 @@ XRESULT D3D11PFX_GodRays::RenderCS(
     // Unbind UAV and SRVs
     ID3D11UnorderedAccessView* nullUAV = nullptr;
     context->CSSetUnorderedAccessViews( 0, 1, &nullUAV, nullptr );
-    ID3D11ShaderResourceView* nullSRVs[2] = { nullptr, nullptr };
-    context->CSSetShaderResources( 0, 2, nullSRVs );
+    ID3D11ShaderResourceView* nullSRVs[3] = { nullptr, nullptr, nullptr };
+    context->CSSetShaderResources( 0, 3, nullSRVs );
 
     // --- Pass 2: Compute Shader Zoom ---
     auto zoomCS = engine->GetShaderManager().GetCShader( CShaderID::CS_PFX_GodRayZoom );
@@ -259,6 +263,7 @@ XRESULT D3D11PFX_GodRays::RenderCS(
 XRESULT D3D11PFX_GodRays::RenderToTexture(
     ID3D11ShaderResourceView* backbuffer,
     ID3D11ShaderResourceView* depthCopy,
+    ID3D11ShaderResourceView* lowClouds,
     ID3D11ShaderResourceView** outGodRaysSRV ) {
 
     *outGodRaysSRV = nullptr;
@@ -270,7 +275,7 @@ XRESULT D3D11PFX_GodRays::RenderToTexture(
     engine->SetDefaultStates();
 
     if ( !FeatureLevel10Compatibility ) {
-        return RenderToTextureCS( backbuffer, depthCopy, outGodRaysSRV );
+        return RenderToTextureCS( backbuffer, depthCopy, lowClouds, outGodRaysSRV );
     }
 
     // FL10 pixel shader path: mask -> zoom -> write to pool texture (no additive blit)
@@ -316,8 +321,8 @@ XRESULT D3D11PFX_GodRays::RenderToTexture(
 
     engine->GetContext()->OMSetRenderTargets( 1, tempBuffer->GetRenderTargetView().GetAddressOf(), nullptr );
 
-    ID3D11ShaderResourceView* srvs[2] { backbuffer, depthCopy };
-    engine->GetContext()->PSSetShaderResources( 0, 2, srvs );
+    ID3D11ShaderResourceView* srvs[3] { backbuffer, depthCopy, lowClouds };
+    engine->GetContext()->PSSetShaderResources( 0, 3, srvs );
     engine->SetViewport({ 0, 0, INT2(tempBuffer->GetSizeX(), tempBuffer->GetSizeY()) });
     FxRenderer->DrawFullScreenQuad();
 
@@ -333,8 +338,8 @@ XRESULT D3D11PFX_GodRays::RenderToTexture(
     m_GodRaysResult = std::move( tempBuffer2 );
     *outGodRaysSRV = m_GodRaysResult->GetShaderResView().Get();
 
-    ID3D11ShaderResourceView* nullSRVs[2] { nullptr, nullptr };
-    engine->GetContext()->PSSetShaderResources( 0, 2, nullSRVs );
+    ID3D11ShaderResourceView* nullSRVs[3] { nullptr, nullptr, nullptr };
+    engine->GetContext()->PSSetShaderResources( 0, 3, nullSRVs );
 
     auto defaultSampler2 = engine->GetDefaultSamplerState();
     engine->GetContext()->PSSetSamplers( 0, 1, &defaultSampler2 );
@@ -346,6 +351,7 @@ XRESULT D3D11PFX_GodRays::RenderToTexture(
 XRESULT D3D11PFX_GodRays::RenderToTextureCS(
     ID3D11ShaderResourceView* backbuffer,
     ID3D11ShaderResourceView* normals,
+    ID3D11ShaderResourceView* lowClouds,
     ID3D11ShaderResourceView** outGodRaysSRV ) {
 
     D3D11GraphicsEngine* engine = reinterpret_cast<D3D11GraphicsEngine*>(Engine::GraphicsEngine);
@@ -401,15 +407,15 @@ XRESULT D3D11PFX_GodRays::RenderToTextureCS(
     maskCS->Apply();
     context->CSSetSamplers( 0, 1, &clampSampler );
 
-    ID3D11ShaderResourceView* maskSRVs[2] = { backbuffer, normals };
-    context->CSSetShaderResources( 0, 2, maskSRVs );
+    ID3D11ShaderResourceView* maskSRVs[3] = { backbuffer, normals, lowClouds };
+    context->CSSetShaderResources( 0, 3, maskSRVs );
     context->CSSetUnorderedAccessViews( 0, 1, maskBuffer->GetUnorderedAccessView().GetAddressOf(), nullptr );
     context->Dispatch( (ds4Size.x + 7) / 8, (ds4Size.y + 7) / 8, 1 );
 
     ID3D11UnorderedAccessView* nullUAV = nullptr;
     context->CSSetUnorderedAccessViews( 0, 1, &nullUAV, nullptr );
-    ID3D11ShaderResourceView* nullSRVs[2] = { nullptr, nullptr };
-    context->CSSetShaderResources( 0, 2, nullSRVs );
+    ID3D11ShaderResourceView* nullSRVs[3] = { nullptr, nullptr, nullptr };
+    context->CSSetShaderResources( 0, 3, nullSRVs );
 
     // --- Pass 2: CS Zoom ---
     auto zoomCS = engine->GetShaderManager().GetCShader( CShaderID::CS_PFX_GodRayZoom );

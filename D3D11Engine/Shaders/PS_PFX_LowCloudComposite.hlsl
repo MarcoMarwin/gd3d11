@@ -145,7 +145,25 @@ float4 SampleDepthAwareLowClouds(
         }
     }
 
-    return foundCompatibleSample ? bestClouds : float4( 0.0f, 0.0f, 0.0f, 0.0f );
+    if ( foundCompatibleSample )
+    {
+        return bestClouds;
+    }
+
+    // Very distant alpha-tested vegetation often contributes a foreground depth pixel
+    // while the half-res low-cloud layer only saw sky around it. In that case, keeping
+    // clouds out makes the tree contour reveal raw sky. For far silhouettes, use the
+    // nearby cloud layer as the background veil instead of punching a cloud hole.
+    if ( !targetIsSky && targetDepth < 0.020f )
+    {
+        float4 fallbackClouds = TX_LowClouds.SampleLevel( SS_Linear, texcoord, 0 );
+        if ( fallbackClouds.a > 0.001f )
+        {
+            return fallbackClouds;
+        }
+    }
+
+    return float4( 0.0f, 0.0f, 0.0f, 0.0f );
 }
 
 float4 PSMain( PS_INPUT Input ) : SV_TARGET

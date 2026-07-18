@@ -10,21 +10,23 @@ public:
 
     /** Draws this effect to the given buffer */
     XRESULT Render( RenderToTextureBuffer* fxbuffer ) override { return XR_FAILED; }
-    XRESULT Render( ID3D11ShaderResourceView* backbuffer, ID3D11ShaderResourceView* depthCopy );
+    XRESULT Render( ID3D11ShaderResourceView* backbuffer, ID3D11ShaderResourceView* depthCopy, ID3D11ShaderResourceView* lowClouds = nullptr );
 
     /** Renders godrays mask+zoom to a ¼-res pool texture, skipping the final additive blit.
         Returns the pool texture SRV via outGodRaysSRV. Returns XR_SUCCESS if godrays were produced. */
     XRESULT RenderToTexture( ID3D11ShaderResourceView* backbuffer,
                              ID3D11ShaderResourceView* depthCopy,
+                             ID3D11ShaderResourceView* lowClouds,
                              ID3D11ShaderResourceView** outGodRaysSRV );
 
 private:
     /** Compute shader path for FL11+ */
-    XRESULT RenderCS( ID3D11ShaderResourceView* backbuffer, ID3D11ShaderResourceView* depthCopy );
+    XRESULT RenderCS( ID3D11ShaderResourceView* backbuffer, ID3D11ShaderResourceView* depthCopy, ID3D11ShaderResourceView* lowClouds );
 
     /** Compute shader path that writes to pool texture without final blit */
     XRESULT RenderToTextureCS( ID3D11ShaderResourceView* backbuffer,
                                ID3D11ShaderResourceView* depthCopy,
+                               ID3D11ShaderResourceView* lowClouds,
                                ID3D11ShaderResourceView** outGodRaysSRV );
 
     /** Keeps the godrays result texture alive until the next frame replaces it */

@@ -44,7 +44,7 @@ public:
     XRESULT RenderSimpleSharpen( const Microsoft::WRL::ComPtr<ID3D11ShaderResourceView>& source, INT2 sourceSize, RenderToTextureBuffer* dest, INT2 destSize );
 
     /** Renders the godrays-Effect */
-    XRESULT RenderGodRays(ID3D11ShaderResourceView* backbuffer, ID3D11ShaderResourceView* depth);
+    XRESULT RenderGodRays( ID3D11ShaderResourceView* backbuffer, ID3D11ShaderResourceView* depth, ID3D11ShaderResourceView* lowClouds = nullptr );
 
     /** Renders the depth-of-field effect */
     XRESULT RenderDepthOfField(ID3D11ShaderResourceView* backbuffer);
@@ -67,6 +67,7 @@ public:
     /** Renders godrays mask+zoom to a pool texture, skipping the final additive blit */
     XRESULT RenderGodRaysToTexture( ID3D11ShaderResourceView* backbuffer,
                                     ID3D11ShaderResourceView* normals,
+                                    ID3D11ShaderResourceView* lowClouds,
                                     ID3D11ShaderResourceView** outGodRaysSRV );
 
     XRESULT RenderScreenSpaceLighting( ID3D11ShaderResourceView* sceneSRV,
@@ -76,6 +77,17 @@ public:
                                         ID3D11ShaderResourceView* materialSRV,
                                         ID3D11ShaderResourceView* velocitySRV,
                                         ID3D11ShaderResourceView** outLightingSRV );
+
+    XRESULT RenderLowCloudLayer( ID3D11RenderTargetView* cloudLayerRTV,
+                                 ID3D11RenderTargetView* cloudDepthRTV,
+                                 ID3D11ShaderResourceView* sceneSRV,
+                                 ID3D11ShaderResourceView* depthSRV );
+
+    XRESULT CompositeLowClouds( ID3D11RenderTargetView* outputRTV,
+                                ID3D11ShaderResourceView* sceneSRV,
+                                ID3D11ShaderResourceView* lowCloudLayerSRV,
+                                ID3D11ShaderResourceView* lowCloudDepthSRV,
+                                ID3D11ShaderResourceView* depthSRV );
 
     XRESULT RenderLowClouds( ID3D11RenderTargetView* outputRTV,
                              ID3D11ShaderResourceView* sceneSRV,
