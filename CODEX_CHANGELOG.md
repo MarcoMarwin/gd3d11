@@ -575,3 +575,4 @@ Kurze, append-only Dokumentation der von Codex gepushten Renderer-Builds.
 - Korrekturpush: Wasser-SSR ist wieder naeher am Build-132-Fallback abgestimmt; rohe Sky-/Sonnen-/Mond-Screenhits werden nicht mehr als harte Wasserreflektion genutzt, LowClouds laufen nur bei aktiven Wasserreflektionen in den SSR-Pfad, und Nicht-`NW_WATER_LAKE01`-Wasser bleibt beim 132-artigen Wasserlook.
 - Korrekturpush: Regenwasser bei Tag/Nacht wurde grauer/blauer abgestimmt, LowCloud-Baumkonturen und der LowCloud-Horizont-Fill wurden nachgezogen, und LowClouds maskieren Godrays bei tief stehender Sonne staerker.
 - Korrekturpush: der Resize-Pfad selbst bleibt unveraendert; Texture-Pool-Clear entfernt keine aktiven Targets mehr, um den R6025-Absturz beim Aufloesungswechsel zu vermeiden.
+- Korrekturpush: `D3D11PFX_GodRays.cpp` verwendet fuer die Atmosphere-CB-Abfragen wieder einen nicht-const `GSky`-Pointer, damit `Release_G1_AVX` nach dem Godray-LowSun-Boost kompiliert.

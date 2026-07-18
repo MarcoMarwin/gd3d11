@@ -18,7 +18,7 @@ extern bool FeatureLevel10Compatibility;
 
 namespace {
 	float GetRainSkyVisibility() {
-		const auto* sky = Engine::GAPI->GetSky();
+		auto* sky = Engine::GAPI->GetSky();
 		if( !sky )
 			return 1.0f;
 
@@ -29,7 +29,7 @@ namespace {
 	}
 
 	float GetLowSunGodRayBoost() {
-		const auto* sky = Engine::GAPI->GetSky();
+		auto* sky = Engine::GAPI->GetSky();
 		if( !sky )
 			return 1.0f;
 
