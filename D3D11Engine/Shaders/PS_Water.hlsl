@@ -349,7 +349,7 @@ PS_OUTPUT PSMain( PS_INPUT Input )
 
 	output.color = float4(max(color, float3(0.0f, 0.0f, 0.0f)), 1.0f);
 	// Preserve the special rain-disabled mask, while normal water blends cleanly into the shore.
-	output.waterMask = lerp(0.25f, 1.0f, step(0.5f, WM_DisableRainEffects));
+	output.waterMask = lerp(0.25f * shoreVisibility, 1.0f, step(0.5f, WM_DisableRainEffects));
 	output.fsr3ReactiveMask = 0.45f;
 	return output;
 }

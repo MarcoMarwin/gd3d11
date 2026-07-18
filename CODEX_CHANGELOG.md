@@ -571,3 +571,4 @@ Kurze, append-only Dokumentation der von Codex gepushten Renderer-Builds.
 - LowCloud-Kanten: entfernte alpha-getestete Vegetation bekommt beim LowCloud-Compositing einen konservativen Farbfallback, damit an Baumkonturen nicht roher Sky durchscheint, wenn Wolken dahinter liegen.
 - Konsistenz: der seltene Standalone-Godray-Fallback verwendet wieder den Depth-SRV statt des alten Normal-SRV-Parameters.
 - Pruefung: AGENTS-Regeln gelesen; Buildnummer aus outputs ermittelt; Wasser-/LowCloud-/Godray-Bindings, WaterMaterialInfo-Pfade, Merge-Marker, PowerShell-Escape-Artefakte und git diff --check statisch kontrolliert. Kein vollstaendiger lokaler C++-/Shader-Build.
+- Korrekturpush: ungueltige `IsValid()`-Pruefungen auf RenderToTextureBuffer/RenderToDepthStencilBuffer durch vorhandene Texture-/View-Pruefungen ersetzt; Wasser-Shader ist wieder byte-identisch zu Build 134.

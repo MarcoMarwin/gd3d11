@@ -811,7 +811,7 @@ XRESULT D3D11PfxRenderer::RenderLowClouds( ID3D11RenderTargetView* outputRTV,
     const INT2 cloudRes( std::max( 1, (res.x + 1) / 2 ), std::max( 1, (res.y + 1) / 2 ) );
     auto lowCloudLayer = m_texturePool->Acquire( TexturePool::Description{ cloudRes.x, cloudRes.y, DXGI_FORMAT_R16G16B16A16_FLOAT } );
     auto lowCloudDepth = m_texturePool->Acquire( TexturePool::Description{ cloudRes.x, cloudRes.y, DXGI_FORMAT_R32_FLOAT } );
-    if ( !lowCloudLayer || !lowCloudDepth || !lowCloudLayer->IsValid() || !lowCloudDepth->IsValid() ) {
+    if ( !lowCloudLayer || !lowCloudDepth || !lowCloudLayer->GetRenderTargetView().Get() || !lowCloudLayer->GetShaderResView().Get() || !lowCloudDepth->GetRenderTargetView().Get() || !lowCloudDepth->GetShaderResView().Get() ) {
         return XR_FAILED;
     }
 

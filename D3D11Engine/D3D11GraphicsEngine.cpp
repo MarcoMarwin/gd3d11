@@ -4366,10 +4366,10 @@ XRESULT D3D11GraphicsEngine::OnStartWorldRendering() {
                 auto* lowCloudDepth = graph.GetPhysicalTexture( lowCloudDepthResource );
                 auto* depthBuffer = GetDepthBuffer();
                 if ( !PfxRenderer
-                    || !backBuffer || !backBuffer->IsValid()
-                    || !lowCloudLayer || !lowCloudLayer->IsValid()
-                    || !lowCloudDepth || !lowCloudDepth->IsValid()
-                    || !depthBuffer || !depthBuffer->IsValid() ) {
+                    || !backBuffer || !backBuffer->GetShaderResView().Get()
+                    || !lowCloudLayer || !lowCloudLayer->GetRenderTargetView().Get()
+                    || !lowCloudDepth || !lowCloudDepth->GetRenderTargetView().Get()
+                    || !depthBuffer || !depthBuffer->GetShaderResView().Get() ) {
                     return;
                 }
 
@@ -4436,7 +4436,7 @@ XRESULT D3D11GraphicsEngine::OnStartWorldRendering() {
             ID3D11ShaderResourceView* lowCloudLayerSRV = nullptr;
             if ( compositionLowClouds ) {
                 auto* lowCloudLayer = graph.GetPhysicalTexture( lowCloudLayerResource );
-                lowCloudLayerSRV = lowCloudLayer && lowCloudLayer->IsValid() ? lowCloudLayer->GetShaderResView().Get() : nullptr;
+                lowCloudLayerSRV = lowCloudLayer && lowCloudLayer->GetShaderResView().Get() ? lowCloudLayer->GetShaderResView().Get() : nullptr;
             }
             DrawWaterSurfaces( waterMaskRTV, fsr3ReactiveMaskRTV, lowCloudLayerSRV );
             if ( renderWaterMask ) {
@@ -4690,7 +4690,7 @@ XRESULT D3D11GraphicsEngine::OnStartWorldRendering() {
                     ID3D11ShaderResourceView* lowCloudLayerSRV = nullptr;
                     if ( compositionLowClouds ) {
                         auto* lowCloudLayer = graph.GetPhysicalTexture( lowCloudLayerResource );
-                        lowCloudLayerSRV = lowCloudLayer && lowCloudLayer->IsValid() ? lowCloudLayer->GetShaderResView().Get() : nullptr;
+                        lowCloudLayerSRV = lowCloudLayer && lowCloudLayer->GetShaderResView().Get() ? lowCloudLayer->GetShaderResView().Get() : nullptr;
                     }
                     PfxRenderer->RenderGodRaysToTexture(
                         backbufferResource->GetShaderResView().Get(),
@@ -4895,10 +4895,10 @@ XRESULT D3D11GraphicsEngine::OnStartWorldRendering() {
                 auto* lowCloudDepth = graph.GetPhysicalTexture(lowCloudDepthResource);
                 auto tempBuffer = PfxRenderer->GetTempBuffer();
                 if ( !PfxRenderer
-                    || !backBuffer || !backBuffer->IsValid()
-                    || !lowCloudLayer || !lowCloudLayer->IsValid()
-                    || !lowCloudDepth || !lowCloudDepth->IsValid()
-                    || !tempBuffer || !tempBuffer->IsValid() ) {
+                    || !backBuffer || !backBuffer->GetTexture().Get() || !backBuffer->GetShaderResView().Get()
+                    || !lowCloudLayer || !lowCloudLayer->GetShaderResView().Get()
+                    || !lowCloudDepth || !lowCloudDepth->GetShaderResView().Get()
+                    || !tempBuffer || !tempBuffer->GetTexture().Get() || !tempBuffer->GetRenderTargetView().Get() || !tempBuffer->GetShaderResView().Get() ) {
                     return;
                 }
 
