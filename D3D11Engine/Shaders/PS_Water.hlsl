@@ -355,9 +355,9 @@ PS_OUTPUT PSMain( PS_INPUT Input )
 	float legacyDarknessFactor = 2.0f - AC_LightPos.y;
 	legacyDarknessFactor = lerp(legacyDarknessFactor, max(1.22f, legacyDarknessFactor * 0.58f), nightAmount * legacyEnhancedWater);
 	float3 legacyFinalColor = legacyColor / max(legacyDarknessFactor, 0.001f);
-	legacyFinalColor = lerp(legacyFinalColor, reflectionSSRColor, legacySsrBlend);
-	float oceanTint = saturate(WM_IsOceanWater * WM_OceanWaterTintStrength);
-	if (oceanTint > 0.001f)
+	float isOceanWater = saturate(WM_IsOceanWater);
+	float oceanTint = saturate(isOceanWater * WM_OceanWaterTintStrength);
+	if (isOceanWater > 0.5f)
 	{
 		// Ocean finish only. All water uses the shared Build-132 SSR path above.
 		float3 clearAbsorption = float3(0.00240f, 0.00115f, 0.00062f);
@@ -379,7 +379,10 @@ PS_OUTPUT PSMain( PS_INPUT Input )
 		float horizonReflectionWeight = saturate(oceanFresnel * cubeReflectionStrength * 0.35f);
 		float3 horizonWaterColor = lerp(oceanScattering, fallbackReflection, horizonReflectionWeight);
 		oceanVolume = lerp(oceanVolume, horizonWaterColor, farWaterBlend * 0.38f);
-		oceanVolume = oceanVolume * max(WM_OceanWaterTint, float3(0.0f, 0.0f, 0.0f));
+		oceanVolume = lerp(
+			oceanVolume,
+			oceanVolume * max(WM_OceanWaterTint, float3(0.0f, 0.0f, 0.0f)),
+			oceanTint);
 		float rainWaterCoverage = lerp(0.42f, 1.0f, shoreVisibility);
 		float rainWaterRegradeWeight = rainAmount * rainWaterCoverage * lerp(0.68f, 0.90f, nightAmount);
 		float3 dayRainWaterHaze = float3(0.072f, 0.092f, 0.100f);
@@ -388,13 +391,11 @@ PS_OUTPUT PSMain( PS_INPUT Input )
 		float oceanLuma = dot(oceanVolume, float3(0.2126f, 0.7152f, 0.0722f));
 		float3 rainRegradedOcean = rainWaterHaze * lerp(0.72f, 1.24f, saturate(oceanLuma * 4.0f));
 		oceanVolume = lerp(oceanVolume, rainRegradedOcean, rainWaterRegradeWeight);
-		float shoreFinishWeight = saturate(shoreVisibility * lerp(0.40f, 0.72f, nightAmount) + farWaterBlend * 0.35f);
-		legacyFinalColor = lerp(legacyFinalColor, oceanVolume, oceanTint * shoreFinishWeight);
+		// Restore the dedicated ocean body from Build 139, but keep reflections
+		// outside this branch so they still use Build 140's shared guarded SSR.
+		legacyFinalColor = oceanVolume;
 	}
-	else
-	{
-		legacyFinalColor = lerp(legacyFinalColor, legacyFinalColor * max(WM_OceanWaterTint, float3(0.0f, 0.0f, 0.0f)), oceanTint);
-	}
+	legacyFinalColor = lerp(legacyFinalColor, reflectionSSRColor, legacySsrBlend);
 	output.color = float4(max(legacyFinalColor, float3(0.0f, 0.0f, 0.0f)), 1.0f);
 	output.waterMask = lerp(0.25f, 1.0f, step(0.5f, WM_DisableRainEffects));
 	output.fsr3ReactiveMask = 0.45f;

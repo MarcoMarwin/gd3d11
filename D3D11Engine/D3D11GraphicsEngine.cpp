@@ -298,8 +298,8 @@ namespace
             return false;
         }
 
-        const std::string name = texture->GetNameWithoutExt();
-        return TextureNameContainsMarker( name, "NW_WATER_LAKE01" );
+        const std::string stem = NormalizeVisualStemForMarker( texture->GetNameWithoutExt() );
+        return stem.rfind( "NW_WATER_LAKE", 0 ) == 0;
     }
 
     void FillWaterMaterialInfo( WaterMaterialInfoConstantBuffer& wmcb, zCTexture* texture ) {

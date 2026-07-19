@@ -249,13 +249,15 @@ float3 FP_ComputeSunLighting(
     if ( moonLightActive )
     {
         // Preserve the old night base and add only a tiny shadowed moon term.
-        litPixel = diffuseColor * SQ_ShadowStrength * sunStrength * shadowAO;
+        float3 globalNightAmbient = diffuseColor * SQ_ShadowStrength * sunStrength * shadowAO;
+        float3 indoorNightAmbient = diffuseColor * SQ_ShadowStrength * 0.05f * shadowAO;
+        litPixel = lerp(indoorNightAmbient, globalNightAmbient, indoorDaylightMask);
 
         const float moonLightStrength = 0.14f;
         float moonDirect = sun;
         float3 moonColor = float3( 0.42f, 0.56f, 1.0f );
-        litPixel += diffuseColor * moonColor * moonLightStrength * moonDirect * worldAO;
-        litPixel += spec * moonColor * (moonLightStrength * 0.25f) * moonDirect;
+        litPixel += diffuseColor * moonColor * moonLightStrength * moonDirect * worldAO * indoorDaylightMask;
+        litPixel += spec * moonColor * (moonLightStrength * 0.25f) * moonDirect * indoorDaylightMask;
     }
     else
     {
@@ -272,7 +274,7 @@ float3 FP_ComputeSunLighting(
     }
 
     float sssSunWeight = saturate( (AC_LightPos.y + 0.08f) * 3.0f ) * AC_SunVisibility * GetRainSkyVisibility() * indoorDaylightMask;
-    float sssMoonWeight = AC_MoonVisibility * 0.12f;
+    float sssMoonWeight = AC_MoonVisibility * 0.12f * indoorDaylightMask;
     float sssLightWeight = max( sssSunWeight, sssMoonWeight );
     float materialBacklitMask = max( vegetationBacklitMask, twoSidedBacklitMaterial );
     if ( AC_EnableSSS > 0.5f && sssLightWeight > 0.001f && materialBacklitMask > 0.001f ) {

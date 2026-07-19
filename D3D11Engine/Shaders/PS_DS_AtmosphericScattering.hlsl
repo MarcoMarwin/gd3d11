@@ -37,20 +37,6 @@ cbuffer DS_ScreenQuadConstantBuffer : register(b0)
     float4 SQ_CascadeAtlasRect[MAX_CSM_CASCADES];
 };
 
-float IsEncodedIndoorNoDaylight(float rawLighting)
-{
-    return rawLighting < 0.035f ? 1.0f : 0.0f;
-}
-
-float IsEncodedIndoorDaylightWindow(float rawLighting)
-{
-    return rawLighting >= 0.08f && rawLighting < 0.5f ? 1.0f : 0.0f;
-}
-
-float DecodeIndoorDaylightMask(float rawLighting)
-{
-    return 1.0f - IsEncodedIndoorNoDaylight(rawLighting);
-}
 
 //--------------------------------------------------------------------------------------
 // Textures and Samplers
@@ -260,8 +246,7 @@ float4 PSMain(PS_INPUT Input) : SV_TARGET
     float4 diffuse = TX_Diffuse.Sample(SS_Linear, uv);
     float rawVertLighting = diffuse.a;
     float indoorDaylightMask = DecodeIndoorDaylightMask(rawVertLighting);
-    float encodedIndoorMarker = max(IsEncodedIndoorNoDaylight(rawVertLighting), IsEncodedIndoorDaylightWindow(rawVertLighting));
-    float vertLighting = lerp(rawVertLighting, 0.05f, encodedIndoorMarker);
+    float vertLighting = DecodeIndoorVertexLighting(rawVertLighting);
 	
 	// Sample depth first to detect sky pixels (reversed-Z: sky has depth == 0.0)
     float expDepth = TX_Depth.Sample(SS_Linear, uv).r;
@@ -369,14 +354,16 @@ float4 PSMain(PS_INPUT Input) : SV_TARGET
         float3 nightSpecBare = specWet * lightColor.rgb;
         float3 nightSpecColored = saturate(
             lerp(nightSpecBare, nightSpecBare * diffuse.rgb, specMod));
-        litPixel = diffuse.rgb * SQ_ShadowStrength * sunStrength * shadowAO
+        float3 globalNightAmbient = diffuse.rgb * SQ_ShadowStrength * sunStrength * shadowAO
             + nightSpecColored;
+        float3 indoorNightAmbient = diffuse.rgb * SQ_ShadowStrength * 0.05f * shadowAO;
+        litPixel = lerp(indoorNightAmbient, globalNightAmbient, indoorDaylightMask);
 
         const float moonLightStrength = 0.14f;
         float moonDirect = sun;
         float3 moonColor = float3(0.42f, 0.56f, 1.0f);
-        litPixel += diffuse.rgb * moonColor * moonLightStrength * moonDirect * worldAO;
-        litPixel += spec * moonColor * (moonLightStrength * 0.25f) * moonDirect;
+        litPixel += diffuse.rgb * moonColor * moonLightStrength * moonDirect * worldAO * indoorDaylightMask;
+        litPixel += spec * moonColor * (moonLightStrength * 0.25f) * moonDirect * indoorDaylightMask;
     }
     else
     {
@@ -393,7 +380,7 @@ float4 PSMain(PS_INPUT Input) : SV_TARGET
     }
 
 	float sssSunWeight = saturate((AC_LightPos.y + 0.08f) * 3.0f) * AC_SunVisibility * GetRainSkyVisibility() * indoorDaylightMask;
-	float sssMoonWeight = AC_MoonVisibility * 0.12f;
+	float sssMoonWeight = AC_MoonVisibility * 0.12f * indoorDaylightMask;
 	float sssLightWeight = max(sssSunWeight, sssMoonWeight);
 	float3 sssLightColor = moonLightActive ? float3(0.42f, 0.56f, 1.0f) : lightColor.rgb;
 	float materialBacklitMask = max(vegetationMask, twoSidedBacklitMaterial);
@@ -419,8 +406,10 @@ float4 PSMain(PS_INPUT Input) : SV_TARGET
 	float fresnel = f8*f2;
     litPixel += lerp(fresnel * litPixel * 0.5f, 0.0f, sun);
 	
-	// Run scattering
-    litPixel = ApplyAtmosphericScatteringGround(wsPosition, litPixel.rgb);
+	// Preserve Build 139 scattering/tint globally, but exclude only the
+	// explicitly marked no-window indoor receiver.
+    float3 scatteredPixel = ApplyAtmosphericScatteringGround(wsPosition, litPixel.rgb);
+    litPixel = lerp(litPixel, scatteredPixel, indoorDaylightMask);
 
 	
     // Fix indoor stuff

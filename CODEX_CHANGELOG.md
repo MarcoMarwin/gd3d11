@@ -595,3 +595,12 @@ Kurze, append-only Dokumentation der von Codex gepushten Renderer-Builds.
 - SSGI/Contact Shadows: Screen-Space-GI und Kontaktschatten werden per Albedo-GBuffer-Maske nur noch fuer Indoor-Receiver inklusive 30f-Aussentoleranz berechnet; Outdoor-Pixel laufen im Trace/Temporal fruehzeitig auf 0.
 - F11-Menue: die Tooltips fuer Screen Space GI und Contact Shadows weisen knapp darauf hin, dass beide Effekte nur indoor wirken.
 - Pruefung: Register-/Aufrufer-Bindings fuer Screen-Space-Lighting, Indoor-Daylight-Polymarker, PowerShell-Escape-Artefakte und git diff --check statisch kontrolliert. Kein vollstaendiger lokaler C++-/Shader-Build.
+
+## Build 141 (Indoor-Beleuchtung, Meerwasser, dynamische Wolken und Regen-Sonne)
+
+- Indoor-/Outdoor-Abgrenzung: reservierte GBuffer-Marker ersetzen die mit dunklen Outdoor-Vertexfarben kollidierenden Build-140-Werte; die Sonderregel greift nur bei tatsaechlichen Indoor-Receivern, waehrend Outdoor sowie Raeume mit `NW_CITY_WINDOW*` die globale Tages-/Nachtaufhellung und Einfaerbung behalten.
+- Indoor-Erkennung: pauschale BSP-Leaf- und Bounding-Box-VOB-Scans wurden entfernt; im Outdoor-BSP werden nur lightmapped Worldpolys kontrolliert und VOBs nur ueber ihren tatsaechlichen Indoor-Status markiert.
+- Meerwasser: Texturen mit Praefix `NW_WATER_LAKE` erhalten wieder den blauen Ocean-Volumenkoerper aus Build 139, unabhaengig von der optionalen Tint-Staerke; Reflexionen bleiben im gemeinsamen, tiefen-/kanten-/hitqualitaetsgesicherten Build-140-SSR-Pfad gegen NPC-/Objektartefakte.
+- Dynamische Wolken: tiefenkompatible Wolkensamples koennen wieder vor Landschaft und Weltgeometrie liegen; Sky-/Geometrieklassen und relative Tiefen werden getrennt, damit Baumkanten keinen Sky-/Cloud-Hintergrund vermischen.
+- Regen-Sonne: das vollstaendige Mie-/Sonnenprofil behaelt seine feste Groesse und wird nach der Phasenberechnung nur in der Amplitude bis exakt null ueberblendet; beim Regenende erscheint es ueber dieselbe Kurve wieder, ohne einen verbleibenden Punkt.
+- Pruefung: Build 139 und 140 gezielt als Referenzen verglichen; `origin/master` war Fast-Forward-kompatibel; Aenderungsumfang, GBuffer-Marker, Indoor-Klassifizierung, Ocean-Praefix/-Koerper und gemeinsamer SSR-Abschluss, Cloud-Tiefenklassen, Sonnenprofil-Regenfade, Shader-Klammern, Escape-Artefakte und `git diff --check` statisch kontrolliert. Kein vollstaendiger lokaler C++-/Shader-Build; finale Renderpruefung erfolgt im Spiel.

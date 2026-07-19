@@ -153,7 +153,7 @@ void CSMain( uint3 groupID : SV_GroupID, uint3 threadID : SV_GroupThreadID, uint
             lighting *= lerp(1.0f, shadow, saturate(light.ShadowStrength));
         }
 
-        float indoorPixel = diffuse.a < 0.5f ? 1.0f : 0.0f;
+        float indoorPixel = DecodeIndoorReceiverMask(diffuse.a);
         float doorFloorBleed = 0.0f;
         if ( light.IsIndoor > 0.5f && light.IgnoreIndoorOutdoorLimit < 0.5f ) {
             doorFloorBleed = ComputeIndoorDoorFloorBleed(indoorPixel, wsPosition, wsNormal, vsPosition, light.PositionView, light.PositionWorld, light.Range, pixelCoord, expDepth);

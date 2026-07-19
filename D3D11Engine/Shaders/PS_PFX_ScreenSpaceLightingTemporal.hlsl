@@ -1,3 +1,5 @@
+#include <DS_Defines.h>
+
 SamplerState SS_Linear : register( s0 );
 Texture2D TX_Raw : register( t0 );
 Texture2D TX_History : register( t1 );
@@ -32,9 +34,7 @@ float ViewZ(float depth) { return SSL_ProjParams.z / (depth - SSL_ProjParams.w);
 float IsIndoorScreenSpaceReceiver(float2 uv)
 {
     float a = TX_Albedo.SampleLevel(SS_Linear, saturate(uv), 0).a;
-    float noWindowIndoor = (a > 0.001f && a < 0.035f) ? 1.0f : 0.0f;
-    float windowIndoor = (a >= 0.08f && a < 0.5f) ? 1.0f : 0.0f;
-    return max(noWindowIndoor, windowIndoor);
+    return DecodeIndoorReceiverMask(a);
 }
 float IsContactReceiverExcluded(float2 uv)
 {

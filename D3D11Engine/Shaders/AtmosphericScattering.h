@@ -563,7 +563,7 @@ float3 ApplyAtmosphericScatteringSky(float3 worldPosition)
 	
 	// Finally, scale the Mie and Rayleigh colors and set up the varying variables for the pixel shader
 	float3 c0 = vFrontColor * (vInvWavelength * AC_KrESun);
-	// Keep the Mie/sun profile stable; rain clouds fade the finished sky instead of changing apparent sun size.
+	// Keep the Mie/sun profile independent of weather; rain opacity is applied after phase evaluation.
 	float3 c1 = vFrontColor * AC_KmESun;
 	
 	
@@ -574,7 +574,13 @@ float3 ApplyAtmosphericScatteringSky(float3 worldPosition)
 	
 	float fCos2 = fCos*fCos;
 
-	float3 color = AC_getRayleighPhase(fCos2) * c0 + AC_getMiePhase(fCos, fCos2, AC_g, AC_g * AC_g) * c1 * 2.0f;
+	float3 rayleighColor = AC_getRayleighPhase(fCos2) * c0;
+	float3 fixedSunProfile = AC_getMiePhase(fCos, fCos2, AC_g, AC_g * AC_g) * c1 * 2.0f;
+	// Preserve the complete angular profile and cross-fade only its amplitude. The rain
+	// transition reaches exact zero at the same point as the CPU-side main-light fade,
+	// so the high-energy center cannot remain visible as a small point in steady rain.
+	float rainSunOpacity = 1.0f - smoothstep(0.02f, 0.50f, saturate(AC_RainFXWeight));
+	float3 color = rayleighColor + fixedSunProfile * rainSunOpacity;
 	
 	return color;
 }

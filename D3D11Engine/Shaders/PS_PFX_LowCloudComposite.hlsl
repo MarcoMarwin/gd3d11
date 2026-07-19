@@ -106,10 +106,6 @@ float4 SampleDepthAwareLowClouds(
 
     const float skyDepthEpsilon = 0.00001f;
     bool targetIsSky = targetDepth < skyDepthEpsilon;
-    if ( !targetIsSky )
-    {
-        return float4( 0.0f, 0.0f, 0.0f, 0.0f );
-    }
 
     float2 cloudPosition = texcoord * float2( cloudSize ) - 0.5f;
     int2 baseCloudPixel = int2( floor( cloudPosition ) );
@@ -167,8 +163,23 @@ float4 SampleDepthAwareLowClouds(
                 continue;
             }
 
+            // For geometry pixels, only reuse a nearby half-resolution sample
+            // from the same surface depth. This restores clouds in front of
+            // landscape while rejecting sky/foliage cross-contamination.
+            float relativeDepthDelta = 0.0f;
+            if ( !targetIsSky )
+            {
+                relativeDepthDelta = abs( targetDepth - sourceDepth )
+                    / max( max( targetDepth, sourceDepth ), skyDepthEpsilon );
+                if ( relativeDepthDelta >= 0.18f )
+                {
+                    continue;
+                }
+            }
+
             float2 spatialDelta = float2( cloudPixel ) - cloudPosition;
-            float metric = dot( spatialDelta, spatialDelta );
+            float metric = dot( spatialDelta, spatialDelta )
+                + relativeDepthDelta * 20.0f;
             if ( metric < bestMetric )
             {
                 bestMetric = metric;
@@ -183,11 +194,9 @@ float4 SampleDepthAwareLowClouds(
         return bestClouds;
     }
 
-    // Real sky pixels inside alpha-tested tree gaps must still receive the cloud
-    // background even when the half-res depth tap was polluted by nearby foliage.
-    // Non-sky pixels deliberately do not use a colour fallback: otherwise distant
-    // tree/rock silhouettes get brightened by invisible clouds and flicker at alpha
-    // contours.
+    // Real sky pixels inside alpha-tested tree gaps keep Build 140's stable
+    // fallback. Geometry deliberately has no sky-colour fallback; it can receive
+    // clouds only from depth-compatible raymarch samples above.
     if ( targetIsSky )
     {
         float4 fallbackClouds = SampleStableSkyLowClouds( texcoord );

@@ -48,3 +48,52 @@ float3 DecodeNormalGBuffer(float2 encoded)
     n.xy = n.z >= 0.0 ? encoded.xy : OctWrap(encoded.xy);
     return normalize(n);
 }
+
+// Indoor daylight state is stored in the albedo alpha channel after the
+// geometry pass. Keep the two values in a reserved, narrow range near one so
+// ordinary dark vertex lighting can never be mistaken for an indoor marker.
+static const float INDOOR_NO_DAYLIGHT_GBUFFER_MARKER = 254.0f / 255.0f;
+static const float INDOOR_DAYLIGHT_WINDOW_GBUFFER_MARKER = 253.0f / 255.0f;
+static const float INDOOR_GBUFFER_MARKER_EPSILON = 0.0015f;
+
+float IsEncodedIndoorNoDaylight(float rawLighting)
+{
+    return abs(rawLighting - INDOOR_NO_DAYLIGHT_GBUFFER_MARKER)
+        < INDOOR_GBUFFER_MARKER_EPSILON ? 1.0f : 0.0f;
+}
+
+float IsEncodedIndoorDaylightWindow(float rawLighting)
+{
+    return abs(rawLighting - INDOOR_DAYLIGHT_WINDOW_GBUFFER_MARKER)
+        < INDOOR_GBUFFER_MARKER_EPSILON ? 1.0f : 0.0f;
+}
+
+float DecodeIndoorReceiverMask(float rawLighting)
+{
+    return max(IsEncodedIndoorNoDaylight(rawLighting),
+        IsEncodedIndoorDaylightWindow(rawLighting));
+}
+
+float DecodeIndoorDaylightMask(float rawLighting)
+{
+    return 1.0f - IsEncodedIndoorNoDaylight(rawLighting);
+}
+
+float DecodeIndoorVertexLighting(float rawLighting)
+{
+    return lerp(rawLighting, 0.05f, DecodeIndoorReceiverMask(rawLighting));
+}
+
+float EncodeIndoorDaylightMarker(
+    float rawLighting, float noDaylight, float daylightWindow)
+{
+    // Reserve the two top R8 values for the markers. Mapping an unmarked
+    // value this close to full brightness to 1.0 is visually lossless and
+    // prevents an accidental collision after the BGRA8 GBuffer write.
+    float unmarkedLighting = rawLighting > 0.989f ? 1.0f : rawLighting;
+    return noDaylight > 0.5f
+        ? INDOOR_NO_DAYLIGHT_GBUFFER_MARKER
+        : (daylightWindow > 0.5f
+            ? INDOOR_DAYLIGHT_WINDOW_GBUFFER_MARKER
+            : unmarkedLighting);
+}

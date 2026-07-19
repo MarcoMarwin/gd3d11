@@ -133,20 +133,11 @@ namespace {
         return false;
     }
 
-    bool LeafHasIndoorVob( const zCBspLeaf* leaf ) {
-        if ( !leaf )
-            return false;
-
-        for ( int i = 0; i < leaf->LeafVobList.NumInArray; ++i ) {
-            zCVob* vob = leaf->LeafVobList.Array[i];
-            if ( vob && vob->IsIndoorVob() )
-                return true;
-        }
-        return false;
-    }
-
     bool LeafIsIndoorReceiver( const zCBspLeaf* leaf, bool outdoorWorld ) {
-        return !outdoorWorld || LeafHasLightmappedWorldPoly( leaf ) || LeafHasIndoorVob( leaf );
+        // In an outdoor BSP, only a genuinely lightmapped leaf is an indoor
+        // receiver. A single indoor VOB must not reclassify neighboring outdoor
+        // world geometry in the same broad leaf.
+        return !outdoorWorld || LeafHasLightmappedWorldPoly( leaf );
     }
 
     bool LeafHasIndoorDaylightWindow( const zCBspLeaf* leaf, const std::vector<XMFLOAT3>& windowPositions ) {
@@ -5369,11 +5360,15 @@ void GothicAPI::CollectIndoorDaylightWorldPolys( zCBspBase* base ) {
         if ( LeafIsIndoorReceiver( leaf, outdoorWorld ) ) {
             const bool hasIndoorWindow = LeafHasIndoorDaylightWindow( leaf, IndoorDaylightWindowPositions );
             for ( int i = 0; i < leaf->NumPolys; ++i ) {
-                if ( leaf->PolyList && leaf->PolyList[i] ) {
-                    IndoorDaylightControlledWorldPolys.insert( leaf->PolyList[i] );
-                    if ( hasIndoorWindow ) {
-                        IndoorDaylightWorldPolys.insert( leaf->PolyList[i] );
-                    }
+                zCPolygon* poly = leaf->PolyList ? leaf->PolyList[i] : nullptr;
+                // Indoor BSP worlds are controlled globally. In outdoor BSPs,
+                // restrict the exception to each lightmapped polygon itself.
+                if ( !poly || (outdoorWorld && !poly->GetLightmap()) )
+                    continue;
+
+                IndoorDaylightControlledWorldPolys.insert( poly );
+                if ( hasIndoorWindow ) {
+                    IndoorDaylightWorldPolys.insert( poly );
                 }
             }
         }
@@ -5435,6 +5430,11 @@ void GothicAPI::BuildBspVobMapCacheHelper( zCBspBase* base ) {
                             bvi.Vobs.push_back( v );
                         }
                     }
+
+                    if ( LeafIsIndoorReceiver( leaf, outdoorLocation ) && v->Vob->IsIndoorVob() ) {
+                        v->IndoorDaylightControlled = true;
+                        v->AllowIndoorDaylight = v->AllowIndoorDaylight || bvi.HasIndoorWindow;
+                    }
                 }
             }
 
@@ -5449,46 +5449,14 @@ void GothicAPI::BuildBspVobMapCacheHelper( zCBspBase* base ) {
                         bvi.Mobs.push_back( v );
                     }
                     v->IndoorVob = vob->IsIndoorVob();
+                    if ( LeafIsIndoorReceiver( leaf, outdoorLocation ) && v->IndoorVob ) {
+                        v->IndoorDaylightControlled = true;
+                        v->AllowIndoorDaylight = v->AllowIndoorDaylight || bvi.HasIndoorWindow;
+                    }
                 }
             }
         }
 
-        if ( LeafIsIndoorReceiver( leaf, outdoorLocation ) ) {
-            for ( VobInfo* indoorVob : bvi.IndoorVobs ) {
-                if ( indoorVob ) {
-                    indoorVob->IndoorDaylightControlled = true;
-                    indoorVob->AllowIndoorDaylight = indoorVob->AllowIndoorDaylight || bvi.HasIndoorWindow;
-                }
-            }
-            for ( SkeletalVobInfo* mob : bvi.Mobs ) {
-                if ( mob && mob->IndoorVob ) {
-                    mob->IndoorDaylightControlled = true;
-                    mob->AllowIndoorDaylight = mob->AllowIndoorDaylight || bvi.HasIndoorWindow;
-                }
-            }
-
-            for ( auto& candidate : VobMap ) {
-                VobInfo* receiver = candidate.second;
-                if ( !receiver || !receiver->Vob )
-                    continue;
-
-                if ( PositionInsideExpandedBox( receiver->Vob->GetPositionWorld(), leaf->BBox3D, INDOOR_DAYLIGHT_WINDOW_TOLERANCE ) ) {
-                    receiver->IndoorDaylightControlled = true;
-                    receiver->AllowIndoorDaylight = receiver->AllowIndoorDaylight || bvi.HasIndoorWindow;
-                }
-            }
-
-            for ( auto& candidate : SkeletalVobMap ) {
-                SkeletalVobInfo* receiver = candidate.second;
-                if ( !receiver || !receiver->Vob )
-                    continue;
-
-                if ( PositionInsideExpandedBox( receiver->Vob->GetPositionWorld(), leaf->BBox3D, INDOOR_DAYLIGHT_WINDOW_TOLERANCE ) ) {
-                    receiver->IndoorDaylightControlled = true;
-                    receiver->AllowIndoorDaylight = receiver->AllowIndoorDaylight || bvi.HasIndoorWindow;
-                }
-            }
-        }
 
         for ( int i = 0; i < leaf->LightVobList.NumInArray; i++ ) {
             zCVobLight* vob = leaf->LightVobList.Array[i];
