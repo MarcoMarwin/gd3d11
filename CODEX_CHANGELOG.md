@@ -612,3 +612,9 @@ Kurze, append-only Dokumentation der von Codex gepushten Renderer-Builds.
 - Tages-/Nachtbeleuchtung: die NW_CITY_WINDOW-Sonderregel und ihre BSP-/VOB-Scans sowie GBuffer-Marker wurden vollstaendig entfernt; globale Tagesaufhellung, Nachtaufhellung, Mondlicht, SSS und atmosphaerische Einfaerbung entsprechen wieder Build 139.
 - Indoor-Klassifizierung: Punktlichter sowie die eigenstaendige Indoor-Begrenzung von SSGI/Contact Shadows verwenden wieder die klassische Build-139-Alpha-Schwelle; andere Build-141-Fixes fuer Meerwasser/SSR und den Regen-Sonnenfade bleiben erhalten.
 - Pruefung: Build 139 gezielt als Referenz verglichen; elf Beleuchtungs-/GBuffer-Dateien stimmen byte-identisch mit Build 139 ueberein; Wolkenfilter, Sky-/Geometrie-Trennung, Ocean-Praefix/-Koerper, gemeinsamer SSR-Abschluss, Regen-Sonnenprofil, Aufrufer, Escape-Artefakte und `git diff --check` statisch kontrolliert. Kein vollstaendiger lokaler C++-/Shader-Build.
+## Build 142
+- Modifizierte D3D11GraphicsEngine.cpp: 'OWODWAT' wird von SSR ausgeschlossen.
+- Modifizierte PS_Water.hlsl: Dedicated Waterfall-Override hinzugefuegt.
+- Modifizierte PS_Water.hlsl: Legacy-Wasser um Volumetric Murkiness und Shoreline Foam erweitert.
+- Modifizierte PS_Water.hlsl: Ocean SSR Contact Fade Artifact Fix uebernommen.
+

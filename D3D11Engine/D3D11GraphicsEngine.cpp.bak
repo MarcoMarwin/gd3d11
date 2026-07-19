@@ -269,8 +269,7 @@ namespace
 
         const std::string name = texture->GetNameWithoutExt();
         return TextureNameContainsMarker( name, "WATERFALL" )
-            || TextureNameContainsMarker( name, "WASSERFALL" )
-            || TextureNameContainsMarker( name, "OWODWAT" );
+            || TextureNameContainsMarker( name, "WASSERFALL" );
     }
 
     bool IsOceanWaterTexture( zCTexture* texture ) {
