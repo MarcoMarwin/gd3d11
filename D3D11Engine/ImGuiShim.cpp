@@ -1594,7 +1594,7 @@ void ImGuiShim::RenderSettingsWindow()
                     &settings.EnableScreenSpaceGI, &settings.ScreenSpaceGIStrength, 1.0f ) ) {
                 shadersToReload |= ShaderCategory::Other;
             }
-            ImGui::SetItemTooltip( "%s", Tr( "Adds soft indirect light reflected from nearby surfaces.", u8"F\u00FCgt weiches, von nahen Fl\u00E4chen reflektiertes Licht hinzu." ) );
+            ImGui::SetItemTooltip( "%s", Tr( "Adds soft indirect light reflected from nearby indoor surfaces. Only affects indoor areas.", u8"F\u00FCgt weiches, von nahen Innenraum-Fl\u00E4chen reflektiertes Licht hinzu. Wirkt nur indoor." ) );
             ImGui::SameLine();
             ImGui::SetNextItemWidth( standardComboWidth );
             const bool screenSpaceGIBeforeSlider = settings.EnableScreenSpaceGI;
@@ -1609,7 +1609,7 @@ void ImGuiShim::RenderSettingsWindow()
             if ( ImGui::Checkbox( "##Enable Contact Shadows", &settings.EnableContactShadows ) ) {
                 shadersToReload |= ShaderCategory::Other;
             }
-            ImGui::SetItemTooltip( "%s", Tr( "Adds small shadows where objects meet nearby surfaces.", u8"F\u00FCgt kleine Schatten an nahen Kontaktstellen hinzu." ) );
+            ImGui::SetItemTooltip( "%s", Tr( "Adds small shadows where objects meet nearby indoor surfaces. Only affects indoor areas.", u8"F\u00FCgt kleine Schatten an nahen Innenraum-Kontaktstellen hinzu. Wirkt nur indoor." ) );
             ImGui::EndGroup();
         }
 

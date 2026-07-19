@@ -305,153 +305,98 @@ PS_OUTPUT PSMain( PS_INPUT Input )
 	float ssrBlend = saturate(ssrWeight * ssrFresnel * ssrReflectionStrength * 0.78f * lerp(0.85f, 1.10f, nightAmount) * rainFogVisibility);
 	float3 reflectionColor = fallbackReflection;
 
-	if (WM_IsOceanWater < 0.5f)
-	{
-		float legacyShallowDepth = saturate(max(sceneViewZ - surfaceViewZ, 0.0f) * 0.01f);
-		float2 legacyDistUV = screenUV + distortionSmall.xy * DIST_SMALL_AMOUNT + distortionBig.xy * DIST_SMALL_AMOUNT;
-		float legacyDepthRefracted = LinearizeWaterDepth(TX_Depth.Sample(SS_Linear, legacyDistUV).r);
-		legacyDistUV = CleanRefraction(legacyDistUV, screenUV, legacyDepthRefracted);
-		legacyDistUV = saturate(legacyDistUV);
-
-		float3 legacyDiffuse = TX_Diffuse.Sample(SS_Linear, Input.vTexcoord + distortionSmall.xy * DIST_SMALL_AMOUNT * 0.5f).rgb;
-		float3 legacyWavesFres = normalize(distortionBig.xzy * float3(1.0f, 10.0f, 1.0f));
-		float3 legacyWavesSmall = normalize(distortionSmall.xzy * float3(1.0f, 10.0f, 1.0f));
-		float legacyFresnel = min(0.5f, saturate(pow(1.0f - saturate(dot(-viewDirection, legacyWavesFres)), 10.0f)));
-
-		float3 legacyScene = TX_Scene.Sample(SS_Linear, legacyDistUV).rgb;
-		float3 legacySceneClean = TX_Scene.Sample(SS_Linear, lerp(legacyDistUV, screenUV, pow(1.0f - legacyShallowDepth, 20.0f))).rgb;
-		float legacyWetFactor = 1.0f - saturate(pow(1.0f - legacyShallowDepth, 8.0f) + clamp(pow(distortionSmall.y, 2.0f), 0.5f, 1.0f));
-		float legacyEnhancedWater = step(0.5f, AC_EnableSSR) * waterMaterialAllowsSSR;
-		float3 legacySceneWet = lerp(legacySceneClean, legacySceneClean * lerp(0.01f, 0.38f, nightAmount * legacyEnhancedWater), legacyWetFactor);
-		legacyScene = lerp(legacyScene, legacyScene * float3(4.0f, 0.2f, 0.1f) * 0.05f, legacyWetFactor);
-		legacyScene = lerp(legacyScene, legacyDiffuse, 0.73f * max(pow(legacyFresnel, 8.0f), 0.5f));
-
-		float legacySsrFresnel = lerp(0.55f, 0.80f, saturate(pow(1.0f - saturate(dot(-viewDirection, legacyWavesFres)), 2.0f)));
-		float legacyCubeWeight = waterSSRActive ? saturate(1.0f - ssrWeight * saturate(ssrReflectionStrength)) : 1.0f;
-		float legacyRainCubemapVisibility = lerp(1.0f, 0.12f, rainAmount) * (1.0f - rainAmount * smoothstep(5000.0f, 22000.0f, waterViewDistance));
-		legacyScene.rgb += reflectionCube * cubeReflectionStrength * legacyCubeWeight * legacyRainCubemapVisibility * legacyFresnel * lerp(1.0f, legacyDiffuse, 0.6f);
-		float legacySsrBlend = saturate(ssrWeight * legacySsrFresnel * ssrReflectionStrength * 0.78f * lerp(0.85f, 1.10f, nightAmount) * rainFogVisibility);
-
-		float legacyPxDistance = Input.vTexcoord2.y;
-		float3 legacyColor = lerp(legacyScene, legacySceneClean, pow(saturate(legacyPxDistance / 35000.0f), 4.0f));
-		legacyColor = lerp(legacyColor, legacySceneWet, 1.0f - legacyShallowDepth);
-		legacyColor.rgb = ApplyAtmosphericScatteringGround(Input.vWorldPosition, legacyColor.rgb);
-
-		float3 sunOrange = float3(0.6f, 0.3f, 0.1f) * 2.0f;
-		float3 sunColor = lerp(sunOrange, float3(1.0f, 1.0f, 1.0f), AC_LightPos.y) * 5.0f;
-		float3 legacyReflectVectorSmall = reflect(-viewDirection, legacyWavesSmall);
-		float cosSpec = clamp(dot(legacyReflectVectorSmall, -AC_LightPos.xyz), 0.0f, 1.0f);
-		float sunSpot = pow(cosSpec, 500.0f) * 0.5f;
-		float weatherLightVisibility = GetRainSkyVisibility();
-		float sunVisibility = smoothstep(-0.04f, 0.08f, AC_LightPos.y) * weatherLightVisibility;
-		sunSpot *= sunVisibility;
-		float sunSpotSSRBlock = saturate(max(ssrBaseWeight, ssrHitQuality * 0.75f) * ssrHitValid * 1.85f);
-		sunSpot *= 1.0f - sunSpotSSRBlock;
-		legacyColor.rgb += sunColor * sunSpot;
-
-		float moonVisibility = smoothstep(-0.04f, 0.08f, AC_MoonPos.y) * weatherLightVisibility;
-		float3 moonLightVector = -AC_MoonPos.xyz;
-		float3 moonRayDirection = moonLightVector / max(length(moonLightVector), 0.001f);
-		float moonCosSpec = clamp(dot(legacyReflectVectorSmall, moonRayDirection), 0.0f, 1.0f);
-		float moonSpot = pow(moonCosSpec, 360.0f) * 0.22f * moonVisibility;
-		moonSpot *= 1.0f - sunSpotSSRBlock;
-		float3 moonColor = float3(0.58f, 0.66f, 1.0f) * 1.15f;
-		legacyColor.rgb += moonColor * moonSpot;
-
-		float legacyDarknessFactor = 2.0f - AC_LightPos.y;
-		legacyDarknessFactor = lerp(legacyDarknessFactor, max(1.22f, legacyDarknessFactor * 0.58f), nightAmount * legacyEnhancedWater);
-		float3 legacyFinalColor = legacyColor / max(legacyDarknessFactor, 0.001f);
-		legacyFinalColor = lerp(legacyFinalColor, reflectionSSRColor, legacySsrBlend);
-
-		output.color = float4(max(legacyFinalColor, float3(0.0f, 0.0f, 0.0f)), 1.0f);
-		output.waterMask = lerp(0.25f, 1.0f, step(0.5f, WM_DisableRainEffects));
-		output.fsr3ReactiveMask = 0.45f;
-		return output;
-	}
-
-	// Depth-dependent absorption keeps shallow sand visible without tinting the whole sea brown.
-	float3 clearAbsorption = float3(0.00240f, 0.00115f, 0.00062f);
-	float3 rainAbsorption = float3(0.00300f, 0.00155f, 0.00088f);
-	float3 transmittance = exp(-lerp(clearAbsorption, rainAbsorption, rainAmount) * waterThickness);
-
-	float3 clearDayScattering = float3(0.035f, 0.120f, 0.150f);
-	float3 rainDayScattering = float3(0.052f, 0.080f, 0.096f);
-	float3 clearNightScattering = float3(0.0035f, 0.0080f, 0.0200f);
-	float3 rainNightScattering = max(AC_NightRainMidColor * 1.05f + AC_NightRainSkyColor * 0.20f, float3(0.018f, 0.030f, 0.052f));
-	float3 dayScattering = lerp(clearDayScattering, rainDayScattering, rainAmount);
-	float3 nightScattering = lerp(clearNightScattering, rainNightScattering, rainAmount);
-	float3 scatteringColor = lerp(dayScattering, nightScattering, nightAmount);
-
-	float diffuseLuma = dot(diffuse, float3(0.2126f, 0.7152f, 0.0722f));
-	scatteringColor *= lerp(0.94f, 1.06f, saturate(diffuseLuma * 1.4f));
-	float oceanContact = 1.0f - shoreVisibility;
-	float stableContact = SmootherStep01(oceanContact);
-	float refractedSceneValid = step(0.000001f, rawDepthRefracted);
-	float3 stableSceneRefracted = lerp(scatteringColor, sceneRefracted, refractedSceneValid);
-	stableSceneRefracted = lerp(stableSceneRefracted, sceneClean, stableContact * 0.82f);
-	float3 waterVolume = stableSceneRefracted * transmittance + scatteringColor * (1.0f - transmittance);
-	waterVolume = lerp(sceneClean, waterVolume, shoreVisibility);
-
-	// A mild distance blend removes the old horizontal color band without hiding the horizon.
-	float farWaterBlend = SmootherStep01(saturate((waterViewDistance - 20000.0f) / 45000.0f)) * shoreVisibility;
-	float horizonReflectionWeight = saturate(fresnel * cubeReflectionStrength * 0.35f);
-	float3 horizonWaterColor = lerp(scatteringColor, fallbackReflection, horizonReflectionWeight);
-	waterVolume = lerp(waterVolume, horizonWaterColor, farWaterBlend * 0.38f);
-
-	float oceanTint = saturate(WM_IsOceanWater * WM_OceanWaterTintStrength);
-	waterVolume = lerp(
-		waterVolume,
-		waterVolume * max(WM_OceanWaterTint, float3(0.0f, 0.0f, 0.0f)),
-		oceanTint);
-
-	// Tie ocean water to the same 360-degree rain haze as the sky so it does not
-	// inherit brown terrain tones at rainy day/night distances.
-	float rainWaterCoverage = lerp(0.42f, 1.0f, shoreVisibility);
-	float rainWaterRegradeWeight = rainAmount * rainWaterCoverage * lerp(0.68f, 0.90f, nightAmount);
-	float3 dayRainWaterHaze = float3(0.072f, 0.092f, 0.100f);
-	float3 nightRainWaterHaze = max(AC_NightRainMidColor * 1.28f + AC_NightRainSkyColor * 0.34f, float3(0.020f, 0.034f, 0.058f));
-	float3 rainWaterHaze = lerp(dayRainWaterHaze, nightRainWaterHaze, nightAmount);
-	float waterVolumeLuma = dot(waterVolume, float3(0.2126f, 0.7152f, 0.0722f));
-	float3 rainRegradedWater = rainWaterHaze * lerp(0.72f, 1.24f, saturate(waterVolumeLuma * 4.0f));
-	waterVolume = lerp(waterVolume, rainRegradedWater, rainWaterRegradeWeight);
-
-	float contactReflectionFloor = stableContact * lerp(0.46f, 0.28f, rainAmount) * lerp(1.0f, 0.70f, nightAmount);
-	float reflectionVisibility = max(shoreVisibility, contactReflectionFloor);
-	float reflectionAmount = saturate(fresnel * cubeReflectionStrength) * reflectionVisibility;
-	float3 color = lerp(waterVolume, reflectionColor, reflectionAmount);
-
-	// Keep sun and moon glints tied to the same reflection control and weather visibility.
+	float legacyShallowDepth = saturate(max(sceneViewZ - surfaceViewZ, 0.0f) * 0.01f);
+	float2 legacyDistUV = screenUV + distortionSmall.xy * DIST_SMALL_AMOUNT + distortionBig.xy * DIST_SMALL_AMOUNT;
+	float legacyRawDepthRefracted = TX_Depth.Sample(SS_Linear, legacyDistUV).r;
+	float legacyDepthRefracted = LinearizeWaterDepth(legacyRawDepthRefracted);
+	legacyDistUV = CleanRefraction(legacyDistUV, screenUV, legacyDepthRefracted);
+	legacyDistUV = saturate(legacyDistUV);
+	float3 legacyDiffuse = TX_Diffuse.Sample(SS_Linear, Input.vTexcoord + distortionSmall.xy * DIST_SMALL_AMOUNT * 0.5f).rgb;
+	float3 legacyWavesFres = normalize(distortionBig.xzy * float3(1.0f, 10.0f, 1.0f));
+	float3 legacyWavesSmall = normalize(distortionSmall.xzy * float3(1.0f, 10.0f, 1.0f));
+	float legacyFresnel = min(0.5f, saturate(pow(1.0f - saturate(dot(-viewDirection, legacyWavesFres)), 10.0f)));
+	float3 legacyScene = TX_Scene.Sample(SS_Linear, legacyDistUV).rgb;
+	float oceanSkyThroughGuard = saturate(WM_IsOceanWater);
+	legacyScene = lerp(legacyScene, lerp(reflectionCube, legacyScene, step(0.000001f, legacyRawDepthRefracted)), oceanSkyThroughGuard);
+	float3 legacySceneClean = TX_Scene.Sample(SS_Linear, lerp(legacyDistUV, screenUV, pow(1.0f - legacyShallowDepth, 20.0f))).rgb;
+	float legacyWetFactor = 1.0f - saturate(pow(1.0f - legacyShallowDepth, 8.0f) + clamp(pow(distortionSmall.y, 2.0f), 0.5f, 1.0f));
+	float legacyEnhancedWater = step(0.5f, AC_EnableSSR) * waterMaterialAllowsSSR;
+	float3 legacySceneWet = lerp(legacySceneClean, legacySceneClean * lerp(0.01f, 0.38f, nightAmount * legacyEnhancedWater), legacyWetFactor);
+	legacyScene = lerp(legacyScene, legacyScene * float3(4.0f, 0.2f, 0.1f) * 0.05f, legacyWetFactor);
+	legacyScene = lerp(legacyScene, legacyDiffuse, 0.73f * max(pow(legacyFresnel, 8.0f), 0.5f));
+	float legacySsrFresnel = lerp(0.55f, 0.80f, saturate(pow(1.0f - saturate(dot(-viewDirection, legacyWavesFres)), 2.0f)));
+	float legacyCubeWeight = waterSSRActive ? saturate(1.0f - ssrWeight * saturate(ssrReflectionStrength)) : 1.0f;
+	float legacyRainCubemapVisibility = lerp(1.0f, 0.12f, rainAmount) * (1.0f - rainAmount * smoothstep(5000.0f, 22000.0f, waterViewDistance));
+	legacyScene.rgb += reflectionCube * cubeReflectionStrength * legacyCubeWeight * legacyRainCubemapVisibility * legacyFresnel * lerp(1.0f, legacyDiffuse, 0.6f);
+	float legacySsrBlend = saturate(ssrWeight * legacySsrFresnel * ssrReflectionStrength * 0.78f * lerp(0.85f, 1.10f, nightAmount) * rainFogVisibility);
+	float legacyPxDistance = Input.vTexcoord2.y;
+	float3 legacyColor = lerp(legacyScene, legacySceneClean, pow(saturate(legacyPxDistance / 35000.0f), 4.0f));
+	legacyColor = lerp(legacyColor, legacySceneWet, 1.0f - legacyShallowDepth);
+	legacyColor.rgb = ApplyAtmosphericScatteringGround(Input.vWorldPosition, legacyColor.rgb);
 	float3 sunOrange = float3(0.6f, 0.3f, 0.1f) * 2.0f;
 	float3 sunColor = lerp(sunOrange, float3(1.0f, 1.0f, 1.0f), AC_LightPos.y) * 5.0f;
-	float3 reflectVectorSmall = reflect(-viewDirection, wavesSmall);
-	float cosSpec = clamp(dot(reflectVectorSmall, -AC_LightPos.xyz), 0.0f, 1.0f);
+	float3 legacyReflectVectorSmall = reflect(-viewDirection, legacyWavesSmall);
+	float cosSpec = clamp(dot(legacyReflectVectorSmall, -AC_LightPos.xyz), 0.0f, 1.0f);
 	float sunSpot = pow(cosSpec, 500.0f) * 0.5f;
 	float weatherLightVisibility = GetRainSkyVisibility();
 	float sunVisibility = smoothstep(-0.04f, 0.08f, AC_LightPos.y) * weatherLightVisibility;
 	sunSpot *= sunVisibility;
-
 	float sunSpotSSRBlock = saturate(max(ssrBaseWeight, ssrHitQuality * 0.75f) * ssrHitValid * 1.85f);
 	sunSpot *= 1.0f - sunSpotSSRBlock;
-	float reflectionControl = saturate(cubeReflectionStrength) * reflectionVisibility;
-	color += sunColor * sunSpot * reflectionControl;
-
+	legacyColor.rgb += sunColor * sunSpot;
 	float moonVisibility = smoothstep(-0.04f, 0.08f, AC_MoonPos.y) * weatherLightVisibility;
 	float3 moonLightVector = -AC_MoonPos.xyz;
 	float3 moonRayDirection = moonLightVector / max(length(moonLightVector), 0.001f);
-	float moonCosSpec = clamp(dot(reflectVectorSmall, moonRayDirection), 0.0f, 1.0f);
+	float moonCosSpec = clamp(dot(legacyReflectVectorSmall, moonRayDirection), 0.0f, 1.0f);
 	float moonSpot = pow(moonCosSpec, 360.0f) * 0.22f * moonVisibility;
 	moonSpot *= 1.0f - sunSpotSSRBlock;
 	float3 moonColor = float3(0.58f, 0.66f, 1.0f) * 1.15f;
-	color += moonColor * moonSpot * reflectionControl;
-
-	float colorLuma = dot(color, float3(0.2126f, 0.7152f, 0.0722f));
-	float3 finalRainRegrade = rainWaterHaze * lerp(0.78f, 1.30f, saturate(colorLuma * 4.0f));
-	color = lerp(color, reflectionSSRColor, ssrBlend);
-	color = lerp(color, finalRainRegrade, rainWaterRegradeWeight * lerp(0.35f, 0.62f, nightAmount));
-
-	output.color = float4(max(color, float3(0.0f, 0.0f, 0.0f)), 1.0f);
-	// Preserve the special rain-disabled mask, while normal water blends cleanly into the shore.
-	output.waterMask = lerp(lerp(0.18f, 0.25f, shoreVisibility), 1.0f, step(0.5f, WM_DisableRainEffects));
+	legacyColor.rgb += moonColor * moonSpot;
+	float legacyDarknessFactor = 2.0f - AC_LightPos.y;
+	legacyDarknessFactor = lerp(legacyDarknessFactor, max(1.22f, legacyDarknessFactor * 0.58f), nightAmount * legacyEnhancedWater);
+	float3 legacyFinalColor = legacyColor / max(legacyDarknessFactor, 0.001f);
+	legacyFinalColor = lerp(legacyFinalColor, reflectionSSRColor, legacySsrBlend);
+	float oceanTint = saturate(WM_IsOceanWater * WM_OceanWaterTintStrength);
+	if (oceanTint > 0.001f)
+	{
+		// Ocean finish only. All water uses the shared Build-132 SSR path above.
+		float3 clearAbsorption = float3(0.00240f, 0.00115f, 0.00062f);
+		float3 rainAbsorption = float3(0.00300f, 0.00155f, 0.00088f);
+		float3 oceanTransmittance = exp(-lerp(clearAbsorption, rainAbsorption, rainAmount) * waterThickness);
+		float3 clearDayScattering = float3(0.035f, 0.120f, 0.150f);
+		float3 rainDayScattering = float3(0.052f, 0.080f, 0.096f);
+		float3 clearNightScattering = float3(0.0035f, 0.0080f, 0.0200f);
+		float3 rainNightScattering = max(AC_NightRainMidColor * 1.05f + AC_NightRainSkyColor * 0.20f, float3(0.018f, 0.030f, 0.052f));
+		float3 oceanScattering = lerp(lerp(clearDayScattering, rainDayScattering, rainAmount), lerp(clearNightScattering, rainNightScattering, rainAmount), nightAmount);
+		oceanScattering *= lerp(0.94f, 1.06f, saturate(dot(legacyDiffuse, float3(0.2126f, 0.7152f, 0.0722f)) * 1.4f));
+		float oceanRefractedValid = step(0.000001f, legacyRawDepthRefracted);
+		float3 oceanScene = lerp(reflectionCube, TX_Scene.Sample(SS_Linear, legacyDistUV).rgb, oceanRefractedValid);
+		float3 oceanVolume = oceanScene * oceanTransmittance + oceanScattering * (1.0f - oceanTransmittance);
+		oceanVolume = lerp(sceneClean, oceanVolume, shoreVisibility);
+		float farWaterBlend = SmootherStep01(saturate((waterViewDistance - 20000.0f) / 45000.0f)) * shoreVisibility;
+		float oceanNdotV = saturate(dot(-viewDirection, legacyWavesFres));
+		float oceanFresnel = 0.02f + 0.98f * pow(1.0f - oceanNdotV, 5.0f);
+		float horizonReflectionWeight = saturate(oceanFresnel * cubeReflectionStrength * 0.35f);
+		float3 horizonWaterColor = lerp(oceanScattering, fallbackReflection, horizonReflectionWeight);
+		oceanVolume = lerp(oceanVolume, horizonWaterColor, farWaterBlend * 0.38f);
+		oceanVolume = oceanVolume * max(WM_OceanWaterTint, float3(0.0f, 0.0f, 0.0f));
+		float rainWaterCoverage = lerp(0.42f, 1.0f, shoreVisibility);
+		float rainWaterRegradeWeight = rainAmount * rainWaterCoverage * lerp(0.68f, 0.90f, nightAmount);
+		float3 dayRainWaterHaze = float3(0.072f, 0.092f, 0.100f);
+		float3 nightRainWaterHaze = max(AC_NightRainMidColor * 1.28f + AC_NightRainSkyColor * 0.34f, float3(0.020f, 0.034f, 0.058f));
+		float3 rainWaterHaze = lerp(dayRainWaterHaze, nightRainWaterHaze, nightAmount);
+		float oceanLuma = dot(oceanVolume, float3(0.2126f, 0.7152f, 0.0722f));
+		float3 rainRegradedOcean = rainWaterHaze * lerp(0.72f, 1.24f, saturate(oceanLuma * 4.0f));
+		oceanVolume = lerp(oceanVolume, rainRegradedOcean, rainWaterRegradeWeight);
+		float shoreFinishWeight = saturate(shoreVisibility * lerp(0.40f, 0.72f, nightAmount) + farWaterBlend * 0.35f);
+		legacyFinalColor = lerp(legacyFinalColor, oceanVolume, oceanTint * shoreFinishWeight);
+	}
+	else
+	{
+		legacyFinalColor = lerp(legacyFinalColor, legacyFinalColor * max(WM_OceanWaterTint, float3(0.0f, 0.0f, 0.0f)), oceanTint);
+	}
+	output.color = float4(max(legacyFinalColor, float3(0.0f, 0.0f, 0.0f)), 1.0f);
+	output.waterMask = lerp(0.25f, 1.0f, step(0.5f, WM_DisableRainEffects));
 	output.fsr3ReactiveMask = 0.45f;
 	return output;
 }

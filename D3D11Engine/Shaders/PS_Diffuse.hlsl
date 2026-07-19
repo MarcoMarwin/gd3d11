@@ -183,7 +183,7 @@ FORWARD_PLUS_PS_OUTPUT PSMain( PS_INPUT Input )
     }
 #endif
 
-	float3 litPixel = FP_ComputeSunLighting(wsPosition, vsPosition, nrm, color.rgb, specIntensity, specPower, shadow, vertLighting, twoSidedBacklitMaterial, vegetationBacklitMask);
+	float3 litPixel = FP_ComputeSunLighting(wsPosition, vsPosition, nrm, color.rgb, Input.vDiffuse.a, specIntensity, specPower, shadow, vertLighting, twoSidedBacklitMaterial, vegetationBacklitMask);
 	
 	// Atmospheric scattering
 	litPixel = ApplyAtmosphericScatteringGround(wsPosition, litPixel);

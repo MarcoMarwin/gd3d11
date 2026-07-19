@@ -6,6 +6,7 @@ Texture2D TX_Depth : register( t1 );
 Texture2D TX_Normals : register( t2 );
 Texture2D TX_WaterMask : register( t3 );
 Texture2D TX_Material : register( t4 );
+Texture2D TX_Albedo : register( t5 );
 
 cbuffer ScreenSpaceLightingConstantBuffer : register( b0 )
 {
@@ -31,6 +32,13 @@ float WaterMask(float2 uv) { return TX_WaterMask.SampleLevel(SS_Linear, saturate
 float IsGeometry(float d) { return step(0.000001f, d); }
 float4 MaterialInfo(float2 uv) { return TX_Material.SampleLevel(SS_Linear, saturate(uv), 0); }
 float IsAlphaTestedMaterial(float4 materialInfo) { return materialInfo.g < 0.0f ? 1.0f : 0.0f; }
+float IndoorReceiverMask(float2 uv)
+{
+    float a = TX_Albedo.SampleLevel(SS_Linear, saturate(uv), 0).a;
+    float noWindowIndoor = (a > 0.001f && a < 0.035f) ? 1.0f : 0.0f;
+    float windowIndoor = (a >= 0.08f && a < 0.5f) ? 1.0f : 0.0f;
+    return max(noWindowIndoor, windowIndoor);
+}
 float3 ViewPosition(float2 uv, float depth)
 {
     float viewZ = SSL_ProjParams.z / (depth - SSL_ProjParams.w);
@@ -82,7 +90,7 @@ bool TraceRay(float3 origin, float3 dir, float maxDistance, int steps, float jit
 
 float ComputeContact(float2 uv, float depth)
 {
-    if (SSL_EnableContact < 0.5f || SSL_ContactStrength <= 0.001f || IsGeometry(depth) < 0.5f || WaterMask(uv) > 0.02f) return 0.0f;
+    if (SSL_EnableContact < 0.5f || SSL_ContactStrength <= 0.001f || IsGeometry(depth) < 0.5f || WaterMask(uv) > 0.02f || IndoorReceiverMask(uv) < 0.5f) return 0.0f;
 
     float4 materialInfo = MaterialInfo(uv);
     if (IsAlphaTestedMaterial(materialInfo) > 0.5f) return 0.0f;
@@ -125,7 +133,7 @@ float ComputeContact(float2 uv, float depth)
 
 float3 ComputeGI(float2 uv, float depth, float3 baseColor)
 {
-    if (SSL_EnableGI < 0.5f || IsGeometry(depth) < 0.5f || WaterMask(uv) > 0.02f) return 0.0f;
+    if (SSL_EnableGI < 0.5f || IsGeometry(depth) < 0.5f || WaterMask(uv) > 0.02f || IndoorReceiverMask(uv) < 0.5f) return 0.0f;
     float3 vp = ViewPosition(uv, depth);
     float3 n = ViewNormal(uv);
     float3 wsN = normalize(mul(float4(n, 0.0f), SSL_InvView).xyz);
@@ -181,6 +189,9 @@ float4 PSMain(PS_INPUT input) : SV_TARGET
 {
     float2 uv = input.vTexcoord;
     float depth = DepthRaw(uv);
+    if (IsGeometry(depth) < 0.5f || WaterMask(uv) > 0.02f || IndoorReceiverMask(uv) < 0.5f)
+        return 0.0f;
+
     float3 baseColor = TX_Scene.SampleLevel(SS_Linear, uv, 0).rgb;
     float contact = ComputeContact(uv, depth);
     float3 gi = ComputeGI(uv, depth, baseColor);

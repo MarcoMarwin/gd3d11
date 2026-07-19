@@ -32,6 +32,8 @@ WorldConverter::WorldConverter() {}
 WorldConverter::~WorldConverter() {}
 
 namespace {
+    constexpr DWORD INDOOR_NO_DAYLIGHT_POLY_ALPHA_R8 = 0x05000000u;
+    constexpr DWORD INDOOR_DAYLIGHT_POLY_ALPHA_R8 = 0x1F000000u;
     void CreateShadowIndexBuffer( MeshInfo* meshInfo ) {
         if ( !meshInfo || meshInfo->ShadowIndices.empty() ) {
             return;
@@ -541,6 +543,9 @@ HRESULT WorldConverter::ConvertWorldMesh( zCPolygon** polys, unsigned int numPol
         }
 #endif
 
+        const bool indoorDaylightControlledPoly = matGroup != zMAT_GROUP_WATER && Engine::GAPI && Engine::GAPI->ShouldControlIndoorDaylightForWorldPoly( poly );
+        const bool allowIndoorDaylight = indoorDaylightControlledPoly && Engine::GAPI->ShouldAllowIndoorDaylightForWorldPoly( poly );
+
         // Extract poly vertices
         polyVertices.clear();
         polyVertices.reserve( poly->GetNumPolyVertices() );
@@ -575,6 +580,10 @@ HRESULT WorldConverter::ConvertWorldMesh( zCPolygon** polys, unsigned int numPol
                 if ( matGroup == zMAT_GROUP_WATER ) {
                     t.Color = 0xFFFFFFFF;
                 }
+            }
+
+            if ( indoorDaylightControlledPoly ) {
+                t.Color = (t.Color & 0x00FFFFFFu) | (allowIndoorDaylight ? INDOOR_DAYLIGHT_POLY_ALPHA_R8 : INDOOR_NO_DAYLIGHT_POLY_ALPHA_R8);
             }
 
             if ( matGroup == zMAT_GROUP_WATER ) {

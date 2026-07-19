@@ -78,8 +78,10 @@ extern float vobAnimation_WindStrength;
 namespace {
     constexpr const char* MATERIALS_JSON_PATH = "system\\GD3D11\\textures\\materials.json";
     constexpr const char* MATERIALS_JSON_VDFS_PATH = R"(\system\GD3D11\textures\materials.json)";
-    constexpr const char* MATERIALS_BIN_PATH = "system\\GD3D11\\textures\\materials.bin";
-    constexpr const char* MATERIALS_BIN_VDFS_PATH = R"(\system\GD3D11\textures\materials.bin)";
+    constexpr DWORD INDOOR_NO_WINDOW_LIGHT_ALPHA_R8 = 0x2B000000u;
+    constexpr DWORD INDOOR_WINDOW_LIGHT_ALPHA_R8 = 0x60000000u;
+    constexpr float INDOOR_NO_WINDOW_LIGHT_ALPHA = 0.02f;
+    constexpr float INDOOR_WINDOW_LIGHT_ALPHA = 0.12f;
 
     std::string ToLowerMaterialName( std::string name ) {
         for ( char& c : name ) {
@@ -87,7 +89,101 @@ namespace {
         }
         return name;
     }
+    bool HasIndoorWindowPrefix( std::string name ) {
+        name = ToLowerMaterialName( std::move( name ) );
+        const size_t slash = name.find_last_of( "\\/" );
+        if ( slash != std::string::npos ) {
+            name.erase( 0, slash + 1 );
+        }
+        return name.rfind( "nw_city_window", 0 ) == 0;
+    }
 
+    bool IsIndoorWindowVob( zCVob* source ) {
+        if ( !source )
+            return false;
+
+        if ( HasIndoorWindowPrefix( source->GetName() ) )
+            return true;
+
+        if ( zCVisual* visual = source->GetVisual() ) {
+            if ( const char* objectName = visual->GetObjectName() ) {
+                return HasIndoorWindowPrefix( objectName );
+            }
+        }
+        return false;
+    }
+
+    constexpr float INDOOR_DAYLIGHT_WINDOW_TOLERANCE = 30.0f;
+
+    bool PositionInsideExpandedBox( const XMFLOAT3& position, const zTBBox3D& box, float tolerance ) {
+        return position.x >= box.Min.x - tolerance && position.x <= box.Max.x + tolerance
+            && position.y >= box.Min.y - tolerance && position.y <= box.Max.y + tolerance
+            && position.z >= box.Min.z - tolerance && position.z <= box.Max.z + tolerance;
+    }
+
+    bool LeafHasLightmappedWorldPoly( const zCBspLeaf* leaf ) {
+        if ( !leaf || !leaf->PolyList )
+            return false;
+
+        for ( int i = 0; i < leaf->NumPolys; ++i ) {
+            zCPolygon* poly = leaf->PolyList[i];
+            if ( poly && poly->GetLightmap() )
+                return true;
+        }
+        return false;
+    }
+
+    bool LeafHasIndoorVob( const zCBspLeaf* leaf ) {
+        if ( !leaf )
+            return false;
+
+        for ( int i = 0; i < leaf->LeafVobList.NumInArray; ++i ) {
+            zCVob* vob = leaf->LeafVobList.Array[i];
+            if ( vob && vob->IsIndoorVob() )
+                return true;
+        }
+        return false;
+    }
+
+    bool LeafIsIndoorReceiver( const zCBspLeaf* leaf, bool outdoorWorld ) {
+        return !outdoorWorld || LeafHasLightmappedWorldPoly( leaf ) || LeafHasIndoorVob( leaf );
+    }
+
+    bool LeafHasIndoorDaylightWindow( const zCBspLeaf* leaf, const std::vector<XMFLOAT3>& windowPositions ) {
+        if ( !leaf )
+            return false;
+
+        for ( int i = 0; i < leaf->LeafVobList.NumInArray; ++i ) {
+            if ( IsIndoorWindowVob( leaf->LeafVobList.Array[i] ) )
+                return true;
+        }
+
+        for ( const XMFLOAT3& windowPosition : windowPositions ) {
+            if ( PositionInsideExpandedBox( windowPosition, leaf->BBox3D, INDOOR_DAYLIGHT_WINDOW_TOLERANCE ) )
+                return true;
+        }
+        return false;
+    }
+
+    void CollectIndoorDaylightWindowPositionsRec( zCBspBase* base, std::vector<XMFLOAT3>& outPositions ) {
+        if ( !base )
+            return;
+
+        if ( base->IsLeaf() ) {
+            zCBspLeaf* leaf = static_cast<zCBspLeaf*>(base);
+            for ( int i = 0; i < leaf->LeafVobList.NumInArray; ++i ) {
+                zCVob* vob = leaf->LeafVobList.Array[i];
+                if ( IsIndoorWindowVob( vob ) ) {
+                    outPositions.push_back( vob->GetPositionWorld() );
+                }
+            }
+            return;
+        }
+
+        zCBspNode* node = static_cast<zCBspNode*>(base);
+        CollectIndoorDaylightWindowPositionsRec( node->Front, outPositions );
+        CollectIndoorDaylightWindowPositionsRec( node->Back, outPositions );
+    }
     bool IsGroundFogName( std::string name ) {
         name = ToLowerMaterialName( std::move( name ) );
         const bool hasFogMarker = name.find( "groundfog" ) != std::string::npos
@@ -375,7 +471,7 @@ namespace {
         }
 
         if ( loaded > 0 ) {
-            LogInfo() << "Loaded " << loaded << " fallback materials from materials.json";
+            LogInfo() << "Loaded " << loaded << " materials from materials.json";
         }
         return loaded > 0;
     }
@@ -388,146 +484,17 @@ namespace {
         return false;
     }
 
-    bool ParseMaterialsBinBytes( const std::vector<char>& bytes, gtl::flat_hash_map<std::string, MaterialInfo::Buffer>& database ) {
-        const char* ptr = bytes.data();
-        const char* end = ptr + bytes.size();
-
-        auto canRead = [&]( size_t size ) -> bool {
-            return ptr <= end && size <= static_cast<size_t>(end - ptr);
-        };
-        auto readBytes = [&]( void* dst, size_t size ) -> bool {
-            if ( !canRead( size ) ) {
-                return false;
-            }
-            memcpy( dst, ptr, size );
-            ptr += size;
-            return true;
-        };
-
-        char magic[4];
-        if ( !readBytes( magic, sizeof( magic ) ) || memcmp( magic, "GDMB", 4 ) != 0 ) {
-            return false;
-        }
-
-        int32_t version = 0;
-        if ( !readBytes( &version, sizeof( version ) ) || version != 1 ) {
-            return false;
-        }
-
-        uint32_t numEntries = 0;
-        if ( !readBytes( &numEntries, sizeof( numEntries ) ) ) {
-            return false;
-        }
-
-        uint32_t loaded = 0;
-        for ( uint32_t i = 0; i < numEntries; ++i ) {
-            uint16_t nameLen = 0;
-            if ( !readBytes( &nameLen, sizeof( nameLen ) ) || nameLen == 0 || !canRead( nameLen + sizeof( MaterialInfo::Buffer ) ) ) {
-                LogWarn() << "Ignoring truncated or corrupt materials.bin";
-                return loaded > 0;
-            }
-
-            std::string name( ptr, ptr + nameLen );
-            ptr += nameLen;
-
-            MaterialInfo::Buffer buffer;
-            if ( !readBytes( &buffer, sizeof( buffer ) ) ) {
-                LogWarn() << "Ignoring truncated or corrupt materials.bin";
-                return loaded > 0;
-            }
-            ApplyMaterialCompatibility( buffer, MATERIALINFO_VERSION );
-            database[ToLowerMaterialName( name )] = buffer;
-            ++loaded;
-        }
-
-        if ( loaded > 0 ) {
-            LogInfo() << "Loaded " << loaded << " legacy fallback materials from materials.bin";
-        }
-        return loaded > 0;
-    }
-
-    bool LoadMaterialsBinDatabase( gtl::flat_hash_map<std::string, MaterialInfo::Buffer>& database ) {
-        std::vector<char> bytes;
-        FILE* f = fopen( MATERIALS_BIN_PATH, "rb" );
-        if ( f ) {
-            fseek( f, 0, SEEK_END );
-            const long size = ftell( f );
-            fseek( f, 0, SEEK_SET );
-            if ( size > 12 && size <= 16 * 1024 * 1024 ) {
-                bytes.resize( static_cast<size_t>(size) );
-                if ( fread( bytes.data(), 1, bytes.size(), f ) != bytes.size() ) {
-                    bytes.clear();
-                }
-            }
-            fclose( f );
-        }
-
-        if ( bytes.empty() ) {
-            ReadVdfsBytes( MATERIALS_BIN_VDFS_PATH, bytes );
-        }
-        if ( bytes.empty() ) {
-            return false;
-        }
-        return ParseMaterialsBinBytes( bytes, database );
-    }
-
-    bool ReadMaterialInfoFile( const std::string& filePath, MaterialInfo::Buffer& out ) {
-        char readBuffer[sizeof( int ) + sizeof( MaterialInfo::Buffer )] = {};
-        auto vdfsFile = zFILE_VDFS::Create( filePath.c_str() );
-        if ( !vdfsFile->Exists() || vdfsFile->Open( false ) != zERROR_NONE ) {
-            return false;
-        }
-
-        const auto bytesRead = vdfsFile->Read( readBuffer, sizeof( readBuffer ) );
-        vdfsFile->Close();
-        if ( bytesRead < static_cast<int>(sizeof( int )) ) {
-            return false;
-        }
-
-        int version = MATERIALINFO_VERSION;
-        memcpy( &version, readBuffer, sizeof( int ) );
-
-        MaterialInfo::Buffer buffer = {};
-        const size_t payloadBytes = std::min<size_t>( sizeof( MaterialInfo::Buffer ), static_cast<size_t>(bytesRead) - sizeof( int ) );
-        if ( payloadBytes > 0 ) {
-            memcpy( &buffer, readBuffer + sizeof( int ), payloadBytes );
-        }
-        ApplyMaterialCompatibility( buffer, version );
-        out = buffer;
-        return true;
-    }
 }
 
-/** Writes this info to a file */
+/** Material editing is centralized in materials.json. Legacy per-texture material writes are ignored. */
 void MaterialInfo::WriteToFile( const std::string& name ) {
-    const std::string filePath = "system\\GD3D11\\textures\\infos\\" + name + ".mi";
-    FILE* f = fopen( filePath.c_str(), "wb" );
-
-    if ( !f ) {
-        LogError() << "Failed to open file '" << filePath << "' for writing! Make sure the game runs in Admin mode "
-            " to get the rights to write to that directory!";
-        return;
-    }
-
-    fwrite( &MATERIALINFO_VERSION, sizeof( MATERIALINFO_VERSION ), 1, f );
-    fwrite( &buffer, sizeof( MaterialInfo::Buffer ), 1, f );
-    fclose( f );
+    LogInfo() << "SaveMaterialInfo ignored for '" << name << "': edit system\\GD3D11\\textures\\materials.json instead.";
 }
-
-/** Loads this info from a file */
+/** Loads this info from materials.json only. */
 void MaterialInfo::LoadFromFile( const std::string_view name ) {
-    std::string filePath = R"(\system\GD3D11\textures\infos\)";
-    filePath.append( name.data(), name.size() );
-    filePath.append( ".mi" );
-
-    if ( ReadMaterialInfoFile( filePath, buffer ) ) {
-        return;
-    }
-
     if ( Engine::GAPI && !Engine::GAPI->MaterialDatabaseLoaded ) {
         Engine::GAPI->LoadMaterialDatabase();
     }
-
     if ( Engine::GAPI ) {
         auto it = Engine::GAPI->MaterialDatabase.find( ToLowerMaterialName( std::string( name ) ) );
         if ( it != Engine::GAPI->MaterialDatabase.end() ) {
@@ -545,16 +512,11 @@ void GothicAPI::LoadMaterialDatabase() {
     MaterialDatabaseLoaded = true;
     MaterialDatabase.clear();
 
-    if ( LoadMaterialsJsonDatabase( MaterialDatabase ) ) {
-        return;
-    }
-
-    // Legacy fallback only. materials.bin is no longer the editable primary format.
-    LoadMaterialsBinDatabase( MaterialDatabase );
+    LoadMaterialsJsonDatabase( MaterialDatabase );
 }
 
 void GothicAPI::SaveMaterialDatabase() {
-    LogInfo() << "SaveMaterialDatabase ignored: material editor writes individual .mi files; materials.json is an editable fallback database.";
+    LogInfo() << "SaveMaterialDatabase ignored: edit system\\GD3D11\\textures\\materials.json directly.";
 }
 GothicAPI::GothicAPI() {
     OriginalGothicWndProc = 0;
@@ -1214,6 +1176,9 @@ void GothicAPI::ResetVobs() {
     ParticleEffectVobs.clear();
     RegisteredVobs.clear();
     BspLeafVobLists.clear();
+    IndoorDaylightControlledWorldPolys.clear();
+    IndoorDaylightWorldPolys.clear();
+    IndoorDaylightWindowPositions.clear();
     LeafLinearCache.Clear();
     DynamicallyAddedVobs.clear();
     DecalVobs.clear();
@@ -1272,6 +1237,12 @@ void GothicAPI::OnGeometryLoaded( zCBspTree* tree ) {
         LogError() << "World geometry contains no polygons; renderer world data was cleared safely.";
         return;
     }
+
+    IndoorDaylightControlledWorldPolys.clear();
+    IndoorDaylightWorldPolys.clear();
+    IndoorDaylightWindowPositions.clear();
+    CollectIndoorDaylightWindowPositionsRec( tree->GetRootNode(), IndoorDaylightWindowPositions );
+    CollectIndoorDaylightWorldPolys( tree->GetRootNode() );
 
     bool indoorLocation = (LoadedWorldInfo->BspTree->GetBspTreeMode() == zBSP_MODE_INDOOR);
     std::string worldStr = "system\\GD3D11\\meshes\\WLD_" + LoadedWorldInfo->WorldName + ".obj";
@@ -2896,6 +2867,9 @@ void GothicAPI::DrawSkeletalMeshVob( SkeletalVobInfo* vi, float distance, bool u
         }
     }
 
+    if ( vi->IndoorDaylightControlled || vi->Vob->IsIndoorVob() ) {
+        modelColor.w = vi->AllowIndoorDaylight ? INDOOR_WINDOW_LIGHT_ALPHA : INDOOR_NO_WINDOW_LIGHT_ALPHA;
+    }
     XMMATRIX scale = XMMatrixScalingFromVector( model->GetModelScaleXM() );
 
     XMMATRIX xmWorld = vi->Vob->GetWorldMatrixXM() * scale;
@@ -3137,6 +3111,9 @@ void GothicAPI::DrawSkeletalMeshVob_Layered( SkeletalVobInfo * vi, float distanc
         }
     }
 
+    if ( vi->IndoorDaylightControlled || vi->Vob->IsIndoorVob() ) {
+        modelColor.w = vi->AllowIndoorDaylight ? INDOOR_WINDOW_LIGHT_ALPHA : INDOOR_NO_WINDOW_LIGHT_ALPHA;
+    }
     XMMATRIX scale = XMMatrixScalingFromVector( model->GetModelScaleXM() );
 
     XMMATRIX xmWorld = vi->Vob->GetWorldMatrixXM() * scale;
@@ -4432,10 +4409,10 @@ void GothicAPI::CollectVisibleVobs(
             vii.world = it->WorldMatrix;
             vii.prevWorld = it->HasValidPrevMatrix ? it->PrevWorldMatrix : it->WorldMatrix;
             vii.color = it->GroundColor;
-            if ( it->IndoorLightMask ) {
+            if ( it->IndoorLightMask || it->IndoorDaylightControlled ) {
                 // INSTANCE_COLOR is R8G8B8A8_UNORM. Keep RGB lighting and mark alpha as indoor.
                 // This lets indoor point lights affect static indoor vobs/decorations like BSP polys.
-                vii.color = (vii.color & 0x00FFFFFFu) | 0x0D000000u;
+                vii.color = (vii.color & 0x00FFFFFFu) | (it->AllowIndoorDaylight ? INDOOR_WINDOW_LIGHT_ALPHA_R8 : INDOOR_NO_WINDOW_LIGHT_ALPHA_R8);
             }
             vii.windStrenth = 0.0f;
             vii.canBeAffectedByPlayer = 0;
@@ -4809,6 +4786,8 @@ void GothicAPI::MoveVobFromBspToDynamic( VobInfo* vob ) {
         }
     }
     vob->ParentBSPNodes.clear();
+    vob->IndoorDaylightControlled = false;
+    vob->AllowIndoorDaylight = false;
 
     // Add to dynamic vob list
     DynamicallyAddedVobs.push_back( vob );
@@ -5369,6 +5348,42 @@ void GothicAPI::ConfigureAllPointlightShadowSources() const {
         assignAnchor( lights[lightIndex], parentAnchors[parentClaims[lightIndex].ParentIndex].Position );
     }
 }
+
+bool GothicAPI::ShouldControlIndoorDaylightForWorldPoly( const zCPolygon* poly ) const {
+    return poly && IndoorDaylightControlledWorldPolys.find( poly ) != IndoorDaylightControlledWorldPolys.end();
+}
+
+bool GothicAPI::ShouldAllowIndoorDaylightForWorldPoly( const zCPolygon* poly ) const {
+    return poly && IndoorDaylightWorldPolys.find( poly ) != IndoorDaylightWorldPolys.end();
+}
+
+void GothicAPI::CollectIndoorDaylightWorldPolys( zCBspBase* base ) {
+    if ( !base )
+        return;
+
+    const bool outdoorWorld = LoadedWorldInfo && LoadedWorldInfo->BspTree
+        && LoadedWorldInfo->BspTree->GetBspTreeMode() == zBSP_MODE_OUTDOOR;
+
+    if ( base->IsLeaf() ) {
+        zCBspLeaf* leaf = static_cast<zCBspLeaf*>(base);
+        if ( LeafIsIndoorReceiver( leaf, outdoorWorld ) ) {
+            const bool hasIndoorWindow = LeafHasIndoorDaylightWindow( leaf, IndoorDaylightWindowPositions );
+            for ( int i = 0; i < leaf->NumPolys; ++i ) {
+                if ( leaf->PolyList && leaf->PolyList[i] ) {
+                    IndoorDaylightControlledWorldPolys.insert( leaf->PolyList[i] );
+                    if ( hasIndoorWindow ) {
+                        IndoorDaylightWorldPolys.insert( leaf->PolyList[i] );
+                    }
+                }
+            }
+        }
+        return;
+    }
+
+    zCBspNode* node = static_cast<zCBspNode*>(base);
+    CollectIndoorDaylightWorldPolys( node->Front );
+    CollectIndoorDaylightWorldPolys( node->Back );
+}
 /** Helper function for going through the bsp-tree */
 void GothicAPI::BuildBspVobMapCacheHelper( zCBspBase* base ) {
     if ( !base )
@@ -5377,6 +5392,7 @@ void GothicAPI::BuildBspVobMapCacheHelper( zCBspBase* base ) {
     // Put it into the cache
     BspInfo& bvi = BspLeafVobLists[base];
     bvi.OriginalNode = base;
+    bvi.HasIndoorWindow = false;
 
     bool outdoorLocation = (LoadedWorldInfo->BspTree->GetBspTreeMode() == zBSP_MODE_OUTDOOR);
     if ( base->IsLeaf() ) {
@@ -5384,9 +5400,12 @@ void GothicAPI::BuildBspVobMapCacheHelper( zCBspBase* base ) {
 
         bvi.Front = nullptr;
         bvi.Back = nullptr;
+        bvi.HasIndoorWindow = LeafIsIndoorReceiver( leaf, outdoorLocation )
+            && LeafHasIndoorDaylightWindow( leaf, IndoorDaylightWindowPositions );
 
         for ( int i = 0; i < leaf->LeafVobList.NumInArray; i++ ) {
             zCVob* vob = leaf->LeafVobList.Array[i];
+            const bool indoorVobInOutdoorLeaf = outdoorLocation && vob->IsIndoorVob();
 
             // Get the vob info for this one
             auto vit = VobMap.find( vob );
@@ -5396,7 +5415,7 @@ void GothicAPI::BuildBspVobMapCacheHelper( zCBspBase* base ) {
                     float vobSmallSize = Engine::GAPI->GetRendererState().RendererSettings.SmallVobSize;
 
                     // Treat indoor vobs as indoor vobs only in outdoor locations
-                    if ( outdoorLocation && vob->IsIndoorVob() ) {
+                    if ( indoorVobInOutdoorLeaf ) {
                         // Only add once
                         if ( std::find( bvi.IndoorVobs.begin(), bvi.IndoorVobs.end(), v ) == bvi.IndoorVobs.end() ) {
                             v->ParentBSPNodes.push_back( &bvi );
@@ -5429,6 +5448,44 @@ void GothicAPI::BuildBspVobMapCacheHelper( zCBspBase* base ) {
                         v->ParentBSPNodes.push_back( &bvi );
                         bvi.Mobs.push_back( v );
                     }
+                    v->IndoorVob = vob->IsIndoorVob();
+                }
+            }
+        }
+
+        if ( LeafIsIndoorReceiver( leaf, outdoorLocation ) ) {
+            for ( VobInfo* indoorVob : bvi.IndoorVobs ) {
+                if ( indoorVob ) {
+                    indoorVob->IndoorDaylightControlled = true;
+                    indoorVob->AllowIndoorDaylight = indoorVob->AllowIndoorDaylight || bvi.HasIndoorWindow;
+                }
+            }
+            for ( SkeletalVobInfo* mob : bvi.Mobs ) {
+                if ( mob && mob->IndoorVob ) {
+                    mob->IndoorDaylightControlled = true;
+                    mob->AllowIndoorDaylight = mob->AllowIndoorDaylight || bvi.HasIndoorWindow;
+                }
+            }
+
+            for ( auto& candidate : VobMap ) {
+                VobInfo* receiver = candidate.second;
+                if ( !receiver || !receiver->Vob )
+                    continue;
+
+                if ( PositionInsideExpandedBox( receiver->Vob->GetPositionWorld(), leaf->BBox3D, INDOOR_DAYLIGHT_WINDOW_TOLERANCE ) ) {
+                    receiver->IndoorDaylightControlled = true;
+                    receiver->AllowIndoorDaylight = receiver->AllowIndoorDaylight || bvi.HasIndoorWindow;
+                }
+            }
+
+            for ( auto& candidate : SkeletalVobMap ) {
+                SkeletalVobInfo* receiver = candidate.second;
+                if ( !receiver || !receiver->Vob )
+                    continue;
+
+                if ( PositionInsideExpandedBox( receiver->Vob->GetPositionWorld(), leaf->BBox3D, INDOOR_DAYLIGHT_WINDOW_TOLERANCE ) ) {
+                    receiver->IndoorDaylightControlled = true;
+                    receiver->AllowIndoorDaylight = receiver->AllowIndoorDaylight || bvi.HasIndoorWindow;
                 }
             }
         }
@@ -5512,6 +5569,20 @@ void BspLeafLinearCache::Clear() {
 /** Builds our BspTreeVobMap */
 void GothicAPI::BuildBspVobMapCache() {
     ZoneScopedN( "GothicAPI::BuildBspVobMapCache" );
+
+    for ( auto& it : VobMap ) {
+        if ( it.second ) {
+            it.second->IndoorDaylightControlled = false;
+            it.second->AllowIndoorDaylight = false;
+        }
+    }
+    for ( auto& it : SkeletalVobMap ) {
+        if ( it.second ) {
+            it.second->IndoorDaylightControlled = false;
+            it.second->AllowIndoorDaylight = false;
+        }
+    }
+
     BuildBspVobMapCacheHelper( LoadedWorldInfo->BspTree->GetRootNode() );
 
     // Resolve all flame and parent-vob associations after the complete world is known.

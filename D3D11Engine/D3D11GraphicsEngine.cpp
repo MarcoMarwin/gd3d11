@@ -71,6 +71,27 @@ static const GUID IID_IDXGIVkInteropAdapter = { 0x3A6D8F2C, 0xB0E8, 0x4AB4, { 0x
 static const GUID IID_IDXGIDeviceRenderDoc = { 0xa7aa6116, 0x9c8d, 0x4bba, { 0x90, 0x83, 0xb4, 0xd8, 0x16, 0xb7, 0x1b, 0x78 } };
 
 constexpr float inv255f = (1.f / 255.f);
+constexpr float INDOOR_NO_WINDOW_LIGHT_ALPHA = 0.02f;
+constexpr float INDOOR_WINDOW_LIGHT_ALPHA = 0.12f;
+constexpr DWORD INDOOR_NO_WINDOW_LIGHT_ALPHA_R8 = 0x2B000000u;
+constexpr DWORD INDOOR_WINDOW_LIGHT_ALPHA_R8 = 0x60000000u;
+
+static float ResolveIndoorLightAlpha( const VobInfo* vi ) {
+    if ( !vi || !vi->Vob )
+        return 1.0f;
+    if ( !vi->IndoorDaylightControlled && !vi->Vob->IsIndoorVob() )
+        return 1.0f;
+    return vi->AllowIndoorDaylight ? INDOOR_WINDOW_LIGHT_ALPHA : INDOOR_NO_WINDOW_LIGHT_ALPHA;
+}
+
+static float ResolveIndoorLightAlpha( const SkeletalVobInfo* vi ) {
+    if ( !vi || !vi->Vob )
+        return 1.0f;
+    if ( !vi->IndoorDaylightControlled && !vi->Vob->IsIndoorVob() )
+        return 1.0f;
+    return vi->AllowIndoorDaylight ? INDOOR_WINDOW_LIGHT_ALPHA : INDOOR_NO_WINDOW_LIGHT_ALPHA;
+}
+
 float vobAnimation_WindStrength = 1.0f;
 
 constexpr DXGI_FORMAT VERTEX_INDEX_DXGI_FORMAT = sizeof( VERTEX_INDEX ) == sizeof( unsigned short ) ? DXGI_FORMAT_R16_UINT : DXGI_FORMAT_R32_UINT;
@@ -2619,7 +2640,7 @@ XRESULT  D3D11GraphicsEngine::DrawSkeletalVertexNormals( SkeletalVobInfo* vi,
 
     VS_ExConstantBuffer_PerInstanceSkeletal cb2;
     cb2.World = world;
-    color.w = (vi && vi->Vob && vi->Vob->IsIndoorVob()) ? 0.05f : 1.0f;
+    color.w = ResolveIndoorLightAlpha( vi );
     cb2.PI_ModelColor = color;
     cb2.PI_ModelFatness = fatness;
 
@@ -2696,7 +2717,7 @@ XRESULT D3D11GraphicsEngine::DrawSkeletalMesh( SkeletalVobInfo* vi,
 
     VS_ExConstantBuffer_PerInstanceSkeletal cb2;
     cb2.World = world;
-    color.w = (vi && vi->Vob && vi->Vob->IsIndoorVob()) ? 0.05f : 1.0f;
+    color.w = ResolveIndoorLightAlpha( vi );
     cb2.PI_ModelColor = color;
     cb2.PI_ModelFatness = fatness;
     // Set PrevWorld for motion vectors (use current world if no previous is available)
@@ -2825,7 +2846,7 @@ XRESULT D3D11GraphicsEngine::DrawSkeletalMesh_Layered( SkeletalVobInfo* vi,
     VS_ExConstantBuffer_PerInstanceSkeletal cb2;
     cb2.World = world;
     cb2.PrevWorld = world;
-    color.w = (vi && vi->Vob && vi->Vob->IsIndoorVob()) ? 0.05f : 1.0f;
+    color.w = ResolveIndoorLightAlpha( vi );
     cb2.PI_ModelColor = color;
     cb2.PI_ModelFatness = fatness;
     ActiveVS->GetBuffer("Matrices_PerInstances").Update( &cb2 ).Bind();
@@ -3278,7 +3299,7 @@ void D3D11GraphicsEngine::DrawSkeletalMeshVobs(
                     }
                 }
             }
-            modelColor.w = vi->Vob->IsIndoorVob() ? 0.05f : 1.0f;
+            modelColor.w = ResolveIndoorLightAlpha( vi );
 
             if ( updateState ) {
                 if ( vi->LastAniUpdateFrame != now ) {
@@ -3314,7 +3335,7 @@ void D3D11GraphicsEngine::DrawSkeletalMeshVobs(
                     VS_ExConstantBuffer_PerInstanceSkeletal cb2;
                     cb2.World = world;
                     auto maskedColor = color;
-                    maskedColor.w = vi->Vob->IsIndoorVob() ? 0.05f : 1.0f;
+                    maskedColor.w = ResolveIndoorLightAlpha( vi );
                     cb2.PI_ModelColor = maskedColor;
                     cb2.PI_ModelFatness = fatness;
                     // Set PrevWorld for motion vectors (use current world if no previous is available)
@@ -3467,7 +3488,7 @@ void D3D11GraphicsEngine::DrawSkeletalMeshVobs(
             const float materialClassMarker = (vi && vi->Vob && vi->Vob->GetVobType() == zVOB_TYPE_NSC) ? -1.0f : 0.0f;
             auto model = data.Model;
             auto modelColor = data.ModelColor;
-            modelColor.w = (vi && vi->Vob && vi->Vob->IsIndoorVob()) ? 0.05f : 1.0f;
+            modelColor.w = ResolveIndoorLightAlpha( vi );
             auto transforms = std::span( &BoneTransformCache[data.BoneIdx], data.NumBones );
             auto fatness = data.Fatness;
             auto& world = data.World;
@@ -4710,21 +4731,23 @@ XRESULT D3D11GraphicsEngine::OnStartWorldRendering() {
     if ( compositionNeedsGeometry ) {
         graph.AddPass( RG_PASS_NAME("Screen-Space Lighting"), [&]( RGBuilder& builder, RenderPass& pass ) {
             builder.Read( backBufferHandle );
+            builder.Read( colorResource );
             builder.Read( normalsResource );
             builder.Read( specularResource );
             builder.Read( waterMaskResource );
             builder.Read( velocityBufferHandle );
 
-            pass.m_executeCallback = [this, backBufferHandle, normalsResource, specularResource, waterMaskResource, velocityBufferHandle,
+            pass.m_executeCallback = [this, backBufferHandle, colorResource, normalsResource, specularResource, waterMaskResource, velocityBufferHandle,
                                       &compositionScreenSpaceLightingSRV]( const RenderGraph& graph ) {
                 TracyD3D11ZoneCGX( "D3D11GraphicsEngine::Screen-Space Lighting" );
 
                 auto backBuffer = graph.GetPhysicalTexture( backBufferHandle );
+                auto albedoTexture = graph.GetPhysicalTexture( colorResource );
                 auto normalsTexture = graph.GetPhysicalTexture( normalsResource );
                 auto specularTexture = graph.GetPhysicalTexture( specularResource );
                 auto waterMaskTexture = graph.GetPhysicalTexture( waterMaskResource );
                 auto velocityTexture = graph.GetPhysicalTexture( velocityBufferHandle );
-                if ( !backBuffer || !normalsTexture || !specularTexture || !waterMaskTexture ) {
+                if ( !backBuffer || !albedoTexture || !normalsTexture || !specularTexture || !waterMaskTexture ) {
                     compositionScreenSpaceLightingSRV = nullptr;
                     return;
                 }
@@ -4734,6 +4757,7 @@ XRESULT D3D11GraphicsEngine::OnStartWorldRendering() {
 
                 PfxRenderer->RenderScreenSpaceLighting(
                     tempBuffer->GetShaderResView().Get(),
+                    albedoTexture->GetShaderResView().Get(),
                     GetDepthBuffer()->GetShaderResView().Get(),
                     normalsTexture->GetShaderResView().Get(),
                     waterMaskTexture->GetShaderResView().Get(),
@@ -5323,9 +5347,7 @@ XRESULT D3D11GraphicsEngine::DrawMeshInfoListAlphablended(
         if ( zCTexture* texture = meshKey.Material->GetAniTexture() ) {
             PsSimpleFFdata ffdata = { };
             ffdata.textureFactor = ComputeTransparencyTextureFactor( meshKey.Material );
-
-            const bool isWaterfallFoam = meshKey.Info && meshKey.Info->MaterialType == MaterialInfo::MT_WaterfallFoam;
-            if (texture->CacheIn( isWaterfallFoam ? -1.0f : 0.6f ) != zRES_CACHED_IN) {
+            if (texture->CacheIn( 0.6f ) != zRES_CACHED_IN) {
                 // Draw what? black? :)
                 continue;
             }
@@ -5423,12 +5445,10 @@ XRESULT D3D11GraphicsEngine::DrawMeshInfoListAlphablended(
 
     UpdateRenderStates();
 
-    // Waterfall foam needs scene depth for fogging. General transparent world
-    // geometry must keep the opaque depth/G-buffer pair intact for later effects.
+    // Draw again, but only to depthbuffer this time to make them work with
+    // fogging
     for ( auto const& [meshKey, meshInfo] : list ) {
-        if ( meshKey.Material && meshInfo && meshKey.Info &&
-            meshKey.Material->GetAniTexture() != nullptr &&
-            meshKey.Info->MaterialType == MaterialInfo::MT_WaterfallFoam ) {
+        if ( meshKey.Material->GetAniTexture() != nullptr && meshKey.Info->MaterialType != MaterialInfo::MT_Portal ) {
             // Draw the section-part
             DrawVertexBufferIndexedUINT( nullptr, nullptr, meshInfo->Indices.size(),
                 meshInfo->BaseIndexLocation );
@@ -5440,32 +5460,9 @@ XRESULT D3D11GraphicsEngine::DrawMeshInfoListAlphablended(
 
 
 XRESULT D3D11GraphicsEngine::DrawWaterfallMask( ID3D11RenderTargetView* waterMaskRTV ) {
-    if ( (FrameTransparencyMeshesWaterfall.empty()
-        && FrameTransparencyMeshesWetSSRBlockers.empty()) || !waterMaskRTV ) {
+    if ( (FrameTransparencyMeshesWaterfall.empty() && FrameTransparencyMeshesWetSSRBlockers.empty()) || !waterMaskRTV ) {
         return XR_SUCCESS;
     }
-
-    auto& rendererState = Engine::GAPI->GetRendererState();
-    const GothicBlendStateInfo previousBlendState = rendererState.BlendState;
-    const GothicDepthBufferStateInfo previousDepthState = rendererState.DepthState;
-    const GothicRasterizerStateInfo previousRasterizerState = rendererState.RasterizerState;
-    XRESULT result = XR_SUCCESS;
-
-    auto restoreMaskState = [&]() {
-        ID3D11ShaderResourceView* nullSRV = nullptr;
-        GetContext()->PSSetShaderResources( 0, 1, &nullSRV );
-        rendererState.BlendState = previousBlendState;
-        rendererState.DepthState = previousDepthState;
-        rendererState.RasterizerState = previousRasterizerState;
-        rendererState.BlendState.SetDirty();
-        rendererState.DepthState.SetDirty();
-        rendererState.RasterizerState.SetDirty();
-        if ( UpdateRenderStates() != XR_SUCCESS ) {
-            result = XR_FAILED;
-        }
-        GetContext()->OMSetRenderTargets( 1, HDRBackBuffer->GetRenderTargetView().GetAddressOf(),
-            DepthStencilBuffer->GetDepthStencilView().Get() );
-    };
 
     GetContext()->OMSetRenderTargets( 1, &waterMaskRTV,
         DepthStencilBuffer->GetDepthStencilView().Get() );
@@ -5474,11 +5471,11 @@ XRESULT D3D11GraphicsEngine::DrawWaterfallMask( ID3D11RenderTargetView* waterMas
     Engine::GAPI->SetViewTransformXM( view );
     Engine::GAPI->ResetWorldTransform();
 
+    SetActivePixelShader( PShaderID::PS_WaterMask );
     SetActiveVertexShader( VShaderID::VS_Ex );
-    if ( !ActiveVS || ActiveVS->Apply() != XR_SUCCESS ) {
-        restoreMaskState();
-        return XR_FAILED;
-    }
+    ActivePS->Apply();
+    ActiveVS->Apply();
+
     SetupVS_ExMeshDrawCall();
     SetupVS_ExConstantBuffer();
 
@@ -5488,103 +5485,39 @@ XRESULT D3D11GraphicsEngine::DrawWaterfallMask( ID3D11RenderTargetView* waterMas
     cbInstance.Color = float4( 1.0f, 1.0f, 1.0f, 1.0f );
     ActiveVS->GetBuffer( "Matrices_PerInstances" ).Update( &cbInstance, sizeof( cbInstance ) ).Bind();
 
-    rendererState.DepthState.DepthBufferEnabled = true;
-    rendererState.DepthState.DepthWriteEnabled = false;
-    rendererState.DepthState.DepthBufferCompareFunc =
-        GothicDepthBufferStateInfo::CF_COMPARISON_GREATER_EQUAL;
-    rendererState.DepthState.SetDirty();
+    Engine::GAPI->GetRendererState().DepthState.DepthWriteEnabled = false;
+    Engine::GAPI->GetRendererState().DepthState.SetDirty();
+    Engine::GAPI->GetRendererState().BlendState.SetDefault();
+    Engine::GAPI->GetRendererState().BlendState.SetDirty();
+    UpdateRenderStates();
 
-    rendererState.BlendState.SetDefault();
-    rendererState.BlendState.SrcBlend = GothicBlendStateInfo::BF_ONE;
-    rendererState.BlendState.DestBlend = GothicBlendStateInfo::BF_ONE;
-    rendererState.BlendState.BlendOp = GothicBlendStateInfo::BO_BLEND_OP_MAX;
-    rendererState.BlendState.SrcBlendAlpha = GothicBlendStateInfo::BF_ONE;
-    rendererState.BlendState.DestBlendAlpha = GothicBlendStateInfo::BF_ONE;
-    rendererState.BlendState.BlendOpAlpha = GothicBlendStateInfo::BO_BLEND_OP_MAX;
-    rendererState.BlendState.BlendEnabled = true;
-    rendererState.BlendState.SetDirty();
-
-    // Reverse-Z uses larger depth values near the camera. One bias unit keeps
-    // coplanar transparency masks stable without pulling them through foreground geometry.
-    rendererState.RasterizerState.ZBias = 1;
-    rendererState.RasterizerState.SetDirty();
-    if ( UpdateRenderStates() != XR_SUCCESS ) {
-        restoreMaskState();
-        return XR_FAILED;
-    }
-
-    if ( DrawVertexBufferIndexedUINT(
+    DrawVertexBufferIndexedUINT(
         Engine::GAPI->GetWrappedWorldMesh()->MeshVertexBuffer,
-        Engine::GAPI->GetWrappedWorldMesh()->MeshIndexBuffer, 0, 0 ) != XR_SUCCESS ) {
-        restoreMaskState();
-        return XR_FAILED;
-    }
+        Engine::GAPI->GetWrappedWorldMesh()->MeshIndexBuffer, 0, 0 );
 
-    if ( !FrameTransparencyMeshesWaterfall.empty() ) {
-        SetActivePixelShader( PShaderID::PS_WaterMask );
-        if ( !ActivePS || ActivePS->Apply() != XR_SUCCESS ) {
-            result = XR_FAILED;
-        } else {
-            for ( auto const& [meshKey, meshInfo] : FrameTransparencyMeshesWaterfall ) {
-                if ( meshKey.Material && meshInfo && !meshInfo->Indices.empty()
-                    && meshKey.Material->GetAniTexture() ) {
-                    if ( DrawVertexBufferIndexedUINT( nullptr, nullptr, meshInfo->Indices.size(),
-                        meshInfo->BaseIndexLocation ) != XR_SUCCESS ) {
-                        result = XR_FAILED;
-                        break;
-                    }
-                }
-            }
+    for ( auto const& [meshKey, meshInfo] : FrameTransparencyMeshesWaterfall ) {
+        if ( meshKey.Material && meshKey.Material->GetAniTexture() ) {
+            DrawVertexBufferIndexedUINT( nullptr, nullptr, meshInfo->Indices.size(),
+                meshInfo->BaseIndexLocation );
         }
     }
 
-    if ( result == XR_SUCCESS && !FrameTransparencyMeshesWetSSRBlockers.empty() ) {
-        SetActivePixelShader( PShaderID::PS_TransparencyWetMask );
-        if ( !ActivePS || ActivePS->Apply() != XR_SUCCESS ) {
-            result = XR_FAILED;
-        } else {
-            GetContext()->PSSetSamplers( 0, 1, DefaultSamplerState.GetAddressOf() );
-            zCTexture* lastTexture = nullptr;
-            for ( auto const& [meshKey, meshInfo] : FrameTransparencyMeshesWetSSRBlockers ) {
-                if ( !meshKey.Material || !meshInfo || meshInfo->Indices.empty() ) {
-                    continue;
-                }
-
-                zCTexture* texture = meshKey.Material->GetAniTexture();
-                if ( !texture || texture->CacheIn( 0.6f ) != zRES_CACHED_IN ) {
-                    continue;
-                }
-                MyDirectDrawSurface7* surface = texture->GetSurface();
-                if ( !surface || !surface->GetEngineTexture() ) {
-                    continue;
-                }
-
-                if ( texture != lastTexture ) {
-                    ID3D11ShaderResourceView* textureSRV =
-                        surface->GetEngineTexture()->GetShaderResourceView().Get();
-                    if ( !textureSRV ) {
-                        continue;
-                    }
-                    GetContext()->PSSetShaderResources( 0, 1, &textureSRV );
-                    lastTexture = texture;
-                }
-
-                PsSimpleFFdata ffdata = {};
-                ffdata.textureFactor = ComputeTransparencyTextureFactor( meshKey.Material );
-                ActivePS->GetBuffer( "cbFFData" ).Update( &ffdata ).Bind();
-                if ( DrawVertexBufferIndexedUINT( nullptr, nullptr, meshInfo->Indices.size(),
-                    meshInfo->BaseIndexLocation ) != XR_SUCCESS ) {
-                    result = XR_FAILED;
-                    break;
-                }
-            }
+    for ( auto const& [meshKey, meshInfo] : FrameTransparencyMeshesWetSSRBlockers ) {
+        if ( meshKey.Material && meshInfo ) {
+            DrawVertexBufferIndexedUINT( nullptr, nullptr, meshInfo->Indices.size(),
+                meshInfo->BaseIndexLocation );
         }
     }
 
-    restoreMaskState();
-    return result;
+    Engine::GAPI->GetRendererState().DepthState.DepthWriteEnabled = true;
+    Engine::GAPI->GetRendererState().DepthState.SetDirty();
+    UpdateRenderStates();
+
+    GetContext()->OMSetRenderTargets( 1, HDRBackBuffer->GetRenderTargetView().GetAddressOf(),
+        DepthStencilBuffer->GetDepthStencilView().Get() );
+
+    return XR_SUCCESS;
 }
-
 
 XRESULT D3D11GraphicsEngine::DrawWorldMesh( bool noTextures ) {
     if ( !Engine::GAPI->GetRendererState().RendererSettings.DrawWorldMesh )
@@ -5701,17 +5634,6 @@ XRESULT D3D11GraphicsEngine::DrawWorldMesh( bool noTextures ) {
                         continue;
                     }
 
-                    const bool isWaterfallFoam = worldMesh.first.Info && worldMesh.first.Info->MaterialType == MaterialInfo::MT_WaterfallFoam;
-                    if ( isWaterfallFoam ) {
-                        if ( !isZPrepass ) {
-                            aniTex->CacheIn( -1.0f );
-                            const float distanceSq = ComputeWorldMeshDistanceSqFromCamera( renderItem, worldMesh.second, cameraPosition );
-                            const std::pair<MeshKey, MeshInfo*> transparencyMesh = { worldMesh.first, worldMesh.second };
-                            waterfallTransparencyMeshes.push_back( { transparencyMesh, distanceSq } );
-                        }
-                        continue;
-                    }
-
                     if ( aniTex->CacheIn( 0.6f ) != zRES_CACHED_IN ) {
                         continue;
                     }
@@ -5722,6 +5644,11 @@ XRESULT D3D11GraphicsEngine::DrawWorldMesh( bool noTextures ) {
                     if ( worldMesh.first.Info->MaterialType == MaterialInfo::MT_Portal ) {
                         if ( !isZPrepass ) {
                             portalTransparencyMeshes.push_back( { transparencyMesh, distanceSq } );
+                        }
+                        continue;
+                    } else if ( worldMesh.first.Info->MaterialType == MaterialInfo::MT_WaterfallFoam ) {
+                        if ( !isZPrepass ) {
+                            waterfallTransparencyMeshes.push_back( { transparencyMesh, distanceSq } );
                         }
                         continue;
                     }
@@ -7266,8 +7193,8 @@ void XM_CALLCONV D3D11GraphicsEngine::DrawWorldAroundForWorldShadow( FXMVECTOR p
             vii.world = it->WorldMatrix;
             vii.prevWorld = it->HasValidPrevMatrix ? it->PrevWorldMatrix : it->WorldMatrix;
             vii.color = it->GroundColor;
-            if ( it->IndoorLightMask ) {
-                vii.color = (vii.color & 0x00FFFFFFu) | 0x0D000000u;
+            if ( it->IndoorLightMask || it->IndoorDaylightControlled ) {
+                vii.color = (vii.color & 0x00FFFFFFu) | (it->AllowIndoorDaylight ? INDOOR_WINDOW_LIGHT_ALPHA_R8 : INDOOR_NO_WINDOW_LIGHT_ALPHA_R8);
             }
             vii.windStrenth = 0.0f;
             vii.canBeAffectedByPlayer = 0;

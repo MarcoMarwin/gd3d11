@@ -587,3 +587,11 @@ Kurze, append-only Dokumentation der von Codex gepushten Renderer-Builds.
 - Materialien: `system\GD3D11\textures\materials.json` wurde als bereinigte Fallback-Datenbank eingebaut; Wasser, Foam, Alpha/Vegetation und IceDragon-Schnee erzeugen kein Rain-Ground-SSR, und Materialwerte werden im Loader gekappt.
 - Normal-/Displacementmaps: echte Normalmaps werden nur genutzt, wenn das Material sie erlaubt; der alte Wet-Distortion-Normalfallback ist abgeschaltet, `displacementFactor=0` bleibt wirklich 0, und Displacementmaps werden bei 0 nicht geladen/gebunden.
 - Pruefung: AGENTS-Regeln gelesen; Buildnummer aus outputs ermittelt; Materialien-JSON geparst und auf Wertebereiche, Keys, IceDragon-/Wasser-SSR-Treffer geprueft; Material-/Normal-/POM-Bindings, Wet-Ground-SSR-Bindings, Shader-Escape-Artefakte und git diff --check statisch kontrolliert. Kein vollstaendiger lokaler C++-/Shader-Build.
+
+## Build 140 (Arbeitsbuild)
+
+- Arbeitsbuild aus dem gepushten Build-139-Stand 82d6e67 angelegt; weitere Aenderungen folgen in diesem Build.
+- Indoor-Tageslicht: die bisherige kuenstliche Tagesaufhellung greift in Indoor-Raeumen nur noch, wenn ein NW_CITY_WINDOW*-VOB/Visual im Raum oder innerhalb der 30f-Toleranz erkannt wird; Worldmesh, VOBs, MOBs und Skeletal-Receiver nutzen denselben Marker.
+- SSGI/Contact Shadows: Screen-Space-GI und Kontaktschatten werden per Albedo-GBuffer-Maske nur noch fuer Indoor-Receiver inklusive 30f-Aussentoleranz berechnet; Outdoor-Pixel laufen im Trace/Temporal fruehzeitig auf 0.
+- F11-Menue: die Tooltips fuer Screen Space GI und Contact Shadows weisen knapp darauf hin, dass beide Effekte nur indoor wirken.
+- Pruefung: Register-/Aufrufer-Bindings fuer Screen-Space-Lighting, Indoor-Daylight-Polymarker, PowerShell-Escape-Artefakte und git diff --check statisch kontrolliert. Kein vollstaendiger lokaler C++-/Shader-Build.

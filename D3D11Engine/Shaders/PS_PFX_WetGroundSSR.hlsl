@@ -138,8 +138,8 @@ float4 PSMain(PS_INPUT input) : SV_TARGET
     float rainRippleWeight = wetMask * saturate(WG_RainFXWeight) * smoothstep(0.05f, 0.45f, WG_Wetness);
     float rainSparkle = CalculateRainSparkle(uv, wetUV, WG_Time) * rainRippleWeight;
     // Keep reflected geometry still. Rain adds only fine temporal grain, not moving UV/normal waves.
-    float2 combinedDistortion = distortion * 0.12f;
-    float3 wetNormal = normalize(wsNormal + float3(combinedDistortion.x, 0.0f, combinedDistortion.y) * 0.045f);
+    float2 combinedDistortion = float2(distortion.x * 0.30f, distortion.y);
+    float3 wetNormal = normalize(wsNormal + float3(combinedDistortion.x, 0.0f, combinedDistortion.y) * 0.10f);
 
     float3 viewRay = normalize(wsPosition - WG_CameraPosition);
     float3 rayDirection = normalize(reflect(viewRay, wetNormal));

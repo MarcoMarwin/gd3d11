@@ -85,6 +85,7 @@ enum EBspTreeCollectFlags : unsigned int {
 struct BspInfo {
     BspInfo() {
         NumStaticLights = 0;
+        HasIndoorWindow = false;
         OriginalNode = nullptr;
         Front = nullptr;
         Back = nullptr;
@@ -99,6 +100,7 @@ struct BspInfo {
         Mobs = std::move( other.Mobs );
         NodePolygons = std::move( other.NodePolygons );
         NumStaticLights = other.NumStaticLights;
+        HasIndoorWindow = other.HasIndoorWindow;
         OriginalNode = other.OriginalNode;
         Front = other.Front;
         Back = other.Back;
@@ -123,6 +125,7 @@ struct BspInfo {
     std::vector<zCPolygon*> NodePolygons;
 
     int NumStaticLights;
+    bool HasIndoorWindow;
 
     // Original bsp-node
     zCBspBase* OriginalNode;
@@ -277,6 +280,8 @@ public:
 
     /** Called when the game loaded a new level */
     void OnGeometryLoaded( zCBspTree* tree );
+    bool ShouldControlIndoorDaylightForWorldPoly( const zCPolygon* poly ) const;
+    bool ShouldAllowIndoorDaylightForWorldPoly( const zCPolygon* poly ) const;
 
     /** Called when the game is done loading the world */
     void OnWorldLoaded();
@@ -581,6 +586,7 @@ public:
 
     /** Builds our BspTreeVobMap */
     void BuildBspVobMapCache();
+    void CollectIndoorDaylightWorldPolys( zCBspBase* base );
 
     /** Resolves basic runtime pointlight-shadow eligibility. */
     void ConfigurePointlightShadowSource( VobLightInfo* lightInfo ) const;
@@ -914,11 +920,14 @@ private:
 
     /** Map of VobInfo-Lists for zCBspLeafs */
     std::unordered_map<zCBspBase*, BspInfo> BspLeafVobLists;
+    std::unordered_set<const zCPolygon*> IndoorDaylightControlledWorldPolys;
+    std::unordered_set<const zCPolygon*> IndoorDaylightWorldPolys;
+    std::vector<XMFLOAT3> IndoorDaylightWindowPositions;
 
     /** Map for the material infos */
     gtl::flat_hash_map<zCTexture*, std::unique_ptr<MaterialInfo>> MaterialInfos;
 
-    /** In-memory fallback database loaded from editable materials.json or legacy materials.bin */
+    /** In-memory material database loaded exclusively from editable materials.json */
     gtl::flat_hash_map<std::string, MaterialInfo::Buffer> MaterialDatabase;
     bool MaterialDatabaseLoaded = false;
     void LoadMaterialDatabase();

@@ -342,6 +342,8 @@ struct VobInfo : public BaseVobInfo {
 
     /** True when this vob should receive statically bounded indoor lights. */
     bool IndoorLightMask = false;
+    bool IndoorDaylightControlled = false;
+    bool AllowIndoorDaylight = false;
     bool HasIndoorLightMaskSample = false;
     XMFLOAT3 LastIndoorLightMaskPosition = XMFLOAT3( FLT_MAX, FLT_MAX, FLT_MAX );
 
@@ -437,6 +439,8 @@ struct SkeletalVobInfo : public BaseVobInfo {
         Vob = nullptr;
         VisualInfo = nullptr;
         IndoorVob = false;
+        IndoorDaylightControlled = false;
+        AllowIndoorDaylight = false;
         VobConstantBuffer = nullptr;
         HasValidPrevTransforms = false;
         LastAniUpdateFrame = 0;
@@ -479,6 +483,8 @@ struct SkeletalVobInfo : public BaseVobInfo {
 
     /** Indoor* */
     bool IndoorVob;
+    bool IndoorDaylightControlled;
+    bool AllowIndoorDaylight;
 
     /** Flag to see if this vob was drawn in the current render pass. Used to collect the same vob only once. */
     std::atomic<size_t> VisibleInRenderPass{};

@@ -2,18 +2,18 @@
     "version": 1,
     "readme": {
         "de": [
-            "Einzelne .mi Dateien haben Vorrang vor dieser materials.json.",
-            "Lege einzelne Materialdateien unter system/GD3D11/textures/infos/ ab.",
-            "Dateiname: <TEXTURNAME_OHNE_ENDUNG>.mi",
-            "Nur wenn keine passende .mi Datei gefunden wird, nutzt der Renderer den Eintrag aus materials.json.",
+            "Diese materials.json ist die einzige Materialquelle des Renderers.",
+            "Neue oder geaenderte Texturwerte werden direkt hier in materials.json eingetragen.",
+            "Materialschluessel ist der Texturname ohne Dateiendung.",
+            "Es gibt keinen Vorrang einzelner Materialdateien mehr.",
             "Normalmaps liegen unter system/GD3D11/textures/replacements/Normalmaps_<Name>/.",
             "Displacementmaps fuer POM liegen unter system/GD3D11/textures/replacements/Displacementmaps_<Name>/."
         ],
         "en": [
-            "Individual .mi files have priority over this materials.json.",
-            "Place individual material files in system/GD3D11/textures/infos/.",
-            "Filename: <TEXTURE_NAME_WITHOUT_EXTENSION>.mi",
-            "The renderer uses materials.json only when no matching .mi file exists.",
+            "This materials.json is the renderer's only material source.",
+            "Add or edit texture values directly in this materials.json.",
+            "The material key is the texture name without file extension.",
+            "Individual material files no longer override this file.",
             "Normal maps live in system/GD3D11/textures/replacements/Normalmaps_<Name>/.",
             "Displacement maps for POM live in system/GD3D11/textures/replacements/Displacementmaps_<Name>/."
         ]

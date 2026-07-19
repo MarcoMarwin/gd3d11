@@ -309,9 +309,6 @@ float4 ComputeWorldLowCloudVolume(float3 cameraWorld, float3 endWorld, float cam
         1.0f,
         SmootherStep01(saturate((rayDir.y - 0.085f) / 0.220f)),
         nightHorizonMask);
-    float nightHorizonLiftMask = nightHorizonMask * (1.0f - SmootherStep01(
-        saturate((rayDir.y - 0.100f) / 0.320f)));
-    float effectiveSkyHorizonFill = skyHorizonFill * (1.0f - nightHorizonLiftMask * 0.94f);
 
     if (abs(rayDir.y) > 0.035f && skyHorizonFill < 0.001f)
     {
@@ -364,10 +361,6 @@ float4 ComputeWorldLowCloudVolume(float3 cameraWorld, float3 endWorld, float cam
             (sampleDistance - 26000.0f * cloudDistanceScale)
             / max(8000.0f, 36000.0f * cloudDistanceScale)));
         float3 cloudSampleWorld = sampleWorld;
-        cloudSampleWorld.y += max(
-            cloudBase + 1900.0f * cloudHeightScale - cloudSampleWorld.y, 0.0f)
-            * effectiveSkyHorizonFill * horizonFillDistance;
-        cloudSampleWorld.y += 8200.0f * cloudHeightScale * nightHorizonLiftMask * horizonFillDistance;
         float nearCloudFadeStart = lerp(7800.0f, 18000.0f, skyPixel) * cloudDistanceScale;
         float nearCloudFadeEnd = lerp(18000.0f, 32000.0f, skyPixel) * cloudDistanceScale;
         float farCloudFadeStart = lerp(105000.0f, 72000.0f, skyPixel) * cloudDistanceScale;
@@ -524,14 +517,6 @@ float3 ApplyAtmosphericScatteringSky(float3 worldPosition)
 	float fFar = length(vRay);
 	vRay /= fFar;
 
-	// Keep the procedural sky usable slightly below the visible horizon. Water refraction
-	// samples the rendered sky from TX_Scene, so pushing the orange/black
-	// under-horizon transition down avoids warm bands on open sea without a cubemap pop.
-	float underHorizonBlend = SmootherStep01(saturate((-vRay.y - 0.015f) / 0.34f));
-	float heldHorizonY = max(vRay.y, 0.025f);
-	vRay.y = lerp(heldHorizonY, vRay.y, underHorizonBlend * underHorizonBlend);
-	vRay = normalize(vRay);
-	
 	//return float4(abs(AC_SpherePosition), 1);
 	
 	//if(AC_CameraHeight < AC_InnerRadius)
@@ -578,9 +563,8 @@ float3 ApplyAtmosphericScatteringSky(float3 worldPosition)
 	
 	// Finally, scale the Mie and Rayleigh colors and set up the varying variables for the pixel shader
 	float3 c0 = vFrontColor * (vInvWavelength * AC_KrESun);
-	// Dense rain must remove the residual sun/Mie spot completely, not just dim
-	// the sun disc. AC_SunVisibility already includes the monotonic rain fade.
-	float3 c1 = vFrontColor * AC_KmESun * saturate(AC_SunVisibility);
+	// Keep the Mie/sun profile stable; rain clouds fade the finished sky instead of changing apparent sun size.
+	float3 c1 = vFrontColor * AC_KmESun;
 	
 	
 	

@@ -37,6 +37,21 @@ cbuffer DS_ScreenQuadConstantBuffer : register(b0)
     float4 SQ_CascadeAtlasRect[MAX_CSM_CASCADES];
 };
 
+float IsEncodedIndoorNoDaylight(float rawLighting)
+{
+    return rawLighting < 0.035f ? 1.0f : 0.0f;
+}
+
+float IsEncodedIndoorDaylightWindow(float rawLighting)
+{
+    return rawLighting >= 0.08f && rawLighting < 0.5f ? 1.0f : 0.0f;
+}
+
+float DecodeIndoorDaylightMask(float rawLighting)
+{
+    return 1.0f - IsEncodedIndoorNoDaylight(rawLighting);
+}
+
 //--------------------------------------------------------------------------------------
 // Textures and Samplers
 //--------------------------------------------------------------------------------------
@@ -243,7 +258,10 @@ float4 PSMain(PS_INPUT Input) : SV_TARGET
 	
 	// Look up the diffuse color
     float4 diffuse = TX_Diffuse.Sample(SS_Linear, uv);
-    float vertLighting = diffuse.a;
+    float rawVertLighting = diffuse.a;
+    float indoorDaylightMask = DecodeIndoorDaylightMask(rawVertLighting);
+    float encodedIndoorMarker = max(IsEncodedIndoorNoDaylight(rawVertLighting), IsEncodedIndoorDaylightWindow(rawVertLighting));
+    float vertLighting = lerp(rawVertLighting, 0.05f, encodedIndoorMarker);
 	
 	// Sample depth first to detect sky pixels (reversed-Z: sky has depth == 0.0)
     float expDepth = TX_Depth.Sample(SS_Linear, uv).r;
@@ -365,13 +383,16 @@ float4 PSMain(PS_INPUT Input) : SV_TARGET
         float3 specBare = spec * lightColor.rgb * sun + specWet * lightColor.rgb;
         float3 specColored = saturate(
             lerp(specBare, specBare * diffuse.rgb, specMod));
+        float3 fakeDayAmbient = diffuse.rgb * SQ_ShadowStrength * sunStrength * shadowAO;
+        float3 indoorNightAmbient = diffuse.rgb * SQ_ShadowStrength * 0.05f * shadowAO;
+        float3 daylightAmbient = lerp(indoorNightAmbient, fakeDayAmbient, indoorDaylightMask);
         litPixel = lerp(
-            diffuse.rgb * SQ_ShadowStrength * sunStrength * shadowAO,
+            daylightAmbient,
             diffuse.rgb * lightColor.rgb * lightColor.a * worldAO,
             sun) + specColored;
     }
 
-	float sssSunWeight = saturate((AC_LightPos.y + 0.08f) * 3.0f) * AC_SunVisibility * GetRainSkyVisibility();
+	float sssSunWeight = saturate((AC_LightPos.y + 0.08f) * 3.0f) * AC_SunVisibility * GetRainSkyVisibility() * indoorDaylightMask;
 	float sssMoonWeight = AC_MoonVisibility * 0.12f;
 	float sssLightWeight = max(sssSunWeight, sssMoonWeight);
 	float3 sssLightColor = moonLightActive ? float3(0.42f, 0.56f, 1.0f) : lightColor.rgb;

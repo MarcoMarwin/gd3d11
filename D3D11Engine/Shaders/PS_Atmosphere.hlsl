@@ -37,6 +37,36 @@ float AtmosphereDither(float2 pixelPosition)
 }
 
 //--------------------------------------------------------------------------------------
+float GetMoonTextureMask(float3 worldPosition)
+{
+    float3 localPosition = worldPosition - AC_SpherePosition;
+    float3 skyDirection = normalize(localPosition - AC_CameraPos);
+    float3 moonDirection = normalize(AC_MoonPos);
+
+    float3 referenceUp = abs(moonDirection.y) > 0.98f
+        ? float3(0.0f, 0.0f, 1.0f)
+        : float3(0.0f, 1.0f, 0.0f);
+    float3 moonRight = normalize(cross(referenceUp, moonDirection));
+    float3 moonUp = normalize(cross(moonDirection, moonRight));
+
+    float forward = dot(skyDirection, moonDirection);
+    float2 tangentPosition = float2(
+        dot(skyDirection, moonRight),
+        dot(skyDirection, moonUp)) / max(0.001f, forward);
+
+    const float moonAngularHalfSize = 0.08f;
+    float2 moonUV = float2(0.5f, 0.5f) +
+        tangentPosition / (moonAngularHalfSize * 2.0f);
+    moonUV.y = 1.0f - moonUV.y;
+
+    float2 inside = step(0.0f, moonUV) * step(moonUV, 1.0f);
+    float boundsMask = inside.x * inside.y * step(0.0f, forward);
+    float4 moonTexture = TX_Texture2.Sample(SS_Linear, saturate(moonUV));
+    float moonLuminance = max(moonTexture.r, max(moonTexture.g, moonTexture.b));
+    float textureMask = smoothstep(0.005f, 0.03f, moonLuminance);
+    return boundsMask * textureMask * GetRainSkyVisibility();
+}
+
 float3 ApplyMoonTexture(float3 worldPosition)
 {
     float3 localPosition = worldPosition - AC_SpherePosition;
@@ -64,7 +94,7 @@ float3 ApplyMoonTexture(float3 worldPosition)
     float4 moonTexture = TX_Texture2.Sample(SS_Linear, saturate(moonUV));
     float moonLuminance = max(moonTexture.r, max(moonTexture.g, moonTexture.b));
     float textureMask = smoothstep(0.005f, 0.03f, moonLuminance);
-    float moonMask = boundsMask * textureMask * GetRainSkyVisibility();
+    float moonMask = GetMoonTextureMask(worldPosition);
     return moonTexture.rgb * moonMask;
 }
 
@@ -94,7 +124,7 @@ float4 RenderRainCloudDeck(float3 worldPosition)
 	float3 cloudColor = lerp(nightCloud, dayCloud, dayWeight);
 	cloudColor += float3(0.10f, 0.13f, 0.19f) * AC_MoonVisibility * structure * 0.035f;
 
-	float opacity = saturate((0.74f + structure * 0.18f) * horizonMask);
+	float opacity = saturate((0.98f + structure * 0.02f) * horizonMask);
 	return float4(cloudColor, opacity);
 }
 // Pixel Shader
@@ -111,8 +141,10 @@ float4 PSMain( PS_INPUT Input ) : SV_TARGET
 	clouds.rgb *= lerp(atmoColor, 1.0f, saturate(AC_LightPos.y));
 	night.rgb = lerp(0.0f, night, saturate(-AC_LightPos.y * 4)); // Make sure stars are only visible at night
 	night.rgb *= GetRainSkyVisibility(); // Dense rain clouds fully occlude stars.
-	
-	
+	float moonSkyMask = GetMoonTextureMask(Input.vWorldPosition);
+	night.rgb *= 1.0f - moonSkyMask;
+	// Apply stars before the moon; the moon mask prevents stars from leaking through the lunar disk.
+	atmoColor += night.rgb * 0.4f;
 	atmoColor += ApplyMoonTexture(Input.vWorldPosition);
 
 	float rainCloudWeight = smoothstep(0.02f, 0.55f, saturate(AC_RainFXWeight));
@@ -124,9 +156,6 @@ float4 PSMain( PS_INPUT Input ) : SV_TARGET
 		float4 rainClouds = RenderRainCloudDeck(Input.vWorldPosition);
 		atmoColor = lerp(atmoColor, rainClouds.rgb, rainClouds.a * rainCloudWeight);
 	}
-	
-	// Apply stars
-	atmoColor += night * 0.4f;
 	
 	atmoColor = saturate(atmoColor + AtmosphereDither(Input.vPosition.xy) * (GetNightWeight() * 1.5f / 255.0f));
 	return float4(atmoColor,1);

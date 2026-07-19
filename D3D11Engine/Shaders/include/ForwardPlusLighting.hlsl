@@ -210,13 +210,19 @@ float3 FP_ComputePointLighting(
 // ============================================
 // Sun Lighting (matches PS_DS_AtmosphericScattering.hlsl PSMain)
 // ============================================
+float FP_DecodeIndoorDaylightMask(float rawLighting)
+{
+    return rawLighting < 0.035f ? 0.0f : 1.0f;
+}
 
 float3 FP_ComputeSunLighting(
     float3 wsPosition, float3 vsPosition, float3 normal,
-    float3 diffuseColor, float specIntensity, float specPower,
+    float3 diffuseColor, float rawIndoorAlpha, float specIntensity, float specPower,
     float shadow, float vertLighting,
     float twoSidedBacklitMaterial, float vegetationBacklitMask )
 {
+    float indoorDaylightMask = FP_DecodeIndoorDaylightMask(rawIndoorAlpha);
+
     float3 V = normalize( -vsPosition );
     float3 H = normalize( SQ_LightDirectionVS + V );
     float spec = PLS_CalcBlinnPhongLighting( normal, H );
@@ -256,13 +262,16 @@ float3 FP_ComputeSunLighting(
         float3 specBare = spec * lightColor.rgb * sun;
         float3 specColored = saturate(
             lerp( specBare, specBare * diffuseColor, specMod ) );
+        float3 fakeDayAmbient = diffuseColor * SQ_ShadowStrength * sunStrength * shadowAO;
+        float3 indoorNightAmbient = diffuseColor * SQ_ShadowStrength * 0.05f * shadowAO;
+        float3 daylightAmbient = lerp(indoorNightAmbient, fakeDayAmbient, indoorDaylightMask);
         litPixel = lerp(
-            diffuseColor * SQ_ShadowStrength * sunStrength * shadowAO,
+            daylightAmbient,
             diffuseColor * lightColor.rgb * lightColor.a * worldAO,
             sun ) + specColored;
     }
 
-    float sssSunWeight = saturate( (AC_LightPos.y + 0.08f) * 3.0f ) * AC_SunVisibility * GetRainSkyVisibility();
+    float sssSunWeight = saturate( (AC_LightPos.y + 0.08f) * 3.0f ) * AC_SunVisibility * GetRainSkyVisibility() * indoorDaylightMask;
     float sssMoonWeight = AC_MoonVisibility * 0.12f;
     float sssLightWeight = max( sssSunWeight, sssMoonWeight );
     float materialBacklitMask = max( vegetationBacklitMask, twoSidedBacklitMaterial );

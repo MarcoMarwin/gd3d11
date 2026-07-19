@@ -330,6 +330,7 @@ XRESULT D3D11PfxRenderer::RenderGodRaysToTexture(
 
 XRESULT D3D11PfxRenderer::RenderScreenSpaceLighting(
     ID3D11ShaderResourceView* sceneSRV,
+    ID3D11ShaderResourceView* albedoSRV,
     ID3D11ShaderResourceView* depthSRV,
     ID3D11ShaderResourceView* normalsSRV,
     ID3D11ShaderResourceView* waterMaskSRV,
@@ -344,7 +345,7 @@ XRESULT D3D11PfxRenderer::RenderScreenSpaceLighting(
     auto& settings = Engine::GAPI->GetRendererState().RendererSettings;
     const bool contactActive = settings.EnableContactShadows;
     const bool giActive = settings.EnableScreenSpaceGI && settings.ScreenSpaceGIStrength > 0.0f;
-    if ( !sceneSRV || !depthSRV || !normalsSRV || !waterMaskSRV || !materialSRV || (!contactActive && !giActive) ) {
+    if ( !sceneSRV || !albedoSRV || !depthSRV || !normalsSRV || !waterMaskSRV || !materialSRV || (!contactActive && !giActive) ) {
         ScreenSpaceLightingHistoryValid = false;
         return XR_SUCCESS;
     }
@@ -409,8 +410,8 @@ XRESULT D3D11PfxRenderer::RenderScreenSpaceLighting(
 
     ID3D11RenderTargetView* rawRTV = raw->GetRenderTargetView().Get();
     context->OMSetRenderTargets( 1, &rawRTV, nullptr );
-    ID3D11ShaderResourceView* traceSRVs[5] = { sceneSRV, depthSRV, normalsSRV, waterMaskSRV, materialSRV };
-    context->PSSetShaderResources( 0, 5, traceSRVs );
+    ID3D11ShaderResourceView* traceSRVs[6] = { sceneSRV, depthSRV, normalsSRV, waterMaskSRV, materialSRV, albedoSRV };
+    context->PSSetShaderResources( 0, 6, traceSRVs );
     ID3D11SamplerState* sampler = engine->GetClampSamplerState();
     context->PSSetSamplers( 0, 1, &sampler );
     engine->SetDefaultStates();
@@ -436,20 +437,21 @@ XRESULT D3D11PfxRenderer::RenderScreenSpaceLighting(
         ScreenSpaceLightingDepthHistory[writeIndex]->GetRenderTargetView().Get()
     };
     context->OMSetRenderTargets( 2, temporalRTVs, nullptr );
-    ID3D11ShaderResourceView* temporalSRVs[7] = {
+    ID3D11ShaderResourceView* temporalSRVs[8] = {
         raw->GetShaderResView().Get(),
         ScreenSpaceLightingHistoryValid ? ScreenSpaceLightingHistory[readIndex]->GetShaderResView().Get() : raw->GetShaderResView().Get(),
         depthSRV,
         normalsSRV,
         velocitySRV,
         ScreenSpaceLightingHistoryValid ? ScreenSpaceLightingDepthHistory[readIndex]->GetShaderResView().Get() : depthSRV,
-        materialSRV
+        materialSRV,
+        albedoSRV
     };
-    context->PSSetShaderResources( 0, 7, temporalSRVs );
+    context->PSSetShaderResources( 0, 8, temporalSRVs );
     DrawFullScreenQuad();
 
-    ID3D11ShaderResourceView* nullSRVs[7] = {};
-    context->PSSetShaderResources( 0, 7, nullSRVs );
+    ID3D11ShaderResourceView* nullSRVs[8] = {};
+    context->PSSetShaderResources( 0, 8, nullSRVs );
     context->OMSetRenderTargets( 1, previousRTV.GetAddressOf(), previousDSV.Get() );
 
     ScreenSpaceLightingHistoryIndex = writeIndex;

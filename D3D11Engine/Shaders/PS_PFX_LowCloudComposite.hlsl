@@ -25,11 +25,17 @@ float LoadLowCloudDepth( int2 cloudPixel, int2 cloudSize )
     return TX_LowCloudDepth.Load( int3( cloudPixel, 0 ) ).r;
 }
 
-float GetNearbySkyCoverage( int2 targetPixel, int2 depthSize )
+float4 SampleStableSkyLowClouds( float2 texcoord )
 {
-    const float skyDepthEpsilon = 0.00001f;
-    float skyCoverage = 0.0f;
-    float totalWeight = 0.0f;
+    uint cloudWidth;
+    uint cloudHeight;
+    TX_LowClouds.GetDimensions( cloudWidth, cloudHeight );
+    float2 texel = 1.0f / max( float2( cloudWidth, cloudHeight ), float2( 1.0f, 1.0f ) );
+
+    float4 center = TX_LowClouds.SampleLevel( SS_Linear, texcoord, 0 );
+    float4 bestClouds = center;
+    float4 accum = center * 4.0f;
+    float totalWeight = 4.0f;
 
     [unroll]
     for ( int y = -1; y <= 1; ++y )
@@ -37,18 +43,28 @@ float GetNearbySkyCoverage( int2 targetPixel, int2 depthSize )
         [unroll]
         for ( int x = -1; x <= 1; ++x )
         {
-            int2 samplePixel = clamp(
-                targetPixel + int2( x, y ),
-                int2( 0, 0 ), depthSize - int2( 1, 1 ) );
-            float depth = TX_FullDepth.Load( int3( samplePixel, 0 ) ).r;
-            float weight = (x == 0 && y == 0) ? 1.0f : 0.75f;
-            skyCoverage += (depth < skyDepthEpsilon ? 1.0f : 0.0f) * weight;
+            if ( x == 0 && y == 0 )
+            {
+                continue;
+            }
+
+            float2 offset = float2( x, y ) * texel;
+            float4 sampleClouds = TX_LowClouds.SampleLevel( SS_Linear, texcoord + offset, 0 );
+            float weight = lerp( 0.35f, 0.85f, saturate( sampleClouds.a * 2.0f ) );
+            accum += sampleClouds * weight;
             totalWeight += weight;
+
+            if ( sampleClouds.a > bestClouds.a )
+            {
+                bestClouds = sampleClouds;
+            }
         }
     }
 
-    return skyCoverage / max( totalWeight, 0.00001f );
+    float4 filteredClouds = accum / max( totalWeight, 0.00001f );
+    return lerp( filteredClouds, bestClouds, 0.35f );
 }
+
 float GetLowCloudDepthWeight( float targetDepth, float sourceDepth )
 {
     const float skyDepthEpsilon = 0.00001f;
@@ -88,6 +104,13 @@ float4 SampleDepthAwareLowClouds(
         int2( pixelPosition.xy ), int2( 0, 0 ), depthSize - int2( 1, 1 ) );
     float targetDepth = TX_FullDepth.Load( int3( targetPixel, 0 ) ).r;
 
+    const float skyDepthEpsilon = 0.00001f;
+    bool targetIsSky = targetDepth < skyDepthEpsilon;
+    if ( !targetIsSky )
+    {
+        return float4( 0.0f, 0.0f, 0.0f, 0.0f );
+    }
+
     float2 cloudPosition = texcoord * float2( cloudSize ) - 0.5f;
     int2 baseCloudPixel = int2( floor( cloudPosition ) );
     float2 cloudFraction = frac( cloudPosition );
@@ -123,8 +146,6 @@ float4 SampleDepthAwareLowClouds(
 
     // Thin silhouettes can miss the four bilinear taps. Search only nearby
     // samples from the same depth class instead of leaking sky clouds across them.
-    const float skyDepthEpsilon = 0.00001f;
-    bool targetIsSky = targetDepth < skyDepthEpsilon;
     float bestMetric = 1000000.0f;
     float4 bestClouds = 0.0f;
     bool foundCompatibleSample = false;
@@ -146,20 +167,8 @@ float4 SampleDepthAwareLowClouds(
                 continue;
             }
 
-            float relativeDepthDelta = 0.0f;
-            if ( !targetIsSky )
-            {
-                relativeDepthDelta = abs( targetDepth - sourceDepth )
-                    / max( max( targetDepth, sourceDepth ), skyDepthEpsilon );
-                if ( relativeDepthDelta >= 0.35f )
-                {
-                    continue;
-                }
-            }
-
             float2 spatialDelta = float2( cloudPixel ) - cloudPosition;
-            float metric = dot( spatialDelta, spatialDelta )
-                + relativeDepthDelta * 16.0f;
+            float metric = dot( spatialDelta, spatialDelta );
             if ( metric < bestMetric )
             {
                 bestMetric = metric;
@@ -174,29 +183,18 @@ float4 SampleDepthAwareLowClouds(
         return bestClouds;
     }
 
-    float4 fallbackClouds = TX_LowClouds.SampleLevel( SS_Linear, texcoord, 0 );
-    if ( fallbackClouds.a <= 0.001f )
-    {
-        return float4( 0.0f, 0.0f, 0.0f, 0.0f );
-    }
-
     // Real sky pixels inside alpha-tested tree gaps must still receive the cloud
     // background even when the half-res depth tap was polluted by nearby foliage.
+    // Non-sky pixels deliberately do not use a colour fallback: otherwise distant
+    // tree/rock silhouettes get brightened by invisible clouds and flicker at alpha
+    // contours.
     if ( targetIsSky )
     {
-        return fallbackClouds;
-    }
-
-    // Distant foliage silhouettes can also miss every compatible low-res tap. Limit
-    // the fallback to far edge pixels with nearby sky so solid geometry is not washed.
-    float nearbySkyCoverage = GetNearbySkyCoverage( targetPixel, depthSize );
-    float farSilhouetteWeight = 1.0f - smoothstep( 0.06f, 0.18f, targetDepth );
-    float edgeBackgroundWeight = saturate( nearbySkyCoverage * 2.5f ) * farSilhouetteWeight;
-    if ( edgeBackgroundWeight > 0.001f )
-    {
-        fallbackClouds.rgb *= edgeBackgroundWeight;
-        fallbackClouds.a *= edgeBackgroundWeight;
-        return fallbackClouds;
+        float4 fallbackClouds = SampleStableSkyLowClouds( texcoord );
+        if ( fallbackClouds.a > 0.001f )
+        {
+            return fallbackClouds;
+        }
     }
 
     return float4( 0.0f, 0.0f, 0.0f, 0.0f );

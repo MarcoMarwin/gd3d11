@@ -72,6 +72,7 @@ public:
                                     ID3D11ShaderResourceView** outGodRaysSRV );
 
     XRESULT RenderScreenSpaceLighting( ID3D11ShaderResourceView* sceneSRV,
+                                        ID3D11ShaderResourceView* albedoSRV,
                                         ID3D11ShaderResourceView* depthSRV,
                                         ID3D11ShaderResourceView* normalsSRV,
                                         ID3D11ShaderResourceView* waterMaskSRV,
