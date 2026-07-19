@@ -165,7 +165,7 @@ float4 PSMain( PS_INPUT Input ) : SV_TARGET
 	// Keep indoor point lights from leaking onto outdoor pixels, but allow a small
 	// distance-stable doorway bleed so thresholds do not form a hard camera-dependent line.
 	float indoor = 1.0f - PL_Outdoor;
-	float indoorPixel = DecodeIndoorReceiverMask(diffuse.a);
+	float indoorPixel = diffuse.a < 0.5f ? 1.0f : 0.0f;
 	float doorFloorBleed = 0.0f;
 	if (indoor > 0.5f && PL_IgnoreIndoorOutdoorLimit < 0.5f)
 	{

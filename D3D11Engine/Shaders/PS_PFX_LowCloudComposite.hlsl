@@ -135,25 +135,30 @@ float4 SampleDepthAwareLowClouds(
         }
     }
 
-    if ( totalWeight > 0.00001f )
+    // A confident 2x2 bilateral footprint is stable and remains the fast path.
+    // Sparse alpha-tested silhouettes must not normalize a tiny single tap to
+    // full cloud coverage because that tap changes with sub-pixel vegetation.
+    const float confidentFootprintWeight = 0.60f;
+    if ( totalWeight >= confidentFootprintWeight )
     {
         return filteredClouds / totalWeight;
     }
 
-    // Thin silhouettes can miss the four bilinear taps. Search only nearby
-    // samples from the same depth class instead of leaking sky clouds across them.
-    float bestMetric = 1000000.0f;
-    float4 bestClouds = 0.0f;
-    bool foundCompatibleSample = false;
+    // Reconstruct uncertain edges from a wider same-class neighborhood. Blend all
+    // compatible samples instead of selecting one winner, so distant foliage keeps
+    // a temporally stable cloud layer while sky and geometry can never contaminate
+    // each other. The wider depth window is strongly weighted toward the target.
+    float4 stableClouds = 0.0f;
+    float stableWeight = 0.0f;
+    int2 searchCenter = int2( floor( cloudPosition + 0.5f ) );
     [unroll]
-    for ( int searchY = -1; searchY <= 1; ++searchY )
+    for ( int searchY = -2; searchY <= 2; ++searchY )
     {
         [unroll]
-        for ( int searchX = -1; searchX <= 1; ++searchX )
+        for ( int searchX = -2; searchX <= 2; ++searchX )
         {
             int2 cloudPixel = clamp(
-                int2( floor( cloudPosition + 0.5f ) )
-                    + int2( searchX, searchY ),
+                searchCenter + int2( searchX, searchY ),
                 int2( 0, 0 ), cloudSize - int2( 1, 1 ) );
             float sourceDepth = LoadLowCloudDepth(
                 cloudPixel, cloudSize );
@@ -163,37 +168,33 @@ float4 SampleDepthAwareLowClouds(
                 continue;
             }
 
-            // For geometry pixels, only reuse a nearby half-resolution sample
-            // from the same surface depth. This restores clouds in front of
-            // landscape while rejecting sky/foliage cross-contamination.
             float relativeDepthDelta = 0.0f;
+            float depthWeight = 1.0f;
             if ( !targetIsSky )
             {
                 relativeDepthDelta = abs( targetDepth - sourceDepth )
                     / max( max( targetDepth, sourceDepth ), skyDepthEpsilon );
-                if ( relativeDepthDelta >= 0.18f )
+                if ( relativeDepthDelta >= 0.30f )
                 {
                     continue;
                 }
+                depthWeight = exp2( -relativeDepthDelta * 24.0f );
             }
 
             float2 spatialDelta = float2( cloudPixel ) - cloudPosition;
-            float metric = dot( spatialDelta, spatialDelta )
-                + relativeDepthDelta * 20.0f;
-            if ( metric < bestMetric )
-            {
-                bestMetric = metric;
-                bestClouds = TX_LowClouds.Load( int3( cloudPixel, 0 ) );
-                foundCompatibleSample = true;
-            }
+            float spatialWeight = exp2(
+                -dot( spatialDelta, spatialDelta ) * 0.65f );
+            float weight = spatialWeight * depthWeight;
+            stableClouds += TX_LowClouds.Load(
+                int3( cloudPixel, 0 ) ) * weight;
+            stableWeight += weight;
         }
     }
 
-    if ( foundCompatibleSample )
+    if ( stableWeight > 0.00001f )
     {
-        return bestClouds;
+        return stableClouds / stableWeight;
     }
-
     // Real sky pixels inside alpha-tested tree gaps keep Build 140's stable
     // fallback. Geometry deliberately has no sky-colour fallback; it can receive
     // clouds only from depth-compatible raymarch samples above.

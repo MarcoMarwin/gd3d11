@@ -35,7 +35,7 @@ float IsAlphaTestedMaterial(float4 materialInfo) { return materialInfo.g < 0.0f 
 float IndoorReceiverMask(float2 uv)
 {
     float a = TX_Albedo.SampleLevel(SS_Linear, saturate(uv), 0).a;
-    return DecodeIndoorReceiverMask(a);
+    return a < 0.5f ? 1.0f : 0.0f;
 }
 float3 ViewPosition(float2 uv, float depth)
 {

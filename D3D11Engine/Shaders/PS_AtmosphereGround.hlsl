@@ -83,8 +83,7 @@ DEFERRED_PS_OUTPUT PSMain( PS_INPUT Input ) : SV_TARGET
 	DEFERRED_PS_OUTPUT output;
 	output.vTransparencyAndCompositionMask = 0.0f;
 	output.vReactiveMask = 0.0f;
-	float encodedLighting = EncodeIndoorDaylightMarker(Input.vDiffuse.a, 0.0f, 0.0f);
-	output.vDiffuse = float4(color.rgb, encodedLighting);
+	output.vDiffuse = float4(color.rgb, Input.vDiffuse.a);
 	
 	output.vNrm = EncodeNormalGBuffer(nrm);
 	

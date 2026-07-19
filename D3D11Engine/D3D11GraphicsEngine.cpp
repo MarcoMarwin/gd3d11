@@ -71,27 +71,6 @@ static const GUID IID_IDXGIVkInteropAdapter = { 0x3A6D8F2C, 0xB0E8, 0x4AB4, { 0x
 static const GUID IID_IDXGIDeviceRenderDoc = { 0xa7aa6116, 0x9c8d, 0x4bba, { 0x90, 0x83, 0xb4, 0xd8, 0x16, 0xb7, 0x1b, 0x78 } };
 
 constexpr float inv255f = (1.f / 255.f);
-constexpr float INDOOR_NO_WINDOW_LIGHT_ALPHA = 0.02f;
-constexpr float INDOOR_WINDOW_LIGHT_ALPHA = 0.12f;
-constexpr DWORD INDOOR_NO_WINDOW_LIGHT_ALPHA_R8 = 0x2B000000u;
-constexpr DWORD INDOOR_WINDOW_LIGHT_ALPHA_R8 = 0x60000000u;
-
-static float ResolveIndoorLightAlpha( const VobInfo* vi ) {
-    if ( !vi || !vi->Vob )
-        return 1.0f;
-    if ( !vi->IndoorDaylightControlled && !vi->Vob->IsIndoorVob() )
-        return 1.0f;
-    return vi->AllowIndoorDaylight ? INDOOR_WINDOW_LIGHT_ALPHA : INDOOR_NO_WINDOW_LIGHT_ALPHA;
-}
-
-static float ResolveIndoorLightAlpha( const SkeletalVobInfo* vi ) {
-    if ( !vi || !vi->Vob )
-        return 1.0f;
-    if ( !vi->IndoorDaylightControlled && !vi->Vob->IsIndoorVob() )
-        return 1.0f;
-    return vi->AllowIndoorDaylight ? INDOOR_WINDOW_LIGHT_ALPHA : INDOOR_NO_WINDOW_LIGHT_ALPHA;
-}
-
 float vobAnimation_WindStrength = 1.0f;
 
 constexpr DXGI_FORMAT VERTEX_INDEX_DXGI_FORMAT = sizeof( VERTEX_INDEX ) == sizeof( unsigned short ) ? DXGI_FORMAT_R16_UINT : DXGI_FORMAT_R32_UINT;
@@ -2640,7 +2619,7 @@ XRESULT  D3D11GraphicsEngine::DrawSkeletalVertexNormals( SkeletalVobInfo* vi,
 
     VS_ExConstantBuffer_PerInstanceSkeletal cb2;
     cb2.World = world;
-    color.w = ResolveIndoorLightAlpha( vi );
+    color.w = (vi && vi->Vob && vi->Vob->IsIndoorVob()) ? 0.05f : 1.0f;
     cb2.PI_ModelColor = color;
     cb2.PI_ModelFatness = fatness;
 
@@ -2717,7 +2696,7 @@ XRESULT D3D11GraphicsEngine::DrawSkeletalMesh( SkeletalVobInfo* vi,
 
     VS_ExConstantBuffer_PerInstanceSkeletal cb2;
     cb2.World = world;
-    color.w = ResolveIndoorLightAlpha( vi );
+    color.w = (vi && vi->Vob && vi->Vob->IsIndoorVob()) ? 0.05f : 1.0f;
     cb2.PI_ModelColor = color;
     cb2.PI_ModelFatness = fatness;
     // Set PrevWorld for motion vectors (use current world if no previous is available)
@@ -2846,7 +2825,7 @@ XRESULT D3D11GraphicsEngine::DrawSkeletalMesh_Layered( SkeletalVobInfo* vi,
     VS_ExConstantBuffer_PerInstanceSkeletal cb2;
     cb2.World = world;
     cb2.PrevWorld = world;
-    color.w = ResolveIndoorLightAlpha( vi );
+    color.w = (vi && vi->Vob && vi->Vob->IsIndoorVob()) ? 0.05f : 1.0f;
     cb2.PI_ModelColor = color;
     cb2.PI_ModelFatness = fatness;
     ActiveVS->GetBuffer("Matrices_PerInstances").Update( &cb2 ).Bind();
@@ -3299,7 +3278,7 @@ void D3D11GraphicsEngine::DrawSkeletalMeshVobs(
                     }
                 }
             }
-            modelColor.w = ResolveIndoorLightAlpha( vi );
+            modelColor.w = vi->Vob->IsIndoorVob() ? 0.05f : 1.0f;
 
             if ( updateState ) {
                 if ( vi->LastAniUpdateFrame != now ) {
@@ -3335,7 +3314,7 @@ void D3D11GraphicsEngine::DrawSkeletalMeshVobs(
                     VS_ExConstantBuffer_PerInstanceSkeletal cb2;
                     cb2.World = world;
                     auto maskedColor = color;
-                    maskedColor.w = ResolveIndoorLightAlpha( vi );
+                    maskedColor.w = vi->Vob->IsIndoorVob() ? 0.05f : 1.0f;
                     cb2.PI_ModelColor = maskedColor;
                     cb2.PI_ModelFatness = fatness;
                     // Set PrevWorld for motion vectors (use current world if no previous is available)
@@ -3488,7 +3467,7 @@ void D3D11GraphicsEngine::DrawSkeletalMeshVobs(
             const float materialClassMarker = (vi && vi->Vob && vi->Vob->GetVobType() == zVOB_TYPE_NSC) ? -1.0f : 0.0f;
             auto model = data.Model;
             auto modelColor = data.ModelColor;
-            modelColor.w = ResolveIndoorLightAlpha( vi );
+            modelColor.w = (vi && vi->Vob && vi->Vob->IsIndoorVob()) ? 0.05f : 1.0f;
             auto transforms = std::span( &BoneTransformCache[data.BoneIdx], data.NumBones );
             auto fatness = data.Fatness;
             auto& world = data.World;
@@ -7193,8 +7172,8 @@ void XM_CALLCONV D3D11GraphicsEngine::DrawWorldAroundForWorldShadow( FXMVECTOR p
             vii.world = it->WorldMatrix;
             vii.prevWorld = it->HasValidPrevMatrix ? it->PrevWorldMatrix : it->WorldMatrix;
             vii.color = it->GroundColor;
-            if ( it->IndoorLightMask || it->IndoorDaylightControlled ) {
-                vii.color = (vii.color & 0x00FFFFFFu) | (it->AllowIndoorDaylight ? INDOOR_WINDOW_LIGHT_ALPHA_R8 : INDOOR_NO_WINDOW_LIGHT_ALPHA_R8);
+            if ( it->IndoorLightMask ) {
+                vii.color = (vii.color & 0x00FFFFFFu) | 0x0D000000u;
             }
             vii.windStrenth = 0.0f;
             vii.canBeAffectedByPlayer = 0;

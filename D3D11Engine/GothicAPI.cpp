@@ -78,102 +78,12 @@ extern float vobAnimation_WindStrength;
 namespace {
     constexpr const char* MATERIALS_JSON_PATH = "system\\GD3D11\\textures\\materials.json";
     constexpr const char* MATERIALS_JSON_VDFS_PATH = R"(\system\GD3D11\textures\materials.json)";
-    constexpr DWORD INDOOR_NO_WINDOW_LIGHT_ALPHA_R8 = 0x2B000000u;
-    constexpr DWORD INDOOR_WINDOW_LIGHT_ALPHA_R8 = 0x60000000u;
-    constexpr float INDOOR_NO_WINDOW_LIGHT_ALPHA = 0.02f;
-    constexpr float INDOOR_WINDOW_LIGHT_ALPHA = 0.12f;
 
     std::string ToLowerMaterialName( std::string name ) {
         for ( char& c : name ) {
             c = static_cast<char>(::tolower( static_cast<unsigned char>(c) ));
         }
         return name;
-    }
-    bool HasIndoorWindowPrefix( std::string name ) {
-        name = ToLowerMaterialName( std::move( name ) );
-        const size_t slash = name.find_last_of( "\\/" );
-        if ( slash != std::string::npos ) {
-            name.erase( 0, slash + 1 );
-        }
-        return name.rfind( "nw_city_window", 0 ) == 0;
-    }
-
-    bool IsIndoorWindowVob( zCVob* source ) {
-        if ( !source )
-            return false;
-
-        if ( HasIndoorWindowPrefix( source->GetName() ) )
-            return true;
-
-        if ( zCVisual* visual = source->GetVisual() ) {
-            if ( const char* objectName = visual->GetObjectName() ) {
-                return HasIndoorWindowPrefix( objectName );
-            }
-        }
-        return false;
-    }
-
-    constexpr float INDOOR_DAYLIGHT_WINDOW_TOLERANCE = 30.0f;
-
-    bool PositionInsideExpandedBox( const XMFLOAT3& position, const zTBBox3D& box, float tolerance ) {
-        return position.x >= box.Min.x - tolerance && position.x <= box.Max.x + tolerance
-            && position.y >= box.Min.y - tolerance && position.y <= box.Max.y + tolerance
-            && position.z >= box.Min.z - tolerance && position.z <= box.Max.z + tolerance;
-    }
-
-    bool LeafHasLightmappedWorldPoly( const zCBspLeaf* leaf ) {
-        if ( !leaf || !leaf->PolyList )
-            return false;
-
-        for ( int i = 0; i < leaf->NumPolys; ++i ) {
-            zCPolygon* poly = leaf->PolyList[i];
-            if ( poly && poly->GetLightmap() )
-                return true;
-        }
-        return false;
-    }
-
-    bool LeafIsIndoorReceiver( const zCBspLeaf* leaf, bool outdoorWorld ) {
-        // In an outdoor BSP, only a genuinely lightmapped leaf is an indoor
-        // receiver. A single indoor VOB must not reclassify neighboring outdoor
-        // world geometry in the same broad leaf.
-        return !outdoorWorld || LeafHasLightmappedWorldPoly( leaf );
-    }
-
-    bool LeafHasIndoorDaylightWindow( const zCBspLeaf* leaf, const std::vector<XMFLOAT3>& windowPositions ) {
-        if ( !leaf )
-            return false;
-
-        for ( int i = 0; i < leaf->LeafVobList.NumInArray; ++i ) {
-            if ( IsIndoorWindowVob( leaf->LeafVobList.Array[i] ) )
-                return true;
-        }
-
-        for ( const XMFLOAT3& windowPosition : windowPositions ) {
-            if ( PositionInsideExpandedBox( windowPosition, leaf->BBox3D, INDOOR_DAYLIGHT_WINDOW_TOLERANCE ) )
-                return true;
-        }
-        return false;
-    }
-
-    void CollectIndoorDaylightWindowPositionsRec( zCBspBase* base, std::vector<XMFLOAT3>& outPositions ) {
-        if ( !base )
-            return;
-
-        if ( base->IsLeaf() ) {
-            zCBspLeaf* leaf = static_cast<zCBspLeaf*>(base);
-            for ( int i = 0; i < leaf->LeafVobList.NumInArray; ++i ) {
-                zCVob* vob = leaf->LeafVobList.Array[i];
-                if ( IsIndoorWindowVob( vob ) ) {
-                    outPositions.push_back( vob->GetPositionWorld() );
-                }
-            }
-            return;
-        }
-
-        zCBspNode* node = static_cast<zCBspNode*>(base);
-        CollectIndoorDaylightWindowPositionsRec( node->Front, outPositions );
-        CollectIndoorDaylightWindowPositionsRec( node->Back, outPositions );
     }
     bool IsGroundFogName( std::string name ) {
         name = ToLowerMaterialName( std::move( name ) );
@@ -1167,9 +1077,6 @@ void GothicAPI::ResetVobs() {
     ParticleEffectVobs.clear();
     RegisteredVobs.clear();
     BspLeafVobLists.clear();
-    IndoorDaylightControlledWorldPolys.clear();
-    IndoorDaylightWorldPolys.clear();
-    IndoorDaylightWindowPositions.clear();
     LeafLinearCache.Clear();
     DynamicallyAddedVobs.clear();
     DecalVobs.clear();
@@ -1228,12 +1135,6 @@ void GothicAPI::OnGeometryLoaded( zCBspTree* tree ) {
         LogError() << "World geometry contains no polygons; renderer world data was cleared safely.";
         return;
     }
-
-    IndoorDaylightControlledWorldPolys.clear();
-    IndoorDaylightWorldPolys.clear();
-    IndoorDaylightWindowPositions.clear();
-    CollectIndoorDaylightWindowPositionsRec( tree->GetRootNode(), IndoorDaylightWindowPositions );
-    CollectIndoorDaylightWorldPolys( tree->GetRootNode() );
 
     bool indoorLocation = (LoadedWorldInfo->BspTree->GetBspTreeMode() == zBSP_MODE_INDOOR);
     std::string worldStr = "system\\GD3D11\\meshes\\WLD_" + LoadedWorldInfo->WorldName + ".obj";
@@ -2858,9 +2759,6 @@ void GothicAPI::DrawSkeletalMeshVob( SkeletalVobInfo* vi, float distance, bool u
         }
     }
 
-    if ( vi->IndoorDaylightControlled || vi->Vob->IsIndoorVob() ) {
-        modelColor.w = vi->AllowIndoorDaylight ? INDOOR_WINDOW_LIGHT_ALPHA : INDOOR_NO_WINDOW_LIGHT_ALPHA;
-    }
     XMMATRIX scale = XMMatrixScalingFromVector( model->GetModelScaleXM() );
 
     XMMATRIX xmWorld = vi->Vob->GetWorldMatrixXM() * scale;
@@ -3102,9 +3000,6 @@ void GothicAPI::DrawSkeletalMeshVob_Layered( SkeletalVobInfo * vi, float distanc
         }
     }
 
-    if ( vi->IndoorDaylightControlled || vi->Vob->IsIndoorVob() ) {
-        modelColor.w = vi->AllowIndoorDaylight ? INDOOR_WINDOW_LIGHT_ALPHA : INDOOR_NO_WINDOW_LIGHT_ALPHA;
-    }
     XMMATRIX scale = XMMatrixScalingFromVector( model->GetModelScaleXM() );
 
     XMMATRIX xmWorld = vi->Vob->GetWorldMatrixXM() * scale;
@@ -4400,10 +4295,10 @@ void GothicAPI::CollectVisibleVobs(
             vii.world = it->WorldMatrix;
             vii.prevWorld = it->HasValidPrevMatrix ? it->PrevWorldMatrix : it->WorldMatrix;
             vii.color = it->GroundColor;
-            if ( it->IndoorLightMask || it->IndoorDaylightControlled ) {
+            if ( it->IndoorLightMask ) {
                 // INSTANCE_COLOR is R8G8B8A8_UNORM. Keep RGB lighting and mark alpha as indoor.
                 // This lets indoor point lights affect static indoor vobs/decorations like BSP polys.
-                vii.color = (vii.color & 0x00FFFFFFu) | (it->AllowIndoorDaylight ? INDOOR_WINDOW_LIGHT_ALPHA_R8 : INDOOR_NO_WINDOW_LIGHT_ALPHA_R8);
+                vii.color = (vii.color & 0x00FFFFFFu) | 0x0D000000u;
             }
             vii.windStrenth = 0.0f;
             vii.canBeAffectedByPlayer = 0;
@@ -4777,8 +4672,6 @@ void GothicAPI::MoveVobFromBspToDynamic( VobInfo* vob ) {
         }
     }
     vob->ParentBSPNodes.clear();
-    vob->IndoorDaylightControlled = false;
-    vob->AllowIndoorDaylight = false;
 
     // Add to dynamic vob list
     DynamicallyAddedVobs.push_back( vob );
@@ -5340,45 +5233,6 @@ void GothicAPI::ConfigureAllPointlightShadowSources() const {
     }
 }
 
-bool GothicAPI::ShouldControlIndoorDaylightForWorldPoly( const zCPolygon* poly ) const {
-    return poly && IndoorDaylightControlledWorldPolys.find( poly ) != IndoorDaylightControlledWorldPolys.end();
-}
-
-bool GothicAPI::ShouldAllowIndoorDaylightForWorldPoly( const zCPolygon* poly ) const {
-    return poly && IndoorDaylightWorldPolys.find( poly ) != IndoorDaylightWorldPolys.end();
-}
-
-void GothicAPI::CollectIndoorDaylightWorldPolys( zCBspBase* base ) {
-    if ( !base )
-        return;
-
-    const bool outdoorWorld = LoadedWorldInfo && LoadedWorldInfo->BspTree
-        && LoadedWorldInfo->BspTree->GetBspTreeMode() == zBSP_MODE_OUTDOOR;
-
-    if ( base->IsLeaf() ) {
-        zCBspLeaf* leaf = static_cast<zCBspLeaf*>(base);
-        if ( LeafIsIndoorReceiver( leaf, outdoorWorld ) ) {
-            const bool hasIndoorWindow = LeafHasIndoorDaylightWindow( leaf, IndoorDaylightWindowPositions );
-            for ( int i = 0; i < leaf->NumPolys; ++i ) {
-                zCPolygon* poly = leaf->PolyList ? leaf->PolyList[i] : nullptr;
-                // Indoor BSP worlds are controlled globally. In outdoor BSPs,
-                // restrict the exception to each lightmapped polygon itself.
-                if ( !poly || (outdoorWorld && !poly->GetLightmap()) )
-                    continue;
-
-                IndoorDaylightControlledWorldPolys.insert( poly );
-                if ( hasIndoorWindow ) {
-                    IndoorDaylightWorldPolys.insert( poly );
-                }
-            }
-        }
-        return;
-    }
-
-    zCBspNode* node = static_cast<zCBspNode*>(base);
-    CollectIndoorDaylightWorldPolys( node->Front );
-    CollectIndoorDaylightWorldPolys( node->Back );
-}
 /** Helper function for going through the bsp-tree */
 void GothicAPI::BuildBspVobMapCacheHelper( zCBspBase* base ) {
     if ( !base )
@@ -5387,7 +5241,6 @@ void GothicAPI::BuildBspVobMapCacheHelper( zCBspBase* base ) {
     // Put it into the cache
     BspInfo& bvi = BspLeafVobLists[base];
     bvi.OriginalNode = base;
-    bvi.HasIndoorWindow = false;
 
     bool outdoorLocation = (LoadedWorldInfo->BspTree->GetBspTreeMode() == zBSP_MODE_OUTDOOR);
     if ( base->IsLeaf() ) {
@@ -5395,8 +5248,6 @@ void GothicAPI::BuildBspVobMapCacheHelper( zCBspBase* base ) {
 
         bvi.Front = nullptr;
         bvi.Back = nullptr;
-        bvi.HasIndoorWindow = LeafIsIndoorReceiver( leaf, outdoorLocation )
-            && LeafHasIndoorDaylightWindow( leaf, IndoorDaylightWindowPositions );
 
         for ( int i = 0; i < leaf->LeafVobList.NumInArray; i++ ) {
             zCVob* vob = leaf->LeafVobList.Array[i];
@@ -5431,10 +5282,6 @@ void GothicAPI::BuildBspVobMapCacheHelper( zCBspBase* base ) {
                         }
                     }
 
-                    if ( LeafIsIndoorReceiver( leaf, outdoorLocation ) && v->Vob->IsIndoorVob() ) {
-                        v->IndoorDaylightControlled = true;
-                        v->AllowIndoorDaylight = v->AllowIndoorDaylight || bvi.HasIndoorWindow;
-                    }
                 }
             }
 
@@ -5449,10 +5296,6 @@ void GothicAPI::BuildBspVobMapCacheHelper( zCBspBase* base ) {
                         bvi.Mobs.push_back( v );
                     }
                     v->IndoorVob = vob->IsIndoorVob();
-                    if ( LeafIsIndoorReceiver( leaf, outdoorLocation ) && v->IndoorVob ) {
-                        v->IndoorDaylightControlled = true;
-                        v->AllowIndoorDaylight = v->AllowIndoorDaylight || bvi.HasIndoorWindow;
-                    }
                 }
             }
         }
@@ -5537,19 +5380,6 @@ void BspLeafLinearCache::Clear() {
 /** Builds our BspTreeVobMap */
 void GothicAPI::BuildBspVobMapCache() {
     ZoneScopedN( "GothicAPI::BuildBspVobMapCache" );
-
-    for ( auto& it : VobMap ) {
-        if ( it.second ) {
-            it.second->IndoorDaylightControlled = false;
-            it.second->AllowIndoorDaylight = false;
-        }
-    }
-    for ( auto& it : SkeletalVobMap ) {
-        if ( it.second ) {
-            it.second->IndoorDaylightControlled = false;
-            it.second->AllowIndoorDaylight = false;
-        }
-    }
 
     BuildBspVobMapCacheHelper( LoadedWorldInfo->BspTree->GetRootNode() );
 

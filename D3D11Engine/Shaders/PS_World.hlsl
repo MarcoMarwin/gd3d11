@@ -88,18 +88,7 @@ DEFERRED_PS_OUTPUT PSMain( PS_INPUT Input ) : SV_TARGET
     float alphaTestMask = 1.0f - smoothstep(0.95f, 1.0f, color.a);
 	output.vTransparencyAndCompositionMask = alphaTestMask * 0.10f;
 	output.vReactiveMask = alphaTestMask * 0.10f;
-	// Validate the Build-140 world marker against the lightmapped default
-	// vertex colour before moving it into the reserved GBuffer marker range.
-	float lightmappedVertex = 1.0f - step(
-		0.012f, max(abs(Input.vDiffuse.r - 0.05f),
-		max(abs(Input.vDiffuse.g - 0.05f), abs(Input.vDiffuse.b - 0.05f))));
-	float noIndoorDaylight = lightmappedVertex
-		* (Input.vDiffuse.a < 0.035f ? 1.0f : 0.0f);
-	float indoorDaylightWindow = lightmappedVertex
-		* (Input.vDiffuse.a >= 0.08f && Input.vDiffuse.a < 0.5f ? 1.0f : 0.0f);
-	float encodedLighting = EncodeIndoorDaylightMarker(
-		Input.vDiffuse.a, noIndoorDaylight, indoorDaylightWindow);
-	output.vDiffuse = float4(color.rgb, encodedLighting);
+	output.vDiffuse = float4(color.rgb, Input.vDiffuse.a);
 	
 	output.vNrm = EncodeNormalGBuffer(normalize(Input.vNormalVS));
 

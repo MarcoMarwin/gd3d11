@@ -34,7 +34,7 @@ float ViewZ(float depth) { return SSL_ProjParams.z / (depth - SSL_ProjParams.w);
 float IsIndoorScreenSpaceReceiver(float2 uv)
 {
     float a = TX_Albedo.SampleLevel(SS_Linear, saturate(uv), 0).a;
-    return DecodeIndoorReceiverMask(a);
+    return a < 0.5f ? 1.0f : 0.0f;
 }
 float IsContactReceiverExcluded(float2 uv)
 {

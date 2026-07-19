@@ -183,12 +183,10 @@ FORWARD_PLUS_PS_OUTPUT PSMain( PS_INPUT Input )
     }
 #endif
 
-	float3 litPixel = FP_ComputeSunLighting(wsPosition, vsPosition, nrm, color.rgb, Input.vDiffuse.a, specIntensity, specPower, shadow, vertLighting, twoSidedBacklitMaterial, vegetationBacklitMask);
+	float3 litPixel = FP_ComputeSunLighting(wsPosition, vsPosition, nrm, color.rgb, specIntensity, specPower, shadow, vertLighting, twoSidedBacklitMaterial, vegetationBacklitMask);
 	
-	// Preserve global Build 139 tinting for outdoor/window receivers only.
-	float indoorDaylightMask = FP_DecodeIndoorDaylightMask(Input.vDiffuse.a);
-	float3 scatteredPixel = ApplyAtmosphericScatteringGround(wsPosition, litPixel);
-	litPixel = lerp(litPixel, scatteredPixel, indoorDaylightMask);
+	// Atmospheric scattering
+	litPixel = ApplyAtmosphericScatteringGround(wsPosition, litPixel);
 
 	// Point lights, only when close enough
 	if (pixelDistZ < 6000.0f) 
@@ -265,12 +263,7 @@ DEFERRED_PS_OUTPUT PSMain( PS_INPUT Input ) : SV_TARGET
 	fx = 1.0f;
 #endif
 	
-	float noIndoorDaylight = Input.vDiffuse.a < 0.035f ? 1.0f : 0.0f;
-	float indoorDaylightWindow = Input.vDiffuse.a >= 0.08f
-		&& Input.vDiffuse.a < 0.5f ? 1.0f : 0.0f;
-	float encodedLighting = EncodeIndoorDaylightMarker(
-		Input.vDiffuse.a, noIndoorDaylight, indoorDaylightWindow);
-	output.vDiffuse = float4(color.rgb, encodedLighting);
+	output.vDiffuse = float4(color.rgb, Input.vDiffuse.a);
 	//output.vDiffuse = float4(Input.vTexcoord2, 0, 1);
 	//output.vDiffuse = float4(Input.vNormalVS, 1);
 	
