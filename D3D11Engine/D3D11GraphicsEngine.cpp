@@ -191,7 +191,7 @@ namespace
         float WM_OceanWaterTintStrength;
         float WM_IsOceanWater;
         XMFLOAT3 WM_OceanWaterTint;
-        float WM_Pad;
+        float WM_IsWaterfall;
     };
     static_assert( sizeof( WaterMaterialInfoConstantBuffer ) == 32 );
 
@@ -262,15 +262,24 @@ namespace
         return false;
     }
 
+    bool IsWaterfallTexture( zCTexture* texture ) {
+        if ( !texture ) {
+            return false;
+        }
+
+        const std::string stem = NormalizeVisualStemForMarker( texture->GetNameWithoutExt() );
+        return stem.rfind( "OWODWAT", 0 ) == 0;
+    }
+
     bool IsWaterTextureExcludedFromSSR( zCTexture* texture ) {
         if ( !texture ) {
             return false;
         }
 
         const std::string name = texture->GetNameWithoutExt();
-        return TextureNameContainsMarker( name, "WATERFALL" )
-            || TextureNameContainsMarker( name, "WASSERFALL" )
-            || TextureNameContainsMarker( name, "OWODWAT" );
+        return IsWaterfallTexture( texture )
+            || TextureNameContainsMarker( name, "WATERFALL" )
+            || TextureNameContainsMarker( name, "WASSERFALL" );
     }
 
     bool IsOceanWaterTexture( zCTexture* texture ) {
@@ -284,13 +293,15 @@ namespace
 
     void FillWaterMaterialInfo( WaterMaterialInfoConstantBuffer& wmcb, zCTexture* texture ) {
         const auto& settings = Engine::GAPI->GetRendererState().RendererSettings;
+        const bool isWaterfall = IsWaterfallTexture( texture );
         wmcb.WM_DisableSSR = IsWaterTextureExcludedFromSSR( texture ) ? 1.0f : 0.0f;
         wmcb.WM_DisableRainEffects = 0.0f;
         wmcb.WM_OceanWaterTintStrength = settings.OceanWaterColorStrength;
         wmcb.WM_IsOceanWater = IsOceanWaterTexture( texture ) ? 1.0f : 0.0f;
         wmcb.WM_OceanWaterTint = settings.OceanWaterColor;
-        wmcb.WM_Pad = 0.0f;
+        wmcb.WM_IsWaterfall = isWaterfall ? 1.0f : 0.0f;
     }
+
     float4 ComputeTransparencyTextureFactor( zCMaterial* material ) {
         const float4 defaultFactor( 1.0f, 1.0f, 1.0f, 1.0f );
         if ( !material ) {

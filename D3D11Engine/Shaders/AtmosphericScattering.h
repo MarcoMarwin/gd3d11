@@ -508,7 +508,7 @@ float3 ApplyAtmosphericScatteringGround(float3 worldPosition, float3 in_color, b
 	return applyDistanceDarkening ? ApplyNightDistanceDarkening(worldPosition, outColor) : outColor;
 }
 
-float3 ApplyAtmosphericScatteringSky(float3 worldPosition)
+float3 ApplyAtmosphericScatteringSkyInternal(float3 worldPosition, float includeSunProfile)
 {
 	float3 camPos = AC_CameraPos;
 	float3 vPos = (worldPosition) - AC_SpherePosition;
@@ -580,9 +580,22 @@ float3 ApplyAtmosphericScatteringSky(float3 worldPosition)
 	// transition reaches exact zero at the same point as the CPU-side main-light fade,
 	// so the high-energy center cannot remain visible as a small point in steady rain.
 	float rainSunOpacity = 1.0f - smoothstep(0.02f, 0.50f, saturate(AC_RainFXWeight));
-	float3 color = rayleighColor + fixedSunProfile * rainSunOpacity;
+	float3 color = rayleighColor + fixedSunProfile * rainSunOpacity * saturate(includeSunProfile);
 	
 	return color;
+}
+
+
+// Water SSR variant: no rendered sun profile. Moon.dds is only composed by
+// the normal sky pass and is therefore not part of this atmosphere result.
+float3 ApplyAtmosphericScatteringSkyWithoutCelestialBodies(float3 worldPosition)
+{
+    return ApplyAtmosphericScatteringSkyInternal(worldPosition, 0.0f);
+}
+
+float3 ApplyAtmosphericScatteringSky(float3 worldPosition)
+{
+    return ApplyAtmosphericScatteringSkyInternal(worldPosition, 1.0f);
 }
 
 float3 ApplyAtmosphericScatteringOuter(float3 worldPosition)
