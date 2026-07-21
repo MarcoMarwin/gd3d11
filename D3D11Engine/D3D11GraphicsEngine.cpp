@@ -270,18 +270,13 @@ namespace
         }
 
         const std::string stem = NormalizeVisualStemForMarker( texture->GetNameWithoutExt() );
-        return stem.rfind( "OWODWAT", 0 ) == 0;
+        return TextureNameContainsMarker( stem, "OWODWAT" )
+            || TextureNameContainsMarker( stem, "WATERFALL" )
+            || TextureNameContainsMarker( stem, "WASSERFALL" );
     }
 
     bool IsWaterTextureExcludedFromSSR( zCTexture* texture ) {
-        if ( !texture ) {
-            return false;
-        }
-
-        const std::string name = texture->GetNameWithoutExt();
-        return IsWaterfallTexture( texture )
-            || TextureNameContainsMarker( name, "WATERFALL" )
-            || TextureNameContainsMarker( name, "WASSERFALL" );
+        return IsWaterfallTexture( texture );
     }
 
     bool IsOceanWaterTexture( zCTexture* texture ) {
@@ -5375,8 +5370,11 @@ XRESULT D3D11GraphicsEngine::DrawMeshInfoListAlphablended(
             }
 
             if (lastMat != meshKey.Material) {
-                //Get the right shader for it
-                BindShaderForTexture( texture, false, alphaFunc, meshKey.Info->MaterialType, true );
+                // A waterfall routed from MT_Water must not select the water shader again.
+                const MaterialInfo::EMaterialType shaderMaterialType = IsWaterfallTexture( texture )
+                    ? MaterialInfo::MT_WaterfallFoam
+                    : meshKey.Info->MaterialType;
+                BindShaderForTexture( texture, false, alphaFunc, shaderMaterialType, true );
                 lastMat = meshKey.Material;
             }
 
@@ -5619,22 +5617,28 @@ XRESULT D3D11GraphicsEngine::DrawWorldMesh( bool noTextures ) {
         for ( auto const& renderItem : renderList ) {
             for ( auto const& worldMesh : renderItem->WorldMeshes ) {
                 if ( worldMesh.first.Material ) {
-                    zCTexture* aniTex = worldMesh.first.Material->GetTexture();
+                    zCTexture* aniTex = worldMesh.first.Material->GetAniTexture();
+                    if ( !aniTex ) {
+                        aniTex = worldMesh.first.Material->GetTexture();
+                    }
                     if ( !aniTex ) continue;
 
                     const float distanceSq = ComputeWorldMeshDistanceSqFromCamera( renderItem, worldMesh.second, cameraPosition );
                     const std::pair<MeshKey, MeshInfo*> transparencyMesh = { worldMesh.first, worldMesh.second };
 
-                    // OWODWAT is authored as water in some worlds, but it is a waterfall surface.
-                    // Keep it out of the PS_Water/SSR path and render it through the dedicated
-                    // waterfall transparency path instead.
+                    // Classify the current animated waterfall texture before generic water.
+                    // This keeps OWODWAT/WATERFALL/WASSERFALL out of FrameWaterSurfaces,
+                    // PS_Water and the water SSR path.
+                    if ( IsWaterfallTexture( aniTex ) ) {
+                        if ( !isZPrepass ) {
+                            waterfallTransparencyMeshes.push_back( { transparencyMesh, distanceSq } );
+                        }
+                        continue;
+                    }
+
                     if ( worldMesh.first.Info->MaterialType == MaterialInfo::MT_Water ) {
                         if ( !isZPrepass ) {
-                            if ( IsWaterfallTexture( aniTex ) ) {
-                                waterfallTransparencyMeshes.push_back( { transparencyMesh, distanceSq } );
-                            } else {
-                                FrameWaterSurfaces[aniTex].push_back( worldMesh.second );
-                            }
+                            FrameWaterSurfaces[aniTex].push_back( worldMesh.second );
                         }
                         continue;
                     }

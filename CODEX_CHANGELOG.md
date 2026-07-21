@@ -628,3 +628,8 @@ Kurze, append-only Dokumentation der von Codex gepushten Renderer-Builds.
 
 - **PS_Water.hlsl**: Dedizierter else if (isWaterfall > 0.5f) Block hinzugefügt, um Wasserfälle vom regulären Ocean/Legacy-Refraction- und Fresnel-Handling abzutrennen und SSR/Cubemap explizit zu überschreiben.
 - **D3D11GraphicsEngine.cpp**: Weitere C++-seitige Logikanpassungen für Wasser und Fallbacks durch den Benutzer lokal integriert.
+
+## Build 146 (Wasserfall Animations- und Material-Fixes)
+
+- **C++ Engine**: Wasserfälle (OWODWAT, WATERFALL, WASSERFALL) verwenden nun konsistent das MT_WaterfallFoam Material anstelle des Standardwasser-Shaders (MT_Water).
+- **Animierte Texturen**: Die Engine prüft jetzt korrekt auf animierte Texturen (GetAniTexture()) bei der Wasserfall-Erkennung, sodass animierte Wasserfälle nun korrekt aus dem generischen PS_Water- und Wasser-SSR-Pfad ausgeschlossen werden.
