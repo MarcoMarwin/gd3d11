@@ -192,8 +192,10 @@ namespace
         float WM_IsOceanWater;
         XMFLOAT3 WM_OceanWaterTint;
         float WM_IsWaterfall;
+        float WM_CameraUnderwater;
+        XMFLOAT3 WM_Padding;
     };
-    static_assert( sizeof( WaterMaterialInfoConstantBuffer ) == 32 );
+    static_assert( sizeof( WaterMaterialInfoConstantBuffer ) == 48 );
 
     bool TextureNameContainsMarker( const std::string& name, const char* marker ) {
         if ( !marker || !*marker ) {
@@ -300,6 +302,9 @@ namespace
         wmcb.WM_IsOceanWater = IsOceanWaterTexture( texture ) ? 1.0f : 0.0f;
         wmcb.WM_OceanWaterTint = settings.OceanWaterColor;
         wmcb.WM_IsWaterfall = isWaterfall ? 1.0f : 0.0f;
+        // The shader applies this state only to ocean water. Legacy water remains unchanged.
+        wmcb.WM_CameraUnderwater = Engine::GAPI->IsUnderWater() ? 1.0f : 0.0f;
+        wmcb.WM_Padding = XMFLOAT3( 0.0f, 0.0f, 0.0f );
     }
 
     float4 ComputeTransparencyTextureFactor( zCMaterial* material ) {

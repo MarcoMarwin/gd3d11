@@ -619,8 +619,7 @@ Kurze, append-only Dokumentation der von Codex gepushten Renderer-Builds.
 - Modifizierte PS_Water.hlsl: Ocean SSR Contact Fade Artifact Fix uebernommen.
 
 
-## Build 143 (Analytischer SSR-Himmel und Refraction Void-Fix)
+## Build 144 (Lokales Refactoring)
 
-- **SSR-Reflektionen**: Analytischer Himmel im SSR-Pass von PS_Water implementiert, um störende Himmelskörper (Sonne/Mond) in den Reflektionen zu vermeiden. Der Edge-Fade für Himmelstreffer wurde entfernt, damit der analytische Himmel nahtlos angewendet wird, ohne am Bildschirmrand zur Cubemap zu verblassen.
-- **Refraction (Ocean & Legacy)**: Durchscheinen des Himmels beim Blick von oben in das Wasser (Void-Fix) behoben. Das Wasser blendet nun korrekterweise zu einer dunklen Tiefe anstatt den Himmel durchzulassen.
-- **Pruefung**: Statischer Syntaxcheck erfolgreich durchgeführt, Klammern geprüft, und User hat die Änderungen in-game erfolgreich validiert.
+- **PS_Water.hlsl**: Umfassendes manuelles Refactoring und Strukturänderungen (Ocean/Legacy Code-Blöcke reorganisiert).
+- **C++ Engine & Header**: Lokale Änderungen in D3D11GraphicsEngine.cpp und AtmosphericScattering.h durch den Benutzer integriert.
