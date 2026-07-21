@@ -5622,10 +5622,19 @@ XRESULT D3D11GraphicsEngine::DrawWorldMesh( bool noTextures ) {
                     zCTexture* aniTex = worldMesh.first.Material->GetTexture();
                     if ( !aniTex ) continue;
 
-                    // Check surface type
+                    const float distanceSq = ComputeWorldMeshDistanceSqFromCamera( renderItem, worldMesh.second, cameraPosition );
+                    const std::pair<MeshKey, MeshInfo*> transparencyMesh = { worldMesh.first, worldMesh.second };
+
+                    // OWODWAT is authored as water in some worlds, but it is a waterfall surface.
+                    // Keep it out of the PS_Water/SSR path and render it through the dedicated
+                    // waterfall transparency path instead.
                     if ( worldMesh.first.Info->MaterialType == MaterialInfo::MT_Water ) {
                         if ( !isZPrepass ) {
-                            FrameWaterSurfaces[aniTex].push_back( worldMesh.second );
+                            if ( IsWaterfallTexture( aniTex ) ) {
+                                waterfallTransparencyMeshes.push_back( { transparencyMesh, distanceSq } );
+                            } else {
+                                FrameWaterSurfaces[aniTex].push_back( worldMesh.second );
+                            }
                         }
                         continue;
                     }
@@ -5633,9 +5642,6 @@ XRESULT D3D11GraphicsEngine::DrawWorldMesh( bool noTextures ) {
                     if ( aniTex->CacheIn( 0.6f ) != zRES_CACHED_IN ) {
                         continue;
                     }
-
-                    const float distanceSq = ComputeWorldMeshDistanceSqFromCamera( renderItem, worldMesh.second, cameraPosition );
-                    const std::pair<MeshKey, MeshInfo*> transparencyMesh = { worldMesh.first, worldMesh.second };
 
                     if ( worldMesh.first.Info->MaterialType == MaterialInfo::MT_Portal ) {
                         if ( !isZPrepass ) {

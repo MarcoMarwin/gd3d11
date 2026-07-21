@@ -623,3 +623,8 @@ Kurze, append-only Dokumentation der von Codex gepushten Renderer-Builds.
 
 - **PS_Water.hlsl**: Umfassendes manuelles Refactoring und Strukturänderungen (Ocean/Legacy Code-Blöcke reorganisiert).
 - **C++ Engine & Header**: Lokale Änderungen in D3D11GraphicsEngine.cpp und AtmosphericScattering.h durch den Benutzer integriert.
+
+## Build 145 (Waterfall-Override und lokale Fixes)
+
+- **PS_Water.hlsl**: Dedizierter else if (isWaterfall > 0.5f) Block hinzugefügt, um Wasserfälle vom regulären Ocean/Legacy-Refraction- und Fresnel-Handling abzutrennen und SSR/Cubemap explizit zu überschreiben.
+- **D3D11GraphicsEngine.cpp**: Weitere C++-seitige Logikanpassungen für Wasser und Fallbacks durch den Benutzer lokal integriert.
