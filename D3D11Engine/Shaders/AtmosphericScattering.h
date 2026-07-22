@@ -302,8 +302,7 @@ float4 ComputeWorldLowCloudVolume(float3 cameraWorld, float3 endWorld, float cam
     float skyHorizonFill = skyPixel * (1.0f - SmootherStep01(
         saturate((abs(rayDir.y) - 0.008f) / 0.115f)));
 
-    // At night the horizontal fog veil owns the horizon. Keep the daytime cloud
-    // horizon fill intact, but smoothly lift/fade low clouds away from it at night.
+    // Night horizon mask
     float nightHorizonMask = nightTimeBlend * skyPixel;
     float nightHorizonClearance = lerp(
         1.0f,
@@ -341,8 +340,6 @@ float4 ComputeWorldLowCloudVolume(float3 cameraWorld, float3 endWorld, float cam
     float3 scattering = 0.0f;
     float accumulatedAlpha = 0.0f;
     const int CLOUD_FIELD_STEPS = 8;
-    // Keep the sample lattice stable through rain/day/night blends. Changing the
-    // active step count during a fade moves all raymarch samples and reads as a jump.
     int activeCloudSteps = CLOUD_FIELD_STEPS;
     float stepLength = usableDistance / max((float)activeCloudSteps, 1.0f);
 
@@ -356,7 +353,7 @@ float4 ComputeWorldLowCloudVolume(float3 cameraWorld, float3 endWorld, float cam
         float stepJitter = LowCloudHash21(float2(i * 17.0f, i * 29.0f) + float2(11.0f, 37.0f)) - 0.5f;
         float sampleDistance = startDistance + (i + 0.58f + stepJitter * 0.24f) * stepLength;
         float3 sampleWorld = cameraWorld + rayDir * sampleDistance;
-        // Fill the visual gap at the sea/sky horizon without moving real geometry clouds.
+        // Horizon fill
         float horizonFillDistance = SmootherStep01(saturate(
             (sampleDistance - 26000.0f * cloudDistanceScale)
             / max(8000.0f, 36000.0f * cloudDistanceScale)));
@@ -480,8 +477,7 @@ float3 ApplyAtmosphericScatteringGround(float3 worldPosition, float3 in_color, b
 		v3FrontColor += v3Attenuate * (fDepth * fScaledLength);
 		v3SamplePoint += v3SampleRay;
 	}
-	// Suppress daytime atmospheric in-scattering during rain, as in the established renderer path.
-	// Distant-world color follows the monotonic atmospheric rain envelope, not wet-ground persistence.
+	// Rain scattering attenuation
 	v3FrontColor *= 1.0f - saturate(AC_RainFXWeight);
 	
 	// Finally, scale the Mie and Rayleigh colors and set up the varying variables for the pixel shader.

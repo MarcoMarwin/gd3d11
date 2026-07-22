@@ -4517,124 +4517,9 @@ XRESULT D3D11GraphicsEngine::OnStartWorldRendering() {
             Engine::GAPI->GetRendererState().RasterizerState.CullMode = GothicRasterizerStateInfo::CM_CULL_BACK;
             Engine::GAPI->GetRendererState().RasterizerState.SetDirty();
 
-            // Dedicated visible waterfall path. Waterfalls must never go through
-            // PS_Water or the generic material shader selection: both can introduce
-            // screen-space, cubemap, normal-map or material-specular reflections.
-            if ( !FrameTransparencyMeshesWaterfall.empty() ) {
-                XMMATRIX view = Engine::GAPI->GetViewMatrixXM();
-                Engine::GAPI->SetViewTransformXM( view );
-                Engine::GAPI->ResetWorldTransform();
-
-                SetActivePixelShader( PShaderID::PS_Simple );
-                SetActiveVertexShader( VShaderID::VS_Ex );
-                ActivePS->Apply();
-                ActiveVS->Apply();
-
-                SetupVS_ExMeshDrawCall();
-                SetupVS_ExConstantBuffer();
-
-                const XMMATRIX identityMatrix = XMMatrixIdentity();
-                VS_ExConstantBuffer_PerInstance cbInstance = {};
-                XMStoreFloat4x4( &cbInstance.World, identityMatrix );
-                cbInstance.Color = float4( 1.0f, 1.0f, 1.0f, 1.0f );
-                ActiveVS->GetBuffer( "Matrices_PerInstances" )
-                    .Update( &cbInstance, sizeof( cbInstance ) )
-                    .Bind();
-
-                InfiniteRangeConstantBuffer->BindToPixelShader( 3 );
-
-                DrawVertexBufferIndexedUINT(
-                    Engine::GAPI->GetWrappedWorldMesh()->MeshVertexBuffer,
-                    Engine::GAPI->GetWrappedWorldMesh()->MeshIndexBuffer, 0, 0 );
-
-                // Explicitly clear every optional material/reflection input. PS_Simple
-                // receives only the animated diffuse texture at t0.
-                ID3D11ShaderResourceView* nullSRVs[15] = {};
-                GetContext()->PSSetShaderResources( 1, 15, nullSRVs );
-
-                int lastAlphaFunc = -1;
-                zCTexture* lastTexture = nullptr;
-                for ( auto const& [meshKey, meshInfo] : FrameTransparencyMeshesWaterfall ) {
-                    if ( !meshKey.Material || !meshInfo ) {
-                        continue;
-                    }
-
-                    zCTexture* texture = meshKey.Material->GetAniTexture();
-                    if ( !texture ) {
-                        texture = meshKey.Material->GetTexture();
-                    }
-                    if ( !texture || texture->CacheIn( 0.6f ) != zRES_CACHED_IN ) {
-                        continue;
-                    }
-
-                    if ( texture != lastTexture ) {
-                        ID3D11ShaderResourceView* diffuseSRV = texture->GetSurface()
-                            ->GetEngineTexture()->GetShaderResourceView().Get();
-                        GetContext()->PSSetShaderResources( 0, 1, &diffuseSRV );
-                        lastTexture = texture;
-                    }
-
-                    int alphaFunc = meshKey.Material->GetAlphaFunc();
-                    if ( alphaFunc == 0 ) {
-                        alphaFunc = zColor( meshKey.Material->GetColor() ).bgra.alpha < 255
-                            ? zMAT_ALPHA_FUNC_BLEND
-                            : zMAT_ALPHA_FUNC_MAT_DEFAULT;
-                    }
-
-                    if ( alphaFunc != lastAlphaFunc ) {
-                        switch ( alphaFunc ) {
-                        case zMAT_ALPHA_FUNC_ADD:
-                            Engine::GAPI->GetRendererState().BlendState.SetAdditiveBlending();
-                            break;
-                        case zMAT_ALPHA_FUNC_MUL:
-                            Engine::GAPI->GetRendererState().BlendState.SetModulateBlending();
-                            break;
-                        case zMAT_ALPHA_FUNC_MUL2:
-                            Engine::GAPI->GetRendererState().BlendState.SetModulate2Blending();
-                            break;
-                        case zMAT_ALPHA_FUNC_BLEND:
-                        case zMAT_ALPHA_FUNC_BLEND_TEST:
-                        case zMAT_ALPHA_FUNC_MAT_DEFAULT:
-                        default:
-                            Engine::GAPI->GetRendererState().BlendState.SetAlphaBlending();
-                            break;
-                        }
-
-                        Engine::GAPI->GetRendererState().BlendState.SetDirty();
-                        Engine::GAPI->GetRendererState().DepthState.DepthWriteEnabled = false;
-                        Engine::GAPI->GetRendererState().DepthState.SetDirty();
-                        UpdateRenderStates();
-                        lastAlphaFunc = alphaFunc;
-                    }
-
-                    PsSimpleFFdata ffdata = {};
-                    ffdata.textureFactor = ComputeTransparencyTextureFactor( meshKey.Material );
-                    ActivePS->GetBuffer( "cbFFData" ).Update( &ffdata ).Bind();
-
-                    DrawVertexBufferIndexedUINT( nullptr, nullptr,
-                        meshInfo->Indices.size(), meshInfo->BaseIndexLocation );
-                }
-
-                // Preserve the existing transparent-world depth replay used for fogging,
-                // but keep color writes disabled so no reflection-capable shader runs.
-                Engine::GAPI->GetRendererState().DepthState.DepthWriteEnabled = true;
-                Engine::GAPI->GetRendererState().DepthState.SetDirty();
-                Engine::GAPI->GetRendererState().BlendState.ColorWritesEnabled = false;
-                Engine::GAPI->GetRendererState().BlendState.SetDirty();
-                UpdateRenderStates();
-
-                for ( auto const& [meshKey, meshInfo] : FrameTransparencyMeshesWaterfall ) {
-                    if ( meshKey.Material && meshInfo &&
-                        (meshKey.Material->GetAniTexture() || meshKey.Material->GetTexture()) ) {
-                        DrawVertexBufferIndexedUINT( nullptr, nullptr,
-                            meshInfo->Indices.size(), meshInfo->BaseIndexLocation );
-                    }
-                }
-
-                Engine::GAPI->GetRendererState().BlendState.ColorWritesEnabled = true;
-                Engine::GAPI->GetRendererState().BlendState.SetDirty();
-                UpdateRenderStates();
-            }
+            // Only MT_WaterfallFoam remains in this list. Named OWODWAT water
+            // stays in FrameWaterSurfaces and is reflection-blocked per batch.
+            DrawMeshInfoListAlphablended( FrameTransparencyMeshesWaterfall );
         };
     });
 
@@ -5743,15 +5628,7 @@ XRESULT D3D11GraphicsEngine::DrawWorldMesh( bool noTextures ) {
                     const float distanceSq = ComputeWorldMeshDistanceSqFromCamera( renderItem, worldMesh.second, cameraPosition );
                     const std::pair<MeshKey, MeshInfo*> transparencyMesh = { worldMesh.first, worldMesh.second };
 
-                    // Classify the current animated waterfall texture before generic water.
-                    // This keeps OWODWAT/WATERFALL/WASSERFALL out of FrameWaterSurfaces,
-                    // PS_Water and the water SSR path.
-                    if ( IsWaterfallTexture( aniTex ) ) {
-                        if ( !isZPrepass ) {
-                            waterfallTransparencyMeshes.push_back( { transparencyMesh, distanceSq } );
-                        }
-                        continue;
-                    }
+                    // Waterfalls stay in main water batch; SSR is disabled via WM_DisableSSR.
 
                     if ( worldMesh.first.Info->MaterialType == MaterialInfo::MT_Water ) {
                         if ( !isZPrepass ) {

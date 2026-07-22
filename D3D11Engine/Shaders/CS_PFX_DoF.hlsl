@@ -1,7 +1,5 @@
 //--------------------------------------------------------------------------------------
-// Compute Shader - Depth of Field Half-res Bokeh Blur
-// Samples full-res scene + depth, computes CoC, does 48-tap bokeh blur
-// Outputs blurred color (rgb) + CoC (a) at half resolution to UAV
+// Depth of Field Blur Pass
 //--------------------------------------------------------------------------------------
 
 #include "DepthReconstruction.h"

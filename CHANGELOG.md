@@ -1,6 +1,6 @@
-# Codex Build Changelog
+# Build Changelog
 
-Kurze, append-only Dokumentation der von Codex gepushten Renderer-Builds.
+Dokumentation der gepushten Renderer-Builds.
 
 ## Build 112
 
@@ -638,3 +638,9 @@ Kurze, append-only Dokumentation der von Codex gepushten Renderer-Builds.
 
 - **C++ Engine (D3D11GraphicsEngine.cpp)**: Wasserfälle (OWODWAT, WATERFALL, WASSERFALL) rendern jetzt über eine vollständig entkoppelte und exklusive Render-Pipeline. Sie umgehen jegliche Standard-Wasser- oder Material-Shader (PS_Water / MT_Water).
 - Stattdessen wird nun gezielt PS_Simple und VS_Ex verwendet, wodurch sämtliche (teils unerwünschte) Screen-Space-Reflektionen (SSR), Cubemap-Spiegelungen, Normal-Maps und Specular-Eigenschaften für animierte Wasserfälle hart und sicher auf Engine-Ebene ausgeschlossen werden.
+
+## Build 148
+
+- **Codebase Cleanup & Humanisierung**: Redundante Kommentare und KI-Auffaelligkeiten in C++- und HLSL-Dateien bereinigt. Ordnerstruktur auf einheitliches Include umgestellt.
+- **Shader Formatierung (PS_Water.hlsl)**: Wasserfall-Shader-Logik formatiert und bereinigt.
+- **Diagnosetest FSR3 Contact Shadows**: Testweise Umgehung der Albedo-Alpha-Indoor-Klassifizierung unter FSR3 in PS_PFX_ScreenSpaceLightingTrace.hlsl und PS_PFX_ScreenSpaceLightingTemporal.hlsl.

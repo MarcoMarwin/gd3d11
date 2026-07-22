@@ -91,8 +91,7 @@ void D3D11Effect::FillRandomRaindropData( std::vector<RainParticleDynamic>& dyna
     float height = Engine::GAPI->GetRendererState().RendererSettings.RainHeightRange;
 
     for ( size_t i = 0; i < dynamicData.size(); i++ ) {
-        // Vogel-disc distribution avoids conspicuous pairs while retaining a
-        // subtle angular jitter so the rain does not form a visible pattern.
+        // Vogel-disc distribution for rain particle placement
         const float normalizedRadius = sqrt( (static_cast<float>(i) + 0.5f)
             / static_cast<float>(dynamicData.size()) );
         const float angle = static_cast<float>(i) * 2.39996323f
@@ -141,8 +140,7 @@ XRESULT D3D11Effect::DrawRain( bool outputResolution, bool useRainExclusionMask 
 
     auto rainPS = e->GetShaderManager().GetPShader( isSnow ? PShaderID::PS_Rain_Snow : PShaderID::PS_Rain );
 
-    // artificially increase the number of particles for snow, to make it look better.
-    // Snowflakes are bigger and slower than raindrops, so we can get away with less particles for rain, but for snow we need more to make it look good.
+    // Particle count setup
     UINT numParticles = state.RendererSettings.RainNumParticles;
 
     static float lastRadius = state.RendererSettings.RainRadiusRange;

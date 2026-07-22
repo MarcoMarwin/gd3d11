@@ -1,7 +1,5 @@
 //--------------------------------------------------------------------------------------
-// Compute Shader - Depth of Field Full-res Composite
-// Reads full-res scene + depth, upsampled half-res bokeh blur, and focus texture
-// Blends sharp and blurred based on per-pixel CoC, writes to UAV
+// Depth of Field Composite Pass
 //--------------------------------------------------------------------------------------
 
 #include "DepthReconstruction.h"

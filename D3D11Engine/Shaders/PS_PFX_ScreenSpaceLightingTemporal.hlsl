@@ -34,7 +34,10 @@ float ViewZ(float depth) { return SSL_ProjParams.z / (depth - SSL_ProjParams.w);
 float IsIndoorScreenSpaceReceiver(float2 uv)
 {
     float a = TX_Albedo.SampleLevel(SS_Linear, saturate(uv), 0).a;
-    return a < 0.5f ? 1.0f : 0.0f;
+    float indoorReceiver = a < 0.5f ? 1.0f : 0.0f;
+
+    // Diagnostic test only: match the trace-stage FSR3 bypass.
+    return lerp(indoorReceiver, 1.0f, saturate(SSL_FSR3Active));
 }
 float IsContactReceiverExcluded(float2 uv)
 {
