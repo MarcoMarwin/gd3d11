@@ -633,3 +633,8 @@ Kurze, append-only Dokumentation der von Codex gepushten Renderer-Builds.
 
 - **C++ Engine**: Wasserfälle (OWODWAT, WATERFALL, WASSERFALL) verwenden nun konsistent das MT_WaterfallFoam Material anstelle des Standardwasser-Shaders (MT_Water).
 - **Animierte Texturen**: Die Engine prüft jetzt korrekt auf animierte Texturen (GetAniTexture()) bei der Wasserfall-Erkennung, sodass animierte Wasserfälle nun korrekt aus dem generischen PS_Water- und Wasser-SSR-Pfad ausgeschlossen werden.
+
+## Build 147 (Dedizierte C++ Render-Pipeline für Wasserfälle)
+
+- **C++ Engine (D3D11GraphicsEngine.cpp)**: Wasserfälle (OWODWAT, WATERFALL, WASSERFALL) rendern jetzt über eine vollständig entkoppelte und exklusive Render-Pipeline. Sie umgehen jegliche Standard-Wasser- oder Material-Shader (PS_Water / MT_Water).
+- Stattdessen wird nun gezielt PS_Simple und VS_Ex verwendet, wodurch sämtliche (teils unerwünschte) Screen-Space-Reflektionen (SSR), Cubemap-Spiegelungen, Normal-Maps und Specular-Eigenschaften für animierte Wasserfälle hart und sicher auf Engine-Ebene ausgeschlossen werden.
