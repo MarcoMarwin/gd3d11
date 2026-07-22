@@ -1034,9 +1034,13 @@ void GothicAPI::ReloadPlayerVob() {
 }
 /** Resets only the vobs */
 void GothicAPI::ResetVobs() {
-    
-    // complete what ever is currently working, and clear everything else.
-    Engine::WorkerThreadPool->clearAndFlush();
+    // Complete all active renderer work before deleting world-owned resources.
+    if ( Engine::RenderingThreadPool ) {
+        Engine::RenderingThreadPool->clearAndFlush();
+    }
+    if ( Engine::WorkerThreadPool ) {
+        Engine::WorkerThreadPool->clearAndFlush();
+    }
     
 
     // Stability: deferred queues store raw D3D pointers to textures that can be destroyed below.
@@ -1155,6 +1159,12 @@ void GothicAPI::OnGeometryLoaded( zCBspTree* tree ) {
 
 /** Called when the game is about to load a new level */
 void GothicAPI::OnLoadWorld( const std::string& levelName, int loadMode ) {
+    if ( Engine::RenderingThreadPool ) {
+        Engine::RenderingThreadPool->clearAndFlush();
+    }
+    if ( Engine::WorkerThreadPool ) {
+        Engine::WorkerThreadPool->clearAndFlush();
+    }
     if ( !LoadedWorldInfo ) {
         LogError() << "World load skipped because renderer world state is unavailable.";
         return;

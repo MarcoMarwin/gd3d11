@@ -55,15 +55,15 @@ namespace Engine {
     /** Called when the game is about to close */
     void OnShutDown() {
         LogInfo() << "Shutting down...";
-
-        // TODO: remove this hack in the future, just a temporary workaround to fix crash on shutdown with the need to kill process via TaskManager
-        // Just killing before GraphicsEngine is not enough.
+        if ( Engine::RenderingThreadPool ) {
+            Engine::RenderingThreadPool->clearAndFlush();
+        }
+        if ( Engine::WorkerThreadPool ) {
+            Engine::WorkerThreadPool->clearAndFlush();
+        }
+        // Preserve the established hard shutdown. The destructor path below is
+        // intentionally not activated because full renderer teardown is not safe yet.
         exit( 0 );
-
-        SAFE_DELETE( Engine::RenderingThreadPool );
-        SAFE_DELETE( Engine::GAPI );
-        SAFE_DELETE( Engine::WorkerThreadPool );
-        SAFE_DELETE( Engine::GraphicsEngine );
     }
 
 };

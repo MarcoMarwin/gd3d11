@@ -1594,7 +1594,7 @@ void ImGuiShim::RenderSettingsWindow()
                     &settings.EnableScreenSpaceGI, &settings.ScreenSpaceGIStrength, 1.0f ) ) {
                 shadersToReload |= ShaderCategory::Other;
             }
-            ImGui::SetItemTooltip( "%s", Tr( "Adds soft indirect light reflected from nearby indoor surfaces. Only affects indoor areas.", u8"F\u00FCgt weiches, von nahen Innenraum-Fl\u00E4chen reflektiertes Licht hinzu. Wirkt nur indoor." ) );
+            ImGui::SetItemTooltip( "%s", Tr( "Adds soft indirect light reflected from nearby surfaces throughout the scene.", u8"F\u00FCgt in der gesamten Szene weiches, von nahen Oberfl\u00E4chen reflektiertes Licht hinzu." ) );
             ImGui::SameLine();
             ImGui::SetNextItemWidth( standardComboWidth );
             const bool screenSpaceGIBeforeSlider = settings.EnableScreenSpaceGI;

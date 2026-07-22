@@ -644,3 +644,8 @@ Dokumentation der gepushten Renderer-Builds.
 - **Codebase Cleanup & Humanisierung**: Redundante Kommentare und KI-Auffaelligkeiten in C++- und HLSL-Dateien bereinigt. Ordnerstruktur auf einheitliches Include umgestellt.
 - **Shader Formatierung (PS_Water.hlsl)**: Wasserfall-Shader-Logik formatiert und bereinigt.
 - **Diagnosetest FSR3 Contact Shadows**: Testweise Umgehung der Albedo-Alpha-Indoor-Klassifizierung unter FSR3 in PS_PFX_ScreenSpaceLightingTrace.hlsl und PS_PFX_ScreenSpaceLightingTemporal.hlsl.
+
+## Build 149
+
+- **Umstrukturierung**: Die "include"-Ordner wurden in "Include" umbenannt.
+- **Hook Safety (zCWorld.h)**: Die Hook-Funktionen hooked_zCWorldDisposeVobs und hooked_LoadWorld wurden überarbeitet, um direkte Rohzugriffe auf Engine::GAPI->GetLoadedWorldInfo()->MainWorld zu vermeiden und stattdessen sichere, null-geprüfte Zugriffe über uto* worldInfo zu verwenden.

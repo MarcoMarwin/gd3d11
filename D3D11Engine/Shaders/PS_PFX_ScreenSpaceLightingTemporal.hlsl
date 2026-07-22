@@ -120,13 +120,6 @@ PS_OUTPUT PSMain(PS_INPUT input)
     float2 uv = input.vTexcoord;
     float depth = TX_Depth.SampleLevel(SS_Linear, uv, 0).r;
     float indoorReceiver = IsIndoorScreenSpaceReceiver(uv);
-    if (indoorReceiver < 0.5f)
-    {
-        output.Lighting = 0.0f;
-        output.Depth = float4(depth, depth, depth, depth);
-        return output;
-    }
-
     float excludedContactReceiver = IsContactReceiverExcluded(uv);
     float4 minV, maxV;
     float4 current = NeighborhoodCurrent(uv, minV, maxV);

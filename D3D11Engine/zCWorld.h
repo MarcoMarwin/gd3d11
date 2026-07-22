@@ -110,10 +110,12 @@ public:
 
     static void __fastcall hooked_zCWorldDisposeVobs( zCWorld* thisptr, void* unknwn, zCTree<zCVob>* tree ) {
         ZoneScoped;
-        // Reset only if this is the main world, inventory worlds are handled differently
-        if ( thisptr == Engine::GAPI->GetLoadedWorldInfo()->MainWorld )
-            Engine::GAPI->ResetVobs();
-
+        GothicAPI* gapi = Engine::GAPI;
+        auto* worldInfo = gapi ? gapi->GetLoadedWorldInfo() : nullptr;
+        // Reset only if this is the main world; inventory worlds are handled differently.
+        if ( worldInfo && thisptr == worldInfo->MainWorld ) {
+            gapi->ResetVobs();
+        }
         HookedFunctions::OriginalFunctions.original_zCWorldDisposeVobs( thisptr, tree );
     }
 
@@ -130,11 +132,17 @@ public:
 
     static void __fastcall hooked_LoadWorld( zCWorld* thisptr, void* unknwn, const zSTRING& fileName, const int loadMode ) {
         ZoneScoped;
-        Engine::GAPI->OnLoadWorld( fileName.ToChar(), loadMode );
-
+        GothicAPI* gapi = Engine::GAPI;
+        if ( gapi ) {
+            gapi->OnLoadWorld( fileName.ToChar(), loadMode );
+        }
         HookedFunctions::OriginalFunctions.original_zCWorldLoadWorld( thisptr, fileName, loadMode );
-
-        Engine::GAPI->GetLoadedWorldInfo()->MainWorld = thisptr;
+        if ( gapi ) {
+            auto* worldInfo = gapi->GetLoadedWorldInfo();
+            if ( worldInfo ) {
+                worldInfo->MainWorld = thisptr;
+            }
+        }
     }
 
     static void __fastcall hooked_VobAddedToWorld( zCWorld* thisptr, void* unknwn, zCVob* vob ) {

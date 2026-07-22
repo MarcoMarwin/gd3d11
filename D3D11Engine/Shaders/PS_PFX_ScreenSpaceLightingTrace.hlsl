@@ -135,7 +135,7 @@ float ComputeContact(float2 uv, float depth)
 
 float3 ComputeGI(float2 uv, float depth, float3 baseColor)
 {
-    if (SSL_EnableGI < 0.5f || IsGeometry(depth) < 0.5f || WaterMask(uv) > 0.02f || IndoorReceiverMask(uv) < 0.5f) return 0.0f;
+    if (SSL_EnableGI < 0.5f || IsGeometry(depth) < 0.5f || WaterMask(uv) > 0.02f) return 0.0f;
     float3 vp = ViewPosition(uv, depth);
     float3 n = ViewNormal(uv);
     float3 wsN = normalize(mul(float4(n, 0.0f), SSL_InvView).xyz);
@@ -191,7 +191,7 @@ float4 PSMain(PS_INPUT input) : SV_TARGET
 {
     float2 uv = input.vTexcoord;
     float depth = DepthRaw(uv);
-    if (IsGeometry(depth) < 0.5f || WaterMask(uv) > 0.02f || IndoorReceiverMask(uv) < 0.5f)
+    if (IsGeometry(depth) < 0.5f || WaterMask(uv) > 0.02f)
         return 0.0f;
 
     float3 baseColor = TX_Scene.SampleLevel(SS_Linear, uv, 0).rgb;
