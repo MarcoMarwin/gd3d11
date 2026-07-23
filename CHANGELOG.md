@@ -667,6 +667,11 @@ Dokumentation der gepushten Renderer-Builds.
 - **Entfernung alter Wasserfall-Renderpfad (D3D11GraphicsEngine.cpp/.h)**: `FrameTransparencyMeshesWaterfall`, `waterfallTransparencyMeshes` und der Rendergraph-Pass `Draw FrameTransparencyMeshesWaterfall` vollständig entfernt; `MT_WaterfallFoam`-Geometrie läuft nun durch die normale Transparenzsortierung.
 - **Rücknahme DoF-Reactive-Mask & Shader-Fixes (D3D11PFX_DepthOfField.cpp/.h, CS/PS_PFX_DoF_Composite.hlsl, D3D11PfxRenderer.cpp/.h)**: DoF-Reactive-Mask-Erweiterung vollständig zurückgenommen, UAV-Deklaration `OutputComposite` (u0) in `CS_PFX_DoF_Composite.hlsl` ergänzt und `GetSkyEdgeBlurSample`-Aufruf in `PS_PFX_DoF_Composite.hlsl` korrigiert.
 
+## Build 154 (Korrekturpush)
+
+- **DoF Composite Shader Fixes**: Nachbesserung der Shaderkompilierung für `PS_PFX_DoF_Composite.hlsl` (`GetSkyEdgeBlurSample`-Initialisierung) und `CS_PFX_DoF_Composite.hlsl` (`OutputComposite` UAV-Deklaration).
+
+
 
 
 
