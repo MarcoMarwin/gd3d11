@@ -482,7 +482,7 @@ XRESULT D3D11PFX_DepthOfField::RenderCS( ID3D11ShaderResourceView* backbuffer, I
         TexturePool::Description{ res.x, res.y, bbufferFormat,
             D3D11_BIND_UNORDERED_ACCESS | D3D11_BIND_SHADER_RESOURCE } );
 
-    RenderToTextureBuffer* dofReactiveBuffer =
+    auto dofReactiveBuffer =
         FxRenderer->GetTexturePool()->Acquire(
             TexturePool::Description{
                 res.x,

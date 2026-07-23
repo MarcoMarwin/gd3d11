@@ -661,9 +661,9 @@ Dokumentation der gepushten Renderer-Builds.
 - **Ocean Edge Sky Smoothing (PS_Water.hlsl)**: Sanfte Angleichung dunkler seitlicher Ocean-Ränder an weiter innen liegende Himmelsspiegelungsproben (`oceanSideSkyBlend`).
 - **SSR & Cubemap Steilwasser-Ausblendung (PS_Water.hlsl)**: Ausblendung von SSR und Cubemap auf stark geneigtem Wasser harmonisiert (`cubeStrength*=steepWaterSsrFactor`).
 
-## Build 152
+## Build 153 (Korrekturpush)
 
-- **PS_Water Steilwasser-Winkelgrenzen (PS_Water.hlsl)**: Bereinigung der Ocean-Seitenrand-Mischung (`oceanSideSkyBlend` entfernt) und Exaktierung der Steilwasser-Reflexionsgrenzen auf 25°–40° (smoothstep 0.766f bis 0.906f).
-- **DoF-FSR3-Reaktivitätsanbindung (D3D11PFX_DepthOfField.cpp, CS_PFX_DoF_Composite.hlsl, PS_PFX_DoF_Composite.hlsl)**: Gezielte Reaktivitätsmarkierung an DoF-geblurrten Sky-/Geometrie-Kanten für FSR3. Temporäre `R8_UNORM`-Maske wird im Compute-Shader (u1) immer sicher beschrieben und bei aktiver FSR3-Reactive-Mask per MAX-Blend-Pass übernommen.
+- **DoF TextureHandle Fix (D3D11PFX_DepthOfField.cpp)**: Typanpassung von `RenderToTextureBuffer*` auf `auto dofReactiveBuffer` bei `TexturePool::Acquire()`, um die Gültigkeit des `TextureHandle` während der gesamten `RenderCS()`-Funktion sicherzustellen.
+
 
 
