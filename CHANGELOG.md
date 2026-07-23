@@ -654,3 +654,10 @@ Dokumentation der gepushten Renderer-Builds.
 
 - **Wasser- und SSR-Korrekturen (PS_Water.hlsl)**: Ocean edge fade vertikal geglättet, Legacy-Nachtverdunkelung angepasst, SSR auf steilem Wasser ausgeblendet, Wasserfall-Mischungen korrigiert und ssrActive nach der Neigungsreduktion berechnet.
 - **DoF-Maskierung & RenderGraph Safety**: DoF-Pass maskiert SSR- und Specular-Flächen über WaterMask/SpecularMask SRVs. RenderGraph gegen ungültige Handles abgesichert (IsHandleRegistered mit GetHandleIndex).
+
+## Build 151
+
+- **Entfernung wirkungsloser Wasserfall-Marker (D3D11GraphicsEngine.cpp & PS_Water.hlsl)**: Marker-Funktionen (`IsWaterfallTexture`, `IsWaterTextureExcludedFromSSR`, `TextureNameContainsMarker`) und wirkungsloser `else if (isWaterfall > 0.5f)` Shader-Pfad entfernt. `WaterMaterialInfoConstantBuffer` auf 48 Byte angepasst. Steile Wasserflächen nutzen die Legacy-Wasserdarstellung.
+- **Ocean Edge Sky Smoothing (PS_Water.hlsl)**: Sanfte Angleichung dunkler seitlicher Ocean-Ränder an weiter innen liegende Himmelsspiegelungsproben (`oceanSideSkyBlend`).
+- **SSR & Cubemap Steilwasser-Ausblendung (PS_Water.hlsl)**: Ausblendung von SSR und Cubemap auf stark geneigtem Wasser harmonisiert (`cubeStrength*=steepWaterSsrFactor`).
+

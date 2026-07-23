@@ -191,42 +191,13 @@ namespace
         float WM_OceanWaterTintStrength;
         float WM_IsOceanWater;
         XMFLOAT3 WM_OceanWaterTint;
-        float WM_IsWaterfall;
+        float WM_Padding0;
         float WM_CameraUnderwater;
-        XMFLOAT3 WM_Padding;
+        XMFLOAT3 WM_Padding1;
     };
     static_assert( sizeof( WaterMaterialInfoConstantBuffer ) == 48 );
 
-    bool TextureNameContainsMarker( const std::string& name, const char* marker ) {
-        if ( !marker || !*marker ) {
-            return false;
-        }
 
-        size_t markerLen = 0;
-        while ( marker[markerLen] ) {
-            ++markerLen;
-        }
-        if ( name.size() < markerLen ) {
-            return false;
-        }
-
-        for ( size_t i = 0; i + markerLen <= name.size(); ++i ) {
-            size_t j = 0;
-            for ( ; j < markerLen; ++j ) {
-                char c = name[i + j];
-                if ( c >= 'a' && c <= 'z' ) {
-                    c = static_cast<char>(c - 'a' + 'A');
-                }
-                if ( c != marker[j] ) {
-                    break;
-                }
-            }
-            if ( j == markerLen ) {
-                return true;
-            }
-        }
-        return false;
-    }
 
     std::string NormalizeVisualStemForMarker( std::string name ) {
         const size_t slash = name.find_last_of( "\\/" );
@@ -264,20 +235,7 @@ namespace
         return false;
     }
 
-    bool IsWaterfallTexture( zCTexture* texture ) {
-        if ( !texture ) {
-            return false;
-        }
 
-        const std::string stem = NormalizeVisualStemForMarker( texture->GetNameWithoutExt() );
-        return TextureNameContainsMarker( stem, "OWODWAT" )
-            || TextureNameContainsMarker( stem, "WATERFALL" )
-            || TextureNameContainsMarker( stem, "WASSERFALL" );
-    }
-
-    bool IsWaterTextureExcludedFromSSR( zCTexture* texture ) {
-        return IsWaterfallTexture( texture );
-    }
 
     bool IsOceanWaterTexture( zCTexture* texture ) {
         if ( !texture ) {
@@ -290,16 +248,14 @@ namespace
 
     void FillWaterMaterialInfo( WaterMaterialInfoConstantBuffer& wmcb, zCTexture* texture ) {
         const auto& settings = Engine::GAPI->GetRendererState().RendererSettings;
-        const bool isWaterfall = IsWaterfallTexture( texture );
-        wmcb.WM_DisableSSR = IsWaterTextureExcludedFromSSR( texture ) ? 1.0f : 0.0f;
         wmcb.WM_DisableRainEffects = 0.0f;
         wmcb.WM_OceanWaterTintStrength = settings.OceanWaterColorStrength;
         wmcb.WM_IsOceanWater = IsOceanWaterTexture( texture ) ? 1.0f : 0.0f;
         wmcb.WM_OceanWaterTint = settings.OceanWaterColor;
-        wmcb.WM_IsWaterfall = isWaterfall ? 1.0f : 0.0f;
+        wmcb.WM_Padding0 = 0.0f;
         // The shader applies this state only to ocean water. Legacy water remains unchanged.
         wmcb.WM_CameraUnderwater = Engine::GAPI->IsUnderWater() ? 1.0f : 0.0f;
-        wmcb.WM_Padding = XMFLOAT3( 0.0f, 0.0f, 0.0f );
+        wmcb.WM_Padding1 = XMFLOAT3( 0.0f, 0.0f, 0.0f );
     }
 
     float4 ComputeTransparencyTextureFactor( zCMaterial* material ) {
@@ -5393,10 +5349,7 @@ XRESULT D3D11GraphicsEngine::DrawMeshInfoListAlphablended(
             }
 
             if (lastMat != meshKey.Material) {
-                // A waterfall routed from MT_Water must not select the water shader again.
-                const MaterialInfo::EMaterialType shaderMaterialType = IsWaterfallTexture( texture )
-                    ? MaterialInfo::MT_WaterfallFoam
-                    : meshKey.Info->MaterialType;
+                const MaterialInfo::EMaterialType shaderMaterialType = meshKey.Info->MaterialType;
                 BindShaderForTexture( texture, false, alphaFunc, shaderMaterialType, true );
                 lastMat = meshKey.Material;
             }
