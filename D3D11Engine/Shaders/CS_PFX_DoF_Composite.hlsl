@@ -27,6 +27,7 @@ Texture2D TX_WaterMask : register(t4);
 Texture2D TX_SpecularMask : register(t5);
 
 RWTexture2D<float4> OutputComposite : register( u0 );
+RWTexture2D<float>  OutputReactive  : register( u1 );
 
 float CameraDistanceFromDepth( float d, float2 texcoord )
 {
@@ -139,6 +140,28 @@ void CSMain( uint3 DTid : SV_DispatchThreadID )
     {
         float4 skyEdgeBlur = GetSkyEdgeBlurSample( texcoord, dtexel, focusDepth );
         OutputComposite[DTid.xy] = float4( lerp( sharpColor, skyEdgeBlur.rgb, skyEdgeBlur.a ), 1.0 );
+
+        float depthL = TX_Depth.SampleLevel( SS_Linear, texcoord + float2( -dtexel.x, 0 ), 0 ).r;
+        float depthR = TX_Depth.SampleLevel( SS_Linear, texcoord + float2(  dtexel.x, 0 ), 0 ).r;
+        float depthU = TX_Depth.SampleLevel( SS_Linear, texcoord + float2( 0, -dtexel.y ), 0 ).r;
+        float depthD = TX_Depth.SampleLevel( SS_Linear, texcoord + float2( 0,  dtexel.y ), 0 ).r;
+
+        float skyC = 1.0f;
+        float skyL = IsSkyDepth( depthL ) ? 1.0f : 0.0f;
+        float skyR = IsSkyDepth( depthR ) ? 1.0f : 0.0f;
+        float skyU = IsSkyDepth( depthU ) ? 1.0f : 0.0f;
+        float skyD = IsSkyDepth( depthD ) ? 1.0f : 0.0f;
+
+        float skyGeometryEdge = max(
+            max( abs( skyC - skyL ), abs( skyC - skyR ) ),
+            max( abs( skyC - skyU ), abs( skyC - skyD ) ) );
+
+        float dofFsrReactive =
+            skyGeometryEdge
+            * smoothstep( 0.08f, 0.65f, skyEdgeBlur.a )
+            * 0.85f;
+
+        OutputReactive[DTid.xy] = dofFsrReactive;
         return;
     }
 
@@ -203,4 +226,21 @@ void CSMain( uint3 DTid : SV_DispatchThreadID )
     float3 finalColor = lerp( sharpColor, blurSample.rgb, blendFactor );
 
     OutputComposite[DTid.xy] = float4( finalColor, 1.0 );
+
+    float skyC = IsSkyDepth( depthC ) ? 1.0f : 0.0f;
+    float skyL = IsSkyDepth( depthL ) ? 1.0f : 0.0f;
+    float skyR = IsSkyDepth( depthR ) ? 1.0f : 0.0f;
+    float skyU = IsSkyDepth( depthU ) ? 1.0f : 0.0f;
+    float skyD = IsSkyDepth( depthD ) ? 1.0f : 0.0f;
+
+    float skyGeometryEdge = max(
+        max( abs( skyC - skyL ), abs( skyC - skyR ) ),
+        max( abs( skyC - skyU ), abs( skyC - skyD ) ) );
+
+    float dofFsrReactive =
+        skyGeometryEdge
+        * smoothstep( 0.08f, 0.65f, blendFactor )
+        * 0.85f;
+
+    OutputReactive[DTid.xy] = dofFsrReactive;
 }

@@ -240,7 +240,7 @@ void D3D11PFX_DepthOfField::UpdateAdaptiveFocus( float configuredNearDistance ) 
     m_AutoFocusBlend = m_AutoFocusTransitionStart
         + (targetBlend - m_AutoFocusTransitionStart) * smoothTransition;
 }
-XRESULT D3D11PFX_DepthOfField::Render( ID3D11ShaderResourceView* backbuffer, ID3D11ShaderResourceView* waterMaskSRV, ID3D11ShaderResourceView* specularSRV ) {
+XRESULT D3D11PFX_DepthOfField::Render( ID3D11ShaderResourceView* backbuffer, ID3D11ShaderResourceView* waterMaskSRV, ID3D11ShaderResourceView* specularSRV, ID3D11RenderTargetView* reactiveMaskRTV ) {
     if ( !backbuffer || !waterMaskSRV || !specularSRV ) {
         return XR_FAILED;
     }
@@ -261,7 +261,7 @@ XRESULT D3D11PFX_DepthOfField::Render( ID3D11ShaderResourceView* backbuffer, ID3
     }
 
     if ( !FeatureLevel10Compatibility ) {
-        auto res = RenderCS( backbuffer, waterMaskSRV, specularSRV );
+        auto res = RenderCS( backbuffer, waterMaskSRV, specularSRV, reactiveMaskRTV );
         engine->GetContext()->OMSetRenderTargets( 1, oldRTV.GetAddressOf(), oldDSV.Get() );
         return res;
     }
@@ -337,7 +337,40 @@ XRESULT D3D11PFX_DepthOfField::Render( ID3D11ShaderResourceView* backbuffer, ID3
     compositePS->Apply();
     compositePS->GetBuffer( "DepthOfFieldConstantBuffer" ).Update( &cb ).Bind();
 
-    engine->GetContext()->OMSetRenderTargets( 1, compositeBuffer->GetRenderTargetView().GetAddressOf(), nullptr );
+    Microsoft::WRL::ComPtr<ID3D11BlendState> oldBlendState;
+    FLOAT oldBlendFactor[4];
+    UINT oldSampleMask;
+    engine->GetContext()->OMGetBlendState( oldBlendState.GetAddressOf(), oldBlendFactor, &oldSampleMask );
+
+    ID3D11RenderTargetView* compositeRTVs[2] = {
+        compositeBuffer->GetRenderTargetView().Get(),
+        reactiveMaskRTV
+    };
+    UINT numRTVs = ( reactiveMaskRTV != nullptr ) ? 2u : 1u;
+
+    if ( reactiveMaskRTV != nullptr ) {
+        D3D11_BLEND_DESC blendDesc = {};
+        blendDesc.IndependentBlendEnable = TRUE;
+        blendDesc.RenderTarget[0].BlendEnable = FALSE;
+        blendDesc.RenderTarget[0].RenderTargetWriteMask = D3D11_COLOR_WRITE_ENABLE_ALL;
+
+        blendDesc.RenderTarget[1].BlendEnable = TRUE;
+        blendDesc.RenderTarget[1].SrcBlend = D3D11_BLEND_ONE;
+        blendDesc.RenderTarget[1].DestBlend = D3D11_BLEND_ONE;
+        blendDesc.RenderTarget[1].BlendOp = D3D11_BLEND_OP_MAX;
+        blendDesc.RenderTarget[1].SrcBlendAlpha = D3D11_BLEND_ONE;
+        blendDesc.RenderTarget[1].DestBlendAlpha = D3D11_BLEND_ONE;
+        blendDesc.RenderTarget[1].BlendOpAlpha = D3D11_BLEND_OP_MAX;
+        blendDesc.RenderTarget[1].RenderTargetWriteMask = D3D11_COLOR_WRITE_ENABLE_RED;
+
+        Microsoft::WRL::ComPtr<ID3D11BlendState> maxBlendState;
+        if ( SUCCEEDED( engine->GetDevice()->CreateBlendState( &blendDesc, maxBlendState.GetAddressOf() ) ) ) {
+            const FLOAT zeroBlendFactor[4] = { 0.0f, 0.0f, 0.0f, 0.0f };
+            engine->GetContext()->OMSetBlendState( maxBlendState.Get(), zeroBlendFactor, 0xFFFFFFFF );
+        }
+    }
+
+    engine->GetContext()->OMSetRenderTargets( numRTVs, compositeRTVs, nullptr );
 
     // t0 = full-res scene, t1 = half-res blur, t2 = full-res depth, t3 = focus (1x1)
     engine->GetContext()->PSSetShaderResources( 0, 1, &backbuffer );
@@ -352,6 +385,12 @@ XRESULT D3D11PFX_DepthOfField::Render( ID3D11ShaderResourceView* backbuffer, ID3
 
     engine->GetContext()->PSSetShaderResources( 0, 6, nullSRVs );
 
+    if ( reactiveMaskRTV != nullptr ) {
+        engine->GetContext()->OMSetBlendState( oldBlendState.Get(), oldBlendFactor, oldSampleMask );
+        ID3D11RenderTargetView* nullRTVs[2] = { nullptr, nullptr };
+        engine->GetContext()->OMSetRenderTargets( 2, nullRTVs, nullptr );
+    }
+
     // Blit composite result to backbuffer
     FxRenderer->CopyTextureToRTV( compositeBuffer->GetShaderResView(), oldRTV, res );
 
@@ -361,7 +400,7 @@ XRESULT D3D11PFX_DepthOfField::Render( ID3D11ShaderResourceView* backbuffer, ID3
 }
 
 /** Compute shader path for FL11+ */
-XRESULT D3D11PFX_DepthOfField::RenderCS( ID3D11ShaderResourceView* backbuffer, ID3D11ShaderResourceView* waterMaskSRV, ID3D11ShaderResourceView* specularSRV ) {
+XRESULT D3D11PFX_DepthOfField::RenderCS( ID3D11ShaderResourceView* backbuffer, ID3D11ShaderResourceView* waterMaskSRV, ID3D11ShaderResourceView* specularSRV, ID3D11RenderTargetView* reactiveMaskRTV ) {
     D3D11GraphicsEngine* engine = reinterpret_cast<D3D11GraphicsEngine*>(Engine::GraphicsEngine);
     auto& context = engine->GetContext();
 
@@ -443,6 +482,27 @@ XRESULT D3D11PFX_DepthOfField::RenderCS( ID3D11ShaderResourceView* backbuffer, I
         TexturePool::Description{ res.x, res.y, bbufferFormat,
             D3D11_BIND_UNORDERED_ACCESS | D3D11_BIND_SHADER_RESOURCE } );
 
+    RenderToTextureBuffer* dofReactiveBuffer =
+        FxRenderer->GetTexturePool()->Acquire(
+            TexturePool::Description{
+                res.x,
+                res.y,
+                DXGI_FORMAT_R8_UNORM,
+                D3D11_BIND_UNORDERED_ACCESS
+                    | D3D11_BIND_SHADER_RESOURCE
+            } );
+
+    if ( !dofReactiveBuffer
+        || !dofReactiveBuffer->GetUnorderedAccessView()
+        || !dofReactiveBuffer->GetShaderResView() ) {
+        return XR_FAILED;
+    }
+
+    const UINT clearReactive[4] = { 0u, 0u, 0u, 0u };
+    context->ClearUnorderedAccessViewUint(
+        dofReactiveBuffer->GetUnorderedAccessView().Get(),
+        clearReactive );
+
     auto compositeCS = engine->GetShaderManager().GetCShader( CShaderID::CS_PFX_DoF_Composite );
     compositeCS->Apply();
     compositeCS->GetBuffer( "DepthOfFieldConstantBuffer" ).Update( &cb ).Bind();
@@ -459,13 +519,95 @@ XRESULT D3D11PFX_DepthOfField::RenderCS( ID3D11ShaderResourceView* backbuffer, I
         specularSRV
     };
     context->CSSetShaderResources( 0, 6, compositeSRVs );
-    context->CSSetUnorderedAccessViews( 0, 1, compositeBuffer->GetUnorderedAccessView().GetAddressOf(), nullptr );
+
+    ID3D11UnorderedAccessView* compositeUAVs[2] = {
+        compositeBuffer->GetUnorderedAccessView().Get(),
+        dofReactiveBuffer->GetUnorderedAccessView().Get()
+    };
+
+    context->CSSetUnorderedAccessViews(
+        0,
+        2,
+        compositeUAVs,
+        nullptr );
 
     context->Dispatch( (res.x + 7) / 8, (res.y + 7) / 8, 1 );
 
-    context->CSSetUnorderedAccessViews( 0, 1, &nullUAV, nullptr );
+    ID3D11UnorderedAccessView* nullCompositeUAVs[2] = {
+        nullptr,
+        nullptr
+    };
+
+    context->CSSetUnorderedAccessViews(
+        0,
+        2,
+        nullCompositeUAVs,
+        nullptr );
+
     context->CSSetShaderResources( 0, 6, nullSRVs );
     context->CSSetShader( nullptr, nullptr, 0 );
+
+    if ( reactiveMaskRTV != nullptr ) {
+        Microsoft::WRL::ComPtr<ID3D11RenderTargetView> previousMaskRTV;
+        Microsoft::WRL::ComPtr<ID3D11DepthStencilView> previousMaskDSV;
+        context->OMGetRenderTargets(
+            1,
+            previousMaskRTV.GetAddressOf(),
+            previousMaskDSV.GetAddressOf() );
+
+        Microsoft::WRL::ComPtr<ID3D11BlendState> previousBlendState;
+        FLOAT previousBlendFactor[4] = {};
+        UINT previousSampleMask = 0xffffffff;
+        context->OMGetBlendState(
+            previousBlendState.GetAddressOf(),
+            previousBlendFactor,
+            &previousSampleMask );
+
+        static Microsoft::WRL::ComPtr<ID3D11BlendState> s_dofReactiveMaxBlendState;
+        if ( !s_dofReactiveMaxBlendState ) {
+            D3D11_BLEND_DESC blendDesc = {};
+            blendDesc.RenderTarget[0].BlendEnable = TRUE;
+            blendDesc.RenderTarget[0].SrcBlend = D3D11_BLEND_ONE;
+            blendDesc.RenderTarget[0].DestBlend = D3D11_BLEND_ONE;
+            blendDesc.RenderTarget[0].BlendOp = D3D11_BLEND_OP_MAX;
+            blendDesc.RenderTarget[0].SrcBlendAlpha = D3D11_BLEND_ONE;
+            blendDesc.RenderTarget[0].DestBlendAlpha = D3D11_BLEND_ONE;
+            blendDesc.RenderTarget[0].BlendOpAlpha = D3D11_BLEND_OP_MAX;
+            blendDesc.RenderTarget[0].RenderTargetWriteMask = D3D11_COLOR_WRITE_ENABLE_RED;
+            engine->GetDevice()->CreateBlendState( &blendDesc, s_dofReactiveMaxBlendState.GetAddressOf() );
+        }
+
+        const FLOAT zeroBlendFactor[4] = { 0.0f, 0.0f, 0.0f, 0.0f };
+        context->OMSetBlendState( s_dofReactiveMaxBlendState.Get(), zeroBlendFactor, 0xFFFFFFFF );
+
+        auto vs = engine->GetShaderManager().GetVShader( VShaderID::VS_PFX );
+        auto ps = engine->GetShaderManager().GetPShader( PShaderID::PS_PFX_Simple );
+
+        vs->Apply();
+        ps->Apply();
+
+        context->OMSetRenderTargets(
+            1,
+            &reactiveMaskRTV,
+            nullptr );
+
+        ID3D11ShaderResourceView* dofReactiveSRV =
+            dofReactiveBuffer->GetShaderResView().Get();
+
+        context->PSSetShaderResources(
+            0,
+            1,
+            &dofReactiveSRV );
+
+        context->PSSetSamplers( 0, 1, &defaultSampler );
+
+        FxRenderer->DrawFullScreenQuad();
+
+        ID3D11ShaderResourceView* nullSRV = nullptr;
+        context->PSSetShaderResources( 0, 1, &nullSRV );
+        context->OMSetBlendState( previousBlendState.Get(), previousBlendFactor, previousSampleMask );
+        context->OMSetRenderTargets( 1, previousMaskRTV.GetAddressOf(), previousMaskDSV.Get() );
+    }
 
     // Blit composite result to backbuffer
     FxRenderer->CopyTextureToRTV( compositeBuffer->GetShaderResView(), oldRTV, res );

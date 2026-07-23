@@ -137,7 +137,7 @@ PS_OUTPUT PSMain(PS_INPUT Input)
     float cubeStrength = lerp(0.34f, max(0.30f, saturate(ssrStrength * 0.82f)), ssrEnabled) * waterTopSide;
 
     float waterGeometryUp=abs(normalize(Input.vNormalWS).y);
-    float steepWaterMask=1.0f-smoothstep(0.64f,0.78f,waterGeometryUp);
+    float steepWaterMask=1.0f-smoothstep(0.766f,0.906f,waterGeometryUp);
     float steepWaterSsrFactor=1.0f-steepWaterMask;
 
     ssrEnabled*=steepWaterSsrFactor;
@@ -219,38 +219,6 @@ PS_OUTPUT PSMain(PS_INPUT Input)
     float3 skyReflection = max(skyBase + (skyBase * (1 - clouds.a) + clouds.rgb - skyBase) * lerp(1.12f, 1.30f, saturate(clouds.a)), 0);
     float2 skyEdge = saturate(abs(skyUV - .5f) * 2);
     float skyWeight = skyValid * (1 - smoothstep(.78f, 1, max(skyEdge.x, skyEdge.y))) * hemi;
-    float oceanSideMask =
-        step(0.5f, WM_IsOceanWater)
-        * waterTopSide
-        * smoothstep(0.78f, 0.98f, abs(screenUV.x * 2.0f - 1.0f));
-    float2 oceanInnerSkyUV =
-        float2(clamp(skyUV.x, 0.12f, 0.88f), skyUV.y);
-    float oceanInnerSkyValid =
-        step(TX_Depth.SampleLevel(SS_Linear, oceanInnerSkyUV, 0).r, 0.000001f);
-    float3 oceanInnerSkyBase =
-        SampleSkyWithoutCelestialBodies(
-            oceanInnerSkyUV,
-            skyDir,
-            fallback);
-    float4 oceanInnerClouds =
-        ResolveLowCloudLayer(
-            TX_LowClouds.SampleLevel(
-                SS_Linear,
-                oceanInnerSkyUV,
-                0),
-            oceanInnerSkyBase);
-    float3 oceanInnerSkyReflection =
-        max(
-            oceanInnerSkyBase
-            + (
-                oceanInnerSkyBase * (1 - oceanInnerClouds.a)
-                + oceanInnerClouds.rgb
-                - oceanInnerSkyBase)
-            * lerp(
-                1.12f,
-                1.30f,
-                saturate(oceanInnerClouds.a)),
-            0);
 
     float3 geoColor = skyReflection;
     float3 geoWorld = Input.vWorldPosition;
@@ -386,18 +354,7 @@ PS_OUTPUT PSMain(PS_INPUT Input)
     float geoConf = saturate(coreWeight * rainVis * lerp(1, .82f, rainAmount));
     float skyConf = saturate(skyWeight * lerp(.90f, .80f, rainAmount));
     float fpMask = saturate(footprint);
-    float oceanSideSkyBlend =
-        oceanSideMask
-        * oceanInnerSkyValid
-        * (1.0f - fpMask)
-        * (1.0f - saturate(skyWeight))
-        * 0.65f;
-    skyReflection =
-        lerp(
-            skyReflection,
-            oceanInnerSkyReflection,
-            oceanSideSkyBlend);
-    float3 skyBack = lerp(resolved, skyReflection, max(skyConf, oceanSideSkyBlend));
+    float3 skyBack = lerp(resolved, skyReflection, skyConf);
     float backLum = dot(skyBack, float3(.2126, .7152, .0722));
     float nightEdgeFloor = lerp(.055f, .010f, nightAmount * step(.5f, WM_IsOceanWater));
     float3 matched = skyBack * min(1, max(nightEdgeFloor, geoLum * lerp(1.42f, 1.00f, nightAmount) + lerp(.025f, .002f, nightAmount)) / max(backLum, .0001f));

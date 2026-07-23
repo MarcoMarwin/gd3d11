@@ -15,11 +15,11 @@ public:
 
     /** Draws this effect to the given buffer */
     XRESULT Render( RenderToTextureBuffer* fxbuffer ) override { return XR_FAILED; }
-    XRESULT Render( ID3D11ShaderResourceView* backbuffer, ID3D11ShaderResourceView* waterMaskSRV, ID3D11ShaderResourceView* specularSRV );
+    XRESULT Render( ID3D11ShaderResourceView* backbuffer, ID3D11ShaderResourceView* waterMaskSRV, ID3D11ShaderResourceView* specularSRV, ID3D11RenderTargetView* reactiveMaskRTV = nullptr );
 
 private:
     /** Compute shader path for FL11+ */
-    XRESULT RenderCS( ID3D11ShaderResourceView* backbuffer, ID3D11ShaderResourceView* waterMaskSRV, ID3D11ShaderResourceView* specularSRV );
+    XRESULT RenderCS( ID3D11ShaderResourceView* backbuffer, ID3D11ShaderResourceView* waterMaskSRV, ID3D11ShaderResourceView* specularSRV, ID3D11RenderTargetView* reactiveMaskRTV = nullptr );
     void UpdateAdaptiveFocus( float configuredNearDistance );
 
     // Ping-pong 1x1 R32_FLOAT textures for temporal focus smoothing

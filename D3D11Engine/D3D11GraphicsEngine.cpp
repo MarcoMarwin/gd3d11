@@ -4883,12 +4883,17 @@ XRESULT D3D11GraphicsEngine::OnStartWorldRendering() {
             builder.Read( waterMaskResource );
             builder.Read( specularResource );
             builder.Write( backBufferHandle );
+            if ( fsr3ActiveForReactiveMask ) {
+                builder.Read( reactiveMaskResource );
+                builder.Write( reactiveMaskResource );
+            }
 
-            pass.m_executeCallback = [this, backBufferHandle, waterMaskResource, specularResource](const RenderGraph& graph) {
+            pass.m_executeCallback = [this, backBufferHandle, waterMaskResource, specularResource, fsr3ActiveForReactiveMask, reactiveMaskResource](const RenderGraph& graph) {
                 TracyD3D11ZoneCGX( "D3D11GraphicsEngine::Draw DepthOfField" );
                 auto backbufferResource = graph.GetPhysicalTexture( backBufferHandle );
                 auto waterMaskTexture = graph.GetPhysicalTexture( waterMaskResource );
                 auto specularTexture = graph.GetPhysicalTexture( specularResource );
+                auto reactiveMaskTexture = fsr3ActiveForReactiveMask ? graph.GetPhysicalTexture( reactiveMaskResource ) : nullptr;
 
                 if ( !PfxRenderer
                     || !backbufferResource
@@ -4903,7 +4908,8 @@ XRESULT D3D11GraphicsEngine::OnStartWorldRendering() {
                 PfxRenderer->RenderDepthOfField(
                     backbufferResource->GetShaderResView().Get(),
                     waterMaskTexture->GetShaderResView().Get(),
-                    specularTexture->GetShaderResView().Get() );
+                    specularTexture->GetShaderResView().Get(),
+                    reactiveMaskTexture ? reactiveMaskTexture->GetRenderTargetView().Get() : nullptr );
             };
         } );
     }
