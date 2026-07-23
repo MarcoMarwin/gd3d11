@@ -261,7 +261,7 @@ Dokumentation der gepushten Renderer-Builds.
 - Regennebel: nur die Deckkraft auf Weltgeometrie bei gleichzeitig Nacht und aktivem Regen leicht angehoben; Wolken-/Himmelpfad, Nachtnebel und sonstige Geometrie-/Himmeluebergaenge bleiben unveraendert.
 - F11/HDR: HDR ist fuer neue Standardwerte aktiv. Deaktivierte gekoppelte Effektregler werden auch beim ersten Oeffnen konsistent auf Null dargestellt.
 - Pruefung: Projekt- und Shaderregistrierungen, Include-/Ressourcenpfade, Constant-Buffer-Layouts, Paketquellen, literal eingefuegte Escapes und `git diff --check` statisch kontrolliert. Kein lokaler HLSL-Compiler und kein vollstaendiger lokaler C++-Build vorhanden.
-## Build 095 (DÃƒÂ¤mmerung, Screen-Space-Licht und Regennebel)
+## Build 095 (DÃÆÃÂ¤mmerung, Screen-Space-Licht und Regennebel)
 
 - Sonne/Mond: Licht, Schatten, Godrays und Backlit Vegetation nutzen getrennte 15-Minuten-Uebergaenge. Mondlicht blendet morgens 04:15-04:30 aus, Sonnenlicht 04:30-04:45 ein; abends blendet Sonnenlicht 17:30-17:45 aus und Mondlicht 17:45-18:00 ein. Schattenquellen ueberlappen nicht.
 - Himmel/Wasser: der Mondkoerper bleibt positionsbasiert sichtbar statt ueber das Lichtgewicht ausgeblendet zu werden. Sonnen- und Mond-Glints auf Wasser laufen positionsbasiert unabhaengig von den Licht-/Schatten-Fades weiter.
@@ -621,23 +621,23 @@ Dokumentation der gepushten Renderer-Builds.
 
 ## Build 144 (Lokales Refactoring)
 
-- **PS_Water.hlsl**: Umfassendes manuelles Refactoring und Strukturänderungen (Ocean/Legacy Code-Blöcke reorganisiert).
-- **C++ Engine & Header**: Lokale Änderungen in D3D11GraphicsEngine.cpp und AtmosphericScattering.h durch den Benutzer integriert.
+- **PS_Water.hlsl**: Umfassendes manuelles Refactoring und StrukturÃ¤nderungen (Ocean/Legacy Code-BlÃ¶cke reorganisiert).
+- **C++ Engine & Header**: Lokale Ãnderungen in D3D11GraphicsEngine.cpp und AtmosphericScattering.h durch den Benutzer integriert.
 
 ## Build 145 (Waterfall-Override und lokale Fixes)
 
-- **PS_Water.hlsl**: Dedizierter else if (isWaterfall > 0.5f) Block hinzugefügt, um Wasserfälle vom regulären Ocean/Legacy-Refraction- und Fresnel-Handling abzutrennen und SSR/Cubemap explizit zu überschreiben.
-- **D3D11GraphicsEngine.cpp**: Weitere C++-seitige Logikanpassungen für Wasser und Fallbacks durch den Benutzer lokal integriert.
+- **PS_Water.hlsl**: Dedizierter else if (isWaterfall > 0.5f) Block hinzugefÃ¼gt, um WasserfÃ¤lle vom regulÃ¤ren Ocean/Legacy-Refraction- und Fresnel-Handling abzutrennen und SSR/Cubemap explizit zu Ã¼berschreiben.
+- **D3D11GraphicsEngine.cpp**: Weitere C++-seitige Logikanpassungen fÃ¼r Wasser und Fallbacks durch den Benutzer lokal integriert.
 
 ## Build 146 (Wasserfall Animations- und Material-Fixes)
 
-- **C++ Engine**: Wasserfälle (OWODWAT, WATERFALL, WASSERFALL) verwenden nun konsistent das MT_WaterfallFoam Material anstelle des Standardwasser-Shaders (MT_Water).
-- **Animierte Texturen**: Die Engine prüft jetzt korrekt auf animierte Texturen (GetAniTexture()) bei der Wasserfall-Erkennung, sodass animierte Wasserfälle nun korrekt aus dem generischen PS_Water- und Wasser-SSR-Pfad ausgeschlossen werden.
+- **C++ Engine**: WasserfÃ¤lle (OWODWAT, WATERFALL, WASSERFALL) verwenden nun konsistent das MT_WaterfallFoam Material anstelle des Standardwasser-Shaders (MT_Water).
+- **Animierte Texturen**: Die Engine prÃ¼ft jetzt korrekt auf animierte Texturen (GetAniTexture()) bei der Wasserfall-Erkennung, sodass animierte WasserfÃ¤lle nun korrekt aus dem generischen PS_Water- und Wasser-SSR-Pfad ausgeschlossen werden.
 
-## Build 147 (Dedizierte C++ Render-Pipeline für Wasserfälle)
+## Build 147 (Dedizierte C++ Render-Pipeline fÃ¼r WasserfÃ¤lle)
 
-- **C++ Engine (D3D11GraphicsEngine.cpp)**: Wasserfälle (OWODWAT, WATERFALL, WASSERFALL) rendern jetzt über eine vollständig entkoppelte und exklusive Render-Pipeline. Sie umgehen jegliche Standard-Wasser- oder Material-Shader (PS_Water / MT_Water).
-- Stattdessen wird nun gezielt PS_Simple und VS_Ex verwendet, wodurch sämtliche (teils unerwünschte) Screen-Space-Reflektionen (SSR), Cubemap-Spiegelungen, Normal-Maps und Specular-Eigenschaften für animierte Wasserfälle hart und sicher auf Engine-Ebene ausgeschlossen werden.
+- **C++ Engine (D3D11GraphicsEngine.cpp)**: WasserfÃ¤lle (OWODWAT, WATERFALL, WASSERFALL) rendern jetzt Ã¼ber eine vollstÃ¤ndig entkoppelte und exklusive Render-Pipeline. Sie umgehen jegliche Standard-Wasser- oder Material-Shader (PS_Water / MT_Water).
+- Stattdessen wird nun gezielt PS_Simple und VS_Ex verwendet, wodurch sÃ¤mtliche (teils unerwÃ¼nschte) Screen-Space-Reflektionen (SSR), Cubemap-Spiegelungen, Normal-Maps und Specular-Eigenschaften fÃ¼r animierte WasserfÃ¤lle hart und sicher auf Engine-Ebene ausgeschlossen werden.
 
 ## Build 148
 
@@ -648,4 +648,9 @@ Dokumentation der gepushten Renderer-Builds.
 ## Build 149
 
 - **Umstrukturierung**: Die "include"-Ordner wurden in "Include" umbenannt.
-- **Hook Safety (zCWorld.h)**: Die Hook-Funktionen hooked_zCWorldDisposeVobs und hooked_LoadWorld wurden �berarbeitet, um direkte Rohzugriffe auf Engine::GAPI->GetLoadedWorldInfo()->MainWorld zu vermeiden und stattdessen sichere, null-gepr�fte Zugriffe �ber uto* worldInfo zu verwenden.
+- **Hook Safety (zCWorld.h)**: Die Hook-Funktionen hooked_zCWorldDisposeVobs und hooked_LoadWorld wurden überarbeitet, um direkte Rohzugriffe auf Engine::GAPI->GetLoadedWorldInfo()->MainWorld zu vermeiden und stattdessen sichere, null-geprüfte Zugriffe über  uto* worldInfo zu verwenden.
+
+## Build 150
+
+- **Wasser- und SSR-Korrekturen (PS_Water.hlsl)**: Ocean edge fade vertikal geglättet, Legacy-Nachtverdunkelung angepasst, SSR auf steilem Wasser ausgeblendet, Wasserfall-Mischungen korrigiert und ssrActive nach der Neigungsreduktion berechnet.
+- **DoF-Maskierung & RenderGraph Safety**: DoF-Pass maskiert SSR- und Specular-Flächen über WaterMask/SpecularMask SRVs. RenderGraph gegen ungültige Handles abgesichert (IsHandleRegistered mit GetHandleIndex).

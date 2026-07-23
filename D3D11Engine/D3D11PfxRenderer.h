@@ -47,7 +47,7 @@ public:
     XRESULT RenderGodRays( ID3D11ShaderResourceView* backbuffer, ID3D11ShaderResourceView* depth, ID3D11ShaderResourceView* lowClouds = nullptr );
 
     /** Renders the depth-of-field effect */
-    XRESULT RenderDepthOfField(ID3D11ShaderResourceView* backbuffer);
+    XRESULT RenderDepthOfField(ID3D11ShaderResourceView* backbuffer, ID3D11ShaderResourceView* waterMaskSRV, ID3D11ShaderResourceView* specularSRV);
 
     XRESULT RenderWetGroundSSR( ID3D11RenderTargetView* outputRTV,
                                 ID3D11ShaderResourceView* sceneSRV,

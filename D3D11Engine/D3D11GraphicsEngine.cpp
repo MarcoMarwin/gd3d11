@@ -4377,7 +4377,10 @@ XRESULT D3D11GraphicsEngine::OnStartWorldRendering() {
     }
     const bool renderRainExclusionMask = rendererState.RendererSettings.EnableRain
         && Engine::GAPI->GetSceneWetness() > 1e-6f && isOutdoor;
-    const bool renderWaterMask = renderRainExclusionMask || compositionNeedsGeometry;
+    const bool renderWaterMask =
+        renderRainExclusionMask
+        || compositionNeedsGeometry
+        || rendererState.RendererSettings.EnableDoF;
     const bool renderWetGroundSSR = rendererState.RendererSettings.EnableSSR
         && renderRainExclusionMask;
     RGResourceHandle waterMaskResource = RG_INVALID_HANDLE;
@@ -4921,12 +4924,30 @@ XRESULT D3D11GraphicsEngine::OnStartWorldRendering() {
     if ( rendererState.RendererSettings.EnableDoF ) {
         graph.AddPass( RG_PASS_NAME("Draw DepthOfField"), [&]( RGBuilder& builder, RenderPass& pass ) {
             builder.Read( backBufferHandle );
+            builder.Read( waterMaskResource );
+            builder.Read( specularResource );
             builder.Write( backBufferHandle );
 
-            pass.m_executeCallback = [this, backBufferHandle](const RenderGraph& graph) {
+            pass.m_executeCallback = [this, backBufferHandle, waterMaskResource, specularResource](const RenderGraph& graph) {
                 TracyD3D11ZoneCGX( "D3D11GraphicsEngine::Draw DepthOfField" );
                 auto backbufferResource = graph.GetPhysicalTexture( backBufferHandle );
-                PfxRenderer->RenderDepthOfField( backbufferResource->GetShaderResView().Get() );
+                auto waterMaskTexture = graph.GetPhysicalTexture( waterMaskResource );
+                auto specularTexture = graph.GetPhysicalTexture( specularResource );
+
+                if ( !PfxRenderer
+                    || !backbufferResource
+                    || !backbufferResource->GetShaderResView().Get()
+                    || !waterMaskTexture
+                    || !waterMaskTexture->GetShaderResView().Get()
+                    || !specularTexture
+                    || !specularTexture->GetShaderResView().Get() ) {
+                    return;
+                }
+
+                PfxRenderer->RenderDepthOfField(
+                    backbufferResource->GetShaderResView().Get(),
+                    waterMaskTexture->GetShaderResView().Get(),
+                    specularTexture->GetShaderResView().Get() );
             };
         } );
     }

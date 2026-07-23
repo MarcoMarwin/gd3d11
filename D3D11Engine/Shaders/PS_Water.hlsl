@@ -136,6 +136,13 @@ PS_OUTPUT PSMain(PS_INPUT Input)
     float nightAmount = saturate((-AC_LightPos.y + 0.12f) * 2.2f);
     float ssrStrength = max(0, AC_SSRStrength) * ssrEnabled;
     float cubeStrength = lerp(0.34f, max(0.30f, saturate(ssrStrength * 0.82f)), ssrEnabled) * (1 - isWaterfall) * waterTopSide;
+
+    float waterGeometryUp=abs(normalize(Input.vNormalWS).y);
+    float steepWaterMask=1.0f-smoothstep(0.64f,0.78f,waterGeometryUp);
+    float steepWaterSsrFactor=1.0f-steepWaterMask;
+
+    ssrEnabled*=steepWaterSsrFactor;
+    ssrStrength*=steepWaterSsrFactor;
     bool ssrActive = ssrStrength > 0.0001f;
 
     float2 wt = Input.vWorldPosition.xz / 1000.0f;
@@ -149,7 +156,7 @@ PS_OUTPUT PSMain(PS_INPUT Input)
     float farScale = lerp(1, 0.58f, SmootherStep01(saturate((waterViewDistance - 14000) / 38000)));
     float waveScale = farScale * lerp(1, 1.12f, rainAmount);
     float refrFade = SmootherStep01(saturate((waterThickness - 12) / 98));
-    float oceanRefractionEdgeFade = smoothstep(0.0f, 0.035f, screenUV.x) * smoothstep(0.0f, 0.035f, 1.0f - screenUV.x) * smoothstep(0.0f, 0.060f, 1.0f - screenUV.y);
+    float oceanRefractionEdgeFade = smoothstep(0.0f, 0.060f, 1.0f - screenUV.y);
     float refractionEdgeFade = lerp(1.0f, oceanRefractionEdgeFade, step(0.5f, WM_IsOceanWater) * waterTopSide);
     float2 distUV = screenUV + (ds.xy + db.xy) * DIST_SMALL_AMOUNT * shoreVisibility * refrFade * waveScale * refractionEdgeFade;
     float3 diffuse = TX_Diffuse.Sample(SS_Linear, Input.vTexcoord + ds.xy * DIST_SMALL_AMOUNT * 0.5f * waveScale).rgb;
@@ -212,7 +219,6 @@ PS_OUTPUT PSMain(PS_INPUT Input)
     float3 skyReflection = max(skyBase + (skyBase * (1 - clouds.a) + clouds.rgb - skyBase) * lerp(1.12f, 1.30f, saturate(clouds.a)), 0);
     float2 skyEdge = saturate(abs(skyUV - .5f) * 2);
     float skyWeight = skyValid * (1 - smoothstep(.78f, 1, max(skyEdge.x, skyEdge.y))) * hemi;
-    float oceanSideEdge = step(0.5f, WM_IsOceanWater) * waterTopSide * (1.0f - smoothstep(0.82f, 0.98f, 1.0f - abs(screenUV.x * 2.0f - 1.0f)));
 
     float3 geoColor = skyReflection;
     float3 geoWorld = Input.vWorldPosition;
@@ -359,6 +365,7 @@ PS_OUTPUT PSMain(PS_INPUT Input)
     ssrColor = lerp(ssrColor, processed, max(coreMask, nightGeometryDominance * accepted));
     float resolvedConf = max(coreMask, fpMask * lerp(.72f, .96f, nightAmount));
     float ssrConfidence = lerp(skyConf, max(skyConf, resolvedConf), fpMask);
+    ssrConfidence *= steepWaterSsrFactor;
     float ssrWeight = max(skyWeight, fpMask);
 
     ssrColor = lerp(fallback, ssrColor, ssrEnabled);
@@ -382,7 +389,6 @@ PS_OUTPUT PSMain(PS_INPUT Input)
     {
         float total = lerp(cubeStrength, ssrStrength, ssrConfidence);
         float3 reflectionColor = lerp(fallback, ssrColor, ssrEnabled);
-        reflectionColor = lerp(reflectionColor, max(reflectionColor, fallback), oceanSideEdge * (1.0f - saturate(ssrConfidence)));
         float thick = clamp(max(depth - surfaceViewZ, 0) * viewRayScale, 0, 6000);
         float underThick = clamp(abs(depth - surfaceViewZ) * .35f, 0, 1400);
         float optical = lerp(thick, underThick, cameraBelowSurface);
@@ -445,9 +451,9 @@ PS_OUTPUT PSMain(PS_INPUT Input)
         float3 waterfallScene = TX_Scene.Sample(SS_Linear, waterfallDistUV).rgb;
         float3 waterfallSceneClean = TX_Scene.Sample(SS_Linear, lerp(waterfallDistUV, screenUV, pow(1.0f - waterfallShallowDepth, 20.0f))).rgb;
         float waterfallWetFactor = 1.0f - saturate(pow(1.0f - waterfallShallowDepth, 8.0f) + clamp(pow(ds.y, 2.0f), 0.5f, 1.0f));
-        float3 waterfallSceneWet = waterfallDiffuse * lerp(1.0f, lerp(0.01f, 0.38f, nightAmount), waterfallWetFactor);
-        waterfallScene = waterfallDiffuse;
-        float3 waterfallColor = waterfallDiffuse;
+        float3 waterfallSceneWet=lerp(waterfallSceneClean,waterfallSceneClean*lerp(0.01f,0.38f,nightAmount),waterfallWetFactor);
+        waterfallScene=lerp(waterfallScene,waterfallDiffuse,0.73f*max(pow(waterfallFresnel,8.0f),0.5f));
+        float3 waterfallColor=lerp(waterfallScene,waterfallSceneClean,pow(saturate(Input.vTexcoord2.y/35000.0f),4.0f));
         waterfallColor = lerp(waterfallColor, waterfallSceneWet, 1.0f - waterfallShallowDepth);
         waterfallColor = ApplyAtmosphericScatteringGround(Input.vWorldPosition, waterfallColor);
         float waterfallDarknessFactor = 2.0f - AC_LightPos.y;
@@ -491,9 +497,8 @@ PS_OUTPUT PSMain(PS_INPUT Input)
         float legacyShoreDerivative = max(fwidth(legacyWaterThickness), 1.0f);
         float legacyShoreFadeEnd = clamp(max(65.0f, legacyShoreDerivative * 1.25f), 65.0f, 160.0f);
         float legacyShoreVisibility = SmootherStep01(saturate((legacyWaterThickness - 1.0f) / max(legacyShoreFadeEnd - 1.0f, 1.0f)));
+        legacyColor *= lerp(1.0f, 0.72f, nightAmount);
         legacyColor = lerp(sceneClean, legacyColor, legacyShoreVisibility);
-        float legacyNightBodyMask = nightAmount * legacyShoreVisibility;
-        legacyColor *= lerp(1.0f, 0.72f, legacyNightBodyMask);
         float3 legacyReflectVectorSmall = reflect(-viewDirection, legacyWavesSmall);
         float weatherLightVisibility = GetRainSkyVisibility();
         float sunSpot = pow(saturate(dot(legacyReflectVectorSmall, -AC_LightPos.xyz)), 500.0f) * 0.5f;

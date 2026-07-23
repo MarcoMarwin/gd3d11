@@ -2,16 +2,57 @@
 #include "BaseGraphicsEngine.h"
 #include "Engine.h"
 #include "GothicAPI.h"
+#include <algorithm>
 
 // Implement RGBuilder methods (must be done after RenderGraph is fully defined)
 RGResourceHandle RGBuilder::Read( RGResourceHandle handle ) {
-    m_pass.m_reads.push_back( handle );
+    if ( !m_graph.IsHandleRegistered( handle ) ) {
+        m_graph.Invalidate();
+        LogError() << "RenderGraph rejected an invalid read handle.";
+        return RG_INVALID_HANDLE;
+    }
+
+    if ( std::find(
+            m_pass.m_reads.begin(),
+            m_pass.m_reads.end(),
+            handle ) == m_pass.m_reads.end() ) {
+        m_pass.m_reads.push_back( handle );
+    }
+
     return handle;
 }
 
 RGResourceHandle RGBuilder::Write( RGResourceHandle handle ) {
-    m_pass.m_writes.push_back( handle );
+    if ( !m_graph.IsHandleRegistered( handle ) ) {
+        m_graph.Invalidate();
+        LogError() << "RenderGraph rejected an invalid write handle.";
+        return RG_INVALID_HANDLE;
+    }
+
+    if ( std::find(
+            m_pass.m_writes.begin(),
+            m_pass.m_writes.end(),
+            handle ) == m_pass.m_writes.end() ) {
+        m_pass.m_writes.push_back( handle );
+    }
+
     return handle;
+}
+
+bool RenderGraph::IsHandleRegistered( RGResourceHandle handle ) const {
+    if ( handle == RG_INVALID_HANDLE ) {
+        return false;
+    }
+
+    return static_cast<size_t>(GetHandleIndex(handle)) < m_nextHandle;
+}
+
+void RenderGraph::Invalidate() {
+    m_valid = false;
+}
+
+bool RenderGraph::IsValid() const {
+    return m_valid;
 }
 
 RGResourceHandle RGBuilder::CreateTexture( const RGTextureDesc& desc ) {
@@ -49,6 +90,10 @@ RGResourceHandle RenderGraph::RegisterResource( const RGTextureDesc& desc )
 
 void RenderGraph::Compile()
 {
+    if ( !m_valid ) {
+        LogError() << "RenderGraph compilation skipped because the graph is invalid.";
+        return;
+    }
     m_resourceLifetimes.assign( m_nextHandle, { UINT32_MAX, 0, false } );
 
     for ( size_t passIndex = 0; passIndex < m_passes.size(); ++passIndex ) {
@@ -82,6 +127,10 @@ void RenderGraph::Compile()
 
 void RenderGraph::Execute()
 {
+    if ( !m_valid ) {
+        LogError() << "RenderGraph execution skipped because the graph is invalid.";
+        return;
+    }
     ZoneScopedN( "RenderGraph::Execute" );
     for ( size_t i = 0; i < m_passes.size(); ++i ) {
         const auto& pass = m_passes[i];

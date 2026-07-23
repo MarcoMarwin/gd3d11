@@ -23,6 +23,8 @@ Texture2D TX_Scene : register( t0 );   // Full-res sharp scene
 Texture2D TX_Blur  : register( t1 );   // Half-res bokeh (rgb=blur, a=CoC)
 Texture2D TX_Depth : register( t2 );   // Full-res hardware depth
 Texture2D TX_Focus : register( t3 );   // 1x1 smoothed focus depth
+Texture2D TX_WaterMask : register(t4);
+Texture2D TX_SpecularMask : register(t5);
 
 RWTexture2D<float4> OutputComposite : register( u0 );
 
@@ -32,6 +34,13 @@ float CameraDistanceFromDepth( float d, float2 texcoord )
     const float2 ndc = texcoord * 2.0f - 1.0f;
     const float2 viewXY = ndc * DoF_ProjParams.xy * viewZ;
     return length( float3( viewXY, viewZ ) );
+}
+
+float ReflectionReceiverMask(float2 texcoord)
+{
+    float waterMask = TX_WaterMask.SampleLevel(SS_Linear, texcoord, 0).r;
+    float specularMask = TX_SpecularMask.SampleLevel(SS_Linear, texcoord, 0).r;
+    return max(saturate(waterMask), saturate(specularMask));
 }
 
 bool IsSkyDepth( float d )
@@ -62,7 +71,7 @@ float ComputeCoCFromDepth( float d, float focusDepth, float2 texcoord )
 
     const float linearDepth = CameraDistanceFromDepth( d, texcoord );
     const float farCoC = saturate( ( linearDepth - focusDepth ) / DoF_FocusRange );
-    const float nearCoC = ComputeNearCoCFromLinearDepth( linearDepth );
+    const float nearCoC=ComputeNearCoCFromLinearDepth(linearDepth)*(1.0f-ReflectionReceiverMask(texcoord));
     return max( farCoC, nearCoC );
 }
 
@@ -142,11 +151,22 @@ void CSMain( uint3 DTid : SV_DispatchThreadID )
     float cocR = IsSkyDepth( depthR ) ? cocC : ComputeCoCFromDepth( depthR, focusDepth, texcoord + float2(  dtexel.x, 0 ) );
     float cocU = IsSkyDepth( depthU ) ? cocC : ComputeCoCFromDepth( depthU, focusDepth, texcoord + float2( 0, -dtexel.y ) );
     float cocD = IsSkyDepth( depthD ) ? cocC : ComputeCoCFromDepth( depthD, focusDepth, texcoord + float2( 0,  dtexel.y ) );
-    float nearC = ComputeNearCoCFromDepth( depthC, texcoord );
-    float nearL = ComputeNearCoCFromDepth( depthL, texcoord + float2( -dtexel.x, 0 ) );
-    float nearR = ComputeNearCoCFromDepth( depthR, texcoord + float2(  dtexel.x, 0 ) );
-    float nearU = ComputeNearCoCFromDepth( depthU, texcoord + float2( 0, -dtexel.y ) );
-    float nearD = ComputeNearCoCFromDepth( depthD, texcoord + float2( 0,  dtexel.y ) );
+    float2 nearUvC = texcoord;
+    float2 nearUvL = texcoord + float2( -dtexel.x, 0 );
+    float2 nearUvR = texcoord + float2(  dtexel.x, 0 );
+    float2 nearUvU = texcoord + float2( 0, -dtexel.y );
+    float2 nearUvD = texcoord + float2( 0,  dtexel.y );
+
+    float nearC = ComputeNearCoCFromDepth( depthC, nearUvC )
+        * (1.0f - ReflectionReceiverMask(nearUvC));
+    float nearL = ComputeNearCoCFromDepth( depthL, nearUvL )
+        * (1.0f - ReflectionReceiverMask(nearUvL));
+    float nearR = ComputeNearCoCFromDepth( depthR, nearUvR )
+        * (1.0f - ReflectionReceiverMask(nearUvR));
+    float nearU = ComputeNearCoCFromDepth( depthU, nearUvU )
+        * (1.0f - ReflectionReceiverMask(nearUvU));
+    float nearD = ComputeNearCoCFromDepth( depthD, nearUvD )
+        * (1.0f - ReflectionReceiverMask(nearUvD));
     float nearNeighbourCoC = max( max( nearC, nearL ), max( nearR, max( nearU, nearD ) ) );
 
     float2 inwardShift = float2(

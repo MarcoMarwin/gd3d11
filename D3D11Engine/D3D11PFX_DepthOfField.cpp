@@ -240,7 +240,11 @@ void D3D11PFX_DepthOfField::UpdateAdaptiveFocus( float configuredNearDistance ) 
     m_AutoFocusBlend = m_AutoFocusTransitionStart
         + (targetBlend - m_AutoFocusTransitionStart) * smoothTransition;
 }
-XRESULT D3D11PFX_DepthOfField::Render( ID3D11ShaderResourceView* backbuffer ) {
+XRESULT D3D11PFX_DepthOfField::Render( ID3D11ShaderResourceView* backbuffer, ID3D11ShaderResourceView* waterMaskSRV, ID3D11ShaderResourceView* specularSRV ) {
+    if ( !backbuffer || !waterMaskSRV || !specularSRV ) {
+        return XR_FAILED;
+    }
+
     D3D11GraphicsEngine* engine = reinterpret_cast<D3D11GraphicsEngine*>(Engine::GraphicsEngine);
 
     engine->SetDefaultStates();
@@ -257,7 +261,7 @@ XRESULT D3D11PFX_DepthOfField::Render( ID3D11ShaderResourceView* backbuffer ) {
     }
 
     if ( !FeatureLevel10Compatibility ) {
-        auto res = RenderCS( backbuffer );
+        auto res = RenderCS( backbuffer, waterMaskSRV, specularSRV );
         engine->GetContext()->OMSetRenderTargets( 1, oldRTV.GetAddressOf(), oldDSV.Get() );
         return res;
     }
@@ -318,11 +322,13 @@ XRESULT D3D11PFX_DepthOfField::Render( ID3D11ShaderResourceView* backbuffer ) {
     engine->GetContext()->PSSetShaderResources( 0, 1, &backbuffer );
     engine->GetDepthBuffer()->BindToPixelShader( engine->GetContext().Get(), 1 );
     engine->GetContext()->PSSetShaderResources( 2, 1, m_FocusSRV[m_FocusIndex].GetAddressOf() );
+    engine->GetContext()->PSSetShaderResources( 3, 1, &waterMaskSRV );
+    engine->GetContext()->PSSetShaderResources( 4, 1, &specularSRV );
 
     FxRenderer->DrawFullScreenQuad();
 
-    ID3D11ShaderResourceView* nullSRVs[4] = { nullptr, nullptr, nullptr, nullptr };
-    engine->GetContext()->PSSetShaderResources( 0, 4, nullSRVs );
+    ID3D11ShaderResourceView* nullSRVs[6] = { nullptr, nullptr, nullptr, nullptr, nullptr, nullptr };
+    engine->GetContext()->PSSetShaderResources( 0, 6, nullSRVs );
     engine->GetContext()->RSSetViewports( 1, &oldVP );
 
     // --- Pass 2: Full-res composite (render to temp, then blit to avoid read-write hazard) ---
@@ -339,10 +345,12 @@ XRESULT D3D11PFX_DepthOfField::Render( ID3D11ShaderResourceView* backbuffer ) {
     engine->GetContext()->PSSetShaderResources( 1, 1, &halfSRV );
     engine->GetDepthBuffer()->BindToPixelShader( engine->GetContext().Get(), 2 );
     engine->GetContext()->PSSetShaderResources( 3, 1, m_FocusSRV[m_FocusIndex].GetAddressOf() );
+    engine->GetContext()->PSSetShaderResources( 4, 1, &waterMaskSRV );
+    engine->GetContext()->PSSetShaderResources( 5, 1, &specularSRV );
 
     FxRenderer->DrawFullScreenQuad();
 
-    engine->GetContext()->PSSetShaderResources( 0, 4, nullSRVs );
+    engine->GetContext()->PSSetShaderResources( 0, 6, nullSRVs );
 
     // Blit composite result to backbuffer
     FxRenderer->CopyTextureToRTV( compositeBuffer->GetShaderResView(), oldRTV, res );
@@ -353,7 +361,7 @@ XRESULT D3D11PFX_DepthOfField::Render( ID3D11ShaderResourceView* backbuffer ) {
 }
 
 /** Compute shader path for FL11+ */
-XRESULT D3D11PFX_DepthOfField::RenderCS( ID3D11ShaderResourceView* backbuffer ) {
+XRESULT D3D11PFX_DepthOfField::RenderCS( ID3D11ShaderResourceView* backbuffer, ID3D11ShaderResourceView* waterMaskSRV, ID3D11ShaderResourceView* specularSRV ) {
     D3D11GraphicsEngine* engine = reinterpret_cast<D3D11GraphicsEngine*>(Engine::GraphicsEngine);
     auto& context = engine->GetContext();
 
@@ -372,7 +380,7 @@ XRESULT D3D11PFX_DepthOfField::RenderCS( ID3D11ShaderResourceView* backbuffer ) 
 
     auto defaultSampler = engine->GetDefaultSamplerState();
     ID3D11UnorderedAccessView* nullUAV = nullptr;
-    ID3D11ShaderResourceView* nullSRVs[4] = { nullptr, nullptr, nullptr, nullptr };
+    ID3D11ShaderResourceView* nullSRVs[6] = { nullptr, nullptr, nullptr, nullptr, nullptr, nullptr };
 
     // --- Pass 0: Focus Resolve (1x1 compute) ---
     int prevIdx = m_FocusIndex;
@@ -415,18 +423,20 @@ XRESULT D3D11PFX_DepthOfField::RenderCS( ID3D11ShaderResourceView* backbuffer ) 
     context->CSSetSamplers( 0, 1, &defaultSampler );
 
     // t0 = full-res scene, t1 = full-res depth, t2 = focus (1x1)
-    ID3D11ShaderResourceView* blurSRVs[3] = {
+    ID3D11ShaderResourceView* blurSRVs[5] = {
         backbuffer,
         engine->GetDepthBuffer()->GetShaderResView().Get(),
-        m_FocusSRV[m_FocusIndex].Get()
+        m_FocusSRV[m_FocusIndex].Get(),
+        waterMaskSRV,
+        specularSRV
     };
-    context->CSSetShaderResources( 0, 3, blurSRVs );
+    context->CSSetShaderResources( 0, 5, blurSRVs );
     context->CSSetUnorderedAccessViews( 0, 1, halfBuffer->GetUnorderedAccessView().GetAddressOf(), nullptr );
 
     context->Dispatch( (res.x / 2 + 7) / 8, (res.y / 2 + 7) / 8, 1 );
 
     context->CSSetUnorderedAccessViews( 0, 1, &nullUAV, nullptr );
-    context->CSSetShaderResources( 0, 3, nullSRVs );
+    context->CSSetShaderResources( 0, 5, nullSRVs );
 
     // --- Pass 2: Full-res composite ---
     auto compositeBuffer = FxRenderer->GetTexturePool()->Acquire(
@@ -440,19 +450,21 @@ XRESULT D3D11PFX_DepthOfField::RenderCS( ID3D11ShaderResourceView* backbuffer ) 
     context->CSSetSamplers( 0, 1, &defaultSampler );
 
     // t0 = full-res scene, t1 = half-res blur, t2 = full-res depth, t3 = focus (1x1)
-    ID3D11ShaderResourceView* compositeSRVs[4] = {
+    ID3D11ShaderResourceView* compositeSRVs[6] = {
         backbuffer,
         halfBuffer->GetShaderResView().Get(),
         engine->GetDepthBuffer()->GetShaderResView().Get(),
-        m_FocusSRV[m_FocusIndex].Get()
+        m_FocusSRV[m_FocusIndex].Get(),
+        waterMaskSRV,
+        specularSRV
     };
-    context->CSSetShaderResources( 0, 4, compositeSRVs );
+    context->CSSetShaderResources( 0, 6, compositeSRVs );
     context->CSSetUnorderedAccessViews( 0, 1, compositeBuffer->GetUnorderedAccessView().GetAddressOf(), nullptr );
 
     context->Dispatch( (res.x + 7) / 8, (res.y + 7) / 8, 1 );
 
     context->CSSetUnorderedAccessViews( 0, 1, &nullUAV, nullptr );
-    context->CSSetShaderResources( 0, 4, nullSRVs );
+    context->CSSetShaderResources( 0, 6, nullSRVs );
     context->CSSetShader( nullptr, nullptr, 0 );
 
     // Blit composite result to backbuffer

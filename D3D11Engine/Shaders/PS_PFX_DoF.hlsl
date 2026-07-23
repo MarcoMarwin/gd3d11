@@ -24,6 +24,8 @@ SamplerState SS_Linear : register( s0 );
 Texture2D TX_Scene : register( t0 );   // Full-res scene color
 Texture2D TX_Depth : register( t1 );   // Full-res hardware depth
 Texture2D TX_Focus : register( t2 );   // 1x1 R32_FLOAT smoothed focus depth
+Texture2D TX_WaterMask : register(t3);
+Texture2D TX_SpecularMask : register(t4);
 
 struct PS_INPUT
 {
@@ -40,6 +42,13 @@ float CameraDistanceFromDepth( float d, float2 texcoord )
     return length( float3( viewXY, viewZ ) );
 }
 
+float ReflectionReceiverMask(float2 texcoord)
+{
+    float waterMask = TX_WaterMask.SampleLevel(SS_Linear, texcoord, 0).r;
+    float specularMask = TX_SpecularMask.SampleLevel(SS_Linear, texcoord, 0).r;
+    return max(saturate(waterMask), saturate(specularMask));
+}
+
 
 float ComputeNearCoC( float linearDepth )
 {
@@ -52,7 +61,7 @@ float ComputeNearCoC( float linearDepth )
 float ComputeCoC( float linearDepth, float focusDepth, float2 texcoord )
 {
     const float farCoC = saturate( ( linearDepth - focusDepth ) / DoF_FocusRange );
-    const float nearCoC = ComputeNearCoC( linearDepth );
+    const float nearCoC=ComputeNearCoC(linearDepth)*(1.0f-ReflectionReceiverMask(texcoord));
     return max( farCoC, nearCoC );
 }
 

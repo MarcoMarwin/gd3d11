@@ -48,6 +48,10 @@ public:
     // Bring an existing engine resource (like the DX11 BackBuffer) into the graph
     RGResourceHandle ImportResource( const std::wstring& name, RenderToTextureBuffer* externalBuffer );
 
+    bool IsHandleRegistered( RGResourceHandle handle ) const;
+    void Invalidate();
+    bool IsValid() const;
+
     // Add a pass using modern C++ lambdas
     template<typename SetupFunc>
         requires std::invocable<SetupFunc, RGBuilder&, RenderPass&>
@@ -70,6 +74,7 @@ public:
 private:
     struct Lifetime { uint32_t firstPass; uint32_t lastPass; bool isRead; };
 
+    bool m_valid = true;
     TexturePool* m_texturePool;
     uint32_t m_nextHandle = 0;
     std::vector<std::unique_ptr<RenderPass>> m_passes;
