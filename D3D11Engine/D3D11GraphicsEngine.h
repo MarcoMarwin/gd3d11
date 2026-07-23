@@ -517,8 +517,6 @@ protected:
     /** List of portal worldmeshes we have to render using alphablending */
     std::vector<std::pair<MeshKey, MeshInfo*>> FrameTransparencyMeshesPortal;
 
-    /** List of waterfall worldmeshes we have to render using alphablending */
-    std::vector<std::pair<MeshKey, MeshInfo*>> FrameTransparencyMeshesWaterfall;
 
     /** Transparent worldmeshes that must block rain/wet-ground SSR */
     std::vector<std::pair<MeshKey, MeshInfo*>> FrameTransparencyMeshesWetSSRBlockers;

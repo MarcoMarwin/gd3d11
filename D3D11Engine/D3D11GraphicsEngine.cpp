@@ -4067,7 +4067,6 @@ XRESULT D3D11GraphicsEngine::OnStartWorldRendering() {
     FrameWaterSurfaces.clear();
     FrameTransparencyMeshes.clear();
     FrameTransparencyMeshesPortal.clear();
-    FrameTransparencyMeshesWaterfall.clear();
     FrameTransparencyMeshesWetSSRBlockers.clear();
     m_FrameGeometryCache.Reset();
 
@@ -4462,25 +4461,6 @@ XRESULT D3D11GraphicsEngine::OnStartWorldRendering() {
             };
         });
     }
-
-    graph.AddPass( RG_PASS_NAME("Draw FrameTransparencyMeshesWaterfall"), [&]( RGBuilder& builder, RenderPass& pass ) {
-        builder.Read( backBufferHandle );
-        builder.Write( backBufferHandle );
-
-        pass.m_executeCallback = [this](const RenderGraph&) {
-            TracyD3D11ZoneCGX( "D3D11GraphicsEngine::Draw FrameTransparencyMeshesWaterfall" );
-
-            SetDefaultStates();
-
-            // Setup renderstates
-            Engine::GAPI->GetRendererState().RasterizerState.CullMode = GothicRasterizerStateInfo::CM_CULL_BACK;
-            Engine::GAPI->GetRendererState().RasterizerState.SetDirty();
-
-            // Only MT_WaterfallFoam remains in this list. Named OWODWAT water
-            // stays in FrameWaterSurfaces and is reflection-blocked per batch.
-            DrawMeshInfoListAlphablended( FrameTransparencyMeshesWaterfall );
-        };
-    });
 
     graph.AddPass( RG_PASS_NAME("Draw ghosts"), [&]( RGBuilder& builder, RenderPass& pass ) {
         builder.Read( backBufferHandle );
@@ -4883,17 +4863,12 @@ XRESULT D3D11GraphicsEngine::OnStartWorldRendering() {
             builder.Read( waterMaskResource );
             builder.Read( specularResource );
             builder.Write( backBufferHandle );
-            if ( fsr3ActiveForReactiveMask ) {
-                builder.Read( reactiveMaskResource );
-                builder.Write( reactiveMaskResource );
-            }
 
-            pass.m_executeCallback = [this, backBufferHandle, waterMaskResource, specularResource, fsr3ActiveForReactiveMask, reactiveMaskResource](const RenderGraph& graph) {
+            pass.m_executeCallback = [this, backBufferHandle, waterMaskResource, specularResource](const RenderGraph& graph) {
                 TracyD3D11ZoneCGX( "D3D11GraphicsEngine::Draw DepthOfField" );
                 auto backbufferResource = graph.GetPhysicalTexture( backBufferHandle );
                 auto waterMaskTexture = graph.GetPhysicalTexture( waterMaskResource );
                 auto specularTexture = graph.GetPhysicalTexture( specularResource );
-                auto reactiveMaskTexture = fsr3ActiveForReactiveMask ? graph.GetPhysicalTexture( reactiveMaskResource ) : nullptr;
 
                 if ( !PfxRenderer
                     || !backbufferResource
@@ -4908,8 +4883,7 @@ XRESULT D3D11GraphicsEngine::OnStartWorldRendering() {
                 PfxRenderer->RenderDepthOfField(
                     backbufferResource->GetShaderResView().Get(),
                     waterMaskTexture->GetShaderResView().Get(),
-                    specularTexture->GetShaderResView().Get(),
-                    reactiveMaskTexture ? reactiveMaskTexture->GetRenderTargetView().Get() : nullptr );
+                    specularTexture->GetShaderResView().Get() );
             };
         } );
     }
@@ -5436,7 +5410,7 @@ XRESULT D3D11GraphicsEngine::DrawMeshInfoListAlphablended(
 
 
 XRESULT D3D11GraphicsEngine::DrawWaterfallMask( ID3D11RenderTargetView* waterMaskRTV ) {
-    if ( (FrameTransparencyMeshesWaterfall.empty() && FrameTransparencyMeshesWetSSRBlockers.empty()) || !waterMaskRTV ) {
+    if ( FrameTransparencyMeshesWetSSRBlockers.empty() || !waterMaskRTV ) {
         return XR_SUCCESS;
     }
 
@@ -5471,12 +5445,6 @@ XRESULT D3D11GraphicsEngine::DrawWaterfallMask( ID3D11RenderTargetView* waterMas
         Engine::GAPI->GetWrappedWorldMesh()->MeshVertexBuffer,
         Engine::GAPI->GetWrappedWorldMesh()->MeshIndexBuffer, 0, 0 );
 
-    for ( auto const& [meshKey, meshInfo] : FrameTransparencyMeshesWaterfall ) {
-        if ( meshKey.Material && meshKey.Material->GetAniTexture() ) {
-            DrawVertexBufferIndexedUINT( nullptr, nullptr, meshInfo->Indices.size(),
-                meshInfo->BaseIndexLocation );
-        }
-    }
 
     for ( auto const& [meshKey, meshInfo] : FrameTransparencyMeshesWetSSRBlockers ) {
         if ( meshKey.Material && meshInfo ) {
@@ -5582,7 +5550,6 @@ XRESULT D3D11GraphicsEngine::DrawWorldMesh( bool noTextures ) {
 
     std::vector<TransparencyWorldMeshEntry> transparencyMeshes;
     std::vector<TransparencyWorldMeshEntry> portalTransparencyMeshes;
-    std::vector<TransparencyWorldMeshEntry> waterfallTransparencyMeshes;
     std::vector<TransparencyWorldMeshEntry> wetSSRBlockerTransparencyMeshes;
 
     GetContext()->IASetPrimitiveTopology( D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST );
@@ -5624,11 +5591,6 @@ XRESULT D3D11GraphicsEngine::DrawWorldMesh( bool noTextures ) {
                     if ( worldMesh.first.Info->MaterialType == MaterialInfo::MT_Portal ) {
                         if ( !isZPrepass ) {
                             portalTransparencyMeshes.push_back( { transparencyMesh, distanceSq } );
-                        }
-                        continue;
-                    } else if ( worldMesh.first.Info->MaterialType == MaterialInfo::MT_WaterfallFoam ) {
-                        if ( !isZPrepass ) {
-                            waterfallTransparencyMeshes.push_back( { transparencyMesh, distanceSq } );
                         }
                         continue;
                     }
@@ -5702,7 +5664,6 @@ XRESULT D3D11GraphicsEngine::DrawWorldMesh( bool noTextures ) {
 
         sortAndAppendTransparencyMeshes( transparencyMeshes, FrameTransparencyMeshes );
         sortAndAppendTransparencyMeshes( portalTransparencyMeshes, FrameTransparencyMeshesPortal );
-        sortAndAppendTransparencyMeshes( waterfallTransparencyMeshes, FrameTransparencyMeshesWaterfall );
         sortAndAppendTransparencyMeshes( wetSSRBlockerTransparencyMeshes, FrameTransparencyMeshesWetSSRBlockers );
     }
     auto CompareMesh = []( std::pair<WorldMeshKey, MeshInfo*>& a, std::pair<WorldMeshKey, MeshInfo*>& b ) -> bool {

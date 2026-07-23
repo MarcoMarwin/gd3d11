@@ -136,13 +136,22 @@ PS_OUTPUT PSMain(PS_INPUT Input)
     float ssrStrength = max(0, AC_SSRStrength) * ssrEnabled;
     float cubeStrength = lerp(0.34f, max(0.30f, saturate(ssrStrength * 0.82f)), ssrEnabled) * waterTopSide;
 
-    float waterGeometryUp=abs(normalize(Input.vNormalWS).y);
-    float steepWaterMask=1.0f-smoothstep(0.766f,0.906f,waterGeometryUp);
-    float steepWaterSsrFactor=1.0f-steepWaterMask;
+    float waterGeometryUp = abs(normalize(Input.vNormalWS).y);
 
-    ssrEnabled*=steepWaterSsrFactor;
-    ssrStrength*=steepWaterSsrFactor;
-    cubeStrength*=steepWaterSsrFactor;
+    // Surface inclination relative to the horizontal plane:
+    // 0-33 degrees: full reflections.
+    // 33-67 degrees: smooth fade.
+    // 67-90 degrees: no reflections.
+    const float waterfallSsrOffCos = 0.39073113f; // cos(67 degrees)
+    const float waterfallSsrFullCos = 0.83867057f; // cos(33 degrees)
+    float steepWaterSsrFactor = smoothstep(
+        waterfallSsrOffCos,
+        waterfallSsrFullCos,
+        waterGeometryUp);
+
+    ssrEnabled *= steepWaterSsrFactor;
+    ssrStrength *= steepWaterSsrFactor;
+    cubeStrength *= steepWaterSsrFactor;
     bool ssrActive = ssrStrength > 0.0001f;
 
     float2 wt = Input.vWorldPosition.xz / 1000.0f;

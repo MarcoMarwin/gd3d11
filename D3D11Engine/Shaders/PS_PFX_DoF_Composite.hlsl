@@ -120,13 +120,7 @@ float4 GetSkyEdgeBlurSample(float2 texcoord, float2 dtexel, float focusDepth)
     return float4(colorAccum / max(coverageAccum, 0.001f), blend);
 }
 
-struct PS_OUTPUT
-{
-    float4 color : SV_TARGET0;
-    float reactive : SV_TARGET1;
-};
-
-PS_OUTPUT PSMain( PS_INPUT Input )
+float4 PSMain( PS_INPUT Input ) : SV_TARGET
 {
     float3 sharpColor = TX_Scene.Sample( SS_Linear, Input.vTexcoord ).rgb;
 
@@ -141,32 +135,15 @@ PS_OUTPUT PSMain( PS_INPUT Input )
     float4 blurSample = TX_Blur.Sample( SS_Linear, Input.vTexcoord );
     if ( IsSkyDepth( depthC ) )
     {
-        float4 skyEdgeBlur = GetSkyEdgeBlurSample( Input.vTexcoord, dtexel, focusDepth );
+        float4 skyEdgeBlur =
+            GetSkyEdgeBlurSample(
+                Input.vTexcoord,
+                dtexel,
+                focusDepth );
 
-        float depthL = TX_Depth.SampleLevel( SS_Linear, Input.vTexcoord + float2( -dtexel.x, 0 ), 0 ).r;
-        float depthR = TX_Depth.SampleLevel( SS_Linear, Input.vTexcoord + float2(  dtexel.x, 0 ), 0 ).r;
-        float depthU = TX_Depth.SampleLevel( SS_Linear, Input.vTexcoord + float2( 0, -dtexel.y ), 0 ).r;
-        float depthD = TX_Depth.SampleLevel( SS_Linear, Input.vTexcoord + float2( 0,  dtexel.y ), 0 ).r;
-
-        float skyC = 1.0f;
-        float skyL = IsSkyDepth( depthL ) ? 1.0f : 0.0f;
-        float skyR = IsSkyDepth( depthR ) ? 1.0f : 0.0f;
-        float skyU = IsSkyDepth( depthU ) ? 1.0f : 0.0f;
-        float skyD = IsSkyDepth( depthD ) ? 1.0f : 0.0f;
-
-        float skyGeometryEdge = max(
-            max( abs( skyC - skyL ), abs( skyC - skyR ) ),
-            max( abs( skyC - skyU ), abs( skyC - skyD ) ) );
-
-        float dofFsrReactive =
-            skyGeometryEdge
-            * smoothstep( 0.08f, 0.65f, skyEdgeBlur.a )
-            * 0.85f;
-
-        PS_OUTPUT o;
-        o.color = float4( lerp( sharpColor, skyEdgeBlur.rgb, skyEdgeBlur.a ), 1.0 );
-        o.reactive = dofFsrReactive;
-        return o;
+        return float4(
+            lerp( sharpColor, skyEdgeBlur.rgb, skyEdgeBlur.a ),
+            1.0 );
     }
 
     float cocC = ComputeCoCFromDepth( depthC, focusDepth, Input.vTexcoord );
@@ -229,23 +206,5 @@ PS_OUTPUT PSMain( PS_INPUT Input )
     float blendFactor = smoothstep( 0.0, 1.0, compositeCoC );
     float3 finalColor = lerp( sharpColor, blurSample.rgb, blendFactor );
 
-    float skyC = IsSkyDepth( depthC ) ? 1.0f : 0.0f;
-    float skyL = IsSkyDepth( depthL ) ? 1.0f : 0.0f;
-    float skyR = IsSkyDepth( depthR ) ? 1.0f : 0.0f;
-    float skyU = IsSkyDepth( depthU ) ? 1.0f : 0.0f;
-    float skyD = IsSkyDepth( depthD ) ? 1.0f : 0.0f;
-
-    float skyGeometryEdge = max(
-        max( abs( skyC - skyL ), abs( skyC - skyR ) ),
-        max( abs( skyC - skyU ), abs( skyC - skyD ) ) );
-
-    float dofFsrReactive =
-        skyGeometryEdge
-        * smoothstep( 0.08f, 0.65f, blendFactor )
-        * 0.85f;
-
-    PS_OUTPUT o;
-    o.color = float4( finalColor, 1.0 );
-    o.reactive = dofFsrReactive;
-    return o;
+    return float4( finalColor, 1.0 );
 }

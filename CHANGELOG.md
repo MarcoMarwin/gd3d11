@@ -661,9 +661,12 @@ Dokumentation der gepushten Renderer-Builds.
 - **Ocean Edge Sky Smoothing (PS_Water.hlsl)**: Sanfte Angleichung dunkler seitlicher Ocean-Ränder an weiter innen liegende Himmelsspiegelungsproben (`oceanSideSkyBlend`).
 - **SSR & Cubemap Steilwasser-Ausblendung (PS_Water.hlsl)**: Ausblendung von SSR und Cubemap auf stark geneigtem Wasser harmonisiert (`cubeStrength*=steepWaterSsrFactor`).
 
-## Build 153 (Korrekturpush)
+## Build 153
 
-- **DoF TextureHandle Fix (D3D11PFX_DepthOfField.cpp)**: Typanpassung von `RenderToTextureBuffer*` auf `auto dofReactiveBuffer` bei `TexturePool::Acquire()`, um die Gültigkeit des `TextureHandle` während der gesamten `RenderCS()`-Funktion sicherzustellen.
+- **Steilwasser-SSR/Cubemap-Ausblendung (PS_Water.hlsl)**: Neigungsabhängige Ausblendung auf 33°–67° korrigiert (`smoothstep(waterfallSsrOffCos, waterfallSsrFullCos, waterGeometryUp)`).
+- **Entfernung alter Wasserfall-Renderpfad (D3D11GraphicsEngine.cpp/.h)**: `FrameTransparencyMeshesWaterfall`, `waterfallTransparencyMeshes` und der Rendergraph-Pass `Draw FrameTransparencyMeshesWaterfall` vollständig entfernt; `MT_WaterfallFoam`-Geometrie läuft nun durch die normale Transparenzsortierung.
+- **Rücknahme DoF-Reactive-Mask & Shader-Fixes (D3D11PFX_DepthOfField.cpp/.h, CS/PS_PFX_DoF_Composite.hlsl, D3D11PfxRenderer.cpp/.h)**: DoF-Reactive-Mask-Erweiterung vollständig zurückgenommen, UAV-Deklaration `OutputComposite` (u0) in `CS_PFX_DoF_Composite.hlsl` ergänzt und `GetSkyEdgeBlurSample`-Aufruf in `PS_PFX_DoF_Composite.hlsl` korrigiert.
+
 
 
 
