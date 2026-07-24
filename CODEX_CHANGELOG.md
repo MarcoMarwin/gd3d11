@@ -12,3 +12,10 @@
 - Vegetation Push: HeroAffectsObjects triggers Vertex shader reload and is completely decoupled.
 - Atmospheric Scattering: Replaced sun transmission masks to prevent high-energy centers from being visible through cloud layers.
 - Water SSR: Added shore-based attenuation to SSR reflections.
+
+## Build 159
+
+- Atmospheric Scattering: Removed artificial sun profile zoning and integrated unified celestial preservation masks for sun and moon.
+- Moon Projection: Added AC_MoonScreenPos to atmosphere constant buffers and GSky celestial projection for accurate moon transmission through low clouds.
+- Vegetation Wind: Integrated interaction push scale to properly attenuate both current and previous wind offsets for consistent FSR motion vectors.
+- UI: Corrected contact shadows tooltip translation and UTF-8 escapes.

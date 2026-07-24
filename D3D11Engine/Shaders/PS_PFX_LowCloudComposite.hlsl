@@ -235,16 +235,37 @@ float4 PSMain( PS_INPUT Input ) : SV_TARGET
         clouds.a = cloudAlpha;
     }
 
-    float2 sunDelta = Input.vTexcoord - AC_LightScreenPos.xy;
-    float sunDistance = length(sunDelta);
-    float sunScreenVisibility = saturate(AC_LightScreenPos.z) * saturate(AC_SunVisibility);
-    float sunCoreMask = (1.0f - smoothstep(0.006f, 0.020f, sunDistance)) * sunScreenVisibility;
-    float sunBloomMask = (1.0f - smoothstep(0.020f, 0.070f, sunDistance)) * sunScreenVisibility;
-    float sunHaloMask = (1.0f - smoothstep(0.070f, 0.160f, sunDistance)) * sunScreenVisibility;
-    float preservedSunTransmission = max(
-        sunCoreMask * 0.30f,
-        max(sunBloomMask * 0.18f, sunHaloMask * 0.10f));
-    float effectiveCloudAlpha = min(cloudAlpha, 1.0f - preservedSunTransmission);
-    scene.rgb = scene.rgb * (1.0f - effectiveCloudAlpha) + clouds.rgb;
+    float sunDistance =
+        length( Input.vTexcoord - AC_LightScreenPos.xy );
+    float moonDistance =
+        length( Input.vTexcoord - AC_MoonScreenPos.xy );
+    float sunVisibility =
+        saturate( AC_LightScreenPos.z )
+        * saturate( AC_SunVisibility );
+    float moonVisibility =
+        saturate( AC_MoonScreenPos.z )
+        * saturate( AC_MoonVisibility );
+    float sunPreservationMask =
+        ( 1.0f - smoothstep( 0.018f, 0.060f, sunDistance ) )
+        * sunVisibility;
+    float moonPreservationMask =
+        ( 1.0f - smoothstep( 0.018f, 0.060f, moonDistance ) )
+        * moonVisibility;
+    float celestialPreservationMask =
+        max( sunPreservationMask, moonPreservationMask );
+    float effectiveCloudAlpha =
+        min(
+            cloudAlpha,
+            lerp(
+                1.0f,
+                0.88f,
+                celestialPreservationMask ) );
+    float cloudPremultipliedScale =
+        cloudAlpha > 0.00001f
+            ? effectiveCloudAlpha / cloudAlpha
+            : 0.0f;
+    scene.rgb =
+        scene.rgb * ( 1.0f - effectiveCloudAlpha )
+        + clouds.rgb * cloudPremultipliedScale;
     return scene;
 }

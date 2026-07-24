@@ -455,6 +455,7 @@ struct AtmosphereConstantBuffer {
     float AC_LowCloudPad0;
 
     float4 AC_LightScreenPos;
+    float4 AC_MoonScreenPos;
 };
 
 struct CASConstantBuffer {

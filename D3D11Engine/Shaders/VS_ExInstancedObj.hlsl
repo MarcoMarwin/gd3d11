@@ -203,9 +203,10 @@ VS_OUTPUT VSMain( VS_INPUT Input )
     // Base vertex positions (local). Previous uses the previous wind phase for motion vectors.
     float3 position = Input.vPosition;
     float3 prevPosition = Input.vPosition;
-
     float localMinHeight = minHeight;
     float localMaxHeight = maxHeight;
+    float interactionWindScale = 1.0f;
+
 #if WIND_META_SRV
     WindMetaDataEntry meta = WindMetaData[Input.InstanceWindMetaIndex];
     localMinHeight = meta.minHeight;
@@ -213,45 +214,38 @@ VS_OUTPUT VSMain( VS_INPUT Input )
 #endif
 
 #if SHD_INFLUENCE
-    
-    if (Input.InstanceWind.y > 0)
-    {
+    if (Input.InstanceWind.y > 0) {
         // CHARACTER INTERACTION MOVING BUSHES SHADER
-        float3 interactionOffset = CalculateActorInteractionInfluence(position, localMinHeight, localMaxHeight, Input.InstanceWorldMatrix);
+        float3 interactionOffset = CalculateActorInteractionInfluence(
+            position, localMinHeight, localMaxHeight, Input.InstanceWorldMatrix);
+        float maxInteractionDisplacement = max(
+            heroAffectStrength * characterInteractionStrength, 0.0001f);
+        float interactionInfluence = saturate(
+            length(interactionOffset) / maxInteractionDisplacement);
+        interactionWindScale = 1.0f - interactionInfluence;
         position += interactionOffset;
         prevPosition += interactionOffset;
     }
 #endif
-    
+
 #if SHD_WIND
-    
-    if (Input.InstanceWind.x > 0)
-    {
+    if (Input.InstanceWind.x > 0) {
         // WIND SHADER
         // Protect 0 height
         float heightRange = max(localMaxHeight - localMinHeight, 0.001);
         float vertexHeightNorm = saturate((Input.vPosition.y - localMinHeight) / heightRange);
 
-        // Apply current and previous wind phases so FSR receives vegetation motion vectors.
+        // Apply current and previous wind phases with the same local interaction
+        // attenuation so FSR receives consistent vegetation motion vectors.
         float3 windDirection = normalize(windDir);
-        position += ApplyTreeWind(
-            Input.vPosition,
-            windDirection,
-            vertexHeightNorm,
-            globalTime,
-            Input.InstanceWorldMatrix,
-            localMaxHeight,
-            Input.InstanceWind.x
+        float3 currentWindOffset = ApplyTreeWind(
+            Input.vPosition, windDirection, vertexHeightNorm, globalTime, Input.InstanceWorldMatrix, localMaxHeight, Input.InstanceWind.x
         );
-        prevPosition += ApplyTreeWind(
-            Input.vPosition,
-            windDirection,
-            vertexHeightNorm,
-            prevGlobalTime,
-            Input.InstancePrevWorldMatrix,
-            localMaxHeight,
-            Input.InstanceWind.x
+        float3 previousWindOffset = ApplyTreeWind(
+            Input.vPosition, windDirection, vertexHeightNorm, prevGlobalTime, Input.InstancePrevWorldMatrix, localMaxHeight, Input.InstanceWind.x
         );
+        position += currentWindOffset * interactionWindScale;
+        prevPosition += previousWindOffset * interactionWindScale;
     }
 #endif
     

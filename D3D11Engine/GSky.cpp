@@ -437,34 +437,54 @@ XRESULT GSky::RenderSky() {
     AtmosphereCB.AC_SunVisibility = sunTimeFade * rainLightFade;
     AtmosphereCB.AC_MoonVisibility = moonTimeFade * rainLightFade;
 
-    XMVECTOR lightDirVec = XMVector3Normalize( XMLoadFloat3( &LightDir ) );
-    const float lightDistance = std::max( 10000.0f, Engine::GAPI->GetFarPlane() );
-    XMVECTOR lightViewDir = XMVector3Normalize( XMVector3TransformNormal( lightDirVec, Engine::GAPI->GetViewMatrixXM() ) );
-    XMVECTOR lightViewPosition = XMVectorSet( XMVectorGetX( lightViewDir ) * lightDistance, XMVectorGetY( lightViewDir ) * lightDistance, XMVectorGetZ( lightViewDir ) * lightDistance, 1.0f );
-    XMFLOAT4X4 lightProjection = Engine::GAPI->GetProjectionMatrix();
+    const float celestialDistance = std::max( 10000.0f, Engine::GAPI->GetFarPlane() );
+    XMFLOAT4X4 celestialProjection = Engine::GAPI->GetProjectionMatrix();
     // Screen-space atmosphere effects must not follow the temporal sub-pixel jitter.
-    lightProjection._13 = 0.0f;
-    lightProjection._23 = 0.0f;
-    XMFLOAT4 lightClip;
-    XMStoreFloat4( &lightClip, XMVector4Transform( lightViewPosition, XMLoadFloat4x4( &lightProjection ) ) );
-    float lightVisible = 0.0f;
-    float lightScreenX = 0.5f;
-    float lightScreenY = 0.5f;
-    if ( fabsf( lightClip.w ) > 0.0001f ) {
-        float invW = 1.0f / lightClip.w;
-        float ndcX = lightClip.x * invW;
-        float ndcY = lightClip.y * invW;
-        float ndcZ = lightClip.z * invW;
-        lightScreenX = ndcX * 0.5f + 0.5f;
-        lightScreenY = -ndcY * 0.5f + 0.5f;
-        if ( lightClip.w > 0.0f && ndcZ >= 0.0f && ndcZ <= 1.0f ) {
-            const float edgeDistance = std::min( std::min( lightScreenX + 0.25f, 1.25f - lightScreenX ), std::min( lightScreenY + 0.25f, 1.25f - lightScreenY ) );
-            const float fadeWidth = 0.35f;
-            const float fade = std::max( 0.0f, std::min( 1.0f, (edgeDistance + fadeWidth) / fadeWidth ) );
-            lightVisible = fade * fade * (3.0f - 2.0f * fade);
+    celestialProjection._13 = 0.0f;
+    celestialProjection._23 = 0.0f;
+    const XMMATRIX celestialView = Engine::GAPI->GetViewMatrixXM();
+    const XMMATRIX celestialProjectionMatrix = XMLoadFloat4x4( &celestialProjection );
+    auto projectCelestialDirection = [&]( const XMFLOAT3& direction ) {
+        XMVECTOR directionVector = XMVector3Normalize( XMLoadFloat3( &direction ) );
+        XMVECTOR viewDirection = XMVector3Normalize(
+            XMVector3TransformNormal( directionVector, celestialView ) );
+        XMVECTOR viewPosition = XMVectorSet(
+            XMVectorGetX( viewDirection ) * celestialDistance,
+            XMVectorGetY( viewDirection ) * celestialDistance,
+            XMVectorGetZ( viewDirection ) * celestialDistance,
+            1.0f );
+        XMFLOAT4 clipPosition;
+        XMStoreFloat4(
+            &clipPosition,
+            XMVector4Transform( viewPosition, celestialProjectionMatrix ) );
+        float visible = 0.0f;
+        float screenX = 0.5f;
+        float screenY = 0.5f;
+        if ( fabsf( clipPosition.w ) > 0.0001f ) {
+            const float invW = 1.0f / clipPosition.w;
+            const float ndcX = clipPosition.x * invW;
+            const float ndcY = clipPosition.y * invW;
+            const float ndcZ = clipPosition.z * invW;
+            screenX = ndcX * 0.5f + 0.5f;
+            screenY = -ndcY * 0.5f + 0.5f;
+            if ( clipPosition.w > 0.0f && ndcZ >= 0.0f && ndcZ <= 1.0f ) {
+                const float edgeDistance = std::min(
+                    std::min( screenX + 0.25f, 1.25f - screenX ),
+                    std::min( screenY + 0.25f, 1.25f - screenY ) );
+                const float fadeWidth = 0.35f;
+                const float fade = std::clamp(
+                    (edgeDistance + fadeWidth) / fadeWidth,
+                    0.0f,
+                    1.0f );
+                visible = fade * fade * (3.0f - 2.0f * fade);
+            }
         }
-    }
-    AtmosphereCB.AC_LightScreenPos = XMFLOAT4( lightScreenX, lightScreenY, lightVisible, 0.0f );
+        return XMFLOAT4( screenX, screenY, visible, 0.0f );
+    };
+    AtmosphereCB.AC_LightScreenPos =
+        projectCelestialDirection( LightDir );
+    AtmosphereCB.AC_MoonScreenPos =
+        projectCelestialDirection( MoonDir );
     AtmosphereCB.AC_CameraHeight = -Atmosphere.SphereOffsetY;
     AtmosphereCB.AC_InnerRadius = Atmosphere.InnerRadius;
     AtmosphereCB.AC_OuterRadius = Atmosphere.OuterRadius;

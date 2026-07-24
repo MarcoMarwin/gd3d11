@@ -87,6 +87,7 @@ cbuffer Atmosphere : register( b1 )
 	float AC_LowCloudPad0;
 
 	float4 AC_LightScreenPos;
+	float4 AC_MoonScreenPos;
 };
 
 // The scale equation calculated by Vernier's Graphical Analysis
@@ -603,12 +604,8 @@ float3 ApplyAtmosphericScatteringSkyInternal(float3 worldPosition, float include
 
 	float3 rayleighColor = AC_getRayleighPhase(fCos2) * c0;
 	float3 fixedSunProfile = AC_getMiePhase(fCos, fCos2, AC_g, AC_g * AC_g) * c1 * 2.0f;
-	float sunProfileCos = saturate(fCos);
-	float sunHaloMask = smoothstep(0.9850f, 0.9950f, sunProfileCos);
-	float sunCoreMask = smoothstep(0.9975f, 0.9995f, sunProfileCos);
-	float sunProfileWeight = sunHaloMask * lerp(0.35f, 1.0f, sunCoreMask);
 	float rainSunOpacity = 1.0f - smoothstep(0.02f, 0.50f, saturate(AC_RainFXWeight));
-	float3 color = rayleighColor + fixedSunProfile * sunProfileWeight * rainSunOpacity * saturate(includeSunProfile);	  
+	float3 color = rayleighColor + fixedSunProfile * rainSunOpacity * saturate(includeSunProfile);	    
 	return color;
 }
 

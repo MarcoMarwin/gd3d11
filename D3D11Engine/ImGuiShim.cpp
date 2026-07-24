@@ -1604,7 +1604,7 @@ ImGui::Checkbox( "##Enable Rain", &settings.EnableRain );
             if ( ImGui::Checkbox( "##Enable Contact Shadows", &settings.EnableContactShadows ) ) {
                 shadersToReload |= ShaderCategory::Other;
             }
-            ImGui::SetItemTooltip( "%s", Tr( "Adds small shadows where objects meet nearby indoor surfaces. Only affects indoor areas.", u8"F\u00FCgt kleine Schatten an nahen Innenraum-Kontaktstellen hinzu. Wirkt nur indoor." ) );
+            ImGui::SetItemTooltip( "%s", Tr( "Adds small shadows where objects meet nearby indoor surfaces. Only affects indoor areas.", u8"F\u00FCgt kleine Schatten an nahen Kontaktstellen hinzu. Wirkt nur in Innenr\u00E4umen." ) );
             ImGui::EndGroup();
         }
 
