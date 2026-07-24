@@ -92,24 +92,6 @@ public:
             var,
             def );
 
-        if ( _stricmp( section.ToChar(), "ENGINE" ) == 0
-            && _stricmp( var, "noAmbientPFX" ) == 0 ) {
-            const int noAmbientPFX =
-                Engine::GAPI
-                && !Engine::GAPI->GetRendererState()
-                    .RendererSettings.EnableAmbientParticles
-                    ? 1
-                    : 0;
-
-            if ( Engine::GAPI ) {
-                Engine::GAPI->SetIntParamFromConfig(
-                    "noAmbientPFX",
-                    noAmbientPFX );
-            }
-
-            return noAmbientPFX;
-        }
-
         if ( _stricmp( var, "zWaterAniEnabled" ) == 0 ) {
             Engine::GAPI->SetIntParamFromConfig(
                 "zWaterAniEnabled",

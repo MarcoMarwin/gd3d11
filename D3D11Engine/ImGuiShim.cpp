@@ -797,18 +797,7 @@ namespace {
 #endif
     }
 
-    void SyncAmbientParticlesOption(
-        bool enableAmbientParticles ) {
-        if ( zCOption* options = zCOption::GetOptions() ) {
-            options->WriteString(
-                zSTRING( "ENGINE" ),
-                "noAmbientPFX",
-                zSTRING(
-                    enableAmbientParticles
-                        ? "0"
-                        : "1" ) );
-        }
-    }
+
 }
 struct GraphicsPresetComparable {
     int textureMaxSize;
@@ -819,7 +808,6 @@ struct GraphicsPresetComparable {
     bool EnableScreenSpaceGI;
     bool EnableDoF;
     bool EnableDynamicClouds;
-    bool EnableAmbientParticles;
     int WindQuality;
     bool EnableGodRays;
     int OutdoorSmallVobDrawDistance;
@@ -841,7 +829,6 @@ GraphicsPresetComparable MakeGraphicsPresetComparable(
         s.EnableScreenSpaceGI,
         s.EnableDoF,
         s.EnableDynamicClouds,
-        s.EnableAmbientParticles,
         IsWindEffectsControlVisible() ? s.WindQuality : 0,
         s.EnableGodRays,
         ObjectDrawDistanceMetersToUi(
@@ -865,7 +852,6 @@ bool GraphicsPresetComparableEqual(
         && a.EnableScreenSpaceGI == b.EnableScreenSpaceGI
         && a.EnableDoF == b.EnableDoF
         && a.EnableDynamicClouds == b.EnableDynamicClouds
-        && a.EnableAmbientParticles == b.EnableAmbientParticles
         && a.WindQuality == b.WindQuality
         && a.EnableGodRays == b.EnableGodRays
         && a.OutdoorSmallVobDrawDistance
@@ -886,7 +872,6 @@ void ApplyGraphicsPresets( GothicRendererSettings& s, bool applyRuntimeUpdates =
     // Presets only own the quality controls displayed below the menu separator.
     s.EnableGodRays = true;
     s.EnableDynamicClouds = true;
-    s.EnableAmbientParticles = true;
 
     // Reset all visible effect strengths to their normalized UI defaults.
     s.AOStrength = 1.0f;
@@ -904,7 +889,6 @@ void ApplyGraphicsPresets( GothicRendererSettings& s, bool applyRuntimeUpdates =
         s.EnableScreenSpaceGI = false;
         s.EnableDoF = false;
         s.EnableDynamicClouds = false;
-        s.EnableAmbientParticles = false;
         if ( IsWindEffectsControlVisible() ) s.WindQuality = GothicRendererSettings::EWindQuality::WIND_QUALITY_ADVANCED;
         s.OutdoorSmallVobDrawRadius = ObjectDrawDistanceUiToMeters( 2 );
         s.SectionDrawRadius = 3;
@@ -917,7 +901,6 @@ void ApplyGraphicsPresets( GothicRendererSettings& s, bool applyRuntimeUpdates =
         s.EnableScreenSpaceGI = false;
         s.EnableDoF = true;
         s.EnableDynamicClouds = true;
-        s.EnableAmbientParticles = true;
         if ( IsWindEffectsControlVisible() ) s.WindQuality = GothicRendererSettings::EWindQuality::WIND_QUALITY_ADVANCED;
         s.OutdoorSmallVobDrawRadius = ObjectDrawDistanceUiToMeters( 4 );
         s.SectionDrawRadius = 4;
@@ -930,7 +913,6 @@ void ApplyGraphicsPresets( GothicRendererSettings& s, bool applyRuntimeUpdates =
         s.EnableScreenSpaceGI = false;
         s.EnableDoF = true;
         s.EnableDynamicClouds = true;
-        s.EnableAmbientParticles = true;
         if ( IsWindEffectsControlVisible() ) s.WindQuality = GothicRendererSettings::EWindQuality::WIND_QUALITY_ADVANCED;
         s.OutdoorSmallVobDrawRadius = ObjectDrawDistanceUiToMeters( 6 );
         s.SectionDrawRadius = 5;
@@ -943,7 +925,6 @@ void ApplyGraphicsPresets( GothicRendererSettings& s, bool applyRuntimeUpdates =
         s.EnableScreenSpaceGI = true;
         s.EnableDoF = true;
         s.EnableDynamicClouds = true;
-        s.EnableAmbientParticles = true;
         if ( IsWindEffectsControlVisible() ) s.WindQuality = GothicRendererSettings::EWindQuality::WIND_QUALITY_ADVANCED;
         s.OutdoorSmallVobDrawRadius = ObjectDrawDistanceUiToMeters( 8 );
         s.SectionDrawRadius = 6;
@@ -969,11 +950,8 @@ void ApplyGraphicsPresets( GothicRendererSettings& s, bool applyRuntimeUpdates =
     }
 
     if ( applyRuntimeUpdates ) {
-        SyncAmbientParticlesOption(
-            s.EnableAmbientParticles );
         Engine::GAPI->UpdateTextureMaxSize();
-        Engine::GraphicsEngine->ReloadShaders(
-            ShaderCategory::Other );
+        Engine::GraphicsEngine->ReloadShaders( ShaderCategory::Other );
     }
 }
 
@@ -1021,7 +999,6 @@ namespace
             static_cast<int>(GothicRendererSettings::D3D11_LANGUAGE_ENGLISH),
             static_cast<int>(GothicRendererSettings::D3D11_LANGUAGE_GERMAN) ));
         s.LimitLightIntesity = true;
-        s.VisualFXDrawRadius = VISUAL_FX_DRAW_RADIUS_FIXED;
         s.EnableShadows = true;
         s.ShadowFilterMode = FeatureLevel10Compatibility
             ? GothicRendererSettings::E_ShadowFilterMode::SHADOW_FILTER_SIMPLE
@@ -1612,29 +1589,7 @@ void ImGuiShim::RenderSettingsWindow()
             ImGui::Checkbox( "##Enable Dynamic Clouds", &settings.EnableDynamicClouds );
             ImGui::SetItemTooltip( "%s", Tr( "Enables moving low cloud fields.", u8"Aktiviert bewegte tiefe Wolkenfelder." ) );
 
-              ImText(
-                  Tr(
-                      "Ambient Particles",
-                      u8"Atmosphärenpartikel" ),
-                  {
-                      buttonWidth.x
-                          - ImGui::GetFrameHeight()
-                          - style.ItemSpacing.x,
-                      buttonWidth.y
-                  } );
-              ImGui::SameLine();
-                if ( ImGui::Checkbox(
-                        "##Enable Ambient Particles",
-                        &settings.EnableAmbientParticles ) ) {
-                    SyncAmbientParticlesOption(
-                        settings.EnableAmbientParticles );
-                }
 
-              ImGui::SetItemTooltip(
-                  "%s",
-                  Tr(
-                      "Shows atmospheric particle effects in the environment.",
-                      u8"Zeigt atmosphärische Partikeleffekte in der Umgebung." ) );
 
             ImText( "Screen-Space GI", { buttonWidth.x - ImGui::GetFrameHeight() - style.ItemSpacing.x, buttonWidth.y } ); ImGui::SameLine();
             if ( ImGui::Checkbox( "##Enable Screen-Space GI", &settings.EnableScreenSpaceGI ) ) {

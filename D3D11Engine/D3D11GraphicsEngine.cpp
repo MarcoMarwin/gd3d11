@@ -92,10 +92,6 @@ static void UpdateCharacterInteractionPositions( VS_ExConstantBuffer_Wind& windB
         windBuff.interactionPositions[i] = float4( 0, 0, 0, 0 );
     }
 
-    if ( Engine::GAPI->GetRendererState().RendererSettings.WindQuality == GothicRendererSettings::EWindQuality::WIND_QUALITY_NONE ) {
-        return;
-    }
-
     if ( !Engine::GAPI->GetRendererState().RendererSettings.HeroAffectsObjects ) {
         return;
     }
@@ -7209,8 +7205,14 @@ void XM_CALLCONV D3D11GraphicsEngine::DrawWorldAroundForWorldShadow( FXMVECTOR p
         }
 
         GraphicsShaderConstantBuffer windBuffer = {};
-        if ( ActiveVS &&
-            (Engine::GAPI->GetRendererState().RendererSettings.WindQuality > 0) ) {
+        const auto& windSettings =
+            Engine::GAPI->GetRendererState().RendererSettings;
+
+        if ( ActiveVS
+            && (windSettings.WindQuality
+                    != GothicRendererSettings::EWindQuality::
+                        WIND_QUALITY_NONE
+                || windSettings.HeroAffectsObjects) ) {
             windBuffer = ActiveVS->GetBuffer( "WindParams" );
             windBuffer.Bind();
         }
@@ -7538,7 +7540,7 @@ void D3D11GraphicsEngine::ApplyWindProps( VS_ExConstantBuffer_Wind& windBuff ) {
 
     const auto& settings = Engine::GAPI->GetRendererState().RendererSettings;
     windBuff.characterInteractionStrength =
-        settings.WindQuality != GothicRendererSettings::EWindQuality::WIND_QUALITY_NONE ? 1.0f : 0.0f;
+        settings.HeroAffectsObjects ? 1.0f : 0.0f;
 
     //LogInfo() << windBuff.windDir.x << " " << windBuff.windDir.y << " " << windBuff.windDir.z;
 
@@ -7611,8 +7613,14 @@ XRESULT D3D11GraphicsEngine::DrawVOBsInstanced() {
         SetupVS_ExConstantBuffer();
 
         GraphicsShaderConstantBuffer windBuffer = {};
-        if ( ActiveVS &&
-            (Engine::GAPI->GetRendererState().RendererSettings.WindQuality > 0) ) {
+        const auto& windSettings =
+            Engine::GAPI->GetRendererState().RendererSettings;
+
+        if ( ActiveVS
+            && (windSettings.WindQuality
+                    != GothicRendererSettings::EWindQuality::
+                        WIND_QUALITY_NONE
+                || windSettings.HeroAffectsObjects) ) {
             windBuffer = ActiveVS->GetBuffer( "WindParams" );
             windBuffer.Bind();
         }
@@ -8177,8 +8185,14 @@ XRESULT D3D11GraphicsEngine::DrawFrameAlphaMeshes()
     }
 
     GraphicsShaderConstantBuffer windBuffer = {};
-    if ( ActiveVS &&
-        (Engine::GAPI->GetRendererState().RendererSettings.WindQuality > 0) ) {
+    const auto& windSettings =
+        Engine::GAPI->GetRendererState().RendererSettings;
+
+    if ( ActiveVS
+        && (windSettings.WindQuality
+                != GothicRendererSettings::EWindQuality::
+                    WIND_QUALITY_NONE
+            || windSettings.HeroAffectsObjects) ) {
         windBuffer = ActiveVS->GetBuffer( "WindParams" );
         windBuffer.Bind();
         UpdateCharacterInteractionPositions( g_windBuffer );

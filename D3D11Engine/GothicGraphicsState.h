@@ -568,7 +568,7 @@ struct GothicRendererSettings {
     };
 
     float GetEffectiveVisualFXDrawRadius() const {
-        return std::min( VISUAL_FX_DRAW_RADIUS_FIXED, OutdoorSmallVobDrawRadius );
+        return VISUAL_FX_DRAW_RADIUS_FIXED;
     }
 
     float GetContactShadowFixedStrength() const {
@@ -588,7 +588,6 @@ struct GothicRendererSettings {
         DrawDynamicVOBs = true;
 
         DrawParticleEffects = true;
-        EnableAmbientParticles = true;
 
         DrawSky = true;
         DrawFog = true;
@@ -608,12 +607,6 @@ struct GothicRendererSettings {
         IndoorVobDrawRadius = 5000.0f;
         OutdoorVobDrawRadius = 100000.0f; // Advanced-only large-object distance; F11 presets must not override it.
         SkeletalMeshDrawRadius = 6000.0f;
-        VisualFXDrawRadius = VISUAL_FX_DRAW_RADIUS_FIXED;
-
-#if BUILD_SPACER_NET
-        VisualFXDrawRadius = 16000.0f;
-#endif
-
         OutdoorSmallVobDrawRadius = 10000.0f;
         SmallVobSize = 1500.0f;
 
@@ -701,8 +694,6 @@ struct GothicRendererSettings {
 
         WindQuality = WIND_QUALITY_ADVANCED;
         HeroAffectsObjects = true;
-        HeroAffectsObjectsStrength = 1.0f;
-        HeroAffectsObjectsRadius = 1.0f;
         EnablePointlightShadows = PLS_UPDATE_DYNAMIC;
         PartialDynamicShadowUpdates = true;
         EnableTiledLighting = false;
@@ -894,14 +885,11 @@ struct GothicRendererSettings {
     bool DrawSkeletalMeshes;
     bool DrawMobs;
     bool DrawParticleEffects;
-    bool EnableAmbientParticles;
     bool DrawSky;
     bool DrawFog;
     float FogRange;
     int WindQuality;
     bool HeroAffectsObjects;
-    float HeroAffectsObjectsStrength;
-    float HeroAffectsObjectsRadius;
     bool DrawG1ForestPortals;
     bool DrawRainThroughTransformFeedback;
     bool EnableHDR;
@@ -961,7 +949,6 @@ struct GothicRendererSettings {
     float OutdoorVobDrawRadius;
     float SkeletalMeshDrawRadius;
     float OutdoorSmallVobDrawRadius;
-    float VisualFXDrawRadius;
     float SmallVobSize;
     float WorldShadowRangeScale;
     int NumShadowCascades;

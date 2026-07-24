@@ -1274,8 +1274,6 @@ void GothicAPI::OnWorldLoaded() {
     LoadRendererWorldSettings( RendererState.RendererSettings );
     RendererState.RendererSettings.ApplySkyColorValues( GetSky()->GetDaySkyTexture() == ESkyTexture::ST_OldWorld );
     RendererState.RendererSettings.ApplyWorldNightFogBrightness( LoadedWorldInfo->WorldName == "OLDWORLD" || LoadedWorldInfo->WorldName == "WORLD" );
-    // The removed F11 control stays at Kirides' former maximum value (10).
-    RendererState.RendererSettings.VisualFXDrawRadius = VISUAL_FX_DRAW_RADIUS_FIXED;
 
     // Re-seed weather transitions from the freshly loaded savegame/world.
     if ( GSky* sky = GetSky() ) {
@@ -1402,17 +1400,6 @@ void GothicAPI::SaveRendererGlobalSettings( const GothicRendererSettings& s, con
     WritePrivateProfileStringA( "General", "GraphicsPreset", std::to_string( static_cast<int>(s.GraphicsPreset) ).c_str(), ini.c_str() );
     WritePrivateProfileStringA( "General", "OutdoorSmallVobDrawRadius", std::to_string( s.OutdoorSmallVobDrawRadius ).c_str(), ini.c_str() );
     WritePrivateProfileStringA( "General", "SectionDrawRadius", std::to_string( s.SectionDrawRadius ).c_str(), ini.c_str() );
-
-    const char* hiddenGeneralKeys[] = {
-        "VisualFXDrawRadius", "OutdoorVobDrawRadius", "IndoorVobDrawRadius", "SkeletalMeshDrawRadius"
-    };
-    for ( const char* key : hiddenGeneralKeys ) {
-        WritePrivateProfileStringA( "General", key, nullptr, ini.c_str() );
-    }
-
-    WritePrivateProfileStringA( "Fog", nullptr, nullptr, ini.c_str() );
-    WritePrivateProfileStringA( "Atmosphere", nullptr, nullptr, ini.c_str() );
-    WritePrivateProfileStringA( "Rain", nullptr, nullptr, ini.c_str() );
 }
 /** Goes through the given zCTree and registers all found vobs */
 void GothicAPI::TraverseVobTree( zCTree<zCVob>* tree ) {
@@ -5750,11 +5737,7 @@ XRESULT GothicAPI::SaveMenuSettings( const std::string& file ) {
     WritePrivateProfileStringA( "General", "EnableSSR", std::to_string( s.EnableSSR ? TRUE : FALSE ).c_str(), ini.c_str() );
     WritePrivateProfileStringA( "General", "SSRStrength", std::to_string( s.SSRStrength ).c_str(), ini.c_str() );
     WritePrivateProfileStringA( "General", "EnableContactShadows", std::to_string( s.EnableContactShadows ? TRUE : FALSE ).c_str(), ini.c_str() );
-    WritePrivateProfileStringA( "General", "ContactShadowStrength", nullptr, ini.c_str() );
     WritePrivateProfileStringA( "General", "EnableScreenSpaceGI", std::to_string( s.EnableScreenSpaceGI ? TRUE : FALSE ).c_str(), ini.c_str() );
-    WritePrivateProfileStringA( "General", "ScreenSpaceGIStrength", float_to_string( s.ScreenSpaceGIStrength, 2 ).c_str(), ini.c_str() );
-    WritePrivateProfileStringA( "General", "EnableSSS", nullptr, ini.c_str() );
-    WritePrivateProfileStringA( "General", "SSSIntensity", nullptr, ini.c_str() );
 
     /*
     * F11 draw-distance settings are saved globally in UserSettings.ini
@@ -5770,9 +5753,6 @@ XRESULT GothicAPI::SaveMenuSettings( const std::string& file ) {
     WritePrivateProfileStringA( "Display", "ResolutionScale", std::to_string( s.ResolutionScalePercent ).c_str(), ini.c_str() );
     WritePrivateProfileStringA( "Display", "Upscaler", std::to_string( static_cast<int>(s.Upscaler) ).c_str(), ini.c_str() );
     WritePrivateProfileStringA( "Display", "VSync", std::to_string( s.EnableVSync ? TRUE : FALSE ).c_str(), ini.c_str() );
-    WritePrivateProfileStringA( "Display", "ForceFOV", nullptr, ini.c_str() );
-    WritePrivateProfileStringA( "Display", "FOVHoriz", nullptr, ini.c_str() );
-    WritePrivateProfileStringA( "Display", "FOVVert", nullptr, ini.c_str() );
     WritePrivateProfileStringA( "Display", "DisplayContrast", std::to_string( s.GammaValue ).c_str(), ini.c_str() );
     WritePrivateProfileStringA( "Display", "DisplayBrightness", std::to_string( s.BrightnessValue ).c_str(), ini.c_str() );
     WritePrivateProfileStringA( "Display", "DisplayFlip", std::to_string( s.DisplayFlip ? TRUE : FALSE ).c_str(), ini.c_str() );
@@ -5780,15 +5760,9 @@ XRESULT GothicAPI::SaveMenuSettings( const std::string& file ) {
     WritePrivateProfileStringA( "Display", "StretchWindow", std::to_string( s.StretchWindow ? TRUE : FALSE ).c_str(), ini.c_str() );
     WritePrivateProfileStringA( "Display", "Rain", std::to_string( s.EnableRain ? TRUE : FALSE ).c_str(), ini.c_str() );
     WritePrivateProfileStringA( "Display", "DynamicClouds", std::to_string( s.EnableDynamicClouds ? TRUE : FALSE ).c_str(), ini.c_str() );
-    WritePrivateProfileStringA( "Display", "EnableAmbientParticles", std::to_string( s.EnableAmbientParticles ? TRUE : FALSE ).c_str(), ini.c_str() );
-    WritePrivateProfileStringA( "Detail", nullptr, nullptr, ini.c_str() );
     WritePrivateProfileStringA( "Display", "WindQuality", std::to_string( s.WindQuality ).c_str(), ini.c_str() );
     WritePrivateProfileStringA( "Display", "WindStrength", std::to_string( s.GlobalWindStrength ).c_str(), ini.c_str() );
-    WritePrivateProfileStringA( "Display", "WaterWaveAnimation", nullptr, ini.c_str() );
     WritePrivateProfileStringA( "Display", "HeroAffectsObjects", std::to_string( s.HeroAffectsObjects ? TRUE : FALSE ).c_str(), ini.c_str() );
-    WritePrivateProfileStringA( "Display", "HeroAffectsObjectsStrength", std::to_string( s.HeroAffectsObjectsStrength ).c_str(), ini.c_str() );
-    WritePrivateProfileStringA( "Display", "HeroAffectsObjectsRadius", std::to_string( s.HeroAffectsObjectsRadius ).c_str(), ini.c_str() );
-
     WritePrivateProfileStringA( "Shadows", "ShadowMapSize", std::to_string( s.ShadowMapSize ).c_str(), ini.c_str() );
     WritePrivateProfileStringA( "Shadows", "ShadowSoftness", std::to_string( s.ShadowSoftness ).c_str(), ini.c_str() );
 
@@ -5797,41 +5771,6 @@ XRESULT GothicAPI::SaveMenuSettings( const std::string& file ) {
 
     WritePrivateProfileStringA( "AO", "Mode", std::to_string( static_cast<int>(s.AoMode) ).c_str(), ini.c_str() );
     WritePrivateProfileStringA( "AO", "Strength", float_to_string( s.AOStrength, 2 ).c_str(), ini.c_str() );
-    const char* hiddenUserGeneralKeys[] = {
-        "AtmosphericScattering", "EnableDebugLog", "EnableAutoupdates", "DoFGaussBlur",
-        "DoFFocusDistance", "DoFFocusRange", "DoFMaxBlur", "DoFNearBlurDistance",
-        "DoFNearBlurStrength", "ParallaxOcclusionStrength", "AllowNumpadKeys",
-        "EnableInactiveFpsLock", "MultiThreadResourceManager", "CompressBackBuffer",
-        "AnimateStaticVobs", "DrawWorldSectionIntersections", "SunLightStrength",
-        "DrawG1ForestPortals", "DrawRainThroughTransformFeedback", "EnableParticleLighting",
-        "ParticleLightingStrength", "SharpeningMode"
-    };
-    for ( const char* key : hiddenUserGeneralKeys ) {
-        WritePrivateProfileStringA( "General", key, nullptr, ini.c_str() );
-    }
-
-    const char* hiddenDisplayKeys[] = {
-        "ForceFOV", "FOVHoriz", "FOVVert", "Gamma", "Brightness", "HDR_Monitor", "UIScale",
-        "TiledLighting", "RendererMode"
-    };
-    for ( const char* key : hiddenDisplayKeys ) {
-        WritePrivateProfileStringA( "Display", key, nullptr, ini.c_str() );
-    }
-
-    const char* hiddenShadowKeys[] = {
-        "EnableShadows", "ShadowFilterMode", "PointlightShadowMapSize", "WorldShadowRangeScale",
-        "NumShadowCascades", "ShadowCascadePCFLimit", "ShadowFrustumCullingMode",
-        "PointlightShadows", "EnableDynamicLighting", "SmoothCameraUpdate", "SmoothShadowFrequency",
-        "ShadowStrength", "ShadowAOStrength", "WorldAOStrength"
-    };
-    for ( const char* key : hiddenShadowKeys ) {
-        WritePrivateProfileStringA( "Shadows", key, nullptr, ini.c_str() );
-    }
-
-    WritePrivateProfileStringA( "SMAA", nullptr, nullptr, ini.c_str() );
-    WritePrivateProfileStringA( "XeGTAO", nullptr, nullptr, ini.c_str() );
-    WritePrivateProfileStringA( "FontRendering", nullptr, nullptr, ini.c_str() );
-    WritePrivateProfileStringA( "Debug", nullptr, nullptr, ini.c_str() );
     return XR_SUCCESS;
 }
 
@@ -5896,7 +5835,6 @@ XRESULT GothicAPI::LoadMenuSettings( const std::string& file ) {
         s.WaterCubemapStrength = ds.WaterCubemapStrength;
         s.EnableContactShadows = GetPrivateProfileBoolA( "General", "EnableContactShadows", ds.EnableContactShadows, ini );
         s.EnableScreenSpaceGI = GetPrivateProfileBoolA( "General", "EnableScreenSpaceGI", ds.EnableScreenSpaceGI, ini );
-        s.ScreenSpaceGIStrength = std::clamp( GetPrivateProfileFloatA( "General", "ScreenSpaceGIStrength", ds.ScreenSpaceGIStrength, ini ), 0.0f, 2.0f );
         s.EnableParticleLighting = ds.EnableParticleLighting;
         s.ParticleLightingStrength = ds.ParticleLightingStrength;
         s.EnableSSS = true;
@@ -5996,10 +5934,7 @@ XRESULT GothicAPI::LoadMenuSettings( const std::string& file ) {
 
         s.WindQuality = GetPrivateProfileIntA( "Display", "WindQuality", 0, ini.c_str() );
         s.GlobalWindStrength = std::clamp( GetPrivateProfileFloatA( "Display", "WindStrength", ds.GlobalWindStrength, ini ), 0.0f, 2.0f );
-        s.EnableAmbientParticles = GetPrivateProfileIntA( "Display", "EnableAmbientParticles", ds.EnableAmbientParticles ? 1 : 0, ini.c_str() ) != 0;
         s.EnableWaterAnimation = true;
-        s.HeroAffectsObjectsStrength = std::clamp( GetPrivateProfileFloatA( "Display", "HeroAffectsObjectsStrength", ds.HeroAffectsObjectsStrength, ini ), 0.0f, 2.0f );
-        s.HeroAffectsObjectsRadius = std::clamp( GetPrivateProfileFloatA( "Display", "HeroAffectsObjectsRadius", ds.HeroAffectsObjectsRadius, ini ), 0.0f, 2.0f );
         s.HeroAffectsObjects = GetPrivateProfileIntA( "Display", "HeroAffectsObjects", ds.HeroAffectsObjects ? 1 : 0, ini.c_str() ) != 0;
         s.DynamicCloudDensity = ds.DynamicCloudDensity;
         s.DynamicCloudScale = ds.DynamicCloudScale;
@@ -6135,9 +6070,6 @@ XRESULT GothicAPI::LoadMenuSettings( const std::string& file ) {
     s.EnableWaterAnimation = true;
     s.EnableSSS = true;
     s.SSSIntensity = 1.0f;
-    s.HeroAffectsObjects =
-        s.WindQuality != GothicRendererSettings::EWindQuality::WIND_QUALITY_NONE;
-    s.HeroAffectsObjectsStrength = s.HeroAffectsObjects ? 1.0f : 0.0f;
     s.NightRainMidColor = ds.NightRainMidColor;
     s.NightRainFarColor = ds.NightRainFarColor;
     s.NightRainSkyColor = ds.NightRainSkyColor;
