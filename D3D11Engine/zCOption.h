@@ -80,23 +80,56 @@ public:
     }
 
     /** Reads config stuff */
-    static int __fastcall hooked_zOptionReadBool( void* thisptr, void* unknwn, zSTRING const& section, char const* var, int def ) {
+    static int __fastcall hooked_zOptionReadBool(
+        void* thisptr,
+        void* unknwn,
+        zSTRING const& section,
+        char const* var,
+        int def ) {
+        int r = HookedFunctions::OriginalFunctions.original_zCOptionReadBool(
+            thisptr,
+            section,
+            var,
+            def );
 
-        int r = HookedFunctions::OriginalFunctions.original_zCOptionReadBool( thisptr, section, var, def );
+        if ( _stricmp( section.ToChar(), "ENGINE" ) == 0
+            && _stricmp( var, "noAmbientPFX" ) == 0 ) {
+            const int noAmbientPFX =
+                Engine::GAPI
+                && !Engine::GAPI->GetRendererState()
+                    .RendererSettings.EnableAmbientParticles
+                    ? 1
+                    : 0;
+
+            if ( Engine::GAPI ) {
+                Engine::GAPI->SetIntParamFromConfig(
+                    "noAmbientPFX",
+                    noAmbientPFX );
+            }
+
+            return noAmbientPFX;
+        }
+
         if ( _stricmp( var, "zWaterAniEnabled" ) == 0 ) {
-            Engine::GAPI->SetIntParamFromConfig( "zWaterAniEnabled", 0 );
-            return 0; // Disable water animations
+            Engine::GAPI->SetIntParamFromConfig(
+                "zWaterAniEnabled",
+                0 );
+            return 0;
         } else if ( _stricmp( var, "zStartupWindowed" ) == 0 ) {
-            Engine::GAPI->SetIntParamFromConfig( "zStartupWindowed", r );
+            Engine::GAPI->SetIntParamFromConfig(
+                "zStartupWindowed",
+                r );
             return 1;
         } else if ( _stricmp( var, "gameAbnormalExit" ) == 0 ) {
 #ifndef PUBLIC_RELEASE
-            // No VDFS bullshit when testing
             return 0;
 #endif
         }
 
-        Engine::GAPI->SetIntParamFromConfig( var, r );
+        if ( Engine::GAPI ) {
+            Engine::GAPI->SetIntParamFromConfig( var, r );
+        }
+
         return r;
     }
 

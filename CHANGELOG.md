@@ -2,6 +2,14 @@
 
 Dokumentation der gepushten Renderer-Builds.
 
+## Build 156
+
+- Vegetation Push: Umwandlung in eine reine Checkbox im F11-Menue direkt vor Rain Rendering. Der Verdraengungsradius ist fest auf 1200.0f eingestellt. FixupSettings ueberschreibt HeroAffectsObjects nicht mehr, auch bei deaktiviertem Wind nicht.
+- Screen-Space GI: Umwandlung in eine reine Checkbox ohne Staerke-Slider im F11-Menue. FixupSettings stellt ScreenSpaceGIStrength bei aktivierter Checkbox fest auf 1.0f und bei deaktivierter Checkbox auf 0.0f ein. ScreenSpaceGIStrength wurde aus Preset-Vergleichen entfernt.
+- Ambient Particles & [ENGINE]/noAmbientPFX: Vollstaendige Anbindung von Ambient Particles an Gothics native [ENGINE]/noAmbientPFX-Option via zCOption.h Hook und SyncAmbientParticlesOption in ImGuiShim.cpp. Die Zuordnung der Partikeleffekte erfolgt 1:1 durch Gothics m_bIsAmbientPFX-Feld.
+- Dynamic Clouds Sonnen-Transmission: Ueberarbeitung des Sonnenblocks in PS_PFX_LowClouds.hlsl mit realistischer Transmission (Sonnenkern 18 %, Halo 6 %) und sanfter Wolken-Rueckseiten-Durchleuchtung (backlitCloudColor).
+- Pruefung: Statische Diff-, HLSL-String-, Inhalts-, Zeilenzahl-, Byte- und SHA-256-Hash-Pruefung lokal und direkt im OneDrive-Backup-Ziel; kein vollstaendiger lokaler C++-Build.
+
 ## Build 155
 
 - Partikelbeleuchtung: Trennung von Nacht-RGB-Dimmung (nightDim) und Regen-Alpha-Dimmung (rainAlpha) in PS_ParticleSimple.hlsl und PS_ParticleDistortion.hlsl. Rauch bleibt ueber particleLightingScale (1.0) staerker betroffen als Wasserpartikel (0.25).

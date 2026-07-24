@@ -116,15 +116,70 @@ PS_OUTPUT PSMain( PS_INPUT Input )
     clouds.rgb = lerp( clouds.rgb, nightRainVeilColor, veilAmount );
     clouds.a *= 1.0f - veilAmount * 0.34f;
 
-    float lightDiskMask = saturate( sunCore + sunHalo * 0.42f + moonCore * 0.92f + moonHalo * 0.24f );
-    float cloudCoverAtLight = saturate( clouds.a * 1.90f + globalShadow * 0.86f );
-    float lightCoreMask = saturate( sunCore + moonCore );
-    float lightDiskOcclusion = saturate( lightDiskMask * cloudCoverAtLight ) * lerp( 0.78f, 0.995f, lightCoreMask );
+    float moonDiskMask = saturate( moonCore + moonHalo * 0.24f );
+    float moonCoverAtLight = saturate( clouds.a * 1.90f + globalShadow * 0.86f );
+    float moonDiskOcclusion =
+        saturate( moonDiskMask * moonCoverAtLight )
+        * lerp( 0.78f, 0.995f, moonCore );
 
-    float layerAlpha = saturate( clouds.a + lightDiskOcclusion * ( 1.0f - clouds.a ) );
+    float originalCloudAlpha = saturate( clouds.a );
+
+    float sunTransmissionMask =
+        saturate( sunCore + sunHalo * 0.42f );
+
+    float protectedSunCore = saturate( sunCore );
+    float protectedSunHalo = saturate( sunHalo * ( 1.0f - protectedSunCore ) );
+
+    float minimumSunTransmission =
+        protectedSunCore * 0.18f
+        + protectedSunHalo * 0.06f;
+
+    float maximumSunCloudAlpha =
+        1.0f - saturate( minimumSunTransmission );
+
+    float transmittedCloudAlpha =
+        min( originalCloudAlpha, maximumSunCloudAlpha );
+
+    float mediumDensityGlow =
+        saturate( 1.0f - abs( originalCloudAlpha - 0.48f ) / 0.48f );
+
+    float thinDensityGlow =
+        saturate( 1.0f - originalCloudAlpha );
+
+    float backlightDensity =
+        saturate( mediumDensityGlow * 0.82f + thinDensityGlow * 0.18f );
+
+    float sunBacklightMask =
+        saturate( protectedSunCore + protectedSunHalo * 0.72f )
+        * saturate( sunWeight )
+        * max( 0.0f, AC_LowCloudSunLight );
+
+    float3 transmittedSunColor =
+        lerp(
+            float3( 1.00f, 0.72f, 0.42f ),
+            float3( 1.00f, 0.92f, 0.74f ),
+            saturate( AC_LightPos.y * 2.5f ) );
+
+    float3 backlitCloudColor =
+        clouds.rgb
+        + transmittedSunColor
+        * sunBacklightMask
+        * backlightDensity
+        * 0.62f;
+
+    clouds.rgb = lerp(
+        clouds.rgb,
+        backlitCloudColor,
+        sunTransmissionMask );
+
+    float layerAlpha = saturate(
+        transmittedCloudAlpha
+        + moonDiskOcclusion * ( 1.0f - transmittedCloudAlpha ) );
 
     PS_OUTPUT output;
-    output.Clouds = float4( clouds.rgb * clouds.a, layerAlpha );
+    output.Clouds = float4(
+        clouds.rgb * transmittedCloudAlpha,
+        layerAlpha );
     output.Depth = expDepth;
     return output;
 }

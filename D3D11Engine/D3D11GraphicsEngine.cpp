@@ -96,6 +96,10 @@ static void UpdateCharacterInteractionPositions( VS_ExConstantBuffer_Wind& windB
         return;
     }
 
+    if ( !Engine::GAPI->GetRendererState().RendererSettings.HeroAffectsObjects ) {
+        return;
+    }
+
     zCVob* player = Engine::GAPI->GetPlayerVob();
     if ( !player ) {
         return;
@@ -108,9 +112,7 @@ static void UpdateCharacterInteractionPositions( VS_ExConstantBuffer_Wind& windB
     // influencers around the camera. That keeps the limited influence slots
     // focused on what the player can actually see.
     const XMFLOAT3 interactionSelectionCenter = Engine::GAPI->GetCameraPosition();
-    const auto& settings = Engine::GAPI->GetRendererState().RendererSettings;
-    const float NpcInteractionSearchRadius =
-        1200.0f * std::clamp( settings.HeroAffectsObjectsRadius, 0.0f, 2.0f );
+    const float NpcInteractionSearchRadius = 1200.0f;
     Engine::GAPI->CollectNearbyNpcInteractionPositions(
         interactionSelectionCenter,
         NpcInteractionSearchRadius,

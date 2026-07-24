@@ -7,6 +7,7 @@
 #include <windowsx.h>
 
 #include "zCParser.h"
+#include "zCOption.h"
 #include <map>
 #include <vector>
 #include <algorithm>
@@ -795,6 +796,19 @@ namespace {
         return false;
 #endif
     }
+
+    void SyncAmbientParticlesOption(
+        bool enableAmbientParticles ) {
+        if ( zCOption* options = zCOption::GetOptions() ) {
+            options->WriteString(
+                zSTRING( "ENGINE" ),
+                "noAmbientPFX",
+                zSTRING(
+                    enableAmbientParticles
+                        ? "0"
+                        : "1" ) );
+        }
+    }
 }
 struct GraphicsPresetComparable {
     int textureMaxSize;
@@ -811,7 +825,6 @@ struct GraphicsPresetComparable {
     int OutdoorSmallVobDrawDistance;
     int SectionDrawRadius;
     float AOStrength;
-    float ScreenSpaceGIStrength;
     float DoFBokehRadius;
     float GodRayStrength;
     float GlobalWindStrength;
@@ -835,7 +848,6 @@ GraphicsPresetComparable MakeGraphicsPresetComparable(
             s.OutdoorSmallVobDrawRadius ),
         s.SectionDrawRadius,
         s.AOStrength,
-        s.ScreenSpaceGIStrength,
         s.DoFBokehRadius,
         s.GodRayStrength,
         IsWindEffectsControlVisible() ? s.GlobalWindStrength : 0.0f,
@@ -860,7 +872,6 @@ bool GraphicsPresetComparableEqual(
             == b.OutdoorSmallVobDrawDistance
         && a.SectionDrawRadius == b.SectionDrawRadius
         && a.AOStrength == b.AOStrength
-        && a.ScreenSpaceGIStrength == b.ScreenSpaceGIStrength
         && a.DoFBokehRadius == b.DoFBokehRadius
         && a.GodRayStrength == b.GodRayStrength
         && a.GlobalWindStrength == b.GlobalWindStrength;
@@ -958,8 +969,11 @@ void ApplyGraphicsPresets( GothicRendererSettings& s, bool applyRuntimeUpdates =
     }
 
     if ( applyRuntimeUpdates ) {
+        SyncAmbientParticlesOption(
+            s.EnableAmbientParticles );
         Engine::GAPI->UpdateTextureMaxSize();
-        Engine::GraphicsEngine->ReloadShaders( ShaderCategory::Other );
+        Engine::GraphicsEngine->ReloadShaders(
+            ShaderCategory::Other );
     }
 }
 
@@ -1018,21 +1032,12 @@ namespace
         s.EnableWaterAnimation = true;
         s.EnableSSS = true;
         s.SSSIntensity = 1.0f;
-        const bool windEffectsEnabled =
-            s.WindQuality != GothicRendererSettings::EWindQuality::WIND_QUALITY_NONE;
-        if ( !windEffectsEnabled ) {
-            s.HeroAffectsObjects = false;
-            s.HeroAffectsObjectsStrength = 0.0f;
-            s.HeroAffectsObjectsRadius = 0.0f;
-        } else {
-            s.HeroAffectsObjects = s.HeroAffectsObjectsRadius > 0.001f;
-            s.HeroAffectsObjectsStrength = 1.0f;
-        }
         s.HDRToneMapStrength = std::clamp( s.HDRToneMapStrength, 0.0f, 2.0f );
         // Disabled coupled controls must always display their true zero effect state.
         if ( !s.EnableHDR ) s.HDRToneMapStrength = 0.0f;
         if ( s.AoMode == AOMode::AO_NONE ) s.AOStrength = 0.0f;
-        if ( !s.EnableScreenSpaceGI ) s.ScreenSpaceGIStrength = 0.0f;
+        s.ScreenSpaceGIStrength =
+            s.EnableScreenSpaceGI ? 1.0f : 0.0f;
         if ( !s.EnableGodRays ) s.GodRayStrength = 0.0f;
         if ( !s.EnableSSR ) s.SSRStrength = 0.0f;
 
@@ -1438,6 +1443,10 @@ void ImGuiShim::RenderSettingsWindow()
             }
             ImGui::SetItemTooltip( "%s", Tr( "Makes water reflections weaker or stronger.", u8"Macht Wasserreflexionen schw\u00E4cher oder st\u00E4rker." ) );
 
+            ImText( Tr( "Vegetation Push", u8"Vegetationsverdrängung" ), { buttonWidth.x - ImGui::GetFrameHeight() - style.ItemSpacing.x, buttonWidth.y } ); ImGui::SameLine();
+            ImGui::Checkbox( "##Enable Vegetation Push", &settings.HeroAffectsObjects );
+            ImGui::SetItemTooltip( "%s", Tr( "Lets nearby vegetation move aside when the player passes through it.", u8"Lässt nahe Vegetation beim Durchlaufen zur Seite weichen." ) );
+
             ImText( Tr( "Rain Rendering", u8"Regendarstellung" ), { buttonWidth.x - ImGui::GetFrameHeight() - style.ItemSpacing.x, buttonWidth.y } ); ImGui::SameLine();
             ImGui::Checkbox( "##Enable Rain", &settings.EnableRain );
             ImGui::SetItemTooltip( "%s", Tr( "Enables rain and rain effects.", u8"Aktiviert Regen und Regeneffekte." ) );
@@ -1584,9 +1593,6 @@ void ImGuiShim::RenderSettingsWindow()
                 }
                 ImGui::SetItemTooltip( "%s", Tr( "Makes vegetation move more or less strongly in the wind.", u8"L\u00E4sst Vegetation sich schw\u00E4cher oder st\u00E4rker im Wind bewegen." ) );
 
-                ImText( Tr( "Vegetation Displacement", u8"Vegetationsverdr\u00E4ngung" ), buttonWidth ); ImGui::SameLine();
-                SliderNormalizedUiStrength( "##HeroAffectsObjectsRadius", &settings.HeroAffectsObjectsRadius );
-                ImGui::SetItemTooltip( "%s", Tr( "Sets how far nearby vegetation is pushed aside.", u8"Bestimmt, wie weit Vegetation in der N\u00E4he verdr\u00E4ngt wird." ) );
             }
 #endif //BUILD_GOTHIC_2_6_fix
 
@@ -1606,25 +1612,36 @@ void ImGuiShim::RenderSettingsWindow()
             ImGui::Checkbox( "##Enable Dynamic Clouds", &settings.EnableDynamicClouds );
             ImGui::SetItemTooltip( "%s", Tr( "Enables moving low cloud fields.", u8"Aktiviert bewegte tiefe Wolkenfelder." ) );
 
-            ImText( Tr( "Ambient Particles", u8"Atmosph\u00E4renpartikel" ), { buttonWidth.x - ImGui::GetFrameHeight() - style.ItemSpacing.x, buttonWidth.y } ); ImGui::SameLine();
-            ImGui::Checkbox( "##Enable Ambient Particles", &settings.EnableAmbientParticles );
-            ImGui::SetItemTooltip( "%s", Tr( "Shows atmospheric particles in the environment.", u8"Zeigt atmosph\u00E4rische Partikel in der Umgebung." ) );
+              ImText(
+                  Tr(
+                      "Ambient Particles",
+                      u8"Atmosphärenpartikel" ),
+                  {
+                      buttonWidth.x
+                          - ImGui::GetFrameHeight()
+                          - style.ItemSpacing.x,
+                      buttonWidth.y
+                  } );
+              ImGui::SameLine();
+                if ( ImGui::Checkbox(
+                        "##Enable Ambient Particles",
+                        &settings.EnableAmbientParticles ) ) {
+                    SyncAmbientParticlesOption(
+                        settings.EnableAmbientParticles );
+                }
+
+              ImGui::SetItemTooltip(
+                  "%s",
+                  Tr(
+                      "Shows atmospheric particle effects in the environment.",
+                      u8"Zeigt atmosphärische Partikeleffekte in der Umgebung." ) );
 
             ImText( "Screen-Space GI", { buttonWidth.x - ImGui::GetFrameHeight() - style.ItemSpacing.x, buttonWidth.y } ); ImGui::SameLine();
-            if ( CoupledStrengthCheckbox( "##Enable Screen-Space GI", "ScreenSpaceGIStrength",
-                    &settings.EnableScreenSpaceGI, &settings.ScreenSpaceGIStrength, 1.0f ) ) {
+            if ( ImGui::Checkbox( "##Enable Screen-Space GI", &settings.EnableScreenSpaceGI ) ) {
+                settings.ScreenSpaceGIStrength = settings.EnableScreenSpaceGI ? 1.0f : 0.0f;
                 shadersToReload |= ShaderCategory::Other;
             }
-            ImGui::SetItemTooltip( "%s", Tr( "Adds soft indirect light reflected from nearby surfaces throughout the scene.", u8"F\u00FCgt in der gesamten Szene weiches, von nahen Oberfl\u00E4chen reflektiertes Licht hinzu." ) );
-            ImGui::SameLine();
-            ImGui::SetNextItemWidth( standardComboWidth );
-            const bool screenSpaceGIBeforeSlider = settings.EnableScreenSpaceGI;
-            if ( CoupledStrengthSlider( "##ScreenSpaceGIStrength", "ScreenSpaceGIStrength",
-                    &settings.EnableScreenSpaceGI, &settings.ScreenSpaceGIStrength )
-                && screenSpaceGIBeforeSlider != settings.EnableScreenSpaceGI ) {
-                shadersToReload |= ShaderCategory::Other;
-            }
-            ImGui::SetItemTooltip( "%s", Tr( "Makes indirect lighting weaker or stronger.", u8"Macht die indirekte Beleuchtung schw\u00E4cher oder st\u00E4rker." ) );
+            ImGui::SetItemTooltip( "%s", Tr( "Enables soft indirect lighting from nearby surfaces.", u8"Aktiviert weiches indirektes Licht von nahen Oberflächen." ) );
 
             ImText( Tr( "Contact Shadows", u8"Kontaktschatten" ), { buttonWidth.x - ImGui::GetFrameHeight() - style.ItemSpacing.x, buttonWidth.y } ); ImGui::SameLine();
             if ( ImGui::Checkbox( "##Enable Contact Shadows", &settings.EnableContactShadows ) ) {

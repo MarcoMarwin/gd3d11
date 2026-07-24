@@ -3362,12 +3362,15 @@ void GothicAPI::DrawParticleFX( zCVob* source, zCParticleFX* fx, ParticleFrameDa
             }
         }
 
-        const bool waterfallParticle = IsWaterfallParticleTexture( texture );
-        const bool groundFogParticle = IsGroundFogParticleVob( source ) || IsGroundFogParticleTexture( texture );
-        if ( groundFogParticle && !RendererState.RendererSettings.EnableAmbientParticles ) {
-            return;
-        }
-        const bool smokeOrFogParticle = groundFogParticle
+        const bool waterfallParticle =
+            IsWaterfallParticleTexture( texture );
+
+        const bool groundFogParticle =
+            IsGroundFogParticleVob( source )
+            || IsGroundFogParticleTexture( texture );
+
+        const bool smokeOrFogParticle =
+            groundFogParticle
             || IsSmokeParticleVob( source )
             || IsSmokeParticleTexture( texture );
         const int sourceBlendMode = static_cast<int>(fx->GetEmitter()->GetVisAlphaFunc());
@@ -5997,7 +6000,7 @@ XRESULT GothicAPI::LoadMenuSettings( const std::string& file ) {
         s.EnableWaterAnimation = true;
         s.HeroAffectsObjectsStrength = std::clamp( GetPrivateProfileFloatA( "Display", "HeroAffectsObjectsStrength", ds.HeroAffectsObjectsStrength, ini ), 0.0f, 2.0f );
         s.HeroAffectsObjectsRadius = std::clamp( GetPrivateProfileFloatA( "Display", "HeroAffectsObjectsRadius", ds.HeroAffectsObjectsRadius, ini ), 0.0f, 2.0f );
-        s.HeroAffectsObjects = s.HeroAffectsObjectsStrength > 0.001f;
+        s.HeroAffectsObjects = GetPrivateProfileIntA( "Display", "HeroAffectsObjects", ds.HeroAffectsObjects ? 1 : 0, ini.c_str() ) != 0;
         s.DynamicCloudDensity = ds.DynamicCloudDensity;
         s.DynamicCloudScale = ds.DynamicCloudScale;
         s.DynamicCloudHeight = ds.DynamicCloudHeight;
@@ -6026,12 +6029,10 @@ XRESULT GothicAPI::LoadMenuSettings( const std::string& file ) {
         if ( !s.EnableGodRays ) s.GodRayStrength = 0.0f;
         if ( !s.EnableDoF ) s.DoFBokehRadius = 0.0f;
         if ( !s.EnableSSR ) s.SSRStrength = 0.0f;
-        if ( !s.EnableScreenSpaceGI ) s.ScreenSpaceGIStrength = 0.0f;
+        s.ScreenSpaceGIStrength = s.EnableScreenSpaceGI ? 1.0f : 0.0f;
         s.SSSIntensity = 1.0f;
         if ( s.WindQuality == GothicRendererSettings::EWindQuality::WIND_QUALITY_NONE ) {
             s.GlobalWindStrength = 0.0f;
-            s.HeroAffectsObjects = false;
-            s.HeroAffectsObjectsStrength = 0.0f;
         }
         if ( s.AoMode == AOMode::AO_NONE ) s.AOStrength = 0.0f;
         s.XegtaoSettings = ds.XegtaoSettings;
