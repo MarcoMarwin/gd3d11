@@ -235,6 +235,16 @@ float4 PSMain( PS_INPUT Input ) : SV_TARGET
         clouds.a = cloudAlpha;
     }
 
-    scene.rgb = scene.rgb * (1.0f - cloudAlpha) + clouds.rgb;
+    float2 sunDelta = Input.vTexcoord - AC_LightScreenPos.xy;
+    float sunDistance = length(sunDelta);
+    float sunScreenVisibility = saturate(AC_LightScreenPos.z) * saturate(AC_SunVisibility);
+    float sunCoreMask = (1.0f - smoothstep(0.006f, 0.020f, sunDistance)) * sunScreenVisibility;
+    float sunBloomMask = (1.0f - smoothstep(0.020f, 0.070f, sunDistance)) * sunScreenVisibility;
+    float sunHaloMask = (1.0f - smoothstep(0.070f, 0.160f, sunDistance)) * sunScreenVisibility;
+    float preservedSunTransmission = max(
+        sunCoreMask * 0.30f,
+        max(sunBloomMask * 0.18f, sunHaloMask * 0.10f));
+    float effectiveCloudAlpha = min(cloudAlpha, 1.0f - preservedSunTransmission);
+    scene.rgb = scene.rgb * (1.0f - effectiveCloudAlpha) + clouds.rgb;
     return scene;
 }

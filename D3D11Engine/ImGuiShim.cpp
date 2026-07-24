@@ -1420,15 +1420,17 @@ void ImGuiShim::RenderSettingsWindow()
             }
             ImGui::SetItemTooltip( "%s", Tr( "Makes water reflections weaker or stronger.", u8"Macht Wasserreflexionen schw\u00E4cher oder st\u00E4rker." ) );
 
-            ImText( Tr( "Vegetation Push", u8"Vegetationsverdrängung" ), { buttonWidth.x - ImGui::GetFrameHeight() - style.ItemSpacing.x, buttonWidth.y } ); ImGui::SameLine();
-            ImGui::Checkbox( "##Enable Vegetation Push", &settings.HeroAffectsObjects );
-            ImGui::SetItemTooltip( "%s", Tr( "Lets nearby vegetation move aside when the player passes through it.", u8"Lässt nahe Vegetation beim Durchlaufen zur Seite weichen." ) );
+            ImText( Tr( "Vegetation Push", u8"Vegetationsverdr\u00E4ngung" ), { buttonWidth.x - ImGui::GetFrameHeight() - style.ItemSpacing.x, buttonWidth.y } ); ImGui::SameLine();
+            if ( ImGui::Checkbox( "##Enable Vegetation Push", &settings.HeroAffectsObjects ) )
+            {
+                shadersToReload |= ShaderCategory::Vertex;
+            }
+            ImGui::SetItemTooltip( "%s", Tr( "Lets nearby vegetation move aside when the player passes through it.", u8"L\u00E4sst nahe Vegetation beim Durchlaufen zur Seite weichen." ) );
 
             ImText( Tr( "Rain Rendering", u8"Regendarstellung" ), { buttonWidth.x - ImGui::GetFrameHeight() - style.ItemSpacing.x, buttonWidth.y } ); ImGui::SameLine();
-            ImGui::Checkbox( "##Enable Rain", &settings.EnableRain );
-            ImGui::SetItemTooltip( "%s", Tr( "Enables rain and rain effects.", u8"Aktiviert Regen und Regeneffekte." ) );
-            ImGui::Dummy( ImVec2( 1.0f, ImGui::GetFrameHeight() ) );
-            ImGui::EndGroup();
+ImGui::Checkbox( "##Enable Rain", &settings.EnableRain );
+		ImGui::SetItemTooltip( "%s", Tr( "Enables rain and rain effects.", u8"Aktiviert Regen und Regeneffekte." ) );
+	ImGui::EndGroup();
         }
 
         ImGui::Separator();
@@ -1596,7 +1598,7 @@ void ImGuiShim::RenderSettingsWindow()
                 settings.ScreenSpaceGIStrength = settings.EnableScreenSpaceGI ? 1.0f : 0.0f;
                 shadersToReload |= ShaderCategory::Other;
             }
-            ImGui::SetItemTooltip( "%s", Tr( "Enables soft indirect lighting from nearby surfaces.", u8"Aktiviert weiches indirektes Licht von nahen Oberflächen." ) );
+            ImGui::SetItemTooltip( "%s", Tr( "Enables soft indirect lighting from nearby surfaces.", u8"Aktiviert weiches indirektes Licht von nahen Oberfl\u00E4chen." ) );
 
             ImText( Tr( "Contact Shadows", u8"Kontaktschatten" ), { buttonWidth.x - ImGui::GetFrameHeight() - style.ItemSpacing.x, buttonWidth.y } ); ImGui::SameLine();
             if ( ImGui::Checkbox( "##Enable Contact Shadows", &settings.EnableContactShadows ) ) {
