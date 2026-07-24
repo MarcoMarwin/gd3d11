@@ -804,8 +804,9 @@ struct GraphicsPresetComparable {
     bool EnableContactShadows;
     bool EnableScreenSpaceGI;
     bool EnableDoF;
+    bool EnableDynamicClouds;
+    bool EnableAmbientParticles;
     int WindQuality;
-    bool EnableSSR;
     bool EnableGodRays;
     int OutdoorSmallVobDrawDistance;
     int SectionDrawRadius;
@@ -813,7 +814,6 @@ struct GraphicsPresetComparable {
     float ScreenSpaceGIStrength;
     float DoFBokehRadius;
     float GodRayStrength;
-    float SSRStrength;
     float GlobalWindStrength;
 };
 
@@ -827,8 +827,9 @@ GraphicsPresetComparable MakeGraphicsPresetComparable(
         s.EnableContactShadows,
         s.EnableScreenSpaceGI,
         s.EnableDoF,
+        s.EnableDynamicClouds,
+        s.EnableAmbientParticles,
         IsWindEffectsControlVisible() ? s.WindQuality : 0,
-        s.EnableSSR,
         s.EnableGodRays,
         ObjectDrawDistanceMetersToUi(
             s.OutdoorSmallVobDrawRadius ),
@@ -837,7 +838,6 @@ GraphicsPresetComparable MakeGraphicsPresetComparable(
         s.ScreenSpaceGIStrength,
         s.DoFBokehRadius,
         s.GodRayStrength,
-        s.SSRStrength,
         IsWindEffectsControlVisible() ? s.GlobalWindStrength : 0.0f,
     };
 }
@@ -852,8 +852,9 @@ bool GraphicsPresetComparableEqual(
         && a.EnableContactShadows == b.EnableContactShadows
         && a.EnableScreenSpaceGI == b.EnableScreenSpaceGI
         && a.EnableDoF == b.EnableDoF
+        && a.EnableDynamicClouds == b.EnableDynamicClouds
+        && a.EnableAmbientParticles == b.EnableAmbientParticles
         && a.WindQuality == b.WindQuality
-        && a.EnableSSR == b.EnableSSR
         && a.EnableGodRays == b.EnableGodRays
         && a.OutdoorSmallVobDrawDistance
             == b.OutdoorSmallVobDrawDistance
@@ -862,7 +863,6 @@ bool GraphicsPresetComparableEqual(
         && a.ScreenSpaceGIStrength == b.ScreenSpaceGIStrength
         && a.DoFBokehRadius == b.DoFBokehRadius
         && a.GodRayStrength == b.GodRayStrength
-        && a.SSRStrength == b.SSRStrength
         && a.GlobalWindStrength == b.GlobalWindStrength;
 }
 
@@ -873,14 +873,14 @@ void ApplyGraphicsPresets( GothicRendererSettings& s, bool applyRuntimeUpdates =
     }
 
     // Presets only own the quality controls displayed below the menu separator.
-    s.EnableSSR = true;
     s.EnableGodRays = true;
+    s.EnableDynamicClouds = true;
+    s.EnableAmbientParticles = true;
 
     // Reset all visible effect strengths to their normalized UI defaults.
     s.AOStrength = 1.0f;
     s.ScreenSpaceGIStrength = 1.0f;
     s.GodRayStrength = 1.0f;
-    s.SSRStrength = 1.0f;
     s.DoFBokehRadius = 3.5f;
     if ( IsWindEffectsControlVisible() ) s.GlobalWindStrength = 1.0f;
     s.ShadowSoftness = 1.0f;
@@ -892,6 +892,8 @@ void ApplyGraphicsPresets( GothicRendererSettings& s, bool applyRuntimeUpdates =
         s.EnableContactShadows = false;
         s.EnableScreenSpaceGI = false;
         s.EnableDoF = false;
+        s.EnableDynamicClouds = false;
+        s.EnableAmbientParticles = false;
         if ( IsWindEffectsControlVisible() ) s.WindQuality = GothicRendererSettings::EWindQuality::WIND_QUALITY_ADVANCED;
         s.OutdoorSmallVobDrawRadius = ObjectDrawDistanceUiToMeters( 2 );
         s.SectionDrawRadius = 3;
@@ -903,6 +905,8 @@ void ApplyGraphicsPresets( GothicRendererSettings& s, bool applyRuntimeUpdates =
         s.EnableContactShadows = true;
         s.EnableScreenSpaceGI = false;
         s.EnableDoF = true;
+        s.EnableDynamicClouds = true;
+        s.EnableAmbientParticles = true;
         if ( IsWindEffectsControlVisible() ) s.WindQuality = GothicRendererSettings::EWindQuality::WIND_QUALITY_ADVANCED;
         s.OutdoorSmallVobDrawRadius = ObjectDrawDistanceUiToMeters( 4 );
         s.SectionDrawRadius = 4;
@@ -914,6 +918,8 @@ void ApplyGraphicsPresets( GothicRendererSettings& s, bool applyRuntimeUpdates =
         s.EnableContactShadows = true;
         s.EnableScreenSpaceGI = false;
         s.EnableDoF = true;
+        s.EnableDynamicClouds = true;
+        s.EnableAmbientParticles = true;
         if ( IsWindEffectsControlVisible() ) s.WindQuality = GothicRendererSettings::EWindQuality::WIND_QUALITY_ADVANCED;
         s.OutdoorSmallVobDrawRadius = ObjectDrawDistanceUiToMeters( 6 );
         s.SectionDrawRadius = 5;
@@ -925,6 +931,8 @@ void ApplyGraphicsPresets( GothicRendererSettings& s, bool applyRuntimeUpdates =
         s.EnableContactShadows = true;
         s.EnableScreenSpaceGI = true;
         s.EnableDoF = true;
+        s.EnableDynamicClouds = true;
+        s.EnableAmbientParticles = true;
         if ( IsWindEffectsControlVisible() ) s.WindQuality = GothicRendererSettings::EWindQuality::WIND_QUALITY_ADVANCED;
         s.OutdoorSmallVobDrawRadius = ObjectDrawDistanceUiToMeters( 8 );
         s.SectionDrawRadius = 6;
@@ -937,7 +945,6 @@ void ApplyGraphicsPresets( GothicRendererSettings& s, bool applyRuntimeUpdates =
     if ( s.AoMode == AOMode::AO_NONE ) s.AOStrength = 0.0f;
     if ( !s.EnableScreenSpaceGI ) s.ScreenSpaceGIStrength = 0.0f;
     if ( !s.EnableGodRays ) s.GodRayStrength = 0.0f;
-    if ( !s.EnableSSR ) s.SSRStrength = 0.0f;
     if ( !s.EnableDoF ) s.DoFBokehRadius = 0.0f;
     if ( IsWindEffectsControlVisible() && s.WindQuality == GothicRendererSettings::EWindQuality::WIND_QUALITY_NONE ) s.GlobalWindStrength = 0.0f;
 
@@ -1013,8 +1020,14 @@ namespace
         s.SSSIntensity = 1.0f;
         const bool windEffectsEnabled =
             s.WindQuality != GothicRendererSettings::EWindQuality::WIND_QUALITY_NONE;
-        s.HeroAffectsObjects = windEffectsEnabled;
-        s.HeroAffectsObjectsStrength = windEffectsEnabled ? 1.0f : 0.0f;
+        if ( !windEffectsEnabled ) {
+            s.HeroAffectsObjects = false;
+            s.HeroAffectsObjectsStrength = 0.0f;
+            s.HeroAffectsObjectsRadius = 0.0f;
+        } else {
+            s.HeroAffectsObjects = s.HeroAffectsObjectsRadius > 0.001f;
+            s.HeroAffectsObjectsStrength = 1.0f;
+        }
         s.HDRToneMapStrength = std::clamp( s.HDRToneMapStrength, 0.0f, 2.0f );
         // Disabled coupled controls must always display their true zero effect state.
         if ( !s.EnableHDR ) s.HDRToneMapStrength = 0.0f;
@@ -1405,13 +1418,29 @@ void ImGuiShim::RenderSettingsWindow()
             }
             ImGui::SetItemTooltip( "%s", Tr( "Adjusts highlight compression and exposure balancing.", u8"Regelt die Zeichnung heller Bereiche und den Belichtungsausgleich." ) );
 
+            bool waterReflections = settings.EnableSSR;
+            ImText( Tr( "Water Reflections", u8"Wasserreflektionen" ), { buttonWidth.x - ImGui::GetFrameHeight() - style.ItemSpacing.x, buttonWidth.y } ); ImGui::SameLine();
+            if ( CoupledStrengthCheckbox( "##Enable Water Reflections", "WaterReflectionsStrength",
+                    &waterReflections, &settings.SSRStrength, 1.0f ) ) {
+                settings.EnableSSR = waterReflections;
+                shadersToReload |= ShaderCategory::Water;
+            }
+            ImGui::SetItemTooltip( "%s", Tr( "Enables reflections on water surfaces.", u8"Aktiviert Reflexionen auf Wasseroberfl\u00E4chen." ) );
+            ImGui::SameLine();
+            ImGui::SetNextItemWidth( standardComboWidth );
+            const bool waterReflectionsBeforeSlider = waterReflections;
+            if ( CoupledStrengthSlider( "##WaterReflectionsStrength", "WaterReflectionsStrength",
+                    &waterReflections, &settings.SSRStrength ) ) {
+                settings.EnableSSR = waterReflections;
+                if ( waterReflectionsBeforeSlider != waterReflections ) {
+                    shadersToReload |= ShaderCategory::Water;
+                }
+            }
+            ImGui::SetItemTooltip( "%s", Tr( "Makes water reflections weaker or stronger.", u8"Macht Wasserreflexionen schw\u00E4cher oder st\u00E4rker." ) );
+
             ImText( Tr( "Rain Rendering", u8"Regendarstellung" ), { buttonWidth.x - ImGui::GetFrameHeight() - style.ItemSpacing.x, buttonWidth.y } ); ImGui::SameLine();
             ImGui::Checkbox( "##Enable Rain", &settings.EnableRain );
             ImGui::SetItemTooltip( "%s", Tr( "Enables rain and rain effects.", u8"Aktiviert Regen und Regeneffekte." ) );
-
-            ImText( Tr( "Dynamic Clouds", u8"Dynamische Wolken" ), { buttonWidth.x - ImGui::GetFrameHeight() - style.ItemSpacing.x, buttonWidth.y } ); ImGui::SameLine();
-            ImGui::Checkbox( "##Enable Dynamic Clouds", &settings.EnableDynamicClouds );
-            ImGui::SetItemTooltip( "%s", Tr( "Enables moving low cloud fields.", u8"Aktiviert bewegte tiefe Wolkenfelder." ) );
             ImGui::Dummy( ImVec2( 1.0f, ImGui::GetFrameHeight() ) );
             ImGui::EndGroup();
         }
@@ -1526,26 +1555,6 @@ void ImGuiShim::RenderSettingsWindow()
             }
             ImGui::SetItemTooltip( "%s", Tr( "Makes sunlight beams weaker or stronger.", u8"Macht Sonnenstrahlen schw\u00E4cher oder st\u00E4rker." ) );
 
-            bool waterReflections = settings.EnableSSR;
-            ImText( Tr( "Water Reflections", u8"Wasserreflektionen" ), { buttonWidth.x - ImGui::GetFrameHeight() - style.ItemSpacing.x, buttonWidth.y } ); ImGui::SameLine();
-            if ( CoupledStrengthCheckbox( "##Enable Water Reflections", "WaterReflectionsStrength",
-                    &waterReflections, &settings.SSRStrength, 1.0f ) ) {
-                settings.EnableSSR = waterReflections;
-                shadersToReload |= ShaderCategory::Water;
-            }
-            ImGui::SetItemTooltip( "%s", Tr( "Enables reflections on water surfaces.", u8"Aktiviert Reflexionen auf Wasseroberfl\u00E4chen." ) );
-            ImGui::SameLine();
-            ImGui::SetNextItemWidth( standardComboWidth );
-            const bool waterReflectionsBeforeSlider = waterReflections;
-            if ( CoupledStrengthSlider( "##WaterReflectionsStrength", "WaterReflectionsStrength",
-                    &waterReflections, &settings.SSRStrength ) ) {
-                settings.EnableSSR = waterReflections;
-                if ( waterReflectionsBeforeSlider != waterReflections ) {
-                    shadersToReload |= ShaderCategory::Water;
-                }
-            }
-            ImGui::SetItemTooltip( "%s", Tr( "Makes water reflections weaker or stronger.", u8"Macht Wasserreflexionen schw\u00E4cher oder st\u00E4rker." ) );
-
 #if defined(BUILD_GOTHIC_2_6_fix) || (defined(BUILD_GOTHIC_1_08k) && !defined(BUILD_1_12F))
 #if defined(BUILD_GOTHIC_1_08k) && !defined(BUILD_1_12F)
             if ( haveWindAnimations )
@@ -1574,6 +1583,10 @@ void ImGuiShim::RenderSettingsWindow()
                     }
                 }
                 ImGui::SetItemTooltip( "%s", Tr( "Makes vegetation move more or less strongly in the wind.", u8"L\u00E4sst Vegetation sich schw\u00E4cher oder st\u00E4rker im Wind bewegen." ) );
+
+                ImText( Tr( "Vegetation Displacement", u8"Vegetationsverdr\u00E4ngung" ), buttonWidth ); ImGui::SameLine();
+                SliderNormalizedUiStrength( "##HeroAffectsObjectsRadius", &settings.HeroAffectsObjectsRadius );
+                ImGui::SetItemTooltip( "%s", Tr( "Sets how far nearby vegetation is pushed aside.", u8"Bestimmt, wie weit Vegetation in der N\u00E4he verdr\u00E4ngt wird." ) );
             }
 #endif //BUILD_GOTHIC_2_6_fix
 
@@ -1588,6 +1601,14 @@ void ImGuiShim::RenderSettingsWindow()
                 &settings.EnableDoF, &depthOfFieldStrength );
             settings.DoFBokehRadius = depthOfFieldStrength * 3.5f;
             ImGui::SetItemTooltip( "%s", Tr( "Makes out-of-focus areas clearer or more blurred.", u8"Macht unscharfe Bereiche klarer oder verschwommener." ) );
+
+            ImText( Tr( "Dynamic Clouds", u8"Dynamische Wolken" ), { buttonWidth.x - ImGui::GetFrameHeight() - style.ItemSpacing.x, buttonWidth.y } ); ImGui::SameLine();
+            ImGui::Checkbox( "##Enable Dynamic Clouds", &settings.EnableDynamicClouds );
+            ImGui::SetItemTooltip( "%s", Tr( "Enables moving low cloud fields.", u8"Aktiviert bewegte tiefe Wolkenfelder." ) );
+
+            ImText( Tr( "Ambient Particles", u8"Atmosph\u00E4renpartikel" ), { buttonWidth.x - ImGui::GetFrameHeight() - style.ItemSpacing.x, buttonWidth.y } ); ImGui::SameLine();
+            ImGui::Checkbox( "##Enable Ambient Particles", &settings.EnableAmbientParticles );
+            ImGui::SetItemTooltip( "%s", Tr( "Shows atmospheric particles in the environment.", u8"Zeigt atmosph\u00E4rische Partikel in der Umgebung." ) );
 
             ImText( "Screen-Space GI", { buttonWidth.x - ImGui::GetFrameHeight() - style.ItemSpacing.x, buttonWidth.y } ); ImGui::SameLine();
             if ( CoupledStrengthCheckbox( "##Enable Screen-Space GI", "ScreenSpaceGIStrength",

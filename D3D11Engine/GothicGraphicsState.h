@@ -588,6 +588,7 @@ struct GothicRendererSettings {
         DrawDynamicVOBs = true;
 
         DrawParticleEffects = true;
+        EnableAmbientParticles = true;
 
         DrawSky = true;
         DrawFog = true;
@@ -701,6 +702,7 @@ struct GothicRendererSettings {
         WindQuality = WIND_QUALITY_ADVANCED;
         HeroAffectsObjects = true;
         HeroAffectsObjectsStrength = 1.0f;
+        HeroAffectsObjectsRadius = 1.0f;
         EnablePointlightShadows = PLS_UPDATE_DYNAMIC;
         PartialDynamicShadowUpdates = true;
         EnableTiledLighting = false;
@@ -892,12 +894,14 @@ struct GothicRendererSettings {
     bool DrawSkeletalMeshes;
     bool DrawMobs;
     bool DrawParticleEffects;
+    bool EnableAmbientParticles;
     bool DrawSky;
     bool DrawFog;
     float FogRange;
     int WindQuality;
     bool HeroAffectsObjects;
     float HeroAffectsObjectsStrength;
+    float HeroAffectsObjectsRadius;
     bool DrawG1ForestPortals;
     bool DrawRainThroughTransformFeedback;
     bool EnableHDR;

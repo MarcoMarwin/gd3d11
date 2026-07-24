@@ -28,17 +28,22 @@ struct PS_INPUT
     float4 vPosition        : SV_POSITION;
 };
 
-float3 AdaptParticleLighting(float3 rgb, float particleLightingScale)
+float4 AdaptParticleLighting(float4 color, float particleLightingScale)
 {
     if (particleLightingScale < 0.0f)
-        return rgb;
+        return color;
 
     float night = saturate((-AC_LightPos.y + 0.08f) * 2.5f);
     float rain = max(saturate(AC_RainFXWeight), saturate(AC_SceneWettness));
-    float weatherDim = max(night, rain);
-    float nonEmissiveDim = lerp(1.0f, 0.24f, weatherDim);
     float strength = saturate(AC_EnableParticleLighting * AC_ParticleLightingStrength) * saturate(particleLightingScale);
-    return rgb * lerp(1.0f, nonEmissiveDim, strength);
+
+    float nightDim = lerp(1.0f, 0.24f, night);
+    color.rgb *= lerp(1.0f, nightDim, strength);
+
+    float rainAlpha = lerp(1.0f, 0.24f, rain);
+    color.a *= lerp(1.0f, rainAlpha, strength);
+
+    return color;
 }
 
 float4 PSMain( PS_INPUT Input ) : SV_TARGET
@@ -48,6 +53,6 @@ float4 PSMain( PS_INPUT Input ) : SV_TARGET
 #ifdef USE_FFDATA
     color *= cbFFData.textureFactor;
 #endif
-    color.rgb = AdaptParticleLighting(color.rgb, Input.vParticleLightingScale);
+    color = AdaptParticleLighting(color, Input.vParticleLightingScale);
     return color;
 }

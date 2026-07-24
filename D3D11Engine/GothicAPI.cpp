@@ -3364,6 +3364,9 @@ void GothicAPI::DrawParticleFX( zCVob* source, zCParticleFX* fx, ParticleFrameDa
 
         const bool waterfallParticle = IsWaterfallParticleTexture( texture );
         const bool groundFogParticle = IsGroundFogParticleVob( source ) || IsGroundFogParticleTexture( texture );
+        if ( groundFogParticle && !RendererState.RendererSettings.EnableAmbientParticles ) {
+            return;
+        }
         const bool smokeOrFogParticle = groundFogParticle
             || IsSmokeParticleVob( source )
             || IsSmokeParticleTexture( texture );
@@ -5774,12 +5777,14 @@ XRESULT GothicAPI::SaveMenuSettings( const std::string& file ) {
     WritePrivateProfileStringA( "Display", "StretchWindow", std::to_string( s.StretchWindow ? TRUE : FALSE ).c_str(), ini.c_str() );
     WritePrivateProfileStringA( "Display", "Rain", std::to_string( s.EnableRain ? TRUE : FALSE ).c_str(), ini.c_str() );
     WritePrivateProfileStringA( "Display", "DynamicClouds", std::to_string( s.EnableDynamicClouds ? TRUE : FALSE ).c_str(), ini.c_str() );
+    WritePrivateProfileStringA( "Display", "EnableAmbientParticles", std::to_string( s.EnableAmbientParticles ? TRUE : FALSE ).c_str(), ini.c_str() );
     WritePrivateProfileStringA( "Detail", nullptr, nullptr, ini.c_str() );
     WritePrivateProfileStringA( "Display", "WindQuality", std::to_string( s.WindQuality ).c_str(), ini.c_str() );
     WritePrivateProfileStringA( "Display", "WindStrength", std::to_string( s.GlobalWindStrength ).c_str(), ini.c_str() );
     WritePrivateProfileStringA( "Display", "WaterWaveAnimation", nullptr, ini.c_str() );
-    WritePrivateProfileStringA( "Display", "HeroAffectsObjects", nullptr, ini.c_str() );
-    WritePrivateProfileStringA( "Display", "HeroAffectsObjectsStrength", nullptr, ini.c_str() );
+    WritePrivateProfileStringA( "Display", "HeroAffectsObjects", std::to_string( s.HeroAffectsObjects ? TRUE : FALSE ).c_str(), ini.c_str() );
+    WritePrivateProfileStringA( "Display", "HeroAffectsObjectsStrength", std::to_string( s.HeroAffectsObjectsStrength ).c_str(), ini.c_str() );
+    WritePrivateProfileStringA( "Display", "HeroAffectsObjectsRadius", std::to_string( s.HeroAffectsObjectsRadius ).c_str(), ini.c_str() );
 
     WritePrivateProfileStringA( "Shadows", "ShadowMapSize", std::to_string( s.ShadowMapSize ).c_str(), ini.c_str() );
     WritePrivateProfileStringA( "Shadows", "ShadowSoftness", std::to_string( s.ShadowSoftness ).c_str(), ini.c_str() );
@@ -5988,10 +5993,11 @@ XRESULT GothicAPI::LoadMenuSettings( const std::string& file ) {
 
         s.WindQuality = GetPrivateProfileIntA( "Display", "WindQuality", 0, ini.c_str() );
         s.GlobalWindStrength = std::clamp( GetPrivateProfileFloatA( "Display", "WindStrength", ds.GlobalWindStrength, ini ), 0.0f, 2.0f );
+        s.EnableAmbientParticles = GetPrivateProfileIntA( "Display", "EnableAmbientParticles", ds.EnableAmbientParticles ? 1 : 0, ini.c_str() ) != 0;
         s.EnableWaterAnimation = true;
-        s.HeroAffectsObjects =
-            s.WindQuality != GothicRendererSettings::EWindQuality::WIND_QUALITY_NONE;
-        s.HeroAffectsObjectsStrength = s.HeroAffectsObjects ? 1.0f : 0.0f;
+        s.HeroAffectsObjectsStrength = std::clamp( GetPrivateProfileFloatA( "Display", "HeroAffectsObjectsStrength", ds.HeroAffectsObjectsStrength, ini ), 0.0f, 2.0f );
+        s.HeroAffectsObjectsRadius = std::clamp( GetPrivateProfileFloatA( "Display", "HeroAffectsObjectsRadius", ds.HeroAffectsObjectsRadius, ini ), 0.0f, 2.0f );
+        s.HeroAffectsObjects = s.HeroAffectsObjectsStrength > 0.001f;
         s.DynamicCloudDensity = ds.DynamicCloudDensity;
         s.DynamicCloudScale = ds.DynamicCloudScale;
         s.DynamicCloudHeight = ds.DynamicCloudHeight;
@@ -6022,8 +6028,11 @@ XRESULT GothicAPI::LoadMenuSettings( const std::string& file ) {
         if ( !s.EnableSSR ) s.SSRStrength = 0.0f;
         if ( !s.EnableScreenSpaceGI ) s.ScreenSpaceGIStrength = 0.0f;
         s.SSSIntensity = 1.0f;
-        s.HeroAffectsObjectsStrength = s.HeroAffectsObjects ? 1.0f : 0.0f;
-        if ( s.WindQuality == GothicRendererSettings::EWindQuality::WIND_QUALITY_NONE ) s.GlobalWindStrength = 0.0f;
+        if ( s.WindQuality == GothicRendererSettings::EWindQuality::WIND_QUALITY_NONE ) {
+            s.GlobalWindStrength = 0.0f;
+            s.HeroAffectsObjects = false;
+            s.HeroAffectsObjectsStrength = 0.0f;
+        }
         if ( s.AoMode == AOMode::AO_NONE ) s.AOStrength = 0.0f;
         s.XegtaoSettings = ds.XegtaoSettings;
         s.EnableCustomFontRendering = ds.EnableCustomFontRendering;

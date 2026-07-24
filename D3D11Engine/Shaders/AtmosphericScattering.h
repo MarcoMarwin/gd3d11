@@ -336,6 +336,16 @@ float4 ComputeWorldLowCloudVolume(float3 cameraWorld, float3 endWorld, float cam
     float3 nightShadow = float3(0.012f, 0.018f, 0.028f) * max(AC_LowCloudNightColor, float3(0.0f, 0.0f, 0.0f));
 
     float3 lightDir = normalize(lerp(float3(-0.25f, 0.72f, 0.18f), AC_LightPos, saturate(abs(AC_LightPos.y) + 0.12f)));
+
+    float nearCloudFadeStart = lerp(7800.0f, 18000.0f, skyPixel) * cloudDistanceScale;
+    float nearCloudFadeEnd = lerp(18000.0f, 32000.0f, skyPixel) * cloudDistanceScale;
+    float farCloudFadeStart = lerp(105000.0f, 72000.0f, skyPixel) * cloudDistanceScale;
+    float farCloudFadeEnd = lerp(140000.0f, 98000.0f, skyPixel) * cloudDistanceScale;
+
+    float3 litColor = lerp(nightLit, dayLit, dayWeight);
+    float3 shadowColor = lerp(nightShadow, dayShadow, dayWeight);
+    float viewSunForward = pow(saturate(dot(rayDir, lightDir) * 0.5f + 0.5f), 4.0f);
+
     float transmittance = 1.0f;
     float3 scattering = 0.0f;
     float accumulatedAlpha = 0.0f;
@@ -358,20 +368,36 @@ float4 ComputeWorldLowCloudVolume(float3 cameraWorld, float3 endWorld, float cam
             (sampleDistance - 26000.0f * cloudDistanceScale)
             / max(8000.0f, 36000.0f * cloudDistanceScale)));
         float3 cloudSampleWorld = sampleWorld;
-        float nearCloudFadeStart = lerp(7800.0f, 18000.0f, skyPixel) * cloudDistanceScale;
-        float nearCloudFadeEnd = lerp(18000.0f, 32000.0f, skyPixel) * cloudDistanceScale;
-        float farCloudFadeStart = lerp(105000.0f, 72000.0f, skyPixel) * cloudDistanceScale;
-        float farCloudFadeEnd = lerp(140000.0f, 98000.0f, skyPixel) * cloudDistanceScale;
-        float distanceFade = smoothstep(nearCloudFadeStart, nearCloudFadeEnd, sampleDistance) * (1.0f - smoothstep(farCloudFadeStart, farCloudFadeEnd, sampleDistance));
-        float density = ComputeWorldLowCloudDensity(cloudSampleWorld, baseFogHeight) * distanceFade * skyHorizonWeight * nightHorizonClearance;
+        float distanceFade =
+            smoothstep(nearCloudFadeStart, nearCloudFadeEnd, sampleDistance)
+            * (1.0f - smoothstep(farCloudFadeStart, farCloudFadeEnd, sampleDistance));
 
-        float upperSelfLight = smoothstep(cloudBase + 2600.0f * cloudHeightScale, cloudBase + 9400.0f * cloudHeightScale, cloudSampleWorld.y);
-        float selfShadow = lerp(0.46f, 0.94f, upperSelfLight) * lerp(1.0f, 0.72f, saturate(density * 1.20f));
-        float3 litColor = lerp(nightLit, dayLit, dayWeight);
-        float3 shadowColor = lerp(nightShadow, dayShadow, dayWeight);
+        float density =
+            ComputeWorldLowCloudDensity(cloudSampleWorld, baseFogHeight)
+            * distanceFade
+            * skyHorizonWeight
+            * nightHorizonClearance;
+
+        if (density <= 0.0f)
+        {
+            continue;
+        }
+
+        float upperSelfLight = smoothstep(
+            cloudBase + 2600.0f * cloudHeightScale,
+            cloudBase + 9400.0f * cloudHeightScale,
+            cloudSampleWorld.y);
+
+        float selfShadow =
+            lerp(0.46f, 0.94f, upperSelfLight)
+            * lerp(1.0f, 0.72f, saturate(density * 1.20f));
+
         float3 cloudColor = lerp(shadowColor, litColor, selfShadow);
-        float upperSunLayer = smoothstep(cloudBase + 3900.0f * cloudHeightScale, cloudBase + 9200.0f * cloudHeightScale, cloudSampleWorld.y);
-        float viewSunForward = pow(saturate(dot(rayDir, lightDir) * 0.5f + 0.5f), 4.0f);
+
+        float upperSunLayer = smoothstep(
+            cloudBase + 3900.0f * cloudHeightScale,
+            cloudBase + 9200.0f * cloudHeightScale,
+            cloudSampleWorld.y);
         float sunTopLight = upperSunLayer * dayWeight * saturate(lightDir.y * 1.35f) * selfShadow * lerp(1.0f, 0.45f, rainWeight) * max(0.0f, AC_LowCloudSunLight);
         cloudColor += float3(0.155f, 0.156f, 0.140f) * sunTopLight * lerp(0.38f, 0.88f, viewSunForward);
 
@@ -381,6 +407,11 @@ float4 ComputeWorldLowCloudVolume(float3 cameraWorld, float3 endWorld, float cam
         scattering += cloudColor * weight;
         accumulatedAlpha += weight;
         transmittance *= 1.0f - sampleAlpha;
+
+        if (transmittance <= 0.001f)
+        {
+            break;
+        }
     }
 
     accumulatedAlpha = saturate(accumulatedAlpha * 1.04f);

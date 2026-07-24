@@ -2,6 +2,14 @@
 
 Dokumentation der gepushten Renderer-Builds.
 
+## Build 155
+
+- Partikelbeleuchtung: Trennung von Nacht-RGB-Dimmung (nightDim) und Regen-Alpha-Dimmung (rainAlpha) in PS_ParticleSimple.hlsl und PS_ParticleDistortion.hlsl. Rauch bleibt ueber particleLightingScale (1.0) staerker betroffen als Wasserpartikel (0.25).
+- F11-Menue & Presets: Water Reflections steht genau einmal direkt nach HDR Tone Mapping und bleibt aus allen Presets ausgeschlossen. Dynamic Clouds und Ambient Particles stehen direkt unter Depth of Field und sind vollstaendig in Presets integriert (Low=false, sonst true). Ambient Particles deaktiviert bei false ausschliesslich atmosphaerischen Ground Fog.
+- Vegetationsverdraengung: Der F11-Regler steuert HeroAffectsObjectsRadius (Display -> HeroAffectsObjectsRadius), welche den Such- und Verdraengungsradius um den Spieler skaliert.
+- Dynamic Clouds Optimierung: Schleifeninvariante Werte vor die Raymarching-Schleife verlagert, exakt leere Dichte-Samples (density <= 0.0f) per continue uebersprungen und Schleife bei voller Deckkraft (transmittance <= 0.001f) per break beendet. Exakt 8 Marching-Schritte und alle visuellen Details bleiben 100% erhalten.
+- Pruefung: Statische Diff-, HLSL-String-, Inhalts-, Zeilenzahl-, Byte- und SHA-256-Hash-Pruefung lokal und direkt im OneDrive-Backup-Ziel; kein vollstaendiger lokaler C++-Build.
+
 ## Build 112
 
 - Seitenverhaeltnis: Logische Spielaufloesung und physische Borderless-Swapchain sind getrennt. Welt, HUD, Gothic-Menue und F11 werden gemeinsam in der gewaehlten Aufloesung gerendert und erst zur Ausgabe proportional mit schwarzen Balken eingepasst.

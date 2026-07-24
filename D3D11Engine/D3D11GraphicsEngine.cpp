@@ -108,7 +108,9 @@ static void UpdateCharacterInteractionPositions( VS_ExConstantBuffer_Wind& windB
     // influencers around the camera. That keeps the limited influence slots
     // focused on what the player can actually see.
     const XMFLOAT3 interactionSelectionCenter = Engine::GAPI->GetCameraPosition();
-    constexpr float NpcInteractionSearchRadius = 1200.0f; // 12 meters in Gothic world units.
+    const auto& settings = Engine::GAPI->GetRendererState().RendererSettings;
+    const float NpcInteractionSearchRadius =
+        1200.0f * std::clamp( settings.HeroAffectsObjectsRadius, 0.0f, 2.0f );
     Engine::GAPI->CollectNearbyNpcInteractionPositions(
         interactionSelectionCenter,
         NpcInteractionSearchRadius,
