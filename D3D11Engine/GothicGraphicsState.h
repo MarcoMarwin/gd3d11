@@ -853,6 +853,8 @@ struct GothicRendererSettings {
         FogGlobalDensity = 0.00002f;
         FogHeightFalloff = 0.00018f;
         FogHeight = 4000;
+        OceanWaterColor = XMFLOAT3( 0.72f, 0.82f, 0.84f );
+        OceanWaterColorStrength = 0.65f;
         ApplyOldWorldSkyColorValues();
         ApplyWorldNightFogBrightness( true );
     }
@@ -861,6 +863,8 @@ struct GothicRendererSettings {
         FogGlobalDensity = 0.00004f;
         FogHeightFalloff = 0.0005f;
         FogHeight = 800;
+        OceanWaterColor = XMFLOAT3( 0.78f, 0.90f, 0.92f );
+        OceanWaterColorStrength = 0.55f;
         ApplyNewWorldSkyColorValues();
         ApplyWorldNightFogBrightness( false );
     }
@@ -869,6 +873,8 @@ struct GothicRendererSettings {
         FogGlobalDensity = 0.00004f;
         FogHeightFalloff = 0.0005f;
         FogHeight = 0;
+        OceanWaterColor = XMFLOAT3( 0.72f, 0.88f, 0.95f );
+        OceanWaterColorStrength = 0.0f;
         ApplyNewWorldSkyColorValues();
         ApplyWorldNightFogBrightness( false );
     }

@@ -139,11 +139,12 @@ PS_OUTPUT PSMain(PS_INPUT Input)
     float waterGeometryUp = abs(normalize(Input.vNormalWS).y);
 
     // Surface inclination relative to the horizontal plane:
-    // 0-33 degrees: full reflections.
-    // 33-67 degrees: smooth fade.
-    // 67-90 degrees: no reflections.
-    const float waterfallSsrOffCos = 0.39073113f; // cos(67 degrees)
-    const float waterfallSsrFullCos = 0.83867057f; // cos(33 degrees)
+    // 0-39 degrees: full reflections.
+    // 39-50 degrees: smooth fade.
+    // 50-90 degrees: no reflections.
+    const float waterfallSsrOffCos = 0.64278761f;  // cos(50 degrees)
+    const float waterfallSsrFullCos = 0.77714596f; // cos(39 degrees)
+
     float steepWaterSsrFactor = smoothstep(
         waterfallSsrOffCos,
         waterfallSsrFullCos,
@@ -195,7 +196,20 @@ PS_OUTPUT PSMain(PS_INPUT Input)
     float3 gray = lum.xxx;
     float3 dayRain = lerp(gray * .46f, float3(.18, .20, .21), .55f) * lerp(1, max(AC_LowCloudRainColor, 0), .30f);
     float3 clearNight = lerp(cube * .025f, float3(.004, .009, .023), .72f);
-    float3 rainNight = WM_IsOceanWater > .5f ? max(AC_NightRainSkyColor * .32f, float3(.006, .008, .012)) : max(AC_NightRainSkyColor * .46f, float3(.012, .018, .030));
+float3 oceanNightRainFallback =
+    lerp(
+        max(
+            AC_NightRainSkyColor * 0.32f,
+            float3(0.006f, 0.008f, 0.012f)),
+        float3(0.018f, 0.027f, 0.040f),
+        0.70f);
+
+float3 rainNight =
+    WM_IsOceanWater > 0.5f
+        ? oceanNightRainFallback
+        : max(
+            AC_NightRainSkyColor * 0.46f,
+            float3(0.012f, 0.018f, 0.030f));
     float3 fallback = lerp(lerp(cube, dayRain, rainAmount), lerp(clearNight, rainNight, rainAmount), nightAmount);
 
     float3 skyNormal = normalize(lerp(wf, float3(0, 1, 0), .46f));
@@ -223,9 +237,32 @@ PS_OUTPUT PSMain(PS_INPUT Input)
     }
 
     skyValid *= step(.0001f, skyDir.y) * waterTopSide * ssrEnabled;
-    float3 skyBase = SampleSkyWithoutCelestialBodies(skyUV, skyDir, fallback);
-    float4 clouds = ResolveLowCloudLayer(TX_LowClouds.SampleLevel(SS_Linear, skyUV, 0), skyBase);
-    float3 skyReflection = max(skyBase + (skyBase * (1 - clouds.a) + clouds.rgb - skyBase) * lerp(1.12f, 1.30f, saturate(clouds.a)), 0);
+float3 skyBase =
+    SampleSkyWithoutCelestialBodies(
+        skyUV,
+        skyDir,
+        fallback);
+
+float4 clouds =
+    ResolveLowCloudLayer(
+        TX_LowClouds.SampleLevel(
+            SS_Linear,
+            skyUV,
+            0),
+        skyBase);
+
+float3 skyReflection =
+    max(
+        skyBase
+        + (
+            skyBase * (1.0f - clouds.a)
+            + clouds.rgb
+            - skyBase)
+        * lerp(
+            1.12f,
+            1.30f,
+            saturate(clouds.a)),
+        0.0f);
     float2 skyEdge = saturate(abs(skyUV - .5f) * 2);
     float skyWeight = skyValid * (1 - smoothstep(.78f, 1, max(skyEdge.x, skyEdge.y))) * hemi;
 
@@ -305,7 +342,67 @@ PS_OUTPUT PSMain(PS_INPUT Input)
                 float farRisk = smoothstep(9000, 26000, abs(finalZ)) * (1 - smoothstep(.30f, .72f, cov));
                 float reject = 1 - smoothstep(.10f, .78f, max(occ, farRisk));
 
-                geoColor = TX_Scene.SampleLevel(SS_Linear, uv, 0).rgb;
+                float reflectionRadius =
+                    lerp(
+                        0.65f,
+                        1.35f,
+                        smoothstep(2000.0f, 18000.0f, abs(finalZ)));
+
+                float2 reflectionOffset =
+                    px * reflectionRadius;
+
+                float reflectionDepthTolerance =
+                    max(45.0f, abs(finalZ) * 0.012f);
+
+                float3 reflectionSum =
+                    TX_Scene.SampleLevel(SS_Linear, uv, 0).rgb * 4.0f;
+
+                float reflectionWeight = 4.0f;
+
+                float2 reflectionOffsets[4] = {
+                    float2( reflectionOffset.x, 0.0f),
+                    float2(-reflectionOffset.x, 0.0f),
+                    float2(0.0f,  reflectionOffset.y),
+                    float2(0.0f, -reflectionOffset.y)
+                };
+
+                [unroll]
+                for (int reflectionSample = 0;
+                     reflectionSample < 4;
+                     ++reflectionSample)
+                {
+                    float2 reflectionUV =
+                        saturate(
+                            uv
+                            + reflectionOffsets[reflectionSample]);
+
+                    float reflectionDepth =
+                        LinearizeWaterDepth(
+                            TX_Depth.SampleLevel(
+                                SS_Linear,
+                                reflectionUV,
+                                0).r);
+
+                    float sampleWeight =
+                        1.0f
+                        - smoothstep(
+                            reflectionDepthTolerance,
+                            reflectionDepthTolerance * 3.0f,
+                            abs(reflectionDepth - finalZ));
+
+                    reflectionSum +=
+                        TX_Scene.SampleLevel(
+                            SS_Linear,
+                            reflectionUV,
+                            0).rgb
+                        * sampleWeight;
+
+                    reflectionWeight += sampleWeight;
+                }
+
+                geoColor =
+                    reflectionSum
+                    / max(reflectionWeight, 0.0001f);
                 geoWorld = mid;
                 geoValid = 1;
                 geoSceneZ = abs(finalZ);
@@ -408,7 +505,37 @@ PS_OUTPUT PSMain(PS_INPUT Input)
         float3 absRain = float3(.003, .00155, .00088);
         float3 absorb = lerp(absDay, absRain, rainAmount) * lerp(1, .58f, cameraBelowSurface);
         float3 trans = exp(-absorb * optical);
-        float3 scatter = lerp(lerp(float3(.035, .120, .150), float3(.040, .075, .082), rainAmount), lerp(float3(.008, .017, .034), max(AC_NightRainSkyColor * .52f, float3(.010, .014, .017)), rainAmount), nightAmount);
+        float3 oceanClearDayScatter =
+            float3(0.035f, 0.120f, 0.150f);
+
+        float3 oceanDayRainScatter =
+            float3(0.070f, 0.066f, 0.064f);
+
+        float3 oceanClearNightScatter =
+            float3(0.008f, 0.017f, 0.034f);
+
+        float3 oceanAtmosphericNightRainScatter =
+            max(
+                AC_NightRainSkyColor * 0.52f,
+                float3(0.010f, 0.014f, 0.017f));
+
+        float3 oceanNightRainScatter =
+            lerp(
+                oceanAtmosphericNightRainScatter,
+                float3(0.020f, 0.032f, 0.044f),
+                0.72f);
+
+        float3 scatter =
+            lerp(
+                lerp(
+                    oceanClearDayScatter,
+                    oceanDayRainScatter,
+                    rainAmount),
+                lerp(
+                    oceanClearNightScatter,
+                    oceanNightRainScatter,
+                    rainAmount),
+                nightAmount);
         scatter *= lerp(.94f, 1.06f, saturate(dot(diffuse, float3(.2126, .7152, .0722)) * 1.4f));
         float3 volume = sceneRefr * trans + scatter * (1 - trans);
         volume = lerp(scatter, volume, sceneValid);
@@ -419,11 +546,62 @@ PS_OUTPUT PSMain(PS_INPUT Input)
         volume = lerp(volume, underComposedSky, underSky);
         float underGeometry = cameraBelowSurface * refrValid;
         volume = lerp(volume, lerp(sceneRefr, volume, .32f), underGeometry);
-        float tint = saturate(WM_IsOceanWater * WM_OceanWaterTintStrength) * lerp(1, .35f, cameraBelowSurface) * lerp(1.0f, .45f, nightAmount);
+        float tint =
+            saturate(
+                WM_IsOceanWater
+                * WM_OceanWaterTintStrength)
+            * lerp(
+                1.0f,
+                0.35f,
+                cameraBelowSurface)
+            * lerp(
+                1.0f,
+                0.45f,
+                nightAmount)
+            * lerp(
+                1.0f,
+                0.35f,
+                rainAmount);
         volume = lerp(volume, volume * max(WM_OceanWaterTint, 0), tint);
-        float volumeLuma = dot(volume, float3(.2126f, .7152f, .0722f));
-        float3 neutralNightVolume = lerp(volume, volumeLuma.xxx, .34f) * float3(1.04f, 1.02f, .90f);
-        volume = lerp(volume, neutralNightVolume, nightAmount * .58f);
+        float volumeLuma =
+            dot(
+                volume,
+                float3(
+                    0.2126f,
+                    0.7152f,
+                    0.0722f));
+
+        float3 clearNightVolume =
+            lerp(
+                volume,
+                volumeLuma.xxx,
+                0.34f)
+            * float3(
+                1.04f,
+                1.02f,
+                0.90f);
+
+        float3 rainNightVolume =
+            lerp(
+                volume,
+                volumeLuma.xxx,
+                0.24f)
+            * float3(
+                0.86f,
+                0.99f,
+                1.16f);
+
+        float3 gradedNightVolume =
+            lerp(
+                clearNightVolume,
+                rainNightVolume,
+                rainAmount);
+
+        volume =
+            lerp(
+                volume,
+                gradedNightVolume,
+                nightAmount * 0.58f);
         float reflectionLuma = dot(reflectionColor, float3(.2126f, .7152f, .0722f));
         float oceanFallbackInfluence = ssrEnabled * (1.0f - saturate(ssrConfidence));
         float oceanFallbackLimit = max(dot(volume, float3(.2126f, .7152f, .0722f)) * 1.35f, 0.04f);

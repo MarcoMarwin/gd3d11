@@ -119,13 +119,22 @@ XRESULT GSky::LoadSkyResources() {
     XLE( Engine::GraphicsEngine->CreateTexture( &cloudTex ) );
     CloudTexture.reset( cloudTex );
 
-#ifdef BUILD_GOTHIC_1_08k
-    DaySkyTexture = ESkyTexture::ST_OldWorld;
-    XLE( CloudTexture->Init( "system\\GD3D11\\Textures\\SkyDay_G1.dds" ) );
-#else
-    DaySkyTexture = ESkyTexture::ST_NewWorld;
-    XLE( CloudTexture->Init( "system\\GD3D11\\Textures\\SkyDay.dds" ) );
-#endif
+    switch ( DaySkyTexture ) {
+    case ESkyTexture::ST_OldWorld:
+        XLE( CloudTexture->Init(
+            "system\\GD3D11\\Textures\\SkyDay_G1.dds" ) );
+        Atmosphere.WaveLengths = float3( 0.54f, 0.56f, 0.60f );
+        break;
+
+    case ESkyTexture::ST_NewWorld:
+    default:
+        XLE( CloudTexture->Init(
+            "system\\GD3D11\\Textures\\SkyDay.dds" ) );
+        Atmosphere.WaveLengths = float3( 0.63f, 0.57f, 0.50f );
+        break;
+    }
+
+    ApplyDaySkyColorProfile();
 
     D3D11Texture* rainCloudTex;
     XLE( Engine::GraphicsEngine->CreateTexture( &rainCloudTex ) );

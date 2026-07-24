@@ -667,9 +667,15 @@ Dokumentation der gepushten Renderer-Builds.
 - **Entfernung alter Wasserfall-Renderpfad (D3D11GraphicsEngine.cpp/.h)**: `FrameTransparencyMeshesWaterfall`, `waterfallTransparencyMeshes` und der Rendergraph-Pass `Draw FrameTransparencyMeshesWaterfall` vollständig entfernt; `MT_WaterfallFoam`-Geometrie läuft nun durch die normale Transparenzsortierung.
 - **Rücknahme DoF-Reactive-Mask & Shader-Fixes (D3D11PFX_DepthOfField.cpp/.h, CS/PS_PFX_DoF_Composite.hlsl, D3D11PfxRenderer.cpp/.h)**: DoF-Reactive-Mask-Erweiterung vollständig zurückgenommen, UAV-Deklaration `OutputComposite` (u0) in `CS_PFX_DoF_Composite.hlsl` ergänzt und `GetSkyEdgeBlurSample`-Aufruf in `PS_PFX_DoF_Composite.hlsl` korrigiert.
 
-## Build 154 (Korrekturpush)
+## Build 154
 
-- **DoF Composite Shader Fixes**: Nachbesserung der Shaderkompilierung für `PS_PFX_DoF_Composite.hlsl` (`GetSkyEdgeBlurSample`-Initialisierung) und `CS_PFX_DoF_Composite.hlsl` (`OutputComposite` UAV-Deklaration).
+- **DoF Composite Shader Fixes (PS/CS_PFX_DoF_Composite.hlsl)**: `GetSkyEdgeBlurSample`-Aufruf im `IsSkyDepth`-Block ergänzt und `OutputComposite` UAV-Register (`u0`) wiederhergestellt.
+- **Wasser-Reflection 39°/50°-Kurve & Sky-Reflection (PS_Water.hlsl)**: Neigungsabhängige Ausblendung auf 39°–50° zurückgestellt (`0.64278761f` / `0.77714596f`) und Low-Cloud-Komposition über `skyBase` wiederhergestellt.
+- **Ocean-Regenfarben & Tint-Anpassungen (PS_Water.hlsl)**: Ocean-Nachtregen-Fallback und Volume-Grading auf kühles Blaugrau (`0.86f, 0.99f, 1.16f`) umgestellt; Ocean-Tint bei Regen weich auf 35% abgeschwächt.
+- **Weltbezogene Ocean-Profile (GothicGraphicsState.h)**: Standard-Wasserfarben und Stärken für OldWorld (`0.72, 0.82, 0.84`, `0.65f`), NewWorld (`0.78, 0.90, 0.92`, `0.55f`) und AddonWorld (`0.72, 0.88, 0.95`, `0.0f`) hinterlegt.
+- **GSky Savegame & OldWorld Fix (GSky.cpp)**: Statisches Makro in `LoadSkyResources()` durch dynamische `DaySkyTexture`-Prüfung (`ST_OldWorld` vs `ST_NewWorld`) und `ApplyDaySkyColorProfile()` ersetzt.
+- **SSR 5-Tap Kreuzfilter (PS_Water.hlsl)**: SSR-Treffersampling durch tiefengeführten 5-Tap-Kreuzfilter zur Weichzeichnung von Reflexionskanten erweitert.
+
 
 
 
