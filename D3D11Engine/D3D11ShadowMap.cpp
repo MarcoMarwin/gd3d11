@@ -1398,7 +1398,7 @@ DS_ScreenQuadConstantBuffer D3D11ShadowMap::FillSunCSMConstantBuffer() const {
 
     DS_ScreenQuadConstantBuffer scb = {};
     scb.SQ_ProjParams = float4( 1.0f / proj._11, 1.0f / proj._22, proj._43, proj._33 );
-    scb.SQ_JitterOffset = float2( 0.0f, 0.0f );
+    scb.SQ_JitterOffset = float2( proj._13 * 0.5f, -proj._23 * 0.5f );
     XMStoreFloat4x4( &scb.SQ_InvView, XMMatrixInverse( nullptr, viewRaw ) );
     XMStoreFloat4x4( &scb.SQ_View, viewRaw );
 
@@ -1504,7 +1504,7 @@ XRESULT D3D11ShadowMap::DrawWorldLights()
     auto& proj = Engine::GAPI->GetProjectionMatrix();
     DS_ScreenQuadConstantBuffer scb = {};
     scb.SQ_ProjParams = float4( 1.0f / proj._11, 1.0f / proj._22, proj._43, proj._33 );
-    scb.SQ_JitterOffset = float2( 0.0f, 0.0f );
+    scb.SQ_JitterOffset = float2( proj._13 * 0.5f, -proj._23 * 0.5f );
     XMStoreFloat4x4( &scb.SQ_InvView, XMMatrixInverse( nullptr, viewRaw ) );
     XMStoreFloat4x4( &scb.SQ_View, viewRaw );
 

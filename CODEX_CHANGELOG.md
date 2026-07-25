@@ -45,3 +45,9 @@
 
 - Water Shader: Replaced legacy water murkiness in PS_Water.hlsl with physical volumetric absorption and scattering model (legacyVolume).
 - Transparency Rendering: Restored nightly-compatible 3-SRV resource binding and 4-argument BindShaderForTexture call in DrawMeshInfoListAlphablended (D3D11GraphicsEngine.cpp).
+
+## Build 164
+
+- FSR3 Jitter: Restored FSR 3 camera projection jitter in D3D11ShadowMap.cpp to exact Build 160 state.
+- Transparency Rendering: Restored original extended resource and shader binding in DrawMeshInfoListAlphablended (D3D11GraphicsEngine.cpp).
+- Transparent EnvMap World Surfaces: Reduced initial night opacity factor from 0.1f to 0.05f in ComputeTransparencyTextureFactor (D3D11GraphicsEngine.cpp).

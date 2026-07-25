@@ -265,7 +265,7 @@ namespace
         }
 
         if ( material->GetEnvMapEnabled() ) {
-            float intensity = material->GetEnvMapStrength() * 0.1f;
+            float intensity = material->GetEnvMapStrength() * 0.05f;
             if ( Engine::GAPI ) {
                 if ( GSky* sky = Engine::GAPI->GetSky() ) {
                     const float sunHeight = sky->GetAtmosphereCB().AC_LightPos.y;
@@ -5303,18 +5303,16 @@ XRESULT D3D11GraphicsEngine::DrawMeshInfoListAlphablended(
             }
 
             MyDirectDrawSurface7* surface = texture->GetSurface();
-            ID3D11ShaderResourceView* srv[3];
+            ID3D11ShaderResourceView* srv[4];
 
-            // Match the established nightly transparency path:
-            // diffuse plus explicitly authored normal/fx resources only.
+            // Get diffuse and normalmap
             srv[0] = surface->GetEngineTexture()
                 ->GetShaderResourceView().Get();
-            srv[1] = surface->GetNormalmap()
-                ? surface->GetNormalmap()->GetShaderResourceView().Get()
-                : nullptr;
+            srv[1] = GetMaterialNormalmapSRV( surface, meshKey.Info );
             srv[2] = surface->GetFxMap()
                 ? surface->GetFxMap()->GetShaderResourceView().Get()
                 : nullptr;
+            srv[3] = GetParallaxDisplacementSRV( surface, meshKey.Info );
 
             int alphaFunc = meshKey.Material->GetAlphaFunc();
 
@@ -5324,13 +5322,15 @@ XRESULT D3D11GraphicsEngine::DrawMeshInfoListAlphablended(
                     : zMAT_ALPHA_FUNC_MAT_DEFAULT;
             }
 
-            if ( lastTex != texture ) {
+            if (lastTex != texture) {
                 GetContext()->PSSetShaderResources( 0, 3, srv );
+                GetContext()->PSSetShaderResources( 13, 1, &srv[3] );
                 lastTex = texture;
             }
 
-            if ( lastMat != meshKey.Material ) {
-                BindShaderForTexture( texture, false, alphaFunc, meshKey.Info->MaterialType );
+            if (lastMat != meshKey.Material) {
+                const MaterialInfo::EMaterialType shaderMaterialType = meshKey.Info->MaterialType;
+                BindShaderForTexture( texture, false, alphaFunc, shaderMaterialType, true );
                 lastMat = meshKey.Material;
             }
 
