@@ -909,12 +909,12 @@ void ApplyGraphicsPresets( GothicRendererSettings& s, bool applyRuntimeUpdates =
         s.EnableDoF = false;
         s.EnableDynamicClouds = false;
         if ( IsWindEffectsControlVisible() ) s.WindQuality = GothicRendererSettings::EWindQuality::WIND_QUALITY_ADVANCED;
-        s.OutdoorSmallVobDrawRadius = ObjectDrawDistanceUiToMeters( 2 );
+        s.OutdoorSmallVobDrawRadius = ObjectDrawDistanceUiToMeters( 3 );
         s.SectionDrawRadius = 3;
         s.textureMaxSize = static_cast<int>(TX_QUALITY::High);
         s.AllowNormalmaps = false;
-        s.EnableSSR = false;
-        s.SSRStrength = 0.0f;
+        s.EnableSSR = true;
+        s.SSRStrength = 1.0f;
         s.HeroAffectsObjects = false;
         s.EnableRain = false;
         break;
@@ -926,7 +926,7 @@ void ApplyGraphicsPresets( GothicRendererSettings& s, bool applyRuntimeUpdates =
         s.EnableDoF = true;
         s.EnableDynamicClouds = true;
         if ( IsWindEffectsControlVisible() ) s.WindQuality = GothicRendererSettings::EWindQuality::WIND_QUALITY_ADVANCED;
-        s.OutdoorSmallVobDrawRadius = ObjectDrawDistanceUiToMeters( 4 );
+        s.OutdoorSmallVobDrawRadius = ObjectDrawDistanceUiToMeters( 5 );
         s.SectionDrawRadius = 5;
         s.textureMaxSize = static_cast<int>(TX_QUALITY::MAX);
         s.AllowNormalmaps = false;
@@ -943,7 +943,7 @@ void ApplyGraphicsPresets( GothicRendererSettings& s, bool applyRuntimeUpdates =
         s.EnableDoF = true;
         s.EnableDynamicClouds = true;
         if ( IsWindEffectsControlVisible() ) s.WindQuality = GothicRendererSettings::EWindQuality::WIND_QUALITY_ADVANCED;
-        s.OutdoorSmallVobDrawRadius = ObjectDrawDistanceUiToMeters( 6 );
+        s.OutdoorSmallVobDrawRadius = ObjectDrawDistanceUiToMeters( 7 );
         s.SectionDrawRadius = 7;
         s.textureMaxSize = static_cast<int>(TX_QUALITY::MAX);
         s.AllowNormalmaps = true;
@@ -960,7 +960,7 @@ void ApplyGraphicsPresets( GothicRendererSettings& s, bool applyRuntimeUpdates =
         s.EnableDoF = true;
         s.EnableDynamicClouds = true;
         if ( IsWindEffectsControlVisible() ) s.WindQuality = GothicRendererSettings::EWindQuality::WIND_QUALITY_ADVANCED;
-        s.OutdoorSmallVobDrawRadius = ObjectDrawDistanceUiToMeters( 8 );
+        s.OutdoorSmallVobDrawRadius = ObjectDrawDistanceUiToMeters( 9 );
         s.SectionDrawRadius = 9;
         s.textureMaxSize = static_cast<int>(TX_QUALITY::MAX);
         s.AllowNormalmaps = true;
@@ -1399,10 +1399,12 @@ void ImGuiShim::RenderSettingsWindow()
                     : Tr( "Enable the FPS limiter to select a frame-rate limit.", u8"Aktiviere das FPS-Limit, um eine Bildrate auszuw\u00E4hlen." )) );
 
             ImText( Tr( "Contrast", u8"Kontrast" ), buttonWidth ); ImGui::SameLine();
+            ImGui::SetNextItemWidth( standardComboWidth );
             SliderDisplayTuningStrength( "##Contrast", &settings.GammaValue );
             ImGui::SetItemTooltip( "%s", Tr( "Changes the difference between dark and bright areas.", u8"Ver\u00E4ndert den Unterschied zwischen dunklen und hellen Bereichen." ) );
 
             ImText( Tr( "Brightness", u8"Helligkeit" ), buttonWidth ); ImGui::SameLine();
+            ImGui::SetNextItemWidth( standardComboWidth );
             SliderDisplayTuningStrength( "##Brightness", &settings.BrightnessValue );
             ImGui::SetItemTooltip( "%s", Tr( "Makes the overall image darker or brighter.", u8"Macht das gesamte Bild dunkler oder heller." ) );
 

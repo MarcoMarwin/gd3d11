@@ -489,7 +489,7 @@ XRESULT D3D11PfxRenderer::RenderPostFXComposition(
     const bool needsAtmosphere = compositionHeightFog || contactShadowsActive || screenSpaceGIActive;
     CompositionControlConstantBuffer control = {};
     control.CC_HeightFogEnabled = compositionHeightFog ? 1.0f : 0.0f;
-    control.CC_ContactShadowScale = fsr3UpscalingActive ? 0.70f : 1.0f;
+    control.CC_ContactShadowScale = 1.0f;
     control.CC_InvResolution = float2( 1.0f / std::max( 1, res.x ), 1.0f / std::max( 1, res.y ) );
     const XMFLOAT4X4& projection = Engine::GAPI->GetProjectionMatrix();
     control.CC_ProjParams = float4( 1.0f / projection._11, 1.0f / projection._22, projection._43, projection._33 );

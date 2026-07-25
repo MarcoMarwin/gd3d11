@@ -27,3 +27,10 @@
 - F11 Menu & Presets: Integrated Surface Detail, Water Reflections (SSR & strength), Vegetation Push, and Rain Rendering into graphics presets.
 - Surface Detail: Simplified UI to a single checkbox automatically controlling normal maps and parallax occlusion mapping.
 - Particle FX: Added continuous rain-dependent opacity scaling for smoke/fog (50% -> 70%) and water particles (100% -> 50%) via GetRainFXWeight.
+
+## Build 161
+
+- F11 Menu & UI: Fixed Contrast and Brightness slider width to standardComboWidth and restored exact menu column symmetry.
+- Presets: Activated Water Reflections in Low preset (SSR & strength 1.0) and updated Object Draw Distance presets to 3 / 5 / 7 / 9.
+- Contact Shadows: Removed FSR 3 composition scale dampening (CC_ContactShadowScale = 1.0f).
+- Shadow Map: Neutralized frame-variable FSR 3 projection jitter offset (SQ_JitterOffset = float2(0.0f, 0.0f)) in FillSunCSMConstantBuffer.
