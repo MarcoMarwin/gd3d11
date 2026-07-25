@@ -810,6 +810,11 @@ struct GraphicsPresetComparable {
     bool EnableDynamicClouds;
     int WindQuality;
     bool EnableGodRays;
+    bool AllowNormalmaps;
+    bool EnableSSR;
+    float SSRStrength;
+    bool HeroAffectsObjects;
+    bool EnableRain;
     int OutdoorSmallVobDrawDistance;
     int SectionDrawRadius;
     float AOStrength;
@@ -831,6 +836,11 @@ GraphicsPresetComparable MakeGraphicsPresetComparable(
         s.EnableDynamicClouds,
         IsWindEffectsControlVisible() ? s.WindQuality : 0,
         s.EnableGodRays,
+        s.AllowNormalmaps,
+        s.EnableSSR,
+        s.SSRStrength,
+        s.HeroAffectsObjects,
+        s.EnableRain,
         ObjectDrawDistanceMetersToUi(
             s.OutdoorSmallVobDrawRadius ),
         s.SectionDrawRadius,
@@ -854,6 +864,11 @@ bool GraphicsPresetComparableEqual(
         && a.EnableDynamicClouds == b.EnableDynamicClouds
         && a.WindQuality == b.WindQuality
         && a.EnableGodRays == b.EnableGodRays
+        && a.AllowNormalmaps == b.AllowNormalmaps
+        && a.EnableSSR == b.EnableSSR
+        && a.SSRStrength == b.SSRStrength
+        && a.HeroAffectsObjects == b.HeroAffectsObjects
+        && a.EnableRain == b.EnableRain
         && a.OutdoorSmallVobDrawDistance
             == b.OutdoorSmallVobDrawDistance
         && a.SectionDrawRadius == b.SectionDrawRadius
@@ -872,6 +887,10 @@ void ApplyGraphicsPresets( GothicRendererSettings& s, bool applyRuntimeUpdates =
     // Presets only own the quality controls displayed below the menu separator.
     s.EnableGodRays = true;
     s.EnableDynamicClouds = true;
+    s.EnableSSR = true;
+    s.SSRStrength = 1.0f;
+    s.HeroAffectsObjects = true;
+    s.EnableRain = true;
 
     // Reset all visible effect strengths to their normalized UI defaults.
     s.AOStrength = 1.0f;
@@ -893,6 +912,11 @@ void ApplyGraphicsPresets( GothicRendererSettings& s, bool applyRuntimeUpdates =
         s.OutdoorSmallVobDrawRadius = ObjectDrawDistanceUiToMeters( 2 );
         s.SectionDrawRadius = 3;
         s.textureMaxSize = static_cast<int>(TX_QUALITY::High);
+        s.AllowNormalmaps = false;
+        s.EnableSSR = false;
+        s.SSRStrength = 0.0f;
+        s.HeroAffectsObjects = false;
+        s.EnableRain = false;
         break;
     case GothicRendererSettings::GRAPHICS_MEDIUM:
         s.ShadowMapSize = 2048;
@@ -903,8 +927,13 @@ void ApplyGraphicsPresets( GothicRendererSettings& s, bool applyRuntimeUpdates =
         s.EnableDynamicClouds = true;
         if ( IsWindEffectsControlVisible() ) s.WindQuality = GothicRendererSettings::EWindQuality::WIND_QUALITY_ADVANCED;
         s.OutdoorSmallVobDrawRadius = ObjectDrawDistanceUiToMeters( 4 );
-        s.SectionDrawRadius = 4;
+        s.SectionDrawRadius = 5;
         s.textureMaxSize = static_cast<int>(TX_QUALITY::MAX);
+        s.AllowNormalmaps = false;
+        s.EnableSSR = true;
+        s.SSRStrength = 1.0f;
+        s.HeroAffectsObjects = true;
+        s.EnableRain = true;
         break;
     case GothicRendererSettings::GRAPHICS_HIGH:
         s.ShadowMapSize = 4096;
@@ -915,8 +944,13 @@ void ApplyGraphicsPresets( GothicRendererSettings& s, bool applyRuntimeUpdates =
         s.EnableDynamicClouds = true;
         if ( IsWindEffectsControlVisible() ) s.WindQuality = GothicRendererSettings::EWindQuality::WIND_QUALITY_ADVANCED;
         s.OutdoorSmallVobDrawRadius = ObjectDrawDistanceUiToMeters( 6 );
-        s.SectionDrawRadius = 5;
+        s.SectionDrawRadius = 7;
         s.textureMaxSize = static_cast<int>(TX_QUALITY::MAX);
+        s.AllowNormalmaps = true;
+        s.EnableSSR = true;
+        s.SSRStrength = 1.0f;
+        s.HeroAffectsObjects = true;
+        s.EnableRain = true;
         break;
     case GothicRendererSettings::GRAPHICS_VERY_HIGH:
         s.ShadowMapSize = 8192;
@@ -927,13 +961,19 @@ void ApplyGraphicsPresets( GothicRendererSettings& s, bool applyRuntimeUpdates =
         s.EnableDynamicClouds = true;
         if ( IsWindEffectsControlVisible() ) s.WindQuality = GothicRendererSettings::EWindQuality::WIND_QUALITY_ADVANCED;
         s.OutdoorSmallVobDrawRadius = ObjectDrawDistanceUiToMeters( 8 );
-        s.SectionDrawRadius = 6;
+        s.SectionDrawRadius = 9;
         s.textureMaxSize = static_cast<int>(TX_QUALITY::MAX);
+        s.AllowNormalmaps = true;
+        s.EnableSSR = true;
+        s.SSRStrength = 1.0f;
+        s.HeroAffectsObjects = true;
+        s.EnableRain = true;
         break;
     default:
         return;
     }
 
+    if ( !s.EnableSSR ) s.SSRStrength = 0.0f;
     if ( s.AoMode == AOMode::AO_NONE ) s.AOStrength = 0.0f;
     if ( !s.EnableScreenSpaceGI ) s.ScreenSpaceGIStrength = 0.0f;
     if ( !s.EnableGodRays ) s.GodRayStrength = 0.0f;
@@ -1009,6 +1049,7 @@ namespace
         s.EnableWaterAnimation = true;
         s.EnableSSS = true;
         s.SSSIntensity = 1.0f;
+        s.EnableParallaxOcclusionMapping = s.AllowNormalmaps;
         s.HDRToneMapStrength = std::clamp( s.HDRToneMapStrength, 0.0f, 2.0f );
         // Disabled coupled controls must always display their true zero effect state.
         if ( !s.EnableHDR ) s.HDRToneMapStrength = 0.0f;
@@ -1312,14 +1353,6 @@ void ImGuiShim::RenderSettingsWindow()
                 }
                 ImGui::SetItemTooltip( "%s", Tr( "Changes image detail and rendering performance.", u8"Bestimmt das Verh\u00E4ltnis zwischen Bilddetails und Renderleistung." ) );
             }
-
-            ImText( Tr( "Contrast", u8"Kontrast" ), buttonWidth ); ImGui::SameLine();
-            SliderDisplayTuningStrength( "##Contrast", &settings.GammaValue );
-            ImGui::SetItemTooltip( "%s", Tr( "Changes the difference between dark and bright areas.", u8"Ver\u00E4ndert den Unterschied zwischen dunklen und hellen Bereichen." ) );
-
-            ImText( Tr( "Brightness", u8"Helligkeit" ), buttonWidth ); ImGui::SameLine();
-            SliderDisplayTuningStrength( "##Brightness", &settings.BrightnessValue );
-            ImGui::SetItemTooltip( "%s", Tr( "Makes the overall image darker or brighter.", u8"Macht das gesamte Bild dunkler oder heller." ) );
             ImGui::PopItemWidth();
             ImGui::EndGroup();
         }
@@ -1365,24 +1398,13 @@ void ImGuiShim::RenderSettingsWindow()
                     ? Tr( "Sets the maximum rendered frames per second.", u8"Legt die maximal gerenderten Bilder pro Sekunde fest." )
                     : Tr( "Enable the FPS limiter to select a frame-rate limit.", u8"Aktiviere das FPS-Limit, um eine Bildrate auszuw\u00E4hlen." )) );
 
-            ImText( Tr( "Surface Detail", u8"Oberfl\u00E4chendetails" ), { buttonWidth.x - ImGui::GetFrameHeight() - style.ItemSpacing.x, buttonWidth.y } ); ImGui::SameLine();
-            if ( ImGui::Checkbox( "##Enable Surface Detail", &settings.AllowNormalmaps ) ) {
-                Engine::GAPI->UpdateTextureMaxSize();
-            }
-            ImGui::SetItemTooltip( "%s", Tr( "Adds fine depth and structure to surfaces.", u8"F\u00FCgt Oberfl\u00E4chen feine Tiefe und Struktur hinzu." ) );
-            ImGui::SameLine();
+            ImText( Tr( "Contrast", u8"Kontrast" ), buttonWidth ); ImGui::SameLine();
+            SliderDisplayTuningStrength( "##Contrast", &settings.GammaValue );
+            ImGui::SetItemTooltip( "%s", Tr( "Changes the difference between dark and bright areas.", u8"Ver\u00E4ndert den Unterschied zwischen dunklen und hellen Bereichen." ) );
 
-            const std::array<std::pair<const char*, bool>, 2> surfaceDetailModes = {{
-                {Tr( "Normal Maps", u8"Normalmaps" ), false},
-                {"Parallax", true},
-            }};
-            ImGui::BeginDisabled( !settings.AllowNormalmaps );
-            ImGui::SetNextItemWidth( standardComboWidth );
-            if ( ImComboBoxC( "##SurfaceDetailMode", surfaceDetailModes, &settings.EnableParallaxOcclusionMapping, [] {} ) ) {
-                ImGui::EndCombo();
-            }
-            ImGui::EndDisabled();
-            ImGui::SetItemTooltip( "%s", Tr( "Changes how surface depth is represented.", u8"Bestimmt, wie r\u00E4umliche Oberfl\u00E4chendetails dargestellt werden." ) );
+            ImText( Tr( "Brightness", u8"Helligkeit" ), buttonWidth ); ImGui::SameLine();
+            SliderDisplayTuningStrength( "##Brightness", &settings.BrightnessValue );
+            ImGui::SetItemTooltip( "%s", Tr( "Makes the overall image darker or brighter.", u8"Macht das gesamte Bild dunkler oder heller." ) );
 
             ImText( Tr( "HDR Tone Mapping", u8"HDR-Tonemapping" ), { buttonWidth.x - ImGui::GetFrameHeight() - style.ItemSpacing.x, buttonWidth.y } ); ImGui::SameLine();
             if ( CoupledStrengthCheckbox( "##Enable HDR Tone Mapping", "HDRToneMapStrength",
@@ -1399,38 +1421,7 @@ void ImGuiShim::RenderSettingsWindow()
                 shadersToReload |= ShaderCategory::Tonemapping;
             }
             ImGui::SetItemTooltip( "%s", Tr( "Adjusts highlight compression and exposure balancing.", u8"Regelt die Zeichnung heller Bereiche und den Belichtungsausgleich." ) );
-
-            bool waterReflections = settings.EnableSSR;
-            ImText( Tr( "Water Reflections", u8"Wasserreflektionen" ), { buttonWidth.x - ImGui::GetFrameHeight() - style.ItemSpacing.x, buttonWidth.y } ); ImGui::SameLine();
-            if ( CoupledStrengthCheckbox( "##Enable Water Reflections", "WaterReflectionsStrength",
-                    &waterReflections, &settings.SSRStrength, 1.0f ) ) {
-                settings.EnableSSR = waterReflections;
-                shadersToReload |= ShaderCategory::Water;
-            }
-            ImGui::SetItemTooltip( "%s", Tr( "Enables reflections on water surfaces.", u8"Aktiviert Reflexionen auf Wasseroberfl\u00E4chen." ) );
-            ImGui::SameLine();
-            ImGui::SetNextItemWidth( standardComboWidth );
-            const bool waterReflectionsBeforeSlider = waterReflections;
-            if ( CoupledStrengthSlider( "##WaterReflectionsStrength", "WaterReflectionsStrength",
-                    &waterReflections, &settings.SSRStrength ) ) {
-                settings.EnableSSR = waterReflections;
-                if ( waterReflectionsBeforeSlider != waterReflections ) {
-                    shadersToReload |= ShaderCategory::Water;
-                }
-            }
-            ImGui::SetItemTooltip( "%s", Tr( "Makes water reflections weaker or stronger.", u8"Macht Wasserreflexionen schw\u00E4cher oder st\u00E4rker." ) );
-
-            ImText( Tr( "Vegetation Push", u8"Vegetationsverdr\u00E4ngung" ), { buttonWidth.x - ImGui::GetFrameHeight() - style.ItemSpacing.x, buttonWidth.y } ); ImGui::SameLine();
-            if ( ImGui::Checkbox( "##Enable Vegetation Push", &settings.HeroAffectsObjects ) )
-            {
-                shadersToReload |= ShaderCategory::Vertex;
-            }
-            ImGui::SetItemTooltip( "%s", Tr( "Lets nearby vegetation move aside when the player passes through it.", u8"L\u00E4sst nahe Vegetation beim Durchlaufen zur Seite weichen." ) );
-
-            ImText( Tr( "Rain Rendering", u8"Regendarstellung" ), { buttonWidth.x - ImGui::GetFrameHeight() - style.ItemSpacing.x, buttonWidth.y } ); ImGui::SameLine();
-ImGui::Checkbox( "##Enable Rain", &settings.EnableRain );
-		ImGui::SetItemTooltip( "%s", Tr( "Enables rain and rain effects.", u8"Aktiviert Regen und Regeneffekte." ) );
-	ImGui::EndGroup();
+            ImGui::EndGroup();
         }
 
         ImGui::Separator();
@@ -1438,6 +1429,17 @@ ImGui::Checkbox( "##Enable Rain", &settings.EnableRain );
         {
             ImGui::BeginGroup();
             ImGui::PushItemWidth( controlWidth );
+
+            ImText( Tr( "World Draw Distance", u8"Weltsichtweite" ), buttonWidth ); ImGui::SameLine();
+            ImGui::SliderInt( "##SectionDrawRadius", &settings.SectionDrawRadius, 1, 10, "%d", ImGuiSliderFlags_::ImGuiSliderFlags_ClampOnInput );
+            ImGui::SetItemTooltip( "%s", Tr( "Higher values show terrain and buildings from farther away.", u8"H\u00F6here Werte zeigen Gel\u00E4nde und Geb\u00E4ude aus gr\u00F6\u00DFerer Entfernung." ) );
+
+            int objectDrawDistance = ObjectDrawDistanceMetersToUi( settings.OutdoorSmallVobDrawRadius );
+            ImText( Tr( "Object Draw Distance", u8"Objektsichtweite" ), buttonWidth ); ImGui::SameLine();
+            if ( ImGui::SliderInt( "##OutdoorSmallVobDrawRadius", &objectDrawDistance, OBJECT_DRAW_DISTANCE_UI_MIN, OBJECT_DRAW_DISTANCE_UI_MAX, "%d", ImGuiSliderFlags_::ImGuiSliderFlags_ClampOnInput ) ) {
+                settings.OutdoorSmallVobDrawRadius = ObjectDrawDistanceUiToMeters( objectDrawDistance );
+            }
+            ImGui::SetItemTooltip( "%s", Tr( "Higher values show small objects and vegetation from farther away.", u8"H\u00F6here Werte zeigen kleine Objekte und Vegetation aus gr\u00F6\u00DFerer Entfernung." ) );
 
             ImText( Tr( "Texture Quality", u8"Texturqualit\u00E4t" ), buttonWidth ); ImGui::SameLine();
             const std::array<std::pair<const char*, int>, 6> QualityOptions = {{
@@ -1509,24 +1511,26 @@ ImGui::Checkbox( "##Enable Rain", &settings.EnableRain );
             ImGui::EndDisabled();
             ImGui::SetItemTooltip( "%s", Tr( "Makes contact shading lighter or darker.", u8"Macht diese Abdunklung heller oder dunkler." ) );
 
-            ImText( Tr( "World Draw Distance", u8"Weltsichtweite" ), buttonWidth ); ImGui::SameLine();
-            ImGui::SliderInt( "##SectionDrawRadius", &settings.SectionDrawRadius, 1, 10, "%d", ImGuiSliderFlags_::ImGuiSliderFlags_ClampOnInput );
-            ImGui::SetItemTooltip( "%s", Tr( "Higher values show terrain and buildings from farther away.", u8"H\u00F6here Werte zeigen Gel\u00E4nde und Geb\u00E4ude aus gr\u00F6\u00DFerer Entfernung." ) );
-
-            int objectDrawDistance = ObjectDrawDistanceMetersToUi( settings.OutdoorSmallVobDrawRadius );
-            ImText( Tr( "Object Draw Distance", u8"Objektsichtweite" ), buttonWidth ); ImGui::SameLine();
-            if ( ImGui::SliderInt( "##OutdoorSmallVobDrawRadius", &objectDrawDistance, OBJECT_DRAW_DISTANCE_UI_MIN, OBJECT_DRAW_DISTANCE_UI_MAX, "%d", ImGuiSliderFlags_::ImGuiSliderFlags_ClampOnInput ) ) {
-                settings.OutdoorSmallVobDrawRadius = ObjectDrawDistanceUiToMeters( objectDrawDistance );
+            bool waterReflections = settings.EnableSSR;
+            ImText( Tr( "Water Reflections", u8"Wasserreflektionen" ), { buttonWidth.x - ImGui::GetFrameHeight() - style.ItemSpacing.x, buttonWidth.y } ); ImGui::SameLine();
+            if ( CoupledStrengthCheckbox( "##Enable Water Reflections", "WaterReflectionsStrength",
+                    &waterReflections, &settings.SSRStrength, 1.0f ) ) {
+                settings.EnableSSR = waterReflections;
+                shadersToReload |= ShaderCategory::Water;
             }
-            ImGui::SetItemTooltip( "%s", Tr( "Higher values show small objects and vegetation from farther away.", u8"H\u00F6here Werte zeigen kleine Objekte und Vegetation aus gr\u00F6\u00DFerer Entfernung." ) );
-            ImGui::PopItemWidth();
-            ImGui::EndGroup();
-        }
+            ImGui::SetItemTooltip( "%s", Tr( "Enables reflections on water surfaces.", u8"Aktiviert Reflexionen auf Wasseroberfl\u00E4chen." ) );
+            ImGui::SameLine();
+            ImGui::SetNextItemWidth( standardComboWidth );
+            const bool waterReflectionsBeforeSlider = waterReflections;
+            if ( CoupledStrengthSlider( "##WaterReflectionsStrength", "WaterReflectionsStrength",
+                    &waterReflections, &settings.SSRStrength ) ) {
+                settings.EnableSSR = waterReflections;
+                if ( waterReflectionsBeforeSlider != waterReflections ) {
+                    shadersToReload |= ShaderCategory::Water;
+                }
+            }
+            ImGui::SetItemTooltip( "%s", Tr( "Makes water reflections weaker or stronger.", u8"Macht Wasserreflexionen schw\u00E4cher oder st\u00E4rker." ) );
 
-        ImGui::SameLine();
-
-        {
-            ImGui::BeginGroup();
             ImText( Tr( "Godrays", u8"Lichtstrahlen" ), { buttonWidth.x - ImGui::GetFrameHeight() - style.ItemSpacing.x, buttonWidth.y } ); ImGui::SameLine();
             if ( CoupledStrengthCheckbox( "##Enable Godrays", "GodRayStrength",
                     &settings.EnableGodRays, &settings.GodRayStrength, 1.0f ) ) {
@@ -1542,6 +1546,25 @@ ImGui::Checkbox( "##Enable Rain", &settings.EnableRain );
                 shadersToReload |= ShaderCategory::Other;
             }
             ImGui::SetItemTooltip( "%s", Tr( "Makes sunlight beams weaker or stronger.", u8"Macht Sonnenstrahlen schw\u00E4cher oder st\u00E4rker." ) );
+            ImGui::PopItemWidth();
+            ImGui::EndGroup();
+        }
+
+        ImGui::SameLine();
+
+        {
+            ImGui::BeginGroup();
+            float depthOfFieldStrength = settings.DoFBokehRadius / 3.5f;
+            ImText( Tr( "Depth of Field", u8"Tiefenunsch\u00E4rfe" ), { buttonWidth.x - ImGui::GetFrameHeight() - style.ItemSpacing.x, buttonWidth.y } ); ImGui::SameLine();
+            CoupledStrengthCheckbox( "##Enable Depth of Field", "DepthOfFieldBlurStrength",
+                &settings.EnableDoF, &depthOfFieldStrength, 1.0f );
+            ImGui::SetItemTooltip( "%s", Tr( "Blurs out-of-focus parts of the scene.", u8"Stellt Bereiche au\u00DFerhalb des Fokus unscharf dar." ) );
+            ImGui::SameLine();
+            ImGui::SetNextItemWidth( standardComboWidth );
+            CoupledStrengthSlider( "##DepthOfFieldBlurStrength", "DepthOfFieldBlurStrength",
+                &settings.EnableDoF, &depthOfFieldStrength );
+            settings.DoFBokehRadius = depthOfFieldStrength * 3.5f;
+            ImGui::SetItemTooltip( "%s", Tr( "Makes out-of-focus areas clearer or more blurred.", u8"Macht unscharfe Bereiche klarer oder verschwommener." ) );
 
 #if defined(BUILD_GOTHIC_2_6_fix) || (defined(BUILD_GOTHIC_1_08k) && !defined(BUILD_1_12F))
 #if defined(BUILD_GOTHIC_1_08k) && !defined(BUILD_1_12F)
@@ -1575,23 +1598,33 @@ ImGui::Checkbox( "##Enable Rain", &settings.EnableRain );
             }
 #endif //BUILD_GOTHIC_2_6_fix
 
-            float depthOfFieldStrength = settings.DoFBokehRadius / 3.5f;
-            ImText( Tr( "Depth of Field", u8"Tiefenunsch\u00E4rfe" ), { buttonWidth.x - ImGui::GetFrameHeight() - style.ItemSpacing.x, buttonWidth.y } ); ImGui::SameLine();
-            CoupledStrengthCheckbox( "##Enable Depth of Field", "DepthOfFieldBlurStrength",
-                &settings.EnableDoF, &depthOfFieldStrength, 1.0f );
-            ImGui::SetItemTooltip( "%s", Tr( "Blurs out-of-focus parts of the scene.", u8"Stellt Bereiche au\u00DFerhalb des Fokus unscharf dar." ) );
-            ImGui::SameLine();
-            ImGui::SetNextItemWidth( standardComboWidth );
-            CoupledStrengthSlider( "##DepthOfFieldBlurStrength", "DepthOfFieldBlurStrength",
-                &settings.EnableDoF, &depthOfFieldStrength );
-            settings.DoFBokehRadius = depthOfFieldStrength * 3.5f;
-            ImGui::SetItemTooltip( "%s", Tr( "Makes out-of-focus areas clearer or more blurred.", u8"Macht unscharfe Bereiche klarer oder verschwommener." ) );
+            ImText( Tr( "Vegetation Push", u8"Vegetationsverdr\u00E4ngung" ), { buttonWidth.x - ImGui::GetFrameHeight() - style.ItemSpacing.x, buttonWidth.y } ); ImGui::SameLine();
+            if ( ImGui::Checkbox( "##Enable Vegetation Push", &settings.HeroAffectsObjects ) )
+            {
+                shadersToReload |= ShaderCategory::Vertex;
+            }
+            ImGui::SetItemTooltip( "%s", Tr( "Lets nearby vegetation move aside when the player passes through it.", u8"L\u00E4sst nahe Vegetation beim Durchlaufen zur Seite weichen." ) );
+
+            ImText( Tr( "Rain Rendering", u8"Regendarstellung" ), { buttonWidth.x - ImGui::GetFrameHeight() - style.ItemSpacing.x, buttonWidth.y } ); ImGui::SameLine();
+            ImGui::Checkbox( "##Enable Rain", &settings.EnableRain );
+            ImGui::SetItemTooltip( "%s", Tr( "Enables rain and rain effects.", u8"Aktiviert Regen und Regeneffekte." ) );
 
             ImText( Tr( "Dynamic Clouds", u8"Dynamische Wolken" ), { buttonWidth.x - ImGui::GetFrameHeight() - style.ItemSpacing.x, buttonWidth.y } ); ImGui::SameLine();
             ImGui::Checkbox( "##Enable Dynamic Clouds", &settings.EnableDynamicClouds );
             ImGui::SetItemTooltip( "%s", Tr( "Enables moving low cloud fields.", u8"Aktiviert bewegte tiefe Wolkenfelder." ) );
 
+            ImText( Tr( "Surface Detail", u8"Oberfl\u00E4chendetails" ), { buttonWidth.x - ImGui::GetFrameHeight() - style.ItemSpacing.x, buttonWidth.y } ); ImGui::SameLine();
+            if ( ImGui::Checkbox( "##Enable Surface Detail", &settings.AllowNormalmaps ) ) {
+                settings.EnableParallaxOcclusionMapping = settings.AllowNormalmaps;
+                Engine::GAPI->UpdateTextureMaxSize();
+            }
+            ImGui::SetItemTooltip( "%s", Tr( "Enables available normal and parallax surface details.", u8"Aktiviert vorhandene Normalmap- und Parallax-Oberfl\u00E4chendetails." ) );
 
+            ImText( Tr( "Contact Shadows", u8"Kontaktschatten" ), { buttonWidth.x - ImGui::GetFrameHeight() - style.ItemSpacing.x, buttonWidth.y } ); ImGui::SameLine();
+            if ( ImGui::Checkbox( "##Enable Contact Shadows", &settings.EnableContactShadows ) ) {
+                shadersToReload |= ShaderCategory::Other;
+            }
+            ImGui::SetItemTooltip( "%s", Tr( "Adds small shadows where objects meet nearby indoor surfaces. Only affects indoor areas.", u8"F\u00FCgt kleine Schatten an nahen Kontaktstellen hinzu. Wirkt nur in Innenr\u00E4umen." ) );
 
             ImText( "Screen-Space GI", { buttonWidth.x - ImGui::GetFrameHeight() - style.ItemSpacing.x, buttonWidth.y } ); ImGui::SameLine();
             if ( ImGui::Checkbox( "##Enable Screen-Space GI", &settings.EnableScreenSpaceGI ) ) {
@@ -1599,12 +1632,6 @@ ImGui::Checkbox( "##Enable Rain", &settings.EnableRain );
                 shadersToReload |= ShaderCategory::Other;
             }
             ImGui::SetItemTooltip( "%s", Tr( "Enables soft indirect lighting from nearby surfaces.", u8"Aktiviert weiches indirektes Licht von nahen Oberfl\u00E4chen." ) );
-
-            ImText( Tr( "Contact Shadows", u8"Kontaktschatten" ), { buttonWidth.x - ImGui::GetFrameHeight() - style.ItemSpacing.x, buttonWidth.y } ); ImGui::SameLine();
-            if ( ImGui::Checkbox( "##Enable Contact Shadows", &settings.EnableContactShadows ) ) {
-                shadersToReload |= ShaderCategory::Other;
-            }
-            ImGui::SetItemTooltip( "%s", Tr( "Adds small shadows where objects meet nearby indoor surfaces. Only affects indoor areas.", u8"F\u00FCgt kleine Schatten an nahen Kontaktstellen hinzu. Wirkt nur in Innenr\u00E4umen." ) );
             ImGui::EndGroup();
         }
 

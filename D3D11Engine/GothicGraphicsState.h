@@ -577,7 +577,7 @@ struct GothicRendererSettings {
 
     /** Sets the default values for this struct */
     void SetDefault() {
-        SectionDrawRadius = 4;
+        SectionDrawRadius = 5;
 
         FpsLimit = 0;
         FpsLimitLastEnabled = 60;

@@ -25,15 +25,7 @@ float LensFlareLuma(float3 color) { return dot(color, float3(0.2126f, 0.7152f, 0
 
 float LensFlareCircle(float2 uv, float2 position, float radius, float aspect) { float2 delta = uv - position; delta.x *= aspect; return 1.0f - smoothstep(radius * 0.35f, radius, length(delta)); }
 
-float LensFlareRing(float2 uv, float2 position, float radius, float width, float aspect) { float2 delta = uv - position; delta.x *= aspect; float ringDistance = abs(length(delta) - radius); return 1.0f - smoothstep(0.0f, width, ringDistance); }
-
-float3 BuildLensFlare(float2 uv, float2 sunPosition, float aspect, float sunVisibility) { float2 screenCenter = float2(0.5f, 0.5f); float2 flareAxis = screenCenter - sunPosition; float lookAtSun = 1.0f - smoothstep(0.10f, 0.68f, length(flareAxis)); float flareStrength = saturate(sunVisibility) * lookAtSun * max(GR_Weight, 0.0f);
-
-float sunGlow = LensFlareCircle(uv, sunPosition, 0.105f, aspect); float sunHalo = LensFlareRing(uv, sunPosition, 0.145f, 0.030f, aspect); float ghost1 = LensFlareCircle(uv, sunPosition + flareAxis * 0.62f, 0.040f, aspect); float ghost2 = LensFlareRing(uv, sunPosition + flareAxis * 1.05f, 0.075f, 0.020f, aspect); float ghost3 = LensFlareCircle(uv, sunPosition + flareAxis * 1.48f, 0.055f, aspect); float ghost4 = LensFlareRing(uv, sunPosition + flareAxis * 1.82f, 0.095f, 0.024f, aspect);
-
-float3 flareColor = 0.0f; flareColor += sunGlow * float3(1.00f, 0.82f, 0.56f) * 1.20f; flareColor += sunHalo * float3(1.00f, 0.62f, 0.30f) * 0.48f; flareColor += ghost1 * float3(0.35f, 0.60f, 1.00f) * 0.34f; flareColor += ghost2 * float3(0.40f, 1.00f, 0.65f) * 0.25f; flareColor += ghost3 * float3(1.00f, 0.38f, 0.26f) * 0.28f; flareColor += ghost4 * float3(0.45f, 0.55f, 1.00f) * 0.20f;
-
-return flareColor * flareStrength; }
+float3 BuildLensFlare(float2 uv, float2 sunPosition, float aspect, float sunVisibility) { float2 screenCenter = float2(0.5f, 0.5f); float2 flareAxis = screenCenter - sunPosition; float lookAtSun = 1.0f - smoothstep(0.08f, 0.58f, length(flareAxis)); float flareStrength = saturate(sunVisibility) * lookAtSun * max(GR_Weight, 0.0f) * 0.35f; float sunGlow = LensFlareCircle(uv, sunPosition, 0.052f, aspect); float ghost1 = LensFlareCircle(uv, sunPosition + flareAxis * 0.72f, 0.022f, aspect); float ghost2 = LensFlareCircle(uv, sunPosition + flareAxis * 1.46f, 0.032f, aspect); float3 flareColor = 0.0f; flareColor += sunGlow * float3(1.00f, 0.90f, 0.72f) * 0.34f; flareColor += ghost1 * float3(0.62f, 0.72f, 0.88f) * 0.10f; flareColor += ghost2 * float3(0.72f, 0.68f, 0.62f) * 0.07f; return flareColor * flareStrength; }
 
 [numthreads(8, 8, 1)]
 void CSMain( uint3 DTid : SV_DispatchThreadID )

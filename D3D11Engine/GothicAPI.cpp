@@ -3364,6 +3364,7 @@ void GothicAPI::DrawParticleFX( zCVob* source, zCParticleFX* fx, ParticleFrameDa
         const int blendMode = sourceBlendMode;
         const bool emissiveParticle = !groundFogParticle && !waterfallParticle
             && IsEmissiveParticleTexture( texture, sourceBlendMode );
+        const float particleRainWeight = std::clamp( GetRainFXWeight(), 0.0f, 1.0f );
         const ParticleBatchKey batchKey = { texture, blendMode };
 
         // Blend mode is part of the batch key because Gothic reuses particle textures
@@ -3459,9 +3460,13 @@ void GothicAPI::DrawParticleFX( zCVob* source, zCParticleFX* fx, ParticleFrameDa
                 color.w = std::pow( color.w, 1.0f / 2.2f );
             }
             if ( smokeOrFogParticle ) {
-                // Alpha is raised to 2.2 in VS_ParticlePoint. Applying the
-                // inverse-gamma factor here yields exactly 50% final opacity.
-                color.w *= 0.7297401f;
+                // Preserve the current 50% final opacity while dry and raise it
+                // smoothly to 70% final opacity during full rain.
+                color.w *= std::lerp( 0.7297401f, 0.8503349f, particleRainWeight );
+            } else if ( waterfallParticle ) {
+                // Preserve the current water-particle opacity while dry and reduce
+                // it smoothly to 50% final opacity during full rain.
+                color.w *= std::lerp( 1.0f, 0.7297401f, particleRainWeight );
             }
 
             ii.position = p->PositionWS;
