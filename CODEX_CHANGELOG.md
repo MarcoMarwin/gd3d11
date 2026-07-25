@@ -34,3 +34,9 @@
 - Presets: Activated Water Reflections in Low preset (SSR & strength 1.0) and updated Object Draw Distance presets to 3 / 5 / 7 / 9.
 - Contact Shadows: Removed FSR 3 composition scale dampening (CC_ContactShadowScale = 1.0f).
 - Shadow Map: Neutralized frame-variable FSR 3 projection jitter offset (SQ_JitterOffset = float2(0.0f, 0.0f)) in FillSunCSMConstantBuffer.
+
+## Build 162
+
+- Contact Shadows: Removed diagnostic FSR 3 bypass from IndoorReceiverMask in PS_PFX_ScreenSpaceLightingTrace.hlsl so Contact Shadows target indoor receivers exclusively in all modes.
+- Shadow Map: Neutralized frame-variable FSR 3 projection jitter in DrawWorldLights (SQ_JitterOffset = float2(0.0f, 0.0f)).
+- Default Settings: Updated default OutdoorSmallVobDrawRadius to 12500.0f (UI level 5) in GothicGraphicsState.h, matching default Object Draw Distance with Medium preset.

@@ -35,11 +35,7 @@ float IsAlphaTestedMaterial(float4 materialInfo) { return materialInfo.g < 0.0f 
 float IndoorReceiverMask(float2 uv)
 {
     float a = TX_Albedo.SampleLevel(SS_Linear, saturate(uv), 0).a;
-    float indoorReceiver = a < 0.5f ? 1.0f : 0.0f;
-
-    // Diagnostic test only: bypass the albedo-alpha indoor
-    // classification while FSR3 is active.
-    return lerp(indoorReceiver, 1.0f, saturate(SSL_FSR3Active));
+    return a < 0.5f ? 1.0f : 0.0f;
 }
 float3 ViewPosition(float2 uv, float depth)
 {
