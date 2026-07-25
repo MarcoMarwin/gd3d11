@@ -5303,16 +5303,18 @@ XRESULT D3D11GraphicsEngine::DrawMeshInfoListAlphablended(
             }
 
             MyDirectDrawSurface7* surface = texture->GetSurface();
-            ID3D11ShaderResourceView* srv[4];
+            ID3D11ShaderResourceView* srv[3];
 
-            // Get diffuse and normalmap
+            // Match the established nightly transparency path:
+            // diffuse plus explicitly authored normal/fx resources only.
             srv[0] = surface->GetEngineTexture()
                 ->GetShaderResourceView().Get();
-            srv[1] = GetMaterialNormalmapSRV( surface, meshKey.Info );
+            srv[1] = surface->GetNormalmap()
+                ? surface->GetNormalmap()->GetShaderResourceView().Get()
+                : nullptr;
             srv[2] = surface->GetFxMap()
                 ? surface->GetFxMap()->GetShaderResourceView().Get()
                 : nullptr;
-            srv[3] = GetParallaxDisplacementSRV( surface, meshKey.Info );
 
             int alphaFunc = meshKey.Material->GetAlphaFunc();
 
@@ -5322,15 +5324,13 @@ XRESULT D3D11GraphicsEngine::DrawMeshInfoListAlphablended(
                     : zMAT_ALPHA_FUNC_MAT_DEFAULT;
             }
 
-            if (lastTex != texture) {
+            if ( lastTex != texture ) {
                 GetContext()->PSSetShaderResources( 0, 3, srv );
-                GetContext()->PSSetShaderResources( 13, 1, &srv[3] );
                 lastTex = texture;
             }
 
-            if (lastMat != meshKey.Material) {
-                const MaterialInfo::EMaterialType shaderMaterialType = meshKey.Info->MaterialType;
-                BindShaderForTexture( texture, false, alphaFunc, shaderMaterialType, true );
+            if ( lastMat != meshKey.Material ) {
+                BindShaderForTexture( texture, false, alphaFunc, meshKey.Info->MaterialType );
                 lastMat = meshKey.Material;
             }
 
