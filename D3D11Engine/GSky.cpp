@@ -545,6 +545,7 @@ XRESULT GSky::RenderSky() {
     AtmosphereCB.AC_ParticleLightingStrength = rendererSettings.ParticleLightingStrength * 1.5f;
     // BEGIN TEMPORARY RENDERER TEST OVERRIDES
     AtmosphereCB.AC_PadParticle0 = 0.0f;
+    AtmosphereCB.AC_PadParticle1 = 0.0f;
     if ( nightTestOverridesEnabled ) {
         if ( nightTests.DisableGroundNightContribution ) {
             AtmosphereCB.AC_PadParticle0 += 1.0f;
@@ -555,21 +556,29 @@ XRESULT GSky::RenderSky() {
         if ( nightTests.UseNightlyGroundRainInput ) {
             AtmosphereCB.AC_PadParticle0 += 4.0f;
         }
+        if ( nightTests.DisableParticleNightDimming ) {
+            AtmosphereCB.AC_PadParticle1 += 1.0f;
+        }
+        if ( nightTests.DisableParticleRainAlphaReduction ) {
+            AtmosphereCB.AC_PadParticle1 += 2.0f;
+        }
     }
-    AtmosphereCB.AC_PadParticle1 = 0.0f;
     // END TEMPORARY RENDERER TEST OVERRIDES
     // BEGIN TEMPORARY RENDERER TEST OVERRIDES
     const bool disableAllNightRainAdjustments = nightTestOverridesEnabled && nightTests.DisableNightRainAdjustments;
-    const bool disableNightRainMidContribution = disableAllNightRainAdjustments || ( nightTestOverridesEnabled && nightTests.DisableNightRainMidColor ) || ( nightTestOverridesEnabled && nightTests.DisableNightRainMidInfluence );
-    const bool disableNightRainWorldHaze = disableAllNightRainAdjustments || ( nightTestOverridesEnabled && nightTests.DisableNightRainFarColor ) || ( nightTestOverridesEnabled && nightTests.DisableNightRainWorldHazeStrength );
-    const bool disableNightRainSkyHaze = disableAllNightRainAdjustments || ( nightTestOverridesEnabled && nightTests.DisableNightRainSkyColor ) || ( nightTestOverridesEnabled && nightTests.DisableNightRainSkyHazeStrength );
+    const bool disableNightRainMidColor = disableAllNightRainAdjustments || ( nightTestOverridesEnabled && nightTests.DisableNightRainMidColor );
+    const bool disableNightRainFarColor = disableAllNightRainAdjustments || ( nightTestOverridesEnabled && nightTests.DisableNightRainFarColor );
+    const bool disableNightRainSkyColor = disableAllNightRainAdjustments || ( nightTestOverridesEnabled && nightTests.DisableNightRainSkyColor );
+    const bool disableNightRainMidInfluence = disableAllNightRainAdjustments || ( nightTestOverridesEnabled && nightTests.DisableNightRainMidInfluence );
+    const bool disableNightRainWorldHazeStrength = disableAllNightRainAdjustments || ( nightTestOverridesEnabled && nightTests.DisableNightRainWorldHazeStrength );
+    const bool disableNightRainSkyHazeStrength = disableAllNightRainAdjustments || ( nightTestOverridesEnabled && nightTests.DisableNightRainSkyHazeStrength );
 
-    AtmosphereCB.AC_NightRainMidColor = rendererSettings.NightRainMidColor;
-    AtmosphereCB.AC_NightRainWorldHazeStrength = disableNightRainWorldHaze ? 0.0f : rendererSettings.NightRainWorldHazeStrength;
-    AtmosphereCB.AC_NightRainFarColor = rendererSettings.NightRainFarColor;
-    AtmosphereCB.AC_NightRainMidInfluence = disableNightRainMidContribution ? 0.0f : rendererSettings.NightRainMidInfluence;
-    AtmosphereCB.AC_NightRainSkyColor = rendererSettings.NightRainSkyColor;
-    AtmosphereCB.AC_NightRainSkyHazeStrength = disableNightRainSkyHaze ? 0.0f : rendererSettings.NightRainSkyHazeStrength;
+    AtmosphereCB.AC_NightRainMidColor = disableNightRainMidColor ? float3( 1.0f, 1.0f, 1.0f ) : rendererSettings.NightRainMidColor;
+    AtmosphereCB.AC_NightRainWorldHazeStrength = disableNightRainWorldHazeStrength ? 0.0f : rendererSettings.NightRainWorldHazeStrength;
+    AtmosphereCB.AC_NightRainFarColor = disableNightRainFarColor ? float3( 1.0f, 1.0f, 1.0f ) : rendererSettings.NightRainFarColor;
+    AtmosphereCB.AC_NightRainMidInfluence = disableNightRainMidInfluence ? 0.0f : rendererSettings.NightRainMidInfluence;
+    AtmosphereCB.AC_NightRainSkyColor = disableNightRainSkyColor ? float3( 1.0f, 1.0f, 1.0f ) : rendererSettings.NightRainSkyColor;
+    AtmosphereCB.AC_NightRainSkyHazeStrength = disableNightRainSkyHazeStrength ? 0.0f : rendererSettings.NightRainSkyHazeStrength;
     AtmosphereCB.AC_NightRainFarMaxLuma = disableAllNightRainAdjustments || ( nightTestOverridesEnabled && nightTests.DisableNightRainFarMaxLuma ) ? 1.0f : rendererSettings.NightRainFarMaxLuma;
     AtmosphereCB.AC_NightRainVeryFarMaxLuma = disableAllNightRainAdjustments || ( nightTestOverridesEnabled && nightTests.DisableNightRainVeryFarMaxLuma ) ? 1.0f : rendererSettings.NightRainVeryFarMaxLuma;
     AtmosphereCB.AC_NightRainVeryFarInfluence = disableAllNightRainAdjustments || ( nightTestOverridesEnabled && nightTests.DisableNightRainVeryFarInfluence ) ? 0.0f : rendererSettings.NightRainVeryFarInfluence;

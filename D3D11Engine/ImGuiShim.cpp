@@ -1175,6 +1175,12 @@ namespace {
 
         ImGui::Separator();
 
+        ImGui::TextUnformatted( "Particle Lighting Diagnostics" );
+        ImGui::Checkbox( "Disable Particle Night Dimming", &night.DisableParticleNightDimming );
+        ImGui::Checkbox( "Disable Particle Rain Alpha Reduction", &night.DisableParticleRainAlphaReduction );
+
+        ImGui::Separator();
+
         ImGui::TextUnformatted( "Transparency Path Identification" );
         ImGui::Checkbox( "Disable Transparent World Meshes", &night.DisableTransparentWorldMeshes );
         ImGui::Checkbox( "Disable Transparent VOB Meshes", &night.DisableTransparentVobMeshes );
@@ -1188,6 +1194,10 @@ namespace {
         ImGui::Checkbox( "Disable Transparent FX Maps", &night.DisableTransparentFxMaps );
         ImGui::Checkbox( "Disable Transparent Displacement Maps", &night.DisableTransparentDisplacementMaps );
         ImGui::Checkbox( "Force White Transparent Texture Factor", &night.ForceWhiteTransparentTextureFactor );
+        ImGui::SetNextItemWidth( 300.0f );
+        ImGui::SliderFloat( "Transparent World Mesh Alpha", &night.TransparentWorldMeshAlpha, 0.0f, 1.0f, "%.2f", ImGuiSliderFlags_AlwaysClamp );
+        ImGui::SetNextItemWidth( 300.0f );
+        ImGui::SliderFloat( "Transparent World Mesh Night EnvMap Factor", &night.TransparentWorldMeshNightEnvMapFactor, 0.0f, 1.0f, "%.2f", ImGuiSliderFlags_AlwaysClamp );
 
         ImGui::Separator();
 
@@ -1199,10 +1209,9 @@ namespace {
 
         ImGui::TextUnformatted( "Nightly World Transparency Comparison" );
         ImGui::Checkbox( "Use Base Texture For Transparent World Meshes", &night.UseBaseTextureForTransparentWorldMeshes );
-        ImGui::Checkbox( "Use Nightly Temporal Matrices For Transparent World Meshes", &night.UseNightlyTemporalMatricesForTransparentWorldMeshes );
         ImGui::Checkbox( "Use Nightly World Transparency Tessellation Reset", &night.UseNightlyWorldTransparencyTessellationReset );
         ImGui::Checkbox( "Use Nightly Waterfall Transparency Classification", &night.UseNightlyWaterfallTransparencyClassification );
-        ImGui::Checkbox( "Use Nightly Per-Instance Buffer For Transparent World Meshes", &night.UseNightlyPerInstanceBufferForTransparentWorldMeshes );
+        ImGui::Checkbox( "Use Nightly Blend Shader For Transparent World Meshes", &night.UseNightlyBlendShaderForTransparentWorldMeshes );
 
         ImGui::Separator();
 

@@ -67,3 +67,10 @@
 ## Build 168
 
 - Diagnostics: Extended F11 transparency diagnostic menu with Nightly world transparency comparison tests (base texture fallback, temporal matrices, tessellation reset, waterfall classification, per-instance buffer) and transparency list isolation toggles (wet-SSR blocker collection/draw, regular/portal/waterfall transparency draw) in D3D11GraphicsEngine.cpp and ImGuiShim.cpp.
+
+## Build 169
+- Added UseNightlyBlendShaderForTransparentWorldMeshes diagnostic flag and integrated it via SetActivePixelShader( PShaderID::PS_Simple_FF ).
+- Re-architected DisableWaterfallTransparencyDraw for early elimination of MT_WaterfallFoam.
+- Extracted and isolated DisableNightRainMidColor, FarColor, SkyColor, MidInfluence, WorldHazeStrength, SkyHazeStrength over AC_NightRain configuration.
+- Added Particle Lighting Diagnostics (DisableParticleNightDimming, DisableParticleRainAlphaReduction).
+- Added Transparent World Mesh Alpha and Night EnvMap Factor controls.

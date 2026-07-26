@@ -33,8 +33,12 @@ float4 AdaptParticleLighting(float4 color, float particleLightingScale)
     if (particleLightingScale < 0.0f)
         return color;
 
-    float night = saturate((-AC_LightPos.y + 0.08f) * 2.5f);
-    float rain = max(saturate(AC_RainFXWeight), saturate(AC_SceneWettness));
+    float packedParticleTestFlags = floor(max(AC_PadParticle1, 0.0f) + 0.5f);
+    bool disableParticleNightDimming = fmod(floor(packedParticleTestFlags / 1.0f), 2.0f) >= 1.0f;
+    bool disableParticleRainAlphaReduction = fmod(floor(packedParticleTestFlags / 2.0f), 2.0f) >= 1.0f;
+
+    float night = disableParticleNightDimming ? 0.0f : saturate((-AC_LightPos.y + 0.08f) * 2.5f);
+    float rain = disableParticleRainAlphaReduction ? 0.0f : max(saturate(AC_RainFXWeight), saturate(AC_SceneWettness));
     float strength = saturate(AC_EnableParticleLighting * AC_ParticleLightingStrength) * saturate(particleLightingScale);
 
     float nightDim = lerp(1.0f, 0.24f, night);

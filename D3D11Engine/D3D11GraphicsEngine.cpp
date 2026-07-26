@@ -266,7 +266,14 @@ namespace
         }
 
         if ( material->GetEnvMapEnabled() ) {
-            float intensity = material->GetEnvMapStrength() * 0.05f;
+            float nightEnvMapFactor = 0.05f;
+            // BEGIN TEMPORARY RENDERER TEST OVERRIDES
+            const RendererTestSettings& rendererTestSettings = GetRendererTestSettings();
+            if ( rendererTestSettings.EnableOverrides ) {
+                nightEnvMapFactor = std::clamp( rendererTestSettings.Night.TransparentWorldMeshNightEnvMapFactor, 0.0f, 1.0f );
+            }
+            // END TEMPORARY RENDERER TEST OVERRIDES
+            float intensity = material->GetEnvMapStrength() * nightEnvMapFactor;
             if ( Engine::GAPI ) {
                 if ( GSky* sky = Engine::GAPI->GetSky() ) {
                     const float sunHeight = sky->GetAtmosphereCB().AC_LightPos.y;
@@ -5283,23 +5290,7 @@ XRESULT D3D11GraphicsEngine::DrawMeshInfoListAlphablended( const std::vector<std
     SetActiveVertexShader( VShaderID::VS_Ex );
 
     SetupVS_ExMeshDrawCall();
-    if ( transparencyTestOverridesEnabled && transparencyTests.UseNightlyTemporalMatricesForTransparentWorldMeshes ) {
-        auto& nightlyView = Engine::GAPI->GetRendererState().TransformState.TransformView;
-        auto& nightlyProjection = Engine::GAPI->GetProjectionMatrix();
-        VS_ExConstantBuffer_PerFrame nightlyPerFrame = {};
-        nightlyPerFrame.View = nightlyView;
-        nightlyPerFrame.Projection = nightlyProjection;
-        XMStoreFloat4x4( &nightlyPerFrame.ViewProj, XMMatrixMultiply( XMLoadFloat4x4( &nightlyProjection ), XMLoadFloat4x4( &nightlyView ) ) );
-        nightlyPerFrame.PrevViewProj = m_PrevViewProjMatrix;
-        if ( TemporalState ) {
-            nightlyPerFrame.UnjitteredViewProj = TemporalState->GetUnjitteredViewProj();
-        } else {
-            nightlyPerFrame.UnjitteredViewProj = nightlyPerFrame.ViewProj;
-        }
-        ActiveVS->GetBuffer( 0 ).Update( &nightlyPerFrame ).Bind();
-    } else {
-        SetupVS_ExConstantBuffer();
-    }
+    SetupVS_ExConstantBuffer();
 
     // Set constant buffer
     ActivePS->GetBuffer( "FFPipelineConstantBuffer" )
@@ -5312,14 +5303,10 @@ XRESULT D3D11GraphicsEngine::DrawMeshInfoListAlphablended( const std::vector<std
         .Bind();
 
     const XMMATRIX identityMatrix = XMMatrixIdentity();
-    if ( transparencyTestOverridesEnabled && transparencyTests.UseNightlyPerInstanceBufferForTransparentWorldMeshes ) {
-        ActiveVS->GetBuffer( "Matrices_PerInstances" ).Update( &identityMatrix ).Bind();
-    } else {
-        VS_ExConstantBuffer_PerInstance cbInstance = {};
-        XMStoreFloat4x4( &cbInstance.World, identityMatrix );
-        cbInstance.Color = float4( 1.0f, 1.0f, 1.0f, 1.0f );
-        ActiveVS->GetBuffer( "Matrices_PerInstances" ).Update( &cbInstance, sizeof( cbInstance ) ).Bind();
-    }
+    VS_ExConstantBuffer_PerInstance cbInstance = {};
+    XMStoreFloat4x4( &cbInstance.World, identityMatrix );
+    cbInstance.Color = float4( 1.0f, 1.0f, 1.0f, 1.0f );
+    ActiveVS->GetBuffer( "Matrices_PerInstances" ).Update( &cbInstance, sizeof( cbInstance ) ).Bind();
 
     InfiniteRangeConstantBuffer->BindToPixelShader( 3 );
 
@@ -5348,6 +5335,9 @@ XRESULT D3D11GraphicsEngine::DrawMeshInfoListAlphablended( const std::vector<std
             // BEGIN TEMPORARY RENDERER TEST OVERRIDES
             if ( transparencyTestOverridesEnabled && transparencyTests.ForceWhiteTransparentTextureFactor ) {
                 ffdata.textureFactor = float4( 1.0f, 1.0f, 1.0f, 1.0f );
+            }
+            if ( transparencyTestOverridesEnabled ) {
+                ffdata.textureFactor.w *= std::clamp( transparencyTests.TransparentWorldMeshAlpha, 0.0f, 1.0f );
             }
             // END TEMPORARY RENDERER TEST OVERRIDES
             if (texture->CacheIn( 0.6f ) != zRES_CACHED_IN) {
@@ -5393,6 +5383,13 @@ XRESULT D3D11GraphicsEngine::DrawMeshInfoListAlphablended( const std::vector<std
             if (lastMat != meshKey.Material) {
                 const MaterialInfo::EMaterialType shaderMaterialType = meshKey.Info->MaterialType;
                 BindShaderForTexture( texture, false, alphaFunc, shaderMaterialType, true );
+                if ( transparencyTestOverridesEnabled
+                    && transparencyTests.UseNightlyBlendShaderForTransparentWorldMeshes
+                    && (alphaFunc == zMAT_ALPHA_FUNC_BLEND
+                        || alphaFunc == zMAT_ALPHA_FUNC_ADD) ) {
+                    SetActivePixelShader( PShaderID::PS_Simple_FF );
+                    ActivePS->Apply();
+                }
                 lastMat = meshKey.Material;
             }
 
@@ -5668,12 +5665,17 @@ XRESULT D3D11GraphicsEngine::DrawWorldMesh( bool noTextures ) {
                     }
 
 
+                    // BEGIN TEMPORARY RENDERER TEST OVERRIDES
+                    if ( transparencyTestOverridesEnabled && transparencyTests.DisableWaterfallTransparencyDraw && worldMesh.first.Info->MaterialType == MaterialInfo::MT_WaterfallFoam ) {
+                        continue;
+                    }
                     if ( transparencyTestOverridesEnabled && transparencyTests.UseNightlyWaterfallTransparencyClassification && worldMesh.first.Info->MaterialType == MaterialInfo::MT_WaterfallFoam ) {
                         if ( !isZPrepass ) {
                             transparencyMeshes.push_back( { transparencyMesh, distanceSq } );
                         }
                         continue;
                     }
+                    // END TEMPORARY RENDERER TEST OVERRIDES
 
                     // Check for alphablending
                     if ( (worldMesh.first.Material->GetAlphaFunc() > zMAT_ALPHA_FUNC_NONE &&
