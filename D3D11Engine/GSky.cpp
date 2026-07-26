@@ -573,11 +573,11 @@ XRESULT GSky::RenderSky() {
     const bool disableNightRainWorldHazeStrength = disableAllNightRainAdjustments || ( nightTestOverridesEnabled && nightTests.DisableNightRainWorldHazeStrength );
     const bool disableNightRainSkyHazeStrength = disableAllNightRainAdjustments || ( nightTestOverridesEnabled && nightTests.DisableNightRainSkyHazeStrength );
 
-    AtmosphereCB.AC_NightRainMidColor = disableNightRainMidColor ? float3( 1.0f, 1.0f, 1.0f ) : rendererSettings.NightRainMidColor;
+    AtmosphereCB.AC_NightRainMidColor = disableNightRainMidColor ? XMFLOAT3( 1.0f, 1.0f, 1.0f ) : rendererSettings.NightRainMidColor;
     AtmosphereCB.AC_NightRainWorldHazeStrength = disableNightRainWorldHazeStrength ? 0.0f : rendererSettings.NightRainWorldHazeStrength;
-    AtmosphereCB.AC_NightRainFarColor = disableNightRainFarColor ? float3( 1.0f, 1.0f, 1.0f ) : rendererSettings.NightRainFarColor;
+    AtmosphereCB.AC_NightRainFarColor = disableNightRainFarColor ? XMFLOAT3( 1.0f, 1.0f, 1.0f ) : rendererSettings.NightRainFarColor;
     AtmosphereCB.AC_NightRainMidInfluence = disableNightRainMidInfluence ? 0.0f : rendererSettings.NightRainMidInfluence;
-    AtmosphereCB.AC_NightRainSkyColor = disableNightRainSkyColor ? float3( 1.0f, 1.0f, 1.0f ) : rendererSettings.NightRainSkyColor;
+    AtmosphereCB.AC_NightRainSkyColor = disableNightRainSkyColor ? XMFLOAT3( 1.0f, 1.0f, 1.0f ) : rendererSettings.NightRainSkyColor;
     AtmosphereCB.AC_NightRainSkyHazeStrength = disableNightRainSkyHazeStrength ? 0.0f : rendererSettings.NightRainSkyHazeStrength;
     AtmosphereCB.AC_NightRainFarMaxLuma = disableAllNightRainAdjustments || ( nightTestOverridesEnabled && nightTests.DisableNightRainFarMaxLuma ) ? 1.0f : rendererSettings.NightRainFarMaxLuma;
     AtmosphereCB.AC_NightRainVeryFarMaxLuma = disableAllNightRainAdjustments || ( nightTestOverridesEnabled && nightTests.DisableNightRainVeryFarMaxLuma ) ? 1.0f : rendererSettings.NightRainVeryFarMaxLuma;

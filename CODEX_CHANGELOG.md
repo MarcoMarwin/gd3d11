@@ -74,3 +74,6 @@
 - Extracted and isolated DisableNightRainMidColor, FarColor, SkyColor, MidInfluence, WorldHazeStrength, SkyHazeStrength over AC_NightRain configuration.
 - Added Particle Lighting Diagnostics (DisableParticleNightDimming, DisableParticleRainAlphaReduction).
 - Added Transparent World Mesh Alpha and Night EnvMap Factor controls.
+
+## Build 170 (Korrekturpush)
+- Korrekturpush für Build 169: C2679 Compilerfehler in GSky.cpp behoben, indem inkompatible float3-Zuweisungen an AC_NightRain-Farbwerte durch XMFLOAT3 ersetzt wurden.
