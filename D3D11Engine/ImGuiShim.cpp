@@ -1117,7 +1117,7 @@ namespace {
         RendererTestSettings& testSettings = GetRendererTestSettings();
         RendererNightTestSettings& night = testSettings.Night;
 
-        ImGui::SetNextWindowSize( ImVec2( 520.0f, 720.0f ), ImGuiCond_FirstUseEver );
+        ImGui::SetNextWindowSize( ImVec2( 600.0f, 820.0f ), ImGuiCond_FirstUseEver );
 
         if ( !ImGui::Begin( "Renderer Night Diagnostics", &g_RendererTestWindowVisible, ImGuiWindowFlags_NoCollapse ) ) {
             ImGui::End();
@@ -1172,6 +1172,32 @@ namespace {
         ImGui::Checkbox( "Disable Ground Rain Attenuation", &night.DisableGroundRainAttenuation );
         ImGui::Checkbox( "Use Nightly Ground Rain Input", &night.UseNightlyGroundRainInput );
         ImGui::Checkbox( "Disable Decal Night/Rain Lighting Scale", &night.DisableDecalNightRainLightingScale );
+
+        ImGui::Separator();
+
+        ImGui::TextUnformatted( "Transparency Path Identification" );
+        ImGui::Checkbox( "Disable Transparent World Meshes", &night.DisableTransparentWorldMeshes );
+        ImGui::Checkbox( "Disable Transparent VOB Meshes", &night.DisableTransparentVobMeshes );
+        ImGui::Checkbox( "Disable Transparent Decals", &night.DisableTransparentDecals );
+        ImGui::Checkbox( "Disable Transparent Particle Meshes", &night.DisableTransparentParticleMeshes );
+
+        ImGui::Separator();
+
+        ImGui::TextUnformatted( "Transparent World Materials" );
+        ImGui::Checkbox( "Disable Transparent Normalmaps", &night.DisableTransparentNormalmaps );
+        ImGui::Checkbox( "Disable Transparent FX Maps", &night.DisableTransparentFxMaps );
+        ImGui::Checkbox( "Disable Transparent Displacement Maps", &night.DisableTransparentDisplacementMaps );
+        ImGui::Checkbox( "Force White Transparent Texture Factor", &night.ForceWhiteTransparentTextureFactor );
+
+        ImGui::Separator();
+
+        ImGui::TextUnformatted( "Transparent VOB Diagnostics" );
+        ImGui::Checkbox( "Disable Transparent VOB Wind Metadata", &night.DisableTransparentVobWindMetadata );
+        ImGui::Checkbox( "Disable Transparent VOB Wind Buffer", &night.DisableTransparentVobWindBuffer );
+
+        if ( ImGui::Button( "Reset Structural Tests" ) ) {
+            ResetTransparencyStructuralTests();
+        }
 
         ImGui::Separator();
 

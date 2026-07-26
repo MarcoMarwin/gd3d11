@@ -5257,12 +5257,18 @@ void D3D11GraphicsEngine::UpdateColorSpace_SwapChain()
 }
 
 /** Draws a list of mesh infos */
-XRESULT D3D11GraphicsEngine::DrawMeshInfoListAlphablended(
-    const std::vector<std::pair<MeshKey, MeshInfo*>>& list ) {
+XRESULT D3D11GraphicsEngine::DrawMeshInfoListAlphablended( const std::vector<std::pair<MeshKey, MeshInfo*>>& list ) {
     if ( list.empty() ) {
         return XR_SUCCESS;
     }
-
+    // BEGIN TEMPORARY RENDERER TEST OVERRIDES
+    const RendererTestSettings& rendererTestSettings = GetRendererTestSettings();
+    const RendererNightTestSettings& transparencyTests = rendererTestSettings.Night;
+    const bool transparencyTestOverridesEnabled = rendererTestSettings.EnableOverrides;
+    if ( transparencyTestOverridesEnabled && transparencyTests.DisableTransparentWorldMeshes ) {
+        return XR_SUCCESS;
+    }
+    // END TEMPORARY RENDERER TEST OVERRIDES
     XMMATRIX view = Engine::GAPI->GetViewMatrixXM();
     Engine::GAPI->SetViewTransformXM( view );
     Engine::GAPI->ResetWorldTransform();
@@ -5306,6 +5312,11 @@ XRESULT D3D11GraphicsEngine::DrawMeshInfoListAlphablended(
         if ( zCTexture* texture = meshKey.Material->GetAniTexture() ) {
             PsSimpleFFdata ffdata = { };
             ffdata.textureFactor = ComputeTransparencyTextureFactor( meshKey.Material );
+            // BEGIN TEMPORARY RENDERER TEST OVERRIDES
+            if ( transparencyTestOverridesEnabled && transparencyTests.ForceWhiteTransparentTextureFactor ) {
+                ffdata.textureFactor = float4( 1.0f, 1.0f, 1.0f, 1.0f );
+            }
+            // END TEMPORARY RENDERER TEST OVERRIDES
             if (texture->CacheIn( 0.6f ) != zRES_CACHED_IN) {
                 // Draw what? black? :)
                 continue;
@@ -5313,15 +5324,24 @@ XRESULT D3D11GraphicsEngine::DrawMeshInfoListAlphablended(
 
             MyDirectDrawSurface7* surface = texture->GetSurface();
             ID3D11ShaderResourceView* srv[4];
-
             // Get diffuse and normalmap
-            srv[0] = surface->GetEngineTexture()
-                ->GetShaderResourceView().Get();
+            srv[0] = surface->GetEngineTexture() ->GetShaderResourceView().Get();
             srv[1] = GetMaterialNormalmapSRV( surface, meshKey.Info );
-            srv[2] = surface->GetFxMap()
-                ? surface->GetFxMap()->GetShaderResourceView().Get()
-                : nullptr;
+            srv[2] = surface->GetFxMap() ? surface->GetFxMap()->GetShaderResourceView().Get() : nullptr;
             srv[3] = GetParallaxDisplacementSRV( surface, meshKey.Info );
+            // BEGIN TEMPORARY RENDERER TEST OVERRIDES
+            if ( transparencyTestOverridesEnabled ) {
+                if ( transparencyTests.DisableTransparentNormalmaps ) {
+                    srv[1] = nullptr;
+                }
+                if ( transparencyTests.DisableTransparentFxMaps ) {
+                    srv[2] = nullptr;
+                }
+                if ( transparencyTests.DisableTransparentDisplacementMaps ) {
+                    srv[3] = nullptr;
+                }
+            }
+            // END TEMPORARY RENDERER TEST OVERRIDES
 
             int alphaFunc = meshKey.Material->GetAlphaFunc();
 
@@ -8110,12 +8130,18 @@ XRESULT D3D11GraphicsEngine::DrawVOBsInstanced() {
 }
 
 /** Draws the static VOBs */
-XRESULT D3D11GraphicsEngine::DrawFrameAlphaMeshes()
-{
+XRESULT D3D11GraphicsEngine::DrawFrameAlphaMeshes() {
     if ( m_AlphaMeshes.empty() ) {
         return XR_SUCCESS;
     }
-
+    // BEGIN TEMPORARY RENDERER TEST OVERRIDES
+    const RendererTestSettings& rendererTestSettings = GetRendererTestSettings();
+    const RendererNightTestSettings& transparencyTests = rendererTestSettings.Night;
+    const bool transparencyTestOverridesEnabled = rendererTestSettings.EnableOverrides;
+    if ( transparencyTestOverridesEnabled && transparencyTests.DisableTransparentVobMeshes ) {
+        return XR_SUCCESS;
+    }
+    // END TEMPORARY RENDERER TEST OVERRIDES
     TracyD3D11ZoneCGX("DrawFrameAlphaMeshes");
     auto _scopeDrawFrameAlphaMeshes = RecordGraphicsEvent( GE_NAME( "DrawFrameAlphaMeshes" ) );
 
@@ -8132,7 +8158,7 @@ XRESULT D3D11GraphicsEngine::DrawFrameAlphaMeshes()
         DepthStencilBuffer->GetDepthStencilView().Get() );
 
     bool useWindMetadata = false;
-    if ( ActiveVS && ActiveVS->GetInputIndex( "WindMetaData" ) != -1 && !m_AlphaMeshes.empty() ) {
+    if ( ActiveVS && ActiveVS->GetInputIndex( "WindMetaData" ) != -1 && !m_AlphaMeshes.empty() && !( transparencyTestOverridesEnabled && transparencyTests.DisableTransparentVobWindMetadata ) ) {
         std::unordered_map<MeshVisualInfo*, DWORD> metadataByVisual;
         metadataByVisual.reserve( m_AlphaMeshes.size() );
 
@@ -8194,14 +8220,7 @@ XRESULT D3D11GraphicsEngine::DrawFrameAlphaMeshes()
     }
 
     GraphicsShaderConstantBuffer windBuffer = {};
-    const auto& windSettings =
-        Engine::GAPI->GetRendererState().RendererSettings;
-
-    if ( ActiveVS
-        && (windSettings.WindQuality
-                != GothicRendererSettings::EWindQuality::
-                    WIND_QUALITY_NONE
-            || windSettings.HeroAffectsObjects) ) {
+    if ( ActiveVS && (Engine::GAPI->GetRendererState().RendererSettings.WindQuality > 0 || Engine::GAPI->GetRendererState().RendererSettings.HeroAffectsObjects) && !( transparencyTestOverridesEnabled && transparencyTests.DisableTransparentVobWindBuffer ) ) {
         windBuffer = ActiveVS->GetBuffer( "WindParams" );
         windBuffer.Bind();
         UpdateCharacterInteractionPositions( g_windBuffer );
@@ -8917,8 +8936,13 @@ bool D3D11GraphicsEngine::BindShaderForTexture( zCTexture* texture,
 }
 
 /** Draws the given list of decals */
-void D3D11GraphicsEngine::DrawDecalList( const std::vector<zCVob*>& decals,
-    bool lighting ) {
+void D3D11GraphicsEngine::DrawDecalList( const std::vector<zCVob*>& decals, bool lighting ) {
+    // BEGIN TEMPORARY RENDERER TEST OVERRIDES
+    const RendererTestSettings& rendererTestSettings = GetRendererTestSettings();
+    if ( !lighting && rendererTestSettings.EnableOverrides && rendererTestSettings.Night.DisableTransparentDecals ) {
+        return;
+    }
+    // END TEMPORARY RENDERER TEST OVERRIDES
     SetDefaultStates();
     TracyD3D11ZoneCGX( "DrawDecalList" );
     auto _ = RecordGraphicsEvent( GE_NAME( "DrawDecalList" ) );
@@ -9449,6 +9473,12 @@ void D3D11GraphicsEngine::EnsureTempVertexBufferSize( std::unique_ptr<D3D11Verte
 /** Draws particle meshes */
 void D3D11GraphicsEngine::DrawFrameParticleMeshes( std::unordered_map<zCVob*, MeshVisualInfo*>& progMeshes ) {
     if ( progMeshes.empty() ) return;
+    // BEGIN TEMPORARY RENDERER TEST OVERRIDES
+    const RendererTestSettings& rendererTestSettings = GetRendererTestSettings();
+    if ( rendererTestSettings.EnableOverrides && rendererTestSettings.Night.DisableTransparentParticleMeshes ) {
+        return;
+    }
+    // END TEMPORARY RENDERER TEST OVERRIDES
     SetDefaultStates();
 
     SetActivePixelShader( PShaderID::PS_Simple );

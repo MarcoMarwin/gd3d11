@@ -59,3 +59,7 @@
 ## Build 166
 
 - Diagnostics: Extended runtime diagnostic overrides with four targeted toggles for ground night contribution, ground rain attenuation, nightly ground rain input, and decal night/rain lighting scale, controlled via ImGuiShim and evaluated in GSky.cpp, AtmosphericScattering.h, and D3D11GraphicsEngine.cpp.
+
+## Build 167
+
+- Diagnostics: Implemented additional temporary transparency diagnostic package with toggles for path identification (world meshes, VOB meshes, decals, particles), transparent world materials (normalmaps, fx maps, displacement maps, white texture factor), and VOB wind diagnostics (metadata, wind buffer) in D3D11GraphicsEngine.cpp and ImGuiShim.cpp.

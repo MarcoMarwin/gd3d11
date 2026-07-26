@@ -25,6 +25,16 @@ struct RendererNightTestSettings {
     bool DisableGroundRainAttenuation = false;
     bool UseNightlyGroundRainInput = false;
     bool DisableDecalNightRainLightingScale = false;
+    bool DisableTransparentWorldMeshes = false;
+    bool DisableTransparentVobMeshes = false;
+    bool DisableTransparentDecals = false;
+    bool DisableTransparentParticleMeshes = false;
+    bool DisableTransparentNormalmaps = false;
+    bool DisableTransparentFxMaps = false;
+    bool DisableTransparentDisplacementMaps = false;
+    bool ForceWhiteTransparentTextureFactor = false;
+    bool DisableTransparentVobWindMetadata = false;
+    bool DisableTransparentVobWindBuffer = false;
 };
 
 struct RendererTestSettings {
@@ -39,6 +49,20 @@ inline RendererTestSettings& GetRendererTestSettings() {
 
 inline void ResetRendererNightTests() {
     GetRendererTestSettings().Night = RendererNightTestSettings{};
+}
+
+inline void ResetTransparencyStructuralTests() {
+    RendererNightTestSettings& night = GetRendererTestSettings().Night;
+    night.DisableTransparentWorldMeshes = false;
+    night.DisableTransparentVobMeshes = false;
+    night.DisableTransparentDecals = false;
+    night.DisableTransparentParticleMeshes = false;
+    night.DisableTransparentNormalmaps = false;
+    night.DisableTransparentFxMaps = false;
+    night.DisableTransparentDisplacementMaps = false;
+    night.ForceWhiteTransparentTextureFactor = false;
+    night.DisableTransparentVobWindMetadata = false;
+    night.DisableTransparentVobWindBuffer = false;
 }
 
 inline void ResetAllRendererTests() {
