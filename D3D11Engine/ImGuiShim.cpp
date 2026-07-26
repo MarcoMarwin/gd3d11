@@ -1117,7 +1117,7 @@ namespace {
         RendererTestSettings& testSettings = GetRendererTestSettings();
         RendererNightTestSettings& night = testSettings.Night;
 
-        ImGui::SetNextWindowSize( ImVec2( 600.0f, 820.0f ), ImGuiCond_FirstUseEver );
+        ImGui::SetNextWindowSize( ImVec2( 680.0f, 920.0f ), ImGuiCond_FirstUseEver );
 
         if ( !ImGui::Begin( "Renderer Night Diagnostics", &g_RendererTestWindowVisible, ImGuiWindowFlags_NoCollapse ) ) {
             ImGui::End();
@@ -1194,6 +1194,24 @@ namespace {
         ImGui::TextUnformatted( "Transparent VOB Diagnostics" );
         ImGui::Checkbox( "Disable Transparent VOB Wind Metadata", &night.DisableTransparentVobWindMetadata );
         ImGui::Checkbox( "Disable Transparent VOB Wind Buffer", &night.DisableTransparentVobWindBuffer );
+
+        ImGui::Separator();
+
+        ImGui::TextUnformatted( "Nightly World Transparency Comparison" );
+        ImGui::Checkbox( "Use Base Texture For Transparent World Meshes", &night.UseBaseTextureForTransparentWorldMeshes );
+        ImGui::Checkbox( "Use Nightly Temporal Matrices For Transparent World Meshes", &night.UseNightlyTemporalMatricesForTransparentWorldMeshes );
+        ImGui::Checkbox( "Use Nightly World Transparency Tessellation Reset", &night.UseNightlyWorldTransparencyTessellationReset );
+        ImGui::Checkbox( "Use Nightly Waterfall Transparency Classification", &night.UseNightlyWaterfallTransparencyClassification );
+        ImGui::Checkbox( "Use Nightly Per-Instance Buffer For Transparent World Meshes", &night.UseNightlyPerInstanceBufferForTransparentWorldMeshes );
+
+        ImGui::Separator();
+
+        ImGui::TextUnformatted( "Transparency List Isolation" );
+        ImGui::Checkbox( "Disable Wet-SSR Blocker Collection", &night.DisableWetSSRBlockerCollection );
+        ImGui::Checkbox( "Disable Wet-SSR Blocker Draw", &night.DisableWetSSRBlockerDraw );
+        ImGui::Checkbox( "Disable Regular Transparency Draw", &night.DisableRegularTransparencyDraw );
+        ImGui::Checkbox( "Disable Portal Transparency Draw", &night.DisablePortalTransparencyDraw );
+        ImGui::Checkbox( "Disable Waterfall Transparency Draw", &night.DisableWaterfallTransparencyDraw );
 
         if ( ImGui::Button( "Reset Structural Tests" ) ) {
             ResetTransparencyStructuralTests();

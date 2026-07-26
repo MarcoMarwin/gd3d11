@@ -35,6 +35,16 @@ struct RendererNightTestSettings {
     bool ForceWhiteTransparentTextureFactor = false;
     bool DisableTransparentVobWindMetadata = false;
     bool DisableTransparentVobWindBuffer = false;
+    bool UseBaseTextureForTransparentWorldMeshes = false;
+    bool UseNightlyTemporalMatricesForTransparentWorldMeshes = false;
+    bool UseNightlyWorldTransparencyTessellationReset = false;
+    bool UseNightlyWaterfallTransparencyClassification = false;
+    bool UseNightlyPerInstanceBufferForTransparentWorldMeshes = false;
+    bool DisableWetSSRBlockerCollection = false;
+    bool DisableWetSSRBlockerDraw = false;
+    bool DisableRegularTransparencyDraw = false;
+    bool DisablePortalTransparencyDraw = false;
+    bool DisableWaterfallTransparencyDraw = false;
 };
 
 struct RendererTestSettings {
@@ -63,6 +73,16 @@ inline void ResetTransparencyStructuralTests() {
     night.ForceWhiteTransparentTextureFactor = false;
     night.DisableTransparentVobWindMetadata = false;
     night.DisableTransparentVobWindBuffer = false;
+    night.UseBaseTextureForTransparentWorldMeshes = false;
+    night.UseNightlyTemporalMatricesForTransparentWorldMeshes = false;
+    night.UseNightlyWorldTransparencyTessellationReset = false;
+    night.UseNightlyWaterfallTransparencyClassification = false;
+    night.UseNightlyPerInstanceBufferForTransparentWorldMeshes = false;
+    night.DisableWetSSRBlockerCollection = false;
+    night.DisableWetSSRBlockerDraw = false;
+    night.DisableRegularTransparencyDraw = false;
+    night.DisablePortalTransparencyDraw = false;
+    night.DisableWaterfallTransparencyDraw = false;
 }
 
 inline void ResetAllRendererTests() {
