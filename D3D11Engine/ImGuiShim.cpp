@@ -1195,6 +1195,8 @@ namespace {
         ImGui::Checkbox( "Disable Transparent Displacement Maps", &night.DisableTransparentDisplacementMaps );
         ImGui::Checkbox( "Force White Transparent Texture Factor", &night.ForceWhiteTransparentTextureFactor );
         ImGui::SetNextItemWidth( 300.0f );
+        ImGui::SliderFloat( "Transparent World Mesh Brightness", &night.TransparentWorldMeshBrightness, 0.0f, 1.0f, "%.2f", ImGuiSliderFlags_AlwaysClamp );
+        ImGui::SetNextItemWidth( 300.0f );
         ImGui::SliderFloat( "Transparent World Mesh Alpha", &night.TransparentWorldMeshAlpha, 0.0f, 1.0f, "%.2f", ImGuiSliderFlags_AlwaysClamp );
         ImGui::SetNextItemWidth( 300.0f );
         ImGui::SliderFloat( "Transparent World Mesh Night EnvMap Factor", &night.TransparentWorldMeshNightEnvMapFactor, 0.0f, 1.0f, "%.2f", ImGuiSliderFlags_AlwaysClamp );
@@ -1211,13 +1213,14 @@ namespace {
         ImGui::Checkbox( "Use Base Texture For Transparent World Meshes", &night.UseBaseTextureForTransparentWorldMeshes );
         ImGui::Checkbox( "Use Nightly World Transparency Tessellation Reset", &night.UseNightlyWorldTransparencyTessellationReset );
         ImGui::Checkbox( "Use Nightly Waterfall Transparency Classification", &night.UseNightlyWaterfallTransparencyClassification );
-        ImGui::Checkbox( "Use Nightly Blend Shader For Transparent World Meshes", &night.UseNightlyBlendShaderForTransparentWorldMeshes );
 
         ImGui::Separator();
 
         ImGui::TextUnformatted( "Transparency List Isolation" );
         ImGui::Checkbox( "Disable Wet-SSR Blocker Collection", &night.DisableWetSSRBlockerCollection );
         ImGui::Checkbox( "Disable Wet-SSR Blocker Draw", &night.DisableWetSSRBlockerDraw );
+        ImGui::Checkbox( "Disable Wet Ground SSR", &night.DisableWetGroundSSR );
+        ImGui::Checkbox( "Disable Transparent World Mesh Depth/Fog Replay", &night.DisableTransparentWorldMeshDepthFogReplay );
         ImGui::Checkbox( "Disable Regular Transparency Draw", &night.DisableRegularTransparencyDraw );
         ImGui::Checkbox( "Disable Portal Transparency Draw", &night.DisablePortalTransparencyDraw );
         ImGui::Checkbox( "Disable Waterfall Transparency Draw", &night.DisableWaterfallTransparencyDraw );

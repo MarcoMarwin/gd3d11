@@ -35,6 +35,7 @@ struct RendererNightTestSettings {
     bool DisableTransparentFxMaps = false;
     bool DisableTransparentDisplacementMaps = false;
     bool ForceWhiteTransparentTextureFactor = false;
+    float TransparentWorldMeshBrightness = 1.0f;
     float TransparentWorldMeshAlpha = 1.0f;
     float TransparentWorldMeshNightEnvMapFactor = 0.05f;
     bool DisableTransparentVobWindMetadata = false;
@@ -42,9 +43,10 @@ struct RendererNightTestSettings {
     bool UseBaseTextureForTransparentWorldMeshes = false;
     bool UseNightlyWorldTransparencyTessellationReset = false;
     bool UseNightlyWaterfallTransparencyClassification = false;
-    bool UseNightlyBlendShaderForTransparentWorldMeshes = false;
     bool DisableWetSSRBlockerCollection = false;
     bool DisableWetSSRBlockerDraw = false;
+    bool DisableWetGroundSSR = false;
+    bool DisableTransparentWorldMeshDepthFogReplay = false;
     bool DisableRegularTransparencyDraw = false;
     bool DisablePortalTransparencyDraw = false;
     bool DisableWaterfallTransparencyDraw = false;
@@ -74,6 +76,7 @@ inline void ResetTransparencyStructuralTests() {
     night.DisableTransparentFxMaps = false;
     night.DisableTransparentDisplacementMaps = false;
     night.ForceWhiteTransparentTextureFactor = false;
+    night.TransparentWorldMeshBrightness = 1.0f;
     night.TransparentWorldMeshAlpha = 1.0f;
     night.TransparentWorldMeshNightEnvMapFactor = 0.05f;
     night.DisableTransparentVobWindMetadata = false;
@@ -81,9 +84,10 @@ inline void ResetTransparencyStructuralTests() {
     night.UseBaseTextureForTransparentWorldMeshes = false;
     night.UseNightlyWorldTransparencyTessellationReset = false;
     night.UseNightlyWaterfallTransparencyClassification = false;
-    night.UseNightlyBlendShaderForTransparentWorldMeshes = false;
     night.DisableWetSSRBlockerCollection = false;
     night.DisableWetSSRBlockerDraw = false;
+    night.DisableWetGroundSSR = false;
+    night.DisableTransparentWorldMeshDepthFogReplay = false;
     night.DisableRegularTransparencyDraw = false;
     night.DisablePortalTransparencyDraw = false;
     night.DisableWaterfallTransparencyDraw = false;

@@ -77,3 +77,15 @@
 
 ## Build 170 (Korrekturpush)
 - Korrekturpush für Build 169: C2679 Compilerfehler in GSky.cpp behoben, indem inkompatible float3-Zuweisungen an AC_NightRain-Farbwerte durch XMFLOAT3 ersetzt wurden.
+
+## Build 171
+- Transparent World Meshes: Made PS_Simple_FF shader standard for BLEND and ADD alpha functions; removed diagnostic UseNightlyBlendShaderForTransparentWorldMeshes toggle.
+- Transparent World Meshes: Added Transparent World Mesh Brightness multiplier to F11 diagnostics, strictly targeting RGB.
+- Diagnostics: Added Disable Wet Ground SSR and Disable Transparent World Mesh Depth/Fog Replay toggles to F11 transparency menu.
+
+
+## Build 171
+- Transparent World Meshes: Made PS_Simple_FF shader standard for BLEND and ADD alpha functions; removed diagnostic UseNightlyBlendShaderForTransparentWorldMeshes toggle.
+- Transparent World Meshes: Added Transparent World Mesh Brightness multiplier to F11 diagnostics, strictly targeting RGB.
+- Diagnostics: Added Disable Wet Ground SSR and Disable Transparent World Mesh Depth/Fog Replay toggles to F11 transparency menu.
+

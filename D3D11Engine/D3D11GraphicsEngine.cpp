@@ -4411,7 +4411,11 @@ XRESULT D3D11GraphicsEngine::OnStartWorldRendering() {
         };
     });
 
-    if ( renderWetGroundSSR ) {
+    // BEGIN TEMPORARY RENDERER TEST OVERRIDES
+    const RendererTestSettings& wetGroundSSRTestSettings = GetRendererTestSettings();
+    const bool disableWetGroundSSR = wetGroundSSRTestSettings.EnableOverrides && wetGroundSSRTestSettings.Night.DisableWetGroundSSR;
+    // END TEMPORARY RENDERER TEST OVERRIDES
+    if ( renderWetGroundSSR && !disableWetGroundSSR ) {
         graph.AddPass( RG_PASS_NAME("Wet Ground SSR"), [&]( RGBuilder& builder, RenderPass& pass ) {
             builder.Read( normalsResource );
             builder.Read( waterMaskResource );
@@ -5337,6 +5341,10 @@ XRESULT D3D11GraphicsEngine::DrawMeshInfoListAlphablended( const std::vector<std
                 ffdata.textureFactor = float4( 1.0f, 1.0f, 1.0f, 1.0f );
             }
             if ( transparencyTestOverridesEnabled ) {
+                const float transparentWorldMeshBrightness = std::clamp( transparencyTests.TransparentWorldMeshBrightness, 0.0f, 1.0f );
+                ffdata.textureFactor.x *= transparentWorldMeshBrightness;
+                ffdata.textureFactor.y *= transparentWorldMeshBrightness;
+                ffdata.textureFactor.z *= transparentWorldMeshBrightness;
                 ffdata.textureFactor.w *= std::clamp( transparencyTests.TransparentWorldMeshAlpha, 0.0f, 1.0f );
             }
             // END TEMPORARY RENDERER TEST OVERRIDES
@@ -5383,10 +5391,7 @@ XRESULT D3D11GraphicsEngine::DrawMeshInfoListAlphablended( const std::vector<std
             if (lastMat != meshKey.Material) {
                 const MaterialInfo::EMaterialType shaderMaterialType = meshKey.Info->MaterialType;
                 BindShaderForTexture( texture, false, alphaFunc, shaderMaterialType, true );
-                if ( transparencyTestOverridesEnabled
-                    && transparencyTests.UseNightlyBlendShaderForTransparentWorldMeshes
-                    && (alphaFunc == zMAT_ALPHA_FUNC_BLEND
-                        || alphaFunc == zMAT_ALPHA_FUNC_ADD) ) {
+                if ( alphaFunc == zMAT_ALPHA_FUNC_BLEND || alphaFunc == zMAT_ALPHA_FUNC_ADD ) {
                     SetActivePixelShader( PShaderID::PS_Simple_FF );
                     ActivePS->Apply();
                 }
@@ -5449,20 +5454,30 @@ XRESULT D3D11GraphicsEngine::DrawMeshInfoListAlphablended( const std::vector<std
 
     Engine::GAPI->GetRendererState().DepthState.DepthWriteEnabled = true;
     Engine::GAPI->GetRendererState().DepthState.SetDirty();
-    Engine::GAPI->GetRendererState().BlendState.ColorWritesEnabled = false;
-    Engine::GAPI->GetRendererState().BlendState.SetDirty();
 
-    UpdateRenderStates();
+    // BEGIN TEMPORARY RENDERER TEST OVERRIDES
+    const bool disableTransparentWorldMeshDepthFogReplay = transparencyTestOverridesEnabled && transparencyTests.DisableTransparentWorldMeshDepthFogReplay;
+    if ( !disableTransparentWorldMeshDepthFogReplay ) {
+        Engine::GAPI->GetRendererState().BlendState.ColorWritesEnabled = false;
+        Engine::GAPI->GetRendererState().BlendState.SetDirty();
 
-    // Draw again, but only to depthbuffer this time to make them work with
-    // fogging
-    for ( auto const& [meshKey, meshInfo] : list ) {
-        if ( meshKey.Material->GetAniTexture() != nullptr && meshKey.Info->MaterialType != MaterialInfo::MT_Portal ) {
-            // Draw the section-part
-            DrawVertexBufferIndexedUINT( nullptr, nullptr, meshInfo->Indices.size(),
-                meshInfo->BaseIndexLocation );
+        UpdateRenderStates();
+
+        // Draw again, but only to depthbuffer this time to make them work with
+        // fogging
+        for ( auto const& [meshKey, meshInfo] : list ) {
+            if ( meshKey.Material->GetAniTexture() != nullptr && meshKey.Info->MaterialType != MaterialInfo::MT_Portal ) {
+                // Draw the section-part
+                DrawVertexBufferIndexedUINT( nullptr, nullptr, meshInfo->Indices.size(),
+                    meshInfo->BaseIndexLocation );
+            }
         }
     }
+    // END TEMPORARY RENDERER TEST OVERRIDES
+
+    Engine::GAPI->GetRendererState().BlendState.ColorWritesEnabled = true;
+    Engine::GAPI->GetRendererState().BlendState.SetDirty();
+    UpdateRenderStates();
 
     return XR_SUCCESS;
 }
