@@ -434,6 +434,13 @@ float GetNightWeight()
 	return saturate((-AC_LightPos.y) * 10.0f);
 }
 
+// BEGIN TEMPORARY RENDERER TEST OVERRIDES
+bool IsRendererGroundTestBitEnabled(float bitValue) {
+    float packedValue = floor(max(AC_PadParticle0, 0.0f) + 0.5f);
+    return fmod(floor(packedValue / bitValue), 2.0f) >= 1.0f;
+}
+// END TEMPORARY RENDERER TEST OVERRIDES
+
 float GetRainSkyVisibility()
 {
 	float rainOcclusion = smoothstep(0.05f, 0.65f, saturate(AC_RainFXWeight));
@@ -465,7 +472,12 @@ float3 ApplyAtmosphericScatteringGround(float3 worldPosition, float3 in_color, b
 	float3 v3Pos = worldPosition - AC_SpherePosition;
 	float3 v3Ray = v3Pos - camPos;
 
-	float nightWeight = GetNightWeight();
+	// BEGIN TEMPORARY RENDERER TEST OVERRIDES
+	bool disableGroundNightContribution = IsRendererGroundTestBitEnabled(1.0f);
+	bool disableGroundRainAttenuation = IsRendererGroundTestBitEnabled(2.0f);
+	bool useNightlyGroundRainInput = IsRendererGroundTestBitEnabled(4.0f);
+	float nightWeight = disableGroundNightContribution ? 0.0f : GetNightWeight();
+	// END TEMPORARY RENDERER TEST OVERRIDES
 		
 	float innerRadius = AC_InnerRadius;
 				
@@ -510,7 +522,12 @@ float3 ApplyAtmosphericScatteringGround(float3 worldPosition, float3 in_color, b
 		v3SamplePoint += v3SampleRay;
 	}
 	// Rain scattering attenuation
-	v3FrontColor *= 1.0f - saturate(AC_RainFXWeight);
+	// BEGIN TEMPORARY RENDERER TEST OVERRIDES
+	if (!disableGroundRainAttenuation) {
+		float groundRainInput = useNightlyGroundRainInput ? AC_SceneWettness : AC_RainFXWeight;
+		v3FrontColor *= 1.0f - saturate(groundRainInput);
+	}
+	// END TEMPORARY RENDERER TEST OVERRIDES
 	
 	// Finally, scale the Mie and Rayleigh colors and set up the varying variables for the pixel shader.
 	float3 c0 = v3FrontColor * (vInvWavelength * AC_KrESun + AC_KmESun);
@@ -523,7 +540,9 @@ float3 ApplyAtmosphericScatteringGround(float3 worldPosition, float3 in_color, b
 	float3 dayColor = c0 + in_color * c1;
 	float nearNightBrightness = lerp(1.0f, max(0.0f, AC_NearNightBrightness), saturate(AC_EnableNightAtmosphere));
 	float3 nightColor = float3(0.095f,0.115f,0.255f) * NIGHT_BRIGHTNESS * nearNightBrightness;
-	float moonWeight = saturate((-AC_LightPos.y - 0.08f) * 1.7f);
+	// BEGIN TEMPORARY RENDERER TEST OVERRIDES
+	float moonWeight = disableGroundNightContribution ? 0.0f : saturate((-AC_LightPos.y - 0.08f) * 1.7f);
+	// END TEMPORARY RENDERER TEST OVERRIDES
 	float midtone = saturate(dot(in_color, float3(0.299f, 0.587f, 0.114f)) * 0.95f + 0.04f);
 	float3 moonColor = float3(0.018f, 0.026f, 0.052f) * moonWeight * midtone * nearNightBrightness;
 	float3 outColor;

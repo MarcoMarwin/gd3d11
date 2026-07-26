@@ -21,6 +21,10 @@ struct RendererNightTestSettings {
     bool DisableNightRainVeryFarMaxLuma = false;
     bool DisableNightRainVeryFarInfluence = false;
     bool DisableDynamicCloudNightColor = false;
+    bool DisableGroundNightContribution = false;
+    bool DisableGroundRainAttenuation = false;
+    bool UseNightlyGroundRainInput = false;
+    bool DisableDecalNightRainLightingScale = false;
 };
 
 struct RendererTestSettings {

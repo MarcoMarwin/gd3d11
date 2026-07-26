@@ -55,3 +55,7 @@
 ## Build 165
 
 - Diagnostics: Added temporary runtime diagnostic overrides in GSky.cpp and D3D11GraphicsEngine.cpp to isolate and neutralize general night parameters and night rain adjustments at runtime, controlled via a non-modal diagnostic window and toggle button in ImGuiShim.cpp.
+
+## Build 166
+
+- Diagnostics: Extended runtime diagnostic overrides with four targeted toggles for ground night contribution, ground rain attenuation, nightly ground rain input, and decal night/rain lighting scale, controlled via ImGuiShim and evaluated in GSky.cpp, AtmosphericScattering.h, and D3D11GraphicsEngine.cpp.

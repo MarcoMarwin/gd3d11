@@ -1117,7 +1117,7 @@ namespace {
         RendererTestSettings& testSettings = GetRendererTestSettings();
         RendererNightTestSettings& night = testSettings.Night;
 
-        ImGui::SetNextWindowSize( ImVec2( 520.0f, 620.0f ), ImGuiCond_FirstUseEver );
+        ImGui::SetNextWindowSize( ImVec2( 520.0f, 720.0f ), ImGuiCond_FirstUseEver );
 
         if ( !ImGui::Begin( "Renderer Night Diagnostics", &g_RendererTestWindowVisible, ImGuiWindowFlags_NoCollapse ) ) {
             ImGui::End();
@@ -1164,6 +1164,14 @@ namespace {
 
         ImGui::TextUnformatted( "Night Sky" );
         ImGui::Checkbox( "Disable Dynamic Cloud Night Color", &night.DisableDynamicCloudNightColor );
+
+        ImGui::Separator();
+
+        ImGui::TextUnformatted( "Ground And Transparency Diagnostics" );
+        ImGui::Checkbox( "Disable Ground Night Contribution", &night.DisableGroundNightContribution );
+        ImGui::Checkbox( "Disable Ground Rain Attenuation", &night.DisableGroundRainAttenuation );
+        ImGui::Checkbox( "Use Nightly Ground Rain Input", &night.UseNightlyGroundRainInput );
+        ImGui::Checkbox( "Disable Decal Night/Rain Lighting Scale", &night.DisableDecalNightRainLightingScale );
 
         ImGui::Separator();
 

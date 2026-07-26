@@ -543,8 +543,21 @@ XRESULT GSky::RenderSky() {
     AtmosphereCB.AC_ScreenSpaceGIStrength = rendererSettings.ScreenSpaceGIStrength;
     AtmosphereCB.AC_EnableParticleLighting = rendererSettings.EnableParticleLighting ? 1.0f : 0.0f;
     AtmosphereCB.AC_ParticleLightingStrength = rendererSettings.ParticleLightingStrength * 1.5f;
+    // BEGIN TEMPORARY RENDERER TEST OVERRIDES
     AtmosphereCB.AC_PadParticle0 = 0.0f;
+    if ( nightTestOverridesEnabled ) {
+        if ( nightTests.DisableGroundNightContribution ) {
+            AtmosphereCB.AC_PadParticle0 += 1.0f;
+        }
+        if ( nightTests.DisableGroundRainAttenuation ) {
+            AtmosphereCB.AC_PadParticle0 += 2.0f;
+        }
+        if ( nightTests.UseNightlyGroundRainInput ) {
+            AtmosphereCB.AC_PadParticle0 += 4.0f;
+        }
+    }
     AtmosphereCB.AC_PadParticle1 = 0.0f;
+    // END TEMPORARY RENDERER TEST OVERRIDES
     // BEGIN TEMPORARY RENDERER TEST OVERRIDES
     const bool disableAllNightRainAdjustments = nightTestOverridesEnabled && nightTests.DisableNightRainAdjustments;
     const bool disableNightRainMidContribution = disableAllNightRainAdjustments || ( nightTestOverridesEnabled && nightTests.DisableNightRainMidColor ) || ( nightTestOverridesEnabled && nightTests.DisableNightRainMidInfluence );
