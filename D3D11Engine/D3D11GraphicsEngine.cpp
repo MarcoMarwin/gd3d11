@@ -1,6 +1,7 @@
 #include "D3D11GraphicsEngine.h"
 #include "D3D11DeferredRenderer.h"
 #include "D3D11ShadowMap.h"
+#include "RendererTestSettings.h"
 
 #include "AlignedAllocator.h"
 #include "D3D11Effect.h"
@@ -274,6 +275,14 @@ namespace
                         intensity = material->GetEnvMapStrength()
                             * std::lerp( 0.1f, 0.7f, lerpFactor );
                     }
+                    // BEGIN TEMPORARY RENDERER TEST OVERRIDES
+                    else {
+                        const RendererTestSettings& rendererTestSettings = GetRendererTestSettings();
+                        if ( rendererTestSettings.EnableOverrides && rendererTestSettings.Night.DisableEnvMapNightFactor ) {
+                            return defaultFactor;
+                        }
+                    }
+                    // END TEMPORARY RENDERER TEST OVERRIDES
                 }
             }
             const uint8_t alpha = static_cast<uint8_t>(

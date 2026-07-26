@@ -1056,6 +1056,7 @@ copy "$(OutDir)$(TargetName).pdb" "$(G1_SYSTEM_PATH)\ddraw.pdb"</Command>
     <ClInclude Include="RenderGraph.h" />
     <ClInclude Include="RenderPass.h" />
     <ClInclude Include="RenderQueue.h" />
+    <ClInclude Include="RendererTestSettings.h" />
     <ClInclude Include="RGTextureDesc.h" />
     <ClInclude Include="ShaderCategory.h" />
     <ClInclude Include="StringID.h" />

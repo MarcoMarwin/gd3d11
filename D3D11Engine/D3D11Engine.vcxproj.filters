@@ -668,6 +668,9 @@
     <ClInclude Include="ImGuiShim.h">
       <Filter>Engine</Filter>
     </ClInclude>
+    <ClInclude Include="RendererTestSettings.h">
+      <Filter>Engine</Filter>
+    </ClInclude>
     <ClInclude Include="include\imgui\imconfig.h">
       <Filter>Librarys\imgui</Filter>
     </ClInclude>

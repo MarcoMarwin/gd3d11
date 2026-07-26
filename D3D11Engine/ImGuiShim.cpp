@@ -1,6 +1,7 @@
 #include "ImGuiShim.h"
 #include "GSky.h"
 #include "D3D11PfxRenderer.h"
+#include "RendererTestSettings.h"
 #include "D3D11PFX_FSR3.h"
 #include <VersionHelpers.h>
 #include <ShellScalingApi.h>
@@ -1104,6 +1105,75 @@ void ImGuiShim::CancelSettingsEdit() {
     Engine::GraphicsEngine->ReloadShaders( ShaderCategory::All );
 }
 
+// BEGIN TEMPORARY RENDERER TEST OVERRIDES
+namespace {
+    bool g_RendererTestWindowVisible = false;
+
+    void RenderRendererTestWindow() {
+        if ( !g_RendererTestWindowVisible ) {
+            return;
+        }
+
+        RendererTestSettings& testSettings = GetRendererTestSettings();
+        RendererNightTestSettings& night = testSettings.Night;
+
+        ImGui::SetNextWindowSize( ImVec2( 520.0f, 620.0f ), ImGuiCond_FirstUseEver );
+
+        if ( !ImGui::Begin( "Renderer Night Diagnostics", &g_RendererTestWindowVisible, ImGuiWindowFlags_NoCollapse ) ) {
+            ImGui::End();
+            return;
+        }
+
+        ImGui::Checkbox( "Enable Test Overrides", &testSettings.EnableOverrides );
+        ImGui::SameLine();
+
+        if ( ImGui::Button( "Reset Night Tests" ) ) {
+            ResetRendererNightTests();
+        }
+
+        ImGui::SameLine();
+
+        if ( ImGui::Button( "Reset All Tests" ) ) {
+            ResetAllRendererTests();
+        }
+
+        ImGui::Separator();
+
+        ImGui::TextUnformatted( "General Night" );
+        ImGui::Checkbox( "Disable Night Atmosphere", &night.DisableNightAtmosphere );
+        ImGui::Checkbox( "Disable Near Night Brightness", &night.DisableNearNightBrightness );
+        ImGui::Checkbox( "Disable Night Fog Brightness", &night.DisableNightFogBrightness );
+        ImGui::Checkbox( "Disable Night Darkening", &night.DisableNightDarkening );
+        ImGui::Checkbox( "Disable EnvMap Night Factor", &night.DisableEnvMapNightFactor );
+
+        ImGui::Separator();
+
+        ImGui::TextUnformatted( "Night Rain" );
+        ImGui::Checkbox( "Disable All Night Rain Adjustments", &night.DisableNightRainAdjustments );
+        ImGui::Checkbox( "Disable Night Rain Mid Color", &night.DisableNightRainMidColor );
+        ImGui::Checkbox( "Disable Night Rain Far Color", &night.DisableNightRainFarColor );
+        ImGui::Checkbox( "Disable Night Rain Sky Color", &night.DisableNightRainSkyColor );
+        ImGui::Checkbox( "Disable Night Rain Mid Influence", &night.DisableNightRainMidInfluence );
+        ImGui::Checkbox( "Disable Night Rain World Haze", &night.DisableNightRainWorldHazeStrength );
+        ImGui::Checkbox( "Disable Night Rain Sky Haze", &night.DisableNightRainSkyHazeStrength );
+        ImGui::Checkbox( "Disable Night Rain Far Max Luma", &night.DisableNightRainFarMaxLuma );
+        ImGui::Checkbox( "Disable Night Rain Very Far Max Luma", &night.DisableNightRainVeryFarMaxLuma );
+        ImGui::Checkbox( "Disable Night Rain Very Far Influence", &night.DisableNightRainVeryFarInfluence );
+
+        ImGui::Separator();
+
+        ImGui::TextUnformatted( "Night Sky" );
+        ImGui::Checkbox( "Disable Dynamic Cloud Night Color", &night.DisableDynamicCloudNightColor );
+
+        ImGui::Separator();
+
+        ImGui::Text( "Overrides: %s", testSettings.EnableOverrides ? "enabled" : "disabled" );
+
+        ImGui::End();
+    }
+}
+// END TEMPORARY RENDERER TEST OVERRIDES
+
 void ImGuiShim::RenderSettingsWindow()
 {
     // Autosized settings by child objects & centered
@@ -1231,6 +1301,13 @@ void ImGuiShim::RenderSettingsWindow()
         }
         ImGui::SetItemTooltip( "%s", Tr( "Selects the language used by the D3D11 renderer.", u8"W\u00E4hlt die Sprache des D3D11-Renderers aus." ) );
         ImGui::PopItemWidth();
+        // BEGIN TEMPORARY RENDERER TEST OVERRIDES
+        ImGui::SameLine();
+        if ( ImGui::Button( "Test" ) ) {
+            g_RendererTestWindowVisible = !g_RendererTestWindowVisible;
+        }
+        ImGui::SetItemTooltip( "%s", Tr( "Opens temporary night diagnostics.", u8"\u00D6ffnet die tempor\u00E4re Nachtdiagnose." ) );
+        // END TEMPORARY RENDERER TEST OVERRIDES
 
         const std::string versionText = std::string( Tr( "D3D11 Version ", u8"D3D11-Version " ) ) + VERSION_NUMBER;
         const ImVec2 versionTextSize = ImGui::CalcTextSize( versionText.c_str() );
@@ -1664,4 +1741,7 @@ void ImGuiShim::RenderSettingsWindow()
     if ( shadersToReload != ShaderCategory::None ) {
         Engine::GraphicsEngine->ReloadShaders( shadersToReload );
     }
+    // BEGIN TEMPORARY RENDERER TEST OVERRIDES
+    RenderRendererTestWindow();
+    // END TEMPORARY RENDERER TEST OVERRIDES
 }
