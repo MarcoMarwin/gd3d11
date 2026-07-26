@@ -89,3 +89,7 @@
 - Transparent World Meshes: Added Transparent World Mesh Brightness multiplier to F11 diagnostics, strictly targeting RGB.
 - Diagnostics: Added Disable Wet Ground SSR and Disable Transparent World Mesh Depth/Fog Replay toggles to F11 transparency menu.
 
+
+### Build 171
+- Entkopplung von Wet Ground SSR von den Specular-Werten (eigenstaendiger Wert wetGroundSSRStrength 0.0 - 1.0).
+- Ueberarbeitung des Regentropfen-Grizzle-Effekts fuer Wet Ground SSR (kurze statische Impulse statt UV-Verschiebung).

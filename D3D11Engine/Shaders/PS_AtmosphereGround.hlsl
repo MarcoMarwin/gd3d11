@@ -12,6 +12,10 @@ cbuffer MI_MaterialInfo : register( b2 )
 	float MI_SpecularPower;
 	float MI_NormalmapStrength;
 	float MI_ParallaxOcclusionStrength;
+	float MI_WetGroundSSRStrength;
+	float MI_MaterialPadding0;
+	float MI_MaterialPadding1;
+	float MI_MaterialPadding2;
 }
 
 
@@ -87,8 +91,7 @@ DEFERRED_PS_OUTPUT PSMain( PS_INPUT Input ) : SV_TARGET
 	
 	output.vNrm = EncodeNormalGBuffer(nrm);
 	
-	output.vSI_SP.x = MI_SpecularIntensity;
-	output.vSI_SP.y = MI_SpecularPower;
+	output.vSI_SP = float4( MI_SpecularIntensity, MI_SpecularPower, saturate( MI_WetGroundSSRStrength ), 0.0f );
 	return output;
 }
 

@@ -76,38 +76,26 @@ XRESULT D3D11PfxRenderer::RenderDepthOfField( ID3D11ShaderResourceView* backbuff
     return FX_DepthOfField->Render( backbuffer, waterMaskSRV, specularSRV );
 }
 
-XRESULT D3D11PfxRenderer::RenderWetGroundSSR(
-    ID3D11RenderTargetView* outputRTV,
-    ID3D11ShaderResourceView* sceneSRV,
-    ID3D11ShaderResourceView* depthSRV,
-    ID3D11ShaderResourceView* normalsSRV,
-    ID3D11ShaderResourceView* waterMaskSRV,
-    ID3D11ShaderResourceView* specularSRV ) {
+XRESULT D3D11PfxRenderer::RenderWetGroundSSR( ID3D11RenderTargetView* outputRTV, ID3D11ShaderResourceView* sceneSRV, ID3D11ShaderResourceView* depthSRV, ID3D11ShaderResourceView* normalsSRV, ID3D11ShaderResourceView* waterMaskSRV, ID3D11ShaderResourceView* materialSRV ) {
     auto* engine = reinterpret_cast<D3D11GraphicsEngine*>(Engine::GraphicsEngine);
     auto& context = engine->GetContext();
     auto* rainShadow = engine->Effects ? engine->Effects->GetRainShadowmap() : nullptr;
     auto* shadowMaps = engine->GetShadowMaps();
-    if ( !outputRTV || !sceneSRV || !depthSRV || !normalsSRV || !waterMaskSRV || !specularSRV || !rainShadow || !shadowMaps ) {
+    if ( !outputRTV || !sceneSRV || !depthSRV || !normalsSRV || !waterMaskSRV || !materialSRV || !rainShadow || !shadowMaps ) {
         return XR_FAILED;
     }
-
     auto ps = engine->GetShaderManager().GetPShader( PShaderID::PS_PFX_WetGroundSSR );
     auto vs = engine->GetShaderManager().GetVShader( VShaderID::VS_PFX );
     ps->Apply();
     vs->Apply();
-
     WetGroundSSRConstantBuffer cb = {};
     auto& projection = Engine::GAPI->GetProjectionMatrix();
     cb.WG_ProjParams = float4( 1.0f / projection._11, 1.0f / projection._22, projection._43, projection._33 );
     XMMATRIX view = Engine::GAPI->GetViewMatrixXM();
     XMStoreFloat4x4( &cb.WG_InvView, XMMatrixInverse( nullptr, view ) );
     XMStoreFloat4x4( &cb.WG_ViewProj, XMLoadFloat4x4( &projection ) * view );
-
     auto& rainCamera = engine->Effects->GetRainShadowmapCameraRepl();
-    XMStoreFloat4x4( &cb.WG_RainViewProj,
-        XMLoadFloat4x4( &rainCamera.ProjectionReplacement ) *
-        XMLoadFloat4x4( &rainCamera.ViewReplacement ) );
-
+    XMStoreFloat4x4( &cb.WG_RainViewProj, XMLoadFloat4x4( &rainCamera.ProjectionReplacement ) * XMLoadFloat4x4( &rainCamera.ViewReplacement ) );
     cb.WG_CameraPosition = Engine::GAPI->GetCameraPosition();
     cb.WG_Wetness = Engine::GAPI->GetSceneWetness();
     const INT2 resolution = engine->GetResolution();
@@ -116,29 +104,17 @@ XRESULT D3D11PfxRenderer::RenderWetGroundSSR(
     cb.WG_Time = Engine::GAPI->GetTimeSeconds();
     cb.WG_RainFXWeight = Engine::GAPI->GetRainFXWeight();
     ps->GetBuffer( "WetGroundSSRConstantBuffer" ).Update( &cb ).Bind();
-
     Microsoft::WRL::ComPtr<ID3D11RenderTargetView> previousRTV;
     Microsoft::WRL::ComPtr<ID3D11DepthStencilView> previousDSV;
     context->OMGetRenderTargets( 1, previousRTV.GetAddressOf(), previousDSV.GetAddressOf() );
-
     context->OMSetRenderTargets( 1, &outputRTV, nullptr );
-    ID3D11ShaderResourceView* resources[4] = {
-        sceneSRV,
-        depthSRV,
-        normalsSRV,
-        rainShadow->GetShaderResView().Get()
-    };
+    ID3D11ShaderResourceView* resources[4] = { sceneSRV, depthSRV, normalsSRV, rainShadow->GetShaderResView().Get() };
     context->PSSetShaderResources( 0, 4, resources );
     engine->GetDistortionTexture()->BindToPixelShader( 4 );
     context->PSSetShaderResources( 5, 1, &waterMaskSRV );
-    context->PSSetShaderResources( 6, 1, &specularSRV );
-
-    ID3D11SamplerState* samplers[2] = {
-        engine->GetClampSamplerState(),
-        shadowMaps->GetShadowmapSampler()
-    };
+    context->PSSetShaderResources( 6, 1, &materialSRV );
+    ID3D11SamplerState* samplers[2] = { engine->GetClampSamplerState(), shadowMaps->GetShadowmapSampler() };
     context->PSSetSamplers( 0, 2, samplers );
-
     engine->SetDefaultStates();
     Engine::GAPI->GetRendererState().BlendState.SetDefault();
     Engine::GAPI->GetRendererState().BlendState.SetDirty();
@@ -148,9 +124,7 @@ XRESULT D3D11PfxRenderer::RenderWetGroundSSR(
     Engine::GAPI->GetRendererState().RasterizerState.CullMode = GothicRasterizerStateInfo::CM_CULL_NONE;
     Engine::GAPI->GetRendererState().RasterizerState.SetDirty();
     engine->SetViewport( ViewportInfo( 0, 0, resolution ) );
-
     DrawFullScreenQuad();
-
     ID3D11ShaderResourceView* nullResources[7] = {};
     context->PSSetShaderResources( 0, 7, nullResources );
     context->OMSetRenderTargets( 1, previousRTV.GetAddressOf(), previousDSV.Get() );

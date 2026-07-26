@@ -37,7 +37,6 @@ struct RendererNightTestSettings {
     bool ForceWhiteTransparentTextureFactor = false;
     float TransparentWorldMeshBrightness = 1.0f;
     float TransparentWorldMeshAlpha = 1.0f;
-    float TransparentWorldMeshNightEnvMapFactor = 0.05f;
     bool DisableTransparentVobWindMetadata = false;
     bool DisableTransparentVobWindBuffer = false;
     bool UseBaseTextureForTransparentWorldMeshes = false;
@@ -78,7 +77,6 @@ inline void ResetTransparencyStructuralTests() {
     night.ForceWhiteTransparentTextureFactor = false;
     night.TransparentWorldMeshBrightness = 1.0f;
     night.TransparentWorldMeshAlpha = 1.0f;
-    night.TransparentWorldMeshNightEnvMapFactor = 0.05f;
     night.DisableTransparentVobWindMetadata = false;
     night.DisableTransparentVobWindBuffer = false;
     night.UseBaseTextureForTransparentWorldMeshes = false;

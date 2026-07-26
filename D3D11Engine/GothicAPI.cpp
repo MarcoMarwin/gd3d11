@@ -238,12 +238,15 @@ namespace {
         if ( version < 2 && buffer.DisplacementFactor == 0.0f ) {
             buffer.DisplacementFactor = 0.7f;
         }
-
         MaterialInfo defaults;
         buffer.SpecularIntensity = ClampMaterialScalar( buffer.SpecularIntensity, defaults.buffer.SpecularIntensity, 0.0f, 1.0f );
         buffer.SpecularPower = ClampMaterialScalar( buffer.SpecularPower, defaults.buffer.SpecularPower, 1.0f, 256.0f );
         buffer.NormalmapStrength = ClampMaterialScalar( buffer.NormalmapStrength, defaults.buffer.NormalmapStrength, 0.0f, 3.0f );
         buffer.DisplacementFactor = ClampMaterialScalar( buffer.DisplacementFactor, defaults.buffer.DisplacementFactor, 0.0f, 4.0f );
+        buffer.WetGroundSSRStrength = ClampMaterialScalar( buffer.WetGroundSSRStrength, defaults.buffer.WetGroundSSRStrength, 0.0f, 1.0f );
+        buffer.Padding0 = 0.0f;
+        buffer.Padding1 = 0.0f;
+        buffer.Padding2 = 0.0f;
         buffer.Color = float4( 1, 1, 1, 1 );
     }
 
@@ -326,6 +329,7 @@ namespace {
         ReadJsonFloat( value, "specularPower", "SpecularPower", buffer.SpecularPower );
         ReadJsonFloat( value, "normalmapStrength", "NormalmapStrength", buffer.NormalmapStrength );
         ReadJsonFloat( value, "displacementFactor", "DisplacementFactor", buffer.DisplacementFactor );
+        ReadJsonFloat( value, "wetGroundSSRStrength", "WetGroundSSRStrength", buffer.WetGroundSSRStrength );
 
         const rapidjson::Value* colorValue = nullptr;
         if ( value.HasMember( "color" ) ) {

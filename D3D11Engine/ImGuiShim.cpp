@@ -1198,8 +1198,6 @@ namespace {
         ImGui::SliderFloat( "Transparent World Mesh Brightness", &night.TransparentWorldMeshBrightness, 0.0f, 1.0f, "%.2f", ImGuiSliderFlags_AlwaysClamp );
         ImGui::SetNextItemWidth( 300.0f );
         ImGui::SliderFloat( "Transparent World Mesh Alpha", &night.TransparentWorldMeshAlpha, 0.0f, 1.0f, "%.2f", ImGuiSliderFlags_AlwaysClamp );
-        ImGui::SetNextItemWidth( 300.0f );
-        ImGui::SliderFloat( "Transparent World Mesh Night EnvMap Factor", &night.TransparentWorldMeshNightEnvMapFactor, 0.0f, 1.0f, "%.2f", ImGuiSliderFlags_AlwaysClamp );
 
         ImGui::Separator();
 

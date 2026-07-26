@@ -11,6 +11,10 @@ cbuffer MI_MaterialInfo : register( b2 )
 	float MI_SpecularPower;
 	float MI_NormalmapStrength;
 	float MI_ParallaxOcclusionStrength;
+	float MI_WetGroundSSRStrength;
+	float MI_MaterialPadding0;
+	float MI_MaterialPadding1;
+	float MI_MaterialPadding2;
 }
 
 /*cbuffer POS_MaterialInfo : register( b3 )
@@ -92,8 +96,7 @@ DEFERRED_PS_OUTPUT PSMain( PS_INPUT Input ) : SV_TARGET
 	
 	output.vNrm = EncodeNormalGBuffer(normalize(Input.vNormalVS));
 
-	output.vSI_SP.x = MI_SpecularIntensity;
-	output.vSI_SP.y = MI_SpecularPower;
+	output.vSI_SP = float4( MI_SpecularIntensity, MI_SpecularPower, saturate( MI_WetGroundSSRStrength ), 0.0f );
 	
 #if MOTION_VECTORS == 1
 	// Calculate velocity for motion vectors

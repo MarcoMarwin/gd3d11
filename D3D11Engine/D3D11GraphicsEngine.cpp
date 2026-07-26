@@ -266,34 +266,8 @@ namespace
         }
 
         if ( material->GetEnvMapEnabled() ) {
-            float nightEnvMapFactor = 0.05f;
-            // BEGIN TEMPORARY RENDERER TEST OVERRIDES
-            const RendererTestSettings& rendererTestSettings = GetRendererTestSettings();
-            if ( rendererTestSettings.EnableOverrides ) {
-                nightEnvMapFactor = std::clamp( rendererTestSettings.Night.TransparentWorldMeshNightEnvMapFactor, 0.0f, 1.0f );
-            }
-            // END TEMPORARY RENDERER TEST OVERRIDES
-            float intensity = material->GetEnvMapStrength() * nightEnvMapFactor;
-            if ( Engine::GAPI ) {
-                if ( GSky* sky = Engine::GAPI->GetSky() ) {
-                    const float sunHeight = sky->GetAtmosphereCB().AC_LightPos.y;
-                    if ( sunHeight > 0.0f ) {
-                        const float lerpFactor = std::clamp( sunHeight, 0.0f, 1.0f );
-                        intensity = material->GetEnvMapStrength()
-                            * std::lerp( 0.1f, 0.7f, lerpFactor );
-                    }
-                    // BEGIN TEMPORARY RENDERER TEST OVERRIDES
-                    else {
-                        const RendererTestSettings& rendererTestSettings = GetRendererTestSettings();
-                        if ( rendererTestSettings.EnableOverrides && rendererTestSettings.Night.DisableEnvMapNightFactor ) {
-                            return defaultFactor;
-                        }
-                    }
-                    // END TEMPORARY RENDERER TEST OVERRIDES
-                }
-            }
-            const uint8_t alpha = static_cast<uint8_t>(
-                std::clamp( intensity, 0.0f, 1.0f ) * 255.0f );
+            const float intensity = std::clamp( material->GetEnvMapStrength(), 0.0f, 1.0f );
+            const uint8_t alpha = static_cast<uint8_t>( intensity * 255.0f );
             return zColor( 255, 255, 255, alpha ).ToFloat4();
         }
 
@@ -5336,18 +5310,33 @@ XRESULT D3D11GraphicsEngine::DrawMeshInfoListAlphablended( const std::vector<std
         if ( texture ) {
             PsSimpleFFdata ffdata = { };
             ffdata.textureFactor = ComputeTransparencyTextureFactor( meshKey.Material );
+
+            float transparentWorldMeshDaylightFactor = 1.0f;
+            if ( Engine::GAPI ) {
+                if ( GSky* sky = Engine::GAPI->GetSky() ) {
+                    const float sunHeight = sky->GetAtmosphereCB().AC_LightPos.y;
+                    const float linearDaylightFactor = std::clamp( (sunHeight + 0.08f) / 0.20f, 0.0f, 1.0f );
+                    transparentWorldMeshDaylightFactor = linearDaylightFactor * linearDaylightFactor * (3.0f - 2.0f * linearDaylightFactor);
+                }
+            }
+
+            float transparentWorldMeshBrightness = std::lerp( 0.10f, 1.00f, transparentWorldMeshDaylightFactor );
+            float transparentWorldMeshAlpha = std::lerp( 0.50f, 1.00f, transparentWorldMeshDaylightFactor );
+
             // BEGIN TEMPORARY RENDERER TEST OVERRIDES
             if ( transparencyTestOverridesEnabled && transparencyTests.ForceWhiteTransparentTextureFactor ) {
                 ffdata.textureFactor = float4( 1.0f, 1.0f, 1.0f, 1.0f );
             }
             if ( transparencyTestOverridesEnabled ) {
-                const float transparentWorldMeshBrightness = std::clamp( transparencyTests.TransparentWorldMeshBrightness, 0.0f, 1.0f );
-                ffdata.textureFactor.x *= transparentWorldMeshBrightness;
-                ffdata.textureFactor.y *= transparentWorldMeshBrightness;
-                ffdata.textureFactor.z *= transparentWorldMeshBrightness;
-                ffdata.textureFactor.w *= std::clamp( transparencyTests.TransparentWorldMeshAlpha, 0.0f, 1.0f );
+                transparentWorldMeshBrightness *= std::clamp( transparencyTests.TransparentWorldMeshBrightness, 0.0f, 1.0f );
+                transparentWorldMeshAlpha *= std::clamp( transparencyTests.TransparentWorldMeshAlpha, 0.0f, 1.0f );
             }
             // END TEMPORARY RENDERER TEST OVERRIDES
+
+            ffdata.textureFactor.x *= transparentWorldMeshBrightness;
+            ffdata.textureFactor.y *= transparentWorldMeshBrightness;
+            ffdata.textureFactor.z *= transparentWorldMeshBrightness;
+            ffdata.textureFactor.w *= transparentWorldMeshAlpha;
             if (texture->CacheIn( 0.6f ) != zRES_CACHED_IN) {
                 // Draw what? black? :)
                 continue;

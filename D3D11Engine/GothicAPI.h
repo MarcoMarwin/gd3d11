@@ -155,69 +155,69 @@ struct CameraReplacement {
 
 /** Version of this struct */
 const int MATERIALINFO_VERSION = 5;
-
 struct MaterialInfo {
-    enum EMaterialType {
-        MT_None,
-        MT_Water,
-        MT_Ocean,
-        MT_Portal,
-        MT_WaterfallFoam,
-        MT_FullAlpha, // why does this exist "NW_MISC_FULLALPHA_01" ?? This is just a block of nothing
-    };
+	enum EMaterialType {
+		MT_None,
+		MT_Water,
+		MT_Ocean,
+		MT_Portal,
+		MT_WaterfallFoam,
+		MT_FullAlpha,
+	};
+	MaterialInfo() : PixelShader(static_cast<PShaderID>(0)), MaterialType(MT_None)
+	{
+		buffer.SpecularIntensity = 0.1f;
+		buffer.SpecularPower = 60.0f;
+		buffer.NormalmapStrength = 1.0f;
+		buffer.DisplacementFactor = 1.0f;
+		buffer.WetGroundSSRStrength = 1.0f;
+		buffer.Padding0 = 0.0f;
+		buffer.Padding1 = 0.0f;
+		buffer.Padding2 = 0.0f;
+		buffer.Color = 0xFFFFFFFF;
+	}
+	~MaterialInfo() = default;
+	MaterialInfo( MaterialInfo&& other ) = default;
+	MaterialInfo& operator=( MaterialInfo&& ) = default;
+	MaterialInfo(const MaterialInfo&) = delete;
+	MaterialInfo& operator=( const MaterialInfo& ) = delete;
 
-    MaterialInfo() :
-        PixelShader(static_cast<PShaderID>(0)),
-        MaterialType(MT_None)
-    {
-        buffer.SpecularIntensity = 0.1f;
-        buffer.SpecularPower = 60.0f;
-        buffer.NormalmapStrength = 1.0f;
-        buffer.DisplacementFactor = 1.0f;
-        buffer.Color = 0xFFFFFFFF;
-    }
+	void WriteToFile( const std::string& name );
+	void LoadFromFile( const std::string_view name );
 
-    ~MaterialInfo() = default;
+	struct Buffer {
+		float SpecularIntensity;
+		float SpecularPower;
+		float NormalmapStrength;
+		float DisplacementFactor;
+		float WetGroundSSRStrength;
+		float Padding0;
+		float Padding1;
+		float Padding2;
+		float4 Color;
 
-    MaterialInfo( MaterialInfo&& other ) = default;
-    MaterialInfo& operator=( MaterialInfo&& ) = default;
+		bool operator==( const Buffer& other ) const noexcept {
+			return SpecularIntensity == other.SpecularIntensity &&
+				SpecularPower == other.SpecularPower &&
+				NormalmapStrength == other.NormalmapStrength &&
+				DisplacementFactor == other.DisplacementFactor &&
+				WetGroundSSRStrength == other.WetGroundSSRStrength &&
+				Color == other.Color;
+		}
+	};
+	PShaderID PixelShader;
+	EMaterialType MaterialType;
+	Buffer buffer;
 
-    MaterialInfo(const MaterialInfo&) = delete;
-    MaterialInfo& operator=( const MaterialInfo& ) = delete;
-
-    /** Writes this info to a file */
-    void WriteToFile( const std::string& name );
-
-    /** Loads this info from a file */
-    void LoadFromFile( const std::string_view name );
-
-    struct Buffer {
-        float SpecularIntensity;
-        float SpecularPower;
-        float NormalmapStrength;
-        float DisplacementFactor;
-        float4 Color;
-
-        bool operator==( const Buffer& other ) const noexcept {
-            return SpecularIntensity == other.SpecularIntensity &&
-                SpecularPower == other.SpecularPower &&
-                NormalmapStrength == other.NormalmapStrength &&
-                DisplacementFactor == other.DisplacementFactor &&
-                Color == other.Color;
-        }
-    };
-
-    PShaderID PixelShader;
-    EMaterialType MaterialType;
-    Buffer buffer;
-
-    bool IsSame( MaterialInfo* other ) {
-        if ( other == nullptr ) return false;
-        return PixelShader == other->PixelShader
-            && MaterialType == other->MaterialType
-            && buffer == other->buffer;
-    }
+	bool IsSame( MaterialInfo* other ) {
+		if ( other == nullptr )
+			return false;
+		return PixelShader == other->PixelShader
+			&& MaterialType == other->MaterialType
+			&& buffer == other->buffer;
+	}
 };
+static_assert( sizeof( MaterialInfo::Buffer ) == 48 );
 
 struct ParticleFrameData {
     unsigned char* Buffer;

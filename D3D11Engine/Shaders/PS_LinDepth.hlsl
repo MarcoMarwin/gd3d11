@@ -12,6 +12,10 @@ cbuffer MI_MaterialInfo : register( b2 )
 	float MI_SpecularPower;
 	float MI_NormalmapStrength;
 	float MI_ParallaxOcclusionStrength;
+	float MI_WetGroundSSRStrength;
+	float MI_MaterialPadding0;
+	float MI_MaterialPadding1;
+	float MI_MaterialPadding2;
 }
 
 cbuffer DIST_Distance : register( b3 )

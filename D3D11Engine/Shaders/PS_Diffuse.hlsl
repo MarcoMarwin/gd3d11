@@ -12,6 +12,10 @@ cbuffer MI_MaterialInfo : register( b2 )
 	float MI_SpecularPower;
 	float MI_NormalmapStrength;
 	float MI_ParallaxOcclusionStrength;
+	float MI_WetGroundSSRStrength;
+	float MI_MaterialPadding0;
+	float MI_MaterialPadding1;
+	float MI_MaterialPadding2;
 	
 	float4 MI_Color;
 }
@@ -198,7 +202,7 @@ FORWARD_PLUS_PS_OUTPUT PSMain( PS_INPUT Input )
 	output.vNrm = EncodeNormalGBuffer(nrm);
 	float encodedSpecIntensity = MI_Color.a < -1.5f ? -(specIntensity + 3.0f)
 		: (MI_Color.a < -0.5f ? -(specIntensity + 1.0f) : specIntensity);
-	output.vSI_SP = float2(encodedSpecIntensity, specPower);
+	output.vSI_SP = float4(encodedSpecIntensity, specPower, saturate(MI_WetGroundSSRStrength), 0.0f);
 	output.vVelocity = CalculateVelocity(Input.vCurrClipPos, Input.vPrevClipPos);
 
 	return output;
@@ -280,6 +284,8 @@ DEFERRED_PS_OUTPUT PSMain( PS_INPUT Input ) : SV_TARGET
 #else
 	output.vSI_SP.y = deferredSpecPower;
 #endif
+	output.vSI_SP.z = saturate(MI_WetGroundSSRStrength);
+	output.vSI_SP.w = 0.0f;
 
 	// Calculate velocity for motion vectors
 	// For instanced objects (VOBs, skeletal meshes), vCurrClipPos/vPrevClipPos come from VS
