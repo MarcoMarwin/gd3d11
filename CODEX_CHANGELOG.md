@@ -93,3 +93,7 @@
 ### Build 171
 - Entkopplung von Wet Ground SSR von den Specular-Werten (eigenstaendiger Wert wetGroundSSRStrength 0.0 - 1.0).
 - Ueberarbeitung des Regentropfen-Grizzle-Effekts fuer Wet Ground SSR (kurze statische Impulse statt UV-Verschiebung).
+
+## Build 172
+- Renamed DrawWaterfallMask to DrawTransparentWorldWetSSRMask.
+- Corrected indentations and logic in the renamed function.

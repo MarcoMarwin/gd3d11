@@ -1,4 +1,4 @@
-#include "D3D11GraphicsEngine.h"
+﻿#include "D3D11GraphicsEngine.h"
 #include "D3D11DeferredRenderer.h"
 #include "D3D11ShadowMap.h"
 #include "RendererTestSettings.h"
@@ -4380,7 +4380,7 @@ XRESULT D3D11GraphicsEngine::OnStartWorldRendering() {
             }
             DrawWaterSurfaces( waterMaskRTV, fsr3ReactiveMaskRTV, lowCloudLayerSRV );
             if ( renderWaterMask ) {
-                DrawWaterfallMask( waterMaskRTV );
+                DrawTransparentWorldWetSSRMask( waterMaskRTV );
             }
         };
     });
@@ -5472,9 +5472,11 @@ XRESULT D3D11GraphicsEngine::DrawMeshInfoListAlphablended( const std::vector<std
 }
 
 
-XRESULT D3D11GraphicsEngine::DrawWaterfallMask( ID3D11RenderTargetView* waterMaskRTV ) {
+XRESULT D3D11GraphicsEngine::DrawTransparentWorldWetSSRMask( ID3D11RenderTargetView* waterMaskRTV ) {
     const RendererTestSettings& rendererTestSettings = GetRendererTestSettings();
-    if ( rendererTestSettings.EnableOverrides && rendererTestSettings.Night.DisableWetSSRBlockerDraw ) {
+    const RendererNightTestSettings& transparencyTests = rendererTestSettings.Night;
+    const bool transparencyTestOverridesEnabled = rendererTestSettings.EnableOverrides;
+    if ( transparencyTestOverridesEnabled && transparencyTests.DisableWetSSRBlockerDraw ) {
         return XR_SUCCESS;
     }
 
@@ -5482,18 +5484,16 @@ XRESULT D3D11GraphicsEngine::DrawWaterfallMask( ID3D11RenderTargetView* waterMas
         return XR_SUCCESS;
     }
 
-    GetContext()->OMSetRenderTargets( 1, &waterMaskRTV,
-        DepthStencilBuffer->GetDepthStencilView().Get() );
+    GetContext()->OMSetRenderTargets( 1, &waterMaskRTV, DepthStencilBuffer->GetDepthStencilView().Get() );
 
     XMMATRIX view = Engine::GAPI->GetViewMatrixXM();
     Engine::GAPI->SetViewTransformXM( view );
     Engine::GAPI->ResetWorldTransform();
 
-    SetActivePixelShader( PShaderID::PS_WaterMask );
+    SetActivePixelShader( PShaderID::PS_TransparencyWetMask );
     SetActiveVertexShader( VShaderID::VS_Ex );
     ActivePS->Apply();
     ActiveVS->Apply();
-
     SetupVS_ExMeshDrawCall();
     SetupVS_ExConstantBuffer();
 
@@ -5505,29 +5505,72 @@ XRESULT D3D11GraphicsEngine::DrawWaterfallMask( ID3D11RenderTargetView* waterMas
 
     Engine::GAPI->GetRendererState().DepthState.DepthWriteEnabled = false;
     Engine::GAPI->GetRendererState().DepthState.SetDirty();
+
     Engine::GAPI->GetRendererState().BlendState.SetDefault();
     Engine::GAPI->GetRendererState().BlendState.SetDirty();
+
     UpdateRenderStates();
 
-    DrawVertexBufferIndexedUINT(
-        Engine::GAPI->GetWrappedWorldMesh()->MeshVertexBuffer,
-        Engine::GAPI->GetWrappedWorldMesh()->MeshIndexBuffer, 0, 0 );
+    DrawVertexBufferIndexedUINT( Engine::GAPI->GetWrappedWorldMesh()->MeshVertexBuffer, Engine::GAPI->GetWrappedWorldMesh()->MeshIndexBuffer, 0, 0 );
 
-
+    zCTexture* lastTexture = nullptr;
     for ( auto const& [meshKey, meshInfo] : FrameTransparencyMeshesWetSSRBlockers ) {
-        if ( meshKey.Material && meshInfo ) {
-            DrawVertexBufferIndexedUINT( nullptr, nullptr, meshInfo->Indices.size(),
-                meshInfo->BaseIndexLocation );
+        if ( !meshKey.Material || !meshInfo ) {
+            continue;
         }
+
+        zCTexture* texture = transparencyTestOverridesEnabled && transparencyTests.UseBaseTextureForTransparentWorldMeshes ? meshKey.Material->GetTexture() : meshKey.Material->GetAniTexture();
+        if ( !texture ) {
+            texture = meshKey.Material->GetTexture();
+        }
+
+        if ( !texture || texture->CacheIn( 0.6f ) != zRES_CACHED_IN ) {
+            continue;
+        }
+
+        PsSimpleFFdata ffdata = {};
+        ffdata.textureFactor = ComputeTransparencyTextureFactor( meshKey.Material );
+
+        float transparentWorldMeshDaylightFactor = 1.0f;
+        if ( Engine::GAPI ) {
+            if ( GSky* sky = Engine::GAPI->GetSky() ) {
+                const float sunHeight = sky->GetAtmosphereCB().AC_LightPos.y;
+                const float linearDaylightFactor = std::clamp( (sunHeight + 0.08f) / 0.20f, 0.0f, 1.0f );
+                transparentWorldMeshDaylightFactor = linearDaylightFactor * linearDaylightFactor * (3.0f - 2.0f * linearDaylightFactor);
+            }
+        }
+        float transparentWorldMeshAlpha = std::lerp( 0.50f, 1.00f, transparentWorldMeshDaylightFactor );
+
+        if ( transparencyTestOverridesEnabled && transparencyTests.ForceWhiteTransparentTextureFactor ) {
+            ffdata.textureFactor = float4( 1.0f, 1.0f, 1.0f, 1.0f );
+        }
+        if ( transparencyTestOverridesEnabled ) {
+            transparentWorldMeshAlpha *= std::clamp( transparencyTests.TransparentWorldMeshAlpha, 0.0f, 1.0f );
+        }
+        ffdata.textureFactor.w *= transparentWorldMeshAlpha;
+
+        if ( lastTexture != texture ) {
+            ID3D11ShaderResourceView* textureSRV = texture->GetSurface()->GetEngineTexture()->GetShaderResourceView().Get();
+            GetContext()->PSSetShaderResources( 0, 1, &textureSRV );
+            lastTexture = texture;
+        }
+
+        ActivePS->GetBuffer( "cbFFData" )
+            .Update( &ffdata )
+            .Bind();
+
+        DrawVertexBufferIndexedUINT( nullptr, nullptr, meshInfo->Indices.size(), meshInfo->BaseIndexLocation );
     }
+
+    ID3D11ShaderResourceView* nullTextureSRV = nullptr;
+    GetContext()->PSSetShaderResources( 0, 1, &nullTextureSRV );
 
     Engine::GAPI->GetRendererState().DepthState.DepthWriteEnabled = true;
     Engine::GAPI->GetRendererState().DepthState.SetDirty();
+
     UpdateRenderStates();
 
-    GetContext()->OMSetRenderTargets( 1, HDRBackBuffer->GetRenderTargetView().GetAddressOf(),
-        DepthStencilBuffer->GetDepthStencilView().Get() );
-
+    GetContext()->OMSetRenderTargets( 1, HDRBackBuffer->GetRenderTargetView().GetAddressOf(), DepthStencilBuffer->GetDepthStencilView().Get() );
     return XR_SUCCESS;
 }
 

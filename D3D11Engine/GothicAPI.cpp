@@ -1,4 +1,4 @@
-#include <Windows.h>
+﻿#include <Windows.h>
 #include <string>
 #include <sstream>
 #include "pch.h"
@@ -85,25 +85,10 @@ namespace {
         }
         return name;
     }
-    bool IsGroundFogName( std::string name ) {
+        bool IsGroundFogName( std::string name ) {
         name = ToLowerMaterialName( std::move( name ) );
-        const bool hasFogMarker = name.find( "groundfog" ) != std::string::npos
-            || name.find( "ground_fog" ) != std::string::npos
-            || name.find( "lavafog" ) != std::string::npos
-            || name.find( "waterfog" ) != std::string::npos
-            || name.find( "firesmoke" ) != std::string::npos
-            || name.find( "watersmoke" ) != std::string::npos
-            || name.find( "groundsmoke" ) != std::string::npos
-            || name.find( "mist" ) != std::string::npos
-            || name.find( "nebel" ) != std::string::npos
-            || name.find( "dunst" ) != std::string::npos
-            || name.find( "fog" ) != std::string::npos;
-        if ( !hasFogMarker )
-            return false;
-
-        return name.find( "fireball" ) == std::string::npos
-            && name.find( "spell" ) == std::string::npos
-            && name.find( "magic" ) == std::string::npos;
+        return name.find( "groundfog" ) != std::string::npos
+            || name.find( "ground_fog" ) != std::string::npos;
     }
 
     bool IsGroundFogParticleTexture( zCTexture* texture ) {
@@ -136,30 +121,34 @@ namespace {
     }
 
     bool IsGroundFogParticleVob( zCVob* source ) {
-        if ( !source )
-            return false;
-
+        if ( !source ) return false;
         std::string name = source->GetName();
         if ( zCVisual* visual = source->GetVisual() ) {
             name += " ";
             if ( const char* objectName = visual->GetObjectName() ) {
                 name += objectName;
             }
-            if ( zCParticleFX* particle = reinterpret_cast<zCParticleFX*>(visual) ) {
-                if ( zCParticleEmitter* emitter = particle->GetEmitter() ) {
-                    if ( zCTexture* texture = emitter->GetBaseVisTexture() ) {
-                        name += " ";
-                        name += texture->GetNameWithoutExt();
-                    }
-                }
-            }
         }
         return IsGroundFogName( std::move( name ) );
     }
+    bool IsLargeAreaParticleName( std::string name ) {
+        name = ToLowerMaterialName( std::move( name ) );
+        return name.find( "mfx_snow_exp" ) != std::string::npos
+            || name.find( "leaves" ) != std::string::npos;
+    }
+    bool IsLargeAreaParticleVob( zCVob* source ) {
+        if ( !source ) return false;
+        std::string name = source->GetName();
+        if ( zCVisual* visual = source->GetVisual() ) {
+            name += " ";
+            if ( const char* objectName = visual->GetObjectName() ) {
+                name += objectName;
+            }
+        }
+        return IsLargeAreaParticleName( std::move( name ) );
+    }
     bool IsWaterfallParticleTexture( zCTexture* texture ) {
-        if ( !texture )
-            return false;
-
+        if ( !texture ) return false;
         const std::string name = ToLowerMaterialName( texture->GetNameWithoutExt() );
         return name.find( "waterwall" ) != std::string::npos
             || name.find( "waterfist_expl" ) != std::string::npos
@@ -1863,6 +1852,7 @@ void GothicAPI::GetVisibleParticleEffectsList( std::vector<zCVob*>& pfxList ) {
 
         for ( auto const& it : ParticleEffectVobs ) {
             const bool keepGroundFogVisible = IsGroundFogParticleVob( it );
+            const bool keepLargeAreaParticleVisible = IsLargeAreaParticleVob( it );
             if ( XMVector3Greater(
                     XMVector3LengthSq( it->GetPositionWorldXM() - camPos ), vVfxRangeSq ) ) {
                 // VisualFXDrawRadius is the single distance cutoff for every particle effect.
@@ -1870,7 +1860,9 @@ void GothicAPI::GetVisibleParticleEffectsList( std::vector<zCVob*>& pfxList ) {
             }
 
             INT clipFlags = EGothicCullFlags::CullSides;
-            if ( sceneCam->BBox3DInFrustum( it->GetBBox(), clipFlags ) == ZTCAM_CLIPTYPE_OUT && !keepGroundFogVisible ) {
+            if ( sceneCam->BBox3DInFrustum( it->GetBBox(), clipFlags ) == ZTCAM_CLIPTYPE_OUT
+                && !keepGroundFogVisible
+                && !keepLargeAreaParticleVisible ) {
                 if ( auto vis = it->GetVisual() ) {
                     // Do update particle state, even if not in frustum, so that if player turns back to it, it doesn't restart.
                     auto particleFx = reinterpret_cast<zCParticleFX*>(vis);
@@ -1885,8 +1877,8 @@ void GothicAPI::GetVisibleParticleEffectsList( std::vector<zCVob*>& pfxList ) {
             if ( it->GetVisual() && it->GetShowVisual() ) {
                 pfxList.push_back( it );
             }
-        }
     }
+}
 }
 
 static bool DecalSortcmpFunc( const std::pair<zCVob*, float>& a, const std::pair<zCVob*, float>& b ) {
@@ -3357,11 +3349,11 @@ void GothicAPI::DrawParticleFX( zCVob* source, zCParticleFX* fx, ParticleFrameDa
             IsWaterfallParticleTexture( texture );
 
         const bool groundFogParticle =
-            IsGroundFogParticleVob( source )
-            || IsGroundFogParticleTexture( texture );
+            IsGroundFogParticleVob( source );
 
         const bool smokeOrFogParticle =
             groundFogParticle
+            || IsGroundFogParticleTexture( texture )
             || IsSmokeParticleVob( source )
             || IsSmokeParticleTexture( texture );
         const int sourceBlendMode = static_cast<int>(fx->GetEmitter()->GetVisAlphaFunc());
@@ -3462,11 +3454,13 @@ void GothicAPI::DrawParticleFX( zCVob* source, zCParticleFX* fx, ParticleFrameDa
                 // here only for translucent ground fog so its original linear
                 // emitter opacity survives the shader path.
                 color.w = std::pow( color.w, 1.0f / 2.2f );
-            }
-            if ( smokeOrFogParticle ) {
-                // Preserve the current 50% final opacity while dry and raise it
-                // smoothly to 70% final opacity during full rain.
-                color.w *= std::lerp( 0.7297401f, 0.8503349f, particleRainWeight );
+                // Ground fog uses 35% final visibility while dry and retains
+                // 70% of that dry visibility during full rain.
+                color.w *= std::lerp( 0.35f, 0.245f, particleRainWeight );
+            } else if ( smokeOrFogParticle ) {
+                // Regular smoke and fog preserve the current 50% final visibility
+                // while dry and retain 70% of that dry visibility during full rain.
+                color.w *= std::lerp( 0.7297401f, 0.62052346f, particleRainWeight );
             } else if ( waterfallParticle ) {
                 // Preserve the current water-particle opacity while dry and reduce
                 // it smoothly to 50% final opacity during full rain.

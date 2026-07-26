@@ -198,7 +198,7 @@ float4 PSMain(PS_INPUT input) : SV_TARGET
     reflectedColor *= rcp(1.0f + max(0.0f, reflectionLuma - 1.0f) * 0.7f);
 
     float fresnel = pow(1.0f - saturate(dot(-viewRay, wetNormal)), 3.0f);
-    float reflectionBlend = wetMask * hitWeight * lerp(0.03f, 0.15f, fresnel) * WG_Strength;
+    float reflectionBlend = wetMask * hitWeight * lerp(0.06f, 0.28f, fresnel) * WG_Strength;
     reflectionBlend *= 1.0f + rainSparkle * 0.35f;
     return float4(lerp(sceneColor, reflectedColor, saturate(reflectionBlend)), 1.0f);
 }

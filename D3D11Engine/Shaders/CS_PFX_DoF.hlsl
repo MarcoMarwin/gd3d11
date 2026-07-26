@@ -1,4 +1,4 @@
-//--------------------------------------------------------------------------------------
+﻿//--------------------------------------------------------------------------------------
 // Depth of Field Blur Pass
 //--------------------------------------------------------------------------------------
 
@@ -37,9 +37,49 @@ float CameraDistanceFromDepth( float d, float2 texcoord )
 
 float ReflectionReceiverMask(float2 texcoord)
 {
-    float waterMask = TX_WaterMask.SampleLevel(SS_Linear, texcoord, 0).r;
-    float specularMask = TX_SpecularMask.SampleLevel(SS_Linear, texcoord, 0).r;
-    return max(saturate(waterMask), saturate(specularMask));
+    uint width, height;
+    TX_WaterMask.GetDimensions(width, height);
+
+    int2 maxPixel = int2((int)width - 1, (int)height - 1);
+    int2 center = clamp(int2(texcoord * float2(width, height)), int2(0, 0), maxPixel);
+    int2 left = clamp(center + int2(-1, 0), int2(0, 0), maxPixel);
+    int2 right = clamp(center + int2(1, 0), int2(0, 0), maxPixel);
+    int2 up = clamp(center + int2(0, -1), int2(0, 0), maxPixel);
+    int2 down = clamp(center + int2(0, 1), int2(0, 0), maxPixel);
+
+    float centerWaterMask = TX_WaterMask.Load(int3(center, 0)).r;
+    float leftWaterMask = TX_WaterMask.Load(int3(left, 0)).r;
+    float rightWaterMask = TX_WaterMask.Load(int3(right, 0)).r;
+    float upWaterMask = TX_WaterMask.Load(int3(up, 0)).r;
+    float downWaterMask = TX_WaterMask.Load(int3(down, 0)).r;
+
+    centerWaterMask = centerWaterMask < 0.75f ? saturate(centerWaterMask / 0.25f) : 0.0f;
+    leftWaterMask = leftWaterMask < 0.75f ? saturate(leftWaterMask / 0.25f) : 0.0f;
+    rightWaterMask = rightWaterMask < 0.75f ? saturate(rightWaterMask / 0.25f) : 0.0f;
+    upWaterMask = upWaterMask < 0.75f ? saturate(upWaterMask / 0.25f) : 0.0f;
+    downWaterMask = downWaterMask < 0.75f ? saturate(downWaterMask / 0.25f) : 0.0f;
+
+    float reflectionMask = max(
+        centerWaterMask,
+        saturate(TX_SpecularMask.Load(int3(center, 0)).z));
+
+    reflectionMask = max(reflectionMask, max(
+        leftWaterMask,
+        saturate(TX_SpecularMask.Load(int3(left, 0)).z)));
+
+    reflectionMask = max(reflectionMask, max(
+        rightWaterMask,
+        saturate(TX_SpecularMask.Load(int3(right, 0)).z)));
+
+    reflectionMask = max(reflectionMask, max(
+        upWaterMask,
+        saturate(TX_SpecularMask.Load(int3(up, 0)).z)));
+
+    reflectionMask = max(reflectionMask, max(
+        downWaterMask,
+        saturate(TX_SpecularMask.Load(int3(down, 0)).z)));
+
+    return reflectionMask;
 }
 
 
@@ -107,8 +147,8 @@ void CSMain( uint3 DTid : SV_DispatchThreadID )
         OutputBlur[DTid.xy] = float4( centerColor, 0.0 );
         return;
     }
-
-    const float nearCoC = ComputeNearCoC( centerLinear );
+    const float nearCoC = ComputeNearCoC( centerLinear )
+        * (1.0f - ReflectionReceiverMask(texcoord));
     const float nearBlurRadius = 3.5f;
     const float nearMaxBlur = 5.25f;
     float blurRadius = nearCoC > 0.001f

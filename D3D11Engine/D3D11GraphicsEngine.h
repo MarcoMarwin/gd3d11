@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 #include "D3D11GraphicsEngineBase.h"
 #include "D3D11DeferredRenderer.h"
 #include "D3D11ForwardPlusRenderer.h"
@@ -263,11 +263,9 @@ public:
 
     /** Draws the world mesh */
     XRESULT DrawWorldMesh( bool noTextures = false ) override;
-
     /** Draws a list of mesh infos */
     XRESULT DrawMeshInfoListAlphablended( const std::vector<std::pair<MeshKey, MeshInfo*>>& list );
-    XRESULT DrawWaterfallMask( ID3D11RenderTargetView* waterMaskRTV );
-
+    XRESULT DrawTransparentWorldWetSSRMask( ID3D11RenderTargetView* waterMaskRTV );
     /** Draws the static VOBs */
     XRESULT DrawVOBs( bool noTextures = false ) override;
 
