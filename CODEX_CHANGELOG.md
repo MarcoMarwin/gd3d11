@@ -97,3 +97,8 @@
 ## Build 172
 - Renamed DrawWaterfallMask to DrawTransparentWorldWetSSRMask.
 - Corrected indentations and logic in the renamed function.
+
+## Build 173
+- Extended IsLargeAreaParticleVob for snow and leaves to include texture names.
+- Stripped BOM/invalid bytes from PS_PFX_DoF.hlsl file start.
+- Corrected wetUV indentation in PS_PFX_WetGroundSSR.hlsl.

@@ -57,12 +57,14 @@ float GetRainExposure(float3 wsPosition)
 
 float3 SampleRoughReflection(float2 uv, float2 distortion)
 {
-    float2 spread = WG_InvResolution * 2.0f + abs(distortion) * 0.0015f;
+    float2 spread = WG_InvResolution * 2.0f + abs(distortion) * 0.0040f;
     float3 color = TX_Scene.SampleLevel(SS_Linear, uv, 0).rgb * 0.40f;
+
     color += TX_Scene.SampleLevel(SS_Linear, uv + float2(spread.x, 0), 0).rgb * 0.15f;
     color += TX_Scene.SampleLevel(SS_Linear, uv - float2(spread.x, 0), 0).rgb * 0.15f;
     color += TX_Scene.SampleLevel(SS_Linear, uv + float2(0, spread.y), 0).rgb * 0.15f;
     color += TX_Scene.SampleLevel(SS_Linear, uv - float2(0, spread.y), 0).rgb * 0.15f;
+
     return color;
 }
 
@@ -132,21 +134,25 @@ float4 PSMain(PS_INPUT input) : SV_TARGET
     float materialWetGroundSSRStrength = saturate(TX_Material.SampleLevel(SS_Linear, uv, 0).z);
     if (materialWetGroundSSRStrength <= 0.001f)
         return float4(sceneColor, 1.0f);
-
     float rainExposure = GetRainExposure(wsPosition);
     float wetMask = upwardMask * rainExposure * saturate(WG_Wetness) * wetSSRVisibility * materialWetGroundSSRStrength;
     if (wetMask <= 0.01f)
         return float4(sceneColor, 1.0f);
-
     float2 wetUV = wsPosition.xz / 1100.0f;
-    float2 distortion = TX_Distortion.SampleLevel(SS_Linear, wetUV, 0).xy * 2.0f - 1.0f;
-    distortion += (TX_Distortion.SampleLevel(SS_Linear, wetUV * 0.63f + float2(0.137f, 0.421f), 0).xy * 2.0f - 1.0f) * 0.5f;
+    float2 slowFlowA = float2(0.0075f, -0.0050f) * WG_Time;
+    float2 slowFlowB = float2(-0.0040f, 0.0065f) * WG_Time;
+
+    float2 distortionA = TX_Distortion.SampleLevel(SS_Linear, wetUV + slowFlowA, 0).xy * 2.0f - 1.0f;
+    float2 distortionB = TX_Distortion.SampleLevel(SS_Linear, wetUV * 0.63f + float2(0.137f, 0.421f) + slowFlowB, 0).xy * 2.0f - 1.0f;
+    float2 distortion = distortionA + distortionB * 0.65f;
+
     float rainRippleWeight = wetMask * saturate(WG_RainFXWeight) * smoothstep(0.05f, 0.45f, WG_Wetness);
     float rainSparkle = CalculateRainSparkle(uv, wetUV, WG_Time) * rainRippleWeight;
-    // Keep reflected geometry still. Distortion is static in world space.
-    // Rain contributes only short-lived micro highlights at individual impact pixels.
-    float2 combinedDistortion = float2(distortion.x * 0.30f, distortion.y);
-    float3 wetNormal = normalize(wsNormal + float3(combinedDistortion.x, 0.0f, combinedDistortion.y) * 0.10f);
+
+    // Keep the reflection world-anchored while slowly animating only the wet microstructure.
+    // Rain contributes additional short-lived micro highlights at individual impact pixels.
+    float2 combinedDistortion = float2(distortion.x * 0.65f, distortion.y);
+    float3 wetNormal = normalize(wsNormal + float3(combinedDistortion.x, 0.0f, combinedDistortion.y) * 0.22f);
 
     float3 viewRay = normalize(wsPosition - WG_CameraPosition);
     float3 rayDirection = normalize(reflect(viewRay, wetNormal));

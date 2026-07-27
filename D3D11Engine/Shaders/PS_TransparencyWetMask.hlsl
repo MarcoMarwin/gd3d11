@@ -23,9 +23,9 @@ struct PS_INPUT
 float PSMain(PS_INPUT input) : SV_TARGET
 {
     float textureAlpha = TX_Texture0.Sample(SS_Linear, input.vTexcoord).a;
-    float coverage = saturate(textureAlpha * input.vDiffuse.a * cbFFData.textureFactor.a);
-    clip(coverage - (1.0f / 255.0f));
+    float visibleCoverage = saturate(textureAlpha * input.vDiffuse.a);
+    clip(visibleCoverage - (1.0f / 255.0f));
 
-    // 0.80..1.0 is reserved for alpha-aware transparent-world coverage.
-    return lerp(0.80f, 1.0f, coverage);
+    // Every visible transparent-world fragment fully blocks Wet Ground SSR.
+    return 1.0f;
 }

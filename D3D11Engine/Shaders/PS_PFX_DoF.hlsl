@@ -1,4 +1,4 @@
-﻿//--------------------------------------------------------------------------------------
+//--------------------------------------------------------------------------------------
 // Depth of Field - Half-res bokeh blur pass
 // Samples full-res scene + depth, computes CoC, does 48-tap bokeh blur
 // Outputs blurred color (rgb) + CoC (a) at half resolution

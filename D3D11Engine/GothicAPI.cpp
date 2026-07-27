@@ -137,16 +137,34 @@ namespace {
             || name.find( "leaves" ) != std::string::npos;
     }
     bool IsLargeAreaParticleVob( zCVob* source ) {
-        if ( !source ) return false;
-        std::string name = source->GetName();
-        if ( zCVisual* visual = source->GetVisual() ) {
-            name += " ";
-            if ( const char* objectName = visual->GetObjectName() ) {
-                name += objectName;
+    if ( !source ) return false;
+
+    std::string name = source->GetName();
+    zCVisual* visual = source->GetVisual();
+    if ( visual ) {
+        name += " ";
+        if ( const char* objectName = visual->GetObjectName() ) {
+            name += objectName;
+        }
+
+        zCParticleFX* particleFx = reinterpret_cast<zCParticleFX*>( visual );
+        if ( zCParticleEmitter* emitter = particleFx->GetEmitter() ) {
+            if ( zCTexture* baseTexture = emitter->GetBaseVisTexture() ) {
+                name += " ";
+                name += baseTexture->GetNameWithoutExt();
+            }
+
+            if ( zTParticle* firstParticle = particleFx->GetFirstParticle() ) {
+                if ( zCTexture* currentTexture = emitter->GetVisTexture( firstParticle ) ) {
+                    name += " ";
+                    name += currentTexture->GetNameWithoutExt();
+                }
             }
         }
-        return IsLargeAreaParticleName( std::move( name ) );
     }
+
+    return IsLargeAreaParticleName( std::move( name ) );
+}
     bool IsWaterfallParticleTexture( zCTexture* texture ) {
         if ( !texture ) return false;
         const std::string name = ToLowerMaterialName( texture->GetNameWithoutExt() );
