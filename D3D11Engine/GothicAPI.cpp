@@ -1871,9 +1871,11 @@ void GothicAPI::GetVisibleParticleEffectsList( std::vector<zCVob*>& pfxList ) {
         for ( auto const& it : ParticleEffectVobs ) {
             const bool keepGroundFogVisible = IsGroundFogParticleVob( it );
             const bool keepLargeAreaParticleVisible = IsLargeAreaParticleVob( it );
-            if ( XMVector3Greater(
+            if ( !keepLargeAreaParticleVisible && XMVector3Greater(
                     XMVector3LengthSq( it->GetPositionWorldXM() - camPos ), vVfxRangeSq ) ) {
-                // VisualFXDrawRadius is the single distance cutoff for every particle effect.
+                // VisualFXDrawRadius remains the distance cutoff for normal particle effects.
+                // Large-area snow and leaves emitters must stay active independently of
+                // their Vob origin so their complete emitter population can be maintained.
                 continue;
             }
 

@@ -262,161 +262,360 @@ float3 skyReflection =
             1.12f,
             1.30f,
             saturate(clouds.a)),
-        0.0f);
     float2 skyEdge = saturate(abs(skyUV - .5f) * 2);
     float skyWeight = skyValid * (1 - smoothstep(.78f, 1, max(skyEdge.x, skyEdge.y))) * hemi;
 
     float3 geoColor = skyReflection;
     float3 geoWorld = Input.vWorldPosition;
     float geoRaw = 0, geoQual = 0, geoInter = 0, geoCoverage = 0, geoOcc = 0, geoValid = 0, geoSceneZ = 1000000.0f;
-
     if (ssrActive)
     {
-        float3 pos = Input.vWorldPosition;
-        float3 dir = geoDir;
-        float stepSize = 40;
-        float2 prevUV = screenUV;
-        float prevDiff = -1000000;
+        float3 rayOrigin = Input.vWorldPosition;
+        float3 rayDirection = geoDir;
+        const float maxRayDistance = 50000.0f;
+        float3 rayEnd = rayOrigin + rayDirection * maxRayDistance;
 
-        for (int i = 1; i <= 52; i++)
+        float4 startClip = mul(float4(rayOrigin, 1.0f), RI_ViewProj);
+        float4 endClip = mul(float4(rayEnd, 1.0f), RI_ViewProj);
+
+        if (startClip.w > 0.001f && endClip.w > 0.001f)
         {
-            pos += dir * stepSize;
-            float4 p = mul(float4(pos, 1), RI_ViewProj);
-            if (p.w <= .001f) break;
-            p.xyz /= p.w;
-            float2 uv = p.xy * float2(.5, -.5) + .5;
-            if (any(uv < 0) || any(uv > 1) || p.z < 0 || p.z > 1) break;
+            float3 startNdc = startClip.xyz / startClip.w;
+            float3 endNdc = endClip.xyz / endClip.w;
+            float2 startPixel =
+                (startNdc.xy * float2(0.5f, -0.5f) + 0.5f)
+                * RI_ViewportSize;
+            float2 endPixel =
+                (endNdc.xy * float2(0.5f, -0.5f) + 0.5f)
+                * RI_ViewportSize;
 
-            float pix = length((uv - prevUV) * RI_ViewportSize);
-            float ctrl = saturate(6 / max(pix, 1));
-            float nearPhase = 1 - smoothstep(8, 18, (float)i);
-            float growth = lerp(lerp(1.16f, 1.22f, ctrl), lerp(.78f, 1.08f, ctrl), nearPhase);
-            float nextStep = clamp(max(stepSize * growth, lerp(18, 180, smoothstep(14, 40, (float)i))), 18, 650);
-
-            float rd = TX_Depth.SampleLevel(SS_Linear, uv, 0).r;
-            if (rd <= .000001f) break;
-
-            float sz = LinearizeWaterDepth(rd);
-            float diff = p.w - sz;
-            bool cross = diff > 0 && prevDiff <= 0;
-            bool inside = diff > 0 && diff < max(stepSize * 2, abs(sz) * .012f);
-
-            if (cross || inside)
+            float2 pixelDelta = endPixel - startPixel;
+            bool permute = abs(pixelDelta.x) < abs(pixelDelta.y);
+            if (permute)
             {
-                float3 lo = pos - dir * stepSize, hi = pos, mid = pos;
-                [unroll]
-                for (int j = 0; j < 5; j++)
-                {
-                    mid = (lo + hi) * .5f;
-                    float4 m = mul(float4(mid, 1), RI_ViewProj);
-                    m.xyz /= max(m.w, .001f);
-                    float2 mu = saturate(m.xy * float2(.5, -.5) + .5);
-                    float mz = LinearizeWaterDepth(TX_Depth.SampleLevel(SS_Linear, mu, 0).r);
-                    if (m.w - mz > 0) hi = mid; else lo = mid;
-                }
-
-                float4 f = mul(float4(mid, 1), RI_ViewProj);
-                f.xyz /= max(f.w, .001f);
-                uv = saturate(f.xy * float2(.5, -.5) + .5);
-                float2 px = 1 / RI_ViewportSize;
-                float finalZ = LinearizeWaterDepth(TX_Depth.SampleLevel(SS_Linear, uv, 0).r);
-                float residual = abs(f.w - finalZ);
-                float rt = max(28, abs(finalZ) * .006f);
-                float iq = 1 - smoothstep(rt, rt * 4, residual);
-                float2 delta = uv - prevUV;
-                float2 sd = delta / max(length(delta), .00001f);
-                float2 sn = float2(-sd.y, sd.x);
-                float2 off = px * 1.5f;
-
-                float zf = LinearizeWaterDepth(TX_Depth.SampleLevel(SS_Linear, saturate(uv + sd * off), 0).r);
-                float zb = LinearizeWaterDepth(TX_Depth.SampleLevel(SS_Linear, saturate(uv - sd * off), 0).r);
-                float za = LinearizeWaterDepth(TX_Depth.SampleLevel(SS_Linear, saturate(uv + sn * off), 0).r);
-                float zz = LinearizeWaterDepth(TX_Depth.SampleLevel(SS_Linear, saturate(uv - sn * off), 0).r);
-                float ct = max(38, abs(finalZ) * .011f);
-
-                float cov = .25f * ((1 - smoothstep(ct, ct * 2, abs(zf - finalZ))) + (1 - smoothstep(ct, ct * 2, abs(zb - finalZ))) + (1 - smoothstep(ct, ct * 2, abs(za - finalZ))) + (1 - smoothstep(ct, ct * 2, abs(zz - finalZ))));
-                float st = max(75, abs(finalZ) * .022f);
-                float support = .25f * ((1 - smoothstep(st, st * 3, abs(zf - finalZ))) + (1 - smoothstep(st, st * 3, abs(zb - finalZ))) + (1 - smoothstep(st, st * 3, abs(za - finalZ))) + (1 - smoothstep(st, st * 3, abs(zz - finalZ))));
-                float discontinuity = smoothstep(ct * 1.5f, ct * 6, max(abs(za - finalZ), abs(zz - finalZ)));
-                float occ = saturate((1 - smoothstep(900, 4200, abs(finalZ))) * (1 - smoothstep(.28f, .66f, cov)) * discontinuity);
-                float farRisk = smoothstep(9000, 26000, abs(finalZ)) * (1 - smoothstep(.30f, .72f, cov));
-                float reject = 1 - smoothstep(.10f, .78f, max(occ, farRisk));
-
-                float reflectionRadius =
-                    lerp(
-                        0.65f,
-                        1.35f,
-                        smoothstep(2000.0f, 18000.0f, abs(finalZ)));
-
-                float2 reflectionOffset =
-                    px * reflectionRadius;
-
-                float reflectionDepthTolerance =
-                    max(45.0f, abs(finalZ) * 0.012f);
-
-                float3 reflectionSum =
-                    TX_Scene.SampleLevel(SS_Linear, uv, 0).rgb * 4.0f;
-
-                float reflectionWeight = 4.0f;
-
-                float2 reflectionOffsets[4] = {
-                    float2( reflectionOffset.x, 0.0f),
-                    float2(-reflectionOffset.x, 0.0f),
-                    float2(0.0f,  reflectionOffset.y),
-                    float2(0.0f, -reflectionOffset.y)
-                };
-
-                [unroll]
-                for (int reflectionSample = 0;
-                     reflectionSample < 4;
-                     ++reflectionSample)
-                {
-                    float2 reflectionUV =
-                        saturate(
-                            uv
-                            + reflectionOffsets[reflectionSample]);
-
-                    float reflectionDepth =
-                        LinearizeWaterDepth(
-                            TX_Depth.SampleLevel(
-                                SS_Linear,
-                                reflectionUV,
-                                0).r);
-
-                    float sampleWeight =
-                        1.0f
-                        - smoothstep(
-                            reflectionDepthTolerance,
-                            reflectionDepthTolerance * 3.0f,
-                            abs(reflectionDepth - finalZ));
-
-                    reflectionSum +=
-                        TX_Scene.SampleLevel(
-                            SS_Linear,
-                            reflectionUV,
-                            0).rgb
-                        * sampleWeight;
-
-                    reflectionWeight += sampleWeight;
-                }
-
-                geoColor =
-                    reflectionSum
-                    / max(reflectionWeight, 0.0001f);
-                geoWorld = mid;
-                geoValid = 1;
-                geoSceneZ = abs(finalZ);
-                float2 e = saturate(abs(uv - .5f) * 2);
-                geoRaw = 1 - smoothstep(.78f, 1, max(e.x, e.y));
-                geoInter = iq;
-                geoCoverage = cov;
-                geoOcc = occ;
-                geoQual = iq * lerp(.38f * smoothstep(.34f, .70f, cov), 1, support) * lerp(.72f, 1, smoothstep(120, 900, abs(finalZ))) * reject;
-                break;
+                pixelDelta = pixelDelta.yx;
+                startPixel = startPixel.yx;
+                endPixel = endPixel.yx;
             }
-            prevUV = uv;
-            prevDiff = diff;
-            stepSize = nextStep;
+
+            if (abs(pixelDelta.x) > 0.0001f)
+            {
+                float stepDirection = sign(pixelDelta.x);
+                float inversePrimaryDelta = stepDirection / pixelDelta.x;
+                const float pixelStride = 2.0f;
+                float2 pixelStep =
+                    float2(
+                        stepDirection,
+                        pixelDelta.y * inversePrimaryDelta)
+                    * pixelStride;
+                float endPrimary = endPixel.x * stepDirection;
+                float2 pixelPosition = startPixel + pixelStep;
+                float previousRayDistance = 0.0f;
+                float previousDiff = -1000000.0f;
+                float2 previousUV = screenUV;
+
+                [loop]
+                for (int i = 0; i < 96; ++i)
+                {
+                    if (pixelPosition.x * stepDirection > endPrimary)
+                        break;
+
+                    float2 unpermutedPixel =
+                        permute
+                            ? pixelPosition.yx
+                            : pixelPosition;
+                    float2 uv = unpermutedPixel / RI_ViewportSize;
+
+                    if (any(uv < 0.0f) || any(uv > 1.0f))
+                        break;
+
+                    float primaryProgress =
+                        saturate(
+                            abs(pixelPosition.x - startPixel.x)
+                            / max(abs(endPixel.x - startPixel.x), 0.0001f));
+                    float rayDistance =
+                        primaryProgress * maxRayDistance;
+                    float3 pos =
+                        rayOrigin
+                        + rayDirection * rayDistance;
+                    float4 projected =
+                        mul(float4(pos, 1.0f), RI_ViewProj);
+
+                    if (projected.w <= 0.001f)
+                        break;
+
+                    projected.xyz /= projected.w;
+                    if (projected.z < 0.0f || projected.z > 1.0f)
+                        break;
+
+                    float rd =
+                        TX_Depth.SampleLevel(
+                            SS_Linear,
+                            uv,
+                            0).r;
+                    if (rd <= 0.000001f)
+                        break;
+
+                    float sz = LinearizeWaterDepth(rd);
+                    float diff = projected.w - sz;
+                    float rayInterval =
+                        max(rayDistance - previousRayDistance, 1.0f);
+                    bool cross =
+                        diff > 0.0f
+                        && previousDiff <= 0.0f;
+                    bool inside =
+                        diff > 0.0f
+                        && diff
+                            < max(
+                                rayInterval * 2.0f,
+                                abs(sz) * 0.012f);
+
+                    if (cross || inside)
+                    {
+                        float3 lo =
+                            rayOrigin
+                            + rayDirection * previousRayDistance;
+                        float3 hi = pos;
+                        float3 mid = pos;
+
+                        [unroll]
+                        for (int j = 0; j < 5; ++j)
+                        {
+                            mid = (lo + hi) * 0.5f;
+                            float4 m =
+                                mul(
+                                    float4(mid, 1.0f),
+                                    RI_ViewProj);
+                            m.xyz /= max(m.w, 0.001f);
+                            float2 mu =
+                                saturate(
+                                    m.xy
+                                    * float2(0.5f, -0.5f)
+                                    + 0.5f);
+                            float mz =
+                                LinearizeWaterDepth(
+                                    TX_Depth.SampleLevel(
+                                        SS_Linear,
+                                        mu,
+                                        0).r);
+                            if (m.w - mz > 0.0f)
+                                hi = mid;
+                            else
+                                lo = mid;
+                        }
+
+                        float4 f =
+                            mul(
+                                float4(mid, 1.0f),
+                                RI_ViewProj);
+                        f.xyz /= max(f.w, 0.001f);
+                        uv =
+                            saturate(
+                                f.xy
+                                * float2(0.5f, -0.5f)
+                                + 0.5f);
+                        float2 px = 1.0f / RI_ViewportSize;
+                        float finalZ =
+                            LinearizeWaterDepth(
+                                TX_Depth.SampleLevel(
+                                    SS_Linear,
+                                    uv,
+                                    0).r);
+                        float residual = abs(f.w - finalZ);
+                        float rt =
+                            max(
+                                28.0f,
+                                abs(finalZ) * 0.006f);
+                        float iq =
+                            1.0f
+                            - smoothstep(
+                                rt,
+                                rt * 4.0f,
+                                residual);
+                        float2 delta = uv - previousUV;
+                        float2 sd =
+                            delta
+                            / max(
+                                length(delta),
+                                0.00001f);
+                        float2 sn = float2(-sd.y, sd.x);
+                        float2 off = px * 1.5f;
+                        float zf =
+                            LinearizeWaterDepth(
+                                TX_Depth.SampleLevel(
+                                    SS_Linear,
+                                    saturate(uv + sd * off),
+                                    0).r);
+                        float zb =
+                            LinearizeWaterDepth(
+                                TX_Depth.SampleLevel(
+                                    SS_Linear,
+                                    saturate(uv - sd * off),
+                                    0).r);
+                        float za =
+                            LinearizeWaterDepth(
+                                TX_Depth.SampleLevel(
+                                    SS_Linear,
+                                    saturate(uv + sn * off),
+                                    0).r);
+                        float zz =
+                            LinearizeWaterDepth(
+                                TX_Depth.SampleLevel(
+                                    SS_Linear,
+                                    saturate(uv - sn * off),
+                                    0).r);
+                        float ct =
+                            max(
+                                38.0f,
+                                abs(finalZ) * 0.011f);
+                        float cov =
+                            0.25f
+                            * (
+                                (1.0f - smoothstep(ct, ct * 2.0f, abs(zf - finalZ)))
+                                + (1.0f - smoothstep(ct, ct * 2.0f, abs(zb - finalZ)))
+                                + (1.0f - smoothstep(ct, ct * 2.0f, abs(za - finalZ)))
+                                + (1.0f - smoothstep(ct, ct * 2.0f, abs(zz - finalZ))));
+                        float st =
+                            max(
+                                75.0f,
+                                abs(finalZ) * 0.022f);
+                        float support =
+                            0.25f
+                            * (
+                                (1.0f - smoothstep(st, st * 3.0f, abs(zf - finalZ)))
+                                + (1.0f - smoothstep(st, st * 3.0f, abs(zb - finalZ)))
+                                + (1.0f - smoothstep(st, st * 3.0f, abs(za - finalZ)))
+                                + (1.0f - smoothstep(st, st * 3.0f, abs(zz - finalZ))));
+                        float discontinuity =
+                            smoothstep(
+                                ct * 1.5f,
+                                ct * 6.0f,
+                                max(
+                                    abs(za - finalZ),
+                                    abs(zz - finalZ)));
+                        float occ =
+                            saturate(
+                                (1.0f - smoothstep(900.0f, 4200.0f, abs(finalZ)))
+                                * (1.0f - smoothstep(0.28f, 0.66f, cov))
+                                * discontinuity);
+                        float farRisk =
+                            smoothstep(
+                                9000.0f,
+                                26000.0f,
+                                abs(finalZ))
+                            * (1.0f - smoothstep(0.30f, 0.72f, cov));
+                        float reject =
+                            1.0f
+                            - smoothstep(
+                                0.10f,
+                                0.78f,
+                                max(occ, farRisk));
+                        float reflectionRadius =
+                            lerp(
+                                0.65f,
+                                1.35f,
+                                smoothstep(
+                                    2000.0f,
+                                    18000.0f,
+                                    abs(finalZ)));
+                        float2 reflectionOffset =
+                            px * reflectionRadius;
+                        float reflectionDepthTolerance =
+                            max(
+                                45.0f,
+                                abs(finalZ) * 0.012f);
+                        float3 reflectionSum =
+                            TX_Scene.SampleLevel(
+                                SS_Linear,
+                                uv,
+                                0).rgb
+                            * 4.0f;
+                        float reflectionWeight = 4.0f;
+                        float2 reflectionOffsets[4] = {
+                            float2( reflectionOffset.x, 0.0f),
+                            float2(-reflectionOffset.x, 0.0f),
+                            float2(0.0f,  reflectionOffset.y),
+                            float2(0.0f, -reflectionOffset.y)
+                        };
+
+                        [unroll]
+                        for (int reflectionSample = 0;
+                             reflectionSample < 4;
+                             ++reflectionSample)
+                        {
+                            float2 reflectionUV =
+                                saturate(
+                                    uv
+                                    + reflectionOffsets[reflectionSample]);
+                            float reflectionDepth =
+                                LinearizeWaterDepth(
+                                    TX_Depth.SampleLevel(
+                                        SS_Linear,
+                                        reflectionUV,
+                                        0).r);
+                            float sampleWeight =
+                                1.0f
+                                - smoothstep(
+                                    reflectionDepthTolerance,
+                                    reflectionDepthTolerance * 3.0f,
+                                    abs(reflectionDepth - finalZ));
+                            reflectionSum +=
+                                TX_Scene.SampleLevel(
+                                    SS_Linear,
+                                    reflectionUV,
+                                    0).rgb
+                                * sampleWeight;
+                            reflectionWeight += sampleWeight;
+                        }
+
+                        geoColor =
+                            reflectionSum
+                            / max(
+                                reflectionWeight,
+                                0.0001f);
+                        geoWorld = mid;
+                        geoValid = 1.0f;
+                        geoSceneZ = abs(finalZ);
+                        float2 e =
+                            saturate(
+                                abs(uv - 0.5f)
+                                * 2.0f);
+                        geoRaw =
+                            1.0f
+                            - smoothstep(
+                                0.78f,
+                                1.0f,
+                                max(e.x, e.y));
+                        geoInter = iq;
+                        geoCoverage = cov;
+                        geoOcc = occ;
+                        geoQual =
+                            iq
+                            * lerp(
+                                0.38f
+                                * smoothstep(
+                                    0.34f,
+                                    0.70f,
+                                    cov),
+                                1.0f,
+                                support)
+                            * lerp(
+                                0.72f,
+                                1.0f,
+                                smoothstep(
+                                    120.0f,
+                                    900.0f,
+                                    abs(finalZ)))
+                            * reject;
+                        break;
+                    }
+
+                    previousUV = uv;
+                    previousDiff = diff;
+                    previousRayDistance = rayDistance;
+                    pixelPosition += pixelStep;
+                }
+            }
         }
     }
 

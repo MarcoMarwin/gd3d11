@@ -23,7 +23,7 @@ struct PS_INPUT
 float PSMain(PS_INPUT input) : SV_TARGET
 {
     float textureAlpha = TX_Texture0.Sample(SS_Linear, input.vTexcoord).a;
-    float visibleCoverage = saturate(textureAlpha * input.vDiffuse.a);
+    float visibleCoverage = saturate(textureAlpha * input.vDiffuse.a * cbFFData.textureFactor.a);
     clip(visibleCoverage - (1.0f / 255.0f));
 
     // Every visible transparent-world fragment fully blocks Wet Ground SSR.

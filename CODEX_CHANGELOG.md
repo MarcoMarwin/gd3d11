@@ -102,3 +102,8 @@
 - Extended IsLargeAreaParticleVob for snow and leaves to include texture names.
 - Stripped BOM/invalid bytes from PS_PFX_DoF.hlsl file start.
 - Corrected wetUV indentation in PS_PFX_WetGroundSSR.hlsl.
+
+## Build 174
+- Wet Ground SSR: Replaced World-Space raymarching with pixel-uniform Screen-Space DDA traversal.
+- Wet Ground SSR: Transparent world meshes (including ice) are now reliably excluded via a 3x3 blocker mask evaluation.
+- Wet Ground SSR: Added continuous animated rain ripples mapped to Distortion.dds with frac-based tiling.

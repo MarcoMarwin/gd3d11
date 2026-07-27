@@ -1,4 +1,4 @@
-﻿#include "D3D11GraphicsEngine.h"
+#include "D3D11GraphicsEngine.h"
 #include "D3D11DeferredRenderer.h"
 #include "D3D11ShadowMap.h"
 #include "RendererTestSettings.h"
@@ -5503,7 +5503,9 @@ XRESULT D3D11GraphicsEngine::DrawTransparentWorldWetSSRMask( ID3D11RenderTargetV
     cbInstance.Color = float4( 1.0f, 1.0f, 1.0f, 1.0f );
     ActiveVS->GetBuffer( "Matrices_PerInstances" ).Update( &cbInstance, sizeof( cbInstance ) ).Bind();
 
+    Engine::GAPI->GetRendererState().DepthState.DepthBufferEnabled = true;
     Engine::GAPI->GetRendererState().DepthState.DepthWriteEnabled = false;
+    Engine::GAPI->GetRendererState().DepthState.DepthBufferCompareFunc = GothicDepthBufferStateInfo::CF_COMPARISON_GREATER_EQUAL;
     Engine::GAPI->GetRendererState().DepthState.SetDirty();
 
     Engine::GAPI->GetRendererState().BlendState.SetDefault();
