@@ -261,7 +261,7 @@ float3 skyReflection =
         * lerp(
             1.12f,
             1.30f,
-            saturate(clouds.a)),
+            saturate(clouds.a)), 0.0f);
     float2 skyEdge = saturate(abs(skyUV - .5f) * 2);
     float skyWeight = skyValid * (1 - smoothstep(.78f, 1, max(skyEdge.x, skyEdge.y))) * hemi;
 

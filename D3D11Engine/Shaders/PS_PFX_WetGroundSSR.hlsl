@@ -32,6 +32,7 @@ Texture2D TX_RainShadow : register(t3);
 Texture2D TX_Distortion : register(t4);
 Texture2D TX_WaterMask : register(t5);
 Texture2D TX_Material : register(t6);
+Texture2D TX_TransparentWorldCoverage : register(t7);
 
 struct PS_INPUT
 {
@@ -91,12 +92,7 @@ float SampleWetSSRBlockMask(float2 pixelPosition)
 
 float DecodeWetSSRBlock(float encodedMask)
 {
-    // 0.25 is regular water. Alpha-aware transparent geometry occupies 0.80..1.0.
-    if (encodedMask < 0.75f)
-        return saturate(encodedMask / 0.25f);
-
-    float transparencyCoverage = saturate((encodedMask - 0.80f) / 0.20f);
-    return smoothstep(0.015f, 0.10f, transparencyCoverage);
+    return saturate(encodedMask / 0.25f);
 }
 
 float2 CalculateRainRipples(float2 wetUV, float time)
@@ -156,8 +152,9 @@ float4 PSMain(PS_INPUT input) : SV_TARGET
     float materialWetGroundSSRStrength = saturate(TX_Material.SampleLevel(SS_Linear, uv, 0).z);
     if (materialWetGroundSSRStrength <= 0.001f)
         return float4(sceneColor, 1.0f);
+    float transparentWorldCoverage = saturate(TX_TransparentWorldCoverage.SampleLevel(SS_Linear, uv, 0).r);
     float rainExposure = GetRainExposure(wsPosition);
-    float wetMask = upwardMask * rainExposure * saturate(WG_Wetness) * wetSSRVisibility * materialWetGroundSSRStrength;
+    float wetMask = upwardMask * rainExposure * saturate(WG_Wetness) * wetSSRVisibility * materialWetGroundSSRStrength * (1.0f - transparentWorldCoverage);
     if (wetMask <= 0.01f)
         return float4(sceneColor, 1.0f);
     float2 wetUV = wsPosition.xz / 1100.0f;
@@ -301,7 +298,7 @@ float4 PSMain(PS_INPUT input) : SV_TARGET
     reflectedColor *= rcp(1.0f + max(0.0f, reflectionLuma - 1.0f) * 0.7f);
 
     float fresnel = pow(1.0f - saturate(dot(-viewRay, wetNormal)), 3.0f);
-    float reflectionBlend = wetMask * hitWeight * lerp(0.06f, 0.28f, fresnel) * WG_Strength;
+    float reflectionBlend = wetMask * hitWeight * lerp(0.06f, 0.28f, fresnel) * WG_Strength * 1.35f;
     reflectionBlend *= 1.0f + rainSparkle * 0.35f;
     return float4(lerp(sceneColor, reflectedColor, saturate(reflectionBlend)), 1.0f);
 }

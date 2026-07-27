@@ -225,6 +225,9 @@ XRESULT D3D11ShaderManager::Init() {
     Shaders.push_back( ShaderInfo::make<PShaderID::PS_PFX_WetGroundSSR>( "PS_PFX_WetGroundSSR.hlsl" )
         .with_category( ShaderCategory::Water ) );
 
+    Shaders.push_back( ShaderInfo::make<PShaderID::PS_TransparentWorldCoverage>( "PS_TransparentWorldCoverage.hlsl" )
+        .with_category( ShaderCategory::Water ) );
+
     Shaders.push_back( ShaderInfo::make<PShaderID::PS_ParticleDistortion>( "PS_ParticleDistortion.hlsl" )  );
     Shaders.push_back( ShaderInfo::make<PShaderID::PS_ParticleSimple>( "PS_ParticleSimple.hlsl" )  );
     Shaders.push_back( ShaderInfo::make<PShaderID::PS_ParticleSimple_FF>( "PS_ParticleSimple.hlsl" )
@@ -344,7 +347,6 @@ XRESULT D3D11ShaderManager::Init() {
     Shaders.push_back( ShaderInfo::make<PShaderID::PS_PortalDiffuse>( "PS_PortalDiffuse.hlsl" ) ); //forest portals, doors, etc.
     Shaders.push_back( ShaderInfo::make<PShaderID::PS_WaterfallFoam>( "PS_WaterfallFoam.hlsl" ) );     //foam on at the base of waterfalls
     Shaders.push_back( ShaderInfo::make<PShaderID::PS_WaterMask>( "PS_WaterMask.hlsl" ) );
-    Shaders.push_back( ShaderInfo::make<PShaderID::PS_TransparencyWetMask>( "PS_TransparencyWetMask.hlsl" ) );
 
     Shaders.push_back( ShaderInfo::make<PShaderID::PS_DS_AtmosphericScattering_Rain>( "PS_DS_AtmosphericScattering.hlsl" )
         .with_macros( { { "APPLY_RAIN_EFFECTS", "1" } })

@@ -1213,10 +1213,9 @@ namespace {
         ImGui::Checkbox( "Use Nightly Waterfall Transparency Classification", &night.UseNightlyWaterfallTransparencyClassification );
 
         ImGui::Separator();
+        ImGui::Separator();
 
         ImGui::TextUnformatted( "Transparency List Isolation" );
-        ImGui::Checkbox( "Disable Wet-SSR Blocker Collection", &night.DisableWetSSRBlockerCollection );
-        ImGui::Checkbox( "Disable Wet-SSR Blocker Draw", &night.DisableWetSSRBlockerDraw );
         ImGui::Checkbox( "Disable Wet Ground SSR", &night.DisableWetGroundSSR );
         ImGui::Checkbox( "Disable Transparent World Mesh Depth/Fog Replay", &night.DisableTransparentWorldMeshDepthFogReplay );
         ImGui::Checkbox( "Disable Regular Transparency Draw", &night.DisableRegularTransparencyDraw );

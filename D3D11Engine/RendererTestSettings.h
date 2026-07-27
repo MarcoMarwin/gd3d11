@@ -42,8 +42,6 @@ struct RendererNightTestSettings {
     bool UseBaseTextureForTransparentWorldMeshes = false;
     bool UseNightlyWorldTransparencyTessellationReset = false;
     bool UseNightlyWaterfallTransparencyClassification = false;
-    bool DisableWetSSRBlockerCollection = false;
-    bool DisableWetSSRBlockerDraw = false;
     bool DisableWetGroundSSR = false;
     bool DisableTransparentWorldMeshDepthFogReplay = false;
     bool DisableRegularTransparencyDraw = false;
@@ -82,8 +80,6 @@ inline void ResetTransparencyStructuralTests() {
     night.UseBaseTextureForTransparentWorldMeshes = false;
     night.UseNightlyWorldTransparencyTessellationReset = false;
     night.UseNightlyWaterfallTransparencyClassification = false;
-    night.DisableWetSSRBlockerCollection = false;
-    night.DisableWetSSRBlockerDraw = false;
     night.DisableWetGroundSSR = false;
     night.DisableTransparentWorldMeshDepthFogReplay = false;
     night.DisableRegularTransparencyDraw = false;

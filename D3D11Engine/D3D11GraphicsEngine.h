@@ -1,4 +1,4 @@
-﻿#pragma once
+#pragma once
 #include "D3D11GraphicsEngineBase.h"
 #include "D3D11DeferredRenderer.h"
 #include "D3D11ForwardPlusRenderer.h"
@@ -265,7 +265,7 @@ public:
     XRESULT DrawWorldMesh( bool noTextures = false ) override;
     /** Draws a list of mesh infos */
     XRESULT DrawMeshInfoListAlphablended( const std::vector<std::pair<MeshKey, MeshInfo*>>& list );
-    XRESULT DrawTransparentWorldWetSSRMask( ID3D11RenderTargetView* waterMaskRTV );
+    XRESULT DrawTransparentWorldCoverage( ID3D11RenderTargetView* coverageRTV );
     /** Draws the static VOBs */
     XRESULT DrawVOBs( bool noTextures = false ) override;
 
@@ -517,7 +517,7 @@ protected:
 
 
     /** Transparent worldmeshes that must block rain/wet-ground SSR */
-    std::vector<std::pair<MeshKey, MeshInfo*>> FrameTransparencyMeshesWetSSRBlockers;
+
 
     INT2 m_scaledResolution;
     INT2 m_swapchainResolution;

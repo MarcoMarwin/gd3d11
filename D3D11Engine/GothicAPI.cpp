@@ -1283,6 +1283,9 @@ void GothicAPI::OnWorldLoaded() {
     // Load global F11 draw distances first, then optional world-specific environment overrides.
     LoadRendererGlobalSettings( RendererState.RendererSettings, MENU_SETTINGS_FILE );
     LoadRendererWorldSettings( RendererState.RendererSettings );
+    if ( LoadedWorldInfo->WorldName == "DRAGONISLAND" ) {
+        RendererState.RendererSettings.EnableDynamicClouds = false;
+    }
     RendererState.RendererSettings.ApplySkyColorValues( GetSky()->GetDaySkyTexture() == ESkyTexture::ST_OldWorld );
     RendererState.RendererSettings.ApplyWorldNightFogBrightness( LoadedWorldInfo->WorldName == "OLDWORLD" || LoadedWorldInfo->WorldName == "WORLD" );
 
@@ -1894,7 +1897,7 @@ void GothicAPI::GetVisibleParticleEffectsList( std::vector<zCVob*>& pfxList ) {
                 continue;
             }
 
-            if ( it->GetVisual() && it->GetShowVisual() ) {
+            if ( it->GetVisual() && (it->GetShowVisual() || keepLargeAreaParticleVisible) ) {
                 pfxList.push_back( it );
             }
     }

@@ -76,14 +76,12 @@ XRESULT D3D11PfxRenderer::RenderDepthOfField( ID3D11ShaderResourceView* backbuff
     return FX_DepthOfField->Render( backbuffer, waterMaskSRV, specularSRV );
 }
 
-XRESULT D3D11PfxRenderer::RenderWetGroundSSR( ID3D11RenderTargetView* outputRTV, ID3D11ShaderResourceView* sceneSRV, ID3D11ShaderResourceView* depthSRV, ID3D11ShaderResourceView* normalsSRV, ID3D11ShaderResourceView* waterMaskSRV, ID3D11ShaderResourceView* materialSRV ) {
+XRESULT D3D11PfxRenderer::RenderWetGroundSSR( ID3D11RenderTargetView* outputRTV, ID3D11ShaderResourceView* sceneSRV, ID3D11ShaderResourceView* depthSRV, ID3D11ShaderResourceView* normalsSRV, ID3D11ShaderResourceView* waterMaskSRV, ID3D11ShaderResourceView* materialSRV, ID3D11ShaderResourceView* transparentWorldCoverageSRV ) {
     auto* engine = reinterpret_cast<D3D11GraphicsEngine*>(Engine::GraphicsEngine);
     auto& context = engine->GetContext();
     auto* rainShadow = engine->Effects ? engine->Effects->GetRainShadowmap() : nullptr;
     auto* shadowMaps = engine->GetShadowMaps();
-    if ( !outputRTV || !sceneSRV || !depthSRV || !normalsSRV || !waterMaskSRV || !materialSRV || !rainShadow || !shadowMaps ) {
-        return XR_FAILED;
-    }
+    if ( !outputRTV || !sceneSRV || !depthSRV || !normalsSRV || !waterMaskSRV || !materialSRV || !transparentWorldCoverageSRV || !rainShadow || !shadowMaps ) { return XR_FAILED; }
     auto ps = engine->GetShaderManager().GetPShader( PShaderID::PS_PFX_WetGroundSSR );
     auto vs = engine->GetShaderManager().GetVShader( VShaderID::VS_PFX );
     ps->Apply();
@@ -113,6 +111,7 @@ XRESULT D3D11PfxRenderer::RenderWetGroundSSR( ID3D11RenderTargetView* outputRTV,
     engine->GetDistortionTexture()->BindToPixelShader( 4 );
     context->PSSetShaderResources( 5, 1, &waterMaskSRV );
     context->PSSetShaderResources( 6, 1, &materialSRV );
+    context->PSSetShaderResources( 7, 1, &transparentWorldCoverageSRV );
     ID3D11SamplerState* samplers[2] = { engine->GetClampSamplerState(), shadowMaps->GetShadowmapSampler() };
     context->PSSetSamplers( 0, 2, samplers );
     engine->SetDefaultStates();
@@ -125,8 +124,8 @@ XRESULT D3D11PfxRenderer::RenderWetGroundSSR( ID3D11RenderTargetView* outputRTV,
     Engine::GAPI->GetRendererState().RasterizerState.SetDirty();
     engine->SetViewport( ViewportInfo( 0, 0, resolution ) );
     DrawFullScreenQuad();
-    ID3D11ShaderResourceView* nullResources[7] = {};
-    context->PSSetShaderResources( 0, 7, nullResources );
+    ID3D11ShaderResourceView* nullResources[8] = {};
+    context->PSSetShaderResources( 0, 8, nullResources );
     context->OMSetRenderTargets( 1, previousRTV.GetAddressOf(), previousDSV.Get() );
     return XR_SUCCESS;
 }

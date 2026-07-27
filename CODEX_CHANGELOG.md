@@ -107,3 +107,8 @@
 - Wet Ground SSR: Replaced World-Space raymarching with pixel-uniform Screen-Space DDA traversal.
 - Wet Ground SSR: Transparent world meshes (including ice) are now reliably excluded via a 3x3 blocker mask evaluation.
 - Wet Ground SSR: Added continuous animated rain ripples mapped to Distortion.dds with frac-based tiling.
+
+## Build 175
+- Integration: Replaced obsolete PS_TransparencyWetMask with PS_TransparentWorldCoverage in Visual Studio project files.
+- GothicAPI: Disabled Dynamic Clouds for the DRAGONISLAND world.
+- GothicAPI: Large-Area-Particles (mfx_snow_exp, leaves) are now unconditionally added to the rendering list regardless of GetShowVisual() status.
