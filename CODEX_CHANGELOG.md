@@ -116,3 +116,7 @@
 ## Build 176
 - Vollständiger und restloser Rückbau der Transparent-World-Coverage-Sonderlösung für Wet Ground SSR.
 - Implementierung der DDA-freien Raymarch-Pfützenlogik.
+
+## Build 177
+- D3D11GraphicsEngine: Beschädigten duplizierten Block in OnStartWorldRendering vollständig entfernt.
+- Wet Ground SSR: Regenplätschern durch weltverankerte Regentropfeneinschläge ersetzt, künstliche Pseudoreflexionen entfernt und korrekte Inaktivierung bei aussetzendem Regen sichergestellt.
