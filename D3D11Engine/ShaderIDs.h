@@ -113,7 +113,6 @@ enum class PShaderID : size_t {
     PS_FP_DiffuseNormalmappedAlphaTest,
     PS_FP_DiffuseNormalmappedAlphaTestFxMap,
     PS_FP_ShadowMask,
-    PS_TransparentWorldCoverage,
     COUNT
 };
 

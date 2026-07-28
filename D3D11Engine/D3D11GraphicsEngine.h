@@ -265,7 +265,7 @@ public:
     XRESULT DrawWorldMesh( bool noTextures = false ) override;
     /** Draws a list of mesh infos */
     XRESULT DrawMeshInfoListAlphablended( const std::vector<std::pair<MeshKey, MeshInfo*>>& list );
-    XRESULT DrawTransparentWorldCoverage( ID3D11RenderTargetView* coverageRTV );
+
     /** Draws the static VOBs */
     XRESULT DrawVOBs( bool noTextures = false ) override;
 
@@ -515,8 +515,6 @@ protected:
     /** List of portal worldmeshes we have to render using alphablending */
     std::vector<std::pair<MeshKey, MeshInfo*>> FrameTransparencyMeshesPortal;
 
-
-    /** Transparent worldmeshes that must block rain/wet-ground SSR */
 
 
     INT2 m_scaledResolution;

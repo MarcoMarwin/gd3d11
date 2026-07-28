@@ -4181,11 +4181,208 @@ XRESULT D3D11GraphicsEngine::OnStartWorldRendering() {
     // Shared state for the PostFX composition pass
     ID3D11ShaderResourceView* compositionGodRaysSRV = nullptr;
     ID3D11ShaderResourceView* compositionScreenSpaceLightingSRV = nullptr;
-    bool isOutdoor = Engine::GAPI->GetLoadedWorldInfo()->BspTree->GetBspTreeMode() == zBSP_MODE_OUTDOOR;
+    const auto* loadedWorldInfo = Engine::GAPI->GetLoadedWorldInfo();
+    bool isOutdoor = loadedWorldInfo->BspTree->GetBspTreeMode() == zBSP_MODE_OUTDOOR;
+    const bool isDragonIsland = NormalizeVisualStemForMarker( loadedWorldInfo->WorldName ) == "DRAGONISLAND";
     bool compositionGodRays = (rendererState.RendererSettings.EnableGodRays && isOutdoor);
     bool compositionHeightFog = (rendererState.RendererSettings.DrawFog && isOutdoor);
     const float dynamicCloudRainWeight = Engine::GAPI->GetRainFXWeight();
-    bool compositionLowClouds = (rendererState.RendererSettings.EnableDynamicClouds && rendererState.RendererSettings.DrawFog && isOutdoor && dynamicCloudRainWeight < 0.90f);
+    bool compositionLowClouds = (!isDragonIsland && rendererState.RendererSettings.EnableDynamicClouds && rendererState.RendererSettings.DrawFog && isOutdoor && dynamicCloudRainWeight < 0.90f);
+    bool compositionContactShadows = rendererState.RendererSettings.EnableContactShadows;
+    bool compositionSSGI = rendererState.RendererSettings.EnableScreenSpaceGI && rendererState.RendererSettings.ScreenSpaceGIStrength > 0.0f;
+    bool compositionNeedsGeometry = compositionContactShadows || compositionSSGI;
+    bool compositionNeedsDepth = compositionHeightFog || compositionNeedsGeometry;
+    bool compositionActive = compositionGodRays || compositionNeedsDepth;
+
+    const bool fsr3UpscalingActive = GetDevice()->GetFeatureLevel() >= D3D_FEATURE_LEVEL_11_0
+        && rendererState.RendererSettings.Upscaler == GothicRendererSettings::UPSCALER_FSR_3
+        && rendererState.RendererSettings.ResolutionScalePercent <= 100
+        && rendererState.RendererSettings.AntiAliasingMode == GothicRendererSettings::AA_FSR3
+        && PfxRenderer && PfxRenderer->GetFSR3() && TemporalState;
+    const bool renderTemporalSkyVelocity = rendererState.RendererSettings.DrawSky
+        && fsr3UpscalingActive;
+    XMFLOAT4X4 skyCurrentInvViewProj;
+    const XMFLOAT4X4 skyPreviousViewProj = m_PrevViewProjMatrix;
+    XMFLOAT2 skyJitterOffset( 0.0f, 0.0f );
+    if ( TemporalState ) {
+        const XMFLOAT4X4& currentViewProj = TemporalState->GetUnjitteredViewProj();
+        XMStoreFloat4x4( &skyCurrentInvViewProj,
+            XMMatrixInverse( nullptr, XMLoadFloat4x4( &currentViewProj ) ) );
+        skyJitterOffset = TemporalState->GetJitterOffset();
+    } else {
+        XMFLOAT4X4 currentProjection = Engine::GAPI->GetProjectionMatrix();
+        currentProjection._13 = 0.0f;
+        currentProjection._23 = 0.0f;
+        const XMMATRIX currentViewProj = XMMatrixMultiply(
+            XMLoadFloat4x4( &currentProjection ), Engine::GAPI->GetViewMatrixXM() );
+        XMStoreFloat4x4( &skyCurrentInvViewProj, XMMatrixInverse( nullptr, currentViewProj ) );
+    }
+    if ( rendererState.RendererSettings.DrawSky ) {
+        graph.AddPass( RG_PASS_NAME( "Draw Sky" ), [&]( RGBuilder& builder, RenderPass& pass ) {
+            //// Setup / Declare
+            //RGTextureDesc albedoDesc{ 1920, 1080, 28 /* DXGI_FORMAT_R8G8B8A8_UNORM */, "Albedo" };
+            //albedoTarget = builder.CreateTexture( albedoDesc );
+            builder.Write( backBufferHandle );
+
+            pass.m_executeCallback = [this, backBufferHandle]( const RenderGraph& graph )->void {
+                TracyD3D11ZoneCGX( "D3D11GraphicsEngine::Draw Sky" );
+                // Draw back of the sky if outdoor
+                GetContext()->OMSetRenderTargets( 1, graph.GetPhysicalTexture( backBufferHandle )->GetRenderTargetView().GetAddressOf(), GetDepthBuffer()->GetDepthStencilView().Get() );
+
+                DrawSky();
+            };
+        } );
+    }
+    if ( renderTemporalSkyVelocity ) {
+        graph.AddPass( RG_PASS_NAME( "Sky Velocity" ), [&]( RGBuilder& builder, RenderPass& pass ) {
+            builder.Read( velocityBufferHandle );
+            builder.Write( velocityBufferHandle );
+
+            pass.m_executeCallback = [this, velocityBufferHandle, skyCurrentInvViewProj,
+                                      skyPreviousViewProj, skyJitterOffset]( const RenderGraph& graph ) {
+                TracyD3D11ZoneCGX( "D3D11GraphicsEngine::Sky Velocity" );
+                auto* velocityBuffer = graph.GetPhysicalTexture( velocityBufferHandle );
+                if ( !velocityBuffer ) {
+                    return;
+                }
+
+                SetDefaultStates();
+                UpdateRenderStates();
+                SetViewport( ViewportInfo( 0, 0, GetResolution() ) );
+                GetContext()->OMSetRenderTargets(
+                    1, velocityBuffer->GetRenderTargetView().GetAddressOf(), nullptr );
+
+                auto skyVelocityPS = GetShaderManager().GetPShader( PShaderID::PS_PFX_SkyVelocity );
+                if ( !skyVelocityPS ) {
+                    return;
+                }
+
+                SkyVelocityConstantBuffer constants = {};
+                constants.InvViewProj = skyCurrentInvViewProj;
+                constants.PrevViewProj = skyPreviousViewProj;
+                constants.JitterOffset = skyJitterOffset;
+
+                GetShaderManager().GetVShader( VShaderID::VS_PFX )->Apply();
+                skyVelocityPS->Apply();
+                skyVelocityPS->GetBuffer( "SkyVelocityConstants" ).Update( &constants ).Bind();
+
+                ID3D11ShaderResourceView* depthSRV = GetDepthBuffer()->GetShaderResView().Get();
+                GetContext()->PSSetShaderResources( 0, 1, &depthSRV );
+                PfxRenderer->DrawFullScreenQuad();
+
+                ID3D11ShaderResourceView* nullSRV = nullptr;
+                GetContext()->PSSetShaderResources( 0, 1, &nullSRV );
+            };
+        } );
+    }
+    RGResourceHandle lowCloudLayerResource = RG_INVALID_HANDLE;
+    RGResourceHandle lowCloudDepthResource = RG_INVALID_HANDLE;
+    if ( compositionLowClouds ) {
+        const INT2 cloudResolution(
+            std::max( 1, GetResolution().x / 2 + GetResolution().x % 2 ),
+            std::max( 1, GetResolution().y / 2 + GetResolution().y % 2 ) );
+
+        graph.AddPass( RG_PASS_NAME("Generate Low Clouds"), [&]( RGBuilder& builder, RenderPass& pass ) {
+            builder.Read( backBufferHandle );
+            lowCloudLayerResource = builder.CreateTexture( {
+                static_cast<uint32_t>(cloudResolution.x),
+                static_cast<uint32_t>(cloudResolution.y),
+                DXGI_FORMAT_R16G16B16A16_FLOAT,
+                L"LowCloudLayer"
+            } );
+            lowCloudDepthResource = builder.CreateTexture( {
+                static_cast<uint32_t>(cloudResolution.x),
+                static_cast<uint32_t>(cloudResolution.y),
+                DXGI_FORMAT_R32_FLOAT,
+                L"LowCloudDepth"
+            } );
+
+            pass.m_executeCallback = [this, backBufferHandle, lowCloudLayerResource, lowCloudDepthResource]( const RenderGraph& graph ) {
+                TracyD3D11ZoneCGX( "D3D11GraphicsEngine::Generate Low Clouds" );
+
+                auto* backBuffer = graph.GetPhysicalTexture( backBufferHandle );
+                auto* lowCloudLayer = graph.GetPhysicalTexture( lowCloudLayerResource );
+                auto* lowCloudDepth = graph.GetPhysicalTexture( lowCloudDepthResource );
+                auto* depthBuffer = GetDepthBuffer();
+                if ( !PfxRenderer
+                    || !backBuffer || !backBuffer->GetShaderResView().Get()
+                    || !lowCloudLayer || !lowCloudLayer->GetRenderTargetView().Get()
+                    || !lowCloudDepth || !lowCloudDepth->GetRenderTargetView().Get()
+                    || !depthBuffer || !depthBuffer->GetShaderResView().Get() ) {
+                    return;
+                }
+
+                PfxRenderer->RenderLowCloudLayer(
+                    lowCloudLayer->GetRenderTargetView().Get(),
+                    lowCloudDepth->GetRenderTargetView().Get(),
+                    backBuffer->GetShaderResView().Get(),
+                    depthBuffer->GetShaderResView().Get() );
+
+                GetContext()->PSSetSamplers( 0, 1, DefaultSamplerState.GetAddressOf() );
+            };
+        } );
+    }
+    const bool renderRainExclusionMask = rendererState.RendererSettings.EnableRain
+            }
+            TracyD3D11ZoneCGX( "D3D11GraphicsEngine::Draw ParticleFX #1" );
+            std::vector<zCVob*> decals;
+            zCCamera::GetCamera()->Activate();
+            // Camera->Activate breaks viewport
+            SetViewport( ViewportInfo( 0, 0, GetResolution() ) );
+
+            Engine::GAPI->GetVisibleDecalList( decals );
+
+            Engine::GAPI->ResetRenderStates();
+            DrawDecalList( decals, true );
+            DrawQuadMarks();
+        };
+    });
+
+    ActiveSceneRenderer->AddLightingPasses( graph, *this,
+        colorResource, normalsResource, specularResource,
+        transparencyAndCompositionMaskResource, backBufferHandle, m_FrameLights );
+
+    // XeGTAO is composited before transparent alpha meshes so particles, fire and
+    // other translucent effects are not darkened by opaque-world AO.
+    if ( rendererState.RendererSettings.AoMode == AOMode::AO_XEGTAO ) {
+        graph.AddPass( RG_PASS_NAME("XeGTAO"), [&]( RGBuilder& builder, RenderPass& pass ) {
+            builder.Read( normalsResource );
+            builder.Write( backBufferHandle );
+
+            pass.m_executeCallback = [this, normalsResource, backBufferHandle]( const RenderGraph& graph ) {
+                TracyD3D11ZoneCGX( "D3D11GraphicsEngine::Draw XeGTAO" );
+                auto normalsTexture = graph.GetPhysicalTexture( normalsResource );
+                auto backBuffer = graph.GetPhysicalTexture( backBufferHandle );
+                PfxRenderer->RenderXeGTAO(
+                    GetDepthBufferCopy()->GetShaderResView().Get(),
+                    normalsTexture->GetShaderResView().Get(),
+                    backBuffer->GetRenderTargetView().Get() );
+                GetContext()->PSSetSamplers( 0, 1, DefaultSamplerState.GetAddressOf() );
+            };
+        } );
+    }
+
+    graph.AddPass( RG_PASS_NAME("Draw Frame AlphaMeshes"), [&]( RGBuilder& builder, RenderPass& pass ) {
+        // Setup / Declare
+        builder.Write( backBufferHandle );
+
+        pass.m_executeCallback = [this](const RenderGraph&)-> void {
+            TracyD3D11ZoneCGX( "D3D11GraphicsEngine::Draw Frame AlphaMeshes" );
+            DrawFrameAlphaMeshes();
+            };
+        }
+    );
+
+    // Shared state for the PostFX composition pass
+    ID3D11ShaderResourceView* compositionGodRaysSRV = nullptr;
+    ID3D11ShaderResourceView* compositionScreenSpaceLightingSRV = nullptr;
+    const auto* loadedWorldInfo = Engine::GAPI->GetLoadedWorldInfo();
+    bool isOutdoor = loadedWorldInfo->BspTree->GetBspTreeMode() == zBSP_MODE_OUTDOOR;
+    const bool isDragonIsland = NormalizeVisualStemForMarker( loadedWorldInfo->WorldName ) == "DRAGONISLAND";
+    bool compositionGodRays = (rendererState.RendererSettings.EnableGodRays && isOutdoor);
+    bool compositionHeightFog = (rendererState.RendererSettings.DrawFog && isOutdoor);
+    const float dynamicCloudRainWeight = Engine::GAPI->GetRainFXWeight();
+    bool compositionLowClouds = (!isDragonIsland && rendererState.RendererSettings.EnableDynamicClouds && rendererState.RendererSettings.DrawFog && isOutdoor && dynamicCloudRainWeight < 0.90f);
     bool compositionContactShadows = rendererState.RendererSettings.EnableContactShadows;
     bool compositionSSGI = rendererState.RendererSettings.EnableScreenSpaceGI && rendererState.RendererSettings.ScreenSpaceGIStrength > 0.0f;
     bool compositionNeedsGeometry = compositionContactShadows || compositionSSGI;
@@ -4328,7 +4525,6 @@ XRESULT D3D11GraphicsEngine::OnStartWorldRendering() {
         || rendererState.RendererSettings.EnableDoF;
     const bool renderWetGroundSSR = rendererState.RendererSettings.EnableSSR
         && renderRainExclusionMask;
-    RGResourceHandle transparentWorldCoverageResource = RG_INVALID_HANDLE;
     RGResourceHandle waterMaskResource = RG_INVALID_HANDLE;
     if ( renderWaterMask ) {
         const auto maskSize = GetResolution();
@@ -4388,59 +4584,47 @@ XRESULT D3D11GraphicsEngine::OnStartWorldRendering() {
     const bool disableWetGroundSSR = wetGroundSSRTestSettings.EnableOverrides && wetGroundSSRTestSettings.Night.DisableWetGroundSSR;
     // END TEMPORARY RENDERER TEST OVERRIDES
     if ( renderWetGroundSSR && !disableWetGroundSSR ) {
-        graph.AddPass( RG_PASS_NAME("Transparent World Coverage"), [&]( RGBuilder& builder, RenderPass& pass ) {
-            const INT2 coverageSize = GetResolution();
-            transparentWorldCoverageResource = builder.CreateTexture( {
-                static_cast<uint32_t>( coverageSize.x ),
-                static_cast<uint32_t>( coverageSize.y ),
-                DXGI_FORMAT_R8_UNORM, L"TransparentWorldCoverage"
-            } );
-            builder.Write( transparentWorldCoverageResource );
-
-            pass.m_executeCallback = [this, transparentWorldCoverageResource](const RenderGraph& graph) {
-                auto* coverageTex = graph.GetPhysicalTexture( transparentWorldCoverageResource );
-                if ( coverageTex ) {
-                    ID3D11RenderTargetView* coverageRTV = coverageTex->GetRenderTargetView().Get();
-                    const float clearColor[4] = { 0.0f, 0.0f, 0.0f, 0.0f };
-                    GetContext()->ClearRenderTargetView( coverageRTV, clearColor );
-                    DrawTransparentWorldCoverage( coverageRTV );
-
-                    ID3D11RenderTargetView* nullRTV = nullptr;
-                    GetContext()->OMSetRenderTargets( 1, &nullRTV, nullptr );
-                }
-            };
-        });
-
-        graph.AddPass( RG_PASS_NAME("Wet Ground SSR"), [&]( RGBuilder& builder, RenderPass& pass ) {
-            builder.Read( normalsResource );
-            builder.Read( waterMaskResource );
-            builder.Read( specularResource );
-            builder.Read( backBufferHandle );
-            builder.Read( transparentWorldCoverageResource );
-            builder.Write( backBufferHandle );
-
-            pass.m_executeCallback = [this, backBufferHandle, normalsResource, waterMaskResource, specularResource, transparentWorldCoverageResource](const RenderGraph& graph) {
-                TracyD3D11ZoneCGX( "D3D11GraphicsEngine::Wet Ground SSR" );
-                auto* backBuffer = graph.GetPhysicalTexture( backBufferHandle );
-                auto* normals = graph.GetPhysicalTexture( normalsResource );
-                auto* waterMask = graph.GetPhysicalTexture( waterMaskResource );
-                auto* specular = graph.GetPhysicalTexture( specularResource );
-                auto tempBuffer = PfxRenderer->GetTempBuffer();
-                if ( !backBuffer || !normals || !waterMask || !specular || !tempBuffer ) {
-                    return;
-                }
-
-                GetContext()->CopyResource( tempBuffer->GetTexture().Get(), backBuffer->GetTexture().Get() );
-                PfxRenderer->RenderWetGroundSSR(
-                    backBuffer->GetRenderTargetView().Get(),
-                    tempBuffer->GetShaderResView().Get(),
-                    GetDepthBufferCopy()->GetShaderResView().Get(),
-                    normals->GetShaderResView().Get(),
-                    waterMask->GetShaderResView().Get(),
-                    specular->GetShaderResView().Get(),
-                    graph.GetPhysicalTexture( transparentWorldCoverageResource )->GetShaderResView().Get() );
-            };
-        });
+      graph.AddPass( RG_PASS_NAME("Wet Ground SSR"), [&]( RGBuilder& builder, RenderPass& pass )
+      {
+          builder.Read( normalsResource );
+          builder.Read( waterMaskResource );
+          builder.Read( specularResource );
+          builder.Read( backBufferHandle );
+          if ( compositionLowClouds )
+          {
+              builder.Read( lowCloudLayerResource );
+          }
+          builder.Write( backBufferHandle );
+          pass.m_executeCallback = [this, backBufferHandle, normalsResource, waterMaskResource, specularResource, compositionLowClouds, lowCloudLayerResource](const RenderGraph& graph)
+          {
+              TracyD3D11ZoneCGX( "D3D11GraphicsEngine::Wet Ground SSR" );
+              auto* backBuffer = graph.GetPhysicalTexture( backBufferHandle );
+              auto* normals = graph.GetPhysicalTexture( normalsResource );
+              auto* waterMask = graph.GetPhysicalTexture( waterMaskResource );
+              auto* specular = graph.GetPhysicalTexture( specularResource );
+              auto tempBuffer = PfxRenderer->GetTempBuffer();
+              if ( !backBuffer || !normals || !waterMask || !specular || !tempBuffer )
+              {
+                  return;
+              }
+              ID3D11ShaderResourceView* lowCloudLayerSRV = nullptr;
+              if ( compositionLowClouds )
+              {
+                  auto* lowCloudLayer = graph.GetPhysicalTexture( lowCloudLayerResource );
+                  lowCloudLayerSRV = lowCloudLayer ? lowCloudLayer->GetShaderResView().Get() : nullptr;
+              }
+              GetContext()->CopyResource( tempBuffer->GetTexture().Get(), backBuffer->GetTexture().Get() );
+              PfxRenderer->RenderWetGroundSSR(
+                  backBuffer->GetRenderTargetView().Get(),
+                  tempBuffer->GetShaderResView().Get(),
+                  GetDepthBufferCopy()->GetShaderResView().Get(),
+                  normals->GetShaderResView().Get(),
+                  waterMask->GetShaderResView().Get(),
+                  specular->GetShaderResView().Get(),
+                  lowCloudLayerSRV
+              );
+          };
+      });
     }
 
     graph.AddPass( RG_PASS_NAME("Draw FrameTransparencyMeshes"), [&]( RGBuilder& builder, RenderPass& pass ) {
@@ -5494,98 +5678,6 @@ XRESULT D3D11GraphicsEngine::DrawMeshInfoListAlphablended( const std::vector<std
     return XR_SUCCESS;
 }
 
-
-XRESULT D3D11GraphicsEngine::DrawTransparentWorldCoverage( ID3D11RenderTargetView* coverageRTV ) {
-    if ( FrameTransparencyMeshes.empty() || !coverageRTV ) {
-        return XR_SUCCESS;
-    }
-
-    GetContext()->OMSetRenderTargets( 1, &coverageRTV, DepthStencilBuffer->GetDepthStencilView().Get() );
-
-    XMMATRIX view = Engine::GAPI->GetViewMatrixXM();
-    Engine::GAPI->SetViewTransformXM( view );
-    Engine::GAPI->ResetWorldTransform();
-
-    SetActivePixelShader( PShaderID::PS_TransparentWorldCoverage );
-    SetActiveVertexShader( VShaderID::VS_Ex );
-    ActivePS->Apply();
-    ActiveVS->Apply();
-    SetupVS_ExMeshDrawCall();
-    SetupVS_ExConstantBuffer();
-
-    const XMMATRIX identityMatrix = XMMatrixIdentity();
-    VS_ExConstantBuffer_PerInstance cbInstance = {};
-    XMStoreFloat4x4( &cbInstance.World, identityMatrix );
-    cbInstance.Color = float4( 1.0f, 1.0f, 1.0f, 1.0f );
-    ActiveVS->GetBuffer( "Matrices_PerInstances" ).Update( &cbInstance, sizeof( cbInstance ) ).Bind();
-
-    Engine::GAPI->GetRendererState().DepthState.DepthBufferEnabled = true;
-    Engine::GAPI->GetRendererState().DepthState.DepthWriteEnabled = false;
-    Engine::GAPI->GetRendererState().DepthState.DepthBufferCompareFunc = GothicDepthBufferStateInfo::CF_COMPARISON_GREATER_EQUAL;
-    Engine::GAPI->GetRendererState().DepthState.SetDirty();
-
-    Engine::GAPI->GetRendererState().BlendState.SetDefault();
-    Engine::GAPI->GetRendererState().BlendState.SetDirty();
-    UpdateRenderStates();
-
-    DrawVertexBufferIndexedUINT( Engine::GAPI->GetWrappedWorldMesh()->MeshVertexBuffer, Engine::GAPI->GetWrappedWorldMesh()->MeshIndexBuffer, 0, 0 );
-
-    void* lastTexture = nullptr;
-    void* lastMaterial = nullptr;
-
-    for ( const auto& [meshKey, meshInfo] : FrameTransparencyMeshes ) {
-        if ( !meshKey.Material || !meshInfo ) {
-            continue;
-        }
-
-        zCTexture* texture = meshKey.Material->GetAniTexture();
-        if ( !texture ) {
-            texture = meshKey.Material->GetTexture();
-        }
-        if ( !texture || texture->CacheIn( 0.6f ) != zRES_CACHED_IN ) {
-            continue;
-        }
-
-        if ( lastTexture != texture ) {
-            ID3D11ShaderResourceView* diffuseSRV = texture->GetSurface()->GetEngineTexture()->GetShaderResourceView().Get();
-            GetContext()->PSSetShaderResources( 0, 1, &diffuseSRV );
-            lastTexture = texture;
-        }
-
-        if ( lastMaterial != meshKey.Material ) {
-            PsSimpleFFdata ffdata = {};
-            ffdata.textureFactor = ComputeTransparencyTextureFactor( meshKey.Material );
-
-            float transparentWorldMeshDaylightFactor = 1.0f;
-            if ( Engine::GAPI ) {
-                if ( GSky* sky = Engine::GAPI->GetSky() ) {
-                    const float sunHeight = sky->GetAtmosphereCB().AC_LightPos.y;
-                    const float linearDaylightFactor = std::clamp( (sunHeight + 0.08f) / 0.20f, 0.0f, 1.0f );
-                    transparentWorldMeshDaylightFactor = linearDaylightFactor * linearDaylightFactor * (3.0f - 2.0f * linearDaylightFactor);
-                }
-            }
-
-            const float transparentWorldMeshAlpha = std::lerp( 0.50f, 1.00f, transparentWorldMeshDaylightFactor );
-            ffdata.textureFactor.w *= transparentWorldMeshAlpha;
-
-            ActivePS->GetBuffer( "cbFFData" ).Update( &ffdata ).Bind();
-            lastMaterial = meshKey.Material;
-        }
-
-        DrawVertexBufferIndexedUINT( nullptr, nullptr, meshInfo->Indices.size(), meshInfo->BaseIndexLocation );
-    }
-
-    ID3D11ShaderResourceView* nullSRV = nullptr;
-    GetContext()->PSSetShaderResources( 0, 1, &nullSRV );
-
-    Engine::GAPI->GetRendererState().DepthState.DepthWriteEnabled = true;
-    Engine::GAPI->GetRendererState().DepthState.SetDirty();
-    Engine::GAPI->GetRendererState().BlendState.SetDefault();
-    Engine::GAPI->GetRendererState().BlendState.SetDirty();
-    UpdateRenderStates();
-
-    return XR_SUCCESS;
-}
 
 XRESULT D3D11GraphicsEngine::DrawWorldMesh( bool noTextures ) {
     if ( !Engine::GAPI->GetRendererState().RendererSettings.DrawWorldMesh )

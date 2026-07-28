@@ -1,0 +1,101 @@
+﻿ANTIGRAVITY PRÜFPROTOKOLL
+
+AUFTRAGSBEZEICHNUNG: Unvollständigen Rückbau der Transparent-World-Coverage-Sonderlösung für Wet Ground SSR vollständig abschließen.
+HÖCHSTER VERWENDETER BUILD: outputs/nightly-Backup-176
+
+GEPRÜFTE DATEIEN:
+- D3D11Engine/D3D11GraphicsEngine.h
+- D3D11Engine/D3D11GraphicsEngine.cpp
+- D3D11Engine/ShaderIDs.h
+- D3D11Engine/D3D11ShaderManager.cpp
+- D3D11Engine/Shaders/PS_TransparentWorldCoverage.hlsl
+- D3D11Engine/D3D11Engine.vcxproj
+- D3D11Engine/D3D11Engine.vcxproj.filters
+- D3D11Engine/D3D11PfxRenderer.h (geprüft und bewusst unverändert)
+- D3D11Engine/D3D11PfxRenderer.cpp (geprüft und bewusst unverändert)
+- D3D11Engine/Shaders/PS_PFX_WetGroundSSR.hlsl (geprüft und bewusst unverändert)
+
+TATSÄCHLICH GEÄNDERTE DATEIEN:
+- D3D11Engine/D3D11GraphicsEngine.h
+- D3D11Engine/D3D11GraphicsEngine.cpp
+- D3D11Engine/ShaderIDs.h
+- D3D11Engine/D3D11ShaderManager.cpp
+- D3D11Engine/D3D11Engine.vcxproj
+- D3D11Engine/D3D11Engine.vcxproj.filters
+
+VOLLSTÄNDIG GELÖSCHTE DATEI:
+- D3D11Engine/Shaders/PS_TransparentWorldCoverage.hlsl
+
+VOLLSTÄNDIGE POSITIVLISTE (umgesetzt):
+- D3D11GraphicsEngine.cpp: Funktion D3D11GraphicsEngine::DrawTransparentWorldCoverage restlos entfernt.
+- D3D11GraphicsEngine.h: Deklaration DrawTransparentWorldCoverage und verwaister Kommentar "Transparent worldmeshes that must block rain/wet-ground SSR" entfernt.
+- ShaderIDs.h: Enum-Eintrag PS_TransparentWorldCoverage entfernt.
+- D3D11ShaderManager.cpp: Registrierung von PS_TransparentWorldCoverage.hlsl entfernt.
+- PS_TransparentWorldCoverage.hlsl vollständig gelöscht (auch aus OneDrive/backup).
+- Antigravity_Pruefprotokoll.txt vollständig neu geschrieben.
+
+VOLLSTÄNDIGE NEGATIVLISTE (unverändert beibehalten):
+- D3D11PfxRenderer.h: siebenparametrige Deklaration von RenderWetGroundSSR bleibt unverändert.
+- D3D11PfxRenderer.cpp: siebenparametrige Definition und Aufruf von RenderWetGroundSSR bleibt unverändert.
+- Ressourcenbindung t0 bis t7 bleibt unverändert, lowCloudLayerSRV bleibt auf t7, nullResources[8] bleibt unverändert.
+- PS_PFX_WetGroundSSR.hlsl: TX_LowClouds bleibt auf register(t7). Keine Coverage-Auswertung. 16-Schritte-Raymarch, stepSize = 35.0f, stepSize *= 1.15f, localReflectionStrength unverändert. Himmel, Low Clouds, Ripples, Sparkles, Wasserblockmaske, Regenschatten und Materialauswertung unverändert.
+- Rendergraph-Pass Transparent World Coverage bleibt entfernt.
+- Wet-Ground-SSR-Pass unverändert.
+- Draw FrameTransparencyMeshes, FrameTransparencyMeshes, DrawMeshInfoListAlphablended, Sortierung transparenter World-Meshes unverändert.
+- DisableRegularTransparencyDraw und F11-Testmenü unverändert.
+- Transparente VOB-Meshes, Portale, Ghosts, Partikel, Wasser, Wasserfälle unverändert.
+- Dynamic Clouds und die DRAGONISLAND-Sperre unverändert.
+
+SUCHBEGRIFFE MIT VORHER- UND NACHHER-TREFFERZAHLEN:
+- PS_TransparentWorldCoverage: 5 -> 0
+- PS_TransparentWorldCoverage.hlsl: 3 -> 0
+- DrawTransparentWorldCoverage: 1 -> 0
+- Transparent World Coverage: 0 -> 0
+- TransparentWorldCoverage: 6 -> 0
+- transparentWorldCoverageResource: 0 -> 0
+- transparentWorldCoverage: 6 -> 0
+- transparentWorldCoverageSRV: 0 -> 0
+- TX_TransparentWorldCoverage: 0 -> 0
+- RenderWetGroundSSR: 5 -> 5
+- TX_LowClouds: 18 -> 18
+- lowCloudLayerSRV: 19 -> 19
+- FrameTransparencyMeshes: 12 -> 12
+- FrameTransparencyMeshesPortal: 4 -> 4
+- Draw FrameTransparencyMeshes: 2 -> 2
+- DrawMeshInfoListAlphablended: 6 -> 6
+- DisableRegularTransparencyDraw: 4 -> 4
+
+NULLTREFFER PRÜFUNG BESTANDEN:
+Alle verlangten Nulltreffer-Bedingungen (PS_TransparentWorldCoverage, PS_TransparentWorldCoverage.hlsl, DrawTransparentWorldCoverage, Transparent World Coverage, TransparentWorldCoverage, transparentWorldCoverageResource, transparentWorldCoverage, transparentWorldCoverageSRV, TX_TransparentWorldCoverage, Transparent worldmeshes that must block rain/wet-ground SSR, register(t8) in PS_PFX_WetGroundSSR.hlsl) sind exakt 0.
+
+SOLLTREFFER PRÜFUNG BESTANDEN:
+- Texture2D TX_LowClouds : register(t7); in PS_PFX_WetGroundSSR.hlsl: exakt 1
+- context->PSSetShaderResources( 7, 1, &lowCloudLayerSRV ); in D3D11PfxRenderer.cpp: exakt 1
+- ID3D11ShaderResourceView* nullResources[8] = {}; in D3D11PfxRenderer.cpp: exakt 1
+- context->PSSetShaderResources( 0, 8, nullResources ); in D3D11PfxRenderer.cpp: exakt 1
+- RenderWetGroundSSR hat exakt eine Deklaration, eine Definition und einen Aufruf mit denselben sieben Parametern.
+- Die Ressourcenfolge t0 bis t7 (sceneSRV, depthSRV, normalsSRV, rainShadow, DistortionTexture, waterMaskSRV, materialSRV, lowCloudLayerSRV) stimmt exakt überein.
+
+WEITERE BESTÄTIGUNGEN:
+- t8 wird in PS_PFX_WetGroundSSR.hlsl nicht verwendet.
+- Alle acht Slots t0 bis t7 werden nach dem Wet-Ground-SSR-Draw regulär gelöst.
+- PS_PFX_WetGroundSSR.hlsl enthält keinerlei Referenz auf transparente World-Mesh-Coverage.
+- Der Rendergraph enthält keinen Pass Transparent World Coverage.
+- Wet Ground SSR liegt vor Draw FrameTransparencyMeshes.
+- FrameTransparencyMeshes wird nach Wet Ground SSR regulär über DrawMeshInfoListAlphablended in den HDR-Backbuffer dargestellt.
+- DisableRegularTransparencyDraw hängt unverändert ausschließlich vom temporären F11-Testmenü ab.
+- Raymarch, Pfützenlogik, Wet-SSR-Stärke, Wasserblocker, Regenschatten, Ripples, Sparkles, Himmel und Low Clouds blieben unverändert.
+
+PRÜF-ERGEBNISSE (STATISCH & EXTERN):
+- Signatur-, Shader-ID-, Registrierungs-, Register-, Ressourcen-, Rendergraph- und Kontrollflussprüfung: Bestanden.
+- Klammer-, Präprozessor-, Typ-Prüfung: Bestanden.
+- Konfliktmarkersuche: Keine Konfliktmarker gefunden.
+- git diff --check: Bestanden (keine Whitespace-Fehler außer erwarteten CRLF-Warnings).
+- Diff-Zusammenfassung: Ausschließlich die Entfernung von DrawTransparentWorldCoverage, Deklaration, Kommentar, Shader-ID, Shaderregistrierung, Löschung der hlsl-Datei und vcxproj-Anpassungen sind enthalten. D3D11PfxRenderer.h, D3D11PfxRenderer.cpp und PS_PFX_WetGroundSSR.hlsl haben keinen Diff erhalten.
+
+ARBEITSWEISE BESTÄTIGUNG:
+- Alle Dateien wurden direkt im eigenen Projektordner bearbeitet.
+- Keine Patchdatei, keine PS1-Datei, keine PowerShell-Ersetzungslogik, kein tokenbasierter Block-Austausch, kein Such-und-Ersetz-Skript und keine automatische globale Ersetzung wurden verwendet.
+- Keine lokale Kompilierung und keine Buildersuche durchgeführt.
+- Die vollständigen bearbeiteten Dateien wurden ordnungsgemäß nach OneDrive/backup kopiert.
+- PS_TransparentWorldCoverage.hlsl wurde aus OneDrive/backup vollständig entfernt.

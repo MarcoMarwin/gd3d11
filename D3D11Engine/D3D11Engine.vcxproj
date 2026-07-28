@@ -1324,7 +1324,7 @@ copy "$(OutDir)$(TargetName).pdb" "$(G1_SYSTEM_PATH)\ddraw.pdb"</Command>
     <None Include="Shaders\PS_PFX_LowClouds.hlsl" />
     <None Include="Shaders\PS_PFX_LowCloudComposite.hlsl" />
     <None Include="Shaders\PS_PFX_FSR3TransparencyMask.hlsl" />
-    <None Include="Shaders\PS_TransparentWorldCoverage.hlsl" />
+
     <None Include="Shaders\PS_PFX_Velocity.hlsl">
       <FileType>Document</FileType>
     </None>

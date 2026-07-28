@@ -112,3 +112,7 @@
 - Integration: Replaced obsolete PS_TransparencyWetMask with PS_TransparentWorldCoverage in Visual Studio project files.
 - GothicAPI: Disabled Dynamic Clouds for the DRAGONISLAND world.
 - GothicAPI: Large-Area-Particles (mfx_snow_exp, leaves) are now unconditionally added to the rendering list regardless of GetShowVisual() status.
+
+## Build 176
+- Vollständiger und restloser Rückbau der Transparent-World-Coverage-Sonderlösung für Wet Ground SSR.
+- Implementierung der DDA-freien Raymarch-Pfützenlogik.
