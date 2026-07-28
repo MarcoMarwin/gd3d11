@@ -24,7 +24,7 @@ cbuffer WetGroundSSRConstantBuffer : register(b0)
     float3 WG_RainFogColor;
     float WG_RainFogDensity;
     float WG_FogRange;
-    float3 WG_Pad;
+    float2 WG_Pad;
 };
 
 SamplerState SS_Linear : register(s0);

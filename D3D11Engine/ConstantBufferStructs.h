@@ -371,10 +371,10 @@ struct WetGroundSSRConstantBuffer {
     float3 WG_RainFogColor;
     float WG_RainFogDensity;
     float WG_FogRange;
-    float3 WG_Pad;
+    float2 WG_Pad;
 };
 
-static_assert( sizeof(WetGroundSSRConstantBuffer) % 16 == 0, "WetGroundSSRConstantBuffer must be 16-byte aligned" );
+static_assert( sizeof(WetGroundSSRConstantBuffer) == 272, "WetGroundSSRConstantBuffer must be exactly 272 bytes" );
 
 struct AtmosphereConstantBuffer {
     float AC_Kr4PI;

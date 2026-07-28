@@ -127,3 +127,6 @@
 - GothicAPI: Die DRAGONISLAND Wolkendeaktivierung entfernt.
 - GothicAPI: Zehnminütige Pfützennachwirkung (SceneWetness) nach Regenende eingeführt.
 - Water: Prozedurale Regenringe auf horizontalem Ozean- und Legacywasser eingefügt, inkl. Unterwasserkorrektur.
+
+## Build 179
+- Korrekturpush: Fix GitHub-Buildfehler C2338 (16-byte aligned WetGroundSSRConstantBuffer). Padding auf CPU- und HLSL-Seite von float3 auf float2 korrigiert, um exakt 272 Byte Groesse und 16-Byte-Ausrichtung zu erreichen.
