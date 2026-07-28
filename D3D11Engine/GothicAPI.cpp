@@ -1,4 +1,4 @@
-﻿#include <Windows.h>
+#include <Windows.h>
 #include <string>
 #include <sstream>
 #include "pch.h"
@@ -67,8 +67,14 @@ struct file_deleter {
     void operator()( std::FILE* fp ) { std::fclose( fp ); }
 };
 
-// Duration how long the scene will stay wet, in MS
-const DWORD SCENE_WETNESS_DURATION_MS = 20 * 1000;
+// Puddle wetness remains fully visible for five real minutes after rain ends,
+// then fades monotonically during the following five real minutes.
+constexpr DWORD PUDDLE_RAIN_END_DEBOUNCE_MS = 1000;
+constexpr DWORD PUDDLE_WETNESS_HOLD_MS = 5 * 60 * 1000;
+constexpr DWORD PUDDLE_WETNESS_FADE_MS = 5 * 60 * 1000;
+constexpr DWORD PUDDLE_NEW_RAIN_CONFIRM_MS = 5 * 1000;
+constexpr float PUDDLE_ACTIVE_RAIN_THRESHOLD = 0.01f;
+constexpr float PUDDLE_NEW_RAIN_THRESHOLD = 0.10f;
 
 // Draw ghost from back to front of our camera
 auto CompareGhostDistance = []( const TransparencyVobInfo& a, const TransparencyVobInfo& b ) -> bool { return a.distance < b.distance; };
@@ -76,6 +82,12 @@ auto CompareGhostDistance = []( const TransparencyVobInfo& a, const Transparency
 extern float vobAnimation_WindStrength;
 
 namespace {
+    bool s_puddleWetnessReleasing = false;
+    DWORD s_puddleRainDropStartMs = 0;
+    DWORD s_puddleReleaseStartMs = 0;
+    DWORD s_puddleNewRainStartMs = 0;
+    float s_puddleReleaseStartWetness = 0.0f;
+
     constexpr const char* MATERIALS_JSON_PATH = "system\\GD3D11\\textures\\materials.json";
     constexpr const char* MATERIALS_JSON_VDFS_PATH = R"(\system\GD3D11\textures\materials.json)";
 
@@ -1283,9 +1295,6 @@ void GothicAPI::OnWorldLoaded() {
     // Load global F11 draw distances first, then optional world-specific environment overrides.
     LoadRendererGlobalSettings( RendererState.RendererSettings, MENU_SETTINGS_FILE );
     LoadRendererWorldSettings( RendererState.RendererSettings );
-    if ( LoadedWorldInfo->WorldName == "DRAGONISLAND" ) {
-        RendererState.RendererSettings.EnableDynamicClouds = false;
-    }
     RendererState.RendererSettings.ApplySkyColorValues( GetSky()->GetDaySkyTexture() == ESkyTexture::ST_OldWorld );
     RendererState.RendererSettings.ApplyWorldNightFogBrightness( LoadedWorldInfo->WorldName == "OLDWORLD" || LoadedWorldInfo->WorldName == "WORLD" );
 
@@ -1294,6 +1303,11 @@ void GothicAPI::OnWorldLoaded() {
         sky->ResetWeatherState();
     }
     SceneWetness = GetRainFXWeight();
+    s_puddleWetnessReleasing = false;
+    s_puddleRainDropStartMs = 0;
+    s_puddleReleaseStartMs = 0;
+    s_puddleNewRainStartMs = 0;
+    s_puddleReleaseStartWetness = 0.0f;
 
 #ifndef PUBLIC_RELEASE
     // Enable input again, disabled it when loading started
@@ -6633,31 +6647,80 @@ float GothicAPI::GetRainFXWeight() {
     return (std::max)(rendererRainWeight, gothicRainWeight);
 }
 
-/** Returns the wetness of the scene. Lasts longer than RainFXWeight */
+/** Returns the wetness used only by persistent wet-ground and puddle rendering. */
 float GothicAPI::GetSceneWetness() {
-    float rain = GetRainFXWeight();
-    static DWORD s_rainStopTime = Toolbox::timeSinceStartMs();
+    const float rain = std::clamp( GetRainFXWeight(), 0.0f, 1.0f );
+    const DWORD now = Toolbox::timeSinceStartMs();
 
-    if ( rain >= SceneWetness ) {
-        SceneWetness = rain; // Rain is starting or still going
-        s_rainStopTime = Toolbox::timeSinceStartMs(); // Just querry this until we fall into the else-branch some time
-    } else {
-        // Rain has just stopped, get time of how long the rain isn't going anymore
-        DWORD rainStoppedFor = Toolbox::timeSinceStartMs() - s_rainStopTime;
+    if ( !s_puddleWetnessReleasing ) {
+        s_puddleNewRainStartMs = 0;
 
-        // Get ratio between duration and that time. This value is near 1 when we almost reached the duration
-        float ratio = rainStoppedFor / static_cast<float>(SCENE_WETNESS_DURATION_MS);
+        if ( rain > PUDDLE_ACTIVE_RAIN_THRESHOLD ) {
+            SceneWetness = (std::max)( SceneWetness, rain );
+            s_puddleRainDropStartMs = 0;
+            return SceneWetness;
+        }
 
-        // clamp at 1.0f so the whole thing doesn't start over when reaching 0
-        if ( ratio >= 1.0f )
-            ratio = 1.0f;
-
-        // make the wetness last longer by applying a pow, then inverse it so 1 means that the scene is actually wet
-        SceneWetness = std::max( 0.0f, 1.0f - pow( ratio, 8.0f ) );
-
-        // Just force to 0 when this reached a tiny amount so we can switch the shaders
-        if ( SceneWetness < 0.00001f )
+        if ( SceneWetness <= 0.0f ) {
             SceneWetness = 0.0f;
+            s_puddleRainDropStartMs = 0;
+            return SceneWetness;
+        }
+
+        if ( s_puddleRainDropStartMs == 0 ) {
+            s_puddleRainDropStartMs = now;
+            return SceneWetness;
+        }
+
+        if ( now - s_puddleRainDropStartMs < PUDDLE_RAIN_END_DEBOUNCE_MS ) {
+            return SceneWetness;
+        }
+
+        s_puddleWetnessReleasing = true;
+        s_puddleReleaseStartMs = s_puddleRainDropStartMs;
+        s_puddleReleaseStartWetness = std::clamp( SceneWetness, 0.0f, 1.0f );
+        s_puddleRainDropStartMs = 0;
+    }
+
+    if ( rain >= PUDDLE_NEW_RAIN_THRESHOLD ) {
+        if ( s_puddleNewRainStartMs == 0 ) {
+            s_puddleNewRainStartMs = now;
+        } else if ( now - s_puddleNewRainStartMs >= PUDDLE_NEW_RAIN_CONFIRM_MS ) {
+            s_puddleWetnessReleasing = false;
+            s_puddleRainDropStartMs = 0;
+            s_puddleReleaseStartMs = 0;
+            s_puddleNewRainStartMs = 0;
+            s_puddleReleaseStartWetness = 0.0f;
+            SceneWetness = rain;
+            return SceneWetness;
+        }
+    } else {
+        s_puddleNewRainStartMs = 0;
+    }
+
+    const DWORD releaseElapsedMs = now - s_puddleReleaseStartMs;
+
+    if ( releaseElapsedMs <= PUDDLE_WETNESS_HOLD_MS ) {
+        SceneWetness = s_puddleReleaseStartWetness;
+        return SceneWetness;
+    }
+
+    const DWORD fadeElapsedMs = releaseElapsedMs - PUDDLE_WETNESS_HOLD_MS;
+    if ( fadeElapsedMs >= PUDDLE_WETNESS_FADE_MS ) {
+        SceneWetness = 0.0f;
+        return SceneWetness;
+    }
+
+    float fadeProgress =
+        fadeElapsedMs / static_cast<float>(PUDDLE_WETNESS_FADE_MS);
+    fadeProgress = std::clamp( fadeProgress, 0.0f, 1.0f );
+    const float smoothFade =
+        fadeProgress * fadeProgress * (3.0f - 2.0f * fadeProgress);
+    SceneWetness =
+        s_puddleReleaseStartWetness * (1.0f - smoothFade);
+
+    if ( SceneWetness < 0.00001f ) {
+        SceneWetness = 0.0f;
     }
 
     return SceneWetness;

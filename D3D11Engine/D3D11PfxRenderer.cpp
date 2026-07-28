@@ -98,9 +98,13 @@ XRESULT D3D11PfxRenderer::RenderWetGroundSSR( ID3D11RenderTargetView* outputRTV,
     cb.WG_Wetness = Engine::GAPI->GetSceneWetness();
     const INT2 resolution = engine->GetResolution();
     cb.WG_InvResolution = float2( 1.0f / std::max( resolution.x, 1 ), 1.0f / std::max( resolution.y, 1 ) );
-    cb.WG_Strength = Engine::GAPI->GetRendererState().RendererSettings.SSRStrength * 0.84f;
+    auto& rendererSettings = Engine::GAPI->GetRendererState().RendererSettings;
+    cb.WG_Strength = rendererSettings.SSRStrength * 0.84f;
     cb.WG_Time = Engine::GAPI->GetTimeSeconds();
     cb.WG_RainFXWeight = Engine::GAPI->GetRainFXWeight();
+    cb.WG_RainFogColor = rendererSettings.RainFogColor;
+    cb.WG_RainFogDensity = rendererSettings.RainFogDensity;
+    cb.WG_FogRange = rendererSettings.FogRange;
     ps->GetBuffer( "WetGroundSSRConstantBuffer" ).Update( &cb ).Bind();
 
     if ( GSky* sky = Engine::GAPI->GetSky() )

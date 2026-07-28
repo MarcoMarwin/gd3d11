@@ -368,6 +368,9 @@ struct WetGroundSSRConstantBuffer {
     float WG_Time;
 
     float WG_RainFXWeight;
+    float3 WG_RainFogColor;
+    float WG_RainFogDensity;
+    float WG_FogRange;
     float3 WG_Pad;
 };
 

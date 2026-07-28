@@ -120,3 +120,10 @@
 ## Build 177
 - D3D11GraphicsEngine: Beschädigten duplizierten Block in OnStartWorldRendering vollständig entfernt.
 - Wet Ground SSR: Regenplätschern durch weltverankerte Regentropfeneinschläge ersetzt, künstliche Pseudoreflexionen entfernt und korrekte Inaktivierung bei aussetzendem Regen sichergestellt.
+
+## Build 178
+- PfxRenderer: RainFogColor, RainFogDensity und FogRange Parameter übergeben.
+- Wet Ground SSR: ApplyWetGroundRainHaze für echten volumetrischen Regennebel angepasst.
+- GothicAPI: Die DRAGONISLAND Wolkendeaktivierung entfernt.
+- GothicAPI: Zehnminütige Pfützennachwirkung (SceneWetness) nach Regenende eingeführt.
+- Water: Prozedurale Regenringe auf horizontalem Ozean- und Legacywasser eingefügt, inkl. Unterwasserkorrektur.
