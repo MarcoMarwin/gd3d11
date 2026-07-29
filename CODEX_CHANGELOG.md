@@ -132,3 +132,7 @@
 - Korrekturpush: Fix GitHub-Buildfehler C2338 (16-byte aligned WetGroundSSRConstantBuffer). Padding auf CPU- und HLSL-Seite von float3 auf float2 korrigiert, um exakt 272 Byte Groesse und 16-Byte-Ausrichtung zu erreichen.
 - Atmosphere & Sky: AtmosphericRainWeight-Zustandsmaschine in GSky::RenderSky() und ResetWeatherState() entfernt. Himmel, RainClouds, Ausblendung der Dynamic Clouds, Sonnen-/Mondsichtbarkeit, atmosphärische Bodenabdunklung und entfernte Geometrie verwenden nun pro Frame ausschließlich den gemeinsamen, bereinigten Wert aus GothicAPI::GetRainFXWeight().
 
+## Build 180
+- Wet Ground SSR: Sampler s0/s1 werden vor dem DrawFullScreenQuad gesichert und danach wiederhergestellt, um Shadow-Comparison-Sampler Leaks im Transparenz-Pass zu verhindern.
+- Rain Shadowmap: FF_AlphaRef auf 0.75f korrigiert, damit Alpha-Test-Vegetation regendurchlässig bleibt.
+- Atmospheric Scattering: Einheitliche Umschaltkurve `GetRainCloudTransitionWeight()` eingeführt und Test-Flag `UseNightlyGroundRainInput` restlos entfernt.

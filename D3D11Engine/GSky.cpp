@@ -489,9 +489,7 @@ XRESULT GSky::RenderSky() {
         if ( nightTests.DisableGroundRainAttenuation ) {
             AtmosphereCB.AC_PadParticle0 += 2.0f;
         }
-        if ( nightTests.UseNightlyGroundRainInput ) {
-            AtmosphereCB.AC_PadParticle0 += 4.0f;
-        }
+
         if ( nightTests.DisableParticleNightDimming ) {
             AtmosphereCB.AC_PadParticle1 += 1.0f;
         }

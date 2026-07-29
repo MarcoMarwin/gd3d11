@@ -147,11 +147,13 @@ float4 PSMain( PS_INPUT Input ) : SV_TARGET
 	atmoColor += night.rgb * 0.4f;
 	atmoColor += ApplyMoonTexture(Input.vWorldPosition);
 
-	float rainCloudWeight = smoothstep(0.02f, 0.55f, saturate(AC_RainFXWeight));
+	float rainCloudWeight = GetRainCloudTransitionWeight();
 	float clearCloudWeight = 1.0f - rainCloudWeight * 0.85f;
+
 	atmoColor = lerp(atmoColor, clouds.rgb, clouds.a * 0.4f * clearCloudWeight);
 
-	[branch] if (rainCloudWeight > 0.001f)
+	[branch]
+	if (rainCloudWeight > 0.001f)
 	{
 		float4 rainClouds = RenderRainCloudDeck(Input.vWorldPosition);
 		atmoColor = lerp(atmoColor, rainClouds.rgb, rainClouds.a * rainCloudWeight);

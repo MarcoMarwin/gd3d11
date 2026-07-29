@@ -657,11 +657,11 @@ XRESULT D3D11Effect::DrawRainShadowmap() {
     // Replace gothics camera
     Engine::GAPI->SetCameraReplacementPtr( &cr );
 
-    // Make alpharef a bit more aggressive, to make trees less rain-proof
-
+    // Use a valid, deliberately high alpha threshold for rain occlusion.
+    // Thin vegetation texels remain rain-permeable instead of being submitted
+    // as fully opaque rain blockers.
     float oldAlphaRef = Engine::GAPI->GetRendererState().GraphicsState.FF_AlphaRef;
-
-    Engine::GAPI->GetRendererState().GraphicsState.FF_AlphaRef = -1.0f;
+    Engine::GAPI->GetRendererState().GraphicsState.FF_AlphaRef = 0.75f;
 
     // Bind the FF-Info to the first PS slot
     auto PS_Diffuse = e->GetShaderManager().GetPShader( PShaderID::PS_Diffuse );

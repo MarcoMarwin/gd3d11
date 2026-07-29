@@ -141,7 +141,11 @@ XRESULT D3D11PfxRenderer::RenderWetGroundSSR( ID3D11RenderTargetView* outputRTV,
 
     Microsoft::WRL::ComPtr<ID3D11RenderTargetView> previousRTV;
     Microsoft::WRL::ComPtr<ID3D11DepthStencilView> previousDSV;
+    Microsoft::WRL::ComPtr<ID3D11SamplerState> previousSampler0;
+    Microsoft::WRL::ComPtr<ID3D11SamplerState> previousSampler1;
     context->OMGetRenderTargets( 1, previousRTV.GetAddressOf(), previousDSV.GetAddressOf() );
+    context->PSGetSamplers( 0, 1, previousSampler0.GetAddressOf() );
+    context->PSGetSamplers( 1, 1, previousSampler1.GetAddressOf() );
     context->OMSetRenderTargets( 1, &outputRTV, nullptr );
     ID3D11ShaderResourceView* resources[4] = { sceneSRV, depthSRV, normalsSRV, rainShadow->GetShaderResView().Get() };
     context->PSSetShaderResources( 0, 4, resources );
@@ -165,6 +169,8 @@ XRESULT D3D11PfxRenderer::RenderWetGroundSSR( ID3D11RenderTargetView* outputRTV,
 
     ID3D11ShaderResourceView* nullResources[8] = {};
     context->PSSetShaderResources( 0, 8, nullResources );
+    ID3D11SamplerState* restoredSamplers[2] = { previousSampler0.Get(), previousSampler1.Get() };
+    context->PSSetSamplers( 0, 2, restoredSamplers );
     context->OMSetRenderTargets( 1, previousRTV.GetAddressOf(), previousDSV.Get() );
     return XR_SUCCESS;
 }

@@ -1170,7 +1170,6 @@ namespace {
         ImGui::TextUnformatted( "Ground And Transparency Diagnostics" );
         ImGui::Checkbox( "Disable Ground Night Contribution", &night.DisableGroundNightContribution );
         ImGui::Checkbox( "Disable Ground Rain Attenuation", &night.DisableGroundRainAttenuation );
-        ImGui::Checkbox( "Use Nightly Ground Rain Input", &night.UseNightlyGroundRainInput );
         ImGui::Checkbox( "Disable Decal Night/Rain Lighting Scale", &night.DisableDecalNightRainLightingScale );
 
         ImGui::Separator();

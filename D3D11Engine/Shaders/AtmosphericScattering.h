@@ -134,6 +134,12 @@ float SmootherStep01(float x)
 	x = saturate(x);
 	return x * x * x * (x * (x * 6.0f - 15.0f) + 10.0f);
 }
+
+float GetRainCloudTransitionWeight()
+{
+	return smoothstep(0.02f, 0.55f, saturate(AC_RainFXWeight));
+}
+
 float4 ResolveLowCloudLayer(float4 rawClouds, float3 sceneColor)
 {
 	float rainWeight = saturate(AC_RainFXWeight);
@@ -475,7 +481,7 @@ float3 ApplyAtmosphericScatteringGround(float3 worldPosition, float3 in_color, b
 	// BEGIN TEMPORARY RENDERER TEST OVERRIDES
 	bool disableGroundNightContribution = IsRendererGroundTestBitEnabled(1.0f);
 	bool disableGroundRainAttenuation = IsRendererGroundTestBitEnabled(2.0f);
-	bool useNightlyGroundRainInput = IsRendererGroundTestBitEnabled(4.0f);
+
 	float nightWeight = disableGroundNightContribution ? 0.0f : GetNightWeight();
 	// END TEMPORARY RENDERER TEST OVERRIDES
 		
@@ -523,9 +529,9 @@ float3 ApplyAtmosphericScatteringGround(float3 worldPosition, float3 in_color, b
 	}
 	// Rain scattering attenuation
 	// BEGIN TEMPORARY RENDERER TEST OVERRIDES
-	if (!disableGroundRainAttenuation) {
-		float groundRainInput = useNightlyGroundRainInput ? AC_SceneWettness : AC_RainFXWeight;
-		v3FrontColor *= 1.0f - saturate(groundRainInput);
+	if (!disableGroundRainAttenuation)
+	{
+		v3FrontColor *= 1.0f - GetRainCloudTransitionWeight();
 	}
 	// END TEMPORARY RENDERER TEST OVERRIDES
 	
