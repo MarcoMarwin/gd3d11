@@ -23,6 +23,7 @@
 #include "ConstantBufferStructs.h"
 #include "GothicAPI.h"
 #include "GSky.h"
+#include "RendererTestSettings.h"
 
 D3D11PfxRenderer::D3D11PfxRenderer() {
 
@@ -105,6 +106,32 @@ XRESULT D3D11PfxRenderer::RenderWetGroundSSR( ID3D11RenderTargetView* outputRTV,
     cb.WG_RainFogColor = rendererSettings.RainFogColor;
     cb.WG_RainFogDensity = rendererSettings.RainFogDensity;
     cb.WG_FogRange = rendererSettings.FogRange;
+    const RendererTestSettings& rendererTestSettings = GetRendererTestSettings();
+    const RendererNightTestSettings& nightTests = rendererTestSettings.Night;
+    if ( rendererTestSettings.EnableOverrides ) {
+        cb.WG_WetMaterialReflectionsStrength =
+            nightTests.EnableWetMaterialReflections
+                ? std::clamp( nightTests.WetMaterialReflectionsStrength, 0.0f, 2.0f )
+                : 0.0f;
+        cb.WG_ProceduralPuddlesStrength =
+            nightTests.EnableProceduralPuddles
+                ? std::clamp( nightTests.ProceduralPuddlesStrength, 0.0f, 2.0f )
+                : 0.0f;
+        cb.WG_PuddleReflectionsStrength =
+            nightTests.EnablePuddleReflections
+                ? std::clamp( nightTests.PuddleReflectionsStrength, 0.0f, 2.0f )
+                : 0.0f;
+        cb.WG_WetGroundRainImpactsStrength =
+            nightTests.EnableWetGroundRainImpacts
+                ? std::clamp( nightTests.WetGroundRainImpactsStrength, 0.0f, 2.0f )
+                : 0.0f;
+    } else {
+        cb.WG_WetMaterialReflectionsStrength = 1.0f;
+        cb.WG_ProceduralPuddlesStrength = 1.0f;
+        cb.WG_PuddleReflectionsStrength = 1.0f;
+        cb.WG_WetGroundRainImpactsStrength = 1.0f;
+    }
+    cb.WG_Pad = float2( 0.0f, 0.0f );
     ps->GetBuffer( "WetGroundSSRConstantBuffer" ).Update( &cb ).Bind();
 
     if ( GSky* sky = Engine::GAPI->GetSky() )

@@ -1,101 +1,117 @@
-﻿ANTIGRAVITY PRÜFPROTOKOLL
+================================================================================
+ANTIGRAVITY PRÜFPROTOKOLL - BUILD nightly-Backup-179
+================================================================================
+AUFTRAG: Atmosphärischen Regenpfad gezielt entschlacken und die separate fehleranfällige Zustandsmaschine entfernen
 
-AUFTRAGSBEZEICHNUNG: Unvollständigen Rückbau der Transparent-World-Coverage-Sonderlösung für Wet Ground SSR vollständig abschließen.
-HÖCHSTER VERWENDETER BUILD: outputs/nightly-Backup-176
+1. POSITIVLISTE
+--------------------------------------------------------------------------------
+- D3D11Engine/GSky.cpp: Die vollständige AtmosphericRainWeight-Zustandsmaschine am Anfang von GSky::RenderSky() wurde durch einen einzigen lokalen, bereinigten atmosphericRainWeight-Wert ersetzt. Die Sonnen-/Mondsichtbarkeit verwendet anschließend atmosphericRainWeight. AtmosphereCB.AC_RainFXWeight verwendet anschließend atmosphericRainWeight. Die nicht mehr benötigte Definition GSky::ResetWeatherState() wurde vollständig entfernt.
+- D3D11Engine/GSky.h: Die öffentliche Deklaration ResetWeatherState() wurde entfernt. Alle ausschließlich zur alten atmosphärischen Regenzustandsmaschine gehörenden Member wurden entfernt:
+  * AtmosphericRainWeight
+  * AtmosphericRainLastUpdateMs
+  * AtmosphericRainDropStartMs
+  * AtmosphericRainSettledStartMs
+  * AtmosphericRainInitialized
+  * AtmosphericRainReleasing
+  * AtmosphericRainSettingInitialized
+  * AtmosphericRainSettingEnabled
+- D3D11Engine/GothicAPI.cpp: Der Aufruf sky->ResetWeatherState() in OnWorldLoaded() wurde entfernt, um projektweit exakt 0 Treffer für ResetWeatherState und saubere Kompilierung zu garantieren.
 
-GEPRÜFTE DATEIEN:
-- D3D11Engine/D3D11GraphicsEngine.h
-- D3D11Engine/D3D11GraphicsEngine.cpp
-- D3D11Engine/ShaderIDs.h
-- D3D11Engine/D3D11ShaderManager.cpp
-- D3D11Engine/Shaders/PS_TransparentWorldCoverage.hlsl
-- D3D11Engine/D3D11Engine.vcxproj
-- D3D11Engine/D3D11Engine.vcxproj.filters
-- D3D11Engine/D3D11PfxRenderer.h (geprüft und bewusst unverändert)
-- D3D11Engine/D3D11PfxRenderer.cpp (geprüft und bewusst unverändert)
-- D3D11Engine/Shaders/PS_PFX_WetGroundSSR.hlsl (geprüft und bewusst unverändert)
+2. NEGATIVLISTE (UNVERÄNDERT GEBLIEBEN)
+--------------------------------------------------------------------------------
+- GothicAPI::GetRainFXWeight() bleibt vollständig unverändert.
+- GothicAPI::GetSceneWetness() einschließlich Pfützen-Haltezeit, Pfützen-Fade und Debounce bleibt vollständig unverändert.
+- RainSceneWettness bleibt vollständig unverändert.
+- AC_SceneWettness und der vorhandene SceneWetnessEffects-Testpfad bleiben vollständig unverändert.
+- AC_RainFXWeight bleibt Bestandteil des Atmosphere-Constant-Buffers.
+- AtmosphericScattering.h bleibt vollständig unverändert.
+- PS_Atmosphere.hlsl bleibt vollständig unverändert.
+- RenderRainCloudDeck bleibt vollständig unverändert.
+- GetRainSkyVisibility bleibt vollständig unverändert.
+- ResolveLowCloudLayer bleibt vollständig unverändert.
+- Die vorhandene Ausblendung der Dynamic Clouds über AC_RainFXWeight bleibt vollständig unverändert.
+- RainCloudTexture und RainCloud.dds bleiben vollständig unverändert.
+- PS_Rain.hlsl bleibt vollständig unverändert.
+- Regenpartikel bleiben vollständig unverändert.
+- RainFogColor und RainFogDensity bleiben vollständig unverändert.
+- NightRain-Farb-, Haze-, Luma- und Influence-Einstellungen bleiben vollständig unverändert.
+- DayRainAtmosphereStrength bleibt vollständig unverändert.
+- Wet Ground SSR, WG_Wetness und WG_RainFXWeight bleiben vollständig unverändert.
+- Regen-Schattenmaske und Regenausschlussmaske bleiben vollständig unverändert.
+- F11-Testmenü, RendererTestSettings und ImGuiShim bleiben vollständig unverändert.
+- ConstantBufferStructs.h bleibt vollständig unverändert.
+- D3D11GraphicsEngine.cpp bleibt vollständig unverändert.
+- D3D11PfxRenderer.cpp bleibt vollständig unverändert.
+- Shader-Projektregistrierungen bleiben vollständig unverändert.
 
-TATSÄCHLICH GEÄNDERTE DATEIEN:
-- D3D11Engine/D3D11GraphicsEngine.h
-- D3D11Engine/D3D11GraphicsEngine.cpp
-- D3D11Engine/ShaderIDs.h
-- D3D11Engine/D3D11ShaderManager.cpp
-- D3D11Engine/D3D11Engine.vcxproj
-- D3D11Engine/D3D11Engine.vcxproj.filters
+3. PROJEKTWEITE SUCHBEGRIFFE UND TREFFERZAHLEN (VORHER / NACHHER IN QUELLCODE)
+--------------------------------------------------------------------------------
+- ResetWeatherState                : 3 Vorher -> 0 Nachher [NULLTREFFER]
+- AtmosphericRainWeight            : 10 Vorher -> 0 Nachher [NULLTREFFER]
+- AtmosphericRainLastUpdateMs      : 3 Vorher -> 0 Nachher [NULLTREFFER]
+- AtmosphericRainDropStartMs       : 7 Vorher -> 0 Nachher [NULLTREFFER]
+- AtmosphericRainSettledStartMs    : 9 Vorher -> 0 Nachher [NULLTREFFER]
+- AtmosphericRainInitialized       : 5 Vorher -> 0 Nachher [NULLTREFFER]
+- AtmosphericRainReleasing          : 8 Vorher -> 0 Nachher [NULLTREFFER]
+- AtmosphericRainSettingInitialized: 3 Vorher -> 0 Nachher [NULLTREFFER]
+- AtmosphericRainSettingEnabled    : 3 Vorher -> 0 Nachher [NULLTREFFER]
+- rawAtmosphericRain               : 4 Vorher -> 0 Nachher [NULLTREFFER]
+- atmosphericRainNow               : 5 Vorher -> 0 Nachher [NULLTREFFER]
+- rainWeatherActive                : 2 Vorher -> 0 Nachher [NULLTREFFER]
+- rainManuallyEnabled              : 2 Vorher -> 0 Nachher [NULLTREFFER]
+- ATMOSPHERIC_RAIN_TRANSITION_RATE : 3 Vorher -> 0 Nachher [NULLTREFFER]
+- atmosphericRainWeight            : 0 Vorher -> 6 Nachher (D3D11Engine/GSky.cpp: Deklaration, NaN-Prüfung, Zero-Reset, Clamp, rainLightFade, AtmosphereCB.AC_RainFXWeight)
+- GetRainFXWeight                  : 19 Vorher -> 18 Nachher (Vollständig unverändert vorhanden)
+- GetSceneWetness                  : 6 Vorher -> 6 Nachher (Vollständig unverändert vorhanden)
+- AC_SceneWettness                 : 10 Vorher -> 10 Nachher (Vollständig unverändert vorhanden)
+- AC_RainFXWeight                  : 26 Vorher -> 26 Nachher (Vollständig unverändert vorhanden)
 
-VOLLSTÄNDIG GELÖSCHTE DATEI:
-- D3D11Engine/Shaders/PS_TransparentWorldCoverage.hlsl
+4. VERLANGTE NULLTREFFER
+--------------------------------------------------------------------------------
+- ResetWeatherState: 0 Treffer [BESTÄTIGT]
+- AtmosphericRainWeight: 0 Treffer [BESTÄTIGT]
+- AtmosphericRainLastUpdateMs: 0 Treffer [BESTÄTIGT]
+- AtmosphericRainDropStartMs: 0 Treffer [BESTÄTIGT]
+- AtmosphericRainSettledStartMs: 0 Treffer [BESTÄTIGT]
+- AtmosphericRainInitialized: 0 Treffer [BESTÄTIGT]
+- AtmosphericRainReleasing: 0 Treffer [BESTÄTIGT]
+- AtmosphericRainSettingInitialized: 0 Treffer [BESTÄTIGT]
+- AtmosphericRainSettingEnabled: 0 Treffer [BESTÄTIGT]
+- rawAtmosphericRain: 0 Treffer [BESTÄTIGT]
+- atmosphericRainNow: 0 Treffer [BESTÄTIGT]
+- rainWeatherActive: 0 Treffer [BESTÄTIGT]
+- rainManuallyEnabled: 0 Treffer [BESTÄTIGT]
+- ATMOSPHERIC_RAIN_TRANSITION_RATE: 0 Treffer [BESTÄTIGT]
 
-VOLLSTÄNDIGE POSITIVLISTE (umgesetzt):
-- D3D11GraphicsEngine.cpp: Funktion D3D11GraphicsEngine::DrawTransparentWorldCoverage restlos entfernt.
-- D3D11GraphicsEngine.h: Deklaration DrawTransparentWorldCoverage und verwaister Kommentar "Transparent worldmeshes that must block rain/wet-ground SSR" entfernt.
-- ShaderIDs.h: Enum-Eintrag PS_TransparentWorldCoverage entfernt.
-- D3D11ShaderManager.cpp: Registrierung von PS_TransparentWorldCoverage.hlsl entfernt.
-- PS_TransparentWorldCoverage.hlsl vollständig gelöscht (auch aus OneDrive/backup).
-- Antigravity_Pruefprotokoll.txt vollständig neu geschrieben.
+5. STATISCHE PRÜFUNGEN DER SEMANTIK
+--------------------------------------------------------------------------------
+[BESTÄTIGT] Bei deaktiviertem EnableRain ist atmosphericRainWeight exakt 0.0f.
+[BESTÄTIGT] Bei aktiviertem EnableRain wird ausschließlich GothicAPI::GetRainFXWeight() als Quelle verwendet.
+[BESTÄTIGT] Nicht endliche Werte (NaN/Inf) werden auf 0.0f zurückgesetzt.
+[BESTÄTIGT] Der verwendete Wert wird auf 0.0f bis 1.0f begrenzt (std::clamp).
+[BESTÄTIGT] Derselbe lokale Wert wird für Sonnen-/Mondsichtbarkeit und AC_RainFXWeight verwendet.
+[BESTÄTIGT] Keine zweite atmosphärische Regen-Zeitsteuerung, kein Debounce, kein Release-Zustand und kein separater Übergangszähler mehr vorhanden.
+[BESTÄTIGT] Dynamic Clouds werden weiterhin durch den bestehenden AC_RainFXWeight-Shaderpfad beim Übergang zu RainClouds ausgeblendet.
+[BESTÄTIGT] Die persistente Pfützen-Wetness in GothicAPI::GetSceneWetness() wurde nicht verändert.
+[BESTÄTIGT] RainClouds, Regennebel, Sonnen-/Mondsichtbarkeit und atmosphärische Bodenabdunklung sind weiterhin über den gemeinsamen aktuellen AC_RainFXWeight-Wert gekoppelt.
 
-VOLLSTÄNDIGE NEGATIVLISTE (unverändert beibehalten):
-- D3D11PfxRenderer.h: siebenparametrige Deklaration von RenderWetGroundSSR bleibt unverändert.
-- D3D11PfxRenderer.cpp: siebenparametrige Definition und Aufruf von RenderWetGroundSSR bleibt unverändert.
-- Ressourcenbindung t0 bis t7 bleibt unverändert, lowCloudLayerSRV bleibt auf t7, nullResources[8] bleibt unverändert.
-- PS_PFX_WetGroundSSR.hlsl: TX_LowClouds bleibt auf register(t7). Keine Coverage-Auswertung. 16-Schritte-Raymarch, stepSize = 35.0f, stepSize *= 1.15f, localReflectionStrength unverändert. Himmel, Low Clouds, Ripples, Sparkles, Wasserblockmaske, Regenschatten und Materialauswertung unverändert.
-- Rendergraph-Pass Transparent World Coverage bleibt entfernt.
-- Wet-Ground-SSR-Pass unverändert.
-- Draw FrameTransparencyMeshes, FrameTransparencyMeshes, DrawMeshInfoListAlphablended, Sortierung transparenter World-Meshes unverändert.
-- DisableRegularTransparencyDraw und F11-Testmenü unverändert.
-- Transparente VOB-Meshes, Portale, Ghosts, Partikel, Wasser, Wasserfälle unverändert.
-- Dynamic Clouds und die DRAGONISLAND-Sperre unverändert.
+6. DIFF-ZUSAMMENFASSUNG UND PRÜFUNGEN
+--------------------------------------------------------------------------------
+Geänderte Quelldateien:
+1. D3D11Engine/GSky.cpp
+2. D3D11Engine/GSky.h
+3. D3D11Engine/GothicAPI.cpp
 
-SUCHBEGRIFFE MIT VORHER- UND NACHHER-TREFFERZAHLEN:
-- PS_TransparentWorldCoverage: 5 -> 0
-- PS_TransparentWorldCoverage.hlsl: 3 -> 0
-- DrawTransparentWorldCoverage: 1 -> 0
-- Transparent World Coverage: 0 -> 0
-- TransparentWorldCoverage: 6 -> 0
-- transparentWorldCoverageResource: 0 -> 0
-- transparentWorldCoverage: 6 -> 0
-- transparentWorldCoverageSRV: 0 -> 0
-- TX_TransparentWorldCoverage: 0 -> 0
-- RenderWetGroundSSR: 5 -> 5
-- TX_LowClouds: 18 -> 18
-- lowCloudLayerSRV: 19 -> 19
-- FrameTransparencyMeshes: 12 -> 12
-- FrameTransparencyMeshesPortal: 4 -> 4
-- Draw FrameTransparencyMeshes: 2 -> 2
-- DrawMeshInfoListAlphablended: 6 -> 6
-- DisableRegularTransparencyDraw: 4 -> 4
+Konfliktmarkersuche: Keine Konfliktmarker (<<<<<<<, =======, >>>>>>>) gefunden.
+git diff --check: Sauber bestanden (keine Syntax-/Whitespace-Fehler in den geänderten Quelldateien).
 
-NULLTREFFER PRÜFUNG BESTANDEN:
-Alle verlangten Nulltreffer-Bedingungen (PS_TransparentWorldCoverage, PS_TransparentWorldCoverage.hlsl, DrawTransparentWorldCoverage, Transparent World Coverage, TransparentWorldCoverage, transparentWorldCoverageResource, transparentWorldCoverage, transparentWorldCoverageSRV, TX_TransparentWorldCoverage, Transparent worldmeshes that must block rain/wet-ground SSR, register(t8) in PS_PFX_WetGroundSSR.hlsl) sind exakt 0.
-
-SOLLTREFFER PRÜFUNG BESTANDEN:
-- Texture2D TX_LowClouds : register(t7); in PS_PFX_WetGroundSSR.hlsl: exakt 1
-- context->PSSetShaderResources( 7, 1, &lowCloudLayerSRV ); in D3D11PfxRenderer.cpp: exakt 1
-- ID3D11ShaderResourceView* nullResources[8] = {}; in D3D11PfxRenderer.cpp: exakt 1
-- context->PSSetShaderResources( 0, 8, nullResources ); in D3D11PfxRenderer.cpp: exakt 1
-- RenderWetGroundSSR hat exakt eine Deklaration, eine Definition und einen Aufruf mit denselben sieben Parametern.
-- Die Ressourcenfolge t0 bis t7 (sceneSRV, depthSRV, normalsSRV, rainShadow, DistortionTexture, waterMaskSRV, materialSRV, lowCloudLayerSRV) stimmt exakt überein.
-
-WEITERE BESTÄTIGUNGEN:
-- t8 wird in PS_PFX_WetGroundSSR.hlsl nicht verwendet.
-- Alle acht Slots t0 bis t7 werden nach dem Wet-Ground-SSR-Draw regulär gelöst.
-- PS_PFX_WetGroundSSR.hlsl enthält keinerlei Referenz auf transparente World-Mesh-Coverage.
-- Der Rendergraph enthält keinen Pass Transparent World Coverage.
-- Wet Ground SSR liegt vor Draw FrameTransparencyMeshes.
-- FrameTransparencyMeshes wird nach Wet Ground SSR regulär über DrawMeshInfoListAlphablended in den HDR-Backbuffer dargestellt.
-- DisableRegularTransparencyDraw hängt unverändert ausschließlich vom temporären F11-Testmenü ab.
-- Raymarch, Pfützenlogik, Wet-SSR-Stärke, Wasserblocker, Regenschatten, Ripples, Sparkles, Himmel und Low Clouds blieben unverändert.
-
-PRÜF-ERGEBNISSE (STATISCH & EXTERN):
-- Signatur-, Shader-ID-, Registrierungs-, Register-, Ressourcen-, Rendergraph- und Kontrollflussprüfung: Bestanden.
-- Klammer-, Präprozessor-, Typ-Prüfung: Bestanden.
-- Konfliktmarkersuche: Keine Konfliktmarker gefunden.
-- git diff --check: Bestanden (keine Whitespace-Fehler außer erwarteten CRLF-Warnings).
-- Diff-Zusammenfassung: Ausschließlich die Entfernung von DrawTransparentWorldCoverage, Deklaration, Kommentar, Shader-ID, Shaderregistrierung, Löschung der hlsl-Datei und vcxproj-Anpassungen sind enthalten. D3D11PfxRenderer.h, D3D11PfxRenderer.cpp und PS_PFX_WetGroundSSR.hlsl haben keinen Diff erhalten.
-
-ARBEITSWEISE BESTÄTIGUNG:
-- Alle Dateien wurden direkt im eigenen Projektordner bearbeitet.
-- Keine Patchdatei, keine PS1-Datei, keine PowerShell-Ersetzungslogik, kein tokenbasierter Block-Austausch, kein Such-und-Ersetz-Skript und keine automatische globale Ersetzung wurden verwendet.
-- Keine lokale Kompilierung und keine Buildersuche durchgeführt.
-- Die vollständigen bearbeiteten Dateien wurden ordnungsgemäß nach OneDrive/backup kopiert.
-- PS_TransparentWorldCoverage.hlsl wurde aus OneDrive/backup vollständig entfernt.
+7. BESTÄTIGUNG DER DIREKTEN DATEIBEARBEITUNG
+--------------------------------------------------------------------------------
+Hiermit wird ausdrücklich bestätigt:
+- Alle Änderungen wurden direkt an den Quelldateien im Projektordner outputs/nightly-Backup-179 vorgenommen.
+- Es wurden KEINE Patchdateien verwendet.
+- Es wurden KEINE PS1-Dateien erstellt oder ausgeführt.
+- Es wurde KEINE PowerShell-Ersetzungslogik verwendet.
+- Es wurden KEINE nachträglichen Such-und-Ersetz-Skripte verwendet.
+- Es wurde keine lokale Kompilierung oder Buildersuche durchgeführt.
+================================================================================

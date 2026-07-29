@@ -1214,10 +1214,36 @@ namespace {
 
         ImGui::Separator();
         ImGui::Separator();
+        ImGui::TextUnformatted( "Nightly Rain Effects Isolation" );
 
+        ImGui::Checkbox( "Enable Scene Wetness Effects", &night.EnableSceneWetnessEffects );
+        ImGui::SetNextItemWidth( 300.0f );
+        ImGui::SliderFloat( "Scene Wetness Effects Strength", &night.SceneWetnessEffectsStrength, 0.0f, 2.0f, "%.2f", ImGuiSliderFlags_AlwaysClamp );
+        night.SceneWetnessEffectsStrength = std::clamp( night.SceneWetnessEffectsStrength, 0.0f, 2.0f );
+
+        ImGui::Checkbox( "Enable Wet Material Reflections", &night.EnableWetMaterialReflections );
+        ImGui::SetNextItemWidth( 300.0f );
+        ImGui::SliderFloat( "Wet Material Reflections Strength", &night.WetMaterialReflectionsStrength, 0.0f, 2.0f, "%.2f", ImGuiSliderFlags_AlwaysClamp );
+        night.WetMaterialReflectionsStrength = std::clamp( night.WetMaterialReflectionsStrength, 0.0f, 2.0f );
+
+        ImGui::Checkbox( "Enable Procedural Puddles", &night.EnableProceduralPuddles );
+        ImGui::SetNextItemWidth( 300.0f );
+        ImGui::SliderFloat( "Procedural Puddles Strength", &night.ProceduralPuddlesStrength, 0.0f, 2.0f, "%.2f", ImGuiSliderFlags_AlwaysClamp );
+        night.ProceduralPuddlesStrength = std::clamp( night.ProceduralPuddlesStrength, 0.0f, 2.0f );
+
+        ImGui::Checkbox( "Enable Puddle Reflections", &night.EnablePuddleReflections );
+        ImGui::SetNextItemWidth( 300.0f );
+        ImGui::SliderFloat( "Puddle Reflections Strength", &night.PuddleReflectionsStrength, 0.0f, 2.0f, "%.2f", ImGuiSliderFlags_AlwaysClamp );
+        night.PuddleReflectionsStrength = std::clamp( night.PuddleReflectionsStrength, 0.0f, 2.0f );
+
+        ImGui::Checkbox( "Enable Wet Ground Rain Impacts", &night.EnableWetGroundRainImpacts );
+        ImGui::SetNextItemWidth( 300.0f );
+        ImGui::SliderFloat( "Wet Ground Rain Impacts Strength", &night.WetGroundRainImpactsStrength, 0.0f, 2.0f, "%.2f", ImGuiSliderFlags_AlwaysClamp );
+        night.WetGroundRainImpactsStrength = std::clamp( night.WetGroundRainImpactsStrength, 0.0f, 2.0f );
+
+        ImGui::Separator();
         ImGui::TextUnformatted( "Transparency List Isolation" );
         ImGui::Checkbox( "Disable Wet Ground SSR", &night.DisableWetGroundSSR );
-        ImGui::Checkbox( "Disable Transparent World Mesh Depth/Fog Replay", &night.DisableTransparentWorldMeshDepthFogReplay );
         ImGui::Checkbox( "Disable Regular Transparency Draw", &night.DisableRegularTransparencyDraw );
         ImGui::Checkbox( "Disable Portal Transparency Draw", &night.DisablePortalTransparencyDraw );
         ImGui::Checkbox( "Disable Waterfall Transparency Draw", &night.DisableWaterfallTransparencyDraw );

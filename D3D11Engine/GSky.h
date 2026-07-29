@@ -73,9 +73,6 @@ public:
     /** Returns the cloud texture */
     D3D11Texture* GetCloudTexture();
 
-    /** Re-seeds the atmospheric transition after loading a world or savegame. */
-    void ResetWeatherState();
-
     /** Returns the rain-cloud density texture. */
     D3D11Texture* GetRainCloudTexture() { return RainCloudTexture.get(); }
 
@@ -130,12 +127,4 @@ protected:
     /** Atmospheric variables */
     AtmosphereConstantBuffer AtmosphereCB;
     AtmosphereSettings Atmosphere;
-    float AtmosphericRainWeight = 0.0f;
-    DWORD AtmosphericRainLastUpdateMs = 0;
-    DWORD AtmosphericRainDropStartMs = 0;
-    DWORD AtmosphericRainSettledStartMs = 0;
-    bool AtmosphericRainInitialized = false;
-    bool AtmosphericRainReleasing = false;
-    bool AtmosphericRainSettingInitialized = false;
-    bool AtmosphericRainSettingEnabled = true;
 };

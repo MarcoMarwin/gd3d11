@@ -130,3 +130,5 @@
 
 ## Build 179
 - Korrekturpush: Fix GitHub-Buildfehler C2338 (16-byte aligned WetGroundSSRConstantBuffer). Padding auf CPU- und HLSL-Seite von float3 auf float2 korrigiert, um exakt 272 Byte Groesse und 16-Byte-Ausrichtung zu erreichen.
+- Atmosphere & Sky: AtmosphericRainWeight-Zustandsmaschine in GSky::RenderSky() und ResetWeatherState() entfernt. Himmel, RainClouds, Ausblendung der Dynamic Clouds, Sonnen-/Mondsichtbarkeit, atmosphärische Bodenabdunklung und entfernte Geometrie verwenden nun pro Frame ausschließlich den gemeinsamen, bereinigten Wert aus GothicAPI::GetRainFXWeight().
+

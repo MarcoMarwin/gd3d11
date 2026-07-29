@@ -187,6 +187,7 @@ float2 CalculateWaterRainNormalDistortion(
 
     float animationTime = fmod(max(RI_Time, 0.0f), 256.0f);
     float impactDensity = rainAmount * lerp(0.58f, 1.0f, rainAmount);
+    float heavyRainExtraSetWeight = smoothstep(0.45f, 1.0f, rainAmount);
     float2 impactRipple = float2(0.0f, 0.0f);
     float impactRing = 0.0f;
     float impactPulse = 0.0f;
@@ -201,8 +202,38 @@ float2 CalculateWaterRainNormalDistortion(
         worldPosition.xz, animationTime, 31.0f, 1.92f, impactDensity * 0.94f, 23.41f,
         impactRipple, impactRing, impactPulse);
 
-    const float waterRainResponse = 2.20f;
-    const float waterRingNormalStrength = 0.145f;
+    float2 extraRippleA = float2(0.0f, 0.0f);
+    float extraRingA = 0.0f;
+    float extraPulseA = 0.0f;
+    AccumulateWaterRainImpactLayer(
+        worldPosition.xz + float2(17.41f, 53.27f), animationTime, 58.0f, 1.08f, impactDensity, 37.19f,
+        extraRippleA, extraRingA, extraPulseA);
+    AccumulateWaterRainImpactLayer(
+        worldPosition.xz + float2(61.73f, 29.11f), animationTime, 41.0f, 1.46f, impactDensity * 0.98f, 47.83f,
+        extraRippleA, extraRingA, extraPulseA);
+    AccumulateWaterRainImpactLayer(
+        worldPosition.xz + float2(43.37f, 71.59f), animationTime, 31.0f, 1.92f, impactDensity * 0.94f, 59.41f,
+        extraRippleA, extraRingA, extraPulseA);
+
+    float2 extraRippleB = float2(0.0f, 0.0f);
+    float extraRingB = 0.0f;
+    float extraPulseB = 0.0f;
+    AccumulateWaterRainImpactLayer(
+        worldPosition.xz + float2(83.13f, 19.67f), animationTime, 58.0f, 1.08f, impactDensity, 67.31f,
+        extraRippleB, extraRingB, extraPulseB);
+    AccumulateWaterRainImpactLayer(
+        worldPosition.xz + float2(27.89f, 97.43f), animationTime, 41.0f, 1.46f, impactDensity * 0.98f, 79.53f,
+        extraRippleB, extraRingB, extraPulseB);
+    AccumulateWaterRainImpactLayer(
+        worldPosition.xz + float2(109.21f, 41.17f), animationTime, 31.0f, 1.92f, impactDensity * 0.94f, 91.79f,
+        extraRippleB, extraRingB, extraPulseB);
+
+    impactRipple += (extraRippleA + extraRippleB) * heavyRainExtraSetWeight;
+    impactRing = max(impactRing, max(extraRingA, extraRingB) * heavyRainExtraSetWeight);
+    impactPulse = max(impactPulse, max(extraPulseA, extraPulseB) * heavyRainExtraSetWeight);
+
+    const float waterRainResponse = 3.40f;
+    const float waterRingNormalStrength = 0.230f;
     float visibleRing = saturate(impactRing) * ringVisibility * waterRainResponse;
     float visibleImpact = saturate(impactPulse) * ringVisibility * waterRainResponse;
     float ringShapeStrength = saturate(

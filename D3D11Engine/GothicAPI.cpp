@@ -1298,10 +1298,6 @@ void GothicAPI::OnWorldLoaded() {
     RendererState.RendererSettings.ApplySkyColorValues( GetSky()->GetDaySkyTexture() == ESkyTexture::ST_OldWorld );
     RendererState.RendererSettings.ApplyWorldNightFogBrightness( LoadedWorldInfo->WorldName == "OLDWORLD" || LoadedWorldInfo->WorldName == "WORLD" );
 
-    // Re-seed weather transitions from the freshly loaded savegame/world.
-    if ( GSky* sky = GetSky() ) {
-        sky->ResetWeatherState();
-    }
     SceneWetness = GetRainFXWeight();
     s_puddleWetnessReleasing = false;
     s_puddleRainDropStartMs = 0;

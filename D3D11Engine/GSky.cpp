@@ -283,83 +283,13 @@ XRESULT GSky::RenderSky() {
 
     XMFLOAT3 camPos = Engine::GAPI->GetCameraPosition();
 
-    // Gothic's rain controller can pulse while rain is stopping. Keep all atmospheric
-    // consumers on one rate-limited value so distant scenery cannot change color in one frame.
     const bool rainEnabled = Engine::GAPI->GetRendererState().RendererSettings.EnableRain;
-    const float rawAtmosphericRain = rainEnabled
-        ? std::clamp( Engine::GAPI->GetRainFXWeight(), 0.0f, 1.0f )
-        : 0.0f;
-    const DWORD atmosphericRainNow = GetTickCount();
-    // Gothic can retain the RAIN enum while its actual RainFX is already fading.
-    const bool rainWeatherActive =
-        !AtmosphericRainReleasing && rawAtmosphericRain > 0.01f;
-    const bool rainManuallyEnabled = AtmosphericRainSettingInitialized
-        && rainEnabled && !AtmosphericRainSettingEnabled;
-    if ( !rainEnabled ) {
-        AtmosphericRainWeight = 0.0f;
-        AtmosphericRainDropStartMs = 0;
-        AtmosphericRainSettledStartMs = 0;
-        AtmosphericRainInitialized = true;
-        AtmosphericRainReleasing = false;
-    } else if ( rainManuallyEnabled ) {
-        // F11 is an explicit user override: restore the complete current weather
-        // state immediately. Natural rain changes continue through the rate limiter.
-        AtmosphericRainWeight = rawAtmosphericRain;
-        AtmosphericRainDropStartMs = 0;
-        AtmosphericRainSettledStartMs = 0;
-        AtmosphericRainInitialized = true;
-        AtmosphericRainReleasing = false;
-    } else if ( !AtmosphericRainInitialized ) {
-        AtmosphericRainWeight = rawAtmosphericRain;
-        AtmosphericRainInitialized = true;
-    } else {
-        const float deltaSeconds = std::min( (atmosphericRainNow - AtmosphericRainLastUpdateMs) * 0.001f, 0.1f );
-        constexpr float ATMOSPHERIC_RAIN_TRANSITION_RATE = 1.0f / 60.0f;
-
-        if ( rainWeatherActive ) {
-            // A real weather state owns the active phase. Short RainFX-weight dips
-            // must not start the atmospheric fade while Gothic is still raining.
-            AtmosphericRainDropStartMs = 0;
-            AtmosphericRainSettledStartMs = 0;
-            AtmosphericRainReleasing = false;
-            if ( rawAtmosphericRain > AtmosphericRainWeight ) {
-                AtmosphericRainWeight += std::min(
-                    rawAtmosphericRain - AtmosphericRainWeight, ATMOSPHERIC_RAIN_TRANSITION_RATE * deltaSeconds );
-            }
-        } else if ( !AtmosphericRainReleasing && AtmosphericRainWeight > 0.0f ) {
-            // Debounce the real weather end once, then commit to a monotonic fade.
-            if ( AtmosphericRainDropStartMs == 0 ) {
-                AtmosphericRainDropStartMs = atmosphericRainNow;
-            } else if ( atmosphericRainNow - AtmosphericRainDropStartMs >= 250 ) {
-                AtmosphericRainReleasing = true;
-                AtmosphericRainDropStartMs = 0;
-            }
-        } else if ( !AtmosphericRainReleasing ) {
-            AtmosphericRainDropStartMs = 0;
-            AtmosphericRainSettledStartMs = 0;
-        }
-
-        if ( AtmosphericRainReleasing ) {
-            // Ignore late RainFX pulses during shutdown. They caused the old
-            // rain -> clear -> rain jumps in distant geometry and sky transitions.
-            AtmosphericRainWeight = std::max(
-                0.0f, AtmosphericRainWeight - ATMOSPHERIC_RAIN_TRANSITION_RATE * deltaSeconds );
-
-            if ( AtmosphericRainWeight == 0.0f ) {
-                if ( AtmosphericRainSettledStartMs == 0 ) {
-                    AtmosphericRainSettledStartMs = atmosphericRainNow;
-                } else if ( atmosphericRainNow - AtmosphericRainSettledStartMs >= 1500 ) {
-                    AtmosphericRainReleasing = false;
-                    AtmosphericRainSettledStartMs = 0;
-                }
-            } else {
-                AtmosphericRainSettledStartMs = 0;
-            }
-        }
+    float atmosphericRainWeight = rainEnabled ? Engine::GAPI->GetRainFXWeight() : 0.0f;
+    if ( !std::isfinite( atmosphericRainWeight ) ) {
+        atmosphericRainWeight = 0.0f;
     }
-    AtmosphericRainSettingEnabled = rainEnabled;
-    AtmosphericRainSettingInitialized = true;
-    AtmosphericRainLastUpdateMs = atmosphericRainNow;
+    atmosphericRainWeight = std::clamp( atmosphericRainWeight, 0.0f, 1.0f );
+
     XMFLOAT3 LightDir = {};
     XMFLOAT3 MoonDir = {};
     float masterTime = -1.0f;
@@ -434,7 +364,7 @@ XRESULT GSky::RenderSky() {
         }
     }
 
-    const float rainLightFade = 1.0f - std::clamp( AtmosphericRainWeight * 2.0f, 0.0f, 1.0f );
+    const float rainLightFade = 1.0f - std::clamp( atmosphericRainWeight * 2.0f, 0.0f, 1.0f );
     AtmosphereCB.AC_SunVisibility = sunTimeFade * rainLightFade;
     AtmosphereCB.AC_MoonVisibility = moonTimeFade * rainLightFade;
 
@@ -503,12 +433,21 @@ XRESULT GSky::RenderSky() {
     AtmosphereCB.AC_g = Atmosphere.G;
     AtmosphereCB.AC_Wavelength = Atmosphere.WaveLengths;
     AtmosphereCB.AC_SpherePosition = sp;
+    const RendererTestSettings& rendererTestSettings = GetRendererTestSettings();
+    const bool nightTestOverridesEnabled = rendererTestSettings.EnableOverrides;
+    const RendererNightTestSettings& nightTests = rendererTestSettings.Night;
+    const float sceneWetnessEffectsStrength = nightTestOverridesEnabled
+        ? (nightTests.EnableSceneWetnessEffects
+            ? std::clamp( nightTests.SceneWetnessEffectsStrength, 0.0f, 2.0f )
+            : 0.0f)
+        : 1.0f;
     if ( !Engine::GAPI->GetRendererState().RendererSettings.EnableRain ) {
         AtmosphereCB.AC_SceneWettness = 0.f;
     } else {
-        AtmosphereCB.AC_SceneWettness = Engine::GAPI->GetSceneWetness();
+        AtmosphereCB.AC_SceneWettness =
+            Engine::GAPI->GetSceneWetness() * sceneWetnessEffectsStrength;
     }
-    AtmosphereCB.AC_RainFXWeight = AtmosphericRainWeight;
+    AtmosphereCB.AC_RainFXWeight = atmosphericRainWeight;
     AtmosphereCB.AC_EnableSSR = Engine::GAPI->GetRendererState().RendererSettings.EnableSSR ? 1.0f : 0.0f;
     AtmosphereCB.AC_EnableSSS = 1.0f;
     AtmosphereCB.AC_SSRStrength = Engine::GAPI->GetRendererState().RendererSettings.SSRStrength * 0.84f;
@@ -516,9 +455,6 @@ XRESULT GSky::RenderSky() {
     const auto& rendererSettings = Engine::GAPI->GetRendererState().RendererSettings;
     AtmosphereCB.AC_WaterCubemapStrength = rendererSettings.WaterCubemapStrength;
     // BEGIN TEMPORARY RENDERER TEST OVERRIDES
-    const RendererTestSettings& rendererTestSettings = GetRendererTestSettings();
-    const bool nightTestOverridesEnabled = rendererTestSettings.EnableOverrides;
-    const RendererNightTestSettings& nightTests = rendererTestSettings.Night;
     const bool disableNightAtmosphere = nightTestOverridesEnabled && nightTests.DisableNightAtmosphere;
 
     AtmosphereCB.AC_EnableNightAtmosphere = disableNightAtmosphere ? 0.0f : 1.0f;
@@ -613,23 +549,6 @@ GMesh* GSky::GetSkyDome() {
     return SkyDome.get();
 }
 
-void GSky::ResetWeatherState() {
-    const bool rainEnabled = Engine::GAPI
-        && Engine::GAPI->GetRendererState().RendererSettings.EnableRain;
-    float rainWeight = rainEnabled ? Engine::GAPI->GetRainFXWeight() : 0.0f;
-    if ( !std::isfinite( rainWeight ) ) {
-        rainWeight = 0.0f;
-    }
-
-    AtmosphericRainWeight = std::clamp( rainWeight, 0.0f, 1.0f );
-    AtmosphericRainLastUpdateMs = GetTickCount();
-    AtmosphericRainDropStartMs = 0;
-    AtmosphericRainSettledStartMs = 0;
-    AtmosphericRainInitialized = true;
-    AtmosphericRainReleasing = false;
-    AtmosphericRainSettingInitialized = true;
-    AtmosphericRainSettingEnabled = rainEnabled;
-}
 /** Returns the current sky-light color */
 float4 GSky::GetSkylightColor() {
     zCSkyController_Outdoor* sc = oCGame::GetGame()->_zCSession_world->GetSkyControllerOutdoor();

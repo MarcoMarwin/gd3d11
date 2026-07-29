@@ -1,4 +1,4 @@
-﻿#include "D3D11GraphicsEngine.h"
+#include "D3D11GraphicsEngine.h"
 #include "D3D11DeferredRenderer.h"
 #include "D3D11ShadowMap.h"
 #include "RendererTestSettings.h"
@@ -5454,29 +5454,6 @@ XRESULT D3D11GraphicsEngine::DrawMeshInfoListAlphablended( const std::vector<std
 
     Engine::GAPI->GetRendererState().DepthState.DepthWriteEnabled = true;
     Engine::GAPI->GetRendererState().DepthState.SetDirty();
-
-    // BEGIN TEMPORARY RENDERER TEST OVERRIDES
-    const bool disableTransparentWorldMeshDepthFogReplay = transparencyTestOverridesEnabled && transparencyTests.DisableTransparentWorldMeshDepthFogReplay;
-    if ( !disableTransparentWorldMeshDepthFogReplay ) {
-        Engine::GAPI->GetRendererState().BlendState.ColorWritesEnabled = false;
-        Engine::GAPI->GetRendererState().BlendState.SetDirty();
-
-        UpdateRenderStates();
-
-        // Draw again, but only to depthbuffer this time to make them work with
-        // fogging
-        for ( auto const& [meshKey, meshInfo] : list ) {
-            if ( meshKey.Material->GetAniTexture() != nullptr && meshKey.Info->MaterialType != MaterialInfo::MT_Portal ) {
-                // Draw the section-part
-                DrawVertexBufferIndexedUINT( nullptr, nullptr, meshInfo->Indices.size(),
-                    meshInfo->BaseIndexLocation );
-            }
-        }
-    }
-    // END TEMPORARY RENDERER TEST OVERRIDES
-
-    Engine::GAPI->GetRendererState().BlendState.ColorWritesEnabled = true;
-    Engine::GAPI->GetRendererState().BlendState.SetDirty();
     UpdateRenderStates();
 
     return XR_SUCCESS;
