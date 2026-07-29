@@ -4,6 +4,7 @@
 
 #include "DepthReconstruction.h"
 #include "DS_Defines.h"
+#include "SSR.h"
 #include "AtmosphericScattering.h"
 
 cbuffer WetGroundSSRConstantBuffer : register(b0)
@@ -114,8 +115,7 @@ float3 CalculateGeometricWorldNormal(float2 uv, float3 centerWSPosition)
 
 float CalculateReflectionScreenFade(float2 uv)
 {
-    float2 edgeDistance = min(uv, 1.0f - uv);
-    return smoothstep(0.012f, 0.105f, min(edgeDistance.x, edgeDistance.y));
+    return SSRCore_CalculateEdgeFade(uv, 0.001f);
 }
 float3 CalculateSmoothedWetGroundNormal(
     float2 uv,
@@ -508,10 +508,8 @@ float4 PSMain(PS_INPUT input) : SV_TARGET
     float puddleSupportFade = lerp(0.82f, 1.0f, smoothstep(0.05f, 0.95f, puddleSurfaceSupport));
     puddleMask *= puddleSupportFade * puddleBoundaryMask;
     float materialWetStrength = materialWetGroundSSRStrength * lerp(0.72f, 1.0f, wetness);
-    float materialWetMask = commonWetMask * materialWetStrength
-        * max(WG_WetMaterialReflectionsStrength, 0.0f);
-    puddleMask = saturate(
-        puddleMask * max(WG_ProceduralPuddlesStrength, 0.0f));
+    float materialWetMask = commonWetMask * materialWetStrength * max(WG_WetMaterialReflectionsStrength, 0.0f);
+    puddleMask = saturate(puddleMask * max(WG_ProceduralPuddlesStrength, 0.0f));
     float puddleRainExposure = smoothstep(0.10f, 0.72f, rainExposure);
     float puddleWetMask = saturate(
         wetness * wetSSRVisibility * puddleMask * puddleRainExposure * 1.12f);
@@ -549,17 +547,10 @@ float4 PSMain(PS_INPUT input) : SV_TARGET
             impactRipple, impactRing, impactPulse);
 
     }
-    float wetGroundRainImpactsStrength =
-        max(WG_WetGroundRainImpactsStrength, 0.0f);
-    float2 rippleDistortion =
-        impactRipple * rainImpactVisibility * puddleRainResponse
-        * wetGroundRainImpactsStrength;
-    float ringVisibility =
-        saturate(impactRing) * rainImpactVisibility * puddleRainResponse
-        * wetGroundRainImpactsStrength;
-    float centralImpactVisibility =
-        saturate(impactPulse) * rainImpactVisibility * puddleRainResponse
-        * wetGroundRainImpactsStrength;
+    float wetGroundRainImpactsStrength = max(WG_WetGroundRainImpactsStrength, 0.0f);
+    float2 rippleDistortion = impactRipple * rainImpactVisibility * puddleRainResponse * wetGroundRainImpactsStrength;
+    float ringVisibility = saturate(impactRing) * rainImpactVisibility * puddleRainResponse * wetGroundRainImpactsStrength;
+    float centralImpactVisibility = saturate(impactPulse) * rainImpactVisibility * puddleRainResponse * wetGroundRainImpactsStrength;
     float3 viewRay = normalize(wsPosition - WG_CameraPosition);
     float puddleViewFacing = saturate(dot(-viewRay, geometricWSNormal));
     float puddleGrazing = pow(1.0f - puddleViewFacing, 2.5f);
@@ -606,120 +597,34 @@ float4 PSMain(PS_INPUT input) : SV_TARGET
         wetBaseNormal + float3(rainNormalDistortion.x, 0.0f, rainNormalDistortion.y));
 
     float3 rayDirection = normalize(reflect(viewRay, wetNormal));
-    if (rayDirection.y <= 0.015f)
-        return float4(surfaceColor, 1.0f);
+    if (rayDirection.y <= 0.015f) return float4(surfaceColor, 1.0f);
 
-    float3 rayPosition = wsPosition + wetNormal * 8.0f;
-    float3 previousRayPosition = rayPosition;
-    float stepSize = 18.0f;
-    float2 hitUV = 0.0f;
-    float hitWeight = 0.0f;
-    float2 skyUV = 0.0f;
-    float skyWeight = 0.0f;
+#define WETGROUND_SSR_MAX_STEPS 18
+#define WETGROUND_SSR_REFINE_STEPS 5
+#define WETGROUND_SSR_MAX_DISTANCE 36000.0f
+#define WETGROUND_SSR_THICKNESS 350.0f
+#define WETGROUND_SSR_START_BIAS 8.0f
+#define WETGROUND_SSR_EDGE_FADE 0.001f
 
-    [loop]
-    for (int i = 0; i < 18; ++i)
-    {
-        previousRayPosition = rayPosition;
-        rayPosition += rayDirection * stepSize;
+    SSRTraceResult wetGroundTrace = SSRCore_TraceWorldRay(
+        TX_Depth,
+        wsPosition, rayDirection,
+        WG_ViewProj, 1.0f / WG_InvResolution,
+        WG_ProjParams.z, WG_ProjParams.w,
+        WETGROUND_SSR_MAX_DISTANCE, WETGROUND_SSR_MAX_STEPS, WETGROUND_SSR_REFINE_STEPS,
+        WETGROUND_SSR_START_BIAS, WETGROUND_SSR_THICKNESS, WETGROUND_SSR_EDGE_FADE);
 
-        float4 projected = mul(float4(rayPosition, 1.0f), WG_ViewProj);
-        if (projected.w <= 0.0f)
-            break;
+    float2 hitUV = wetGroundTrace.hitUV;
+    float hitWeight = saturate(wetGroundTrace.confidence);
+    float2 skyUV = wetGroundTrace.skyUV;
+    float skyWeight = saturate(wetGroundTrace.skyWeight);
 
-        projected.xyz /= projected.w;
-        float2 sampleUV = projected.xy * float2(0.5f, -0.5f) + 0.5f;
-        if (any(sampleUV < 0.0f) || any(sampleUV > 1.0f) || projected.z < 0.0f || projected.z > 1.0f)
-            break;
-
-        float edge = max(abs(sampleUV.x - 0.5f), abs(sampleUV.y - 0.5f)) * 2.0f;
-        float screenWeight = 1.0f - smoothstep(0.76f, 1.0f, edge);
-        float sampleDepth = TX_Depth.SampleLevel(SS_Linear, sampleUV, 0).r;
-
-        if (sampleDepth <= 1e-7f)
-        {
-            skyUV = sampleUV;
-            skyWeight = screenWeight;
-            stepSize *= 1.10f;
-            continue;
-        }
-
-        float sampleZ = WG_ProjParams.z / (sampleDepth - WG_ProjParams.w);
-        float depthDifference = projected.w - sampleZ;
-
-        if (depthDifference > 0.0f && depthDifference < stepSize * 1.15f)
-        {
-            float3 refinementLow = previousRayPosition;
-            float3 refinementHigh = rayPosition;
-            float2 refinedUV = sampleUV;
-            float refinedScreenWeight = screenWeight;
-            float refinedDepthError = abs(depthDifference);
-
-            [unroll]
-            for (int refinementStep = 0; refinementStep < 4; ++refinementStep)
-            {
-                float3 refinementPosition = (refinementLow + refinementHigh) * 0.5f;
-                float4 refinementProjected = mul(float4(refinementPosition, 1.0f), WG_ViewProj);
-
-                if (refinementProjected.w <= 0.0f)
-                {
-                    refinementHigh = refinementPosition;
-                    continue;
-                }
-
-                refinementProjected.xyz /= refinementProjected.w;
-                float2 refinementUV = refinementProjected.xy * float2(0.5f, -0.5f) + 0.5f;
-
-                if (any(refinementUV < 0.0f) || any(refinementUV > 1.0f)
-                    || refinementProjected.z < 0.0f || refinementProjected.z > 1.0f)
-                {
-                    refinementHigh = refinementPosition;
-                    continue;
-                }
-
-                float refinementDepth = TX_Depth.SampleLevel(SS_Linear, refinementUV, 0).r;
-                if (refinementDepth <= 1e-7f)
-                {
-                    refinementLow = refinementPosition;
-                    continue;
-                }
-
-                float refinementDenominator = refinementDepth - WG_ProjParams.w;
-                if (abs(refinementDenominator) <= 1e-7f)
-                {
-                    refinementHigh = refinementPosition;
-                    continue;
-                }
-
-                float refinementSampleZ = WG_ProjParams.z / refinementDenominator;
-                float refinementDifference = refinementProjected.w - refinementSampleZ;
-                float candidateDepthError = abs(refinementDifference);
-
-                if (candidateDepthError < refinedDepthError)
-                {
-                    refinedDepthError = candidateDepthError;
-                    refinedUV = refinementUV;
-                    float refinementEdge = max(abs(refinementUV.x - 0.5f), abs(refinementUV.y - 0.5f)) * 2.0f;
-                    refinedScreenWeight = 1.0f - smoothstep(0.76f, 1.0f, refinementEdge);
-                }
-
-                if (refinementDifference > 0.0f)
-                    refinementHigh = refinementPosition;
-                else
-                    refinementLow = refinementPosition;
-            }
-
-            float maximumRefinedError = max(1.25f, stepSize * 0.22f);
-            if (refinedDepthError <= maximumRefinedError)
-            {
-                hitUV = refinedUV;
-                hitWeight = refinedScreenWeight;
-            }
-            break;
-        }
-
-        stepSize *= 1.10f;
-    }
+#undef WETGROUND_SSR_MAX_STEPS
+#undef WETGROUND_SSR_REFINE_STEPS
+#undef WETGROUND_SSR_MAX_DISTANCE
+#undef WETGROUND_SSR_THICKNESS
+#undef WETGROUND_SSR_START_BIAS
+#undef WETGROUND_SSR_EDGE_FADE
 
     float2 reflectionRippleOffset = rippleDistortion * float2(0.0040f, 0.0040f);
     float3 reflectedColor = surfaceColor;
@@ -828,9 +733,7 @@ float4 PSMain(PS_INPUT input) : SV_TARGET
     float materialReflectionBlend =
         materialWetMask * reflectionWeight * materialFresnel * WG_Strength * 2.60f;
     float puddleReflectionBlend =
-        puddleWetMask * slopeWaterFade * reflectionWeight
-        * lerp(0.14f, 0.28f, puddleFresnel) * WG_Strength * 5.20f
-        * max(WG_PuddleReflectionsStrength, 0.0f);
+        puddleWetMask * slopeWaterFade * reflectionWeight * lerp(0.14f, 0.28f, puddleFresnel) * WG_Strength * 5.20f * max(WG_PuddleReflectionsStrength, 0.0f);
     float reflectionBlend = saturate(
         materialReflectionBlend + puddleReflectionBlend * (1.0f - materialReflectionBlend));
 

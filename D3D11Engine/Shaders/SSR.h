@@ -1,129 +1,142 @@
-// By Morgan McGuire and Michael Mara at Williams College 2014
-// Released as open source under the BSD 2-Clause License
-// http://opensource.org/licenses/BSD-2-Clause
-#define point2 float2
-#define point3 float3
- 
-float distanceSquared(float2 a, float2 b) { a -= b; return dot(a, a); }
- 
-// Returns true if the ray hit something
-bool traceScreenSpaceRay(
- // Camera-space ray origin, which must be within the view volume
- point3 csOrig,
- 
- // Unit length camera-space ray direction
- float3 csDir,
- 
- // A projection matrix that maps to pixel coordinates (not [-1, +1]
- // normalized device coordinates)
- matrix proj,
- 
- // The camera-space Z buffer (all negative values)
- Texture2D csZBuffer,
- 
- // Dimensions of csZBuffer
- float2 csZBufferSize,
- 
- // Camera space thickness to ascribe to each pixel in the depth buffer
- float zThickness,
- 
- // (Negative number)
- float nearPlaneZ,
- 
- // Step in horizontal or vertical pixels between samples. This is a float
- // because integer math is slow on GPUs, but should be set to an integer >= 1
- float stride,
- 
- // Number between 0 and 1 for how far to bump the ray in stride units
- // to conceal banding artifacts
- float jitter,
- 
- // Maximum number of iterations. Higher gives better images but may be slow
- const float maxSteps,
- 
- // Maximum camera-space distance to trace before returning a miss
- float maxDistance,
- 
- // Pixel coordinates of the first intersection with the scene
- out point2 hitPixel,
- 
- // Camera space location of the ray hit
- out point3 hitPoint) {
- 
-    // Clip to the near plane   
-    float rayLength = ((csOrig.z + csDir.z * maxDistance) > nearPlaneZ) ?
-        (nearPlaneZ - csOrig.z) / csDir.z : maxDistance;
-    point3 csEndPoint = csOrig + csDir * rayLength;
- 
-    // Project into homogeneous clip space
-    float4 H0 = proj * float4(csOrig, 1.0);
-    float4 H1 = proj * float4(csEndPoint, 1.0);
-    float k0 = 1.0 / H0.w, k1 = 1.0 / H1.w;
- 
-    // The interpolated homogeneous version of the camera-space points 
-    point3 Q0 = csOrig * k0, Q1 = csEndPoint * k1;
- 
-    // Screen-space endpoints
-    point2 P0 = H0.xy * k0, P1 = H1.xy * k1;
- 
-    // If the line is degenerate, make it cover at least one pixel
-    // to avoid handling zero-pixel extent as a special case later
-    P1 += float2((distanceSquared(P0, P1) < 0.0001) ? 0.01 : 0.0);
-    float2 delta = P1 - P0;
- 
-    // Permute so that the primary iteration is in x to collapse
-    // all quadrant-specific DDA cases later
-    bool permute = false;
-    if (abs(delta.x) < abs(delta.y)) {
-        // This is a more-vertical line
-        permute = true; delta = delta.yx; P0 = P0.yx; P1 = P1.yx;
-    }
- 
-    float stepDir = sign(delta.x);
-    float invdx = stepDir / delta.x;
- 
-    // Track the derivatives of Q and k
-    float3  dQ = (Q1 - Q0) * invdx;
-    float dk = (k1 - k0) * invdx;
-    float2  dP = float2(stepDir, delta.y * invdx);
- 
-    // Scale derivatives by the desired pixel stride and then
-    // offset the starting values by the jitter fraction
-    dP *= stride; dQ *= stride; dk *= stride;
-    P0 += dP * jitter; Q0 += dQ * jitter; k0 += dk * jitter;
- 
-    // Slide P from P0 to P1, (now-homogeneous) Q from Q0 to Q1, k from k0 to k1
-    point3 Q = Q0;
- 
-    // Adjust end condition for iteration direction
-    float  end = P1.x * stepDir;
- 
-    float k = k0, stepCount = 0.0, prevZMaxEstimate = csOrig.z;
-    float rayZMin = prevZMaxEstimate, rayZMax = prevZMaxEstimate;
-    float sceneZMax = rayZMax + 100;
-    for (point2 P = P0;
-         ((P.x * stepDir) <= end) && (stepCount < maxSteps) &&
-         ((rayZMax < sceneZMax - zThickness) || (rayZMin > sceneZMax)) &&
-          (sceneZMax != 0);
-         P += dP, Q.z += dQ.z, k += dk, ++stepCount) {
-         
-        rayZMin = prevZMaxEstimate;
-        rayZMax = (dQ.z * 0.5 + Q.z) / (dk * 0.5 + k);
-        prevZMaxEstimate = rayZMax;
-        if (rayZMin > rayZMax) {
-           float t = rayZMin; rayZMin = rayZMax; rayZMax = t;
-        }
- 
-        hitPixel = permute ? P.yx : P;
-        // You may need hitPixel.y = csZBufferSize.y - hitPixel.y; here if your vertical axis
-        // is different than ours in screen space
-		
-		//hitPixel.y = csZBufferSize.y - hitPixel.y;
-        sceneZMax = csZBuffer.Load(int2(hitPixel), 0);
-    }
-     
-    // Advance Q based on the number of steps
-    Q.xy += dQ.xy * stepCount;
-    hitPoint = Q * (1.0 / k);
-    return (rayZMax >= sceneZMax - zThickness) && (rayZMin < sceneZMax);
+#ifndef GD3D11_SHARED_SSR_CORE_INCLUDED
+#define GD3D11_SHARED_SSR_CORE_INCLUDED
+
+struct SSRTraceResult {
+    float hit;
+    float2 hitUV;
+    float confidence;
+    float2 skyUV;
+    float skyWeight;
+};
+
+float SSRCore_CalculateEdgeFade(float2 uv, float edgeWidth) {
+    float2 edge = smoothstep(0.0f, edgeWidth, uv) * smoothstep(0.0f, edgeWidth, 1.0f - uv);
+    return edge.x * edge.y;
 }
+
+bool SSRCore_ProjectWorldToUV(float3 positionWS, float4x4 viewProj, out float2 uv, out float clipW) {
+    float4 projected = mul(float4(positionWS, 1.0f), viewProj);
+    clipW = projected.w;
+    if (projected.w <= 0.0f) {
+        uv = float2(0.0f, 0.0f);
+        return false;
+    }
+    projected.xyz /= projected.w;
+    uv = projected.xy * float2(0.5f, -0.5f) + 0.5f;
+    if (projected.z < 0.0f || projected.z > 1.0f) return false;
+    return true;
+}
+
+float SSRCore_LoadSceneZ(Texture2D depthTexture, float2 uv, float2 viewportSize, float projectionZ, float projectionW) {
+    int2 maxPixel = int2(viewportSize) - int2(1, 1);
+    int2 pixel = clamp(int2(uv * viewportSize), int2(0, 0), maxPixel);
+    float rawDepth = depthTexture.Load(int3(pixel, 0)).r;
+    if (rawDepth <= 1e-7f) return 0.0f;
+    float denominator = rawDepth - projectionW;
+    if (abs(denominator) <= 1e-7f) return 0.0f;
+    return projectionZ / denominator;
+}
+
+SSRTraceResult SSRCore_MissResult() {
+    SSRTraceResult result;
+    result.hit = 0.0f;
+    result.hitUV = float2(0.0f, 0.0f);
+    result.confidence = 0.0f;
+    result.skyUV = float2(0.0f, 0.0f);
+    result.skyWeight = 0.0f;
+    return result;
+}
+
+SSRTraceResult SSRCore_TraceWorldRay(
+    Texture2D depthTexture,
+    float3 originWS, float3 directionWS,
+    float4x4 viewProj, float2 viewportSize,
+    float projectionZ, float projectionW,
+    float maxDistance, int maxSteps, int refineSteps,
+    float startBias, float thickness, float edgeFadeWidth)
+{
+    SSRTraceResult result = SSRCore_MissResult();
+    float3 rayDirection = normalize(directionWS);
+    float stepLength = maxDistance / max((float)maxSteps, 1.0f);
+
+    float3 previousPosition = originWS + rayDirection * startBias;
+    float2 previousUV;
+    float previousClipW;
+    if (!SSRCore_ProjectWorldToUV(previousPosition, viewProj, previousUV, previousClipW)) return result;
+
+    if (any(previousUV < 0.0f) || any(previousUV > 1.0f)) return result;
+
+    float previousSceneZ = SSRCore_LoadSceneZ(depthTexture, previousUV, viewportSize, projectionZ, projectionW);
+    float previousDelta = previousSceneZ > 0.0f ? previousClipW - previousSceneZ : -1.0f;
+    float travelled = startBias;
+
+    [loop]
+    for (int stepIndex = 0; stepIndex < maxSteps; ++stepIndex) {
+        float3 currentPosition = previousPosition + rayDirection * stepLength;
+        travelled += stepLength;
+        float2 currentUV;
+        float currentClipW;
+        if (!SSRCore_ProjectWorldToUV(currentPosition, viewProj, currentUV, currentClipW)) return result;
+        if (any(currentUV < 0.0f) || any(currentUV > 1.0f)) return result;
+
+        float screenEdgeWeight = SSRCore_CalculateEdgeFade(currentUV, edgeFadeWidth);
+        float currentSceneZ = SSRCore_LoadSceneZ(depthTexture, currentUV, viewportSize, projectionZ, projectionW);
+        if (currentSceneZ <= 1e-7f) {
+            result.skyUV = currentUV;
+            result.skyWeight = screenEdgeWeight;
+            previousPosition = currentPosition;
+            previousDelta = -1.0f;
+            continue;
+        }
+
+        float currentDelta = currentClipW - currentSceneZ;
+        if (previousDelta < 0.0f && currentDelta >= 0.0f && currentSceneZ >= previousClipW - thickness) {
+            float3 refinementLow = previousPosition;
+            float3 refinementHigh = currentPosition;
+            float2 refinedUV = currentUV;
+            float refinedGap = currentDelta;
+
+            [unroll]
+            for (int refinementStep = 0; refinementStep < refineSteps; ++refinementStep) {
+                float3 refinementPosition = (refinementLow + refinementHigh) * 0.5f;
+                float2 refinementUV;
+                float refinementClipW;
+                if (!SSRCore_ProjectWorldToUV(refinementPosition, viewProj, refinementUV, refinementClipW)) {
+                    refinementHigh = refinementPosition;
+                    continue;
+                }
+                if (any(refinementUV < 0.0f) || any(refinementUV > 1.0f)) {
+                    refinementHigh = refinementPosition;
+                    continue;
+                }
+                float refinementSceneZ = SSRCore_LoadSceneZ(depthTexture, refinementUV, viewportSize, projectionZ, projectionW);
+                if (refinementSceneZ <= 1e-7f) {
+                    refinementLow = refinementPosition;
+                    continue;
+                }
+                float refinementGap = refinementClipW - refinementSceneZ;
+                if (refinementGap >= 0.0f) {
+                    refinementHigh = refinementPosition;
+                    refinedUV = refinementUV;
+                    refinedGap = refinementGap;
+                } else {
+                    refinementLow = refinementPosition;
+                }
+            }
+
+            if (refinedGap < thickness) {
+                float edgeFade = SSRCore_CalculateEdgeFade(refinedUV, edgeFadeWidth);
+                float distanceFade = saturate(1.0f - travelled / maxDistance);
+                result.hit = 1.0f;
+                result.hitUV = refinedUV;
+                result.confidence = saturate(edgeFade * distanceFade);
+                return result;
+            }
+        }
+        previousPosition = currentPosition;
+        previousDelta = currentDelta;
+        previousClipW = currentClipW;
+    }
+    return result;
+}
+#endif
