@@ -330,6 +330,10 @@ XRESULT D3D11ShaderManager::Init() {
     };
 
     Shaders.push_back( ShaderInfo::make<PShaderID::PS_DS_AtmosphericScattering>( "PS_DS_AtmosphericScattering.hlsl" )
+        .with_macros( [](std::vector<D3D_SHADER_MACRO>& list) {
+            const auto& s = Engine::GAPI->GetRendererState().RendererSettings;
+            list.push_back( { "SURFACE_DETAILS_ENABLED", s.AllowNormalmaps ? "1" : "0" } );
+        } )
         .with_macros( shadowMacroBuilder )
         .with_category( ShaderCategory::LightsAndShadows ) );
 
@@ -347,6 +351,10 @@ XRESULT D3D11ShaderManager::Init() {
 
     Shaders.push_back( ShaderInfo::make<PShaderID::PS_DS_AtmosphericScattering_Rain>( "PS_DS_AtmosphericScattering.hlsl" )
         .with_macros( { { "APPLY_RAIN_EFFECTS", "1" } })
+        .with_macros( [](std::vector<D3D_SHADER_MACRO>& list) {
+            const auto& s = Engine::GAPI->GetRendererState().RendererSettings;
+            list.push_back( { "SURFACE_DETAILS_ENABLED", s.AllowNormalmaps ? "1" : "0" } );
+        } )
         .with_macros( shadowMacroBuilder )
         .with_category( ShaderCategory::LightsAndShadows ) );
 

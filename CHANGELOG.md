@@ -840,3 +840,11 @@ Dokumentation der gepushten Renderer-Builds.
 
 ## Build 181
 - Wet Ground SSR: Constant-Buffer-Layout WetGroundSSRConstantBuffer und F11-Teststaerken (WG_WetMaterialReflectionsStrength, WG_ProceduralPuddlesStrength, WG_PuddleReflectionsStrength, WG_WetGroundRainImpactsStrength) in HLSL (PS_PFX_WetGroundSSR.hlsl) und C++ (ConstantBufferStructs.h, D3D11PfxRenderer.cpp) vollstaendig synchronisiert (288 Bytes) und fuer materialWetMask, puddleMask, rippleDistortion und puddleReflectionBlend angewendet.
+
+## Build 182
+
+- Scene Wetness: Fallback auf distortion.dds ohne AC_RainFXWeight bei deaktivierten Surface Details.
+- Wet Material Reflections: Standardstaerke auf 1.5f angehoben.
+- Wet Ground SSR: Materialien mit wetGroundSSRStrength 0.0 vollstaendig von prozeduralen Pfuetzen ausgeschlossen (materialPuddleEligibility via step).
+- HDR: Dateiname von hdr.h zu HDR.h in Git korrigiert.
+

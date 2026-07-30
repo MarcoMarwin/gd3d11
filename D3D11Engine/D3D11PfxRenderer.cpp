@@ -126,7 +126,7 @@ XRESULT D3D11PfxRenderer::RenderWetGroundSSR( ID3D11RenderTargetView* outputRTV,
                 ? std::clamp( nightTests.WetGroundRainImpactsStrength, 0.0f, 2.0f )
                 : 0.0f;
     } else {
-        cb.WG_WetMaterialReflectionsStrength = 1.0f;
+        cb.WG_WetMaterialReflectionsStrength = 1.5f;
         cb.WG_ProceduralPuddlesStrength = 1.0f;
         cb.WG_PuddleReflectionsStrength = 1.0f;
         cb.WG_WetGroundRainImpactsStrength = 1.0f;

@@ -4,7 +4,6 @@
 
 #include "DepthReconstruction.h"
 #include "DS_Defines.h"
-#include "SSR.h"
 #include "AtmosphericScattering.h"
 
 cbuffer WetGroundSSRConstantBuffer : register(b0)
@@ -68,54 +67,107 @@ float3 DecodeWorldNormal(float2 uv)
     return normalize(mul(float4(vsNormal, 0.0f), WG_InvView).xyz);
 }
 
-float3 CalculateGeometricWorldNormal(float2 uv, float3 centerWSPosition)
+bool EvaluateWetGroundReceiverSample(
+    float2 sampleUV,
+    float3 centerWSPosition,
+    float3 centerWSNormal,
+    out float3 sampleWSPosition)
+{
+    float2 halfTexel = WG_InvResolution * 0.5f;
+    if (any(sampleUV < halfTexel) || any(sampleUV > 1.0f - halfTexel))
+    {
+        sampleWSPosition = centerWSPosition;
+        return false;
+    }
+
+    float sampleDepth = TX_Depth.SampleLevel(SS_Linear, sampleUV, 0).r;
+    if (sampleDepth <= 1e-7f)
+    {
+        sampleWSPosition = centerWSPosition;
+        return false;
+    }
+
+    sampleWSPosition = ReconstructWorldPosition(sampleDepth, sampleUV);
+    float3 sampleWSNormal = DecodeWorldNormal(sampleUV);
+    float3 surfaceDelta = sampleWSPosition - centerWSPosition;
+    float tangentDistance = length(
+        surfaceDelta - centerWSNormal * dot(surfaceDelta, centerWSNormal));
+    float planeDeviation = abs(dot(surfaceDelta, centerWSNormal));
+    float cameraDistance = length(centerWSPosition - WG_CameraPosition);
+    float planeTolerance = max(
+        12.0f,
+        max(tangentDistance * 0.22f, cameraDistance * 0.0015f));
+    float normalAgreement = dot(centerWSNormal, sampleWSNormal);
+
+    return planeDeviation <= planeTolerance && normalAgreement >= 0.35f;
+}
+
+float3 CalculateGeometricWorldNormal(
+    float2 uv,
+    float3 centerWSPosition,
+    float3 centerWSNormal)
 {
     float2 offset = WG_InvResolution * 3.0f;
-    bool hasLeft = uv.x > offset.x;
-    bool hasRight = uv.x < 1.0f - offset.x;
-    bool hasUp = uv.y > offset.y;
-    bool hasDown = uv.y < 1.0f - offset.y;
-    float2 uvLeft = uv - float2(hasLeft ? offset.x : 0.0f, 0.0f);
-    float2 uvRight = uv + float2(hasRight ? offset.x : 0.0f, 0.0f);
-    float2 uvUp = uv - float2(0.0f, hasUp ? offset.y : 0.0f);
-    float2 uvDown = uv + float2(0.0f, hasDown ? offset.y : 0.0f);
-    float depthLeft = TX_Depth.SampleLevel(SS_Linear, uvLeft, 0).r;
-    float depthRight = TX_Depth.SampleLevel(SS_Linear, uvRight, 0).r;
-    float depthUp = TX_Depth.SampleLevel(SS_Linear, uvUp, 0).r;
-    float depthDown = TX_Depth.SampleLevel(SS_Linear, uvDown, 0).r;
-    float3 positionLeft = hasLeft && depthLeft > 1e-7f
-        ? ReconstructWorldPosition(depthLeft, uvLeft)
-        : centerWSPosition;
-    float3 positionRight = hasRight && depthRight > 1e-7f
-        ? ReconstructWorldPosition(depthRight, uvRight)
-        : centerWSPosition;
-    float3 positionUp = hasUp && depthUp > 1e-7f
-        ? ReconstructWorldPosition(depthUp, uvUp)
-        : centerWSPosition;
-    float3 positionDown = hasDown && depthDown > 1e-7f
-        ? ReconstructWorldPosition(depthDown, uvDown)
-        : centerWSPosition;
-    float3 tangentX = positionRight - positionLeft;
-    float3 tangentY = positionDown - positionUp;
+    float2 uvLeft = uv - float2(offset.x, 0.0f);
+    float2 uvRight = uv + float2(offset.x, 0.0f);
+    float2 uvUp = uv - float2(0.0f, offset.y);
+    float2 uvDown = uv + float2(0.0f, offset.y);
+
+    float3 positionLeft = centerWSPosition;
+    float3 positionRight = centerWSPosition;
+    float3 positionUp = centerWSPosition;
+    float3 positionDown = centerWSPosition;
+
+    bool validLeft = EvaluateWetGroundReceiverSample(
+        uvLeft, centerWSPosition, centerWSNormal, positionLeft);
+    bool validRight = EvaluateWetGroundReceiverSample(
+        uvRight, centerWSPosition, centerWSNormal, positionRight);
+    bool validUp = EvaluateWetGroundReceiverSample(
+        uvUp, centerWSPosition, centerWSNormal, positionUp);
+    bool validDown = EvaluateWetGroundReceiverSample(
+        uvDown, centerWSPosition, centerWSNormal, positionDown);
+
+    float3 tangentX = float3(0.0f, 0.0f, 0.0f);
+    float3 tangentY = float3(0.0f, 0.0f, 0.0f);
+
+    if (validLeft && validRight)
+        tangentX = positionRight - positionLeft;
+    else if (validRight)
+        tangentX = positionRight - centerWSPosition;
+    else if (validLeft)
+        tangentX = centerWSPosition - positionLeft;
+
+    if (validUp && validDown)
+        tangentY = positionDown - positionUp;
+    else if (validDown)
+        tangentY = positionDown - centerWSPosition;
+    else if (validUp)
+        tangentY = centerWSPosition - positionUp;
+
     if (dot(tangentX, tangentX) <= 1e-6f || dot(tangentY, tangentY) <= 1e-6f)
     {
-        float3 derivativeX = ddx(centerWSPosition);
-        float3 derivativeY = ddy(centerWSPosition);
-        float3 derivativeNormal = cross(derivativeY, derivativeX);
-        if (dot(derivativeNormal, derivativeNormal) <= 1e-8f)
-            return float3(0.0f, 1.0f, 0.0f);
-        derivativeNormal = normalize(derivativeNormal);
-        return derivativeNormal.y < 0.0f ? -derivativeNormal : derivativeNormal;
+        return centerWSNormal;
     }
-    float3 geometricNormal = normalize(cross(tangentY, tangentX));
-    if (geometricNormal.y < 0.0f)
+
+    float3 geometricNormal = cross(tangentY, tangentX);
+    if (dot(geometricNormal, geometricNormal) <= 1e-8f)
+        return centerWSNormal;
+
+    geometricNormal = normalize(geometricNormal);
+    if (dot(geometricNormal, centerWSNormal) < 0.0f)
         geometricNormal = -geometricNormal;
+
+    float normalAgreement = dot(geometricNormal, centerWSNormal);
+    if (normalAgreement < 0.35f)
+        return centerWSNormal;
+
     return geometricNormal;
 }
 
 float CalculateReflectionScreenFade(float2 uv)
 {
-    return SSRCore_CalculateEdgeFade(uv, 0.001f);
+    float2 edgeDistance = min(uv, 1.0f - uv);
+    return smoothstep(0.012f, 0.105f, min(edgeDistance.x, edgeDistance.y));
 }
 float3 CalculateSmoothedWetGroundNormal(
     float2 uv,
@@ -196,24 +248,33 @@ float GetRainExposure(float3 wsPosition)
 float EvaluatePuddleEligibilitySample(
     float2 sampleUV,
     float3 centerWSPosition,
-    float3 centerGeometricNormal)
+    float3 centerGeometricNormal,
+    out float sampleValidity)
 {
-    float2 halfTexel = WG_InvResolution * 0.5f;
-    sampleUV = clamp(sampleUV, halfTexel, 1.0f - halfTexel);
-    float sampleDepth = TX_Depth.SampleLevel(SS_Linear, sampleUV, 0).r;
-    if (sampleDepth <= 1e-7f)
+    float3 sampleWSPosition = centerWSPosition;
+    bool validReceiverSample = EvaluateWetGroundReceiverSample(
+        sampleUV, centerWSPosition, centerGeometricNormal, sampleWSPosition);
+
+    if (!validReceiverSample)
+    {
+        sampleValidity = 0.0f;
         return 0.0f;
-    float3 sampleWSPosition = ReconstructWorldPosition(sampleDepth, sampleUV);
+    }
+
+    sampleValidity = 1.0f;
     float3 surfaceDelta = sampleWSPosition - centerWSPosition;
     float tangentDistance = length(
         surfaceDelta - centerGeometricNormal * dot(surfaceDelta, centerGeometricNormal));
     float planeDeviation = abs(dot(surfaceDelta, centerGeometricNormal));
     float planeTolerance = max(8.0f, tangentDistance * 0.14f);
+
     float continuityEligibility =
         1.0f - smoothstep(planeTolerance, planeTolerance * 3.0f, planeDeviation);
     float slopeEligibility = smoothstep(0.88f, 0.985f, centerGeometricNormal.y);
+
     return saturate(slopeEligibility * continuityEligibility);
 }
+
 float CalculatePuddleBoundaryMask(
     float2 uv,
     float3 wsPosition,
@@ -229,18 +290,27 @@ float CalculatePuddleBoundaryMask(
         float2(0.0f, 1.0f),
         float2(0.0f, -1.0f)
     };
+
     float centerSlope = smoothstep(0.88f, 0.985f, geometricNormal.y);
     float eligibilitySum = centerSlope * 2.0f;
+    float validitySum = 2.0f;
+
     [unroll]
     for (int sampleIndex = 0; sampleIndex < 4; ++sampleIndex)
     {
-        eligibilitySum += EvaluatePuddleEligibilitySample(
+        float sampleValidity = 0.0f;
+        float sampleEligibility = EvaluatePuddleEligibilitySample(
             uv + directions[sampleIndex] * sampleOffset,
             wsPosition,
-            geometricNormal);
+            geometricNormal,
+            sampleValidity);
+        eligibilitySum += sampleEligibility * sampleValidity;
+        validitySum += sampleValidity;
     }
-    float neighborhoodEligibility = eligibilitySum / 6.0f;
+
+    float neighborhoodEligibility = eligibilitySum / max(validitySum, 1.0f);
     float boundaryFeather = max(0.035f, fwidth(neighborhoodEligibility) * 2.5f);
+
     return smoothstep(
         0.34f - boundaryFeather,
         0.82f + boundaryFeather,
@@ -446,31 +516,70 @@ void AccumulateRainImpactLayer(
     }
 }
 
-float EvaluatePuddleSurfaceSupport(float3 wsPosition, float3 geometricNormal, float2 sampleUV)
+float EvaluatePuddleSurfaceSupport(
+    float3 wsPosition,
+    float3 geometricNormal,
+    float2 sampleUV,
+    out float sampleValidity)
 {
-    float2 halfTexel = WG_InvResolution * 0.5f;
-    sampleUV = clamp(sampleUV, halfTexel, 1.0f - halfTexel);
-    float sampleDepth = TX_Depth.SampleLevel(SS_Linear, sampleUV, 0).r;
-    if (sampleDepth <= 1e-7f)
+    float3 sampleWSPosition = wsPosition;
+    bool validReceiverSample = EvaluateWetGroundReceiverSample(
+        sampleUV, wsPosition, geometricNormal, sampleWSPosition);
+
+    if (!validReceiverSample)
+    {
+        sampleValidity = 0.0f;
         return 0.0f;
-    float3 sampleWSPosition = ReconstructWorldPosition(sampleDepth, sampleUV);
+    }
+
+    sampleValidity = 1.0f;
     float3 surfaceDelta = sampleWSPosition - wsPosition;
-    float tangentDistance = length(surfaceDelta - geometricNormal * dot(surfaceDelta, geometricNormal));
+    float tangentDistance = length(
+        surfaceDelta - geometricNormal * dot(surfaceDelta, geometricNormal));
     float planeDeviation = abs(dot(surfaceDelta, geometricNormal));
-    float planeTolerance = max(8.0f, tangentDistance * 0.18f);
-    return 1.0f - smoothstep(planeTolerance, planeTolerance * 3.25f, planeDeviation);
+    float planeTolerance = max(
+        8.0f, tangentDistance * 0.18f);
+
+    return 1.0f - smoothstep(
+        planeTolerance, planeTolerance * 3.25f, planeDeviation);
 }
-float CalculatePuddleSurfaceSupport(float3 wsPosition, float3 wsNormal, float2 uv)
+
+float CalculatePuddleSurfaceSupport(
+    float3 wsPosition,
+    float3 wsNormal,
+    float2 uv)
 {
     float2 supportOffset = WG_InvResolution * 18.0f;
-    float support = 0.0f;
-    support += EvaluatePuddleSurfaceSupport(wsPosition, wsNormal, uv + float2(supportOffset.x, 0.0f));
-    support += EvaluatePuddleSurfaceSupport(wsPosition, wsNormal, uv - float2(supportOffset.x, 0.0f));
-    support += EvaluatePuddleSurfaceSupport(wsPosition, wsNormal, uv + float2(0.0f, supportOffset.y));
-    support += EvaluatePuddleSurfaceSupport(wsPosition, wsNormal, uv - float2(0.0f, supportOffset.y));
-    support *= 0.25f;
-    float supportFeather = max(0.045f, fwidth(support) * 2.0f);
-    return smoothstep(0.10f - supportFeather, 0.88f + supportFeather, support);
+    const float2 directions[4] =
+    {
+        float2(1.0f, 0.0f),
+        float2(-1.0f, 0.0f),
+        float2(0.0f, 1.0f),
+        float2(0.0f, -1.0f)
+    };
+
+    float supportSum = 1.0f;
+    float validitySum = 1.0f;
+
+    [unroll]
+    for (int sampleIndex = 0; sampleIndex < 4; ++sampleIndex)
+    {
+        float sampleValidity = 0.0f;
+        float sampleSupport = EvaluatePuddleSurfaceSupport(
+            wsPosition,
+            wsNormal,
+            uv + directions[sampleIndex] * supportOffset,
+            sampleValidity);
+        supportSum += sampleSupport * sampleValidity;
+        validitySum += sampleValidity;
+    }
+
+    float support = supportSum / max(validitySum, 1.0f);
+    float supportFeather = max(
+        0.045f, fwidth(support) * 2.0f);
+
+    return smoothstep(
+        0.10f - supportFeather, 0.88f + supportFeather, support);
 }
 
 float4 PSMain(PS_INPUT input) : SV_TARGET
@@ -487,9 +596,12 @@ float4 PSMain(PS_INPUT input) : SV_TARGET
         return float4(sceneColor, 1.0f);
     float3 wsPosition = ReconstructWorldPosition(depth, uv);
     float3 sourceWSNormal = DecodeWorldNormal(uv);
-    float3 geometricWSNormal = CalculateGeometricWorldNormal(uv, wsPosition);
+    float3 geometricWSNormal = CalculateGeometricWorldNormal(
+        uv, wsPosition, sourceWSNormal);
 
     float materialWetGroundSSRStrength = saturate(TX_Material.SampleLevel(SS_Linear, uv, 0).z);
+    float materialPuddleEligibility = step(
+        0.0001f, materialWetGroundSSRStrength);
 
     float3 wsNormal = CalculateSmoothedWetGroundNormal(
         uv,
@@ -506,10 +618,14 @@ float4 PSMain(PS_INPUT input) : SV_TARGET
     float puddleBoundaryMask = CalculatePuddleBoundaryMask(
         uv, wsPosition, geometricWSNormal);
     float puddleSupportFade = lerp(0.82f, 1.0f, smoothstep(0.05f, 0.95f, puddleSurfaceSupport));
-    puddleMask *= puddleSupportFade * puddleBoundaryMask;
+    puddleMask *= puddleSupportFade
+        * puddleBoundaryMask
+        * materialPuddleEligibility;
     float materialWetStrength = materialWetGroundSSRStrength * lerp(0.72f, 1.0f, wetness);
-    float materialWetMask = commonWetMask * materialWetStrength * max(WG_WetMaterialReflectionsStrength, 0.0f);
-    puddleMask = saturate(puddleMask * max(WG_ProceduralPuddlesStrength, 0.0f));
+    float materialWetMask = commonWetMask * materialWetStrength
+        * max(WG_WetMaterialReflectionsStrength, 0.0f);
+    puddleMask = saturate(
+        puddleMask * max(WG_ProceduralPuddlesStrength, 0.0f));
     float puddleRainExposure = smoothstep(0.10f, 0.72f, rainExposure);
     float puddleWetMask = saturate(
         wetness * wetSSRVisibility * puddleMask * puddleRainExposure * 1.12f);
@@ -547,10 +663,17 @@ float4 PSMain(PS_INPUT input) : SV_TARGET
             impactRipple, impactRing, impactPulse);
 
     }
-    float wetGroundRainImpactsStrength = max(WG_WetGroundRainImpactsStrength, 0.0f);
-    float2 rippleDistortion = impactRipple * rainImpactVisibility * puddleRainResponse * wetGroundRainImpactsStrength;
-    float ringVisibility = saturate(impactRing) * rainImpactVisibility * puddleRainResponse * wetGroundRainImpactsStrength;
-    float centralImpactVisibility = saturate(impactPulse) * rainImpactVisibility * puddleRainResponse * wetGroundRainImpactsStrength;
+    float wetGroundRainImpactsStrength =
+        max(WG_WetGroundRainImpactsStrength, 0.0f);
+    float2 rippleDistortion =
+        impactRipple * rainImpactVisibility * puddleRainResponse
+        * wetGroundRainImpactsStrength;
+    float ringVisibility =
+        saturate(impactRing) * rainImpactVisibility * puddleRainResponse
+        * wetGroundRainImpactsStrength;
+    float centralImpactVisibility =
+        saturate(impactPulse) * rainImpactVisibility * puddleRainResponse
+        * wetGroundRainImpactsStrength;
     float3 viewRay = normalize(wsPosition - WG_CameraPosition);
     float puddleViewFacing = saturate(dot(-viewRay, geometricWSNormal));
     float puddleGrazing = pow(1.0f - puddleViewFacing, 2.5f);
@@ -569,15 +692,7 @@ float4 PSMain(PS_INPUT input) : SV_TARGET
     float puddleCore = puddleBodyMask;
     float puddleSurfacePresence = puddleWaterMask * saturate(
         lerp(0.68f, 0.80f, puddleGrazing) + puddleDistanceVisibility * 0.020f);
-    float3 puddleEarthTint = float3(0.085f, 0.064f, 0.043f);
-    float puddleTintAmount = puddleInteriorMask * slopeWaterFade * lerp(0.050f, 0.022f, puddleGrazing);
-    float puddleInteriorDarkening = puddleInteriorMask * slopeWaterFade
-        * lerp(0.36f, 0.28f, puddleGrazing);
-    float puddleDarken = 1.0f - puddleInteriorDarkening;
-    float3 surfaceColor = lerp(
-        sceneColor * puddleDarken,
-        puddleEarthTint,
-        puddleTintAmount);
+    float3 surfaceColor = sceneColor;
 
     float materialMicrostructure = lerp(0.115f, 0.045f, puddleMask);
     float2 baseNormalDistortion = float2(staticDistortion.x * 0.55f, staticDistortion.y * 0.85f);
@@ -597,34 +712,120 @@ float4 PSMain(PS_INPUT input) : SV_TARGET
         wetBaseNormal + float3(rainNormalDistortion.x, 0.0f, rainNormalDistortion.y));
 
     float3 rayDirection = normalize(reflect(viewRay, wetNormal));
-    if (rayDirection.y <= 0.015f) return float4(surfaceColor, 1.0f);
+    if (rayDirection.y <= 0.015f)
+        return float4(surfaceColor, 1.0f);
 
-#define WETGROUND_SSR_MAX_STEPS 18
-#define WETGROUND_SSR_REFINE_STEPS 5
-#define WETGROUND_SSR_MAX_DISTANCE 36000.0f
-#define WETGROUND_SSR_THICKNESS 350.0f
-#define WETGROUND_SSR_START_BIAS 8.0f
-#define WETGROUND_SSR_EDGE_FADE 0.001f
+    float3 rayPosition = wsPosition + wetNormal * 8.0f;
+    float3 previousRayPosition = rayPosition;
+    float stepSize = 18.0f;
+    float2 hitUV = 0.0f;
+    float hitWeight = 0.0f;
+    float2 skyUV = 0.0f;
+    float skyWeight = 0.0f;
 
-    SSRTraceResult wetGroundTrace = SSRCore_TraceWorldRay(
-        TX_Depth,
-        wsPosition, rayDirection,
-        WG_ViewProj, 1.0f / WG_InvResolution,
-        WG_ProjParams.z, WG_ProjParams.w,
-        WETGROUND_SSR_MAX_DISTANCE, WETGROUND_SSR_MAX_STEPS, WETGROUND_SSR_REFINE_STEPS,
-        WETGROUND_SSR_START_BIAS, WETGROUND_SSR_THICKNESS, WETGROUND_SSR_EDGE_FADE);
+    [loop]
+    for (int i = 0; i < 18; ++i)
+    {
+        previousRayPosition = rayPosition;
+        rayPosition += rayDirection * stepSize;
 
-    float2 hitUV = wetGroundTrace.hitUV;
-    float hitWeight = saturate(wetGroundTrace.confidence);
-    float2 skyUV = wetGroundTrace.skyUV;
-    float skyWeight = saturate(wetGroundTrace.skyWeight);
+        float4 projected = mul(float4(rayPosition, 1.0f), WG_ViewProj);
+        if (projected.w <= 0.0f)
+            break;
 
-#undef WETGROUND_SSR_MAX_STEPS
-#undef WETGROUND_SSR_REFINE_STEPS
-#undef WETGROUND_SSR_MAX_DISTANCE
-#undef WETGROUND_SSR_THICKNESS
-#undef WETGROUND_SSR_START_BIAS
-#undef WETGROUND_SSR_EDGE_FADE
+        projected.xyz /= projected.w;
+        float2 sampleUV = projected.xy * float2(0.5f, -0.5f) + 0.5f;
+        if (any(sampleUV < 0.0f) || any(sampleUV > 1.0f) || projected.z < 0.0f || projected.z > 1.0f)
+            break;
+
+        float edge = max(abs(sampleUV.x - 0.5f), abs(sampleUV.y - 0.5f)) * 2.0f;
+        float screenWeight = 1.0f - smoothstep(0.76f, 1.0f, edge);
+        float sampleDepth = TX_Depth.SampleLevel(SS_Linear, sampleUV, 0).r;
+
+        if (sampleDepth <= 1e-7f)
+        {
+            skyUV = sampleUV;
+            skyWeight = screenWeight;
+            stepSize *= 1.10f;
+            continue;
+        }
+
+        float sampleZ = WG_ProjParams.z / (sampleDepth - WG_ProjParams.w);
+        float depthDifference = projected.w - sampleZ;
+
+        if (depthDifference > 0.0f && depthDifference < stepSize * 1.15f)
+        {
+            float3 refinementLow = previousRayPosition;
+            float3 refinementHigh = rayPosition;
+            float2 refinedUV = sampleUV;
+            float refinedScreenWeight = screenWeight;
+            float refinedDepthError = abs(depthDifference);
+
+            [unroll]
+            for (int refinementStep = 0; refinementStep < 4; ++refinementStep)
+            {
+                float3 refinementPosition = (refinementLow + refinementHigh) * 0.5f;
+                float4 refinementProjected = mul(float4(refinementPosition, 1.0f), WG_ViewProj);
+
+                if (refinementProjected.w <= 0.0f)
+                {
+                    refinementHigh = refinementPosition;
+                    continue;
+                }
+
+                refinementProjected.xyz /= refinementProjected.w;
+                float2 refinementUV = refinementProjected.xy * float2(0.5f, -0.5f) + 0.5f;
+
+                if (any(refinementUV < 0.0f) || any(refinementUV > 1.0f)
+                    || refinementProjected.z < 0.0f || refinementProjected.z > 1.0f)
+                {
+                    refinementHigh = refinementPosition;
+                    continue;
+                }
+
+                float refinementDepth = TX_Depth.SampleLevel(SS_Linear, refinementUV, 0).r;
+                if (refinementDepth <= 1e-7f)
+                {
+                    refinementLow = refinementPosition;
+                    continue;
+                }
+
+                float refinementDenominator = refinementDepth - WG_ProjParams.w;
+                if (abs(refinementDenominator) <= 1e-7f)
+                {
+                    refinementHigh = refinementPosition;
+                    continue;
+                }
+
+                float refinementSampleZ = WG_ProjParams.z / refinementDenominator;
+                float refinementDifference = refinementProjected.w - refinementSampleZ;
+                float candidateDepthError = abs(refinementDifference);
+
+                if (candidateDepthError < refinedDepthError)
+                {
+                    refinedDepthError = candidateDepthError;
+                    refinedUV = refinementUV;
+                    float refinementEdge = max(abs(refinementUV.x - 0.5f), abs(refinementUV.y - 0.5f)) * 2.0f;
+                    refinedScreenWeight = 1.0f - smoothstep(0.76f, 1.0f, refinementEdge);
+                }
+
+                if (refinementDifference > 0.0f)
+                    refinementHigh = refinementPosition;
+                else
+                    refinementLow = refinementPosition;
+            }
+
+            float maximumRefinedError = max(1.25f, stepSize * 0.22f);
+            if (refinedDepthError <= maximumRefinedError)
+            {
+                hitUV = refinedUV;
+                hitWeight = refinedScreenWeight;
+            }
+            break;
+        }
+
+        stepSize *= 1.10f;
+    }
 
     float2 reflectionRippleOffset = rippleDistortion * float2(0.0040f, 0.0040f);
     float3 reflectedColor = surfaceColor;
@@ -713,9 +914,6 @@ float4 PSMain(PS_INPUT input) : SV_TARGET
         reflectedColor,
         max(reflectedColor, neutralWaterAmbient),
         darkReflectionSupport * 0.09f);
-    float puddleReflectionDarkening = puddleInteriorMask * slopeWaterFade
-        * lerp(0.075f, 0.040f, puddleGrazing);
-    reflectedColor *= 1.0f - puddleReflectionDarkening;
     reflectionLuma = dot(reflectedColor, float3(0.2126f, 0.7152f, 0.0722f));
     float puddleHighlightCompression =
         max(0.0f, reflectionLuma - 0.58f) * lerp(0.14f, 0.30f, puddleMask);
@@ -733,7 +931,9 @@ float4 PSMain(PS_INPUT input) : SV_TARGET
     float materialReflectionBlend =
         materialWetMask * reflectionWeight * materialFresnel * WG_Strength * 2.60f;
     float puddleReflectionBlend =
-        puddleWetMask * slopeWaterFade * reflectionWeight * lerp(0.14f, 0.28f, puddleFresnel) * WG_Strength * 5.20f * max(WG_PuddleReflectionsStrength, 0.0f);
+        puddleWetMask * slopeWaterFade * reflectionWeight
+        * lerp(0.14f, 0.28f, puddleFresnel) * WG_Strength * 5.20f
+        * max(WG_PuddleReflectionsStrength, 0.0f);
     float reflectionBlend = saturate(
         materialReflectionBlend + puddleReflectionBlend * (1.0f - materialReflectionBlend));
 

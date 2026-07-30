@@ -10,6 +10,10 @@
 #define MAX_CSM_CASCADES 4
 #endif
 
+#ifndef SURFACE_DETAILS_ENABLED
+#define SURFACE_DETAILS_ENABLED 1
+#endif
+
 cbuffer DS_ScreenQuadConstantBuffer : register(b0)
 {
     float4 SQ_ProjParams; // x = 1/P._11, y = 1/P._22, z = P._43, w = P._33
@@ -184,9 +188,13 @@ void ApplySceneWettness(float3 wsPosition, float3 vsPosition, float3 vsDir, inou
     pixelWettnes *= surfaceExposure;
     pixelWettnes *= 0.72f;
     localWettness = pixelWettnes;
-	
-    vsNormal = lerp(vsNormal, nrm, AC_RainFXWeight * pixelWettnes * 0.38f); // Only apply deformation if it's actually raining
-	
+#if SURFACE_DETAILS_ENABLED == 1
+    vsNormal = lerp(
+        vsNormal, nrm, AC_RainFXWeight * pixelWettnes * 0.5f);
+#else
+    vsNormal = lerp(
+        vsNormal, nrm, pixelWettnes * 0.5f);
+#endif
 	// Get fresnel-effect
     // float fresnel = pow(1.0f - max(0.0f, dot(vsNormal, -vsDir)), 160.0f);
     

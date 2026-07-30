@@ -44,7 +44,7 @@ struct RendererNightTestSettings {
     bool EnableSceneWetnessEffects = true;
     float SceneWetnessEffectsStrength = 1.0f;
     bool EnableWetMaterialReflections = true;
-    float WetMaterialReflectionsStrength = 1.0f;
+    float WetMaterialReflectionsStrength = 1.5f;
     bool EnableProceduralPuddles = true;
     float ProceduralPuddlesStrength = 1.0f;
     bool EnablePuddleReflections = true;
@@ -91,7 +91,7 @@ inline void ResetTransparencyStructuralTests() {
     night.EnableSceneWetnessEffects = true;
     night.SceneWetnessEffectsStrength = 1.0f;
     night.EnableWetMaterialReflections = true;
-    night.WetMaterialReflectionsStrength = 1.0f;
+    night.WetMaterialReflectionsStrength = 1.5f;
     night.EnableProceduralPuddles = true;
     night.ProceduralPuddlesStrength = 1.0f;
     night.EnablePuddleReflections = true;

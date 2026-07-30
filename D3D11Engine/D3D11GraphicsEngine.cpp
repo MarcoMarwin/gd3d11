@@ -5323,15 +5323,19 @@ XRESULT D3D11GraphicsEngine::DrawMeshInfoListAlphablended( const std::vector<std
             ffdata.textureFactor = ComputeTransparencyTextureFactor( meshKey.Material );
 
             float transparentWorldMeshDaylightFactor = 1.0f;
+            float transparentWorldMeshRainFactor = 0.0f;
             if ( Engine::GAPI ) {
                 if ( GSky* sky = Engine::GAPI->GetSky() ) {
-                    const float sunHeight = sky->GetAtmosphereCB().AC_LightPos.y;
+                    const auto& atmosphere = sky->GetAtmosphereCB();
+                    const float sunHeight = atmosphere.AC_LightPos.y;
                     const float linearDaylightFactor = std::clamp( (sunHeight + 0.08f) / 0.20f, 0.0f, 1.0f );
                     transparentWorldMeshDaylightFactor = linearDaylightFactor * linearDaylightFactor * (3.0f - 2.0f * linearDaylightFactor);
+                    transparentWorldMeshRainFactor = std::clamp( atmosphere.AC_SceneWettness, 0.0f, 1.0f );
                 }
             }
 
-            float transparentWorldMeshBrightness = std::lerp( 0.10f, 1.00f, transparentWorldMeshDaylightFactor );
+            const float transparentWorldMeshDayBrightnessMax = std::lerp( 1.00f, 0.50f, transparentWorldMeshRainFactor );
+            float transparentWorldMeshBrightness = std::lerp( 0.10f, transparentWorldMeshDayBrightnessMax, transparentWorldMeshDaylightFactor );
             float transparentWorldMeshAlpha = std::lerp( 0.50f, 1.00f, transparentWorldMeshDaylightFactor );
 
             // BEGIN TEMPORARY RENDERER TEST OVERRIDES
@@ -5454,6 +5458,29 @@ XRESULT D3D11GraphicsEngine::DrawMeshInfoListAlphablended( const std::vector<std
 
     Engine::GAPI->GetRendererState().DepthState.DepthWriteEnabled = true;
     Engine::GAPI->GetRendererState().DepthState.SetDirty();
+
+    // BEGIN TEMPORARY RENDERER TEST OVERRIDES
+    const bool disableTransparentWorldMeshDepthFogReplay = transparencyTestOverridesEnabled && transparencyTests.DisableTransparentWorldMeshDepthFogReplay;
+    if ( !disableTransparentWorldMeshDepthFogReplay ) {
+        Engine::GAPI->GetRendererState().BlendState.ColorWritesEnabled = false;
+        Engine::GAPI->GetRendererState().BlendState.SetDirty();
+
+        UpdateRenderStates();
+
+        // Draw again, but only to depthbuffer this time to make them work with
+        // fogging
+        for ( auto const& [meshKey, meshInfo] : list ) {
+            if ( meshKey.Material->GetAniTexture() != nullptr && meshKey.Info->MaterialType != MaterialInfo::MT_Portal ) {
+                // Draw the section-part
+                DrawVertexBufferIndexedUINT( nullptr, nullptr, meshInfo->Indices.size(),
+                    meshInfo->BaseIndexLocation );
+            }
+        }
+    }
+    // END TEMPORARY RENDERER TEST OVERRIDES
+
+    Engine::GAPI->GetRendererState().BlendState.ColorWritesEnabled = true;
+    Engine::GAPI->GetRendererState().BlendState.SetDirty();
     UpdateRenderStates();
 
     return XR_SUCCESS;
