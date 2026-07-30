@@ -848,3 +848,6 @@ Dokumentation der gepushten Renderer-Builds.
 - Wet Ground SSR: Materialien mit wetGroundSSRStrength 0.0 vollstaendig von prozeduralen Pfuetzen ausgeschlossen (materialPuddleEligibility via step).
 - HDR: Dateiname von hdr.h zu HDR.h in Git korrigiert.
 
+
+- Korrekturpush: Fehlende Struct-Member Definition und Reset-Zuweisung fuer DisableTransparentWorldMeshDepthFogReplay in RendererTestSettings.h sowie zugehoerige F11-Checkbox in ImGuiShim.cpp korrigiert (Fix fuer Compilerfehler C2039/C2737 in Release_G1_AVX2).
+

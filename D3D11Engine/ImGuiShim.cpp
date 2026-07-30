@@ -1210,6 +1210,7 @@ namespace {
         ImGui::Checkbox( "Use Base Texture For Transparent World Meshes", &night.UseBaseTextureForTransparentWorldMeshes );
         ImGui::Checkbox( "Use Nightly World Transparency Tessellation Reset", &night.UseNightlyWorldTransparencyTessellationReset );
         ImGui::Checkbox( "Use Nightly Waterfall Transparency Classification", &night.UseNightlyWaterfallTransparencyClassification );
+        ImGui::Checkbox( "Disable Transparent World Mesh Depth Fog Replay", &night.DisableTransparentWorldMeshDepthFogReplay );
 
         ImGui::Separator();
         ImGui::Separator();
