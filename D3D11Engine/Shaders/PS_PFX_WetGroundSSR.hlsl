@@ -28,7 +28,8 @@ cbuffer WetGroundSSRConstantBuffer : register(b0)
     float WG_ProceduralPuddlesStrength;
     float WG_PuddleReflectionsStrength;
     float WG_WetGroundRainImpactsStrength;
-    float2 WG_Pad;
+    float WG_PuddleAccumulation;
+    float WG_Pad;
 };
 
 SamplerState SS_Linear : register(s0);
@@ -611,9 +612,10 @@ float4 PSMain(PS_INPUT input) : SV_TARGET
     float upwardMask = smoothstep(0.38f, 0.82f, geometricWSNormal.y);
     float rainExposure = GetRainExposure(wsPosition);
     float wetness = saturate(WG_Wetness);
+    float puddleAccumulation = smoothstep( 0.18f, 0.95f, saturate(WG_PuddleAccumulation));
     float commonWetMask = upwardMask * rainExposure * wetness * wetSSRVisibility;
     float puddleMask = CalculatePuddleMask(
-        wsPosition, geometricWSNormal.y, wetness);
+        wsPosition, geometricWSNormal.y, puddleAccumulation);
     float puddleSurfaceSupport = CalculatePuddleSurfaceSupport(wsPosition, geometricWSNormal, uv);
     float puddleBoundaryMask = CalculatePuddleBoundaryMask(
         uv, wsPosition, geometricWSNormal);
@@ -628,7 +630,7 @@ float4 PSMain(PS_INPUT input) : SV_TARGET
         puddleMask * max(WG_ProceduralPuddlesStrength, 0.0f));
     float puddleRainExposure = smoothstep(0.10f, 0.72f, rainExposure);
     float puddleWetMask = saturate(
-        wetness * wetSSRVisibility * puddleMask * puddleRainExposure * 1.12f);
+        puddleAccumulation * wetSSRVisibility * puddleMask * puddleRainExposure * 1.12f);
     float wetMask = saturate(materialWetMask + puddleWetMask * (1.0f - materialWetMask));
     if (wetMask <= 0.01f)
         return float4(sceneColor, 1.0f);
@@ -644,8 +646,8 @@ float4 PSMain(PS_INPUT input) : SV_TARGET
     float rainAmount = saturate(WG_RainFXWeight);
     float rainImpactVisibility =
         saturate(materialWetMask + puddleWetMask) * rainAmount * smoothstep(0.05f, 0.45f, WG_Wetness);
-    float puddleRainResponse = lerp(0.62f, 2.20f, puddleMask);
-    float impactDensity = rainAmount * lerp(0.58f, 1.0f, rainAmount);
+    float rainSurfaceResponse = lerp(1.10f, 2.20f, puddleMask);
+    float impactDensity = rainAmount * lerp(0.64f, 1.0f, rainAmount);
     float2 impactRipple = float2(0.0f, 0.0f);
     float impactRing = 0.0f;
     float impactPulse = 0.0f;
@@ -661,19 +663,11 @@ float4 PSMain(PS_INPUT input) : SV_TARGET
         AccumulateRainImpactLayer(
             wsPosition.xz, animationTime, 31.0f, 1.92f, impactDensity * 0.94f, 23.41f,
             impactRipple, impactRing, impactPulse);
-
     }
-    float wetGroundRainImpactsStrength =
-        max(WG_WetGroundRainImpactsStrength, 0.0f);
-    float2 rippleDistortion =
-        impactRipple * rainImpactVisibility * puddleRainResponse
-        * wetGroundRainImpactsStrength;
-    float ringVisibility =
-        saturate(impactRing) * rainImpactVisibility * puddleRainResponse
-        * wetGroundRainImpactsStrength;
-    float centralImpactVisibility =
-        saturate(impactPulse) * rainImpactVisibility * puddleRainResponse
-        * wetGroundRainImpactsStrength;
+    float wetGroundRainImpactsStrength = max(WG_WetGroundRainImpactsStrength, 0.0f);
+    float2 rippleDistortion = impactRipple * rainImpactVisibility * rainSurfaceResponse * wetGroundRainImpactsStrength;
+    float ringVisibility = saturate(impactRing) * rainImpactVisibility * rainSurfaceResponse * wetGroundRainImpactsStrength;
+    float centralImpactVisibility = saturate(impactPulse) * rainImpactVisibility * rainSurfaceResponse * wetGroundRainImpactsStrength;
     float3 viewRay = normalize(wsPosition - WG_CameraPosition);
     float puddleViewFacing = saturate(dot(-viewRay, geometricWSNormal));
     float puddleGrazing = pow(1.0f - puddleViewFacing, 2.5f);
@@ -683,30 +677,33 @@ float4 PSMain(PS_INPUT input) : SV_TARGET
     float puddleInteriorMask = smoothstep(0.12f, 0.88f, puddleWetMask);
     float slopeWaterFeather = max(0.018f, fwidth(geometricWSNormal.y) * 2.5f);
     float slopeWaterFade = smoothstep(
-        0.955f - slopeWaterFeather,
-        0.992f + slopeWaterFeather,
-        geometricWSNormal.y);
+        0.955f - slopeWaterFeather, 0.992f + slopeWaterFeather, geometricWSNormal.y);
     slopeWaterFade = slopeWaterFade * slopeWaterFade * (3.0f - 2.0f * slopeWaterFade);
     float puddleWaterMask = puddleTransitionMask * slopeWaterFade;
     float puddleBodyMask = puddleInteriorMask * slopeWaterFade;
     float puddleCore = puddleBodyMask;
     float puddleSurfacePresence = puddleWaterMask * saturate(
         lerp(0.68f, 0.80f, puddleGrazing) + puddleDistanceVisibility * 0.020f);
+
+    float solidGroundImpactMask = (1.0f - smoothstep(0.12f, 0.72f, puddleMask)) * centralImpactVisibility;
     float3 surfaceColor = sceneColor;
+    float3 boundedImpactLift = max(1.0f - saturate(surfaceColor), 0.0f) * float3(0.075f, 0.085f, 0.095f);
+    surfaceColor += boundedImpactLift * saturate(solidGroundImpactMask);
 
     float materialMicrostructure = lerp(0.115f, 0.045f, puddleMask);
     float2 baseNormalDistortion = float2(staticDistortion.x * 0.55f, staticDistortion.y * 0.85f);
     float3 materialWetNormal = normalize(
         wsNormal + float3(baseNormalDistortion.x, 0.0f, baseNormalDistortion.y) * materialMicrostructure);
-
     float3 puddlePlaneNormal = normalize(
         lerp(geometricWSNormal, float3(0.0f, 1.0f, 0.0f), 0.78f));
     float puddleNormalBlend = puddleWaterMask;
     float3 wetBaseNormal = normalize(
         lerp(materialWetNormal, puddlePlaneNormal, puddleNormalBlend));
 
-    float ringNormalStrength = lerp(0.055f, 0.145f, puddleMask);
-    float ringShapeStrength = saturate(ringVisibility * 0.32f + centralImpactVisibility * 0.18f);
+    float ringNormalStrength = lerp(0.085f, 0.145f, puddleMask);
+    float ringShapeStrength = saturate(
+        ringVisibility * lerp(0.38f, 0.32f, puddleMask) +
+        centralImpactVisibility * lerp(0.42f, 0.18f, puddleMask));
     float2 rainNormalDistortion = rippleDistortion * ringNormalStrength * (1.0f + ringShapeStrength);
     float3 wetNormal = normalize(
         wetBaseNormal + float3(rainNormalDistortion.x, 0.0f, rainNormalDistortion.y));

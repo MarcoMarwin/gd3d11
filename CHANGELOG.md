@@ -851,3 +851,6 @@ Dokumentation der gepushten Renderer-Builds.
 
 - Korrekturpush: Fehlende Struct-Member Definition und Reset-Zuweisung fuer DisableTransparentWorldMeshDepthFogReplay in RendererTestSettings.h sowie zugehoerige F11-Checkbox in ImGuiShim.cpp korrigiert (Fix fuer Compilerfehler C2039/C2737 in Release_G1_AVX2).
 
+
+## Build 183 (Korrekturpush)
+- Korrekturpush: DoF-Composite repariert, fehlerhafter SkyEdgeBlur-Rekonstruktionspfad entfernt und durch stabilen early-out fuer Sky-Pixel (sharpColor) ersetzt, um Artefakte an Alpha-Test-Silhouetten zu beheben.

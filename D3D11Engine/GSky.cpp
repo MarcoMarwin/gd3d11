@@ -436,16 +436,12 @@ XRESULT GSky::RenderSky() {
     const RendererTestSettings& rendererTestSettings = GetRendererTestSettings();
     const bool nightTestOverridesEnabled = rendererTestSettings.EnableOverrides;
     const RendererNightTestSettings& nightTests = rendererTestSettings.Night;
-    const float sceneWetnessEffectsStrength = nightTestOverridesEnabled
-        ? (nightTests.EnableSceneWetnessEffects
-            ? std::clamp( nightTests.SceneWetnessEffectsStrength, 0.0f, 2.0f )
-            : 0.0f)
-        : 1.0f;
+
     if ( !Engine::GAPI->GetRendererState().RendererSettings.EnableRain ) {
         AtmosphereCB.AC_SceneWettness = 0.f;
     } else {
         AtmosphereCB.AC_SceneWettness =
-            Engine::GAPI->GetSceneWetness() * sceneWetnessEffectsStrength;
+            Engine::GAPI->GetSceneWetness();
     }
     AtmosphereCB.AC_RainFXWeight = atmosphericRainWeight;
     AtmosphereCB.AC_EnableSSR = Engine::GAPI->GetRendererState().RendererSettings.EnableSSR ? 1.0f : 0.0f;

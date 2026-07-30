@@ -375,7 +375,8 @@ struct WetGroundSSRConstantBuffer {
     float WG_ProceduralPuddlesStrength;
     float WG_PuddleReflectionsStrength;
     float WG_WetGroundRainImpactsStrength;
-    float2 WG_Pad;
+    float WG_PuddleAccumulation;
+    float WG_Pad;
 };
 
 static_assert( sizeof(WetGroundSSRConstantBuffer) == 288, "WetGroundSSRConstantBuffer must be exactly 288 bytes" );

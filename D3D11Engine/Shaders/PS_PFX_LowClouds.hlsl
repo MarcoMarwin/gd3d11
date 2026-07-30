@@ -49,7 +49,13 @@ float3 VSPositionFromDepth( float depth, float2 vTexCoord )
     return ReconstructVSPositionFromDepthReverseZInfinite( depth, vTexCoord, HF_ProjParams.xy );
 }
 
-float LoadClosestDepth2x2( float2 texcoord )
+struct DepthCoverage2x2
+{
+    float ClosestDepth;
+    float SkyCoverage;
+};
+
+DepthCoverage2x2 LoadDepthCoverage2x2( float2 texcoord )
 {
     uint depthWidth;
     uint depthHeight;
@@ -71,17 +77,27 @@ float LoadClosestDepth2x2( float2 texcoord )
     float depth01 = TX_Depth.Load( int3( pixel01, 0 ) ).r;
     float depth11 = TX_Depth.Load( int3( pixel11, 0 ) ).r;
 
-    // Reversed-Z: the largest value is the closest surface in this 2x2 footprint.
-    return max( max( depth00, depth10 ), max( depth01, depth11 ) );
+    const float skyDepthEpsilon = 0.00001f;
+    float skyCount =
+        ( depth00 < skyDepthEpsilon ? 1.0f : 0.0f )
+        + ( depth10 < skyDepthEpsilon ? 1.0f : 0.0f )
+        + ( depth01 < skyDepthEpsilon ? 1.0f : 0.0f )
+        + ( depth11 < skyDepthEpsilon ? 1.0f : 0.0f );
+
+    DepthCoverage2x2 result;
+    result.ClosestDepth = max( max( depth00, depth10 ), max( depth01, depth11 ) );
+    result.SkyCoverage = skyCount * 0.25f;
+
+    return result;
 }
 
 PS_OUTPUT PSMain( PS_INPUT Input )
 {
-    float expDepth = LoadClosestDepth2x2( Input.vTexcoord );
-    float skyPixel = 1.0f - step( 0.00001f, expDepth );
-    float3 worldPosition = VSPositionFromDepth( expDepth, Input.vTexcoord );
+    DepthCoverage2x2 depthCoverage = LoadDepthCoverage2x2( Input.vTexcoord );
+    float skyPixel = depthCoverage.SkyCoverage;
+    float cloudRayDepth = skyPixel > 0.0f ? 0.0f : depthCoverage.ClosestDepth;
+    float3 worldPosition = VSPositionFromDepth( cloudRayDepth, Input.vTexcoord );
     worldPosition = mul( float4( worldPosition, 1.0f ), HF_InvView ).xyz;
-
     float cameraDistance = length( worldPosition - HF_CameraPosition );
     float nightTimeBlend = smoothstep( 0.0f, 1.0f, saturate( -AC_LightPos.y * 4.0f ) )
         * saturate( AC_EnableNightAtmosphere );
@@ -165,18 +181,18 @@ PS_OUTPUT PSMain( PS_INPUT Input )
         * 0.24f;
 
     float transmittedCloudAlpha =
-        originalCloudAlpha;
+        originalCloudAlpha * skyPixel;
 
     float layerAlpha =
         saturate(
             originalCloudAlpha
             + moonDiskOcclusion
-                * ( 1.0f - originalCloudAlpha ) );
+                * ( 1.0f - originalCloudAlpha ) ) * skyPixel;
 
     PS_OUTPUT output;
     output.Clouds = float4(
         clouds.rgb * transmittedCloudAlpha,
         layerAlpha );
-    output.Depth = expDepth;
+    output.Depth = skyPixel > 0.0f ? 0.0f : depthCoverage.ClosestDepth;
     return output;
 }

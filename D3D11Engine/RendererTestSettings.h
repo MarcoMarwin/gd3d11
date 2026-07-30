@@ -42,8 +42,6 @@ struct RendererNightTestSettings {
     bool UseNightlyWorldTransparencyTessellationReset = false;
     bool UseNightlyWaterfallTransparencyClassification = false;
     bool DisableTransparentWorldMeshDepthFogReplay = false;
-    bool EnableSceneWetnessEffects = true;
-    float SceneWetnessEffectsStrength = 1.0f;
     bool EnableWetMaterialReflections = true;
     float WetMaterialReflectionsStrength = 1.5f;
     bool EnableProceduralPuddles = true;
@@ -90,8 +88,6 @@ inline void ResetTransparencyStructuralTests() {
     night.UseNightlyWorldTransparencyTessellationReset = false;
     night.UseNightlyWaterfallTransparencyClassification = false;
     night.DisableTransparentWorldMeshDepthFogReplay = false;
-    night.EnableSceneWetnessEffects = true;
-    night.SceneWetnessEffectsStrength = 1.0f;
     night.EnableWetMaterialReflections = true;
     night.WetMaterialReflectionsStrength = 1.5f;
     night.EnableProceduralPuddles = true;

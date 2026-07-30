@@ -116,43 +116,7 @@ float ComputeCoCFromDepth( float d, float focusDepth, float2 texcoord )
     return max( farCoC, nearCoC );
 }
 
-static const int SKY_EDGE_SAMPLE_COUNT = 24;
 
-float2 GetSkyEdgeSpiralSample(int index)
-{
-    float radius = sqrt((float(index) + 0.5f) / float(SKY_EDGE_SAMPLE_COUNT));
-    float angle = float(index) * 2.39996323f;
-    return float2(cos(angle), sin(angle)) * radius;
-}
-
-float4 GetSkyEdgeBlurSample(float2 texcoord, float2 dtexel, float focusDepth)
-{
-    float3 colorAccum = 0.0f;
-    float coverageAccum = 0.0f;
-    float kernelAccum = 0.0f;
-    float edgeRadius = clamp(max(DoF_BokehRadius, DoF_MaxBlur) * 0.22f, 2.0f, 10.0f);
-
-    [unroll]
-    for (int i = 0; i < SKY_EDGE_SAMPLE_COUNT; ++i)
-    {
-        float2 offset = GetSkyEdgeSpiralSample(i);
-        float2 sampleUV = texcoord + offset * edgeRadius * dtexel;
-        float depth = TX_Depth.SampleLevel(SS_Linear, sampleUV, 0).r;
-        float coc = ComputeCoCFromDepth(depth, focusDepth, sampleUV);
-        float4 blur = TX_Blur.SampleLevel(SS_Linear, sampleUV, 0);
-        float radialWeight = exp(-dot(offset, offset) * 2.4f);
-        float geometryWeight = IsSkyDepth(depth) ? 0.0f : smoothstep(0.12f, 0.65f, coc);
-        float sampleWeight = radialWeight * geometryWeight;
-
-        colorAccum += blur.rgb * sampleWeight;
-        coverageAccum += sampleWeight;
-        kernelAccum += radialWeight;
-    }
-
-    float coverage = saturate(coverageAccum / max(kernelAccum, 0.001f) * 2.2f);
-    float blend = smoothstep(0.02f, 0.85f, coverage);
-    return float4(colorAccum / max(coverageAccum, 0.001f), blend);
-}
 
 [numthreads(8, 8, 1)]
 void CSMain( uint3 DTid : SV_DispatchThreadID )
@@ -178,8 +142,7 @@ void CSMain( uint3 DTid : SV_DispatchThreadID )
     float4 blurSample = TX_Blur.SampleLevel( SS_Linear, texcoord, 0 );
     if ( IsSkyDepth( depthC ) )
     {
-        float4 skyEdgeBlur = GetSkyEdgeBlurSample( texcoord, dtexel, focusDepth );
-        OutputComposite[DTid.xy] = float4( lerp( sharpColor, skyEdgeBlur.rgb, skyEdgeBlur.a ), 1.0 );
+        OutputComposite[DTid.xy] = float4( sharpColor, 1.0f );
         return;
     }
 

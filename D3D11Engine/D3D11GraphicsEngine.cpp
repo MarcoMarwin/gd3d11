@@ -1332,6 +1332,13 @@ XRESULT D3D11GraphicsEngine::RecreateBuffers() {
 
 /** Called on window resize/resolution change */
 XRESULT D3D11GraphicsEngine::OnResize( INT2 newSize ) {
+    static bool resizeInProgress = false;
+    if ( resizeInProgress )
+    {
+        NewResolution = newSize;
+        return XR_SUCCESS;
+    }
+
     HRESULT hr;
 
     INT2 requestedSwapchainSize = newSize;
@@ -1349,6 +1356,32 @@ XRESULT D3D11GraphicsEngine::OnResize( INT2 newSize ) {
         && memcmp( &m_swapchainResolution, &requestedSwapchainSize, sizeof( requestedSwapchainSize ) ) == 0
         && SwapChain.Get() )
         return XR_SUCCESS;  // Don't resize if neither logical nor physical output changed.
+
+    resizeInProgress = true;
+    struct ResizeScope final
+    {
+        bool& Active;
+        ~ResizeScope() { Active = false; }
+    };
+    ResizeScope resizeScope{ resizeInProgress };
+
+    ID3D11DeviceContext* resizeContext = GetContext().Get();
+    if ( resizeContext )
+    {
+        ID3D11RenderTargetView* nullRenderTarget = nullptr;
+        resizeContext->OMSetRenderTargets( 1, &nullRenderTarget, nullptr );
+
+        ID3D11ShaderResourceView* nullShaderResources[16] = {};
+        resizeContext->PSSetShaderResources( 0, 16, nullShaderResources );
+        resizeContext->VSSetShaderResources( 0, 16, nullShaderResources );
+        resizeContext->GSSetShaderResources( 0, 16, nullShaderResources );
+        resizeContext->CSSetShaderResources( 0, 16, nullShaderResources );
+
+        ID3D11UnorderedAccessView* nullUnorderedAccessViews[ D3D11_PS_CS_UAV_REGISTER_COUNT] = {};
+        resizeContext->CSSetUnorderedAccessViews( 0, D3D11_PS_CS_UAV_REGISTER_COUNT, nullUnorderedAccessViews, nullptr );
+
+        resizeContext->Flush();
+    }
 
     Resolution = newSize;
     NewResolution = newSize;

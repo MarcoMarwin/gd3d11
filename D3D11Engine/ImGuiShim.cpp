@@ -1215,12 +1215,6 @@ namespace {
         ImGui::Separator();
         ImGui::Separator();
         ImGui::TextUnformatted( "Nightly Rain Effects Isolation" );
-
-        ImGui::Checkbox( "Enable Scene Wetness Effects", &night.EnableSceneWetnessEffects );
-        ImGui::SetNextItemWidth( 300.0f );
-        ImGui::SliderFloat( "Scene Wetness Effects Strength", &night.SceneWetnessEffectsStrength, 0.0f, 2.0f, "%.2f", ImGuiSliderFlags_AlwaysClamp );
-        night.SceneWetnessEffectsStrength = std::clamp( night.SceneWetnessEffectsStrength, 0.0f, 2.0f );
-
         ImGui::Checkbox( "Enable Wet Material Reflections", &night.EnableWetMaterialReflections );
         ImGui::SetNextItemWidth( 300.0f );
         ImGui::SliderFloat( "Wet Material Reflections Strength", &night.WetMaterialReflectionsStrength, 0.0f, 2.0f, "%.2f", ImGuiSliderFlags_AlwaysClamp );

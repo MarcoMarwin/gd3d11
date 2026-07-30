@@ -48,7 +48,31 @@ D3D11PfxRenderer::D3D11PfxRenderer() {
     PFX_SimpleSharpen = std::make_unique<D3D11PFX_SimpleSharpen>( this );
 }
 
-D3D11PfxRenderer::~D3D11PfxRenderer() = default;
+D3D11PfxRenderer::~D3D11PfxRenderer()
+{
+    FX_Blur.reset();
+    FX_HeightFog.reset();
+    FX_DistanceBlur.reset();
+    FX_HDR.reset();
+    FX_GodRays.reset();
+    FX_DepthOfField.reset();
+    FX_SMAA.reset();
+    PFX_CAS.reset();
+    PFX_SimpleSharpen.reset();
+    PFX_FSR3.reset();
+    PFX_XeGTAO.reset();
+
+    ScreenSpaceLightingHistory[0].reset();
+    ScreenSpaceLightingHistory[1].reset();
+    ScreenSpaceLightingDepthHistory[0].reset();
+    ScreenSpaceLightingDepthHistory[1].reset();
+    ScreenSpaceLightingHistoryValid = false;
+    ScreenSpaceLightingHistoryIndex = 0;
+    ScreenSpaceLightingFrameIndex = 0;
+
+    m_texturePool.reset();
+    m_depthStencilPool.reset();
+}
 
 /** Renders the distance blur effect */
 XRESULT D3D11PfxRenderer::RenderDistanceBlur(ID3D11ShaderResourceView* diffuse ) {
@@ -131,7 +155,8 @@ XRESULT D3D11PfxRenderer::RenderWetGroundSSR( ID3D11RenderTargetView* outputRTV,
         cb.WG_PuddleReflectionsStrength = 1.0f;
         cb.WG_WetGroundRainImpactsStrength = 1.0f;
     }
-    cb.WG_Pad = float2( 0.0f, 0.0f );
+    cb.WG_PuddleAccumulation = Engine::GAPI->GetPuddleAccumulation();
+    cb.WG_Pad = 0.0f;
     ps->GetBuffer( "WetGroundSSRConstantBuffer" ).Update( &cb ).Bind();
 
     if ( GSky* sky = Engine::GAPI->GetSky() )
