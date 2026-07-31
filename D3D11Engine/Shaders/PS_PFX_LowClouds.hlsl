@@ -49,54 +49,31 @@ float3 VSPositionFromDepth( float depth, float2 vTexCoord )
     return ReconstructVSPositionFromDepthReverseZInfinite( depth, vTexCoord, HF_ProjParams.xy );
 }
 
-struct DepthCoverage2x2
-{
-    float ClosestDepth;
-    float SkyCoverage;
-};
-
-DepthCoverage2x2 LoadDepthCoverage2x2( float2 texcoord )
-{
+float LoadClosestDepth2x2( float2 texcoord ) {
     uint depthWidth;
     uint depthHeight;
     TX_Depth.GetDimensions( depthWidth, depthHeight );
-
     int2 depthSize = max( int2( depthWidth, depthHeight ), int2( 1, 1 ) );
     int2 maxPixel = depthSize - int2( 1, 1 );
-    int2 upperPixel = int2( floor(
-        texcoord * float2( depthSize ) + 0.5f ) );
+    int2 upperPixel = int2( floor( texcoord * float2( depthSize ) + 0.5f ) );
     int2 basePixel = upperPixel - int2( 1, 1 );
-
     int2 pixel00 = clamp( basePixel, int2( 0, 0 ), maxPixel );
     int2 pixel10 = clamp( basePixel + int2( 1, 0 ), int2( 0, 0 ), maxPixel );
     int2 pixel01 = clamp( basePixel + int2( 0, 1 ), int2( 0, 0 ), maxPixel );
     int2 pixel11 = clamp( basePixel + int2( 1, 1 ), int2( 0, 0 ), maxPixel );
-
     float depth00 = TX_Depth.Load( int3( pixel00, 0 ) ).r;
     float depth10 = TX_Depth.Load( int3( pixel10, 0 ) ).r;
     float depth01 = TX_Depth.Load( int3( pixel01, 0 ) ).r;
     float depth11 = TX_Depth.Load( int3( pixel11, 0 ) ).r;
-
-    const float skyDepthEpsilon = 0.00001f;
-    float skyCount =
-        ( depth00 < skyDepthEpsilon ? 1.0f : 0.0f )
-        + ( depth10 < skyDepthEpsilon ? 1.0f : 0.0f )
-        + ( depth01 < skyDepthEpsilon ? 1.0f : 0.0f )
-        + ( depth11 < skyDepthEpsilon ? 1.0f : 0.0f );
-
-    DepthCoverage2x2 result;
-    result.ClosestDepth = max( max( depth00, depth10 ), max( depth01, depth11 ) );
-    result.SkyCoverage = skyCount * 0.25f;
-
-    return result;
+    // Reversed-Z: the largest value is the closest surface in this 2x2 footprint.
+    return max( max( depth00, depth10 ), max( depth01, depth11 ) );
 }
 
 PS_OUTPUT PSMain( PS_INPUT Input )
 {
-    DepthCoverage2x2 depthCoverage = LoadDepthCoverage2x2( Input.vTexcoord );
-    float skyPixel = depthCoverage.SkyCoverage;
-    float cloudRayDepth = skyPixel > 0.0f ? 0.0f : depthCoverage.ClosestDepth;
-    float3 worldPosition = VSPositionFromDepth( cloudRayDepth, Input.vTexcoord );
+    float expDepth = LoadClosestDepth2x2( Input.vTexcoord );
+    float skyPixel = 1.0f - step( 0.00001f, expDepth );
+    float3 worldPosition = VSPositionFromDepth( expDepth, Input.vTexcoord );
     worldPosition = mul( float4( worldPosition, 1.0f ), HF_InvView ).xyz;
     float cameraDistance = length( worldPosition - HF_CameraPosition );
     float nightTimeBlend = smoothstep( 0.0f, 1.0f, saturate( -AC_LightPos.y * 4.0f ) )
@@ -180,19 +157,10 @@ PS_OUTPUT PSMain( PS_INPUT Input )
         * backlightDensity
         * 0.24f;
 
-    float transmittedCloudAlpha =
-        originalCloudAlpha * skyPixel;
-
-    float layerAlpha =
-        saturate(
-            originalCloudAlpha
-            + moonDiskOcclusion
-                * ( 1.0f - originalCloudAlpha ) ) * skyPixel;
-
+    float transmittedCloudAlpha = originalCloudAlpha;
+    float layerAlpha = saturate( originalCloudAlpha + moonDiskOcclusion * ( 1.0f - originalCloudAlpha ) );
     PS_OUTPUT output;
-    output.Clouds = float4(
-        clouds.rgb * transmittedCloudAlpha,
-        layerAlpha );
-    output.Depth = skyPixel > 0.0f ? 0.0f : depthCoverage.ClosestDepth;
+    output.Clouds = float4( clouds.rgb * transmittedCloudAlpha, layerAlpha );
+    output.Depth = expDepth;
     return output;
 }

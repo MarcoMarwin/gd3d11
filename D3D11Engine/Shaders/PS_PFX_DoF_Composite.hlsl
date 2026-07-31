@@ -191,16 +191,17 @@ float4 PSMain( PS_INPUT Input ) : SV_TARGET
     }
 
     float minCoC = min( min( cocC, cocL ), min( cocR, min( cocU, cocD ) ) );
-
     // Keep the old erosion for normal/far DoF edges, but not for near foreground blur:
     // close NPCs and objects must soften across their silhouette instead of staying cut out.
     float nearForegroundWeight = smoothstep( 0.02f, 0.20f, nearNeighbourCoC );
     float compositeCoC = lerp( minCoC, max( cocC, blurSample.a ), nearForegroundWeight );
-
+    // Stabilize sub-pixel alpha-tested silhouettes without replacing real sky or cloud color.
+    // A thin geometry center surrounded by sky keeps more of the already composed scene,
+    // while coherent geometry retains the full existing DoF result.
+    float geometryCoverage = ( 1.0f + ( IsSkyDepth( depthL ) ? 0.0f : 1.0f ) + ( IsSkyDepth( depthR ) ? 0.0f : 1.0f ) + ( IsSkyDepth( depthU ) ? 0.0f : 1.0f ) + ( IsSkyDepth( depthD ) ? 0.0f : 1.0f ) ) * 0.2f;
+    float silhouetteConfidence = smoothstep( 0.20f, 0.80f, geometryCoverage );
     // Bilinear-upsampled half-res bokeh blur
-
-    float blendFactor = smoothstep( 0.0, 1.0, compositeCoC );
+    float blendFactor = smoothstep( 0.0f, 1.0f, compositeCoC ) * silhouetteConfidence;
     float3 finalColor = lerp( sharpColor, blurSample.rgb, blendFactor );
-
-    return float4( finalColor, 1.0 );
+    return float4( finalColor, 1.0f );
 }

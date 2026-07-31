@@ -515,22 +515,26 @@ void ImGuiShim::RenderLoop()
 
     static zSTRING GDX_IMGUI_BEGINFRAME = "GDX_IMGUI_BEGINFRAME";
     static zSTRING GDX_IMGUI_ENDFRAME = "GDX_IMGUI_ENDFRAME";
-    static int beginFrameFn = zCParser::GetParser()->GetIndex( GDX_IMGUI_BEGINFRAME );
-    static int endFrameFn = zCParser::GetParser()->GetIndex( GDX_IMGUI_ENDFRAME );
+    static int beginFrameFn = -1;
+    static int endFrameFn = -1;
+    static int retryFindFuncs = 121;
 
-    static int retryFindFuncs = 0;
-    if ( retryFindFuncs > 120 ) {
-        if ( beginFrameFn == -1 ) { beginFrameFn = zCParser::GetParser()->GetIndex( GDX_IMGUI_BEGINFRAME ); }
-        if ( endFrameFn == -1 ) { endFrameFn = zCParser::GetParser()->GetIndex( GDX_IMGUI_ENDFRAME ); }
+    zCParser* parser = zCParser::GetParser();
+
+    if ( parser && retryFindFuncs > 120 ) {
+        if ( beginFrameFn == -1 ) { beginFrameFn = parser->GetIndex( GDX_IMGUI_BEGINFRAME ); }
+        if ( endFrameFn == -1 ) { endFrameFn = parser->GetIndex( GDX_IMGUI_ENDFRAME ); }
         retryFindFuncs = 0;
+    }
+
+    if ( !parser || beginFrameFn == -1 || endFrameFn == -1 ) {
+        retryFindFuncs++;
     }
 
     LibShowBlockingThisFrame = false;
     LibShowNonBlockingThisFrame = false;
-    if ( beginFrameFn != -1 ) {
-        zCParser::GetParser()->CallFunc( beginFrameFn );
-    } else {
-        retryFindFuncs++;
+    if ( parser && beginFrameFn != -1 ) {
+        parser->CallFunc( beginFrameFn );
     }
 
     auto oldSettings = Engine::GAPI->GetRendererState().RendererSettings;
@@ -556,9 +560,9 @@ void ImGuiShim::RenderLoop()
     ImGui::Render();
     ImGui_ImplDX11_RenderDrawData( ImGui::GetDrawData() );
 
-    if ( endFrameFn != -1 ) {
-        zCParser::GetParser()->CallFunc( endFrameFn );
-    };
+    if ( parser && endFrameFn != -1 ) {
+        parser->CallFunc( endFrameFn );
+    }
 }
 
 bool ImGuiShim::GetIsActive() {
@@ -583,6 +587,16 @@ bool ImGuiShim::GetBlockGameInput()
 
 LRESULT ImGuiShim::OnWindowMessage( HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam )
 {
+    if ( msg == WM_KILLFOCUS && Initiated ) {
+        ImGuiIO& io = ImGui::GetIO();
+        io.ClearInputKeys();
+        io.AddMousePosEvent( -FLT_MAX, -FLT_MAX );
+        for ( int i = 0; i < ImGuiMouseButton_COUNT; i++ ) {
+            io.AddMouseButtonEvent( i, false );
+            io.MouseDown[i] = false;
+        }
+    }
+
     if ( Initiated && GetIsActive() )
     {
         // Queue the virtual F11 position before actions so ImGui never
@@ -815,7 +829,6 @@ struct GraphicsPresetComparable {
     bool EnableSSR;
     float SSRStrength;
     bool HeroAffectsObjects;
-    bool EnableRain;
     int OutdoorSmallVobDrawDistance;
     int SectionDrawRadius;
     float AOStrength;
@@ -841,7 +854,6 @@ GraphicsPresetComparable MakeGraphicsPresetComparable(
         s.EnableSSR,
         s.SSRStrength,
         s.HeroAffectsObjects,
-        s.EnableRain,
         ObjectDrawDistanceMetersToUi(
             s.OutdoorSmallVobDrawRadius ),
         s.SectionDrawRadius,
@@ -869,7 +881,6 @@ bool GraphicsPresetComparableEqual(
         && a.EnableSSR == b.EnableSSR
         && a.SSRStrength == b.SSRStrength
         && a.HeroAffectsObjects == b.HeroAffectsObjects
-        && a.EnableRain == b.EnableRain
         && a.OutdoorSmallVobDrawDistance
             == b.OutdoorSmallVobDrawDistance
         && a.SectionDrawRadius == b.SectionDrawRadius
@@ -891,7 +902,6 @@ void ApplyGraphicsPresets( GothicRendererSettings& s, bool applyRuntimeUpdates =
     s.EnableSSR = true;
     s.SSRStrength = 1.0f;
     s.HeroAffectsObjects = true;
-    s.EnableRain = true;
 
     // Reset all visible effect strengths to their normalized UI defaults.
     s.AOStrength = 1.0f;
@@ -917,7 +927,6 @@ void ApplyGraphicsPresets( GothicRendererSettings& s, bool applyRuntimeUpdates =
         s.EnableSSR = true;
         s.SSRStrength = 1.0f;
         s.HeroAffectsObjects = false;
-        s.EnableRain = false;
         break;
     case GothicRendererSettings::GRAPHICS_MEDIUM:
         s.ShadowMapSize = 2048;
@@ -934,7 +943,6 @@ void ApplyGraphicsPresets( GothicRendererSettings& s, bool applyRuntimeUpdates =
         s.EnableSSR = true;
         s.SSRStrength = 1.0f;
         s.HeroAffectsObjects = true;
-        s.EnableRain = true;
         break;
     case GothicRendererSettings::GRAPHICS_HIGH:
         s.ShadowMapSize = 4096;
@@ -951,7 +959,6 @@ void ApplyGraphicsPresets( GothicRendererSettings& s, bool applyRuntimeUpdates =
         s.EnableSSR = true;
         s.SSRStrength = 1.0f;
         s.HeroAffectsObjects = true;
-        s.EnableRain = true;
         break;
     case GothicRendererSettings::GRAPHICS_VERY_HIGH:
         s.ShadowMapSize = 8192;
@@ -968,7 +975,6 @@ void ApplyGraphicsPresets( GothicRendererSettings& s, bool applyRuntimeUpdates =
         s.EnableSSR = true;
         s.SSRStrength = 1.0f;
         s.HeroAffectsObjects = true;
-        s.EnableRain = true;
         break;
     default:
         return;
@@ -1401,6 +1407,9 @@ void ImGuiShim::RenderSettingsWindow()
         // All right-column value controls start at the same x position.
         const float inlineToggleWidth = (buttonWidth.x - style.ItemSpacing.x) * 0.5f;
         const float inlineToggleLabelWidth = inlineToggleWidth - ImGui::GetFrameHeight() - style.ItemSpacing.x;
+        const float compactAALabelWidth = 120.0f;
+        const float compactAAMethodWidth = 125.0f;
+        const float compactAAValueWidth = buttonWidth.x + controlWidth - compactAALabelWidth - compactAAMethodWidth - style.ItemSpacing.x;
         
         {
             ImGui::BeginGroup();
@@ -1463,13 +1472,14 @@ void ImGuiShim::RenderSettingsWindow()
                 ImGui::PushID( "AntiAliasingSettings" );
                 auto selectedMode = settings.AntiAliasingMode;
                 const bool wasFSRAntiAliasing = settings.AntiAliasingMode == GothicRendererSettings::E_AntiAliasingMode::AA_FSR3;
-                ImText( Tr( "Anti Aliasing", u8"Kantengl\u00E4ttung" ), buttonWidth ); ImGui::SameLine();
+                ImText( "Anti-Aliasing", ImVec2( compactAALabelWidth, buttonWidth.y ) );
+                ImGui::SameLine();
+                ImGui::SetNextItemWidth( compactAAMethodWidth );
                 if ( ImComboBoxCT( "##AntiAliasing", antiAliasing, &selectedMode, [&selectedMode, &settings, wasFSRAntiAliasing] {
                     const bool selectsFSRAntiAliasing = selectedMode == GothicRendererSettings::E_AntiAliasingMode::AA_FSR3;
                     if ( wasFSRAntiAliasing && !selectsFSRAntiAliasing ) {
                         settings.ResolutionScalePercent = 100;
                     }
-
                     if ( selectedMode == GothicRendererSettings::E_AntiAliasingMode::AA_FSR3 ) {
                         settings.Upscaler = GothicRendererSettings::E_Upscaler::UPSCALER_FSR_3;
                     }
@@ -1480,45 +1490,37 @@ void ImGuiShim::RenderSettingsWindow()
                     ImGui::EndCombo();
                 }
                 ImGui::SetItemTooltip( "%s", Tr( "Smooths jagged edges using the selected method.", u8"Gl\u00E4ttet sichtbare Treppenkanten mit dem gew\u00E4hlten Verfahren." ) );
+                ImGui::SameLine();
+                ImGui::SetNextItemWidth( compactAAValueWidth );
+                if ( settings.Upscaler == GothicRendererSettings::UPSCALER_FSR_3 ) {
+                    settings.ResolutionScalePercent = std::clamp( settings.ResolutionScalePercent, 33, 100 );
+                    const std::array<std::pair<const char*, int>, 6> fsrLevels = {{
+                        { Tr( "Native AA", u8"Nativ mit AA" ), 100 },
+                        { Tr( "High Quality", u8"Sehr hohe Qualit\u00E4t" ), 83 },
+                        { Tr( "Quality", u8"Qualit\u00E4t" ), 75 },
+                        { Tr( "Balanced", u8"Ausgeglichen" ), 66 },
+                        { Tr( "Performance", u8"Leistung" ), 50 },
+                        { Tr( "Ultra Performance", u8"Maximale Leistung" ), 33 },
+                    }};
+                    if ( ImComboBox( "##ResolutionScalePercent", fsrLevels, &settings.ResolutionScalePercent ) ) {
+                        ImGui::EndCombo();
+                    }
+                    ImGui::SetItemTooltip( "%s", Tr( "Balances image detail and performance when using FSR 3.", u8"Bestimmt das Verh\u00E4ltnis zwischen Bilddetails und Leistung mit FSR 3." ) );
+                } else {
+                    int resolutionScale = SnapRenderScalePercentNonFSR( settings.ResolutionScalePercent );
+                    if ( resolutionScale != settings.ResolutionScalePercent ) {
+                        settings.ResolutionScalePercent = resolutionScale;
+                        FixupSettings( settings );
+                    }
+                    if ( SliderRenderScalePercentNonFSR( "##ResolutionScalePercent", &resolutionScale ) ) {
+                        settings.ResolutionScalePercent = resolutionScale;
+                        FixupSettings( settings );
+                    }
+                    ImGui::SetItemTooltip( "%s", Tr( "Renders the scene internally at a higher resolution.", u8"Rendert die Szene intern mit einer h\u00F6heren Aufl\u00F6sung." ) );
+                }
                 ImGui::PopID();
             }
 
-            ImText( Tr( "Render Scale", u8"Renderaufl\u00F6sung" ), buttonWidth ); ImGui::SameLine();
-            if ( settings.Upscaler == GothicRendererSettings::UPSCALER_FSR_3 ) {
-                settings.ResolutionScalePercent = std::clamp( settings.ResolutionScalePercent, 33, 100 );
-                // Display "levels" as typical for FSR
-                const std::array<std::pair<const char*, int>, 6> fsrLevels = {{
-                    { Tr( "Native AA", u8"Nativ mit AA" ), 100 },
-                    { Tr( "High Quality", u8"Sehr hohe Qualit\u00E4t" ), 83 },
-                    { Tr( "Quality", u8"Qualit\u00E4t" ), 75 },
-                    { Tr( "Balanced", u8"Ausgeglichen" ), 66 },
-                    { Tr( "Performance", u8"Leistung" ), 50 },
-                    { Tr( "Ultra Performance", u8"Maximale Leistung" ), 33 },
-                }};
-                if (ImComboBox( "##ResolutionScalePercent", fsrLevels, &settings.ResolutionScalePercent ) ) {
-                    ImGui::EndCombo();
-                }
-                ImGui::SetItemTooltip( "%s", Tr( "Balances image detail and performance when using FSR 3.", u8"Bestimmt das Verh\u00E4ltnis zwischen Bilddetails und Leistung mit FSR 3." ) );
-            } else {
-                int resolutionScale = SnapRenderScalePercentNonFSR( settings.ResolutionScalePercent );
-                if ( resolutionScale != settings.ResolutionScalePercent ) {
-                    settings.ResolutionScalePercent = resolutionScale;
-                    FixupSettings( settings );
-                }
-                if ( SliderRenderScalePercentNonFSR( "##ResolutionScalePercent", &resolutionScale ) ) {
-                    settings.ResolutionScalePercent = resolutionScale;
-                    FixupSettings( settings );
-                }
-                ImGui::SetItemTooltip( "%s", Tr( "Changes image detail and rendering performance.", u8"Bestimmt das Verh\u00E4ltnis zwischen Bilddetails und Renderleistung." ) );
-            }
-            ImGui::PopItemWidth();
-            ImGui::EndGroup();
-        }
-
-        ImGui::SameLine();
-
-        {
-            ImGui::BeginGroup();
             ImText( "VSync", { inlineToggleLabelWidth, buttonWidth.y } ); ImGui::SameLine();
             ImGui::Checkbox( "##Enable VSync", &settings.EnableVSync );
             ImGui::SetItemTooltip( "%s", Tr( "Synchronizes frames with the monitor to prevent screen tearing.", u8"Synchronisiert die Bildausgabe mit dem Monitor und verhindert Bildrisse." ) );
@@ -1555,6 +1557,14 @@ void ImGuiShim::RenderSettingsWindow()
                 : (fpsLimitEnabled
                     ? Tr( "Sets the maximum rendered frames per second.", u8"Legt die maximal gerenderten Bilder pro Sekunde fest." )
                     : Tr( "Enable the FPS limiter to select a frame-rate limit.", u8"Aktiviere das FPS-Limit, um eine Bildrate auszuw\u00E4hlen." )) );
+            ImGui::PopItemWidth();
+            ImGui::EndGroup();
+        }
+
+        ImGui::SameLine();
+
+        {
+            ImGui::BeginGroup();
 
             ImText( Tr( "Contrast", u8"Kontrast" ), buttonWidth ); ImGui::SameLine();
             ImGui::SetNextItemWidth( standardComboWidth );
@@ -1581,6 +1591,9 @@ void ImGuiShim::RenderSettingsWindow()
                 shadersToReload |= ShaderCategory::Tonemapping;
             }
             ImGui::SetItemTooltip( "%s", Tr( "Adjusts highlight compression and exposure balancing.", u8"Regelt die Zeichnung heller Bereiche und den Belichtungsausgleich." ) );
+            ImText( Tr( "Rain Rendering", u8"Regendarstellung" ), { buttonWidth.x - ImGui::GetFrameHeight() - style.ItemSpacing.x, buttonWidth.y } ); ImGui::SameLine();
+            ImGui::Checkbox( "##Enable Rain", &settings.EnableRain );
+            ImGui::SetItemTooltip( "%s", Tr( "Enables rain and rain effects.", u8"Aktiviert Regen und Regeneffekte." ) );
             ImGui::EndGroup();
         }
 
@@ -1764,10 +1777,6 @@ void ImGuiShim::RenderSettingsWindow()
                 shadersToReload |= ShaderCategory::Vertex;
             }
             ImGui::SetItemTooltip( "%s", Tr( "Lets nearby vegetation move aside when the player passes through it.", u8"L\u00E4sst nahe Vegetation beim Durchlaufen zur Seite weichen." ) );
-
-            ImText( Tr( "Rain Rendering", u8"Regendarstellung" ), { buttonWidth.x - ImGui::GetFrameHeight() - style.ItemSpacing.x, buttonWidth.y } ); ImGui::SameLine();
-            ImGui::Checkbox( "##Enable Rain", &settings.EnableRain );
-            ImGui::SetItemTooltip( "%s", Tr( "Enables rain and rain effects.", u8"Aktiviert Regen und Regeneffekte." ) );
 
             ImText( Tr( "Dynamic Clouds", u8"Dynamische Wolken" ), { buttonWidth.x - ImGui::GetFrameHeight() - style.ItemSpacing.x, buttonWidth.y } ); ImGui::SameLine();
             ImGui::Checkbox( "##Enable Dynamic Clouds", &settings.EnableDynamicClouds );

@@ -37,6 +37,7 @@ XRESULT D3D11PFX_HeightFog::Render( RenderToTextureBuffer* fxbuffer ) {
 	cb.CameraPosition = Engine::GAPI->GetCameraPosition();
 
 	cb.HF_GlobalDensity = Engine::GAPI->GetRendererState().RendererSettings.FogGlobalDensity;
+	const float baseFogDensity = cb.HF_GlobalDensity;
 	cb.HF_HeightFalloff = Engine::GAPI->GetRendererState().RendererSettings.FogHeightFalloff;
 
 	float height = Engine::GAPI->GetRendererState().RendererSettings.FogHeight;
@@ -57,10 +58,8 @@ XRESULT D3D11PFX_HeightFog::Render( RenderToTextureBuffer* fxbuffer ) {
 
 #if !defined(BUILD_GOTHIC_1_08k) && !defined(BUILD_1_12F)
     float fogDensityFactor = 2;
-    float fogDensityFactorRain = (1.0f - Engine::GAPI->GetFogOverride());
 #else
     float fogDensityFactor = pow( 15000.0f / Engine::GAPI->GetFarZ(), 4.0f );
-    float fogDensityFactorRain = 1.0f;
 #endif
 
 	if ( Engine::GAPI->GetFogOverride() > 0.0f ) {
@@ -108,8 +107,9 @@ XRESULT D3D11PFX_HeightFog::Render( RenderToTextureBuffer* fxbuffer ) {
 	XMFLOAT3 FogColorMod;
 	XMStoreFloat3( &FogColorMod, XMVectorLerpV( color, XMLoadFloat3( &Engine::GAPI->GetRendererState().RendererSettings.RainFogColor ), XMVectorSet( rainFogColorWeight, rainFogColorWeight, rainFogColorWeight, 0 ) ) ); // Scale color faster here, so it looks better on light rain
 	cb.HF_FogColorMod = FogColorMod;
-	// Raining Density, only when not in fogzone
-	cb.HF_GlobalDensity = Toolbox::lerp( cb.HF_GlobalDensity, Engine::GAPI->GetRendererState().RendererSettings.RainFogDensity, rain * fogDensityFactorRain );
+	// World/zone fog and rain fog remain independent candidates. The stronger density wins.
+	const float rainFogDensity = Toolbox::lerp( baseFogDensity, Engine::GAPI->GetRendererState().RendererSettings.RainFogDensity, std::clamp( rain, 0.0f, 1.0f ) );
+	cb.HF_GlobalDensity = std::max( cb.HF_GlobalDensity, rainFogDensity );
 
 
 	hfPS->GetBuffer( "PFXBuffer" ).Update( &cb ).Bind();

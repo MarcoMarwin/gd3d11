@@ -556,6 +556,7 @@ XRESULT D3D11PfxRenderer::RenderPostFXComposition(
         XMStoreFloat4x4( &cb.InvView, XMMatrixInverse( nullptr, Engine::GAPI->GetViewMatrixXM() ) );
         cb.CameraPosition = Engine::GAPI->GetCameraPosition();
         cb.HF_GlobalDensity = settings.FogGlobalDensity;
+        const float baseFogDensity = cb.HF_GlobalDensity;
         cb.HF_HeightFalloff = settings.FogHeightFalloff;
 
         float height = settings.FogHeight;
@@ -575,10 +576,8 @@ XRESULT D3D11PfxRenderer::RenderPostFXComposition(
 
 #if !defined(BUILD_GOTHIC_1_08k) && !defined(BUILD_1_12F)
         float fogDensityFactor = 2;
-        float fogDensityFactorRain = (1.0f - Engine::GAPI->GetFogOverride());
 #else
         float fogDensityFactor = pow( 15000.0f / Engine::GAPI->GetFarZ(), 4.0f );
-        float fogDensityFactorRain = 1.0f;
 #endif
 
         if ( Engine::GAPI->GetFogOverride() > 0.0f ) {
@@ -607,7 +606,8 @@ XRESULT D3D11PfxRenderer::RenderPostFXComposition(
         XMFLOAT3 FogColorMod;
         XMStoreFloat3( &FogColorMod, XMVectorLerpV( color, XMLoadFloat3( &settings.RainFogColor ), XMVectorSet( rainFogColorWeight, rainFogColorWeight, rainFogColorWeight, 0 ) ) );
         cb.HF_FogColorMod = FogColorMod;
-        cb.HF_GlobalDensity = Toolbox::lerp( cb.HF_GlobalDensity, settings.RainFogDensity, rain * fogDensityFactorRain );
+        const float rainFogDensity = Toolbox::lerp( baseFogDensity, settings.RainFogDensity, std::clamp( rain, 0.0f, 1.0f ) );
+        cb.HF_GlobalDensity = std::max( cb.HF_GlobalDensity, rainFogDensity );
 
         compositionPS->GetBuffer( "PFXBuffer" ).Update( &cb ).Bind();
     }
@@ -686,6 +686,7 @@ XRESULT D3D11PfxRenderer::RenderLowCloudLayer(
     XMStoreFloat4x4( &cb.InvView, XMMatrixInverse( nullptr, Engine::GAPI->GetViewMatrixXM() ) );
     cb.CameraPosition = Engine::GAPI->GetCameraPosition();
     cb.HF_GlobalDensity = settings.FogGlobalDensity;
+    const float baseFogDensity = cb.HF_GlobalDensity;
     cb.HF_HeightFalloff = settings.FogHeightFalloff;
 
     float height = settings.FogHeight;
@@ -705,10 +706,8 @@ XRESULT D3D11PfxRenderer::RenderLowCloudLayer(
 
 #if !defined(BUILD_GOTHIC_1_08k) && !defined(BUILD_1_12F)
     float fogDensityFactor = 2;
-    float fogDensityFactorRain = (1.0f - Engine::GAPI->GetFogOverride());
 #else
     float fogDensityFactor = pow( 15000.0f / Engine::GAPI->GetFarZ(), 4.0f );
-    float fogDensityFactorRain = 1.0f;
 #endif
 
     if ( Engine::GAPI->GetFogOverride() > 0.0f ) {
@@ -736,7 +735,8 @@ XRESULT D3D11PfxRenderer::RenderLowCloudLayer(
     XMFLOAT3 fogColorMod;
     XMStoreFloat3( &fogColorMod, XMVectorLerpV( color, XMLoadFloat3( &settings.RainFogColor ), XMVectorSet( rainFogColorWeight, rainFogColorWeight, rainFogColorWeight, 0 ) ) );
     cb.HF_FogColorMod = fogColorMod;
-    cb.HF_GlobalDensity = Toolbox::lerp( cb.HF_GlobalDensity, settings.RainFogDensity, rain * fogDensityFactorRain );
+    const float rainFogDensity = Toolbox::lerp( baseFogDensity, settings.RainFogDensity, std::clamp( rain, 0.0f, 1.0f ) );
+    cb.HF_GlobalDensity = std::max( cb.HF_GlobalDensity, rainFogDensity );
 
     vs->Apply();
 

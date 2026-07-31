@@ -1566,7 +1566,19 @@ XRESULT D3D11GraphicsEngine::OnResize( INT2 newSize ) {
         }
         if ( frameLatencyWaitableObject ) {
             ZoneScopedN( "OnResize::frameLatencyWaitableObject" );
-            WaitForSingleObjectEx( frameLatencyWaitableObject, INFINITE, true );
+            DWORD waitResult = WAIT_IO_COMPLETION;
+            while ( waitResult == WAIT_IO_COMPLETION ) {
+                waitResult = WaitForSingleObjectEx( frameLatencyWaitableObject, INFINITE, true );
+            }
+            if ( waitResult == WAIT_FAILED ) {
+                LogError() << "Frame-latency wait failed during resize. GetLastError: " << GetLastError();
+                m_lowlatency = false;
+                Engine::GAPI->GetRendererState().RendererSettings.LowLatency = false;
+            } else if ( waitResult != WAIT_OBJECT_0 ) {
+                LogWarn() << "Unexpected frame-latency wait result during resize: " << waitResult;
+                m_lowlatency = false;
+                Engine::GAPI->GetRendererState().RendererSettings.LowLatency = false;
+            }
         } else {
             LogWarn() << "Low-latency waitable object is unavailable; using regular borderless mode.";
             m_lowlatency = false;
@@ -1578,12 +1590,29 @@ XRESULT D3D11GraphicsEngine::OnResize( INT2 newSize ) {
     wrl::ComPtr<ID3D11Texture2D> backbuffer;
     m_HDR = Engine::GAPI->GetRendererState().RendererSettings.HDR_Monitor;
     UpdateColorSpace_SwapChain();
-    SwapChain->GetBuffer( 0, __uuidof(ID3D11Texture2D), reinterpret_cast<void**>(backbuffer.GetAddressOf()) );
+    hr = SwapChain->GetBuffer( 0, __uuidof(ID3D11Texture2D), reinterpret_cast<void**>(backbuffer.GetAddressOf()) );
+    if ( FAILED( hr ) || !backbuffer ) {
+        LogError() << "Failed to get swapchain backbuffer after resize! HRESULT: " << std::hex << hr;
+        return XR_FAILED;
+    }
 
     // Recreate RenderTargetView
-    LE( GetDevice()->CreateRenderTargetView( backbuffer.Get(), nullptr, BackbufferRTV.GetAddressOf() ) );
+    BackbufferRTV.Reset();
+    hr = GetDevice()->CreateRenderTargetView( backbuffer.Get(), nullptr, BackbufferRTV.GetAddressOf() );
+    if ( FAILED( hr ) || !BackbufferRTV ) {
+        LogError() << "Failed to create swapchain render-target view after resize! HRESULT: " << std::hex << hr;
+        return XR_FAILED;
+    }
 
-    RecreateBuffers();
+    if ( RecreateBuffers() != XR_SUCCESS ) {
+        LogError() << "Failed to recreate renderer buffers after swapchain resize.";
+        return XR_FAILED;
+    }
+
+    if ( !HDRBackBuffer || !HDRBackBuffer->GetRenderTargetView() || !DepthStencilBuffer || !DepthStencilBuffer->GetDepthStencilView() ) {
+        LogError() << "Renderer buffers are incomplete after swapchain resize.";
+        return XR_FAILED;
+    }
 
     // Bind our newly created resources
     GetContext()->OMSetRenderTargets( 1, HDRBackBuffer->GetRenderTargetView().GetAddressOf(),
@@ -1593,8 +1622,9 @@ XRESULT D3D11GraphicsEngine::OnResize( INT2 newSize ) {
     SetViewport( ViewportInfo( 0, 0, m_scaledResolution.x, m_scaledResolution.y ) );
 
     // Engine::AntTweakBar->OnResize( newSize );
-    Engine::ImGuiHandle->OnResize( newSize );
-
+    if ( Engine::ImGuiHandle ) {
+        Engine::ImGuiHandle->OnResize( newSize );
+    }
 
     return XR_SUCCESS;
 }
@@ -2093,14 +2123,26 @@ XRESULT D3D11GraphicsEngine::Present() {
         default:
             LogWarnBox() << "Device Removed! (Unknown reason)";
         }
-    } else if ( hr == S_OK && frameLatencyWaitableObject ) {
+    } else if ( FAILED( hr ) ) {
+        LogError() << "SwapChain::Present failed! HRESULT: " << std::hex << hr;
+        PresentPending = false;
+        TracyD3D11Collect( s_tracyD3D11Ctx );
+        return XR_FAILED;
+    } else if ( frameLatencyWaitableObject ) {
         ZoneScopedN( "Present::frameLatencyWaitableObject" );
-        WaitForSingleObjectEx( frameLatencyWaitableObject, INFINITE, true );
+        DWORD waitResult = WAIT_IO_COMPLETION;
+        while ( waitResult == WAIT_IO_COMPLETION ) {
+            waitResult = WaitForSingleObjectEx( frameLatencyWaitableObject, INFINITE, true );
+        }
+        if ( waitResult == WAIT_FAILED ) {
+            LogError() << "Frame-latency wait failed after Present. GetLastError: " << GetLastError();
+        } else if ( waitResult != WAIT_OBJECT_0 ) {
+            LogWarn() << "Unexpected frame-latency wait result after Present: " << waitResult;
+        }
     }
 
     PresentPending = false;
     TracyD3D11Collect( s_tracyD3D11Ctx );
-
     return XR_SUCCESS;
 }
 
@@ -8783,12 +8825,11 @@ void D3D11GraphicsEngine::DrawVobSingle( VobInfo* vob, zCCamera& camera ) {
 /** Update focus window state */
 void D3D11GraphicsEngine::UpdateFocus( HWND hWnd, bool focus_state )
 {
-    bool has_focus = (GetForegroundWindow() == hWnd);
-    if ( m_isWindowActive == has_focus || has_focus != focus_state ) {
+    if ( m_isWindowActive == focus_state ) {
         return;
     }
 
-    m_isWindowActive = has_focus;
+    m_isWindowActive = focus_state;
     UpdateClipCursor( hWnd );
 }
 
