@@ -2,6 +2,9 @@
 
 Dokumentation der gepushten Renderer-Builds.
 
+## Build 184
+- Regulaerer Push: Korrektur der `ApplyMaterialCompatibility`-Funktion, Überarbeitung der WetGroundSSR-Materialabhängigkeiten und Integration neuer Texturen/Material-Updates für verbesserte Stabilität und Konsistenz.
+
 ## Build 183 (Korrekturpush)
 - Korrekturpush: DoF-Composite repariert, fehlerhafter SkyEdgeBlur-Rekonstruktionspfad entfernt und durch stabilen early-out fuer Sky-Pixel (sharpColor) ersetzt, um Artefakte an Alpha-Test-Silhouetten zu beheben.
 

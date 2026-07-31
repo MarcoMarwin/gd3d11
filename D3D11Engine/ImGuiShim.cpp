@@ -1407,9 +1407,9 @@ void ImGuiShim::RenderSettingsWindow()
         // All right-column value controls start at the same x position.
         const float inlineToggleWidth = (buttonWidth.x - style.ItemSpacing.x) * 0.5f;
         const float inlineToggleLabelWidth = inlineToggleWidth - ImGui::GetFrameHeight() - style.ItemSpacing.x;
-        const float compactAALabelWidth = 120.0f;
-        const float compactAAMethodWidth = 125.0f;
-        const float compactAAValueWidth = buttonWidth.x + controlWidth - compactAALabelWidth - compactAAMethodWidth - style.ItemSpacing.x;
+        const float compactAALabelWidth = inlineToggleWidth;
+        const float compactAAMethodWidth = inlineToggleWidth;
+        const float compactAAValueWidth = standardComboWidth;
         
         {
             ImGui::BeginGroup();

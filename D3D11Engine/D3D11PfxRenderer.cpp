@@ -156,7 +156,7 @@ XRESULT D3D11PfxRenderer::RenderWetGroundSSR( ID3D11RenderTargetView* outputRTV,
         cb.WG_WetGroundRainImpactsStrength = 1.0f;
     }
     cb.WG_PuddleAccumulation = Engine::GAPI->GetPuddleAccumulation();
-    cb.WG_Pad = 0.0f;
+    cb.WG_ReflectionsEnabled = rendererSettings.EnableSSR ? 1.0f : 0.0f;
     ps->GetBuffer( "WetGroundSSRConstantBuffer" ).Update( &cb ).Bind();
 
     if ( GSky* sky = Engine::GAPI->GetSky() )

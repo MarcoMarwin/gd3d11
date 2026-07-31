@@ -253,15 +253,12 @@ namespace {
         return value;
     }
 
-    void ApplyMaterialCompatibility( MaterialInfo::Buffer& buffer, int version ) {
-        if ( version < 2 && buffer.DisplacementFactor == 0.0f ) {
-            buffer.DisplacementFactor = 0.7f;
-        }
+    void ApplyMaterialCompatibility( MaterialInfo::Buffer& buffer ) {
         MaterialInfo defaults;
         buffer.SpecularIntensity = ClampMaterialScalar( buffer.SpecularIntensity, defaults.buffer.SpecularIntensity, 0.0f, 1.0f );
         buffer.SpecularPower = ClampMaterialScalar( buffer.SpecularPower, defaults.buffer.SpecularPower, 1.0f, 256.0f );
         buffer.NormalmapStrength = ClampMaterialScalar( buffer.NormalmapStrength, defaults.buffer.NormalmapStrength, 0.0f, 3.0f );
-        buffer.DisplacementFactor = ClampMaterialScalar( buffer.DisplacementFactor, defaults.buffer.DisplacementFactor, 0.0f, 4.0f );
+        buffer.DisplacementFactor = ClampMaterialScalar( buffer.DisplacementFactor, defaults.buffer.DisplacementFactor, 0.0f, 1.0f );
         buffer.WetGroundSSRStrength = ClampMaterialScalar( buffer.WetGroundSSRStrength, defaults.buffer.WetGroundSSRStrength, 0.0f, 1.0f );
         buffer.Padding0 = 0.0f;
         buffer.Padding1 = 0.0f;
@@ -362,7 +359,7 @@ namespace {
             }
         }
 
-        ApplyMaterialCompatibility( buffer, MATERIALINFO_VERSION );
+        ApplyMaterialCompatibility( buffer );
         out = buffer;
         return true;
     }

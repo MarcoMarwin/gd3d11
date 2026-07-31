@@ -385,7 +385,6 @@ float4 PSMain( PS_INPUT Input ) : SV_TARGET
     [branch] if ( CC_HeightFogEnabled > 0.5f )
     {
         float4 fog = ComputeHeightFog( Input.vTexcoord );
-        color.rgb = lerp( color.rgb, fog.rgb, fog.a );
         float nightTimeBlend = smoothstep(0.0f, 1.0f, saturate(-AC_LightPos.y * 4.0f));
         float nightAtmosphereBlend = nightTimeBlend * saturate(AC_EnableNightAtmosphere);
         float activeWeatherFog = saturate(AC_RainFXWeight);
@@ -393,9 +392,11 @@ float4 PSMain( PS_INPUT Input ) : SV_TARGET
         float3 nightRainVeilColor = float3(0.12f, 0.18f, 0.27f) * nightFogBrightness / 2.5f;
         float3 rainVeilColor = lerp(fog.rgb, nightRainVeilColor, nightAtmosphereBlend);
         float rainVeilBase = activeWeatherFog * lerp(0.050f, 0.22f, nightAtmosphereBlend);
-        float rainVeilSpatial = lerp(0.45f, 1.0f, SmootherStep01(saturate(fog.a * 1.35f)));
-        float rainVeil = rainVeilBase * rainVeilSpatial;
-        color.rgb = lerp(color.rgb, rainVeilColor, rainVeil);
+        float rainVeil = rainVeilBase;
+        bool rainVeilWins = rainVeil > fog.a;
+        float finalFogWeight = max(fog.a, rainVeil);
+        float3 finalFogColor = rainVeilWins ? rainVeilColor : fog.rgb;
+        color.rgb = lerp(color.rgb, finalFogColor, finalFogWeight);
     }
 #endif
 

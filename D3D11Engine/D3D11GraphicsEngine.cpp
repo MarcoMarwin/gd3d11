@@ -151,10 +151,7 @@ static MaterialInfo::Buffer GetEffectiveMaterialBuffer( const MaterialInfo* info
         buffer.NormalmapStrength = 0.0f;
     }
 
-    const auto& settings = Engine::GAPI->GetRendererState().RendererSettings;
-    if ( surface && surface->GetNormalmap() && surface->GetDisplacementmap() && buffer.DisplacementFactor > 0.0001f ) {
-        buffer.DisplacementFactor *= std::clamp( settings.ParallaxOcclusionStrength, 0.0f, 4.0f );
-    } else {
+    if ( !surface || !surface->GetNormalmap() || !surface->GetDisplacementmap() || buffer.DisplacementFactor <= 0.0001f ) {
         buffer.DisplacementFactor = 0.0f;
     }
 
@@ -4402,8 +4399,7 @@ XRESULT D3D11GraphicsEngine::OnStartWorldRendering() {
         renderRainExclusionMask
         || compositionNeedsGeometry
         || rendererState.RendererSettings.EnableDoF;
-    const bool renderWetGroundSSR = rendererState.RendererSettings.EnableSSR
-        && renderRainExclusionMask;
+    const bool renderWetGroundSSR = renderRainExclusionMask;
     RGResourceHandle waterMaskResource = RG_INVALID_HANDLE;
     if ( renderWaterMask ) {
         const auto maskSize = GetResolution();

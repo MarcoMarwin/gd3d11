@@ -369,6 +369,7 @@ PS_OUTPUT PSMain(PS_INPUT Input)
     float3 sceneRefr = TX_Scene.Sample(SS_Linear, distUV).rgb;
     float ndv = saturate(dot(-viewDirection, wf));
     float fresnel = 0.02f + 0.98f * pow(1 - ndv, 5);
+    float reflectFresnel = pow(1.0f - ndv, 3.0f);
     float3 reflRay = reflect(viewDirection, wf);
     float3 reflVec = -reflRay;
     float hemi = smoothstep(0, 0.06f, reflRay.y) * waterTopSide;
@@ -379,6 +380,10 @@ PS_OUTPUT PSMain(PS_INPUT Input)
     float normalSmooth = 0.34f + 0.18f * SmootherStep01(saturate((waterViewDistance - 1500) / 12000));
     float3 geoDir = reflect(viewDirection, normalize(lerp(wf, float3(0, 1, 0), normalSmooth)));
     float3 cube = max(TX_ReflectionCube.Sample(SS_Linear, reflVec).rgb, 0);
+    float cubeOnlyReflectionAmount = saturate(
+        lerp(0.35f, 1.0f, reflectFresnel) * 0.5f * reflectFresnel)
+        * waterReflectionSuppress;
+    float3 cubeOnlyReflectionColor = cube * lerp(1.0f, diffuse, 0.6f);
     float lum = dot(cube, float3(.2126, .7152, .0722));
     float3 gray = lum.xxx;
     float3 dayRain = lerp(gray * .46f, float3(.18, .20, .21), .55f) * lerp(1, max(AC_LowCloudRainColor, 0), .30f);
@@ -694,7 +699,6 @@ float3 skyReflection =
         float skySel = step(.001f, skyWeight) * (1.0f - saturate(ssrConfidence)) * ssrEnabled;
         float backupDayRf = lerp(fresnel, max(fresnel, .085f), skySel);
         float currentNightRf = lerp(fresnel, max(fresnel, .120f), skySel);
-        float reflectFresnel = pow(1.0f - ndv, 3.0f);
         float skyReflectionLift = skySel * (1.0f - saturate(ssrConfidence));
         float reflectionDriver = max(reflectFresnel, skyReflectionLift * 0.18f);
         float reflectAmount = saturate(
@@ -710,16 +714,21 @@ float3 skyReflection =
             backupDayAmount,
             currentNightAmount,
             nightAmount) * shore * hemi;
-        float3 color = lerp(volume, reflectionColor, amount);
+        float3 oceanSsrColor = lerp(volume, reflectionColor, amount);
         float oceanGeometryBlend = saturate(
             ssrConfidence *
             ssrStrength *
             lerp(.48f, .92f, nightAmount) *
             rainVis) * shore;
-        color = lerp(
-            color,
+        oceanSsrColor = lerp(
+            oceanSsrColor,
             processedReflection,
             oceanGeometryBlend);
+        float3 oceanCubeOnlyColor = lerp(
+            volume,
+            cubeOnlyReflectionColor,
+            cubeOnlyReflectionAmount * shore * hemi);
+        float3 color = lerp(oceanCubeOnlyColor, oceanSsrColor, ssrEnabled);
         float3 smallRefl = reflect(-viewDirection, ws);
         float weather = GetRainSkyVisibility();
         float sunSpot = pow(saturate(dot(smallRefl, -AC_LightPos.xyz)), 500) * .5f * smoothstep(-.04f, .08f, AC_LightPos.y) * smoothstep(0.0f, 0.08f, saturate(AC_SunVisibility)) * weather * sunCloudTransmission * (1 - glintBlock);
@@ -916,10 +925,15 @@ float3 skyReflection =
                 legacySceneReflection,
                 1.0f + legacyDefinitionStrength),
             0.0f);
-        float3 legacyFinalColor = lerp(
+        float3 legacySsrFinalColor = lerp(
             legacyColor,
             legacyDefinedReflection,
             legacySsrBlend * legacyShoreVisibility);
+        float3 legacyCubeOnlyColor = lerp(
+            legacyColor,
+            cubeOnlyReflectionColor,
+            cubeOnlyReflectionAmount * legacyShoreVisibility);
+        float3 legacyFinalColor = lerp(legacyCubeOnlyColor, legacySsrFinalColor, ssrEnabled);
         finalColor = legacyFinalColor;
         maskOut = lerp(0.25f, 1.0f, step(0.5f, WM_DisableRainEffects));
     }

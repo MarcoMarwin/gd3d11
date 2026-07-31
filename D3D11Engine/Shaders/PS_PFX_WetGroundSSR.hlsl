@@ -29,7 +29,7 @@ cbuffer WetGroundSSRConstantBuffer : register(b0)
     float WG_PuddleReflectionsStrength;
     float WG_WetGroundRainImpactsStrength;
     float WG_PuddleAccumulation;
-    float WG_Pad;
+    float WG_ReflectionsEnabled;
 };
 
 SamplerState SS_Linear : register(s0);
@@ -590,19 +590,21 @@ float4 PSMain(PS_INPUT input) : SV_TARGET
     float wetSSRVisibility = 1.0f - DecodeWetSSRBlock(SampleWetSSRBlockMask(input.vPosition.xy));
 
     float depth = TX_Depth.SampleLevel(SS_Linear, uv, 0).r;
-    if (depth <= 1e-7f || WG_Wetness <= 0.001f || WG_Strength <= 0.001f)
+    if (depth <= 1e-7f || WG_Wetness <= 0.001f)
         return float4(sceneColor, 1.0f);
-
     if (wetSSRVisibility <= 0.001f)
         return float4(sceneColor, 1.0f);
+
     float3 wsPosition = ReconstructWorldPosition(depth, uv);
     float3 sourceWSNormal = DecodeWorldNormal(uv);
     float3 geometricWSNormal = CalculateGeometricWorldNormal(
         uv, wsPosition, sourceWSNormal);
 
-    float materialWetGroundSSRStrength = saturate(TX_Material.SampleLevel(SS_Linear, uv, 0).z);
-    float materialPuddleEligibility = step(
-        0.0001f, materialWetGroundSSRStrength);
+    float materialWetGroundSSRStrength = saturate(
+        TX_Material.SampleLevel(SS_Linear, uv, 0).z);
+    float materialWetGroundEligibility = step(0.0001f, materialWetGroundSSRStrength);
+    float reflectionsEnabled = step(0.5f, WG_ReflectionsEnabled) * step(0.001f, WG_Strength);
+    float materialPuddleEligibility = materialWetGroundEligibility * reflectionsEnabled;
 
     float3 wsNormal = CalculateSmoothedWetGroundNormal(
         uv,
@@ -625,14 +627,20 @@ float4 PSMain(PS_INPUT input) : SV_TARGET
         * materialPuddleEligibility;
     float materialWetStrength = materialWetGroundSSRStrength * lerp(0.72f, 1.0f, wetness);
     float materialWetMask = commonWetMask * materialWetStrength
-        * max(WG_WetMaterialReflectionsStrength, 0.0f);
+        * max(WG_WetMaterialReflectionsStrength, 0.0f)
+        * reflectionsEnabled;
     puddleMask = saturate(
-        puddleMask * max(WG_ProceduralPuddlesStrength, 0.0f));
+        puddleMask * max(WG_ProceduralPuddlesStrength, 0.0f) * reflectionsEnabled);
     float puddleRainExposure = smoothstep(0.10f, 0.72f, rainExposure);
     float puddleWetMask = saturate(
         puddleAccumulation * wetSSRVisibility * puddleMask * puddleRainExposure * 1.12f);
     float wetMask = saturate(materialWetMask + puddleWetMask * (1.0f - materialWetMask));
-    if (wetMask <= 0.01f)
+    float rainAmount = saturate(WG_RainFXWeight);
+    float rainImpactBaseMask = commonWetMask * materialWetGroundEligibility;
+    float rainImpactVisibility =
+        saturate(rainImpactBaseMask + puddleWetMask * (1.0f - rainImpactBaseMask))
+        * rainAmount * smoothstep(0.05f, 0.45f, WG_Wetness);
+    if (max(wetMask, rainImpactVisibility) <= 0.01f)
         return float4(sceneColor, 1.0f);
 
     float2 wetUV = wsPosition.xz / 1100.0f;
@@ -642,10 +650,6 @@ float4 PSMain(PS_INPUT input) : SV_TARGET
     float2 distortionA = TX_Distortion.SampleLevel(SS_Linear, distortionAUV, 0).xy * 2.0f - 1.0f;
     float2 distortionB = TX_Distortion.SampleLevel(SS_Linear, distortionBUV, 0).xy * 2.0f - 1.0f;
     float2 staticDistortion = distortionA + distortionB * 0.65f;
-
-    float rainAmount = saturate(WG_RainFXWeight);
-    float rainImpactVisibility =
-        saturate(materialWetMask + puddleWetMask) * rainAmount * smoothstep(0.05f, 0.45f, WG_Wetness);
     float rainSurfaceResponse = lerp(1.10f, 2.20f, puddleMask);
     float impactDensity = rainAmount * lerp(0.64f, 1.0f, rainAmount);
     float2 impactRipple = float2(0.0f, 0.0f);
@@ -689,6 +693,8 @@ float4 PSMain(PS_INPUT input) : SV_TARGET
     float3 surfaceColor = sceneColor;
     float3 boundedImpactLift = max(1.0f - saturate(surfaceColor), 0.0f) * float3(0.075f, 0.085f, 0.095f);
     surfaceColor += boundedImpactLift * saturate(solidGroundImpactMask);
+    if (reflectionsEnabled <= 0.001f)
+        return float4(surfaceColor, 1.0f);
 
     float materialMicrostructure = lerp(0.115f, 0.045f, puddleMask);
     float2 baseNormalDistortion = float2(staticDistortion.x * 0.55f, staticDistortion.y * 0.85f);
