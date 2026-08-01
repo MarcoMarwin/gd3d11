@@ -691,7 +691,15 @@ float4 PSMain(PS_INPUT input) : SV_TARGET
 
     float solidGroundImpactMask = (1.0f - smoothstep(0.12f, 0.72f, puddleMask)) * centralImpactVisibility;
     float3 surfaceColor = sceneColor;
-    float3 boundedImpactLift = max(1.0f - saturate(surfaceColor), 0.0f) * float3(0.075f, 0.085f, 0.095f);
+    float rainImpactNightAmount = smoothstep(
+        0.0f,
+        1.0f,
+        saturate(-AC_LightPos.y * 4.0f))
+        * saturate(AC_EnableNightAtmosphere);
+    float rainImpactBrightness = lerp(1.0f, 0.40f, rainImpactNightAmount);
+    float3 boundedImpactLift = max(1.0f - saturate(surfaceColor), 0.0f)
+        * float3(0.075f, 0.085f, 0.095f)
+        * rainImpactBrightness;
     surfaceColor += boundedImpactLift * saturate(solidGroundImpactMask);
     if (reflectionsEnabled <= 0.001f)
         return float4(surfaceColor, 1.0f);

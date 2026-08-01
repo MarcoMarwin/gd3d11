@@ -103,18 +103,22 @@ struct HeightfogConstantBuffer {
     XMFLOAT4X4 InvView;
     float3 CameraPosition;
     float HF_FogHeight;
-
     float HF_HeightFalloff;
     float HF_GlobalDensity;
     float HF_WeightZNear;
     float HF_WeightZFar;
-
     float3 HF_FogColorMod;
-    float HF_pad2;
-
+    float HF_FogOverride;
     float2 HF_ProjAB;
     float2 HF_Pad3;
+    float3 HF_RainFogColor;
+    float HF_RainGlobalDensity;
+    float HF_RainFogHeight;
+    float HF_RainHeightFalloff;
+    float HF_RainWeightZNear;
+    float HF_RainWeightZFar;
 };
+static_assert( sizeof(HeightfogConstantBuffer) == 176, "HeightfogConstantBuffer must be exactly 176 bytes" );
 
 
 struct ScreenSpaceLightingConstantBuffer {

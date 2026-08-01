@@ -21,10 +21,15 @@ cbuffer PFXBuffer : register( b0 )
     float HF_WeightZFar;
 
     float3 HF_FogColorMod;
-    float HF_pad2;
-
+    float HF_FogOverride;
     float2 HF_ProjAB;
     float2 HF_Pad3;
+    float3 HF_RainFogColor;
+    float HF_RainGlobalDensity;
+    float HF_RainFogHeight;
+    float HF_RainHeightFalloff;
+    float HF_RainWeightZNear;
+    float HF_RainWeightZFar;
 };
 
 SamplerState SS_Linear : register( s0 );

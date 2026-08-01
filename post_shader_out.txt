@@ -1,0 +1,42 @@
+=== POST-CHECK COUNTS ===
+PS_PFX_Composition.hlsl : 1
+PS_PFX_Heightfog.hlsl : 2
+PS_PFX_LowClouds.hlsl : 4
+PS_PFX_LowCloudComposite.hlsl : 3
+D3D11PFX_HeightFog.cpp : 2
+D3D11PfxRenderer.cpp : 4
+RenderPostFXComposition : 3
+RenderHeightfog : 3
+RenderLowCloudLayer : 4
+ComputeHeightFog : 2
+ComputeVolumetricFog : 4
+HF_GlobalDensity : 18
+baseFogDensity : 6
+rainFogDensity : 6
+std::max : 206
+GetFogOverride : 20
+GetFogColor : 5
+FogGlobalDensity : 9
+RainFogDensity : 21
+RainFogColor : 18
+AC_RainFXWeight : 25
+AC_LightPos : 59
+AC_EnableNightAtmosphere : 17
+AC_NightFogBrightness : 7
+activeWeatherFog : 13
+nightTimeBlend : 35
+nightAtmosphereBlend : 3
+nightRainVeilColor : 4
+rainVeilColor : 2
+rainVeilBase : 2
+rainVeilSpatial : 0
+rainVeil : 12
+fog.a : 2
+fog.rgb : 2
+color.rgb = lerp( color.rgb, fog.rgb, fog.a ); : 0
+color.rgb = lerp(color.rgb, rainVeilColor, rainVeil); : 0
+COMPOSE_HEIGHTFOG : 8
+COMPOSE_GODRAYS : 3
+COMPOSE_CONTACT_SHADOWS : 10
+COMPOSE_SSGI : 10
+=== END POST-CHECK COUNTS ===

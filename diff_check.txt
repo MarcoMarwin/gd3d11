@@ -1,0 +1,2 @@
+warning: in the working copy of 'D3D11Engine/ImGuiShim.cpp', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'D3D11Engine/Shaders/PS_PFX_Composition.hlsl', LF will be replaced by CRLF the next time Git touches it

@@ -384,6 +384,18 @@ PS_OUTPUT PSMain(PS_INPUT Input)
         lerp(0.35f, 1.0f, reflectFresnel) * 0.5f * reflectFresnel)
         * waterReflectionSuppress;
     float3 cubeOnlyReflectionColor = cube * lerp(1.0f, diffuse, 0.6f);
+    float cubeOnlyReflectionLuma = dot(
+        cubeOnlyReflectionColor,
+        float3(0.2126f, 0.7152f, 0.0722f));
+    float3 cubeOnlyNightColor = lerp(
+        cubeOnlyReflectionLuma.xxx,
+        cubeOnlyReflectionColor,
+        0.42f)
+        * 0.32f;
+    cubeOnlyReflectionColor = lerp(
+        cubeOnlyReflectionColor,
+        cubeOnlyNightColor,
+        nightAmount);
     float lum = dot(cube, float3(.2126, .7152, .0722));
     float3 gray = lum.xxx;
     float3 dayRain = lerp(gray * .46f, float3(.18, .20, .21), .55f) * lerp(1, max(AC_LowCloudRainColor, 0), .30f);
