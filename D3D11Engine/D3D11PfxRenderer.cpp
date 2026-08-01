@@ -168,9 +168,11 @@ XRESULT D3D11PfxRenderer::RenderWetGroundSSR( ID3D11RenderTargetView* outputRTV,
     Microsoft::WRL::ComPtr<ID3D11DepthStencilView> previousDSV;
     Microsoft::WRL::ComPtr<ID3D11SamplerState> previousSampler0;
     Microsoft::WRL::ComPtr<ID3D11SamplerState> previousSampler1;
+    Microsoft::WRL::ComPtr<ID3D11SamplerState> previousSampler2;
     context->OMGetRenderTargets( 1, previousRTV.GetAddressOf(), previousDSV.GetAddressOf() );
     context->PSGetSamplers( 0, 1, previousSampler0.GetAddressOf() );
     context->PSGetSamplers( 1, 1, previousSampler1.GetAddressOf() );
+    context->PSGetSamplers( 2, 1, previousSampler2.GetAddressOf() );
     context->OMSetRenderTargets( 1, &outputRTV, nullptr );
     ID3D11ShaderResourceView* resources[4] = { sceneSRV, depthSRV, normalsSRV, rainShadow->GetShaderResView().Get() };
     context->PSSetShaderResources( 0, 4, resources );
@@ -179,8 +181,10 @@ XRESULT D3D11PfxRenderer::RenderWetGroundSSR( ID3D11RenderTargetView* outputRTV,
     context->PSSetShaderResources( 6, 1, &materialSRV );
     context->PSSetShaderResources( 7, 1, &lowCloudLayerSRV );
 
-    ID3D11SamplerState* samplers[2] = { engine->GetClampSamplerState(), shadowMaps->GetShadowmapSampler() };
-    context->PSSetSamplers( 0, 2, samplers );
+    ID3D11ShaderResourceView* reflectionCubeSRV = engine->ReflectionCube.Get();
+    context->PSSetShaderResources( 8, 1, &reflectionCubeSRV );
+    ID3D11SamplerState* samplers[3] = { engine->GetClampSamplerState(), shadowMaps->GetShadowmapSampler(), engine->GetCubeSamplerState() };
+    context->PSSetSamplers( 0, 3, samplers );
     engine->SetDefaultStates();
     Engine::GAPI->GetRendererState().BlendState.SetDefault();
     Engine::GAPI->GetRendererState().BlendState.SetDirty();
@@ -192,10 +196,10 @@ XRESULT D3D11PfxRenderer::RenderWetGroundSSR( ID3D11RenderTargetView* outputRTV,
     engine->SetViewport( ViewportInfo( 0, 0, resolution ) );
     DrawFullScreenQuad();
 
-    ID3D11ShaderResourceView* nullResources[8] = {};
-    context->PSSetShaderResources( 0, 8, nullResources );
-    ID3D11SamplerState* restoredSamplers[2] = { previousSampler0.Get(), previousSampler1.Get() };
-    context->PSSetSamplers( 0, 2, restoredSamplers );
+    ID3D11ShaderResourceView* nullResources[9] = {};
+    context->PSSetShaderResources( 0, 9, nullResources );
+    ID3D11SamplerState* restoredSamplers[3] = { previousSampler0.Get(), previousSampler1.Get(), previousSampler2.Get() };
+    context->PSSetSamplers( 0, 3, restoredSamplers );
     context->OMSetRenderTargets( 1, previousRTV.GetAddressOf(), previousDSV.Get() );
     return XR_SUCCESS;
 }

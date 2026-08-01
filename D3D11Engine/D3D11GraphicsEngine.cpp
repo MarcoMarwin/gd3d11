@@ -4702,7 +4702,7 @@ XRESULT D3D11GraphicsEngine::OnStartWorldRendering() {
                             GetDepthBuffer()->GetShaderResView().Get(),
                             lowCloudLayerSRV,
                             &compositionGodRaysSRV );
-                        if ( volumetricResult != XR_SUCCESS ) {
+                        if ( volumetricResult != XR_SUCCESS || !compositionGodRaysSRV ) {
                             PfxRenderer->RenderGodRaysToTexture(
                                 backbufferResource->GetShaderResView().Get(),
                                 GetDepthBuffer()->GetShaderResView().Get(),

@@ -88,7 +88,7 @@ void CSVolumetric( uint3 DTid : SV_DispatchThreadID )
     float jitter = GRV_Noise( DTid.xy );
     float transmittance = 1.0f;
     float3 scattering = 0.0f;
-    float cosTheta = saturate( dot( viewDirectionWS, -normalize( GRV_LightDirectionWS ) ) );
+    float cosTheta = saturate( dot( viewDirectionWS, normalize( GRV_LightDirectionWS ) ) );
     float phase = 0.18f + 0.82f * pow( cosTheta, 8.0f );
     float cloudTransmission = 1.0f;
     uint cloudWidth;

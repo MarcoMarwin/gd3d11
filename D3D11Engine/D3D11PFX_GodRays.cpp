@@ -481,21 +481,24 @@ XRESULT D3D11PFX_GodRays::RenderVolumetricToTexture(
     cb.GRV_ProjParams = float4( 1.0f / projection._11, 1.0f / projection._22, projection._43, projection._33 );
     XMStoreFloat4x4( &cb.GRV_InvView, XMMatrixInverse( nullptr, Engine::GAPI->GetViewMatrixXM() ) );
     cb.GRV_CameraPosition = Engine::GAPI->GetCameraPosition();
-    cb.GRV_MaxDistance = std::clamp( static_cast<float>(settings.FogRange), 1000.0f, 60000.0f );
+    const float worldDrawDistance = std::max(
+        static_cast<float>( settings.SectionDrawRadius ) * WORLD_SECTION_SIZE,
+        6000.0f );
+    cb.GRV_MaxDistance = std::clamp( worldDrawDistance, 6000.0f, 60000.0f );
     const DS_ScreenQuadConstantBuffer sunCB = shadowMaps->FillSunCSMConstantBuffer();
     for ( int i = 0; i < MAX_CSM_CASCADES; ++i )
         cb.GRV_ShadowViewProj[i] = sunCB.SQ_ShadowViewProj[i];
     cb.GRV_LightColor = sunCB.SQ_LightColor;
+    cb.GRV_LightColor.x *= settings.GodRayColorMod.x;
+    cb.GRV_LightColor.y *= settings.GodRayColorMod.y;
+    cb.GRV_LightColor.z *= settings.GodRayColorMod.z;
     cb.GRV_LightDirectionWS = sky->GetMainLightDirection();
     cb.GRV_ShadowmapSize = std::max( sunCB.SQ_ShadowmapSize, 1.0f );
     cb.GRV_FogHeight = settings.FogHeight;
     cb.GRV_HeightFalloff = settings.FogHeightFalloff;
-    cb.GRV_GlobalDensity = settings.FogGlobalDensity;
-    const float secScale = std::min<float>( settings.SectionDrawRadius, settings.FogRange );
-    cb.GRV_WeightZNear = std::max( 0.0f, WORLD_SECTION_SIZE * ((secScale - 0.5f) * 0.7f) - 45000.0f );
-    cb.GRV_WeightZFar = WORLD_SECTION_SIZE * ((secScale - 0.5f) * 0.8f);
-    cb.GRV_WeightZFar = std::min( cb.GRV_WeightZFar, 83200.0f );
-    cb.GRV_WeightZNear = std::min( cb.GRV_WeightZNear, 27799.9922f );
+    cb.GRV_GlobalDensity = std::max( settings.FogGlobalDensity, 0.00012f );
+    cb.GRV_WeightZNear = 0.0f;
+    cb.GRV_WeightZFar = std::max( cb.GRV_MaxDistance * 0.55f, 1.0f );
     cb.GRV_RainFogHeight = cb.GRV_FogHeight;
     cb.GRV_RainHeightFalloff = cb.GRV_HeightFalloff;
     cb.GRV_RainGlobalDensity = settings.RainFogDensity;

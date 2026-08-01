@@ -2,6 +2,9 @@
 
 Dokumentation der gepushten Renderer-Builds.
 
+## Build 188
+- Regulaerer Push: Korrektur der GodRay-Volumen-Berechnung (MaxDistance, LightColor, GlobalDensity, WeightZNear/Far) in D3D11PFX_GodRays.cpp; Anpassung des LightDirection-Skalarprodukts in CS_PFX_GodRayZoom.hlsl; Fallback-Logik fuer fehlende GodRay-Composition in D3D11GraphicsEngine.cpp.
+
 ## Build 187
 - Regulaerer Push: Neue Vegetationsdichte-Option ueber topologische Nachgruppierung (Disjoint-Set) integriert, um Mesh-Flackern durch gezieltes Entfernen ganzer Aeste/Buesche zu vermeiden. E_GodRayMode fuer volumetrische GodRays eingefuehrt und in die F11-Menue-Presets integriert.
 
