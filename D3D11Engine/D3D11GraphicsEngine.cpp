@@ -4698,17 +4698,11 @@ XRESULT D3D11GraphicsEngine::OnStartWorldRendering() {
                     }
                     const auto godRayMode = Engine::GAPI->GetRendererState().RendererSettings.GodRayMode;
                     if ( godRayMode == GothicRendererSettings::E_GodRayMode::GODRAYS_HIGH ) {
-                        const XRESULT volumetricResult = PfxRenderer->RenderVolumetricGodRaysToTexture(
+                        PfxRenderer->RenderCombinedGodRaysToTexture(
+                            backbufferResource->GetShaderResView().Get(),
                             GetDepthBuffer()->GetShaderResView().Get(),
                             lowCloudLayerSRV,
                             &compositionGodRaysSRV );
-                        if ( volumetricResult != XR_SUCCESS || !compositionGodRaysSRV ) {
-                            PfxRenderer->RenderGodRaysToTexture(
-                                backbufferResource->GetShaderResView().Get(),
-                                GetDepthBuffer()->GetShaderResView().Get(),
-                                lowCloudLayerSRV,
-                                &compositionGodRaysSRV );
-                        }
                     } else if ( godRayMode == GothicRendererSettings::E_GodRayMode::GODRAYS_LOW ) {
                         PfxRenderer->RenderGodRaysToTexture(
                             backbufferResource->GetShaderResView().Get(),

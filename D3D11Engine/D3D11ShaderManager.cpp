@@ -483,7 +483,9 @@ XRESULT D3D11ShaderManager::Init() {
         Shaders.push_back( ShaderInfo::make<CShaderID::CS_PFX_GodRayVolumetric>( "CS_PFX_GodRayZoom.hlsl" )
             .with_entrypoint( "CSVolumetric" )
             .with_macros( { { "VOLUMETRIC_GODRAYS", "1" } } ) );
-
+        Shaders.push_back( ShaderInfo::make<CShaderID::CS_PFX_GodRayCombine>( "CS_PFX_GodRayZoom.hlsl" )
+            .with_entrypoint( "CSCombine" )
+            .with_macros( { { "COMBINE_GODRAYS", "1" } } ) );
         Shaders.push_back( ShaderInfo::make<CShaderID::CS_PFX_DoF_FocusResolve>( "CS_PFX_DoF_FocusResolve.hlsl" ));
         Shaders.push_back( ShaderInfo::make<CShaderID::CS_PFX_DoF>( "CS_PFX_DoF.hlsl" ));
         Shaders.push_back( ShaderInfo::make<CShaderID::CS_PFX_DoF_Gauss>( "CS_PFX_DoF.hlsl" )

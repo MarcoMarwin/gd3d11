@@ -5770,7 +5770,7 @@ XRESULT GothicAPI::LoadMenuSettings( const std::string& file ) {
     GothicRendererSettings defaultRendererSettings{};
     defaultRendererSettings.SetDefault();
     const GothicRendererSettings& ds = defaultRendererSettings;
-
+    s.NormalizeGodRayMode( FeatureLevel10Compatibility );
     if ( Toolbox::FileExists( ini ) ) {
         LogInfo() << "Loading menu settings from " << ini;
 
@@ -5796,27 +5796,23 @@ XRESULT GothicAPI::LoadMenuSettings( const std::string& file ) {
         const DWORD godRayModeTextLength = GetPrivateProfileStringA(
             "General", "GodRayMode", "", godRayModeText,
             static_cast<DWORD>(std::size(godRayModeText)), ini.c_str() );
+        bool loadedGodRaysEnabled = GetPrivateProfileBoolA(
+            "General", "EnableGodRays", ds.EnableGodRays, ini );
         if ( godRayModeTextLength > 0 ) {
-            int storedGodRayMode = static_cast<int>(ds.GodRayMode);
+            int storedGodRayMode = 0;
             const auto parseResult = std::from_chars(
                 godRayModeText, godRayModeText + godRayModeTextLength, storedGodRayMode );
-            if ( parseResult.ec != std::errc() || parseResult.ptr != godRayModeText + godRayModeTextLength ) {
-                storedGodRayMode = static_cast<int>(ds.GodRayMode);
+            const bool validStoredGodRayMode = parseResult.ec == std::errc()
+                && parseResult.ptr == godRayModeText + godRayModeTextLength
+                && storedGodRayMode >= static_cast<int>(GothicRendererSettings::E_GodRayMode::GODRAYS_OFF)
+                && storedGodRayMode <= static_cast<int>(GothicRendererSettings::E_GodRayMode::GODRAYS_HIGH);
+            if ( validStoredGodRayMode ) {
+                loadedGodRaysEnabled = storedGodRayMode
+                    != static_cast<int>(GothicRendererSettings::E_GodRayMode::GODRAYS_OFF);
             }
-            storedGodRayMode = std::clamp(
-                storedGodRayMode,
-                static_cast<int>(GothicRendererSettings::E_GodRayMode::GODRAYS_OFF),
-                static_cast<int>(GothicRendererSettings::E_GodRayMode::GODRAYS_HIGH) );
-            s.GodRayMode = static_cast<GothicRendererSettings::E_GodRayMode>(storedGodRayMode);
-        } else {
-            const bool legacyGodRaysEnabled = GetPrivateProfileBoolA(
-                "General", "EnableGodRays", ds.EnableGodRays, ini );
-            s.GodRayMode = legacyGodRaysEnabled
-                ? GothicRendererSettings::E_GodRayMode::GODRAYS_LOW
-                : GothicRendererSettings::E_GodRayMode::GODRAYS_OFF;
         }
+        s.EnableGodRays = loadedGodRaysEnabled;
         s.NormalizeGodRayMode( FeatureLevel10Compatibility );
-        s.EnableGodRays = s.AreGodRaysEnabled();
         s.GodRayStrength = std::clamp( GetPrivateProfileFloatA( "General", "GodRayStrength", ds.GodRayStrength, ini ), 0.0f, 2.0f );
         s.EnableDoF = GetPrivateProfileBoolA( "General", "EnableDoF", ds.EnableDoF, ini );
         s.DoFGaussBlur = ds.DoFGaussBlur;

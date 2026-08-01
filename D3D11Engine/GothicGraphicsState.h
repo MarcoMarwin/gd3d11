@@ -1101,17 +1101,19 @@ struct GothicRendererSettings {
     float NightDarkeningRange;
     float NightDarkeningMax;
     E_GodRayMode GodRayMode;
+
     bool AreGodRaysEnabled() const {
-        return GodRayMode != E_GodRayMode::GODRAYS_OFF;
+        return EnableGodRays;
     }
+
     void NormalizeGodRayMode( bool featureLevel10Compatibility ) {
-        GodRayMode = static_cast<E_GodRayMode>( std::clamp(
-            static_cast<int>(GodRayMode),
-            static_cast<int>(E_GodRayMode::GODRAYS_OFF),
-            static_cast<int>(E_GodRayMode::GODRAYS_HIGH) ) );
-        if ( featureLevel10Compatibility && GodRayMode == E_GodRayMode::GODRAYS_HIGH ) {
-            GodRayMode = E_GodRayMode::GODRAYS_LOW;
+        if ( !EnableGodRays ) {
+            GodRayMode = E_GodRayMode::GODRAYS_OFF;
+            return;
         }
+        GodRayMode = featureLevel10Compatibility
+            ? E_GodRayMode::GODRAYS_LOW
+            : E_GodRayMode::GODRAYS_HIGH;
     }
     static int SnapFSRResolutionScale( int value ) {
         constexpr int levels[] = { 100, 83, 75, 66, 50, 33 };
@@ -1246,3 +1248,4 @@ struct GothicRendererState {
     GothicRendererInfo RendererInfo;
 };
 #pragma warning( pop )
+

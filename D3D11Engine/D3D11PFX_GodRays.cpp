@@ -365,7 +365,7 @@ XRESULT D3D11PFX_GodRays::RenderToTexture(
 /** CS path: mask+zoom to pool texture, no final blit */
 XRESULT D3D11PFX_GodRays::RenderToTextureCS(
     ID3D11ShaderResourceView* backbuffer,
-    ID3D11ShaderResourceView* normals,
+    ID3D11ShaderResourceView* depthCopy,
     ID3D11ShaderResourceView* lowClouds,
     ID3D11ShaderResourceView** outGodRaysSRV ) {
 
@@ -422,7 +422,7 @@ XRESULT D3D11PFX_GodRays::RenderToTextureCS(
     maskCS->Apply();
     context->CSSetSamplers( 0, 1, &clampSampler );
 
-    ID3D11ShaderResourceView* maskSRVs[3] = { backbuffer, normals, lowClouds };
+    ID3D11ShaderResourceView* maskSRVs[3] = { backbuffer, depthCopy, lowClouds };
     context->CSSetShaderResources( 0, 3, maskSRVs );
     context->CSSetUnorderedAccessViews( 0, 1, maskBuffer->GetUnorderedAccessView().GetAddressOf(), nullptr );
     context->Dispatch( (ds4Size.x + 7) / 8, (ds4Size.y + 7) / 8, 1 );
@@ -545,5 +545,64 @@ XRESULT D3D11PFX_GodRays::RenderVolumetricToTexture(
     context->CSSetShader( nullptr, nullptr, 0 );
     m_GodRaysResult = std::move( output );
     *outGodRaysSRV = m_GodRaysResult->GetShaderResView().Get();
+    return XR_SUCCESS;
+}
+XRESULT D3D11PFX_GodRays::RenderCombinedToTexture(
+    ID3D11ShaderResourceView* backbuffer,
+    ID3D11ShaderResourceView* depthCopy,
+    ID3D11ShaderResourceView* lowClouds,
+    ID3D11ShaderResourceView** outGodRaysSRV ) {
+    if ( !outGodRaysSRV )
+        return XR_FAILED;
+    *outGodRaysSRV = nullptr;
+    if ( FeatureLevel10Compatibility )
+        return RenderToTexture( backbuffer, depthCopy, lowClouds, outGodRaysSRV );
+    ID3D11ShaderResourceView* volumetricSRV = nullptr;
+    const XRESULT volumetricResult = RenderVolumetricToTexture( depthCopy, lowClouds, &volumetricSRV );
+    if ( volumetricSRV )
+        m_VolumetricGodRaysResult = std::move( m_GodRaysResult );
+    ID3D11ShaderResourceView* radialSRV = nullptr;
+    const XRESULT radialResult = RenderToTexture( backbuffer, depthCopy, lowClouds, &radialSRV );
+    if ( radialSRV )
+        m_RadialGodRaysResult = std::move( m_GodRaysResult );
+    if ( !volumetricSRV && !radialSRV )
+        return volumetricResult == XR_SUCCESS || radialResult == XR_SUCCESS ? XR_SUCCESS : XR_FAILED;
+    if ( !volumetricSRV ) {
+        *outGodRaysSRV = m_RadialGodRaysResult->GetShaderResView().Get();
+        return XR_SUCCESS;
+    }
+    if ( !radialSRV ) {
+        *outGodRaysSRV = m_VolumetricGodRaysResult->GetShaderResView().Get();
+        return XR_SUCCESS;
+    }
+    D3D11GraphicsEngine* engine = reinterpret_cast<D3D11GraphicsEngine*>(Engine::GraphicsEngine);
+    if ( !engine )
+        return XR_FAILED;
+    const INT2 resolution = engine->GetResolution();
+    const INT2 ds4Size = { std::max( resolution.x / 4, 1 ), std::max( resolution.y / 4, 1 ) };
+    auto combined = FxRenderer->GetTexturePool()->Acquire(
+        TexturePool::Description{ ds4Size.x, ds4Size.y, engine->GetBackBufferFormat(),
+            D3D11_BIND_UNORDERED_ACCESS | D3D11_BIND_SHADER_RESOURCE } );
+    auto combineCS = engine->GetShaderManager().GetCShader( CShaderID::CS_PFX_GodRayCombine );
+    if ( !combined || !combineCS ) {
+        *outGodRaysSRV = m_VolumetricGodRaysResult->GetShaderResView().Get();
+        return XR_SUCCESS;
+    }
+    auto& context = engine->GetContext();
+    combineCS->Apply();
+    ID3D11ShaderResourceView* inputs[2] = {
+        m_VolumetricGodRaysResult->GetShaderResView().Get(),
+        m_RadialGodRaysResult->GetShaderResView().Get()
+    };
+    context->CSSetShaderResources( 0, 2, inputs );
+    context->CSSetUnorderedAccessViews( 0, 1, combined->GetUnorderedAccessView().GetAddressOf(), nullptr );
+    context->Dispatch( (ds4Size.x + 7) / 8, (ds4Size.y + 7) / 8, 1 );
+    ID3D11UnorderedAccessView* nullUAV = nullptr;
+    ID3D11ShaderResourceView* nullSRVs[2] = { nullptr, nullptr };
+    context->CSSetUnorderedAccessViews( 0, 1, &nullUAV, nullptr );
+    context->CSSetShaderResources( 0, 2, nullSRVs );
+    context->CSSetShader( nullptr, nullptr, 0 );
+    m_CombinedGodRaysResult = std::move( combined );
+    *outGodRaysSRV = m_CombinedGodRaysResult->GetShaderResView().Get();
     return XR_SUCCESS;
 }

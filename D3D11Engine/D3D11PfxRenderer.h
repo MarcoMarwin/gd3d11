@@ -77,6 +77,10 @@ public:
     XRESULT RenderVolumetricGodRaysToTexture( ID3D11ShaderResourceView* depthCopy,
                                               ID3D11ShaderResourceView* lowClouds,
                                               ID3D11ShaderResourceView** outGodRaysSRV );
+    XRESULT RenderCombinedGodRaysToTexture( ID3D11ShaderResourceView* backbuffer,
+                                            ID3D11ShaderResourceView* depthCopy,
+                                            ID3D11ShaderResourceView* lowClouds,
+                                            ID3D11ShaderResourceView** outGodRaysSRV );
 
     XRESULT RenderScreenSpaceLighting( ID3D11ShaderResourceView* sceneSRV,
                                         ID3D11ShaderResourceView* albedoSRV,

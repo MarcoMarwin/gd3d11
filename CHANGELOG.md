@@ -881,3 +881,9 @@ Dokumentation der gepushten Renderer-Builds.
 - GothicAPI und Launcher-Schnittstellen vollstaendig von LoadCustomZENResources und weiteren Editor-Exporten bereinigt.
 - Wet Ground SSR: Puddle Geometric World Normal-Berechnung integriert, um Normal-Verzerrungen aus den Puddle-Masken fuer Wasseroberflaechenreflexionen zurueckzunehmen.
 
+
+## Build 189
+- Volumetric Lighting (Godrays) ueberarbeitet: UI auf einen einzigen Ein/Aus-Schalter mit gekoppeltem Staerkeregler vereinfacht.
+- Interne Feature-Level-Normalisierung: DX10-Hardware faellt automatisch auf radiale (Low) Lichtstrahlen zurueck, waehrend DX11-Hardware volumetrische (High) Godrays nutzt.
+- Presetvergleiche und INI-Speicherung auf den neuen EnableGodRays-Master-Schalter umgestellt.
+

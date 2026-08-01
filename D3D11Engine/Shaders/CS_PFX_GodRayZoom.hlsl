@@ -1,8 +1,36 @@
 #ifndef VOLUMETRIC_GODRAYS
 #define VOLUMETRIC_GODRAYS 0
 #endif
-
-#if VOLUMETRIC_GODRAYS
+#ifndef COMBINE_GODRAYS
+#define COMBINE_GODRAYS 0
+#endif
+#if COMBINE_GODRAYS
+Texture2D TX_VolumetricGodRays : register( t0 );
+Texture2D TX_RadialGodRays : register( t1 );
+RWTexture2D<float4> OutputTexture : register( u0 );
+[numthreads(8, 8, 1)]
+void CSCombine( uint3 DTid : SV_DispatchThreadID )
+{
+    uint2 outputSize;
+    OutputTexture.GetDimensions( outputSize.x, outputSize.y );
+    if ( DTid.x >= outputSize.x || DTid.y >= outputSize.y )
+        return;
+    uint2 volumetricSize;
+    uint2 radialSize;
+    TX_VolumetricGodRays.GetDimensions( volumetricSize.x, volumetricSize.y );
+    TX_RadialGodRays.GetDimensions( radialSize.x, radialSize.y );
+    if ( DTid.x >= volumetricSize.x || DTid.y >= volumetricSize.y || DTid.x >= radialSize.x || DTid.y >= radialSize.y )
+    {
+        OutputTexture[DTid.xy] = float4( 0.0f, 0.0f, 0.0f, 1.0f );
+        return;
+    }
+    float3 volumetric = max( TX_VolumetricGodRays.Load( int3( DTid.xy, 0 ) ).rgb, 0.0f );
+    float3 radial = max( TX_RadialGodRays.Load( int3( DTid.xy, 0 ) ).rgb, 0.0f );
+    float3 radialContribution = radial * 0.35f;
+    radialContribution = radialContribution / (1.0f + radialContribution);
+    OutputTexture[DTid.xy] = float4( volumetric + radialContribution, 1.0f );
+}
+#elif VOLUMETRIC_GODRAYS
 #include "DepthReconstruction.h"
 #define MAX_CSM_CASCADES 4
 cbuffer GodRayVolumetricConstantBuffer : register( b0 )
@@ -95,7 +123,10 @@ void CSVolumetric( uint3 DTid : SV_DispatchThreadID )
     uint cloudHeight;
     TX_LowClouds.GetDimensions( cloudWidth, cloudHeight );
     if ( cloudWidth > 0 && cloudHeight > 0 )
-        cloudTransmission = 1.0f - saturate( TX_LowClouds.SampleLevel( SS_Clamp, uv, 0 ).a ) * 0.85f;
+    {
+        float cloudAlpha = saturate( TX_LowClouds.SampleLevel( SS_Clamp, uv, 0 ).a );
+        cloudTransmission = 1.0f - smoothstep( 0.03f, 0.62f, cloudAlpha );
+    }
     [loop]
     for ( uint sampleIndex = 0; sampleIndex < sampleCount; ++sampleIndex )
     {

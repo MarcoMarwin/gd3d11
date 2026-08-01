@@ -21,6 +21,10 @@ public:
     XRESULT RenderVolumetricToTexture( ID3D11ShaderResourceView* depthCopy,
                                       ID3D11ShaderResourceView* lowClouds,
                                       ID3D11ShaderResourceView** outGodRaysSRV );
+    XRESULT RenderCombinedToTexture( ID3D11ShaderResourceView* backbuffer,
+                                    ID3D11ShaderResourceView* depthCopy,
+                                    ID3D11ShaderResourceView* lowClouds,
+                                    ID3D11ShaderResourceView** outGodRaysSRV );
 private:
     /** Compute shader path for FL11+ */
     XRESULT RenderCS( ID3D11ShaderResourceView* backbuffer, ID3D11ShaderResourceView* depthCopy, ID3D11ShaderResourceView* lowClouds );
@@ -31,7 +35,10 @@ private:
                                ID3D11ShaderResourceView* lowClouds,
                                ID3D11ShaderResourceView** outGodRaysSRV );
 
-    /** Keeps the godrays result texture alive until the next frame replaces it */
+    /** Keeps all godray outputs alive through the composition pass. */
     TextureHandle m_GodRaysResult;
+    TextureHandle m_VolumetricGodRaysResult;
+    TextureHandle m_RadialGodRaysResult;
+    TextureHandle m_CombinedGodRaysResult;
 };
 
