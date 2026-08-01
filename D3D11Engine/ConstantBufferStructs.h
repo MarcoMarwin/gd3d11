@@ -205,7 +205,33 @@ struct DS_PointLightConstantBuffer {
 };
 
 constexpr int MAX_CSM_CASCADES = 4;
-
+struct GodRayVolumetricConstantBuffer {
+    float4 GRV_ProjParams;
+    XMFLOAT4X4 GRV_InvView;
+    float3 GRV_CameraPosition;
+    float GRV_MaxDistance;
+    XMFLOAT4X4 GRV_ShadowViewProj[MAX_CSM_CASCADES];
+    float4 GRV_LightColor;
+    float3 GRV_LightDirectionWS;
+    float GRV_ShadowmapSize;
+    float GRV_FogHeight;
+    float GRV_HeightFalloff;
+    float GRV_GlobalDensity;
+    float GRV_WeightZNear;
+    float GRV_WeightZFar;
+    float GRV_RainFogHeight;
+    float GRV_RainHeightFalloff;
+    float GRV_RainGlobalDensity;
+    float GRV_RainWeightZNear;
+    float GRV_RainWeightZFar;
+    float GRV_FogOverride;
+    float GRV_RainWeight;
+    float GRV_SunVisibility;
+    float GRV_Strength;
+    uint32_t GRV_FrameIndex;
+    uint32_t GRV_NumCascades;
+};
+static_assert( sizeof(GodRayVolumetricConstantBuffer) == 448, "GodRayVolumetricConstantBuffer must be exactly 448 bytes" );
 struct DS_ScreenQuadConstantBuffer {
     float4 SQ_ProjParams; // x = 1/P._11, y = 1/P._22, z = P._43, w = P._33
     XMFLOAT4X4 SQ_InvView;

@@ -280,7 +280,7 @@ XRESULT D3D11ShaderManager::Init() {
         .with_category( ShaderCategory::Other )
         .with_macros( [](std::vector<D3D_SHADER_MACRO>& list) {
             const auto& s = Engine::GAPI->GetRendererState().RendererSettings;
-            list.push_back( { "COMPOSE_GODRAYS", s.EnableGodRays ? "1" : "0" } );
+            list.push_back( { "COMPOSE_GODRAYS", s.AreGodRaysEnabled() ? "1" : "0" } );
             list.push_back( { "COMPOSE_HEIGHTFOG", s.DrawFog ? "1" : "0" } );
             list.push_back( { "COMPOSE_CONTACT_SHADOWS", s.EnableContactShadows ? "1" : "0" } );
             list.push_back( { "COMPOSE_SSGI", (s.EnableScreenSpaceGI && s.ScreenSpaceGIStrength > 0.0f) ? "1" : "0" } );
@@ -480,6 +480,9 @@ XRESULT D3D11ShaderManager::Init() {
         Shaders.push_back( ShaderInfo::make<CShaderID::CS_PFX_GodRayMask>( "CS_PFX_GodRayMask.hlsl" ));
 
         Shaders.push_back( ShaderInfo::make<CShaderID::CS_PFX_GodRayZoom>( "CS_PFX_GodRayZoom.hlsl" ));
+        Shaders.push_back( ShaderInfo::make<CShaderID::CS_PFX_GodRayVolumetric>( "CS_PFX_GodRayZoom.hlsl" )
+            .with_entrypoint( "CSVolumetric" )
+            .with_macros( { { "VOLUMETRIC_GODRAYS", "1" } } ) );
 
         Shaders.push_back( ShaderInfo::make<CShaderID::CS_PFX_DoF_FocusResolve>( "CS_PFX_DoF_FocusResolve.hlsl" ));
         Shaders.push_back( ShaderInfo::make<CShaderID::CS_PFX_DoF>( "CS_PFX_DoF.hlsl" ));

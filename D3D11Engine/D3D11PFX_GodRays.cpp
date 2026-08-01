@@ -13,6 +13,7 @@
 #include "GothicAPI.h"
 #include "GSky.h"
 #include "TexturePool.h"
+#include "D3D11ShadowMap.h"
 
 extern bool FeatureLevel10Compatibility;
 
@@ -450,6 +451,96 @@ XRESULT D3D11PFX_GodRays::RenderToTextureCS(
     // Keep the result texture alive until next frame by storing the handle as a member
     m_GodRaysResult = std::move( zoomBuffer );
     *outGodRaysSRV = m_GodRaysResult->GetShaderResView().Get();
+    return XR_SUCCESS;
+}
 
+XRESULT D3D11PFX_GodRays::RenderVolumetricToTexture(
+    ID3D11ShaderResourceView* depthCopy,
+    ID3D11ShaderResourceView* lowClouds,
+    ID3D11ShaderResourceView** outGodRaysSRV ) {
+    if ( !outGodRaysSRV )
+        return XR_FAILED;
+    *outGodRaysSRV = nullptr;
+    if ( FeatureLevel10Compatibility || !depthCopy )
+        return XR_FAILED;
+    D3D11GraphicsEngine* engine = reinterpret_cast<D3D11GraphicsEngine*>(Engine::GraphicsEngine);
+    GSky* sky = Engine::GAPI->GetSky();
+    D3D11ShadowMap* shadowMaps = engine ? engine->GetShadowMaps() : nullptr;
+    D3D11CascadedShadowMapBuffer* csm = shadowMaps ? shadowMaps->GetCascadedShadowMap() : nullptr;
+    if ( !engine || !sky || !shadowMaps || !csm || !csm->GetShaderResourceView() )
+        return XR_FAILED;
+    const auto& atmosphere = sky->GetAtmosphereCB();
+    if ( sky->GetAtmosphereSettings().LightDirection.y <= 0.0f || atmosphere.AC_SunVisibility <= 0.0001f )
+        return XR_SUCCESS;
+    const auto& settings = Engine::GAPI->GetRendererState().RendererSettings;
+    auto& context = engine->GetContext();
+    const INT2 resolution = engine->GetResolution();
+    const INT2 ds4Size = { std::max( resolution.x / 4, 1 ), std::max( resolution.y / 4, 1 ) };
+    GodRayVolumetricConstantBuffer cb = {};
+    const auto& projection = Engine::GAPI->GetProjectionMatrix();
+    cb.GRV_ProjParams = float4( 1.0f / projection._11, 1.0f / projection._22, projection._43, projection._33 );
+    XMStoreFloat4x4( &cb.GRV_InvView, XMMatrixInverse( nullptr, Engine::GAPI->GetViewMatrixXM() ) );
+    cb.GRV_CameraPosition = Engine::GAPI->GetCameraPosition();
+    cb.GRV_MaxDistance = std::clamp( static_cast<float>(settings.FogRange), 1000.0f, 60000.0f );
+    const DS_ScreenQuadConstantBuffer sunCB = shadowMaps->FillSunCSMConstantBuffer();
+    for ( int i = 0; i < MAX_CSM_CASCADES; ++i )
+        cb.GRV_ShadowViewProj[i] = sunCB.SQ_ShadowViewProj[i];
+    cb.GRV_LightColor = sunCB.SQ_LightColor;
+    cb.GRV_LightDirectionWS = sky->GetMainLightDirection();
+    cb.GRV_ShadowmapSize = std::max( sunCB.SQ_ShadowmapSize, 1.0f );
+    cb.GRV_FogHeight = settings.FogHeight;
+    cb.GRV_HeightFalloff = settings.FogHeightFalloff;
+    cb.GRV_GlobalDensity = settings.FogGlobalDensity;
+    const float secScale = std::min<float>( settings.SectionDrawRadius, settings.FogRange );
+    cb.GRV_WeightZNear = std::max( 0.0f, WORLD_SECTION_SIZE * ((secScale - 0.5f) * 0.7f) - 45000.0f );
+    cb.GRV_WeightZFar = WORLD_SECTION_SIZE * ((secScale - 0.5f) * 0.8f);
+    cb.GRV_WeightZFar = std::min( cb.GRV_WeightZFar, 83200.0f );
+    cb.GRV_WeightZNear = std::min( cb.GRV_WeightZNear, 27799.9922f );
+    cb.GRV_RainFogHeight = cb.GRV_FogHeight;
+    cb.GRV_RainHeightFalloff = cb.GRV_HeightFalloff;
+    cb.GRV_RainGlobalDensity = settings.RainFogDensity;
+    cb.GRV_RainWeightZNear = cb.GRV_WeightZNear;
+    cb.GRV_RainWeightZFar = cb.GRV_WeightZFar;
+    cb.GRV_FogOverride = std::clamp( Engine::GAPI->GetFogOverride(), 0.0f, 1.0f );
+#if !defined(BUILD_GOTHIC_1_08k) && !defined(BUILD_1_12F)
+    if ( cb.GRV_FogOverride > 0.0f ) {
+        cb.GRV_FogHeight = Toolbox::lerp( cb.GRV_FogHeight, cb.GRV_CameraPosition.y + 10000.0f, cb.GRV_FogOverride );
+        cb.GRV_HeightFalloff = Toolbox::lerp( cb.GRV_HeightFalloff, 0.000001f, cb.GRV_FogOverride );
+        cb.GRV_GlobalDensity = Toolbox::lerp( cb.GRV_GlobalDensity, cb.GRV_GlobalDensity * 2.0f, cb.GRV_FogOverride );
+        cb.GRV_WeightZNear = Toolbox::lerp( cb.GRV_WeightZNear, WORLD_SECTION_SIZE * 0.09f, cb.GRV_FogOverride );
+        cb.GRV_WeightZFar = Toolbox::lerp( cb.GRV_WeightZFar, WORLD_SECTION_SIZE * 0.8f, cb.GRV_FogOverride );
+    }
+#endif
+    cb.GRV_RainWeight = std::clamp( atmosphere.AC_RainFXWeight, 0.0f, 1.0f );
+    cb.GRV_SunVisibility = std::clamp( atmosphere.AC_SunVisibility, 0.0f, 1.0f ) * GetRainSkyVisibility();
+    cb.GRV_Strength = std::max( settings.GodRayStrength, 0.0f );
+    cb.GRV_FrameIndex = static_cast<uint32_t>(std::max( Engine::GAPI->GetTimeSeconds(), 0.0f ) * 60.0f);
+    cb.GRV_NumCascades = static_cast<uint32_t>(std::clamp<size_t>( settings.NumShadowCascades, 1, MAX_CSM_CASCADES ));
+    auto output = FxRenderer->GetTexturePool()->Acquire(
+        TexturePool::Description{ ds4Size.x, ds4Size.y, engine->GetBackBufferFormat(),
+            D3D11_BIND_UNORDERED_ACCESS | D3D11_BIND_SHADER_RESOURCE } );
+    if ( !output )
+        return XR_FAILED;
+    auto cs = engine->GetShaderManager().GetCShader( CShaderID::CS_PFX_GodRayVolumetric );
+    if ( !cs )
+        return XR_FAILED;
+    cs->Apply();
+    cs->GetBuffer( "GodRayVolumetricConstantBuffer" ).Update( &cb ).Bind();
+    context->OMSetRenderTargets( 0, nullptr, nullptr );
+    ID3D11ShaderResourceView* resources[3] = { depthCopy, csm->GetShaderResourceView(), lowClouds };
+    context->CSSetShaderResources( 0, 3, resources );
+    ID3D11SamplerState* samplers[2] = { shadowMaps->GetShadowmapSampler(), engine->GetClampSamplerState() };
+    context->CSSetSamplers( 0, 2, samplers );
+    context->CSSetUnorderedAccessViews( 0, 1, output->GetUnorderedAccessView().GetAddressOf(), nullptr );
+    context->Dispatch( (ds4Size.x + 7) / 8, (ds4Size.y + 7) / 8, 1 );
+    ID3D11UnorderedAccessView* nullUAV = nullptr;
+    ID3D11ShaderResourceView* nullSRVs[3] = { nullptr, nullptr, nullptr };
+    ID3D11SamplerState* nullSamplers[2] = { nullptr, nullptr };
+    context->CSSetUnorderedAccessViews( 0, 1, &nullUAV, nullptr );
+    context->CSSetShaderResources( 0, 3, nullSRVs );
+    context->CSSetSamplers( 0, 2, nullSamplers );
+    context->CSSetShader( nullptr, nullptr, 0 );
+    m_GodRaysResult = std::move( output );
+    *outGodRaysSRV = m_GodRaysResult->GetShaderResView().Get();
     return XR_SUCCESS;
 }

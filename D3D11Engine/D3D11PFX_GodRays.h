@@ -18,7 +18,9 @@ public:
                              ID3D11ShaderResourceView* depthCopy,
                              ID3D11ShaderResourceView* lowClouds,
                              ID3D11ShaderResourceView** outGodRaysSRV );
-
+    XRESULT RenderVolumetricToTexture( ID3D11ShaderResourceView* depthCopy,
+                                      ID3D11ShaderResourceView* lowClouds,
+                                      ID3D11ShaderResourceView** outGodRaysSRV );
 private:
     /** Compute shader path for FL11+ */
     XRESULT RenderCS( ID3D11ShaderResourceView* backbuffer, ID3D11ShaderResourceView* depthCopy, ID3D11ShaderResourceView* lowClouds );

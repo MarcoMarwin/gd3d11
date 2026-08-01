@@ -370,6 +370,12 @@ XRESULT D3D11PfxRenderer::RenderGodRaysToTexture(
     ID3D11ShaderResourceView** outGodRaysSRV ) {
     return FX_GodRays->RenderToTexture( backbuffer, depthCopy, lowClouds, outGodRaysSRV );
 }
+XRESULT D3D11PfxRenderer::RenderVolumetricGodRaysToTexture(
+    ID3D11ShaderResourceView* depthCopy,
+    ID3D11ShaderResourceView* lowClouds,
+    ID3D11ShaderResourceView** outGodRaysSRV ) {
+    return FX_GodRays->RenderVolumetricToTexture( depthCopy, lowClouds, outGodRaysSRV );
+}
 
 XRESULT D3D11PfxRenderer::RenderScreenSpaceLighting(
     ID3D11ShaderResourceView* sceneSRV,

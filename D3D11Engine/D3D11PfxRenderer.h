@@ -68,11 +68,15 @@ public:
     /** Draws a fullscreenquad */
     XRESULT DrawFullScreenQuad();
 
-    /** Renders godrays mask+zoom to a pool texture, skipping the final additive blit */
+    /** Renders radial godrays mask+zoom to a pool texture, skipping the final additive blit */
     XRESULT RenderGodRaysToTexture( ID3D11ShaderResourceView* backbuffer,
-                                    ID3D11ShaderResourceView* normals,
+                                    ID3D11ShaderResourceView* depthCopy,
                                     ID3D11ShaderResourceView* lowClouds,
                                     ID3D11ShaderResourceView** outGodRaysSRV );
+    /** Renders volumetric godrays to a pool texture, skipping the final additive blit */
+    XRESULT RenderVolumetricGodRaysToTexture( ID3D11ShaderResourceView* depthCopy,
+                                              ID3D11ShaderResourceView* lowClouds,
+                                              ID3D11ShaderResourceView** outGodRaysSRV );
 
     XRESULT RenderScreenSpaceLighting( ID3D11ShaderResourceView* sceneSRV,
                                         ID3D11ShaderResourceView* albedoSRV,

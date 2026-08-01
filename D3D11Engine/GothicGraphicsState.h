@@ -566,6 +566,11 @@ struct GothicRendererSettings {
         RM_Deferred = 0,
         RM_ForwardPlus = 1,
     };
+    enum E_GodRayMode {
+        GODRAYS_OFF = 0,
+        GODRAYS_LOW = 1,
+        GODRAYS_HIGH = 2,
+    };
 
     float GetEffectiveVisualFXDrawRadius() const {
         return VISUAL_FX_DRAW_RADIUS_FIXED;
@@ -699,9 +704,8 @@ struct GothicRendererSettings {
         EnableTiledLighting = false;
         RendererMode = RM_Deferred;
         DrawSectionIntersections = true;
-
         EnableGodRays = true;
-
+        GodRayMode = E_GodRayMode::GODRAYS_LOW;
         // 100 preserves Gothics native camera projection; higher values widen both projection axes equally.
         FOVHoriz = 100.0f;
         FOVVert = 100.0f;
@@ -1096,7 +1100,19 @@ struct GothicRendererSettings {
     float NightDarkeningStart;
     float NightDarkeningRange;
     float NightDarkeningMax;
-
+    E_GodRayMode GodRayMode;
+    bool AreGodRaysEnabled() const {
+        return GodRayMode != E_GodRayMode::GODRAYS_OFF;
+    }
+    void NormalizeGodRayMode( bool featureLevel10Compatibility ) {
+        GodRayMode = static_cast<E_GodRayMode>( std::clamp(
+            static_cast<int>(GodRayMode),
+            static_cast<int>(E_GodRayMode::GODRAYS_OFF),
+            static_cast<int>(E_GodRayMode::GODRAYS_HIGH) ) );
+        if ( featureLevel10Compatibility && GodRayMode == E_GodRayMode::GODRAYS_HIGH ) {
+            GodRayMode = E_GodRayMode::GODRAYS_LOW;
+        }
+    }
     static int SnapFSRResolutionScale( int value ) {
         constexpr int levels[] = { 100, 83, 75, 66, 50, 33 };
         const int clampedValue = std::clamp( value, 33, 100 );

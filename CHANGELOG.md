@@ -2,6 +2,9 @@
 
 Dokumentation der gepushten Renderer-Builds.
 
+## Build 187
+- Regulaerer Push: Neue Vegetationsdichte-Option ueber topologische Nachgruppierung (Disjoint-Set) integriert, um Mesh-Flackern durch gezieltes Entfernen ganzer Aeste/Buesche zu vermeiden. E_GodRayMode fuer volumetrische GodRays eingefuehrt und in die F11-Menue-Presets integriert.
+
 ## Build 184
 - Regulaerer Push: Korrektur der `ApplyMaterialCompatibility`-Funktion, Überarbeitung der WetGroundSSR-Materialabhängigkeiten und Integration neuer Texturen/Material-Updates für verbesserte Stabilität und Konsistenz.
 

@@ -747,7 +747,8 @@ void ApplyFeatureLevel10Downgrades(GothicRendererSettings& s) {
         s.SharpenFactor = 0.2f;
     }
     s.AoMode = AOMode::AO_NONE;
-
+    s.NormalizeGodRayMode( true );
+    s.EnableGodRays = s.AreGodRaysEnabled();
     if (s.NumShadowCascades >= 2) {
         s.DebugSettings.ShadowCascades.Lambda = D3D11ShadowMap::lambdaBiasTable[s.NumShadowCascades].lambda;
         s.DebugSettings.ShadowCascades.Bias = D3D11ShadowMap::lambdaBiasTable[s.NumShadowCascades].bias;
@@ -824,7 +825,7 @@ struct GraphicsPresetComparable {
     bool EnableDoF;
     bool EnableDynamicClouds;
     int WindQuality;
-    bool EnableGodRays;
+    int GodRayMode;
     bool AllowNormalmaps;
     bool EnableSSR;
     float SSRStrength;
@@ -849,7 +850,7 @@ GraphicsPresetComparable MakeGraphicsPresetComparable(
         s.EnableDoF,
         s.EnableDynamicClouds,
         IsWindEffectsControlVisible() ? s.WindQuality : 0,
-        s.EnableGodRays,
+        static_cast<int>(s.GodRayMode),
         s.AllowNormalmaps,
         s.EnableSSR,
         s.SSRStrength,
@@ -876,7 +877,7 @@ bool GraphicsPresetComparableEqual(
         && a.EnableDoF == b.EnableDoF
         && a.EnableDynamicClouds == b.EnableDynamicClouds
         && a.WindQuality == b.WindQuality
-        && a.EnableGodRays == b.EnableGodRays
+        && a.GodRayMode == b.GodRayMode
         && a.AllowNormalmaps == b.AllowNormalmaps
         && a.EnableSSR == b.EnableSSR
         && a.SSRStrength == b.SSRStrength
@@ -897,7 +898,8 @@ void ApplyGraphicsPresets( GothicRendererSettings& s, bool applyRuntimeUpdates =
     }
 
     // Presets only own the quality controls displayed below the menu separator.
-    s.EnableGodRays = true;
+    s.GodRayMode = GothicRendererSettings::E_GodRayMode::GODRAYS_LOW;
+    s.EnableGodRays = s.AreGodRaysEnabled();
     s.EnableDynamicClouds = true;
     s.EnableSSR = true;
     s.SSRStrength = 1.0f;
@@ -959,6 +961,9 @@ void ApplyGraphicsPresets( GothicRendererSettings& s, bool applyRuntimeUpdates =
         s.EnableSSR = true;
         s.SSRStrength = 1.0f;
         s.HeroAffectsObjects = true;
+        s.GodRayMode = FeatureLevel10Compatibility
+            ? GothicRendererSettings::E_GodRayMode::GODRAYS_LOW
+            : GothicRendererSettings::E_GodRayMode::GODRAYS_HIGH;
         break;
     case GothicRendererSettings::GRAPHICS_VERY_HIGH:
         s.ShadowMapSize = 8192;
@@ -975,15 +980,19 @@ void ApplyGraphicsPresets( GothicRendererSettings& s, bool applyRuntimeUpdates =
         s.EnableSSR = true;
         s.SSRStrength = 1.0f;
         s.HeroAffectsObjects = true;
+        s.GodRayMode = FeatureLevel10Compatibility
+            ? GothicRendererSettings::E_GodRayMode::GODRAYS_LOW
+            : GothicRendererSettings::E_GodRayMode::GODRAYS_HIGH;
         break;
     default:
         return;
     }
-
+    s.NormalizeGodRayMode( FeatureLevel10Compatibility );
+    s.EnableGodRays = s.AreGodRaysEnabled();
     if ( !s.EnableSSR ) s.SSRStrength = 0.0f;
     if ( s.AoMode == AOMode::AO_NONE ) s.AOStrength = 0.0f;
     if ( !s.EnableScreenSpaceGI ) s.ScreenSpaceGIStrength = 0.0f;
-    if ( !s.EnableGodRays ) s.GodRayStrength = 0.0f;
+    if ( !s.AreGodRaysEnabled() ) s.GodRayStrength = 0.0f;
     if ( !s.EnableDoF ) s.DoFBokehRadius = 0.0f;
     if ( IsWindEffectsControlVisible() && s.WindQuality == GothicRendererSettings::EWindQuality::WIND_QUALITY_NONE ) s.GlobalWindStrength = 0.0f;
 
@@ -1063,7 +1072,9 @@ namespace
         if ( s.AoMode == AOMode::AO_NONE ) s.AOStrength = 0.0f;
         s.ScreenSpaceGIStrength =
             s.EnableScreenSpaceGI ? 1.0f : 0.0f;
-        if ( !s.EnableGodRays ) s.GodRayStrength = 0.0f;
+        s.NormalizeGodRayMode( FeatureLevel10Compatibility );
+        s.EnableGodRays = s.AreGodRaysEnabled();
+        if ( !s.AreGodRaysEnabled() ) s.GodRayStrength = 0.0f;
         if ( !s.EnableSSR ) s.SSRStrength = 0.0f;
 
         if ( !s.EnableDoF ) s.DoFBokehRadius = 0.0f;
@@ -1704,20 +1715,33 @@ void ImGuiShim::RenderSettingsWindow()
             }
             ImGui::SetItemTooltip( "%s", Tr( "Makes water reflections weaker or stronger.", u8"Macht Wasserreflexionen schw\u00E4cher oder st\u00E4rker." ) );
 
-            ImText( Tr( "Godrays", u8"Lichtstrahlen" ), { buttonWidth.x - ImGui::GetFrameHeight() - style.ItemSpacing.x, buttonWidth.y } ); ImGui::SameLine();
-            if ( CoupledStrengthCheckbox( "##Enable Godrays", "GodRayStrength",
-                    &settings.EnableGodRays, &settings.GodRayStrength, 1.0f ) ) {
-                shadersToReload |= ShaderCategory::Other;
-            }
-            ImGui::SetItemTooltip( "%s", Tr( "Adds sunlight beams when the sun is partially blocked by trees, buildings, or terrain.", u8"F\u00FCgt sichtbare Sonnenstrahlen hinter B\u00E4umen, Geb\u00E4uden und Gel\u00E4nde hinzu." ) );
+            const std::vector<std::tuple<const char*, GothicRendererSettings::E_GodRayMode, const char*>> godRayModes = {
+                { Tr( "Off", u8"Aus" ), GothicRendererSettings::E_GodRayMode::GODRAYS_OFF, nullptr },
+                { Tr( "Low", u8"Niedrig" ), GothicRendererSettings::E_GodRayMode::GODRAYS_LOW, nullptr },
+                { Tr( "High", u8"Hoch" ), GothicRendererSettings::E_GodRayMode::GODRAYS_HIGH, nullptr },
+            };
+            auto selectedGodRayMode = settings.GodRayMode;
+            const bool godRaysWereEnabled = settings.AreGodRaysEnabled();
+            ImText( Tr( "Godrays", u8"Lichtstrahlen" ), ImVec2( compactAALabelWidth, buttonWidth.y ) );
             ImGui::SameLine();
-            ImGui::SetNextItemWidth( standardComboWidth );
-            const bool godRaysBeforeSlider = settings.EnableGodRays;
-            if ( CoupledStrengthSlider( "##GodrayStrength", "GodRayStrength",
-                    &settings.EnableGodRays, &settings.GodRayStrength )
-                && godRaysBeforeSlider != settings.EnableGodRays ) {
-                shadersToReload |= ShaderCategory::Other;
+            ImGui::SetNextItemWidth( compactAAMethodWidth );
+            if ( ImComboBoxCT( "##GodRayMode", godRayModes, &selectedGodRayMode,
+                    [&settings, &selectedGodRayMode, godRaysWereEnabled, &shadersToReload] {
+                        settings.GodRayMode = selectedGodRayMode;
+                        settings.NormalizeGodRayMode( FeatureLevel10Compatibility );
+                        settings.EnableGodRays = settings.AreGodRaysEnabled();
+                        if ( godRaysWereEnabled != settings.AreGodRaysEnabled() ) {
+                            shadersToReload |= ShaderCategory::Other;
+                        }
+                    } ) ) {
+                ImGui::EndCombo();
             }
+            ImGui::SetItemTooltip( "%s", Tr( "Selects off, radial or volumetric sunlight beams.", u8"W\u00E4hlt ausgeschaltete, radiale oder volumetrische Lichtstrahlen." ) );
+            ImGui::SameLine();
+            ImGui::SetNextItemWidth( compactAAValueWidth );
+            ImGui::BeginDisabled( !settings.AreGodRaysEnabled() );
+            SliderNormalizedUiStrength( "##GodrayStrength", &settings.GodRayStrength );
+            ImGui::EndDisabled();
             ImGui::SetItemTooltip( "%s", Tr( "Makes sunlight beams weaker or stronger.", u8"Macht Sonnenstrahlen schw\u00E4cher oder st\u00E4rker." ) );
             ImGui::PopItemWidth();
             ImGui::EndGroup();

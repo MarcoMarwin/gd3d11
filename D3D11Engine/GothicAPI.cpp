@@ -5711,7 +5711,8 @@ XRESULT GothicAPI::SaveMenuSettings( const std::string& file ) {
     WritePrivateProfileStringA( "General", "EnableHDR", std::to_string( s.EnableHDR ? TRUE : FALSE ).c_str(), ini.c_str() );
     WritePrivateProfileStringA( "General", "HDRToneMapStrength", float_to_string( s.HDRToneMapStrength, 2 ).c_str(), ini.c_str() );
     WritePrivateProfileStringA( "General", "HDRToneMapStrengthNormalized", "1", ini.c_str() );
-    WritePrivateProfileStringA( "General", "EnableGodRays", std::to_string( s.EnableGodRays ? TRUE : FALSE ).c_str(), ini.c_str() );
+    WritePrivateProfileStringA( "General", "GodRayMode", std::to_string( static_cast<int>(s.GodRayMode) ).c_str(), ini.c_str() );
+    WritePrivateProfileStringA( "General", "EnableGodRays", std::to_string( s.AreGodRaysEnabled() ? TRUE : FALSE ).c_str(), ini.c_str() );
     WritePrivateProfileStringA( "General", "GodRayStrength", float_to_string( s.GodRayStrength, 2 ).c_str(), ini.c_str() );
     WritePrivateProfileStringA( "General", "EnableDoF", std::to_string( s.EnableDoF ? TRUE : FALSE ).c_str(), ini.c_str() );
     WritePrivateProfileStringA( "General", "DoFBokehRadius", float_to_string( s.DoFBokehRadius, 2 ).c_str(), ini.c_str() );
@@ -5791,7 +5792,31 @@ XRESULT GothicAPI::LoadMenuSettings( const std::string& file ) {
         s.HDRToneMapStrength = std::clamp( storedHDRToneMapStrength, 0.0f, 2.0f );
         s.EnableDebugLog = ds.EnableDebugLog;
         s.EnableAutoupdates = ds.EnableAutoupdates;
-        s.EnableGodRays = GetPrivateProfileBoolA( "General", "EnableGodRays", ds.EnableGodRays, ini );
+        char godRayModeText[32] = {};
+        const DWORD godRayModeTextLength = GetPrivateProfileStringA(
+            "General", "GodRayMode", "", godRayModeText,
+            static_cast<DWORD>(std::size(godRayModeText)), ini.c_str() );
+        if ( godRayModeTextLength > 0 ) {
+            int storedGodRayMode = static_cast<int>(ds.GodRayMode);
+            const auto parseResult = std::from_chars(
+                godRayModeText, godRayModeText + godRayModeTextLength, storedGodRayMode );
+            if ( parseResult.ec != std::errc() || parseResult.ptr != godRayModeText + godRayModeTextLength ) {
+                storedGodRayMode = static_cast<int>(ds.GodRayMode);
+            }
+            storedGodRayMode = std::clamp(
+                storedGodRayMode,
+                static_cast<int>(GothicRendererSettings::E_GodRayMode::GODRAYS_OFF),
+                static_cast<int>(GothicRendererSettings::E_GodRayMode::GODRAYS_HIGH) );
+            s.GodRayMode = static_cast<GothicRendererSettings::E_GodRayMode>(storedGodRayMode);
+        } else {
+            const bool legacyGodRaysEnabled = GetPrivateProfileBoolA(
+                "General", "EnableGodRays", ds.EnableGodRays, ini );
+            s.GodRayMode = legacyGodRaysEnabled
+                ? GothicRendererSettings::E_GodRayMode::GODRAYS_LOW
+                : GothicRendererSettings::E_GodRayMode::GODRAYS_OFF;
+        }
+        s.NormalizeGodRayMode( FeatureLevel10Compatibility );
+        s.EnableGodRays = s.AreGodRaysEnabled();
         s.GodRayStrength = std::clamp( GetPrivateProfileFloatA( "General", "GodRayStrength", ds.GodRayStrength, ini ), 0.0f, 2.0f );
         s.EnableDoF = GetPrivateProfileBoolA( "General", "EnableDoF", ds.EnableDoF, ini );
         s.DoFGaussBlur = ds.DoFGaussBlur;
@@ -5944,7 +5969,7 @@ XRESULT GothicAPI::LoadMenuSettings( const std::string& file ) {
         s.AOStrength = std::clamp( GetPrivateProfileFloatA( "AO", "Strength", ds.AOStrength, ini ), 0.0f, 2.0f );
 
         if ( !s.EnableHDR ) s.HDRToneMapStrength = 0.0f;
-        if ( !s.EnableGodRays ) s.GodRayStrength = 0.0f;
+        if ( !s.AreGodRaysEnabled() ) s.GodRayStrength = 0.0f;
         if ( !s.EnableDoF ) s.DoFBokehRadius = 0.0f;
         if ( !s.EnableSSR ) s.SSRStrength = 0.0f;
         s.ScreenSpaceGIStrength = s.EnableScreenSpaceGI ? 1.0f : 0.0f;
