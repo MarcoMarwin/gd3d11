@@ -164,7 +164,57 @@ float3 CalculateGeometricWorldNormal(
 
     return geometricNormal;
 }
-
+float3 CalculatePuddleGeometricWorldNormal(
+    float3 wsPosition,
+    out float geometryValidity)
+{
+    float3 tangentX = ddx(wsPosition);
+    float3 tangentY = ddy(wsPosition);
+    float tangentXLength = length(tangentX);
+    float tangentYLength = length(tangentY);
+    float cameraDistance = length(wsPosition - WG_CameraPosition);
+    float maximumTangentLength = max(24.0f, cameraDistance * 0.012f);
+    float3 geometricNormal = cross(tangentY, tangentX);
+    float geometricNormalLengthSq = dot(geometricNormal, geometricNormal);
+    geometryValidity = step(1e-5f, min(tangentXLength, tangentYLength))
+        * step(max(tangentXLength, tangentYLength), maximumTangentLength)
+        * step(1e-8f, geometricNormalLengthSq);
+    if (geometryValidity <= 0.0f)
+        return float3(0.0f, 1.0f, 0.0f);
+    geometricNormal *= rsqrt(geometricNormalLengthSq);
+    if (geometricNormal.y < 0.0f)
+        geometricNormal = -geometricNormal;
+    return geometricNormal;
+}
+bool EvaluatePuddleReceiverSample(
+    float2 sampleUV,
+    float3 centerWSPosition,
+    float3 centerGeometricNormal,
+    out float3 sampleWSPosition)
+{
+    float2 halfTexel = WG_InvResolution * 0.5f;
+    if (any(sampleUV < halfTexel) || any(sampleUV > 1.0f - halfTexel))
+    {
+        sampleWSPosition = centerWSPosition;
+        return false;
+    }
+    float sampleDepth = TX_Depth.SampleLevel(SS_Linear, sampleUV, 0).r;
+    if (sampleDepth <= 1e-7f)
+    {
+        sampleWSPosition = centerWSPosition;
+        return false;
+    }
+    sampleWSPosition = ReconstructWorldPosition(sampleDepth, sampleUV);
+    float3 surfaceDelta = sampleWSPosition - centerWSPosition;
+    float tangentDistance = length(
+        surfaceDelta - centerGeometricNormal * dot(surfaceDelta, centerGeometricNormal));
+    float planeDeviation = abs(dot(surfaceDelta, centerGeometricNormal));
+    float cameraDistance = length(centerWSPosition - WG_CameraPosition);
+    float planeTolerance = max(
+        8.0f,
+        max(tangentDistance * 0.18f, cameraDistance * 0.0012f));
+    return planeDeviation <= planeTolerance;
+}
 float CalculateReflectionScreenFade(float2 uv)
 {
     float2 edgeDistance = min(uv, 1.0f - uv);
@@ -253,7 +303,7 @@ float EvaluatePuddleEligibilitySample(
     out float sampleValidity)
 {
     float3 sampleWSPosition = centerWSPosition;
-    bool validReceiverSample = EvaluateWetGroundReceiverSample(
+    bool validReceiverSample = EvaluatePuddleReceiverSample(
         sampleUV, centerWSPosition, centerGeometricNormal, sampleWSPosition);
 
     if (!validReceiverSample)
@@ -524,7 +574,7 @@ float EvaluatePuddleSurfaceSupport(
     out float sampleValidity)
 {
     float3 sampleWSPosition = wsPosition;
-    bool validReceiverSample = EvaluateWetGroundReceiverSample(
+    bool validReceiverSample = EvaluatePuddleReceiverSample(
         sampleUV, wsPosition, geometricNormal, sampleWSPosition);
 
     if (!validReceiverSample)
@@ -599,6 +649,9 @@ float4 PSMain(PS_INPUT input) : SV_TARGET
     float3 sourceWSNormal = DecodeWorldNormal(uv);
     float3 geometricWSNormal = CalculateGeometricWorldNormal(
         uv, wsPosition, sourceWSNormal);
+    float puddleGeometryValidity = 0.0f;
+    float3 puddleGeometricWSNormal = CalculatePuddleGeometricWorldNormal(
+        wsPosition, puddleGeometryValidity);
 
     float materialWetGroundSSRStrength = saturate(
         TX_Material.SampleLevel(SS_Linear, uv, 0).z);
@@ -617,14 +670,16 @@ float4 PSMain(PS_INPUT input) : SV_TARGET
     float puddleAccumulation = smoothstep( 0.18f, 0.95f, saturate(WG_PuddleAccumulation));
     float commonWetMask = upwardMask * rainExposure * wetness * wetSSRVisibility;
     float puddleMask = CalculatePuddleMask(
-        wsPosition, geometricWSNormal.y, puddleAccumulation);
-    float puddleSurfaceSupport = CalculatePuddleSurfaceSupport(wsPosition, geometricWSNormal, uv);
+        wsPosition, puddleGeometricWSNormal.y, puddleAccumulation);
+    float puddleSurfaceSupport = CalculatePuddleSurfaceSupport(
+        wsPosition, puddleGeometricWSNormal, uv);
     float puddleBoundaryMask = CalculatePuddleBoundaryMask(
-        uv, wsPosition, geometricWSNormal);
+        uv, wsPosition, puddleGeometricWSNormal);
     float puddleSupportFade = lerp(0.82f, 1.0f, smoothstep(0.05f, 0.95f, puddleSurfaceSupport));
     puddleMask *= puddleSupportFade
         * puddleBoundaryMask
-        * materialPuddleEligibility;
+        * materialPuddleEligibility
+        * puddleGeometryValidity;
     float materialWetStrength = materialWetGroundSSRStrength * lerp(0.72f, 1.0f, wetness);
     float materialWetMask = commonWetMask * materialWetStrength
         * max(WG_WetMaterialReflectionsStrength, 0.0f)
@@ -673,15 +728,16 @@ float4 PSMain(PS_INPUT input) : SV_TARGET
     float ringVisibility = saturate(impactRing) * rainImpactVisibility * rainSurfaceResponse * wetGroundRainImpactsStrength;
     float centralImpactVisibility = saturate(impactPulse) * rainImpactVisibility * rainSurfaceResponse * wetGroundRainImpactsStrength;
     float3 viewRay = normalize(wsPosition - WG_CameraPosition);
-    float puddleViewFacing = saturate(dot(-viewRay, geometricWSNormal));
+    float puddleViewFacing = saturate(dot(-viewRay, puddleGeometricWSNormal));
     float puddleGrazing = pow(1.0f - puddleViewFacing, 2.5f);
     float puddleDistance = length(wsPosition - WG_CameraPosition);
     float puddleDistanceVisibility = smoothstep(450.0f, 2200.0f, puddleDistance);
     float puddleTransitionMask = smoothstep(0.002f, 0.42f, puddleWetMask);
     float puddleInteriorMask = smoothstep(0.12f, 0.88f, puddleWetMask);
-    float slopeWaterFeather = max(0.018f, fwidth(geometricWSNormal.y) * 2.5f);
+    float slopeWaterFeather = max(0.018f, fwidth(puddleGeometricWSNormal.y) * 2.5f);
     float slopeWaterFade = smoothstep(
-        0.955f - slopeWaterFeather, 0.992f + slopeWaterFeather, geometricWSNormal.y);
+        0.955f - slopeWaterFeather, 0.992f + slopeWaterFeather, puddleGeometricWSNormal.y)
+        * puddleGeometryValidity;
     slopeWaterFade = slopeWaterFade * slopeWaterFade * (3.0f - 2.0f * slopeWaterFade);
     float puddleWaterMask = puddleTransitionMask * slopeWaterFade;
     float puddleBodyMask = puddleInteriorMask * slopeWaterFade;
@@ -709,8 +765,9 @@ float4 PSMain(PS_INPUT input) : SV_TARGET
     float3 materialWetNormal = normalize(
         wsNormal + float3(baseNormalDistortion.x, 0.0f, baseNormalDistortion.y) * materialMicrostructure);
     float3 puddlePlaneNormal = normalize(
-        lerp(geometricWSNormal, float3(0.0f, 1.0f, 0.0f), 0.78f));
-    float puddleNormalBlend = puddleWaterMask;
+        lerp(puddleGeometricWSNormal, float3(0.0f, 1.0f, 0.0f), 0.78f));
+    float puddleNormalBlend = smoothstep(0.015f, 0.20f, puddleWetMask)
+        * slopeWaterFade;
     float3 wetBaseNormal = normalize(
         lerp(materialWetNormal, puddlePlaneNormal, puddleNormalBlend));
 
@@ -940,7 +997,8 @@ float4 PSMain(PS_INPUT input) : SV_TARGET
         max(reflectedColor, surfaceColor * float3(0.88f, 0.92f, 0.96f)),
         puddleSurfaceFresnel * 0.075f);
     float materialReflectionBlend =
-        materialWetMask * reflectionWeight * materialFresnel * WG_Strength * 2.60f;
+        materialWetMask * (1.0f - puddleNormalBlend)
+        * reflectionWeight * materialFresnel * WG_Strength * 2.60f;
     float puddleReflectionBlend =
         puddleWetMask * slopeWaterFade * reflectionWeight
         * lerp(0.14f, 0.28f, puddleFresnel) * WG_Strength * 5.20f

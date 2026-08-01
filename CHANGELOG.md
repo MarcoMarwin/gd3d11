@@ -869,3 +869,9 @@ Dokumentation der gepushten Renderer-Builds.
 ## Build 185
 - Implement volumetric height fog candidate selection for world and rain (Blocks 1-18)
 
+
+## Build 186
+- Editor-Widget-Klassen und ImGuiEditorView rueckstandsfrei entfernt (inklusive BaseWidget, EditorLinePrimitive, GVegetationBox, WidgetContainer, Widget_TransRot).
+- GothicAPI und Launcher-Schnittstellen vollstaendig von LoadCustomZENResources und weiteren Editor-Exporten bereinigt.
+- Wet Ground SSR: Puddle Geometric World Normal-Berechnung integriert, um Normal-Verzerrungen aus den Puddle-Masken fuer Wasseroberflaechenreflexionen zurueckzunehmen.
+

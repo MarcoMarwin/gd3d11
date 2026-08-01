@@ -407,11 +407,61 @@ HF_RainWeightZFar );
 float nightFogBrightness = lerp(1.0f, max(0.0f, AC_NightFogBrightness), saturate(AC_EnableNightAtmosphere));
 float3 nightRainVeilColor = float3(0.12f, 0.18f, 0.27f) * nightFogBrightness / 2.5f;
 float3 rainVeilColor = lerp(HF_RainFogColor, nightRainVeilColor, nightAtmosphereBlend);
-float rainVeilBase = lerp(0.050f, 0.22f, nightAtmosphereBlend);
-float rainVeil = max(saturate(rainFog), rainVeilBase) * activeWeatherFog;
-        bool rainVeilWins = rainVeil > fog.a;
-        float finalFogWeight = max(fog.a, rainVeil);
-        float3 finalFogColor = rainVeilWins ? rainVeilColor : fog.rgb;
+float rainFogOpacity = saturate(rainFog) * 0.75f;
+float rainVeilBase = lerp(0.040f, 0.17f, nightAtmosphereBlend);
+float rainVeil = max(rainFogOpacity, rainVeilBase) * activeWeatherFog;
+        float worldFogEventPresent = step(0.0001f, HF_FogOverride);
+        float rainFogPresent = step(0.0001f, activeWeatherFog);
+        float worldFogReferenceDistance = max(lerp(
+            HF_WeightZNear,
+            HF_WeightZFar,
+            0.75f), 0.0f);
+        float rainFogReferenceDistance = max(lerp(
+            HF_RainWeightZNear,
+            HF_RainWeightZFar,
+            0.75f), 0.0f);
+        float worldFogReferenceOpacity = 1.0f - exp(
+            -max(HF_GlobalDensity, 0.0f)
+            * 0.75f
+            * worldFogReferenceDistance
+            * exp(-HF_HeightFalloff));
+        float rainFogReferenceOpacity = 1.0f - exp(
+            -max(HF_RainGlobalDensity, 0.0f)
+            * 0.75f
+            * rainFogReferenceDistance
+            * exp(-HF_RainHeightFalloff));
+        float worldFogReferenceMaxOpacity = lerp(
+            1.0f,
+            0.85f,
+            nightAtmosphereBlend);
+        worldFogReferenceOpacity = saturate(worldFogReferenceOpacity)
+            * worldFogReferenceMaxOpacity
+            * saturate(HF_FogOverride);
+        rainFogReferenceOpacity = max(
+            saturate(rainFogReferenceOpacity) * 0.75f,
+            rainVeilBase)
+            * activeWeatherFog;
+        float strongestReferenceOpacity = max(
+            max(worldFogReferenceOpacity, rainFogReferenceOpacity),
+            0.0001f);
+        float globalFogDominance = (
+            rainFogReferenceOpacity - worldFogReferenceOpacity)
+            / strongestReferenceOpacity;
+        float transitionRainWinnerBlend = smoothstep(
+            -0.08f,
+            0.08f,
+            globalFogDominance);
+        float globalRainWinnerBlend = rainFogPresent * (
+            (1.0f - worldFogEventPresent)
+            + worldFogEventPresent * transitionRainWinnerBlend);
+        float finalFogWeight = lerp(
+            fog.a,
+            rainVeil,
+            globalRainWinnerBlend);
+        float3 finalFogColor = lerp(
+            fog.rgb,
+            rainVeilColor,
+            globalRainWinnerBlend);
         color.rgb = lerp(color.rgb, finalFogColor, finalFogWeight);
     }
 #endif

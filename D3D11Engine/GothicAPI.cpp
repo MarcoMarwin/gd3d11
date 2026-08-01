@@ -1088,9 +1088,6 @@ void GothicAPI::ResetVobs() {
         }
     }
 
-    // Remove vegetation
-    ResetVegetation();
-
     // Clear helper-lists
     for ( zCVob* vob : ParticleEffectVobs ) {
         DestroyParticleEffect( vob );
@@ -1238,8 +1235,6 @@ void GothicAPI::OnWorldLoaded() {
     }
 
     _canRain = false;
-
-    LoadCustomZENResources();
 
     LogInfo() << "Collecting vobs...";
 
@@ -5696,52 +5691,7 @@ size_t GothicAPI::CollectNearbyNpcInteractionPositions( const XMFLOAT3& center, 
     return count;
 }
 
-/** Loads resources created for this .ZEN */
-void GothicAPI::LoadCustomZENResources() {
-    // Editor-only .spt/.veg resources are intentionally ignored in the player build.
-}
 
-/** Saves resources created for this .ZEN */
-void GothicAPI::SaveCustomZENResources() {
-    // Editor-only .spt/.veg resources are intentionally ignored in the player build.
-}
-
-/** Applys the suppressed textures */
-void GothicAPI::ApplySuppressedSectionTextures() {
-}
-
-/** Resets the suppressed textures */
-void GothicAPI::ResetSupressedTextures() {
-    SuppressedTexturesBySection.clear();
-}
-
-/** Resets the vegetation */
-void GothicAPI::ResetVegetation() {
-}
-
-/** Removes the given texture from the given section and stores the supression, so we can load it next time */
-void GothicAPI::SupressTexture( WorldMeshSectionInfo*, const std::string& ) {
-}
-
-/** Saves Suppressed textures to a file */
-XRESULT GothicAPI::SaveSuppressedTextures( const std::string& ) {
-    return XR_SUCCESS;
-}
-
-/** Saves Suppressed textures to a file */
-XRESULT GothicAPI::LoadSuppressedTextures( const std::string& ) {
-    return XR_SUCCESS;
-}
-
-/** Saves vegetation to a file */
-XRESULT GothicAPI::SaveVegetation( const std::string& ) {
-    return XR_SUCCESS;
-}
-
-/** Saves vegetation to a file */
-XRESULT GothicAPI::LoadVegetation( const std::string& ) {
-    return XR_SUCCESS;
-}
 
 /** Saves the users settings from the menu */
 XRESULT GothicAPI::SaveMenuSettings( const std::string& file ) {

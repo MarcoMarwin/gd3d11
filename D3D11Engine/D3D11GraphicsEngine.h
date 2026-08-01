@@ -402,7 +402,7 @@ public:
 
     D3D11PfxRenderer* GetPfxRenderer() const { return PfxRenderer.get(); }
     D3D11Texture* GetDistortionTexture() const { return DistortionTexture.get(); }
-    D3D11Texture* GetBlueNoiseTexture() const { return BlueNoise512BGRA.get(); }
+    D3D11Texture* GetBlueNoiseTexture() const { return BlueNoiseTexture.get(); }
     D3D11Texture* GetWhiteTexture() const { return WhiteTexture.get(); }
 
     RenderToTextureBuffer* GetVelocityBuffer() const { return VelocityBuffer.get(); }
@@ -493,9 +493,8 @@ protected:
 
     /** Sky */
     std::unique_ptr<D3D11Texture> DistortionTexture;
-    std::unique_ptr<D3D11Texture> NoiseTexture;
     std::unique_ptr<D3D11Texture> WhiteTexture;
-    std::unique_ptr<D3D11Texture> BlueNoise512BGRA;
+    std::unique_ptr<D3D11Texture> BlueNoiseTexture;
 
     /** Shadowing */
     std::vector<VobInfo*> RenderedVobs;
@@ -524,7 +523,6 @@ public:
     GMesh* InverseUnitSphereMesh;
     /** Reflection */
     Microsoft::WRL::ComPtr<ID3D11ShaderResourceView> ReflectionCube;
-    Microsoft::WRL::ComPtr<ID3D11ShaderResourceView> ReflectionCube2;
 private:
     bool PrepareAndBindWindMetadata( const std::vector<MeshVisualInfo*>& activeVisuals );
     void UnbindWindMetadata();

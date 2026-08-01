@@ -325,12 +325,6 @@ public:
     /** Called when a material got removed */
     void OnMaterialCreated( zCMaterial* mat );
 
-    /** Loads resources created for this .ZEN */
-    void LoadCustomZENResources();
-
-    /** Saves resources created for this .ZEN */
-    void SaveCustomZENResources();
-
     /** Returns the GraphicsState */
     GothicRendererState& GetRendererState();
 
@@ -685,27 +679,6 @@ public:
     /** Returns the collection of PolyStrip meshes infos */
     const std::map<zCTexture*, PolyStripInfo>& GetPolyStripInfos() { return PolyStripInfos; };
 
-    /** Removes the given texture from the given section and stores the supression, so we can load it next time */
-    void SupressTexture( WorldMeshSectionInfo* section, const std::string& texture );
-
-    /** Resets the suppressed textures */
-    void ResetSupressedTextures();
-
-    /** Resets the vegetation */
-    void ResetVegetation();
-
-    /** Saves Suppressed textures to a file */
-    XRESULT SaveSuppressedTextures( const std::string& file );
-
-    /** Saves Suppressed textures to a file */
-    XRESULT LoadSuppressedTextures( const std::string& file );
-
-    /** Saves vegetation to a file */
-    XRESULT SaveVegetation( const std::string& file );
-
-    /** Saves vegetation to a file */
-    XRESULT LoadVegetation( const std::string& file );
-
     /** Returns the main-thread id */
     DWORD GetMainThreadID();
 
@@ -846,9 +819,6 @@ private:
     void BuildBspVobMapCacheHelper( zCBspBase* base );
     void BuildBspLeafLinearCache();
 
-    /** Applys the suppressed textures */
-    void ApplySuppressedSectionTextures();
-
     /** Puts the custom-polygons into the bsp-tree */
     void PutCustomPolygonsIntoBspTree();
     void PutCustomPolygonsIntoBspTreeRec( BspInfo* base );
@@ -976,9 +946,6 @@ private:
 
     /** Gothics output window */
     HWND OutputWindow;
-
-    /** Suppressed textures for the sections */
-    std::map<WorldMeshSectionInfo*, std::vector<std::string>> SuppressedTexturesBySection;
 
     /** Current camera, stored to find out about camera switches */
     zCCamera* CurrentCamera;

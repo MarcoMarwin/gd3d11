@@ -28,7 +28,6 @@ EXPORTS
 	UpdateCustomFontMultiplier	= FakeUpdateCustomFontMultiplier
 	SetCustomSkyTexture			= FakeSetCustomSkyTexture			
 	LoadMenuSettings			= FakeLoadMenuSettings				
-	LoadCustomZENResources		= FakeLoadCustomZENResources		
 
 	; ImGui C-API Wrapper for Daedalus scripting
 	imgui_begin                  = Fakeimgui_begin                 

@@ -987,14 +987,9 @@ XRESULT D3D11GraphicsEngine::Init() {
     SetActiveVertexShader( VShaderID::VS_Ex );
 
     DistortionTexture = std::make_unique<D3D11Texture>();
-    DistortionTexture->Init( "system\\GD3D11\\textures\\distortion.dds" );
-
-    NoiseTexture = std::make_unique<D3D11Texture>();
-    NoiseTexture->Init( "system\\GD3D11\\textures\\noise.dds" );
-
-    BlueNoise512BGRA = std::make_unique<D3D11Texture>();
-    BlueNoise512BGRA->Init( "system\\GD3D11\\textures\\bluenoise-rgba-512-bgra.dds" );
-
+    DistortionTexture->Init( "system\\GD3D11\\Textures\\Distortion.dds" );
+    BlueNoiseTexture = std::make_unique<D3D11Texture>();
+    BlueNoiseTexture->Init( "system\\GD3D11\\Textures\\BlueNoise.dds" );
     WhiteTexture = std::make_unique<D3D11Texture>();
     uint32_t whitePixel = 0xFFFFFFFF;
     WhiteTexture->Init( {1,1}, D3D11Texture::ETextureFormat::TF_B8G8R8A8, 1, &whitePixel, "FULL_WHITE_ALPHA_OPAQUE.static-memory");
@@ -1022,20 +1017,12 @@ XRESULT D3D11GraphicsEngine::Init() {
     SetDebugName( InfiniteRangeConstantBuffer->Get().Get(), "InfiniteRangeConstantBuffer" );
     SetDebugName( OutdoorSmallVobsConstantBuffer->Get().Get(), "OutdoorSmallVobsConstantBuffer" );
     SetDebugName( OutdoorVobsConstantBuffer->Get().Get(), "OutdoorVobsConstantBuffer" );
-    // Load reflectioncube
-
+    // Load reflection cube
     if ( S_OK != CreateDDSTextureFromFile(
-        GetDevice().Get(), L"system\\GD3D11\\Textures\\reflect_cube.dds",
-        nullptr,
-        ReflectionCube.GetAddressOf() ) )
+        GetDevice().Get(), L"system\\GD3D11\\Textures\\SkyCubemap.dds",
+        nullptr, ReflectionCube.GetAddressOf() ) )
         LogWarn()
-        << "Failed to load file: system\\GD3D11\\Textures\\reflect_cube.dds";
-
-    if ( S_OK != CreateDDSTextureFromFile(
-        GetDevice().Get(), L"system\\GD3D11\\Textures\\SkyCubemap2.dds",
-        nullptr, ReflectionCube2.GetAddressOf() ) )
-        LogWarn()
-        << "Failed to load file: system\\GD3D11\\Textures\\SkyCubemap2.dds";
+        << "Failed to load file: system\\GD3D11\\Textures\\SkyCubemap.dds";
 
     // Init quad buffers
     ExVertexStruct vx[6];

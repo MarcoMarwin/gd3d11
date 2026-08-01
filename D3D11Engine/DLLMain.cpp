@@ -302,10 +302,6 @@ extern "C" void WINAPI LoadMenuSettings(char* menuSettingsFile) {
     Engine::GAPI->LoadMenuSettings( !menuSettingsFile ? MENU_SETTINGS_FILE : menuSettingsFile );
 }
 
-extern "C" void WINAPI LoadCustomZENResources() {
-    Engine::GAPI->LoadCustomZENResources();
-}
-
 extern "C" void WINAPI EnableWindAnimations( void ) {
 #if defined(BUILD_GOTHIC_1_08k) && !defined(BUILD_1_12F)
     haveWindAnimations = true;

@@ -75,7 +75,6 @@ struct ddraw_dll {
     FARPROC	UpdateCustomFontMultiplier;
     FARPROC	SetCustomSkyTexture;
     FARPROC LoadMenuSettings;
-    FARPROC LoadCustomZENResources;
     FARPROC imgui_begin;
     FARPROC imgui_begin_overlay;
     FARPROC imgui_end;
@@ -167,7 +166,6 @@ __declspec(naked) void FakeGDX_SaveRendererSettings() { _asm { jmp[ddraw.GDX_Sav
 __declspec(naked) void FakeUpdateCustomFontMultiplier() { _asm { jmp[ddraw.UpdateCustomFontMultiplier] } }
 __declspec(naked) void FakeSetCustomSkyTexture() { _asm { jmp[ddraw.SetCustomSkyTexture] } }
 __declspec(naked) void FakeLoadMenuSettings() { _asm { jmp[ddraw.LoadMenuSettings] } }
-__declspec(naked) void FakeLoadCustomZENResources() { _asm { jmp[ddraw.LoadCustomZENResources] } }
 __declspec(naked) void Fakeimgui_begin() { _asm { jmp[ddraw.imgui_begin] } }
 __declspec(naked) void Fakeimgui_begin_overlay() { _asm { jmp[ddraw.imgui_begin_overlay] } }
 __declspec(naked) void Fakeimgui_end() { _asm { jmp[ddraw.imgui_end] } }
@@ -440,7 +438,6 @@ BOOL APIENTRY DllMain( HINSTANCE hInst, DWORD reason, LPVOID ) {
         ddraw.UpdateCustomFontMultiplier = GetProcAddress( ddraw.dll, "UpdateCustomFontMultiplier" );
         ddraw.SetCustomSkyTexture = GetProcAddress( ddraw.dll, "SetCustomSkyTexture" );
         ddraw.LoadMenuSettings = GetProcAddress( ddraw.dll, "LoadMenuSettings" );
-        ddraw.LoadCustomZENResources = GetProcAddress( ddraw.dll, "LoadCustomZENResources" );
         
         ddraw.imgui_begin = GetProcAddress( ddraw.dll, "imgui_begin" );
         ddraw.imgui_begin_overlay = GetProcAddress( ddraw.dll, "imgui_begin_overlay" );

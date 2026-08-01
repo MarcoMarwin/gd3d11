@@ -1584,8 +1584,7 @@ XRESULT D3D11ShadowMap::DrawWorldLights()
 
     this->BindSampler( m_context.Get(), 2 );
 
-    m_context->PSSetShaderResources( TX_ReflectionCube, 1, graphicsEngine->ReflectionCube2.GetAddressOf() );
-
+    m_context->PSSetShaderResources( TX_ReflectionCube, 1, graphicsEngine->ReflectionCube.GetAddressOf() );
     graphicsEngine->GetDistortionTexture()->BindToPixelShader( TX_Distortion );
     graphicsEngine->GetBlueNoiseTexture()->BindToPixelShader( TX_BlueNoise512 );
 

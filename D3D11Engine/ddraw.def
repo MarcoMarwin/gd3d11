@@ -27,7 +27,6 @@ EXPORTS
 	SetCustomSkyTexture_ZenGin	= SetCustomSkyTexture_ZenGin
 	SetCustomSkyWavelengths		= SetCustomSkyWavelengths
 	LoadMenuSettings			= LoadMenuSettings
-	LoadCustomZENResources		= LoadCustomZENResources
 	EnableWindAnimations @2137 NONAME
 
 	; ImGui C-API Wrapper for Daedalus scripting

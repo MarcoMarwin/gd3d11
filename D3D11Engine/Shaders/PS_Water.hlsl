@@ -384,18 +384,6 @@ PS_OUTPUT PSMain(PS_INPUT Input)
         lerp(0.35f, 1.0f, reflectFresnel) * 0.5f * reflectFresnel)
         * waterReflectionSuppress;
     float3 cubeOnlyReflectionColor = cube * lerp(1.0f, diffuse, 0.6f);
-    float cubeOnlyReflectionLuma = dot(
-        cubeOnlyReflectionColor,
-        float3(0.2126f, 0.7152f, 0.0722f));
-    float3 cubeOnlyNightColor = lerp(
-        cubeOnlyReflectionLuma.xxx,
-        cubeOnlyReflectionColor,
-        0.42f)
-        * 0.32f;
-    cubeOnlyReflectionColor = lerp(
-        cubeOnlyReflectionColor,
-        cubeOnlyNightColor,
-        nightAmount);
     float lum = dot(cube, float3(.2126, .7152, .0722));
     float3 gray = lum.xxx;
     float3 dayRain = lerp(gray * .46f, float3(.18, .20, .21), .55f) * lerp(1, max(AC_LowCloudRainColor, 0), .30f);
@@ -736,10 +724,32 @@ float3 skyReflection =
             oceanSsrColor,
             processedReflection,
             oceanGeometryBlend);
+        float rawOceanCubeOnlyLuma = max(dot(
+            cubeOnlyReflectionColor,
+            reflectionLumaWeights), .0001f);
+        float oceanNightCubeOnlyLumaLimit = oceanBaseLuma * 1.15f + .003f;
+        float3 oceanNightCubeOnlyColor = cubeOnlyReflectionColor * min(
+            1.0f,
+            oceanNightCubeOnlyLumaLimit / rawOceanCubeOnlyLuma);
+        float oceanNightCubeOnlyLuma = dot(
+            oceanNightCubeOnlyColor,
+            reflectionLumaWeights);
+        oceanNightCubeOnlyColor = lerp(
+            oceanNightCubeOnlyLuma.xxx,
+            oceanNightCubeOnlyColor,
+            .28f);
+        float3 oceanAdaptiveCubeOnlyColor = lerp(
+            cubeOnlyReflectionColor,
+            oceanNightCubeOnlyColor,
+            nightAmount);
+        float oceanCubeOnlyAmount = cubeOnlyReflectionAmount
+            * lerp(1.0f, .55f, nightAmount)
+            * shore
+            * hemi;
         float3 oceanCubeOnlyColor = lerp(
             volume,
-            cubeOnlyReflectionColor,
-            cubeOnlyReflectionAmount * shore * hemi);
+            oceanAdaptiveCubeOnlyColor,
+            oceanCubeOnlyAmount);
         float3 color = lerp(oceanCubeOnlyColor, oceanSsrColor, ssrEnabled);
         float3 smallRefl = reflect(-viewDirection, ws);
         float weather = GetRainSkyVisibility();
@@ -941,10 +951,31 @@ float3 skyReflection =
             legacyColor,
             legacyDefinedReflection,
             legacySsrBlend * legacyShoreVisibility);
+        float rawLegacyCubeOnlyLuma = max(dot(
+            cubeOnlyReflectionColor,
+            reflectionLumaWeights), .0001f);
+        float legacyNightCubeOnlyLumaLimit = legacyBaseLuma * 1.10f + .002f;
+        float3 legacyNightCubeOnlyColor = cubeOnlyReflectionColor * min(
+            1.0f,
+            legacyNightCubeOnlyLumaLimit / rawLegacyCubeOnlyLuma);
+        float legacyNightCubeOnlyLuma = dot(
+            legacyNightCubeOnlyColor,
+            reflectionLumaWeights);
+        legacyNightCubeOnlyColor = lerp(
+            legacyNightCubeOnlyLuma.xxx,
+            legacyNightCubeOnlyColor,
+            .24f);
+        float3 legacyAdaptiveCubeOnlyColor = lerp(
+            cubeOnlyReflectionColor,
+            legacyNightCubeOnlyColor,
+            nightAmount);
+        float legacyCubeOnlyAmount = cubeOnlyReflectionAmount
+            * lerp(1.0f, .50f, nightAmount)
+            * legacyShoreVisibility;
         float3 legacyCubeOnlyColor = lerp(
             legacyColor,
-            cubeOnlyReflectionColor,
-            cubeOnlyReflectionAmount * legacyShoreVisibility);
+            legacyAdaptiveCubeOnlyColor,
+            legacyCubeOnlyAmount);
         float3 legacyFinalColor = lerp(legacyCubeOnlyColor, legacySsrFinalColor, ssrEnabled);
         finalColor = legacyFinalColor;
         maskOut = lerp(0.25f, 1.0f, step(0.5f, WM_DisableRainEffects));

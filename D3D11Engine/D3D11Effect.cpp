@@ -715,7 +715,7 @@ HRESULT LoadTextureArray( Microsoft::WRL::ComPtr<ID3D11Device1> pd3dDevice, Micr
     if ( strstr( sTexturePrefix, "Raindrops" ) ) {
         singleFilePath = R"(\system\GD3D11\Textures\raindrops.dds)";
     } else if ( strstr( sTexturePrefix, "Snowflakes" ) ) {
-        singleFilePath = R"(\system\GD3D11\Textures\snowflakes.dds)";
+        singleFilePath = R"(\system\GD3D11\Textures\SnowFlakes.dds)";
     }
 
     if ( !singleFilePath.empty() ) {
