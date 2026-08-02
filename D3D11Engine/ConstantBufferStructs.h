@@ -230,8 +230,12 @@ struct GodRayVolumetricConstantBuffer {
     float GRV_Strength;
     uint32_t GRV_FrameIndex;
     uint32_t GRV_NumCascades;
+    XMFLOAT4X4 GRV_PreviousViewProjection;
+    float2 GRV_InvOutputSize;
+    float GRV_HistoryValid;
+    float GRV_HistoryWeight;
 };
-static_assert( sizeof(GodRayVolumetricConstantBuffer) == 448, "GodRayVolumetricConstantBuffer must be exactly 448 bytes" );
+static_assert( sizeof(GodRayVolumetricConstantBuffer) == 528, "GodRayVolumetricConstantBuffer must be exactly 528 bytes" );
 struct DS_ScreenQuadConstantBuffer {
     float4 SQ_ProjParams; // x = 1/P._11, y = 1/P._22, z = P._43, w = P._33
     XMFLOAT4X4 SQ_InvView;

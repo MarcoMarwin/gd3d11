@@ -41,6 +41,17 @@ namespace {
 }
 
 D3D11PFX_GodRays::D3D11PFX_GodRays( D3D11PfxRenderer* rnd ) : D3D11PFX_Effect( rnd ) {}
+void D3D11PFX_GodRays::ResetTemporalHistory() {
+    m_VolumetricHistory[0].reset();
+    m_VolumetricHistory[1].reset();
+    m_VolumetricDepthHistory[0].reset();
+    m_VolumetricDepthHistory[1].reset();
+    m_VolumetricHistoryIndex = 0;
+    m_VolumetricHistoryValid = false;
+    m_PreviousViewProjection = {};
+    m_PreviousCameraPosition = {};
+    m_LastVolumetricRenderTime = -1.0f;
+}
 
 /** Draws this effect to the given buffer */
 XRESULT D3D11PFX_GodRays::Render(
@@ -484,7 +495,10 @@ XRESULT D3D11PFX_GodRays::RenderVolumetricToTexture(
     const float worldDrawDistance = std::max(
         static_cast<float>( settings.SectionDrawRadius ) * WORLD_SECTION_SIZE,
         6000.0f );
-    cb.GRV_MaxDistance = std::clamp( worldDrawDistance, 6000.0f, 60000.0f );
+    const float cascadeFarDistance = shadowMaps->GetCascadeFarDistance();
+    if ( cascadeFarDistance <= 1.0f )
+        return XR_FAILED;
+    cb.GRV_MaxDistance = std::min( worldDrawDistance, cascadeFarDistance );
     const DS_ScreenQuadConstantBuffer sunCB = shadowMaps->FillSunCSMConstantBuffer();
     for ( int i = 0; i < MAX_CSM_CASCADES; ++i )
         cb.GRV_ShadowViewProj[i] = sunCB.SQ_ShadowViewProj[i];
@@ -519,6 +533,10 @@ XRESULT D3D11PFX_GodRays::RenderVolumetricToTexture(
     cb.GRV_Strength = std::max( settings.GodRayStrength, 0.0f );
     cb.GRV_FrameIndex = static_cast<uint32_t>(std::max( Engine::GAPI->GetTimeSeconds(), 0.0f ) * 60.0f);
     cb.GRV_NumCascades = static_cast<uint32_t>(std::clamp<size_t>( settings.NumShadowCascades, 1, MAX_CSM_CASCADES ));
+    cb.GRV_PreviousViewProjection = m_PreviousViewProjection;
+    cb.GRV_InvOutputSize = float2( 1.0f / std::max( ds4Size.x, 1 ), 1.0f / std::max( ds4Size.y, 1 ) );
+    cb.GRV_HistoryValid = 0.0f;
+    cb.GRV_HistoryWeight = 0.86f;
     auto output = FxRenderer->GetTexturePool()->Acquire(
         TexturePool::Description{ ds4Size.x, ds4Size.y, engine->GetBackBufferFormat(),
             D3D11_BIND_UNORDERED_ACCESS | D3D11_BIND_SHADER_RESOURCE } );
@@ -543,8 +561,91 @@ XRESULT D3D11PFX_GodRays::RenderVolumetricToTexture(
     context->CSSetShaderResources( 0, 3, nullSRVs );
     context->CSSetSamplers( 0, 2, nullSamplers );
     context->CSSetShader( nullptr, nullptr, 0 );
-    m_GodRaysResult = std::move( output );
-    *outGodRaysSRV = m_GodRaysResult->GetShaderResView().Get();
+    const float currentTime = std::max( Engine::GAPI->GetTimeSeconds(), 0.0f );
+    const XMFLOAT3 currentCameraPosition = Engine::GAPI->GetCameraPosition();
+    const float cameraDeltaX = currentCameraPosition.x - m_PreviousCameraPosition.x;
+    const float cameraDeltaY = currentCameraPosition.y - m_PreviousCameraPosition.y;
+    const float cameraDeltaZ = currentCameraPosition.z - m_PreviousCameraPosition.z;
+    const float cameraDeltaSquared = cameraDeltaX * cameraDeltaX + cameraDeltaY * cameraDeltaY + cameraDeltaZ * cameraDeltaZ;
+    if ( m_LastVolumetricRenderTime < 0.0f || currentTime - m_LastVolumetricRenderTime > 0.10f || cameraDeltaSquared > 250000.0f )
+        m_VolumetricHistoryValid = false;
+    const bool historySizeMismatch = !m_VolumetricHistory[0] || !m_VolumetricHistory[1]
+        || !m_VolumetricDepthHistory[0] || !m_VolumetricDepthHistory[1]
+        || m_VolumetricHistory[0]->GetSizeX() != static_cast<UINT>( ds4Size.x )
+        || m_VolumetricHistory[0]->GetSizeY() != static_cast<UINT>( ds4Size.y )
+        || m_VolumetricHistory[1]->GetSizeX() != static_cast<UINT>( ds4Size.x )
+        || m_VolumetricHistory[1]->GetSizeY() != static_cast<UINT>( ds4Size.y )
+        || m_VolumetricDepthHistory[0]->GetSizeX() != static_cast<UINT>( ds4Size.x )
+        || m_VolumetricDepthHistory[0]->GetSizeY() != static_cast<UINT>( ds4Size.y )
+        || m_VolumetricDepthHistory[1]->GetSizeX() != static_cast<UINT>( ds4Size.x )
+        || m_VolumetricDepthHistory[1]->GetSizeY() != static_cast<UINT>( ds4Size.y );
+    if ( historySizeMismatch ) {
+        ResetTemporalHistory();
+        m_VolumetricHistory[0] = FxRenderer->GetTexturePool()->Acquire(
+            TexturePool::Description{ ds4Size.x, ds4Size.y, engine->GetBackBufferFormat(),
+                D3D11_BIND_UNORDERED_ACCESS | D3D11_BIND_SHADER_RESOURCE } );
+        m_VolumetricHistory[1] = FxRenderer->GetTexturePool()->Acquire(
+            TexturePool::Description{ ds4Size.x, ds4Size.y, engine->GetBackBufferFormat(),
+                D3D11_BIND_UNORDERED_ACCESS | D3D11_BIND_SHADER_RESOURCE } );
+        m_VolumetricDepthHistory[0] = FxRenderer->GetTexturePool()->Acquire(
+            TexturePool::Description{ ds4Size.x, ds4Size.y, DXGI_FORMAT_R32_FLOAT,
+                D3D11_BIND_UNORDERED_ACCESS | D3D11_BIND_SHADER_RESOURCE } );
+        m_VolumetricDepthHistory[1] = FxRenderer->GetTexturePool()->Acquire(
+            TexturePool::Description{ ds4Size.x, ds4Size.y, DXGI_FORMAT_R32_FLOAT,
+                D3D11_BIND_UNORDERED_ACCESS | D3D11_BIND_SHADER_RESOURCE } );
+    }
+    if ( !m_VolumetricHistory[0] || !m_VolumetricHistory[1]
+        || !m_VolumetricDepthHistory[0] || !m_VolumetricDepthHistory[1] ) {
+        ResetTemporalHistory();
+        m_VolumetricGodRaysResult = std::move( output );
+        *outGodRaysSRV = m_VolumetricGodRaysResult->GetShaderResView().Get();
+        return XR_SUCCESS;
+    }
+    const uint32_t readIndex = m_VolumetricHistoryIndex;
+    const uint32_t writeIndex = 1u - readIndex;
+    const XMMATRIX currentView = Engine::GAPI->GetViewMatrixXM();
+    const XMMATRIX currentProjection = XMLoadFloat4x4( &projection );
+    XMFLOAT4X4 currentViewProjection = {};
+    XMStoreFloat4x4( &currentViewProjection, XMMatrixMultiply( currentProjection, currentView ) );
+    cb.GRV_PreviousViewProjection = m_PreviousViewProjection;
+    cb.GRV_HistoryValid = m_VolumetricHistoryValid ? 1.0f : 0.0f;
+    auto temporalCS = engine->GetShaderManager().GetCShader( CShaderID::CS_PFX_GodRayTemporal );
+    if ( !temporalCS ) {
+        ResetTemporalHistory();
+        m_VolumetricGodRaysResult = std::move( output );
+        *outGodRaysSRV = m_VolumetricGodRaysResult->GetShaderResView().Get();
+        return XR_SUCCESS;
+    }
+    temporalCS->Apply();
+    temporalCS->GetBuffer( "GodRayVolumetricConstantBuffer" ).Update( &cb ).Bind();
+    ID3D11ShaderResourceView* temporalResources[4] = {
+        output->GetShaderResView().Get(),
+        m_VolumetricHistoryValid ? m_VolumetricHistory[readIndex]->GetShaderResView().Get() : output->GetShaderResView().Get(),
+        depthCopy,
+        m_VolumetricHistoryValid ? m_VolumetricDepthHistory[readIndex]->GetShaderResView().Get() : depthCopy
+    };
+    context->CSSetShaderResources( 0, 4, temporalResources );
+    ID3D11SamplerState* temporalSampler = engine->GetClampSamplerState();
+    context->CSSetSamplers( 0, 1, &temporalSampler );
+    ID3D11UnorderedAccessView* temporalOutputs[2] = {
+        m_VolumetricHistory[writeIndex]->GetUnorderedAccessView().Get(),
+        m_VolumetricDepthHistory[writeIndex]->GetUnorderedAccessView().Get()
+    };
+    context->CSSetUnorderedAccessViews( 0, 2, temporalOutputs, nullptr );
+    context->Dispatch( (ds4Size.x + 7) / 8, (ds4Size.y + 7) / 8, 1 );
+    ID3D11UnorderedAccessView* nullTemporalUAVs[2] = { nullptr, nullptr };
+    ID3D11ShaderResourceView* nullTemporalSRVs[4] = { nullptr, nullptr, nullptr, nullptr };
+    ID3D11SamplerState* nullTemporalSampler = nullptr;
+    context->CSSetUnorderedAccessViews( 0, 2, nullTemporalUAVs, nullptr );
+    context->CSSetShaderResources( 0, 4, nullTemporalSRVs );
+    context->CSSetSamplers( 0, 1, &nullTemporalSampler );
+    context->CSSetShader( nullptr, nullptr, 0 );
+    m_VolumetricHistoryIndex = writeIndex;
+    m_VolumetricHistoryValid = true;
+    m_PreviousViewProjection = currentViewProjection;
+    m_PreviousCameraPosition = currentCameraPosition;
+    m_LastVolumetricRenderTime = currentTime;
+    *outGodRaysSRV = m_VolumetricHistory[writeIndex]->GetShaderResView().Get();
     return XR_SUCCESS;
 }
 XRESULT D3D11PFX_GodRays::RenderCombinedToTexture(
@@ -559,8 +660,6 @@ XRESULT D3D11PFX_GodRays::RenderCombinedToTexture(
         return RenderToTexture( backbuffer, depthCopy, lowClouds, outGodRaysSRV );
     ID3D11ShaderResourceView* volumetricSRV = nullptr;
     const XRESULT volumetricResult = RenderVolumetricToTexture( depthCopy, lowClouds, &volumetricSRV );
-    if ( volumetricSRV )
-        m_VolumetricGodRaysResult = std::move( m_GodRaysResult );
     ID3D11ShaderResourceView* radialSRV = nullptr;
     const XRESULT radialResult = RenderToTexture( backbuffer, depthCopy, lowClouds, &radialSRV );
     if ( radialSRV )
@@ -572,35 +671,40 @@ XRESULT D3D11PFX_GodRays::RenderCombinedToTexture(
         return XR_SUCCESS;
     }
     if ( !radialSRV ) {
-        *outGodRaysSRV = m_VolumetricGodRaysResult->GetShaderResView().Get();
+        *outGodRaysSRV = volumetricSRV;
         return XR_SUCCESS;
     }
     D3D11GraphicsEngine* engine = reinterpret_cast<D3D11GraphicsEngine*>(Engine::GraphicsEngine);
     if ( !engine )
         return XR_FAILED;
     const INT2 resolution = engine->GetResolution();
-    const INT2 ds4Size = { std::max( resolution.x / 4, 1 ), std::max( resolution.y / 4, 1 ) };
     auto combined = FxRenderer->GetTexturePool()->Acquire(
-        TexturePool::Description{ ds4Size.x, ds4Size.y, engine->GetBackBufferFormat(),
+        TexturePool::Description{ resolution.x, resolution.y, engine->GetBackBufferFormat(),
             D3D11_BIND_UNORDERED_ACCESS | D3D11_BIND_SHADER_RESOURCE } );
     auto combineCS = engine->GetShaderManager().GetCShader( CShaderID::CS_PFX_GodRayCombine );
-    if ( !combined || !combineCS ) {
-        *outGodRaysSRV = m_VolumetricGodRaysResult->GetShaderResView().Get();
+    if ( !combined || !combineCS || !m_VolumetricDepthHistory[m_VolumetricHistoryIndex] ) {
+        *outGodRaysSRV = volumetricSRV;
         return XR_SUCCESS;
     }
     auto& context = engine->GetContext();
     combineCS->Apply();
-    ID3D11ShaderResourceView* inputs[2] = {
-        m_VolumetricGodRaysResult->GetShaderResView().Get(),
-        m_RadialGodRaysResult->GetShaderResView().Get()
+    ID3D11ShaderResourceView* inputs[4] = {
+        volumetricSRV,
+        m_RadialGodRaysResult->GetShaderResView().Get(),
+        m_VolumetricDepthHistory[m_VolumetricHistoryIndex]->GetShaderResView().Get(),
+        depthCopy
     };
-    context->CSSetShaderResources( 0, 2, inputs );
+    context->CSSetShaderResources( 0, 4, inputs );
+    ID3D11SamplerState* combineSampler = engine->GetClampSamplerState();
+    context->CSSetSamplers( 0, 1, &combineSampler );
     context->CSSetUnorderedAccessViews( 0, 1, combined->GetUnorderedAccessView().GetAddressOf(), nullptr );
-    context->Dispatch( (ds4Size.x + 7) / 8, (ds4Size.y + 7) / 8, 1 );
+    context->Dispatch( (resolution.x + 7) / 8, (resolution.y + 7) / 8, 1 );
     ID3D11UnorderedAccessView* nullUAV = nullptr;
-    ID3D11ShaderResourceView* nullSRVs[2] = { nullptr, nullptr };
+    ID3D11ShaderResourceView* nullSRVs[4] = { nullptr, nullptr, nullptr, nullptr };
+    ID3D11SamplerState* nullCombineSampler = nullptr;
     context->CSSetUnorderedAccessViews( 0, 1, &nullUAV, nullptr );
-    context->CSSetShaderResources( 0, 2, nullSRVs );
+    context->CSSetShaderResources( 0, 4, nullSRVs );
+    context->CSSetSamplers( 0, 1, &nullCombineSampler );
     context->CSSetShader( nullptr, nullptr, 0 );
     m_CombinedGodRaysResult = std::move( combined );
     *outGodRaysSRV = m_CombinedGodRaysResult->GetShaderResView().Get();

@@ -126,6 +126,10 @@ public:
     void BindSamplerToCS( ID3D11DeviceContext1* context, UINT slot );
     ID3D11SamplerState* GetShadowmapSampler() const { return m_shadowmapSampler.Get(); }
 
+    float GetCascadeFarDistance() const {
+        return m_CascadeSplits.empty() ? 0.0f : m_CascadeSplits.back();
+    }
+
     XRESULT PrepareRender();
 
     // Compute cascade split distances.

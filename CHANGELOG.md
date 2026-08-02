@@ -890,3 +890,10 @@ Dokumentation der gepushten Renderer-Builds.
 - Interne Feature-Level-Normalisierung: DX10-Hardware faellt automatisch auf radiale (Low) Lichtstrahlen zurueck, waehrend DX11-Hardware volumetrische (High) Godrays nutzt.
 - Presetvergleiche und INI-Speicherung auf den neuen EnableGodRays-Master-Schalter umgestellt.
 
+
+## Build 191
+- Add invalid sky layer marker to low clouds
+- Fix validity-aware 2x2 filter for stable sky low clouds
+- Enhance water glint transmission based on reflected cloud coverage
+- Improve Godrays with radial luminance compression and dynamic litFraction
+- Add Temporal Reprojection (TAA) for Volumetric Godrays to increase sample stability

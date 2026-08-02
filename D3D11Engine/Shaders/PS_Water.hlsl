@@ -580,8 +580,13 @@ float3 skyReflection =
     float3 moonProj = ProjectCelestial(-AC_MoonPos.xyz);
     float sunCloudA = ResolveLowCloudLayer(TX_LowClouds.SampleLevel(SS_Linear, sunProj.xy, 0), TX_Scene.SampleLevel(SS_Linear, sunProj.xy, 0).rgb).a * sunProj.z;
     float moonCloudA = ResolveLowCloudLayer(TX_LowClouds.SampleLevel(SS_Linear, moonProj.xy, 0), TX_Scene.SampleLevel(SS_Linear, moonProj.xy, 0).rgb).a * moonProj.z;
-    float sunCloudTransmission = 1 - smoothstep(.08f, .88f, sunCloudA);
-    float moonCloudTransmission = 1 - smoothstep(.08f, .88f, moonCloudA);
+    float reflectedCloudTransmission = 1 - smoothstep(.08f, .88f, saturate(clouds.a));
+    float sunCloudTransmission = min(
+        1 - smoothstep(.08f, .88f, sunCloudA),
+        reflectedCloudTransmission);
+    float moonCloudTransmission = min(
+        1 - smoothstep(.08f, .88f, moonCloudA),
+        reflectedCloudTransmission);
 
     float3 finalColor;
     float maskOut;

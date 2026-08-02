@@ -25,6 +25,7 @@ public:
                                     ID3D11ShaderResourceView* depthCopy,
                                     ID3D11ShaderResourceView* lowClouds,
                                     ID3D11ShaderResourceView** outGodRaysSRV );
+    void ResetTemporalHistory();
 private:
     /** Compute shader path for FL11+ */
     XRESULT RenderCS( ID3D11ShaderResourceView* backbuffer, ID3D11ShaderResourceView* depthCopy, ID3D11ShaderResourceView* lowClouds );
@@ -40,5 +41,12 @@ private:
     TextureHandle m_VolumetricGodRaysResult;
     TextureHandle m_RadialGodRaysResult;
     TextureHandle m_CombinedGodRaysResult;
+    TextureHandle m_VolumetricHistory[2];
+    TextureHandle m_VolumetricDepthHistory[2];
+    uint32_t m_VolumetricHistoryIndex = 0;
+    bool m_VolumetricHistoryValid = false;
+    XMFLOAT4X4 m_PreviousViewProjection = {};
+    XMFLOAT3 m_PreviousCameraPosition = {};
+    float m_LastVolumetricRenderTime = -1.0f;
 };
 

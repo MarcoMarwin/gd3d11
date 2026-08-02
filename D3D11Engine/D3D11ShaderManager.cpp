@@ -483,6 +483,9 @@ XRESULT D3D11ShaderManager::Init() {
         Shaders.push_back( ShaderInfo::make<CShaderID::CS_PFX_GodRayVolumetric>( "CS_PFX_GodRayZoom.hlsl" )
             .with_entrypoint( "CSVolumetric" )
             .with_macros( { { "VOLUMETRIC_GODRAYS", "1" } } ) );
+        Shaders.push_back( ShaderInfo::make<CShaderID::CS_PFX_GodRayTemporal>( "CS_PFX_GodRayZoom.hlsl" )
+            .with_entrypoint( "CSTemporal" )
+            .with_macros( { { "TEMPORAL_GODRAYS", "1" } } ) );
         Shaders.push_back( ShaderInfo::make<CShaderID::CS_PFX_GodRayCombine>( "CS_PFX_GodRayZoom.hlsl" )
             .with_entrypoint( "CSCombine" )
             .with_macros( { { "COMBINE_GODRAYS", "1" } } ) );

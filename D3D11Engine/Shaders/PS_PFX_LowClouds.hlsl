@@ -212,11 +212,11 @@ PS_OUTPUT PSMain( PS_INPUT Input )
     float layerAlpha = saturate( originalCloudAlpha + moonDiskOcclusion * ( 1.0f - originalCloudAlpha ) );
     float skyVeilDistance = SmootherStep01( saturate( ( skyCameraDistance - 3500.0f ) / 52000.0f ) );
     float skyVeilAmount = rainVeil * skyVeilDistance;
-    float skyOriginalCloudAlpha = saturate( skyClouds.a );
     skyClouds.rgb = lerp( skyClouds.rgb, nightRainVeilColor, skyVeilAmount );
     skyClouds.a *= 1.0f - skyVeilAmount * 0.34f;
+    float skyTransmittedCloudAlpha = saturate( skyClouds.a );
     float skyMoonDiskMask = saturate( skyMoonCore + skyMoonHalo * 0.24f );
-    float skyMoonCoverAtLight = saturate( skyClouds.a * 1.90f + globalShadow * 0.86f );
+    float skyMoonCoverAtLight = saturate( skyTransmittedCloudAlpha * 1.90f + globalShadow * 0.86f );
     float skyMoonDiskOcclusion =
         saturate( skyMoonDiskMask * skyMoonCoverAtLight )
         * lerp( 0.78f, 0.995f, skyMoonCore );
@@ -227,14 +227,14 @@ PS_OUTPUT PSMain( PS_INPUT Input )
     float skyMediumDensityGlow =
         saturate(
             1.0f
-            - abs( skyOriginalCloudAlpha - 0.52f )
+            - abs( skyTransmittedCloudAlpha - 0.52f )
                 / 0.42f );
     float skyDenseCloudSuppression =
         1.0f
         - smoothstep(
             0.68f,
             0.94f,
-            skyOriginalCloudAlpha );
+            skyTransmittedCloudAlpha );
     float skyBacklightDensity = skyMediumDensityGlow * skyDenseCloudSuppression;
     float skySunBacklightMask =
         skySunTransmissionMask
@@ -246,13 +246,13 @@ PS_OUTPUT PSMain( PS_INPUT Input )
         * skyBacklightDensity
         * 0.24f;
     float skyLayerAlpha = saturate(
-        skyOriginalCloudAlpha
-        + skyMoonDiskOcclusion * ( 1.0f - skyOriginalCloudAlpha ) );
+        skyTransmittedCloudAlpha
+        + skyMoonDiskOcclusion * ( 1.0f - skyTransmittedCloudAlpha ) );
     PS_OUTPUT output;
     output.Clouds = float4( clouds.rgb * transmittedCloudAlpha, layerAlpha );
     output.Depth = expDepth;
     output.SkyClouds = depthFootprint.hasSky
-        ? float4( skyClouds.rgb * skyOriginalCloudAlpha, skyLayerAlpha )
-        : output.Clouds;
+        ? float4( skyClouds.rgb * skyTransmittedCloudAlpha, skyLayerAlpha )
+        : float4( 0.0f, 0.0f, 0.0f, -1.0f );
     return output;
 }

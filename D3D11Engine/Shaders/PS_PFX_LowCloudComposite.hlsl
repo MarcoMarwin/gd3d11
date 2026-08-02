@@ -32,11 +32,38 @@ float4 SampleStableSkyLowClouds( float2 texcoord )
     uint cloudHeight;
     TX_SkyLowClouds.GetDimensions( cloudWidth, cloudHeight );
     int2 cloudSize = max( int2( cloudWidth, cloudHeight ), int2( 1, 1 ) );
-    int2 cloudPixel = clamp(
-        int2( texcoord * float2( cloudSize ) ),
-        int2( 0, 0 ),
-        cloudSize - int2( 1, 1 ) );
-    return TX_SkyLowClouds.Load( int3( cloudPixel, 0 ) );
+    float2 cloudPosition = texcoord * float2( cloudSize ) - 0.5f;
+    int2 baseCloudPixel = int2( floor( cloudPosition ) );
+    float2 cloudFraction = frac( cloudPosition );
+    float4 filteredClouds = 0.0f;
+    float totalWeight = 0.0f;
+    [unroll]
+    for ( int y = 0; y < 2; ++y )
+    {
+        [unroll]
+        for ( int x = 0; x < 2; ++x )
+        {
+            int2 cloudPixel = clamp(
+                baseCloudPixel + int2( x, y ),
+                int2( 0, 0 ),
+                cloudSize - int2( 1, 1 ) );
+            float4 sampleClouds = TX_SkyLowClouds.Load( int3( cloudPixel, 0 ) );
+            if ( sampleClouds.a < 0.0f )
+            {
+                continue;
+            }
+            float spatialWeight =
+                (x == 0 ? 1.0f - cloudFraction.x : cloudFraction.x)
+                * (y == 0 ? 1.0f - cloudFraction.y : cloudFraction.y);
+            filteredClouds += sampleClouds * spatialWeight;
+            totalWeight += spatialWeight;
+        }
+    }
+    if ( totalWeight > 0.00001f )
+    {
+        return filteredClouds / totalWeight;
+    }
+    return float4( 0.0f, 0.0f, 0.0f, 0.0f );
 }
 
 float GetLowCloudDepthWeight( float targetDepth, float sourceDepth )
