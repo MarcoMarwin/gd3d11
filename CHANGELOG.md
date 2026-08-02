@@ -2,6 +2,9 @@
 
 Dokumentation der gepushten Renderer-Builds.
 
+## Build 190
+- Regulaerer Push: Low Clouds um SkyClouds-Target in PS_PFX_LowClouds.hlsl und PS_PFX_LowCloudComposite.hlsl erweitert, um Artefakte an Alpha-Test-Silhouetten zu beheben. D3D11PfxRenderer und RenderGraph in D3D11GraphicsEngine.cpp an das neue Target angepasst; E_GodRayMode Persistenz und Menue (GothicAPI.cpp, GothicGraphicsState.h, ImGuiShim.cpp) korrigiert.
+
 ## Build 188
 - Regulaerer Push: Korrektur der GodRay-Volumen-Berechnung (MaxDistance, LightColor, GlobalDensity, WeightZNear/Far) in D3D11PFX_GodRays.cpp; Anpassung des LightDirection-Skalarprodukts in CS_PFX_GodRayZoom.hlsl; Fallback-Logik fuer fehlende GodRay-Composition in D3D11GraphicsEngine.cpp.
 

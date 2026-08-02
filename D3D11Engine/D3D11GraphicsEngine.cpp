@@ -4335,6 +4335,7 @@ XRESULT D3D11GraphicsEngine::OnStartWorldRendering() {
     }
     RGResourceHandle lowCloudLayerResource = RG_INVALID_HANDLE;
     RGResourceHandle lowCloudDepthResource = RG_INVALID_HANDLE;
+    RGResourceHandle skyCloudLayerResource = RG_INVALID_HANDLE;
     if ( compositionLowClouds ) {
         const INT2 cloudResolution(
             std::max( 1, GetResolution().x / 2 + GetResolution().x % 2 ),
@@ -4354,18 +4355,26 @@ XRESULT D3D11GraphicsEngine::OnStartWorldRendering() {
                 DXGI_FORMAT_R32_FLOAT,
                 L"LowCloudDepth"
             } );
+            skyCloudLayerResource = builder.CreateTexture( {
+                static_cast<uint32_t>(cloudResolution.x),
+                static_cast<uint32_t>(cloudResolution.y),
+                DXGI_FORMAT_R16G16B16A16_FLOAT,
+                L"SkyLowCloudLayer"
+            } );
 
-            pass.m_executeCallback = [this, backBufferHandle, lowCloudLayerResource, lowCloudDepthResource]( const RenderGraph& graph ) {
+            pass.m_executeCallback = [this, backBufferHandle, lowCloudLayerResource, lowCloudDepthResource, skyCloudLayerResource]( const RenderGraph& graph ) {
                 TracyD3D11ZoneCGX( "D3D11GraphicsEngine::Generate Low Clouds" );
 
                 auto* backBuffer = graph.GetPhysicalTexture( backBufferHandle );
                 auto* lowCloudLayer = graph.GetPhysicalTexture( lowCloudLayerResource );
                 auto* lowCloudDepth = graph.GetPhysicalTexture( lowCloudDepthResource );
+                auto* skyCloudLayer = graph.GetPhysicalTexture( skyCloudLayerResource );
                 auto* depthBuffer = GetDepthBuffer();
                 if ( !PfxRenderer
                     || !backBuffer || !backBuffer->GetShaderResView().Get()
                     || !lowCloudLayer || !lowCloudLayer->GetRenderTargetView().Get()
                     || !lowCloudDepth || !lowCloudDepth->GetRenderTargetView().Get()
+                    || !skyCloudLayer || !skyCloudLayer->GetRenderTargetView().Get()
                     || !depthBuffer || !depthBuffer->GetShaderResView().Get() ) {
                     return;
                 }
@@ -4373,6 +4382,7 @@ XRESULT D3D11GraphicsEngine::OnStartWorldRendering() {
                 PfxRenderer->RenderLowCloudLayer(
                     lowCloudLayer->GetRenderTargetView().Get(),
                     lowCloudDepth->GetRenderTargetView().Get(),
+                    skyCloudLayer->GetRenderTargetView().Get(),
                     backBuffer->GetShaderResView().Get(),
                     depthBuffer->GetShaderResView().Get() );
 
@@ -4882,19 +4892,22 @@ XRESULT D3D11GraphicsEngine::OnStartWorldRendering() {
             builder.Read( backBufferHandle );
             builder.Read( lowCloudLayerResource );
             builder.Read( lowCloudDepthResource );
+            builder.Read( skyCloudLayerResource );
             builder.Write( backBufferHandle );
 
-            pass.m_executeCallback = [this, backBufferHandle, lowCloudLayerResource, lowCloudDepthResource](const RenderGraph& graph) {
+            pass.m_executeCallback = [this, backBufferHandle, lowCloudLayerResource, lowCloudDepthResource, skyCloudLayerResource](const RenderGraph& graph) {
                 TracyD3D11ZoneCGX( "D3D11GraphicsEngine::PostFX Low Clouds" );
 
                 auto* backBuffer = graph.GetPhysicalTexture(backBufferHandle);
                 auto* lowCloudLayer = graph.GetPhysicalTexture(lowCloudLayerResource);
                 auto* lowCloudDepth = graph.GetPhysicalTexture(lowCloudDepthResource);
+                auto* skyCloudLayer = graph.GetPhysicalTexture(skyCloudLayerResource);
                 auto tempBuffer = PfxRenderer->GetTempBuffer();
                 if ( !PfxRenderer
                     || !backBuffer || !backBuffer->GetTexture().Get() || !backBuffer->GetShaderResView().Get()
                     || !lowCloudLayer || !lowCloudLayer->GetShaderResView().Get()
                     || !lowCloudDepth || !lowCloudDepth->GetShaderResView().Get()
+                    || !skyCloudLayer || !skyCloudLayer->GetShaderResView().Get()
                     || !tempBuffer || !tempBuffer->GetTexture().Get() || !tempBuffer->GetRenderTargetView().Get() || !tempBuffer->GetShaderResView().Get() ) {
                     return;
                 }
@@ -4906,7 +4919,8 @@ XRESULT D3D11GraphicsEngine::OnStartWorldRendering() {
                     tempBuffer->GetShaderResView().Get(),
                     lowCloudLayer->GetShaderResView().Get(),
                     lowCloudDepth->GetShaderResView().Get(),
-                    GetDepthBuffer()->GetShaderResView().Get() );
+                    GetDepthBuffer()->GetShaderResView().Get(),
+                    skyCloudLayer->GetShaderResView().Get() );
 
                 GetContext()->PSSetSamplers( 0, 1, DefaultSamplerState.GetAddressOf() );
             };

@@ -10,6 +10,7 @@ Texture2D TX_Backbuffer : register( t0 );
 Texture2D TX_LowClouds : register( t1 );
 Texture2D TX_LowCloudDepth : register( t2 );
 Texture2D TX_FullDepth : register( t3 );
+Texture2D TX_SkyLowClouds : register( t4 );
 
 struct PS_INPUT
 {
@@ -29,40 +30,13 @@ float4 SampleStableSkyLowClouds( float2 texcoord )
 {
     uint cloudWidth;
     uint cloudHeight;
-    TX_LowClouds.GetDimensions( cloudWidth, cloudHeight );
-    float2 texel = 1.0f / max( float2( cloudWidth, cloudHeight ), float2( 1.0f, 1.0f ) );
-
-    float4 center = TX_LowClouds.SampleLevel( SS_Linear, texcoord, 0 );
-    float4 bestClouds = center;
-    float4 accum = center * 4.0f;
-    float totalWeight = 4.0f;
-
-    [unroll]
-    for ( int y = -1; y <= 1; ++y )
-    {
-        [unroll]
-        for ( int x = -1; x <= 1; ++x )
-        {
-            if ( x == 0 && y == 0 )
-            {
-                continue;
-            }
-
-            float2 offset = float2( x, y ) * texel;
-            float4 sampleClouds = TX_LowClouds.SampleLevel( SS_Linear, texcoord + offset, 0 );
-            float weight = lerp( 0.35f, 0.85f, saturate( sampleClouds.a * 2.0f ) );
-            accum += sampleClouds * weight;
-            totalWeight += weight;
-
-            if ( sampleClouds.a > bestClouds.a )
-            {
-                bestClouds = sampleClouds;
-            }
-        }
-    }
-
-    float4 filteredClouds = accum / max( totalWeight, 0.00001f );
-    return lerp( filteredClouds, bestClouds, 0.35f );
+    TX_SkyLowClouds.GetDimensions( cloudWidth, cloudHeight );
+    int2 cloudSize = max( int2( cloudWidth, cloudHeight ), int2( 1, 1 ) );
+    int2 cloudPixel = clamp(
+        int2( texcoord * float2( cloudSize ) ),
+        int2( 0, 0 ),
+        cloudSize - int2( 1, 1 ) );
+    return TX_SkyLowClouds.Load( int3( cloudPixel, 0 ) );
 }
 
 float GetLowCloudDepthWeight( float targetDepth, float sourceDepth )
@@ -106,7 +80,10 @@ float4 SampleDepthAwareLowClouds(
 
     const float skyDepthEpsilon = 0.00001f;
     bool targetIsSky = targetDepth < skyDepthEpsilon;
-
+    if ( targetIsSky )
+    {
+        return SampleStableSkyLowClouds( texcoord );
+    }
     float2 cloudPosition = texcoord * float2( cloudSize ) - 0.5f;
     int2 baseCloudPixel = int2( floor( cloudPosition ) );
     float2 cloudFraction = frac( cloudPosition );
@@ -195,18 +172,6 @@ float4 SampleDepthAwareLowClouds(
     {
         return stableClouds / stableWeight;
     }
-    // Real sky pixels inside alpha-tested tree gaps keep Build 140's stable
-    // fallback. Geometry deliberately has no sky-colour fallback; it can receive
-    // clouds only from depth-compatible raymarch samples above.
-    if ( targetIsSky )
-    {
-        float4 fallbackClouds = SampleStableSkyLowClouds( texcoord );
-        if ( fallbackClouds.a > 0.001f )
-        {
-            return fallbackClouds;
-        }
-    }
-
     return float4( 0.0f, 0.0f, 0.0f, 0.0f );
 }
 

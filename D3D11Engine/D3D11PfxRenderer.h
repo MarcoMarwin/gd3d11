@@ -93,6 +93,7 @@ public:
 
     XRESULT RenderLowCloudLayer( ID3D11RenderTargetView* cloudLayerRTV,
                                  ID3D11RenderTargetView* cloudDepthRTV,
+                                 ID3D11RenderTargetView* skyCloudLayerRTV,
                                  ID3D11ShaderResourceView* sceneSRV,
                                  ID3D11ShaderResourceView* depthSRV );
 
@@ -100,7 +101,8 @@ public:
                                 ID3D11ShaderResourceView* sceneSRV,
                                 ID3D11ShaderResourceView* lowCloudLayerSRV,
                                 ID3D11ShaderResourceView* lowCloudDepthSRV,
-                                ID3D11ShaderResourceView* depthSRV );
+                                ID3D11ShaderResourceView* depthSRV,
+                                ID3D11ShaderResourceView* skyCloudLayerSRV );
 
     XRESULT RenderLowClouds( ID3D11RenderTargetView* outputRTV,
                              ID3D11ShaderResourceView* sceneSRV,

@@ -47,6 +47,7 @@ struct PS_OUTPUT
 {
     float4 Clouds : SV_TARGET0;
     float Depth : SV_TARGET1;
+    float4 SkyClouds : SV_TARGET2;
 };
 
 float3 VSPositionFromDepth( float depth, float2 vTexCoord )
@@ -54,7 +55,15 @@ float3 VSPositionFromDepth( float depth, float2 vTexCoord )
     return ReconstructVSPositionFromDepthReverseZInfinite( depth, vTexCoord, HF_ProjParams.xy );
 }
 
-float LoadClosestDepth2x2( float2 texcoord ) {
+struct LowCloudDepthFootprint
+{
+    float closestDepth;
+    bool hasSky;
+    bool hasGeometry;
+};
+
+LowCloudDepthFootprint LoadLowCloudDepthFootprint2x2( float2 texcoord )
+{
     uint depthWidth;
     uint depthHeight;
     TX_Depth.GetDimensions( depthWidth, depthHeight );
@@ -70,13 +79,24 @@ float LoadClosestDepth2x2( float2 texcoord ) {
     float depth10 = TX_Depth.Load( int3( pixel10, 0 ) ).r;
     float depth01 = TX_Depth.Load( int3( pixel01, 0 ) ).r;
     float depth11 = TX_Depth.Load( int3( pixel11, 0 ) ).r;
-    // Reversed-Z: the largest value is the closest surface in this 2x2 footprint.
-    return max( max( depth00, depth10 ), max( depth01, depth11 ) );
+    const float skyDepthEpsilon = 0.00001f;
+    LowCloudDepthFootprint footprint;
+    footprint.closestDepth = max( max( depth00, depth10 ), max( depth01, depth11 ) );
+    footprint.hasSky = depth00 < skyDepthEpsilon
+        || depth10 < skyDepthEpsilon
+        || depth01 < skyDepthEpsilon
+        || depth11 < skyDepthEpsilon;
+    footprint.hasGeometry = depth00 >= skyDepthEpsilon
+        || depth10 >= skyDepthEpsilon
+        || depth01 >= skyDepthEpsilon
+        || depth11 >= skyDepthEpsilon;
+    return footprint;
 }
 
 PS_OUTPUT PSMain( PS_INPUT Input )
 {
-    float expDepth = LoadClosestDepth2x2( Input.vTexcoord );
+    LowCloudDepthFootprint depthFootprint = LoadLowCloudDepthFootprint2x2( Input.vTexcoord );
+    float expDepth = depthFootprint.closestDepth;
     float skyPixel = 1.0f - step( 0.00001f, expDepth );
     float3 worldPosition = VSPositionFromDepth( expDepth, Input.vTexcoord );
     worldPosition = mul( float4( worldPosition, 1.0f ), HF_InvView ).xyz;
@@ -95,6 +115,32 @@ PS_OUTPUT PSMain( PS_INPUT Input )
         HF_FogHeight,
         HF_FogColorMod,
         nightTimeBlend );
+
+    float3 skyWorldPosition = VSPositionFromDepth( 0.0f, Input.vTexcoord );
+    skyWorldPosition = mul( float4( skyWorldPosition, 1.0f ), HF_InvView ).xyz;
+    float skyCameraDistance = length( skyWorldPosition - HF_CameraPosition );
+    float3 skyViewDir = normalize( skyWorldPosition - HF_CameraPosition );
+    float3 skySunDir = normalize( lerp( float3( -0.25f, 0.72f, 0.18f ), AC_LightPos, saturate( abs( AC_LightPos.y ) + 0.12f ) ) );
+    float3 skyMoonDir = normalize( lerp( float3( 0.22f, 0.64f, -0.28f ), AC_MoonPos, saturate( abs( AC_MoonPos.y ) + 0.12f ) ) );
+    float skyMoonDiskWeight = saturate( AC_MoonVisibility ) * saturate( AC_EnableNightAtmosphere ) * smoothstep( 0.02f, 0.34f, AC_MoonPos.y );
+    float skySunAlignment = dot( skyViewDir, skySunDir );
+    float skyMoonAlignment = dot( skyViewDir, skyMoonDir );
+    float skySunCore = smoothstep( 0.99920f, 0.99986f, skySunAlignment ) * sunWeight;
+    float skySunHalo = smoothstep( 0.99200f, 0.99860f, skySunAlignment ) * sunWeight;
+    float skyMoonCore = smoothstep( 0.99935f, 0.99988f, skyMoonAlignment ) * skyMoonDiskWeight;
+    float skyMoonHalo = smoothstep( 0.99500f, 0.99900f, skyMoonAlignment ) * skyMoonDiskWeight;
+    float4 skyClouds = clouds;
+    if ( depthFootprint.hasSky && depthFootprint.hasGeometry )
+    {
+        skyClouds = ComputeWorldLowCloudVolume(
+            HF_CameraPosition,
+            skyWorldPosition,
+            skyCameraDistance,
+            1.0f,
+            HF_FogHeight,
+            HF_FogColorMod,
+            nightTimeBlend );
+    }
 
     float3 viewDir = normalize( worldPosition - HF_CameraPosition );
     float3 sunDir = normalize( lerp( float3( -0.25f, 0.72f, 0.18f ), AC_LightPos, saturate( abs( AC_LightPos.y ) + 0.12f ) ) );
@@ -164,8 +210,49 @@ PS_OUTPUT PSMain( PS_INPUT Input )
 
     float transmittedCloudAlpha = originalCloudAlpha;
     float layerAlpha = saturate( originalCloudAlpha + moonDiskOcclusion * ( 1.0f - originalCloudAlpha ) );
+    float skyVeilDistance = SmootherStep01( saturate( ( skyCameraDistance - 3500.0f ) / 52000.0f ) );
+    float skyVeilAmount = rainVeil * skyVeilDistance;
+    float skyOriginalCloudAlpha = saturate( skyClouds.a );
+    skyClouds.rgb = lerp( skyClouds.rgb, nightRainVeilColor, skyVeilAmount );
+    skyClouds.a *= 1.0f - skyVeilAmount * 0.34f;
+    float skyMoonDiskMask = saturate( skyMoonCore + skyMoonHalo * 0.24f );
+    float skyMoonCoverAtLight = saturate( skyClouds.a * 1.90f + globalShadow * 0.86f );
+    float skyMoonDiskOcclusion =
+        saturate( skyMoonDiskMask * skyMoonCoverAtLight )
+        * lerp( 0.78f, 0.995f, skyMoonCore );
+    float skySunTransmissionMask =
+        saturate(
+            skySunCore * 0.42f
+            + skySunHalo * 0.18f );
+    float skyMediumDensityGlow =
+        saturate(
+            1.0f
+            - abs( skyOriginalCloudAlpha - 0.52f )
+                / 0.42f );
+    float skyDenseCloudSuppression =
+        1.0f
+        - smoothstep(
+            0.68f,
+            0.94f,
+            skyOriginalCloudAlpha );
+    float skyBacklightDensity = skyMediumDensityGlow * skyDenseCloudSuppression;
+    float skySunBacklightMask =
+        skySunTransmissionMask
+        * saturate( sunWeight )
+        * max( 0.0f, AC_LowCloudSunLight );
+    skyClouds.rgb +=
+        transmittedSunColor
+        * skySunBacklightMask
+        * skyBacklightDensity
+        * 0.24f;
+    float skyLayerAlpha = saturate(
+        skyOriginalCloudAlpha
+        + skyMoonDiskOcclusion * ( 1.0f - skyOriginalCloudAlpha ) );
     PS_OUTPUT output;
     output.Clouds = float4( clouds.rgb * transmittedCloudAlpha, layerAlpha );
     output.Depth = expDepth;
+    output.SkyClouds = depthFootprint.hasSky
+        ? float4( skyClouds.rgb * skyOriginalCloudAlpha, skyLayerAlpha )
+        : output.Clouds;
     return output;
 }

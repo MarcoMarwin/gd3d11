@@ -671,9 +671,10 @@ XRESULT D3D11PfxRenderer::RenderPostFXComposition(
 XRESULT D3D11PfxRenderer::RenderLowCloudLayer(
     ID3D11RenderTargetView* cloudLayerRTV,
     ID3D11RenderTargetView* cloudDepthRTV,
+    ID3D11RenderTargetView* skyCloudLayerRTV,
     ID3D11ShaderResourceView* sceneSRV,
     ID3D11ShaderResourceView* depthSRV ) {
-    if ( !cloudLayerRTV || !cloudDepthRTV || !sceneSRV || !depthSRV ) {
+    if ( !cloudLayerRTV || !cloudDepthRTV || !skyCloudLayerRTV || !sceneSRV || !depthSRV ) {
         return XR_SUCCESS;
     }
 
@@ -767,9 +768,10 @@ XRESULT D3D11PfxRenderer::RenderLowCloudLayer(
     const float clearValue[4] = {};
     context->ClearRenderTargetView( cloudLayerRTV, clearValue );
     context->ClearRenderTargetView( cloudDepthRTV, clearValue );
+    context->ClearRenderTargetView( skyCloudLayerRTV, clearValue );
 
-    ID3D11RenderTargetView* lowCloudRTVs[2] = { cloudLayerRTV, cloudDepthRTV };
-    context->OMSetRenderTargets( 2, lowCloudRTVs, nullptr );
+    ID3D11RenderTargetView* lowCloudRTVs[3] = { cloudLayerRTV, cloudDepthRTV, skyCloudLayerRTV };
+    context->OMSetRenderTargets( 3, lowCloudRTVs, nullptr );
 
     lowCloudPS->Apply();
     lowCloudPS->GetBuffer( "PFXBuffer" ).Update( &cb ).Bind();
@@ -804,8 +806,9 @@ XRESULT D3D11PfxRenderer::CompositeLowClouds(
     ID3D11ShaderResourceView* sceneSRV,
     ID3D11ShaderResourceView* lowCloudLayerSRV,
     ID3D11ShaderResourceView* lowCloudDepthSRV,
-    ID3D11ShaderResourceView* depthSRV ) {
-    if ( !outputRTV || !sceneSRV || !lowCloudLayerSRV || !lowCloudDepthSRV || !depthSRV ) {
+    ID3D11ShaderResourceView* depthSRV,
+    ID3D11ShaderResourceView* skyCloudLayerSRV ) {
+    if ( !outputRTV || !sceneSRV || !lowCloudLayerSRV || !lowCloudDepthSRV || !depthSRV || !skyCloudLayerSRV ) {
         return XR_SUCCESS;
     }
 
@@ -834,13 +837,14 @@ XRESULT D3D11PfxRenderer::CompositeLowClouds(
     vs->Apply();
     lowCloudCompositePS->Apply();
     lowCloudCompositePS->GetBuffer( "Atmosphere" ).Update( &sky->GetAtmosphereCB() ).Bind();
-    ID3D11ShaderResourceView* compositeSRVs[4] = {
+    ID3D11ShaderResourceView* compositeSRVs[5] = {
         sceneSRV,
         lowCloudLayerSRV,
         lowCloudDepthSRV,
-        depthSRV
+        depthSRV,
+        skyCloudLayerSRV
     };
-    context->PSSetShaderResources( 0, 4, compositeSRVs );
+    context->PSSetShaderResources( 0, 5, compositeSRVs );
 
     Engine::GAPI->GetRendererState().BlendState.SetDefault();
     Engine::GAPI->GetRendererState().BlendState.SetDirty();
@@ -850,8 +854,8 @@ XRESULT D3D11PfxRenderer::CompositeLowClouds(
 
     DrawFullScreenQuad();
 
-    ID3D11ShaderResourceView* nullCompositeSRVs[4] = {};
-    context->PSSetShaderResources( 0, 4, nullCompositeSRVs );
+    ID3D11ShaderResourceView* nullCompositeSRVs[5] = {};
+    context->PSSetShaderResources( 0, 5, nullCompositeSRVs );
 
     Engine::GAPI->GetRendererState().DepthState.DepthBufferCompareFunc = GothicDepthBufferStateInfo::DEFAULT_DEPTH_COMP_STATE;
     Engine::GAPI->GetRendererState().DepthState.DepthWriteEnabled = true;
@@ -872,13 +876,18 @@ XRESULT D3D11PfxRenderer::RenderLowClouds( ID3D11RenderTargetView* outputRTV,
     const INT2 cloudRes( std::max( 1, (res.x + 1) / 2 ), std::max( 1, (res.y + 1) / 2 ) );
     auto lowCloudLayer = m_texturePool->Acquire( TexturePool::Description{ cloudRes.x, cloudRes.y, DXGI_FORMAT_R16G16B16A16_FLOAT } );
     auto lowCloudDepth = m_texturePool->Acquire( TexturePool::Description{ cloudRes.x, cloudRes.y, DXGI_FORMAT_R32_FLOAT } );
-    if ( !lowCloudLayer || !lowCloudDepth || !lowCloudLayer->GetRenderTargetView().Get() || !lowCloudLayer->GetShaderResView().Get() || !lowCloudDepth->GetRenderTargetView().Get() || !lowCloudDepth->GetShaderResView().Get() ) {
+    auto skyCloudLayer = m_texturePool->Acquire( TexturePool::Description{ cloudRes.x, cloudRes.y, DXGI_FORMAT_R16G16B16A16_FLOAT } );
+    if ( !lowCloudLayer || !lowCloudDepth || !skyCloudLayer
+        || !lowCloudLayer->GetRenderTargetView().Get() || !lowCloudLayer->GetShaderResView().Get()
+        || !lowCloudDepth->GetRenderTargetView().Get() || !lowCloudDepth->GetShaderResView().Get()
+        || !skyCloudLayer->GetRenderTargetView().Get() || !skyCloudLayer->GetShaderResView().Get() ) {
         return XR_FAILED;
     }
 
     XRESULT result = RenderLowCloudLayer(
         lowCloudLayer->GetRenderTargetView().Get(),
         lowCloudDepth->GetRenderTargetView().Get(),
+        skyCloudLayer->GetRenderTargetView().Get(),
         sceneSRV,
         depthSRV );
     if ( result != XR_SUCCESS ) {
@@ -890,7 +899,8 @@ XRESULT D3D11PfxRenderer::RenderLowClouds( ID3D11RenderTargetView* outputRTV,
         sceneSRV,
         lowCloudLayer->GetShaderResView().Get(),
         lowCloudDepth->GetShaderResView().Get(),
-        depthSRV );
+        depthSRV,
+        skyCloudLayer->GetShaderResView().Get() );
 }
 XRESULT D3D11PfxRenderer::RenderXeGTAO( ID3D11ShaderResourceView* depthSRV,
                                         ID3D11ShaderResourceView* normalsSRV,
