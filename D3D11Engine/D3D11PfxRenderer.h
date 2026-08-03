@@ -90,6 +90,9 @@ public:
                                         ID3D11ShaderResourceView* materialSRV,
                                         ID3D11ShaderResourceView* velocitySRV,
                                         ID3D11ShaderResourceView** outLightingSRV );
+    void UpdateContactShadowTransition( bool targetActive, float currentTime );
+    bool IsContactShadowTransitionActive() const { return ContactShadowTransitionWeight > 0.0001f; }
+    void ResetScreenSpaceLightingHistory();
 
     XRESULT RenderLowCloudLayer( ID3D11RenderTargetView* cloudLayerRTV,
                                  ID3D11RenderTargetView* cloudDepthRTV,
@@ -162,6 +165,8 @@ private:
     std::unique_ptr<RenderToTextureBuffer> ScreenSpaceLightingHistory[2];
     std::unique_ptr<RenderToTextureBuffer> ScreenSpaceLightingDepthHistory[2];
     bool ScreenSpaceLightingHistoryValid = false;
+    float ContactShadowTransitionWeight = 0.0f;
+    float LastContactShadowTransitionTime = 0.0f;
     uint32_t ScreenSpaceLightingHistoryIndex = 0;
     uint32_t ScreenSpaceLightingFrameIndex = 0;
     std::unique_ptr<DepthStencilPool> m_depthStencilPool;

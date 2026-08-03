@@ -1707,7 +1707,7 @@ void ImGuiShim::RenderSettingsWindow()
             ImGui::SetItemTooltip( "%s", Tr( "Makes water reflections weaker or stronger.", u8"Macht Wasserreflexionen schw\u00E4cher oder st\u00E4rker." ) );
 
             bool godRaysEnabled = settings.EnableGodRays;
-            ImText( Tr( "Volumetric Lighting", u8"Volumetrisches Licht" ), { buttonWidth.x - ImGui::GetFrameHeight() - style.ItemSpacing.x, buttonWidth.y } ); ImGui::SameLine();
+            ImText( Tr( "Light Shafts", u8"Lichtstrahlen" ), { buttonWidth.x - ImGui::GetFrameHeight() - style.ItemSpacing.x, buttonWidth.y } ); ImGui::SameLine();
             if ( CoupledStrengthCheckbox( "##Enable Godrays", "GodRayStrength",
                     &godRaysEnabled, &settings.GodRayStrength, 1.0f ) ) {
                 settings.EnableGodRays = godRaysEnabled;
@@ -1801,7 +1801,7 @@ void ImGuiShim::RenderSettingsWindow()
             if ( ImGui::Checkbox( "##Enable Contact Shadows", &settings.EnableContactShadows ) ) {
                 shadersToReload |= ShaderCategory::Other;
             }
-            ImGui::SetItemTooltip( "%s", Tr( "Adds small shadows where objects meet nearby indoor surfaces. Only affects indoor areas.", u8"F\u00FCgt kleine Schatten an nahen Kontaktstellen hinzu. Wirkt nur in Innenr\u00E4umen." ) );
+            ImGui::SetItemTooltip( "%s", Tr( "Adds small shadows at nearby contact points. With FSR 3, the effect is limited to indoor areas.", u8"F\u00FCgt kleine Schatten an nahen Kontaktstellen hinzu. Mit FSR 3 ist der Effekt auf Innenr\u00E4ume begrenzt." ) );
 
             ImText( "Screen-Space GI", { buttonWidth.x - ImGui::GetFrameHeight() - style.ItemSpacing.x, buttonWidth.y } ); ImGui::SameLine();
             if ( ImGui::Checkbox( "##Enable Screen-Space GI", &settings.EnableScreenSpaceGI ) ) {

@@ -886,7 +886,7 @@ float3 skyReflection =
         // to the live scene color, then restore sceneClean at the shoreline.
         float3 legacyNightRelativeColor = lerp(
             legacyColor,
-            legacyColor * saturate(sceneClean * 1.35f + 0.18f),
+            legacyColor * saturate(sceneClean * 1.10f + 0.34f),
             nightAmount);
         legacyColor = lerp(
             sceneClean,
@@ -959,7 +959,7 @@ float3 skyReflection =
         float rawLegacyCubeOnlyLuma = max(dot(
             cubeOnlyReflectionColor,
             reflectionLumaWeights), .0001f);
-        float legacyNightCubeOnlyLumaLimit = legacyBaseLuma * 1.10f + .002f;
+        float legacyNightCubeOnlyLumaLimit = legacyBaseLuma * 1.15f + .003f;
         float3 legacyNightCubeOnlyColor = cubeOnlyReflectionColor * min(
             1.0f,
             legacyNightCubeOnlyLumaLimit / rawLegacyCubeOnlyLuma);
@@ -969,14 +969,15 @@ float3 skyReflection =
         legacyNightCubeOnlyColor = lerp(
             legacyNightCubeOnlyLuma.xxx,
             legacyNightCubeOnlyColor,
-            .24f);
+            .28f);
         float3 legacyAdaptiveCubeOnlyColor = lerp(
             cubeOnlyReflectionColor,
             legacyNightCubeOnlyColor,
             nightAmount);
         float legacyCubeOnlyAmount = cubeOnlyReflectionAmount
-            * lerp(1.0f, .50f, nightAmount)
-            * legacyShoreVisibility;
+            * lerp(1.0f, .55f, nightAmount)
+            * legacyShoreVisibility
+            * hemi;
         float3 legacyCubeOnlyColor = lerp(
             legacyColor,
             legacyAdaptiveCubeOnlyColor,

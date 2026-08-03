@@ -4246,17 +4246,26 @@ XRESULT D3D11GraphicsEngine::OnStartWorldRendering() {
     bool compositionHeightFog = (rendererState.RendererSettings.DrawFog && isOutdoor);
     const float dynamicCloudRainWeight = Engine::GAPI->GetRainFXWeight();
     bool compositionLowClouds = (!isDragonIsland && rendererState.RendererSettings.EnableDynamicClouds && rendererState.RendererSettings.DrawFog && isOutdoor && dynamicCloudRainWeight < 0.90f);
-    bool compositionContactShadows = rendererState.RendererSettings.EnableContactShadows;
-    bool compositionSSGI = rendererState.RendererSettings.EnableScreenSpaceGI && rendererState.RendererSettings.ScreenSpaceGIStrength > 0.0f;
-    bool compositionNeedsGeometry = compositionContactShadows || compositionSSGI;
-    bool compositionNeedsDepth = compositionHeightFog || compositionNeedsGeometry;
-    bool compositionActive = compositionGodRays || compositionNeedsDepth;
-
     const bool fsr3UpscalingActive = GetDevice()->GetFeatureLevel() >= D3D_FEATURE_LEVEL_11_0
         && rendererState.RendererSettings.Upscaler == GothicRendererSettings::UPSCALER_FSR_3
         && rendererState.RendererSettings.ResolutionScalePercent <= 100
         && rendererState.RendererSettings.AntiAliasingMode == GothicRendererSettings::AA_FSR3
         && PfxRenderer && PfxRenderer->GetFSR3() && TemporalState;
+    const bool cameraIndoor = oCGame::IsSessionCameraIndoor();
+    const bool contactShadowTargetActive = rendererState.RendererSettings.EnableContactShadows
+        && (!fsr3UpscalingActive || cameraIndoor);
+    PfxRenderer->UpdateContactShadowTransition(
+        contactShadowTargetActive,
+        Engine::GAPI->GetTimeSeconds() );
+    bool compositionContactShadows = PfxRenderer->IsContactShadowTransitionActive();
+    bool compositionSSGI = rendererState.RendererSettings.EnableScreenSpaceGI && rendererState.RendererSettings.ScreenSpaceGIStrength > 0.0f;
+    bool compositionNeedsGeometry = compositionContactShadows || compositionSSGI;
+    if ( !compositionNeedsGeometry ) {
+        PfxRenderer->ResetScreenSpaceLightingHistory();
+    }
+    bool compositionNeedsDepth = compositionHeightFog || compositionNeedsGeometry;
+    bool compositionActive = compositionGodRays || compositionNeedsDepth;
+
     const bool renderTemporalSkyVelocity = rendererState.RendererSettings.DrawSky
         && fsr3UpscalingActive;
     XMFLOAT4X4 skyCurrentInvViewProj;
@@ -4411,8 +4420,7 @@ XRESULT D3D11GraphicsEngine::OnStartWorldRendering() {
         }
         waterMaskResource = graph.ImportResource( L"RainExclusionMask", RainExclusionMaskBuffer.get() );
     }
-    const bool fsr3ActiveForReactiveMask = rendererState.RendererSettings.AntiAliasingMode == GothicRendererSettings::AA_FSR3
-        && rendererState.RendererSettings.Upscaler == GothicRendererSettings::UPSCALER_FSR_3;
+    const bool fsr3ActiveForReactiveMask = fsr3UpscalingActive;
 
     graph.AddPass( RG_PASS_NAME("DrawWaterSurfaces"), [&]( RGBuilder& builder, RenderPass& pass ) {
         builder.Read( backBufferHandle );
@@ -4765,7 +4773,7 @@ XRESULT D3D11GraphicsEngine::OnStartWorldRendering() {
             };
         } );
     }
-    if ( fsr3ActiveForReactiveMask && compositionNeedsGeometry ) {
+    if ( fsr3ActiveForReactiveMask && compositionContactShadows ) {
         graph.AddPass( RG_PASS_NAME("FSR3 Contact Shadow Mask"), [&]( RGBuilder& builder, RenderPass& pass ) {
             builder.Read( transparencyAndCompositionMaskResource );
             builder.Read( backBufferHandle );

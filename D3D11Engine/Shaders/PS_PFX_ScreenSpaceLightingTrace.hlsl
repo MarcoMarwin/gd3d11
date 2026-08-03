@@ -32,11 +32,7 @@ float WaterMask(float2 uv) { return TX_WaterMask.SampleLevel(SS_Linear, saturate
 float IsGeometry(float d) { return step(0.000001f, d); }
 float4 MaterialInfo(float2 uv) { return TX_Material.SampleLevel(SS_Linear, saturate(uv), 0); }
 float IsAlphaTestedMaterial(float4 materialInfo) { return materialInfo.g < 0.0f ? 1.0f : 0.0f; }
-float IndoorReceiverMask(float2 uv)
-{
-    float a = TX_Albedo.SampleLevel(SS_Linear, saturate(uv), 0).a;
-    return a < 0.5f ? 1.0f : 0.0f;
-}
+
 float3 ViewPosition(float2 uv, float depth)
 {
     float viewZ = SSL_ProjParams.z / (depth - SSL_ProjParams.w);
@@ -88,7 +84,7 @@ bool TraceRay(float3 origin, float3 dir, float maxDistance, int steps, float jit
 
 float ComputeContact(float2 uv, float depth)
 {
-    if (SSL_EnableContact < 0.5f || SSL_ContactStrength <= 0.001f || IsGeometry(depth) < 0.5f || WaterMask(uv) > 0.02f || IndoorReceiverMask(uv) < 0.5f) return 0.0f;
+    if (SSL_EnableContact <= 0.0001f || SSL_ContactStrength <= 0.001f || IsGeometry(depth) < 0.5f || WaterMask(uv) > 0.02f) return 0.0f;
 
     float4 materialInfo = MaterialInfo(uv);
     if (IsAlphaTestedMaterial(materialInfo) > 0.5f) return 0.0f;

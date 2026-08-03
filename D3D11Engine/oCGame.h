@@ -60,6 +60,11 @@ public:
         return *reinterpret_cast<oCNPC**>(GothicMemoryLocations::oCGame::Var_Player);
     }
 
+    static bool IsSessionCameraIndoor() {
+        oCGame* game = GetGame();
+        return game && game->_zCSession_camVob && game->_zCSession_camVob->IsIndoorVob();
+    }
+
     zCView* GetGameView() {
         return *reinterpret_cast<zCView**>(THISPTR_OFFSET( GothicMemoryLocations::oCGame::Offset_GameView ));
     }

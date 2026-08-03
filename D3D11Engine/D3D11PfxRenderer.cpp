@@ -24,6 +24,7 @@
 #include "GothicAPI.h"
 #include "GSky.h"
 #include "RendererTestSettings.h"
+#include "oCGame.h"
 
 D3D11PfxRenderer::D3D11PfxRenderer() {
 
@@ -388,6 +389,28 @@ XRESULT D3D11PfxRenderer::RenderCombinedGodRaysToTexture(
     return FX_GodRays->RenderCombinedToTexture( backbuffer, depthCopy, lowClouds, outGodRaysSRV );
 }
 
+void D3D11PfxRenderer::UpdateContactShadowTransition( bool targetActive, float currentTime ) {
+    float deltaTime = 0.0f;
+    if ( LastContactShadowTransitionTime > 0.0f && currentTime >= LastContactShadowTransitionTime ) {
+        deltaTime = std::min( currentTime - LastContactShadowTransitionTime, 0.1f );
+    }
+    LastContactShadowTransitionTime = currentTime;
+
+    const float targetWeight = targetActive ? 1.0f : 0.0f;
+    const float transitionStep = deltaTime * 4.0f;
+    if ( ContactShadowTransitionWeight < targetWeight ) {
+        ContactShadowTransitionWeight = std::min(
+            ContactShadowTransitionWeight + transitionStep,
+            targetWeight );
+    } else if ( ContactShadowTransitionWeight > targetWeight ) {
+        ContactShadowTransitionWeight = std::max(
+            ContactShadowTransitionWeight - transitionStep,
+            targetWeight );
+    }
+}
+void D3D11PfxRenderer::ResetScreenSpaceLightingHistory() {
+    ScreenSpaceLightingHistoryValid = false;
+}
 XRESULT D3D11PfxRenderer::RenderScreenSpaceLighting(
     ID3D11ShaderResourceView* sceneSRV,
     ID3D11ShaderResourceView* albedoSRV,
@@ -403,7 +426,7 @@ XRESULT D3D11PfxRenderer::RenderScreenSpaceLighting(
     }
 
     auto& settings = Engine::GAPI->GetRendererState().RendererSettings;
-    const bool contactActive = settings.EnableContactShadows;
+    const bool contactActive = IsContactShadowTransitionActive();
     const bool giActive = settings.EnableScreenSpaceGI && settings.ScreenSpaceGIStrength > 0.0f;
     if ( !sceneSRV || !albedoSRV || !depthSRV || !normalsSRV || !waterMaskSRV || !materialSRV || (!contactActive && !giActive) ) {
         ScreenSpaceLightingHistoryValid = false;
@@ -446,9 +469,9 @@ XRESULT D3D11PfxRenderer::RenderScreenSpaceLighting(
     XMStoreFloat4x4( &cb.SSL_View, view );
     XMStoreFloat4x4( &cb.SSL_InvView, XMMatrixInverse( nullptr, view ) );
     cb.SSL_InvResolution = float2( 1.0f / std::max( 1, res.x ), 1.0f / std::max( 1, res.y ) );
-    cb.SSL_ContactStrength = (contactActive ? settings.GetContactShadowFixedStrength() : 0.0f) * mainLightVisibility;
+    cb.SSL_ContactStrength = contactActive ? settings.GetContactShadowFixedStrength() * mainLightVisibility : 0.0f;
     cb.SSL_GIStrength = settings.ScreenSpaceGIStrength;
-    cb.SSL_EnableContact = contactActive ? 1.0f : 0.0f;
+    cb.SSL_EnableContact = contactActive ? ContactShadowTransitionWeight : 0.0f;
     cb.SSL_EnableGI = giActive ? 1.0f : 0.0f;
     cb.SSL_HistoryValid = ScreenSpaceLightingHistoryValid ? 1.0f : 0.0f;
     cb.SSL_FSR3Active = (settings.Upscaler == GothicRendererSettings::UPSCALER_FSR_3
@@ -544,12 +567,12 @@ XRESULT D3D11PfxRenderer::RenderPostFXComposition(
     // Update constants shared by height fog and the view-space ray tracing effects.
     auto& settings = Engine::GAPI->GetRendererState().RendererSettings;
     GSky* sky = Engine::GAPI->GetSky();
-    const bool contactShadowsActive = settings.EnableContactShadows;
+    const bool contactShadowsActive = IsContactShadowTransitionActive();
     const bool screenSpaceGIActive = settings.EnableScreenSpaceGI && settings.ScreenSpaceGIStrength > 0.0f;
     const bool needsAtmosphere = compositionHeightFog || contactShadowsActive || screenSpaceGIActive;
     CompositionControlConstantBuffer control = {};
     control.CC_HeightFogEnabled = compositionHeightFog ? 1.0f : 0.0f;
-    control.CC_ContactShadowScale = 1.0f;
+    control.CC_ContactShadowScale = contactShadowsActive ? 1.0f : 0.0f;
     control.CC_InvResolution = float2( 1.0f / std::max( 1, res.x ), 1.0f / std::max( 1, res.y ) );
     const XMFLOAT4X4& projection = Engine::GAPI->GetProjectionMatrix();
     control.CC_ProjParams = float4( 1.0f / projection._11, 1.0f / projection._22, projection._43, projection._33 );

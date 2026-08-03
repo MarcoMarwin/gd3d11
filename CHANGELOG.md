@@ -897,3 +897,10 @@ Dokumentation der gepushten Renderer-Builds.
 - Enhance water glint transmission based on reflected cloud coverage
 - Improve Godrays with radial luminance compression and dynamic litFraction
 - Add Temporal Reprojection (TAA) for Volumetric Godrays to increase sample stability
+
+## Build 192
+- Implementiert: Contact Shadows sind (bei aktivem FSR 3) auf Innenräume beschränkt. Ein weicher Überblendungseffekt (Transition) sorgt für fließende Übergänge.
+- Implementiert: Nahbereichs-Godrays (Near Shaft Scattering) für Lichtstrahlen in direkter Kameranähe.
+- Anpassung: Legacy-Wasser-Nachthelligkeit wird nun ausschließlich uferabhängig relativ skaliert (kein globales Aufhellen).
+- Anpassung: Cubemap-Spiegelungen auf Wasser beachten nun die Hemisphäre (hemi).
+- UI: "Volumetric Lighting" in "Light Shafts" umbenannt. Tooltip für Kontaktschatten aktualisiert.

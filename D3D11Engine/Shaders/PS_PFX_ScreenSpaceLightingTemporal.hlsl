@@ -31,14 +31,7 @@ struct PS_INPUT { float2 vTexcoord : TEXCOORD0; float3 vEyeRay : TEXCOORD1; floa
 struct PS_OUTPUT { float4 Lighting : SV_TARGET0; float4 Depth : SV_TARGET1; };
 
 float ViewZ(float depth) { return SSL_ProjParams.z / (depth - SSL_ProjParams.w); }
-float IsIndoorScreenSpaceReceiver(float2 uv)
-{
-    float a = TX_Albedo.SampleLevel(SS_Linear, saturate(uv), 0).a;
-    float indoorReceiver = a < 0.5f ? 1.0f : 0.0f;
 
-    // Diagnostic test only: match the trace-stage FSR3 bypass.
-    return lerp(indoorReceiver, 1.0f, saturate(SSL_FSR3Active));
-}
 float IsContactReceiverExcluded(float2 uv)
 {
     float2 materialInfo = TX_Material.SampleLevel(SS_Linear, saturate(uv), 0).rg;
@@ -119,12 +112,11 @@ PS_OUTPUT PSMain(PS_INPUT input)
     PS_OUTPUT output;
     float2 uv = input.vTexcoord;
     float depth = TX_Depth.SampleLevel(SS_Linear, uv, 0).r;
-    float indoorReceiver = IsIndoorScreenSpaceReceiver(uv);
     float excludedContactReceiver = IsContactReceiverExcluded(uv);
     float4 minV, maxV;
     float4 current = NeighborhoodCurrent(uv, minV, maxV);
     [branch]
-    if (SSL_EnableContact > 0.5f && indoorReceiver > 0.5f)
+    if (SSL_EnableContact > 0.0001f)
         current.a = SoftContact(uv, current.a, excludedContactReceiver);
     else
         current.a = 0.0f;
@@ -161,11 +153,12 @@ PS_OUTPUT PSMain(PS_INPUT input)
     float contactStability = 1.0f - smoothstep(0.05f, 0.30f, contactDelta);
     float contactMotionWeight = lerp(lerp(0.90f, 0.60f, motion), lerp(0.94f, 0.78f, motion), fsr3);
     float fsr3Retention = lerp(0.84f, 0.95f, contactStability);
-    float contactHistoryWeight = contactMotionWeight * contactValid * lerp(1.0f, fsr3Retention, fsr3);
+    float contactFade = saturate(SSL_EnableContact);
+    float contactHistoryWeight = contactMotionWeight * contactValid * lerp(1.0f, fsr3Retention, fsr3) * contactFade;
     output.Lighting.rgb = lerp(current.rgb, history.rgb, historyWeight);
     output.Lighting.a = lerp(current.a, history.a, contactHistoryWeight);
     output.Lighting.rgb = max(output.Lighting.rgb, 0.0f);
-    output.Lighting.a = excludedContactReceiver > 0.5f ? 0.0f : saturate(output.Lighting.a);
+    output.Lighting.a = excludedContactReceiver <= 0.5f ? saturate(output.Lighting.a) * contactFade : 0.0f;
     output.Depth = float4(depth, depth, depth, depth);
     return output;
 }
