@@ -28,7 +28,7 @@ void CSMain( uint3 DTid : SV_DispatchThreadID )
     {
         float cloudAlpha = saturate(TX_LowClouds.SampleLevel(SS_Linear, uv, 0).a);
         float cloudTransmission = 1.0f - smoothstep(0.03f, 0.62f, cloudAlpha);
-        OutputTexture[DTid.xy] = color * cloudTransmission;
+        OutputTexture[DTid.xy] = float4(color.rgb * cloudTransmission, 1.0f);
     }
     else
     {

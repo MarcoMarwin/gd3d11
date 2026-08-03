@@ -904,3 +904,6 @@ Dokumentation der gepushten Renderer-Builds.
 - Anpassung: Legacy-Wasser-Nachthelligkeit wird nun ausschließlich uferabhängig relativ skaliert (kein globales Aufhellen).
 - Anpassung: Cubemap-Spiegelungen auf Wasser beachten nun die Hemisphäre (hemi).
 - UI: "Volumetric Lighting" in "Light Shafts" umbenannt. Tooltip für Kontaktschatten aktualisiert.
+
+## Build 193
+- Regulaerer Push: Radiale GodRays ueberarbeitet: AC_SunVisibility aus der Gewichtung entfernt. Sky-Alpha-Maskierung in CS_PFX_GodRayMask eingefuehrt. Zoom-Pass extrahiert shaftProfile ueber Sampling-Varianz zur Objektkantenerkennung. Combine-Pass nutzt shaftProfile fuer saubere, trennscharfe Ueberblendung zwischen ged�mpftem Himmels-Radial und unged�mpften Lichtstrahlen an Kanten, ohne das Lens-Flare zu beeinflussen.

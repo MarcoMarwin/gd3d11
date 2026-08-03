@@ -131,11 +131,7 @@ void CSTemporal( uint3 DTid : SV_DispatchThreadID )
     float currentDelta = length( current - meanCurrent );
     float localRange = length( maxCurrent - minCurrent );
     float localStability = 1.0f - smoothstep( 0.008f, max( localRange, 0.035f ), currentDelta );
-    float localStructure = smoothstep( 0.012f, 0.080f, localRange );
-    float historyWeight = saturate( GRV_HistoryWeight )
-        * valid
-        * lerp( 0.30f, 1.0f, localStability )
-        * lerp( 1.0f, 0.55f, localStructure );
+    float historyWeight = saturate( GRV_HistoryWeight ) * valid * lerp( 0.30f, 1.0f, localStability );
     float3 resolved = lerp( current, history, historyWeight );
     OutputTexture[DTid.xy] = float4( max( resolved, 0.0f ), 1.0f );
     OutputDepth[DTid.xy] = depth;
@@ -219,13 +215,7 @@ void CSCombine( uint3 DTid : SV_DispatchThreadID )
         }
         volumetric = foundCompatible > 0.5f ? bestVolumetric : 0.0f;
     }
-    float3 radial = max( TX_RadialGodRays.SampleLevel( SS_CombineClamp, fullUV, 0 ).rgb, 0.0f );
-    float3 radialContribution = radial;
-    float radialLuminance = dot( radialContribution, float3( 0.2126f, 0.7152f, 0.0722f ) );
-    float radialExcess = max( radialLuminance - 0.85f, 0.0f );
-    float compressedRadialLuminance = radialLuminance - radialExcess
-        + radialExcess / (1.0f + radialExcess * 1.50f);
-    radialContribution *= compressedRadialLuminance / max( radialLuminance, 0.0001f );
+    float3 radialContribution = max( TX_RadialGodRays.SampleLevel( SS_CombineClamp, fullUV, 0 ).rgb, 0.0f );
     OutputTexture[DTid.xy] = float4( volumetric + radialContribution, 1.0f );
 }
 #elif VOLUMETRIC_GODRAYS
@@ -318,14 +308,8 @@ void CSVolumetric( uint3 DTid : SV_DispatchThreadID )
     float jitter = GRV_Noise( DTid.xy );
     float transmittance = 1.0f;
     float scattering = 0.0f;
-    float nearShaftScattering = 0.0f;
     float cosTheta = saturate( dot( viewDirectionWS, normalize( GRV_LightDirectionWS ) ) );
-    float narrowForward = pow( cosTheta, 10.0f );
-    float broadForward = pow( cosTheta, 3.0f );
-    float phase = 0.08f + 0.62f * narrowForward + 0.30f * broadForward;
-    float nearShaftPhase = 0.16f + 0.84f * broadForward;
-    float surfaceRay = step( 0.0000001f, depth );
-    float nearShaftFar = min( max( GRV_MaxDistance * 0.45f, 1800.0f ), 5200.0f );
+    float phase = 0.10f + 0.90f * pow( cosTheta, 10.0f );
     float cloudTransmission = 1.0f;
     uint cloudWidth;
     uint cloudHeight;
@@ -347,22 +331,12 @@ void CSVolumetric( uint3 DTid : SV_DispatchThreadID )
         float sampleTransmittance = exp( -extinction );
         float visibility = GRV_ShadowVisibility( worldPosition );
         scattering += transmittance * (1.0f - sampleTransmittance) * visibility;
-        float worldHeightDensity = exp( -max( worldPosition.y - GRV_FogHeight, 0.0f ) * max( GRV_HeightFalloff, 0.000001f ) )
-            * max( GRV_GlobalDensity, 0.0f );
-        float rainHeightDensity = exp( -max( worldPosition.y - GRV_RainFogHeight, 0.0f ) * max( GRV_RainHeightFalloff, 0.000001f ) )
-            * max( GRV_RainGlobalDensity, 0.0f );
-        float nearMediumDensity = lerp( worldHeightDensity, rainHeightDensity, saturate( GRV_RainWeight ) );
-        float nearDistanceWeight = smoothstep( 120.0f, 650.0f, distanceToCamera )
-            * (1.0f - smoothstep( nearShaftFar * 0.72f, nearShaftFar, distanceToCamera ));
-        float nearExtinction = nearMediumDensity * nearDistanceWeight * surfaceRay * stepLength;
-        nearShaftScattering += transmittance * (1.0f - exp( -nearExtinction )) * visibility;
         transmittance *= sampleTransmittance;
         if ( transmittance < 0.01f )
             break;
     }
     float3 lightColor = max( GRV_LightColor.rgb, 0.0f );
-    float totalScattering = scattering * phase + nearShaftScattering * nearShaftPhase * 0.55f;
-    float3 result = totalScattering * lightColor * GRV_SunVisibility * cloudTransmission * GRV_Strength;
+    float3 result = scattering * lightColor * phase * GRV_SunVisibility * cloudTransmission * GRV_Strength;
     OutputTexture[DTid.xy] = float4( result, 1.0f );
 }
 #else
@@ -396,6 +370,9 @@ void CSMain( uint3 DTid : SV_DispatchThreadID )
     const int NUM_SAMPLES = 64;
     float2 center = GR_Center;
     float3 color = 0;
+    float shaftFirstMoment = 0.0f;
+    float shaftSecondMoment = 0.0f;
+    float shaftWeight = 0.0f;
     float illumDecay = 1.0f;
     float2 deltaTexCoord = texcoord - center;
     deltaTexCoord *= 1.0f / NUM_SAMPLES * GR_Density;
@@ -408,7 +385,13 @@ void CSMain( uint3 DTid : SV_DispatchThreadID )
         uv -= deltaTexCoord;
         if ( uv.x < 0.0f || uv.x > 1.0f || uv.y < 0.0f || uv.y > 1.0f )
             continue;
-        color += TX_Texture0.SampleLevel( SS_Linear, uv, 0 ).rgb * illumDecay * GR_Weight;
+        float4 maskSample = TX_Texture0.SampleLevel( SS_Linear, uv, 0 );
+        float sampleWeight = illumDecay;
+        float shaftSample = saturate(maskSample.a);
+        color += maskSample.rgb * sampleWeight * GR_Weight;
+        shaftFirstMoment += shaftSample * sampleWeight;
+        shaftSecondMoment += shaftSample * shaftSample * sampleWeight;
+        shaftWeight += sampleWeight;
         illumDecay *= GR_Decay;
     }
     color /= NUM_SAMPLES;
@@ -417,7 +400,26 @@ void CSMain( uint3 DTid : SV_DispatchThreadID )
     float3 sunSample = 0.0f;
     if (center.x >= 0.0f && center.x <= 1.0f && center.y >= 0.0f && center.y <= 1.0f) { sunSample += TX_Texture0.SampleLevel(SS_Linear, center, 0).rgb; sunSample += TX_Texture0.SampleLevel(SS_Linear, center + float2(texelSize.x * 2.0f, 0.0f), 0).rgb; sunSample += TX_Texture0.SampleLevel(SS_Linear, center - float2(texelSize.x * 2.0f, 0.0f), 0).rgb; sunSample += TX_Texture0.SampleLevel(SS_Linear, center + float2(0.0f, texelSize.y * 2.0f), 0).rgb; sunSample += TX_Texture0.SampleLevel(SS_Linear, center - float2(0.0f, texelSize.y * 2.0f), 0).rgb; }
     float sunVisibility = saturate(LensFlareLuma(sunSample / 5.0f) * 3.0f);
-    float3 lensFlare = BuildLensFlare(texcoord, center, aspect, sunVisibility);
-    OutputTexture[DTid.xy] = float4( color * GR_ColorMod + lensFlare, 1.0f);
+    float shaftMean = shaftFirstMoment / max(shaftWeight, 0.0001f);
+    float shaftSecond = shaftSecondMoment / max(shaftWeight, 0.0001f);
+    float shaftVariance = max(shaftSecond - shaftMean * shaftMean, 0.0f);
+    float shaftProfile = smoothstep(0.00025f, 0.00200f, shaftVariance);
+    float3 radialCore = max(color * GR_ColorMod, 0.0f);
+    float3 lensFlare = max(BuildLensFlare(texcoord, center, aspect, sunVisibility), 0.0f);
+    float3 combinedRadial = radialCore + lensFlare;
+    float3 baselineCombined = combinedRadial * 0.75f;
+    float baselineCombinedLuminance = dot(baselineCombined, float3(0.2126f, 0.7152f, 0.0722f));
+    float baselineCombinedExcess = max(baselineCombinedLuminance - 0.65f, 0.0f);
+    float compressedBaselineCombinedLuminance = baselineCombinedLuminance - baselineCombinedExcess
+        + baselineCombinedExcess / (1.0f + baselineCombinedExcess * 1.50f);
+    baselineCombined *= compressedBaselineCombinedLuminance / max(baselineCombinedLuminance, 0.0001f);
+    float3 baselineCore = radialCore * 0.75f;
+    float baselineCoreLuminance = dot(baselineCore, float3(0.2126f, 0.7152f, 0.0722f));
+    float baselineCoreExcess = max(baselineCoreLuminance - 0.65f, 0.0f);
+    float compressedBaselineCoreLuminance = baselineCoreLuminance - baselineCoreExcess
+        + baselineCoreExcess / (1.0f + baselineCoreExcess * 1.50f);
+    baselineCore *= compressedBaselineCoreLuminance / max(baselineCoreLuminance, 0.0001f);
+    float3 radialContribution = baselineCombined + shaftProfile * (radialCore - baselineCore);
+    OutputTexture[DTid.xy] = float4(radialContribution, 1.0f);
 }
 #endif
