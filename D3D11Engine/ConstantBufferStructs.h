@@ -473,18 +473,18 @@ struct AtmosphereConstantBuffer {
 
     float AC_EnableParticleLighting;
     float AC_ParticleLightingStrength;
-    float AC_PadParticle0;
-    float AC_PadParticle1;
+    float AC_Pad3;
+    float AC_Pad4;
 
-    XMFLOAT3 AC_NightRainMidColor;
-    float AC_NightRainWorldHazeStrength;
-    XMFLOAT3 AC_NightRainFarColor;
-    float AC_NightRainMidInfluence;
-    XMFLOAT3 AC_NightRainSkyColor;
-    float AC_NightRainSkyHazeStrength;
-    float AC_NightRainFarMaxLuma;
-    float AC_NightRainVeryFarMaxLuma;
-    float AC_NightRainVeryFarInfluence;
+    XMFLOAT3 AC_Pad5;
+    float AC_Pad6;
+    XMFLOAT3 AC_Pad7;
+    float AC_Pad8;
+    XMFLOAT3 AC_Pad9;
+    float AC_Pad10;
+    float AC_Pad11;
+    float AC_Pad12;
+    float AC_Pad13;
     float AC_DayRainAtmosphereStrength;
 
     XMFLOAT3 AC_LowCloudDayColor;

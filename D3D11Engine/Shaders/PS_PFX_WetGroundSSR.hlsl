@@ -5,6 +5,7 @@
 #include "DepthReconstruction.h"
 #include "DS_Defines.h"
 #include "AtmosphericScattering.h"
+#include "SSR.h"
 
 cbuffer WetGroundSSRConstantBuffer : register(b0)
 {
@@ -661,105 +662,39 @@ WetGroundReflectionTrace TraceWetGroundReflection(
     result.Weight = 0.0f;
     if (activeMask <= 0.001f)
         return result;
+
     float3 rayDirection = normalize(reflect(viewRay, reflectionNormal));
-    if (rayDirection.y <= 0.015f)
-        return result;
-    float3 rayPosition = wsPosition + reflectionNormal * 8.0f;
-    float3 previousRayPosition = rayPosition;
-    float stepSize = 18.0f;
     float2 hitUV = 0.0f;
     float hitWeight = 0.0f;
-    float2 skyUV = 0.0f;
+    float2 skyUV = uv;
     float skyWeight = 0.0f;
-    [loop]
-    for (int i = 0; i < 30; ++i)
+    bool traceScreenSpace = rayDirection.y > 0.015f;
+    if (traceScreenSpace)
     {
-        previousRayPosition = rayPosition;
-        rayPosition += rayDirection * stepSize;
-        float4 projected = mul(float4(rayPosition, 1.0f), WG_ViewProj);
-        if (projected.w <= 0.0f)
-            break;
-        projected.xyz /= projected.w;
-        float2 sampleUV = projected.xy * float2(0.5f, -0.5f) + 0.5f;
-        if (any(sampleUV < 0.0f) || any(sampleUV > 1.0f) || projected.z < 0.0f || projected.z > 1.0f)
-            break;
-        float edge = max(abs(sampleUV.x - 0.5f), abs(sampleUV.y - 0.5f)) * 2.0f;
-        float screenWeight = 1.0f - smoothstep(0.76f, 1.0f, edge);
-        float sampleDepth = TX_Depth.SampleLevel(SS_Linear, sampleUV, 0).r;
-        if (sampleDepth <= 1e-7f)
-        {
-            if (screenWeight > skyWeight)
-            {
-                skyUV = sampleUV;
-                skyWeight = screenWeight;
-            }
-            stepSize *= 1.10f;
-            continue;
-        }
-        float sampleZ = WG_ProjParams.z / (sampleDepth - WG_ProjParams.w);
-        float depthDifference = projected.w - sampleZ;
-        if (depthDifference > 0.0f && depthDifference < stepSize * 1.15f)
-        {
-            float3 refinementLow = previousRayPosition;
-            float3 refinementHigh = rayPosition;
-            float2 refinedUV = sampleUV;
-            float refinedScreenWeight = screenWeight;
-            float refinedDepthError = abs(depthDifference);
-            [unroll]
-            for (int refinementStep = 0; refinementStep < 4; ++refinementStep)
-            {
-                float3 refinementPosition = (refinementLow + refinementHigh) * 0.5f;
-                float4 refinementProjected = mul(float4(refinementPosition, 1.0f), WG_ViewProj);
-                if (refinementProjected.w <= 0.0f)
-                {
-                    refinementHigh = refinementPosition;
-                    continue;
-                }
-                refinementProjected.xyz /= refinementProjected.w;
-                float2 refinementUV = refinementProjected.xy * float2(0.5f, -0.5f) + 0.5f;
-                if (any(refinementUV < 0.0f) || any(refinementUV > 1.0f)
-                    || refinementProjected.z < 0.0f || refinementProjected.z > 1.0f)
-                {
-                    refinementHigh = refinementPosition;
-                    continue;
-                }
-                float refinementDepth = TX_Depth.SampleLevel(SS_Linear, refinementUV, 0).r;
-                if (refinementDepth <= 1e-7f)
-                {
-                    refinementLow = refinementPosition;
-                    continue;
-                }
-                float refinementDenominator = refinementDepth - WG_ProjParams.w;
-                if (abs(refinementDenominator) <= 1e-7f)
-                {
-                    refinementHigh = refinementPosition;
-                    continue;
-                }
-                float refinementSampleZ = WG_ProjParams.z / refinementDenominator;
-                float refinementDifference = refinementProjected.w - refinementSampleZ;
-                float candidateDepthError = abs(refinementDifference);
-                if (candidateDepthError < refinedDepthError)
-                {
-                    refinedDepthError = candidateDepthError;
-                    refinedUV = refinementUV;
-                    float refinementEdge = max(abs(refinementUV.x - 0.5f), abs(refinementUV.y - 0.5f)) * 2.0f;
-                    refinedScreenWeight = 1.0f - smoothstep(0.76f, 1.0f, refinementEdge);
-                }
-                if (refinementDifference > 0.0f)
-                    refinementHigh = refinementPosition;
-                else
-                    refinementLow = refinementPosition;
-            }
-            float maximumRefinedError = max(1.25f, stepSize * 0.22f);
-            if (refinedDepthError <= maximumRefinedError)
-            {
-                hitUV = refinedUV;
-                hitWeight = refinedScreenWeight;
-            }
-            break;
-        }
-        stepSize *= 1.10f;
+        float3 rayStartWS = wsPosition + reflectionNormal * 8.0f;
+        float maximumTraceDistance = clamp(max(WG_FogRange, 12000.0f), 12000.0f, 60000.0f);
+        float2 resolution = 1.0f / max(WG_InvResolution, float2(1e-7f, 1e-7f));
+        SSRTraceResult traceResult = SSRCore_TraceScreenRay(
+            TX_Depth,
+            TX_WaterMask,
+            rayStartWS,
+            rayDirection,
+            WG_ViewProj,
+            resolution,
+            WG_ProjParams.z,
+            WG_ProjParams.w,
+            maximumTraceDistance,
+            512,
+            6,
+            1.0f,
+            0.25f,
+            0.105f);
+        hitUV = traceResult.hitUV;
+        hitWeight = traceResult.confidence;
+        skyUV = traceResult.skyUV;
+        skyWeight = traceResult.skyWeight;
     }
+
     float3 reflectedColor = surfaceColor;
     float reflectionWeight = 0.0f;
     float screenSpaceConfidence = 0.0f;
@@ -768,8 +703,8 @@ WetGroundReflectionTrace TraceWetGroundReflection(
         float2 reflectedUVCandidate = hitUV + hitUVOffset;
         float reflectedScreenFade = CalculateReflectionScreenFade(reflectedUVCandidate);
         float2 reflectedUV = saturate(reflectedUVCandidate);
-        float2 reflectedPixel = reflectedUV / WG_InvResolution;
-        float reflectedWetSSRBlock = DecodeWetSSRBlock(SampleWetSSRBlockMask(reflectedPixel));
+        float reflectedWetSSRBlock = DecodeWetSSRBlock(
+            TX_WaterMask.SampleLevel(SS_Linear, reflectedUV, 0).r);
         if (reflectedWetSSRBlock <= 0.001f)
         {
             float3 directReflection = TX_Scene.SampleLevel(SS_Linear, reflectedUV, 0).rgb;
@@ -793,6 +728,7 @@ WetGroundReflectionTrace TraceWetGroundReflection(
             reflectionWeight = hitWeight;
         }
     }
+
     float3 localFallbackReflection = SampleRoughReflection(
         uv,
         roughDistortion,
@@ -835,6 +771,7 @@ WetGroundReflectionTrace TraceWetGroundReflection(
         fallbackReflection = lerp(
             fallbackReflection, atmosphericCubeReflection, cubeFallbackMix);
     }
+
     if (reflectionWeight > 0.0f)
     {
         float stableScreenSpaceMix = smoothstep(0.08f, 0.92f, screenSpaceConfidence);
@@ -852,6 +789,7 @@ WetGroundReflectionTrace TraceWetGroundReflection(
     result.Weight = reflectionWeight;
     return result;
 }
+
 float4 PSMain(PS_INPUT input) : SV_TARGET
 {
     float2 uv = input.vTexcoord;

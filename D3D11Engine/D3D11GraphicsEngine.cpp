@@ -1,7 +1,6 @@
 #include "D3D11GraphicsEngine.h"
 #include "D3D11DeferredRenderer.h"
 #include "D3D11ShadowMap.h"
-#include "RendererTestSettings.h"
 
 #include "AlignedAllocator.h"
 #include "D3D11Effect.h"
@@ -4459,11 +4458,7 @@ XRESULT D3D11GraphicsEngine::OnStartWorldRendering() {
         };
     });
 
-    // BEGIN TEMPORARY RENDERER TEST OVERRIDES
-    const RendererTestSettings& wetGroundSSRTestSettings = GetRendererTestSettings();
-    const bool disableWetGroundSSR = wetGroundSSRTestSettings.EnableOverrides && wetGroundSSRTestSettings.Night.DisableWetGroundSSR;
-    // END TEMPORARY RENDERER TEST OVERRIDES
-    if ( renderWetGroundSSR && !disableWetGroundSSR ) {
+    if ( renderWetGroundSSR ) {
       graph.AddPass( RG_PASS_NAME("Wet Ground SSR"), [&]( RGBuilder& builder, RenderPass& pass )
       {
           builder.Read( normalsResource );
@@ -4518,10 +4513,7 @@ XRESULT D3D11GraphicsEngine::OnStartWorldRendering() {
             // Setup renderstates
             Engine::GAPI->GetRendererState().RasterizerState.CullMode = GothicRasterizerStateInfo::CM_CULL_BACK;
             Engine::GAPI->GetRendererState().RasterizerState.SetDirty();
-            const RendererTestSettings& rendererTestSettings = GetRendererTestSettings();
-            if ( !( rendererTestSettings.EnableOverrides && rendererTestSettings.Night.DisableRegularTransparencyDraw ) ) {
-                DrawMeshInfoListAlphablended( FrameTransparencyMeshes );
-            }
+            DrawMeshInfoListAlphablended( FrameTransparencyMeshes );
         };
     });
 
@@ -4537,10 +4529,7 @@ XRESULT D3D11GraphicsEngine::OnStartWorldRendering() {
                 // Setup renderstates
                 Engine::GAPI->GetRendererState().RasterizerState.CullMode = GothicRasterizerStateInfo::CM_CULL_BACK;
                 Engine::GAPI->GetRendererState().RasterizerState.SetDirty();
-                const RendererTestSettings& rendererTestSettings = GetRendererTestSettings();
-                if ( !( rendererTestSettings.EnableOverrides && rendererTestSettings.Night.DisablePortalTransparencyDraw ) ) {
-                    DrawMeshInfoListAlphablended( FrameTransparencyMeshesPortal );
-                }
+                DrawMeshInfoListAlphablended( FrameTransparencyMeshesPortal );
             };
         });
     }
@@ -5329,18 +5318,7 @@ XRESULT D3D11GraphicsEngine::DrawMeshInfoListAlphablended( const std::vector<std
     if ( list.empty() ) {
         return XR_SUCCESS;
     }
-    // BEGIN TEMPORARY RENDERER TEST OVERRIDES
-    const RendererTestSettings& rendererTestSettings = GetRendererTestSettings();
-    const RendererNightTestSettings& transparencyTests = rendererTestSettings.Night;
-    const bool transparencyTestOverridesEnabled = rendererTestSettings.EnableOverrides;
-    if ( transparencyTestOverridesEnabled && transparencyTests.DisableTransparentWorldMeshes ) {
-        return XR_SUCCESS;
-    }
-    if ( transparencyTestOverridesEnabled && transparencyTests.UseNightlyWorldTransparencyTessellationReset ) {
-        GetContext()->DSSetShader( nullptr, nullptr, 0 );
-        GetContext()->HSSetShader( nullptr, nullptr, 0 );
-    }
-    // END TEMPORARY RENDERER TEST OVERRIDES
+
     XMMATRIX view = Engine::GAPI->GetViewMatrixXM();
     Engine::GAPI->SetViewTransformXM( view );
     Engine::GAPI->ResetWorldTransform();
@@ -5381,13 +5359,10 @@ XRESULT D3D11GraphicsEngine::DrawMeshInfoListAlphablended( const std::vector<std
     void* lastMat = nullptr;
     MaterialInfo* lastInfo = nullptr;
     for ( auto const& [meshKey, meshInfo] : list ) {
-        if ( transparencyTestOverridesEnabled && transparencyTests.DisableWaterfallTransparencyDraw && meshKey.Info && meshKey.Info->MaterialType == MaterialInfo::MT_WaterfallFoam ) {
-            continue;
-        }
-        zCTexture* texture = transparencyTestOverridesEnabled && transparencyTests.UseBaseTextureForTransparentWorldMeshes ? meshKey.Material->GetTexture() : meshKey.Material->GetAniTexture();
-        if ( !texture ) {
-            texture = meshKey.Material->GetTexture();
-        }
+            zCTexture* texture = meshKey.Material->GetAniTexture();
+            if ( !texture ) {
+                texture = meshKey.Material->GetTexture();
+            }
         if ( texture ) {
             PsSimpleFFdata ffdata = { };
             ffdata.textureFactor = ComputeTransparencyTextureFactor( meshKey.Material );
@@ -5405,23 +5380,12 @@ XRESULT D3D11GraphicsEngine::DrawMeshInfoListAlphablended( const std::vector<std
             }
 
             const float transparentWorldMeshDayBrightnessMax = std::lerp( 1.00f, 0.50f, transparentWorldMeshRainFactor );
-            float transparentWorldMeshBrightness = std::lerp( 0.10f, transparentWorldMeshDayBrightnessMax, transparentWorldMeshDaylightFactor );
-            float transparentWorldMeshAlpha = std::lerp( 0.50f, 1.00f, transparentWorldMeshDaylightFactor );
-
-            // BEGIN TEMPORARY RENDERER TEST OVERRIDES
-            if ( transparencyTestOverridesEnabled && transparencyTests.ForceWhiteTransparentTextureFactor ) {
-                ffdata.textureFactor = float4( 1.0f, 1.0f, 1.0f, 1.0f );
-            }
-            if ( transparencyTestOverridesEnabled ) {
-                transparentWorldMeshBrightness *= std::clamp( transparencyTests.TransparentWorldMeshBrightness, 0.0f, 1.0f );
-                transparentWorldMeshAlpha *= std::clamp( transparencyTests.TransparentWorldMeshAlpha, 0.0f, 1.0f );
-            }
-            // END TEMPORARY RENDERER TEST OVERRIDES
-
-            ffdata.textureFactor.x *= transparentWorldMeshBrightness;
-            ffdata.textureFactor.y *= transparentWorldMeshBrightness;
-            ffdata.textureFactor.z *= transparentWorldMeshBrightness;
-            ffdata.textureFactor.w *= transparentWorldMeshAlpha;
+                const float transparentWorldMeshBrightness = std::lerp( 0.10f, transparentWorldMeshDayBrightnessMax, transparentWorldMeshDaylightFactor );
+                const float transparentWorldMeshAlpha = std::lerp( 0.50f, 1.00f, transparentWorldMeshDaylightFactor );
+                ffdata.textureFactor.x *= transparentWorldMeshBrightness;
+                ffdata.textureFactor.y *= transparentWorldMeshBrightness;
+                ffdata.textureFactor.z *= transparentWorldMeshBrightness;
+                ffdata.textureFactor.w *= transparentWorldMeshAlpha;
             if (texture->CacheIn( 0.6f ) != zRES_CACHED_IN) {
                 // Draw what? black? :)
                 continue;
@@ -5431,24 +5395,10 @@ XRESULT D3D11GraphicsEngine::DrawMeshInfoListAlphablended( const std::vector<std
             ID3D11ShaderResourceView* srv[4];
             // Get diffuse and normalmap
             srv[0] = surface->GetEngineTexture() ->GetShaderResourceView().Get();
-            srv[1] = GetMaterialNormalmapSRV( surface, meshKey.Info );
-            srv[2] = surface->GetFxMap() ? surface->GetFxMap()->GetShaderResourceView().Get() : nullptr;
-            srv[3] = GetParallaxDisplacementSRV( surface, meshKey.Info );
-            // BEGIN TEMPORARY RENDERER TEST OVERRIDES
-            if ( transparencyTestOverridesEnabled ) {
-                if ( transparencyTests.DisableTransparentNormalmaps ) {
-                    srv[1] = nullptr;
-                }
-                if ( transparencyTests.DisableTransparentFxMaps ) {
-                    srv[2] = nullptr;
-                }
-                if ( transparencyTests.DisableTransparentDisplacementMaps ) {
-                    srv[3] = nullptr;
-                }
-            }
-            // END TEMPORARY RENDERER TEST OVERRIDES
-
-            int alphaFunc = meshKey.Material->GetAlphaFunc();
+                srv[1] = GetMaterialNormalmapSRV( surface, meshKey.Info );
+                srv[2] = surface->GetFxMap() ? surface->GetFxMap()->GetShaderResourceView().Get() : nullptr;
+                srv[3] = GetParallaxDisplacementSRV( surface, meshKey.Info );
+                int alphaFunc = meshKey.Material->GetAlphaFunc();
 
             if ( alphaFunc == 0 ) {
                 alphaFunc = zColor( meshKey.Material->GetColor() ).bgra.alpha < 255
@@ -5528,27 +5478,18 @@ XRESULT D3D11GraphicsEngine::DrawMeshInfoListAlphablended( const std::vector<std
 
     Engine::GAPI->GetRendererState().DepthState.DepthWriteEnabled = true;
     Engine::GAPI->GetRendererState().DepthState.SetDirty();
-
-    // BEGIN TEMPORARY RENDERER TEST OVERRIDES
-    const bool disableTransparentWorldMeshDepthFogReplay = transparencyTestOverridesEnabled && transparencyTests.DisableTransparentWorldMeshDepthFogReplay;
-    if ( !disableTransparentWorldMeshDepthFogReplay ) {
-        Engine::GAPI->GetRendererState().BlendState.ColorWritesEnabled = false;
-        Engine::GAPI->GetRendererState().BlendState.SetDirty();
-
-        UpdateRenderStates();
-
-        // Draw again, but only to depthbuffer this time to make them work with
-        // fogging
-        for ( auto const& [meshKey, meshInfo] : list ) {
-            if ( meshKey.Material->GetAniTexture() != nullptr && meshKey.Info->MaterialType != MaterialInfo::MT_Portal ) {
-                // Draw the section-part
-                DrawVertexBufferIndexedUINT( nullptr, nullptr, meshInfo->Indices.size(),
-                    meshInfo->BaseIndexLocation );
-            }
+    Engine::GAPI->GetRendererState().BlendState.ColorWritesEnabled = false;
+    Engine::GAPI->GetRendererState().BlendState.SetDirty();
+    UpdateRenderStates();
+    // Draw again, but only to depthbuffer this time to make them work with
+    // fogging
+    for ( auto const& [meshKey, meshInfo] : list ) {
+        if ( meshKey.Material->GetAniTexture() != nullptr && meshKey.Info->MaterialType != MaterialInfo::MT_Portal ) {
+            // Draw the section-part
+            DrawVertexBufferIndexedUINT( nullptr, nullptr, meshInfo->Indices.size(),
+                meshInfo->BaseIndexLocation );
         }
     }
-    // END TEMPORARY RENDERER TEST OVERRIDES
-
     Engine::GAPI->GetRendererState().BlendState.ColorWritesEnabled = true;
     Engine::GAPI->GetRendererState().BlendState.SetDirty();
     UpdateRenderStates();
@@ -5659,11 +5600,7 @@ XRESULT D3D11GraphicsEngine::DrawWorldMesh( bool noTextures ) {
         for ( auto const& renderItem : renderList ) {
             for ( auto const& worldMesh : renderItem->WorldMeshes ) {
                 if ( worldMesh.first.Material ) {
-                    const RendererTestSettings& rendererTestSettings = GetRendererTestSettings();
-                    const RendererNightTestSettings& transparencyTests = rendererTestSettings.Night;
-                    const bool transparencyTestOverridesEnabled = rendererTestSettings.EnableOverrides;
-
-                    zCTexture* aniTex = transparencyTestOverridesEnabled && transparencyTests.UseBaseTextureForTransparentWorldMeshes ? worldMesh.first.Material->GetTexture() : worldMesh.first.Material->GetAniTexture();
+                    zCTexture* aniTex = worldMesh.first.Material->GetAniTexture();
 
                     if ( !aniTex ) {
                         aniTex = worldMesh.first.Material->GetTexture();
@@ -5692,20 +5629,6 @@ XRESULT D3D11GraphicsEngine::DrawWorldMesh( bool noTextures ) {
                         }
                         continue;
                     }
-
-
-                    // BEGIN TEMPORARY RENDERER TEST OVERRIDES
-                    if ( transparencyTestOverridesEnabled && transparencyTests.DisableWaterfallTransparencyDraw && worldMesh.first.Info->MaterialType == MaterialInfo::MT_WaterfallFoam ) {
-                        continue;
-                    }
-                    if ( transparencyTestOverridesEnabled && transparencyTests.UseNightlyWaterfallTransparencyClassification && worldMesh.first.Info->MaterialType == MaterialInfo::MT_WaterfallFoam ) {
-                        if ( !isZPrepass ) {
-                            transparencyMeshes.push_back( { transparencyMesh, distanceSq } );
-                        }
-                        continue;
-                    }
-                    // END TEMPORARY RENDERER TEST OVERRIDES
-
                     // Check for alphablending
                     if ( (worldMesh.first.Material->GetAlphaFunc() > zMAT_ALPHA_FUNC_NONE &&
                         worldMesh.first.Material->GetAlphaFunc() != zMAT_ALPHA_FUNC_TEST)
@@ -8211,14 +8134,7 @@ XRESULT D3D11GraphicsEngine::DrawFrameAlphaMeshes() {
     if ( m_AlphaMeshes.empty() ) {
         return XR_SUCCESS;
     }
-    // BEGIN TEMPORARY RENDERER TEST OVERRIDES
-    const RendererTestSettings& rendererTestSettings = GetRendererTestSettings();
-    const RendererNightTestSettings& transparencyTests = rendererTestSettings.Night;
-    const bool transparencyTestOverridesEnabled = rendererTestSettings.EnableOverrides;
-    if ( transparencyTestOverridesEnabled && transparencyTests.DisableTransparentVobMeshes ) {
-        return XR_SUCCESS;
-    }
-    // END TEMPORARY RENDERER TEST OVERRIDES
+
     TracyD3D11ZoneCGX("DrawFrameAlphaMeshes");
     auto _scopeDrawFrameAlphaMeshes = RecordGraphicsEvent( GE_NAME( "DrawFrameAlphaMeshes" ) );
 
@@ -8235,7 +8151,7 @@ XRESULT D3D11GraphicsEngine::DrawFrameAlphaMeshes() {
         DepthStencilBuffer->GetDepthStencilView().Get() );
 
     bool useWindMetadata = false;
-    if ( ActiveVS && ActiveVS->GetInputIndex( "WindMetaData" ) != -1 && !m_AlphaMeshes.empty() && !( transparencyTestOverridesEnabled && transparencyTests.DisableTransparentVobWindMetadata ) ) {
+    if ( ActiveVS && ActiveVS->GetInputIndex( "WindMetaData" ) != -1 && !m_AlphaMeshes.empty() ) {
         std::unordered_map<MeshVisualInfo*, DWORD> metadataByVisual;
         metadataByVisual.reserve( m_AlphaMeshes.size() );
 
@@ -8297,7 +8213,7 @@ XRESULT D3D11GraphicsEngine::DrawFrameAlphaMeshes() {
     }
 
     GraphicsShaderConstantBuffer windBuffer = {};
-    if ( ActiveVS && (Engine::GAPI->GetRendererState().RendererSettings.WindQuality > 0 || Engine::GAPI->GetRendererState().RendererSettings.HeroAffectsObjects) && !( transparencyTestOverridesEnabled && transparencyTests.DisableTransparentVobWindBuffer ) ) {
+    if ( ActiveVS && (Engine::GAPI->GetRendererState().RendererSettings.WindQuality > 0 || Engine::GAPI->GetRendererState().RendererSettings.HeroAffectsObjects) ) {
         windBuffer = ActiveVS->GetBuffer( "WindParams" );
         windBuffer.Bind();
         UpdateCharacterInteractionPositions( g_windBuffer );
@@ -9013,12 +8929,7 @@ bool D3D11GraphicsEngine::BindShaderForTexture( zCTexture* texture,
 
 /** Draws the given list of decals */
 void D3D11GraphicsEngine::DrawDecalList( const std::vector<zCVob*>& decals, bool lighting ) {
-    // BEGIN TEMPORARY RENDERER TEST OVERRIDES
-    const RendererTestSettings& rendererTestSettings = GetRendererTestSettings();
-    if ( !lighting && rendererTestSettings.EnableOverrides && rendererTestSettings.Night.DisableTransparentDecals ) {
-        return;
-    }
-    // END TEMPORARY RENDERER TEST OVERRIDES
+
     SetDefaultStates();
     TracyD3D11ZoneCGX( "DrawDecalList" );
     auto _ = RecordGraphicsEvent( GE_NAME( "DrawDecalList" ) );
@@ -9227,17 +9138,9 @@ void D3D11GraphicsEngine::DrawDecalList( const std::vector<zCVob*>& decals, bool
         auto saturateDecal = []( float v ) { return v < 0.0f ? 0.0f : ( v > 1.0f ? 1.0f : v ); };
         if ( auto sky = Engine::GAPI->GetSky() ) {
             const auto& atmo = sky->GetAtmosphereCB();
-            // BEGIN TEMPORARY RENDERER TEST OVERRIDES
-            const RendererTestSettings& rendererTestSettings = GetRendererTestSettings();
-            const bool disableDecalNightRainLightingScale = rendererTestSettings.EnableOverrides && rendererTestSettings.Night.DisableDecalNightRainLightingScale;
-            if ( disableDecalNightRainLightingScale ) {
-                gacb.GA_LightingScale = 1.0f;
-            } else {
-                float night = saturateDecal( ( -atmo.AC_LightPos.y + 0.08f ) * 2.5f );
-                float rain = std::max( saturateDecal( atmo.AC_RainFXWeight ), saturateDecal( atmo.AC_SceneWettness ) );
-                gacb.GA_LightingScale = ( 1.0f + ( 0.34f - 1.0f ) * night ) * ( 1.0f + ( 0.78f - 1.0f ) * rain );
-            }
-            // END TEMPORARY RENDERER TEST OVERRIDES
+            float night = saturateDecal( ( -atmo.AC_LightPos.y + 0.08f ) * 2.5f );
+            float rain = std::max( saturateDecal( atmo.AC_RainFXWeight ), saturateDecal( atmo.AC_SceneWettness ) );
+            gacb.GA_LightingScale = ( 1.0f + ( 0.34f - 1.0f ) * night ) * ( 1.0f + ( 0.78f - 1.0f ) * rain );
         }
     }
     const float ambientDecalLightingScale = gacb.GA_LightingScale;
@@ -9549,12 +9452,7 @@ void D3D11GraphicsEngine::EnsureTempVertexBufferSize( std::unique_ptr<D3D11Verte
 /** Draws particle meshes */
 void D3D11GraphicsEngine::DrawFrameParticleMeshes( std::unordered_map<zCVob*, MeshVisualInfo*>& progMeshes ) {
     if ( progMeshes.empty() ) return;
-    // BEGIN TEMPORARY RENDERER TEST OVERRIDES
-    const RendererTestSettings& rendererTestSettings = GetRendererTestSettings();
-    if ( rendererTestSettings.EnableOverrides && rendererTestSettings.Night.DisableTransparentParticleMeshes ) {
-        return;
-    }
-    // END TEMPORARY RENDERER TEST OVERRIDES
+
     SetDefaultStates();
 
     SetActivePixelShader( PShaderID::PS_Simple );

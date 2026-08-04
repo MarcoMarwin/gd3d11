@@ -61,18 +61,18 @@ cbuffer Atmosphere : register( b1 )
 
 	float AC_EnableParticleLighting;
 	float AC_ParticleLightingStrength;
-	float AC_PadParticle0;
-	float AC_PadParticle1;
+	float AC_Pad3;
+	float AC_Pad4;
 
-	float3 AC_NightRainMidColor;
-	float AC_NightRainWorldHazeStrength;
-	float3 AC_NightRainFarColor;
-	float AC_NightRainMidInfluence;
-	float3 AC_NightRainSkyColor;
-	float AC_NightRainSkyHazeStrength;
-	float AC_NightRainFarMaxLuma;
-	float AC_NightRainVeryFarMaxLuma;
-	float AC_NightRainVeryFarInfluence;
+	float3 AC_Pad5;
+	float AC_Pad6;
+	float3 AC_Pad7;
+	float AC_Pad8;
+	float3 AC_Pad9;
+	float AC_Pad10;
+	float AC_Pad11;
+	float AC_Pad12;
+	float AC_Pad13;
 	float AC_DayRainAtmosphereStrength;
 
 	float3 AC_LowCloudDayColor;
@@ -143,8 +143,7 @@ float GetRainCloudTransitionWeight()
 float4 ResolveLowCloudLayer(float4 rawClouds, float3 sceneColor)
 {
 	float rainWeight = saturate(AC_RainFXWeight);
-	float nightTimeBlend = smoothstep(0.0f, 1.0f, saturate(-AC_LightPos.y * 4.0f))
-		* saturate(AC_EnableNightAtmosphere);
+	float nightTimeBlend = smoothstep(0.0f, 1.0f, saturate(-AC_LightPos.y * 4.0f)) * saturate(AC_EnableNightAtmosphere);
 	float rainCloudVisibility = 1.0f - smoothstep(0.18f, 0.88f, rainWeight);
 	float rainVeil = rainWeight * lerp(0.050f, 0.22f, nightTimeBlend);
 	float dryNightVeil = (1.0f - rainWeight) * nightTimeBlend * 0.12f;
@@ -293,7 +292,7 @@ float ComputeWorldLowCloudDensity(float3 worldPosition, float baseFogHeight)
 	return saturate(verticalBand * cloudBody * 1.42f * max(0.0f, AC_LowCloudDensity));
 }
 
-float4 ComputeWorldLowCloudVolume(float3 cameraWorld, float3 endWorld, float cameraDistance, float skyPixel, float baseFogHeight, float3 fogColorMod, float nightTimeBlend)
+float4 ComputeWorldLowCloudVolumeWithSteps(float3 cameraWorld, float3 endWorld, float cameraDistance, float skyPixel, float baseFogHeight, float3 fogColorMod, float nightTimeBlend, int requestedCloudSteps)
 {
     float3 ray = endWorld - cameraWorld;
     float rayDistance = max(length(ray), 1.0f);
@@ -357,7 +356,7 @@ float4 ComputeWorldLowCloudVolume(float3 cameraWorld, float3 endWorld, float cam
     float3 scattering = 0.0f;
     float accumulatedAlpha = 0.0f;
     const int CLOUD_FIELD_STEPS = 8;
-    int activeCloudSteps = CLOUD_FIELD_STEPS;
+    int activeCloudSteps = clamp(requestedCloudSteps, 1, CLOUD_FIELD_STEPS);
     float stepLength = usableDistance / max((float)activeCloudSteps, 1.0f);
 
     [loop]
@@ -424,6 +423,12 @@ float4 ComputeWorldLowCloudVolume(float3 cameraWorld, float3 endWorld, float cam
     accumulatedAlpha = saturate(accumulatedAlpha * 1.04f);
     return float4(saturate(scattering / max(accumulatedAlpha, 0.001f)), accumulatedAlpha);
 }
+float4 ComputeWorldLowCloudVolume(float3 cameraWorld, float3 endWorld, float cameraDistance, float skyPixel, float baseFogHeight, float3 fogColorMod, float nightTimeBlend)
+{
+    return ComputeWorldLowCloudVolumeWithSteps(
+        cameraWorld, endWorld, cameraDistance, skyPixel,
+        baseFogHeight, fogColorMod, nightTimeBlend, 8);
+}
 float ComputeWorldLowCloudShadow(float3 worldPosition, float baseFogHeight, float nightTimeBlend)
 {
 	return 0.0f;
@@ -437,15 +442,9 @@ float ComputeWorldLowCloudGlobalShadow(float baseFogHeight, float nightTimeBlend
 
 float GetNightWeight()
 {
-	return saturate((-AC_LightPos.y) * 10.0f);
+	return saturate((-AC_LightPos.y) * 10.0f) * saturate(AC_EnableNightAtmosphere);
 }
 
-// BEGIN TEMPORARY RENDERER TEST OVERRIDES
-bool IsRendererGroundTestBitEnabled(float bitValue) {
-    float packedValue = floor(max(AC_PadParticle0, 0.0f) + 0.5f);
-    return fmod(floor(packedValue / bitValue), 2.0f) >= 1.0f;
-}
-// END TEMPORARY RENDERER TEST OVERRIDES
 
 float GetRainSkyVisibility()
 {
@@ -459,7 +458,7 @@ float GetNightDistanceFade(float3 worldPosition)
 	float nightFadeStart = max(0.0f, AC_NightDarkeningStart);
 	float nightFadeEnd = nightFadeStart + max(1000.0f, AC_NightDarkeningRange);
 	float nightDistanceBlend = SmootherStep01((cameraDistance - nightFadeStart) / max(1.0f, nightFadeEnd - nightFadeStart));
-	return nightDistanceBlend * GetNightWeight() * saturate(AC_EnableNightAtmosphere);
+	return nightDistanceBlend * GetNightWeight();
 }
 
 float3 ApplyNightDistanceDarkening(float3 worldPosition, float3 color)
@@ -478,12 +477,7 @@ float3 ApplyAtmosphericScatteringGround(float3 worldPosition, float3 in_color, b
 	float3 v3Pos = worldPosition - AC_SpherePosition;
 	float3 v3Ray = v3Pos - camPos;
 
-	// BEGIN TEMPORARY RENDERER TEST OVERRIDES
-	bool disableGroundNightContribution = IsRendererGroundTestBitEnabled(1.0f);
-	bool disableGroundRainAttenuation = IsRendererGroundTestBitEnabled(2.0f);
-
-	float nightWeight = disableGroundNightContribution ? 0.0f : GetNightWeight();
-	// END TEMPORARY RENDERER TEST OVERRIDES
+	float nightWeight = GetNightWeight();
 		
 	float innerRadius = AC_InnerRadius;
 				
@@ -528,12 +522,7 @@ float3 ApplyAtmosphericScatteringGround(float3 worldPosition, float3 in_color, b
 		v3SamplePoint += v3SampleRay;
 	}
 	// Rain scattering attenuation
-	// BEGIN TEMPORARY RENDERER TEST OVERRIDES
-	if (!disableGroundRainAttenuation)
-	{
-		v3FrontColor *= 1.0f - GetRainCloudTransitionWeight();
-	}
-	// END TEMPORARY RENDERER TEST OVERRIDES
+	v3FrontColor *= 1.0f - GetRainCloudTransitionWeight();
 	
 	// Finally, scale the Mie and Rayleigh colors and set up the varying variables for the pixel shader.
 	float3 c0 = v3FrontColor * (vInvWavelength * AC_KrESun + AC_KmESun);
@@ -544,11 +533,9 @@ float3 ApplyAtmosphericScatteringGround(float3 worldPosition, float3 in_color, b
 	float3 c1 = v3Attenuate;
 	
 	float3 dayColor = c0 + in_color * c1;
-	float nearNightBrightness = lerp(1.0f, max(0.0f, AC_NearNightBrightness), saturate(AC_EnableNightAtmosphere));
+	float nearNightBrightness = max(0.0f, AC_NearNightBrightness);
 	float3 nightColor = float3(0.095f,0.115f,0.255f) * NIGHT_BRIGHTNESS * nearNightBrightness;
-	// BEGIN TEMPORARY RENDERER TEST OVERRIDES
-	float moonWeight = disableGroundNightContribution ? 0.0f : saturate((-AC_LightPos.y - 0.08f) * 1.7f);
-	// END TEMPORARY RENDERER TEST OVERRIDES
+	float moonWeight = saturate((-AC_LightPos.y - 0.08f) * 1.7f);
 	float midtone = saturate(dot(in_color, float3(0.299f, 0.587f, 0.114f)) * 0.95f + 0.04f);
 	float3 moonColor = float3(0.018f, 0.026f, 0.052f) * moonWeight * midtone * nearNightBrightness;
 	float3 outColor;

@@ -123,9 +123,9 @@ float4 ComputeRefinedLowClouds( float2 texcoord, float depth )
         * saturate( AC_EnableNightAtmosphere );
     float sunWeight = saturate( AC_SunVisibility )
         * smoothstep( 0.04f, 0.42f, AC_LightPos.y );
-    float4 clouds = ComputeWorldLowCloudVolume(
+    float4 clouds = ComputeWorldLowCloudVolumeWithSteps(
         HF_CameraPosition, worldPosition, cameraDistance, 0.0f,
-        HF_FogHeight, HF_FogColorMod, nightTimeBlend );
+        HF_FogHeight, HF_FogColorMod, nightTimeBlend, 4 );
     float nightFogBrightness = lerp( 1.0f, max( 0.0f, AC_NightFogBrightness ),
         saturate( AC_EnableNightAtmosphere ) );
     float3 nightRainVeilColor = float3( 0.12f, 0.18f, 0.27f )

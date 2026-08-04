@@ -1,7 +1,6 @@
 #include "ImGuiShim.h"
 #include "GSky.h"
 #include "D3D11PfxRenderer.h"
-#include "RendererTestSettings.h"
 #include "D3D11PFX_FSR3.h"
 #include <VersionHelpers.h>
 #include <ShellScalingApi.h>
@@ -1113,156 +1112,6 @@ void ImGuiShim::CancelSettingsEdit() {
     Engine::GraphicsEngine->ReloadShaders( ShaderCategory::All );
 }
 
-// BEGIN TEMPORARY RENDERER TEST OVERRIDES
-namespace {
-    bool g_RendererTestWindowVisible = false;
-
-    void RenderRendererTestWindow() {
-        if ( !g_RendererTestWindowVisible ) {
-            return;
-        }
-
-        RendererTestSettings& testSettings = GetRendererTestSettings();
-        RendererNightTestSettings& night = testSettings.Night;
-
-        ImGui::SetNextWindowSize( ImVec2( 680.0f, 920.0f ), ImGuiCond_FirstUseEver );
-
-        if ( !ImGui::Begin( "Renderer Night Diagnostics", &g_RendererTestWindowVisible, ImGuiWindowFlags_NoCollapse ) ) {
-            ImGui::End();
-            return;
-        }
-
-        ImGui::Checkbox( "Enable Test Overrides", &testSettings.EnableOverrides );
-        ImGui::SameLine();
-
-        if ( ImGui::Button( "Reset Night Tests" ) ) {
-            ResetRendererNightTests();
-        }
-
-        ImGui::SameLine();
-
-        if ( ImGui::Button( "Reset All Tests" ) ) {
-            ResetAllRendererTests();
-        }
-
-        ImGui::Separator();
-
-        ImGui::TextUnformatted( "General Night" );
-        ImGui::Checkbox( "Disable Night Atmosphere", &night.DisableNightAtmosphere );
-        ImGui::Checkbox( "Disable Near Night Brightness", &night.DisableNearNightBrightness );
-        ImGui::Checkbox( "Disable Night Fog Brightness", &night.DisableNightFogBrightness );
-        ImGui::Checkbox( "Disable Night Darkening", &night.DisableNightDarkening );
-        ImGui::Checkbox( "Disable EnvMap Night Factor", &night.DisableEnvMapNightFactor );
-
-        ImGui::Separator();
-
-        ImGui::TextUnformatted( "Night Rain" );
-        ImGui::Checkbox( "Disable All Night Rain Adjustments", &night.DisableNightRainAdjustments );
-        ImGui::Checkbox( "Disable Night Rain Mid Color", &night.DisableNightRainMidColor );
-        ImGui::Checkbox( "Disable Night Rain Far Color", &night.DisableNightRainFarColor );
-        ImGui::Checkbox( "Disable Night Rain Sky Color", &night.DisableNightRainSkyColor );
-        ImGui::Checkbox( "Disable Night Rain Mid Influence", &night.DisableNightRainMidInfluence );
-        ImGui::Checkbox( "Disable Night Rain World Haze", &night.DisableNightRainWorldHazeStrength );
-        ImGui::Checkbox( "Disable Night Rain Sky Haze", &night.DisableNightRainSkyHazeStrength );
-        ImGui::Checkbox( "Disable Night Rain Far Max Luma", &night.DisableNightRainFarMaxLuma );
-        ImGui::Checkbox( "Disable Night Rain Very Far Max Luma", &night.DisableNightRainVeryFarMaxLuma );
-        ImGui::Checkbox( "Disable Night Rain Very Far Influence", &night.DisableNightRainVeryFarInfluence );
-
-        ImGui::Separator();
-
-        ImGui::TextUnformatted( "Night Sky" );
-        ImGui::Checkbox( "Disable Dynamic Cloud Night Color", &night.DisableDynamicCloudNightColor );
-
-        ImGui::Separator();
-
-        ImGui::TextUnformatted( "Ground And Transparency Diagnostics" );
-        ImGui::Checkbox( "Disable Ground Night Contribution", &night.DisableGroundNightContribution );
-        ImGui::Checkbox( "Disable Ground Rain Attenuation", &night.DisableGroundRainAttenuation );
-        ImGui::Checkbox( "Disable Decal Night/Rain Lighting Scale", &night.DisableDecalNightRainLightingScale );
-
-        ImGui::Separator();
-
-        ImGui::TextUnformatted( "Particle Lighting Diagnostics" );
-        ImGui::Checkbox( "Disable Particle Night Dimming", &night.DisableParticleNightDimming );
-        ImGui::Checkbox( "Disable Particle Rain Alpha Reduction", &night.DisableParticleRainAlphaReduction );
-
-        ImGui::Separator();
-
-        ImGui::TextUnformatted( "Transparency Path Identification" );
-        ImGui::Checkbox( "Disable Transparent World Meshes", &night.DisableTransparentWorldMeshes );
-        ImGui::Checkbox( "Disable Transparent VOB Meshes", &night.DisableTransparentVobMeshes );
-        ImGui::Checkbox( "Disable Transparent Decals", &night.DisableTransparentDecals );
-        ImGui::Checkbox( "Disable Transparent Particle Meshes", &night.DisableTransparentParticleMeshes );
-
-        ImGui::Separator();
-
-        ImGui::TextUnformatted( "Transparent World Materials" );
-        ImGui::Checkbox( "Disable Transparent Normalmaps", &night.DisableTransparentNormalmaps );
-        ImGui::Checkbox( "Disable Transparent FX Maps", &night.DisableTransparentFxMaps );
-        ImGui::Checkbox( "Disable Transparent Displacement Maps", &night.DisableTransparentDisplacementMaps );
-        ImGui::Checkbox( "Force White Transparent Texture Factor", &night.ForceWhiteTransparentTextureFactor );
-        ImGui::SetNextItemWidth( 300.0f );
-        ImGui::SliderFloat( "Transparent World Mesh Brightness", &night.TransparentWorldMeshBrightness, 0.0f, 1.0f, "%.2f", ImGuiSliderFlags_AlwaysClamp );
-        ImGui::SetNextItemWidth( 300.0f );
-        ImGui::SliderFloat( "Transparent World Mesh Alpha", &night.TransparentWorldMeshAlpha, 0.0f, 1.0f, "%.2f", ImGuiSliderFlags_AlwaysClamp );
-
-        ImGui::Separator();
-
-        ImGui::TextUnformatted( "Transparent VOB Diagnostics" );
-        ImGui::Checkbox( "Disable Transparent VOB Wind Metadata", &night.DisableTransparentVobWindMetadata );
-        ImGui::Checkbox( "Disable Transparent VOB Wind Buffer", &night.DisableTransparentVobWindBuffer );
-
-        ImGui::Separator();
-
-        ImGui::TextUnformatted( "Nightly World Transparency Comparison" );
-        ImGui::Checkbox( "Use Base Texture For Transparent World Meshes", &night.UseBaseTextureForTransparentWorldMeshes );
-        ImGui::Checkbox( "Use Nightly World Transparency Tessellation Reset", &night.UseNightlyWorldTransparencyTessellationReset );
-        ImGui::Checkbox( "Use Nightly Waterfall Transparency Classification", &night.UseNightlyWaterfallTransparencyClassification );
-        ImGui::Checkbox( "Disable Transparent World Mesh Depth Fog Replay", &night.DisableTransparentWorldMeshDepthFogReplay );
-
-        ImGui::Separator();
-        ImGui::Separator();
-        ImGui::TextUnformatted( "Nightly Rain Effects Isolation" );
-        ImGui::Checkbox( "Enable Wet Material Reflections", &night.EnableWetMaterialReflections );
-        ImGui::SetNextItemWidth( 300.0f );
-        ImGui::SliderFloat( "Wet Material Reflections Strength", &night.WetMaterialReflectionsStrength, 0.0f, 2.0f, "%.2f", ImGuiSliderFlags_AlwaysClamp );
-        night.WetMaterialReflectionsStrength = std::clamp( night.WetMaterialReflectionsStrength, 0.0f, 2.0f );
-
-        ImGui::Checkbox( "Enable Procedural Puddles", &night.EnableProceduralPuddles );
-        ImGui::SetNextItemWidth( 300.0f );
-        ImGui::SliderFloat( "Procedural Puddles Strength", &night.ProceduralPuddlesStrength, 0.0f, 2.0f, "%.2f", ImGuiSliderFlags_AlwaysClamp );
-        night.ProceduralPuddlesStrength = std::clamp( night.ProceduralPuddlesStrength, 0.0f, 2.0f );
-
-        ImGui::Checkbox( "Enable Puddle Reflections", &night.EnablePuddleReflections );
-        ImGui::SetNextItemWidth( 300.0f );
-        ImGui::SliderFloat( "Puddle Reflections Strength", &night.PuddleReflectionsStrength, 0.0f, 2.0f, "%.2f", ImGuiSliderFlags_AlwaysClamp );
-        night.PuddleReflectionsStrength = std::clamp( night.PuddleReflectionsStrength, 0.0f, 2.0f );
-
-        ImGui::Checkbox( "Enable Wet Ground Rain Impacts", &night.EnableWetGroundRainImpacts );
-        ImGui::SetNextItemWidth( 300.0f );
-        ImGui::SliderFloat( "Wet Ground Rain Impacts Strength", &night.WetGroundRainImpactsStrength, 0.0f, 2.0f, "%.2f", ImGuiSliderFlags_AlwaysClamp );
-        night.WetGroundRainImpactsStrength = std::clamp( night.WetGroundRainImpactsStrength, 0.0f, 2.0f );
-
-        ImGui::Separator();
-        ImGui::TextUnformatted( "Transparency List Isolation" );
-        ImGui::Checkbox( "Disable Wet Ground SSR", &night.DisableWetGroundSSR );
-        ImGui::Checkbox( "Disable Regular Transparency Draw", &night.DisableRegularTransparencyDraw );
-        ImGui::Checkbox( "Disable Portal Transparency Draw", &night.DisablePortalTransparencyDraw );
-        ImGui::Checkbox( "Disable Waterfall Transparency Draw", &night.DisableWaterfallTransparencyDraw );
-
-        if ( ImGui::Button( "Reset Structural Tests" ) ) {
-            ResetTransparencyStructuralTests();
-        }
-
-        ImGui::Separator();
-
-        ImGui::Text( "Overrides: %s", testSettings.EnableOverrides ? "enabled" : "disabled" );
-
-        ImGui::End();
-    }
-}
-// END TEMPORARY RENDERER TEST OVERRIDES
-
 void ImGuiShim::RenderSettingsWindow()
 {
     // Autosized settings by child objects & centered
@@ -1390,14 +1239,6 @@ void ImGuiShim::RenderSettingsWindow()
         }
         ImGui::SetItemTooltip( "%s", Tr( "Selects the language used by the D3D11 renderer.", u8"W\u00E4hlt die Sprache des D3D11-Renderers aus." ) );
         ImGui::PopItemWidth();
-        // BEGIN TEMPORARY RENDERER TEST OVERRIDES
-        ImGui::SameLine();
-        if ( ImGui::Button( "Test" ) ) {
-            g_RendererTestWindowVisible = !g_RendererTestWindowVisible;
-        }
-        ImGui::SetItemTooltip( "%s", Tr( "Opens temporary night diagnostics.", u8"\u00D6ffnet die tempor\u00E4re Nachtdiagnose." ) );
-        // END TEMPORARY RENDERER TEST OVERRIDES
-
         const std::string versionText = std::string( Tr( "D3D11 Version ", u8"D3D11-Version " ) ) + VERSION_NUMBER;
         const ImVec2 versionTextSize = ImGui::CalcTextSize( versionText.c_str() );
         ImGui::SameLine();
@@ -1839,7 +1680,4 @@ void ImGuiShim::RenderSettingsWindow()
     if ( shadersToReload != ShaderCategory::None ) {
         Engine::GraphicsEngine->ReloadShaders( shadersToReload );
     }
-    // BEGIN TEMPORARY RENDERER TEST OVERRIDES
-    RenderRendererTestWindow();
-    // END TEMPORARY RENDERER TEST OVERRIDES
 }

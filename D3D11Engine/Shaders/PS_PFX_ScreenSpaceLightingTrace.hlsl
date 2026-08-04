@@ -32,6 +32,7 @@ float WaterMask(float2 uv) { return TX_WaterMask.SampleLevel(SS_Linear, saturate
 float IsGeometry(float d) { return step(0.000001f, d); }
 float4 MaterialInfo(float2 uv) { return TX_Material.SampleLevel(SS_Linear, saturate(uv), 0); }
 float IsAlphaTestedMaterial(float4 materialInfo) { return materialInfo.g < 0.0f ? 1.0f : 0.0f; }
+float IsNpcMaterial(float4 materialInfo) { return materialInfo.r < -0.5f && materialInfo.r >= -2.0f ? 1.0f : 0.0f; }
 
 float3 ViewPosition(float2 uv, float depth)
 {
@@ -50,7 +51,7 @@ float2 ProjectView(float3 viewPos, out float valid)
 }
 float Hash12(float2 p) { return frac(52.9829189f * frac(dot(p, float2(0.06711056f, 0.00583715f)))); }
 
-bool TraceRay(float3 origin, float3 dir, float maxDistance, int steps, float jitter, float minThickness, float thicknessScale, float maxThickness, float rejectAlphaTestedOccluders, out float2 hitUV, out float hitDistance)
+bool TraceRay(float3 origin, float3 dir, float maxDistance, int steps, float jitter, float minThickness, float thicknessScale, float maxThickness, float rejectAlphaTestedOccluders, float rejectNpcOccluders, out float2 hitUV, out float hitDistance)
 {
     hitUV = 0.0f;
     hitDistance = maxDistance;
@@ -68,7 +69,9 @@ bool TraceRay(float3 origin, float3 dir, float maxDistance, int steps, float jit
         if (WaterMask(uv) > 0.02f) { prevDelta = -1.0f; continue; }
         float d = DepthRaw(uv);
         if (IsGeometry(d) < 0.5f) { prevDelta = -1.0f; continue; }
-        if (rejectAlphaTestedOccluders > 0.5f && IsAlphaTestedMaterial(MaterialInfo(uv)) > 0.5f) { prevDelta = -1.0f; continue; }
+        float4 materialInfo = MaterialInfo(uv);
+        if (rejectAlphaTestedOccluders > 0.5f && IsAlphaTestedMaterial(materialInfo) > 0.5f) { prevDelta = -1.0f; continue; }
+        if (rejectNpcOccluders > 0.5f && IsNpcMaterial(materialInfo) > 0.5f) { prevDelta = -1.0f; continue; }
         float sceneZ = ViewPosition(uv, d).z;
         float delta = p.z - sceneZ;
         float thickness = clamp(travel * thicknessScale, minThickness, maxThickness);
@@ -87,15 +90,7 @@ float ComputeContact(float2 uv, float depth)
     if (SSL_EnableContact <= 0.0001f || SSL_ContactStrength <= 0.001f || IsGeometry(depth) < 0.5f || WaterMask(uv) > 0.02f) return 0.0f;
 
     float4 materialInfo = MaterialInfo(uv);
-    if (IsAlphaTestedMaterial(materialInfo) > 0.5f) return 0.0f;
-
-    float materialClass = materialInfo.r;
-    if (materialClass < -0.5f && materialClass >= -2.0f)
-    {
-        // NPC depth remains available to TraceRay as an occluder, but NPC
-        // surfaces do not receive the screen-space contact-shadow term.
-        return 0.0f;
-    }
+    if (IsAlphaTestedMaterial(materialInfo) > 0.5f || IsNpcMaterial(materialInfo) > 0.5f) return 0.0f;
 
     float3 vp = ViewPosition(uv, depth);
     float3 n = ViewNormal(uv);
@@ -116,7 +111,7 @@ float ComputeContact(float2 uv, float depth)
     float2 hitUV;
     float hitDistance;
     // Dense near-field samples make shallow tabletop contacts less view-angle dependent.
-    if (!TraceRay(vp + n * 1.2f, l, maxDistance, 12, jitter, 2.2f, 0.052f, 22.0f, 1.0f, hitUV, hitDistance)) return 0.0f;
+    if (!TraceRay(vp + n * 1.2f, l, maxDistance, 12, jitter, 2.2f, 0.052f, 22.0f, 1.0f, 1.0f, hitUV, hitDistance)) return 0.0f;
 
     float3 hn = ViewNormal(hitUV);
     float occluderFacing = saturate(dot(hn, -l));
@@ -157,7 +152,7 @@ float3 ComputeGI(float2 uv, float depth, float3 baseColor)
         float3 dirVS = normalize(mul(float4(dirWS, 0.0f), SSL_View).xyz);
         float2 hitUV; float hitDistance;
         float rayJitter = frac(pixelNoise + sampleId * 0.371f);
-        if (TraceRay(vp + n * 4.5f, dirVS, maxDistance, 8, rayJitter, 4.0f, 0.042f, 34.0f, 0.0f, hitUV, hitDistance)) {
+        if (TraceRay(vp + n * 4.5f, dirVS, maxDistance, 8, rayJitter, 4.0f, 0.042f, 34.0f, 0.0f, 0.0f, hitUV, hitDistance)) {
             float3 hn = ViewNormal(hitUV);
             float receiver = saturate(dot(n, dirVS));
             float emitter = lerp(0.35f, 1.0f, saturate(dot(hn, -dirVS)));

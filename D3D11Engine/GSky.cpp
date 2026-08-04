@@ -2,7 +2,6 @@
 
 #include "BaseGraphicsEngine.h"
 #include "D3D11Texture.h"
-#include "RendererTestSettings.h"
 #include "Engine.h"
 #include "GMesh.h"
 #include "oCGame.h"
@@ -433,9 +432,6 @@ XRESULT GSky::RenderSky() {
     AtmosphereCB.AC_g = Atmosphere.G;
     AtmosphereCB.AC_Wavelength = Atmosphere.WaveLengths;
     AtmosphereCB.AC_SpherePosition = sp;
-    const RendererTestSettings& rendererTestSettings = GetRendererTestSettings();
-    const bool nightTestOverridesEnabled = rendererTestSettings.EnableOverrides;
-    const RendererNightTestSettings& nightTests = rendererTestSettings.Night;
 
     if ( !Engine::GAPI->GetRendererState().RendererSettings.EnableRain ) {
         AtmosphereCB.AC_SceneWettness = 0.f;
@@ -450,22 +446,12 @@ XRESULT GSky::RenderSky() {
     AtmosphereCB.AC_SSSIntensity = 1.0f;
     const auto& rendererSettings = Engine::GAPI->GetRendererState().RendererSettings;
     AtmosphereCB.AC_WaterCubemapStrength = rendererSettings.WaterCubemapStrength;
-    // BEGIN TEMPORARY RENDERER TEST OVERRIDES
-    const bool disableNightAtmosphere = nightTestOverridesEnabled && nightTests.DisableNightAtmosphere;
-
-    AtmosphereCB.AC_EnableNightAtmosphere = disableNightAtmosphere ? 0.0f : 1.0f;
-    AtmosphereCB.AC_NearNightBrightness = disableNightAtmosphere || ( nightTestOverridesEnabled && nightTests.DisableNearNightBrightness ) ? 1.0f : rendererSettings.NightNearBrightness;
-    AtmosphereCB.AC_NightFogBrightness = disableNightAtmosphere || ( nightTestOverridesEnabled && nightTests.DisableNightFogBrightness ) ? 1.0f : rendererSettings.NightFogBrightness;
-    if ( disableNightAtmosphere || ( nightTestOverridesEnabled && nightTests.DisableNightDarkening ) ) {
-        AtmosphereCB.AC_NightDarkeningStart = 0.0f;
-        AtmosphereCB.AC_NightDarkeningRange = 1.0f;
-        AtmosphereCB.AC_NightDarkeningMax = 0.0f;
-    } else {
-        AtmosphereCB.AC_NightDarkeningStart = rendererSettings.NightDarkeningStart;
-        AtmosphereCB.AC_NightDarkeningRange = rendererSettings.NightDarkeningRange;
-        AtmosphereCB.AC_NightDarkeningMax = rendererSettings.NightDarkeningMax;
-    }
-    // END TEMPORARY RENDERER TEST OVERRIDES
+    AtmosphereCB.AC_EnableNightAtmosphere = 1.0f;
+    AtmosphereCB.AC_NearNightBrightness = rendererSettings.NightNearBrightness;
+    AtmosphereCB.AC_NightFogBrightness = rendererSettings.NightFogBrightness;
+    AtmosphereCB.AC_NightDarkeningStart = rendererSettings.NightDarkeningStart;
+    AtmosphereCB.AC_NightDarkeningRange = rendererSettings.NightDarkeningRange;
+    AtmosphereCB.AC_NightDarkeningMax = rendererSettings.NightDarkeningMax;
     // AC_SunVisibility was filled together with the moon visibility above.
     AtmosphereCB.AC_WorldCameraPos = camPos;
     AtmosphereCB.AC_EnableContactShadows = rendererSettings.EnableContactShadows ? 1.0f : 0.0f;
@@ -475,52 +461,23 @@ XRESULT GSky::RenderSky() {
     AtmosphereCB.AC_ScreenSpaceGIStrength = rendererSettings.ScreenSpaceGIStrength;
     AtmosphereCB.AC_EnableParticleLighting = rendererSettings.EnableParticleLighting ? 1.0f : 0.0f;
     AtmosphereCB.AC_ParticleLightingStrength = rendererSettings.ParticleLightingStrength * 1.5f;
-    // BEGIN TEMPORARY RENDERER TEST OVERRIDES
-    AtmosphereCB.AC_PadParticle0 = 0.0f;
-    AtmosphereCB.AC_PadParticle1 = 0.0f;
-    if ( nightTestOverridesEnabled ) {
-        if ( nightTests.DisableGroundNightContribution ) {
-            AtmosphereCB.AC_PadParticle0 += 1.0f;
-        }
-        if ( nightTests.DisableGroundRainAttenuation ) {
-            AtmosphereCB.AC_PadParticle0 += 2.0f;
-        }
-
-        if ( nightTests.DisableParticleNightDimming ) {
-            AtmosphereCB.AC_PadParticle1 += 1.0f;
-        }
-        if ( nightTests.DisableParticleRainAlphaReduction ) {
-            AtmosphereCB.AC_PadParticle1 += 2.0f;
-        }
-    }
-    // END TEMPORARY RENDERER TEST OVERRIDES
-    // BEGIN TEMPORARY RENDERER TEST OVERRIDES
-    const bool disableAllNightRainAdjustments = nightTestOverridesEnabled && nightTests.DisableNightRainAdjustments;
-    const bool disableNightRainMidColor = disableAllNightRainAdjustments || ( nightTestOverridesEnabled && nightTests.DisableNightRainMidColor );
-    const bool disableNightRainFarColor = disableAllNightRainAdjustments || ( nightTestOverridesEnabled && nightTests.DisableNightRainFarColor );
-    const bool disableNightRainSkyColor = disableAllNightRainAdjustments || ( nightTestOverridesEnabled && nightTests.DisableNightRainSkyColor );
-    const bool disableNightRainMidInfluence = disableAllNightRainAdjustments || ( nightTestOverridesEnabled && nightTests.DisableNightRainMidInfluence );
-    const bool disableNightRainWorldHazeStrength = disableAllNightRainAdjustments || ( nightTestOverridesEnabled && nightTests.DisableNightRainWorldHazeStrength );
-    const bool disableNightRainSkyHazeStrength = disableAllNightRainAdjustments || ( nightTestOverridesEnabled && nightTests.DisableNightRainSkyHazeStrength );
-
-    AtmosphereCB.AC_NightRainMidColor = disableNightRainMidColor ? XMFLOAT3( 1.0f, 1.0f, 1.0f ) : rendererSettings.NightRainMidColor;
-    AtmosphereCB.AC_NightRainWorldHazeStrength = disableNightRainWorldHazeStrength ? 0.0f : rendererSettings.NightRainWorldHazeStrength;
-    AtmosphereCB.AC_NightRainFarColor = disableNightRainFarColor ? XMFLOAT3( 1.0f, 1.0f, 1.0f ) : rendererSettings.NightRainFarColor;
-    AtmosphereCB.AC_NightRainMidInfluence = disableNightRainMidInfluence ? 0.0f : rendererSettings.NightRainMidInfluence;
-    AtmosphereCB.AC_NightRainSkyColor = disableNightRainSkyColor ? XMFLOAT3( 1.0f, 1.0f, 1.0f ) : rendererSettings.NightRainSkyColor;
-    AtmosphereCB.AC_NightRainSkyHazeStrength = disableNightRainSkyHazeStrength ? 0.0f : rendererSettings.NightRainSkyHazeStrength;
-    AtmosphereCB.AC_NightRainFarMaxLuma = disableAllNightRainAdjustments || ( nightTestOverridesEnabled && nightTests.DisableNightRainFarMaxLuma ) ? 1.0f : rendererSettings.NightRainFarMaxLuma;
-    AtmosphereCB.AC_NightRainVeryFarMaxLuma = disableAllNightRainAdjustments || ( nightTestOverridesEnabled && nightTests.DisableNightRainVeryFarMaxLuma ) ? 1.0f : rendererSettings.NightRainVeryFarMaxLuma;
-    AtmosphereCB.AC_NightRainVeryFarInfluence = disableAllNightRainAdjustments || ( nightTestOverridesEnabled && nightTests.DisableNightRainVeryFarInfluence ) ? 0.0f : rendererSettings.NightRainVeryFarInfluence;
-    // END TEMPORARY RENDERER TEST OVERRIDES
+    AtmosphereCB.AC_Pad3 = 0.0f;
+    AtmosphereCB.AC_Pad4 = 0.0f;
+    AtmosphereCB.AC_Pad5 = XMFLOAT3( 0.0f, 0.0f, 0.0f );
+    AtmosphereCB.AC_Pad6 = 0.0f;
+    AtmosphereCB.AC_Pad7 = XMFLOAT3( 0.0f, 0.0f, 0.0f );
+    AtmosphereCB.AC_Pad8 = 0.0f;
+    AtmosphereCB.AC_Pad9 = XMFLOAT3( 0.0f, 0.0f, 0.0f );
+    AtmosphereCB.AC_Pad10 = 0.0f;
+    AtmosphereCB.AC_Pad11 = 0.0f;
+    AtmosphereCB.AC_Pad12 = 0.0f;
+    AtmosphereCB.AC_Pad13 = 0.0f;
     AtmosphereCB.AC_DayRainAtmosphereStrength = rendererSettings.DayRainAtmosphereStrength;
     AtmosphereCB.AC_LowCloudDayColor = rendererSettings.DynamicCloudDayColor;
     AtmosphereCB.AC_LowCloudDensity = rendererSettings.DynamicCloudDensity;
     AtmosphereCB.AC_LowCloudRainColor = rendererSettings.DynamicCloudRainColor;
     AtmosphereCB.AC_LowCloudScale = rendererSettings.DynamicCloudScale;
-    // BEGIN TEMPORARY RENDERER TEST OVERRIDES
-    AtmosphereCB.AC_LowCloudNightColor = nightTestOverridesEnabled && nightTests.DisableDynamicCloudNightColor ? rendererSettings.DynamicCloudDayColor : rendererSettings.DynamicCloudNightColor;
-    // END TEMPORARY RENDERER TEST OVERRIDES
+    AtmosphereCB.AC_LowCloudNightColor = rendererSettings.DynamicCloudNightColor;
     AtmosphereCB.AC_LowCloudSpeed = rendererSettings.DynamicCloudSpeed;
     AtmosphereCB.AC_LowCloudHeightScale = rendererSettings.DynamicCloudHeight;
     AtmosphereCB.AC_LowCloudDistanceScale = rendererSettings.DynamicCloudDistance;

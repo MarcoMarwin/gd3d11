@@ -139,4 +139,117 @@ SSRTraceResult SSRCore_TraceWorldRay(
     }
     return result;
 }
+SSRTraceResult SSRCore_TraceScreenRay(
+    Texture2D depthTexture,
+    Texture2D blockMaskTexture,
+    float3 originWS, float3 directionWS,
+    float4x4 viewProj, float2 viewportSize,
+    float projectionZ, float projectionW,
+    float maxDistance, int maxSteps, int refineSteps,
+    float screenStridePixels, float blockMaskScale, float edgeFadeWidth)
+{
+    SSRTraceResult result = SSRCore_MissResult();
+    float3 rayDirection = normalize(directionWS);
+    float3 rayEndWS = originWS + rayDirection * maxDistance;
+    float2 startUV;
+    float startClipW;
+    float2 endUV;
+    float endClipW;
+    if (!SSRCore_ProjectWorldToUV(originWS, viewProj, startUV, startClipW)) return result;
+    if (!SSRCore_ProjectWorldToUV(rayEndWS, viewProj, endUV, endClipW)) return result;
+    float2 screenDeltaPixels = (endUV - startUV) * viewportSize;
+    float screenLengthPixels = length(screenDeltaPixels);
+    int screenSteps = min(maxSteps, max(1, (int)ceil(screenLengthPixels / max(screenStridePixels, 0.001f))));
+    float traceFractionLimit = min(1.0f, (maxSteps * screenStridePixels) / max(screenLengthPixels, 1.0f));
+    float inverseStartW = rcp(startClipW);
+    float inverseEndW = rcp(endClipW);
+    float previousFraction = 0.0f;
+    float previousRayDepth = startClipW;
+    [loop]
+    for (int screenStep = 1; screenStep <= maxSteps; ++screenStep)
+    {
+        if (screenStep > screenSteps) break;
+        float fraction = traceFractionLimit * ((float)screenStep / (float)screenSteps);
+        float2 sampleUV = lerp(startUV, endUV, fraction);
+        if (any(sampleUV < 0.0f) || any(sampleUV > 1.0f)) break;
+        float inverseRayW = lerp(inverseStartW, inverseEndW, fraction);
+        if (inverseRayW <= 1e-7f) break;
+        float rayDepth = rcp(inverseRayW);
+        float screenWeight = SSRCore_CalculateEdgeFade(sampleUV, edgeFadeWidth);
+        float sceneDepth = SSRCore_LoadSceneZ(depthTexture, sampleUV, viewportSize, projectionZ, projectionW);
+        if (sceneDepth <= 1e-7f)
+        {
+            if (screenWeight > result.skyWeight)
+            {
+                result.skyUV = sampleUV;
+                result.skyWeight = screenWeight;
+            }
+            previousFraction = fraction;
+            previousRayDepth = rayDepth;
+            continue;
+        }
+        float segmentNearDepth = min(previousRayDepth, rayDepth);
+        float segmentFarDepth = max(previousRayDepth, rayDepth);
+        float pixelFootprint = max(abs(rayDepth - previousRayDepth), 1.0f);
+        float hitThickness = min(max(2.0f, pixelFootprint * 1.5f), 18.0f);
+        bool segmentCrossesScene = sceneDepth >= segmentNearDepth - hitThickness
+            && sceneDepth <= segmentFarDepth + hitThickness;
+        if (segmentCrossesScene)
+        {
+            float refinementLow = previousFraction;
+            float refinementHigh = fraction;
+            float2 refinedUV = sampleUV;
+            float refinedRayDepth = rayDepth;
+            float refinedSceneDepth = sceneDepth;
+            float refinedError = abs(rayDepth - sceneDepth);
+            bool refinedValid = true;
+            [unroll]
+            for (int refinementStep = 0; refinementStep < refineSteps; ++refinementStep)
+            {
+                float refinementFraction = (refinementLow + refinementHigh) * 0.5f;
+                float2 refinementUV = lerp(startUV, endUV, refinementFraction);
+                float refinementInverseW = lerp(inverseStartW, inverseEndW, refinementFraction);
+                if (refinementInverseW <= 1e-7f)
+                {
+                    refinedValid = false;
+                    break;
+                }
+                float refinementRayDepth = rcp(refinementInverseW);
+                float refinementSceneDepth = SSRCore_LoadSceneZ(depthTexture, refinementUV, viewportSize, projectionZ, projectionW);
+                if (refinementSceneDepth <= 1e-7f)
+                {
+                    refinementLow = refinementFraction;
+                    continue;
+                }
+                float refinementError = abs(refinementRayDepth - refinementSceneDepth);
+                if (refinementError < refinedError)
+                {
+                    refinedError = refinementError;
+                    refinedUV = refinementUV;
+                    refinedRayDepth = refinementRayDepth;
+                    refinedSceneDepth = refinementSceneDepth;
+                }
+                if (refinementRayDepth > refinementSceneDepth)
+                    refinementHigh = refinementFraction;
+                else
+                    refinementLow = refinementFraction;
+            }
+            float refinedThickness = min(max(2.0f, abs(refinedRayDepth - previousRayDepth) * 1.5f), 12.0f);
+            int2 maxPixel = int2(viewportSize) - int2(1, 1);
+            int2 refinedPixel = clamp(int2(refinedUV * viewportSize), int2(0, 0), maxPixel);
+            float blocked = saturate(
+                blockMaskTexture.Load(int3(refinedPixel, 0)).r / max(blockMaskScale, 1e-7f));
+            if (refinedValid && refinedError <= refinedThickness && blocked <= 0.001f)
+            {
+                result.hit = 1.0f;
+                result.hitUV = refinedUV;
+                result.confidence = SSRCore_CalculateEdgeFade(refinedUV, edgeFadeWidth);
+                return result;
+            }
+        }
+        previousFraction = fraction;
+        previousRayDepth = rayDepth;
+    }
+    return result;
+}
 #endif

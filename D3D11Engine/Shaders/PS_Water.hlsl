@@ -390,18 +390,14 @@ PS_OUTPUT PSMain(PS_INPUT Input)
     float3 clearNight = lerp(cube * .025f, float3(.004, .009, .023), .72f);
 float3 oceanNightRainFallback =
     lerp(
-        max(
-            AC_NightRainSkyColor * 0.32f,
-            float3(0.006f, 0.008f, 0.012f)),
+        float3(0.006f, 0.008f, 0.012f),
         float3(0.018f, 0.027f, 0.040f),
         0.70f);
 
 float3 rainNight =
     WM_IsOceanWater > 0.5f
         ? oceanNightRainFallback
-        : max(
-            AC_NightRainSkyColor * 0.46f,
-            float3(0.012f, 0.018f, 0.030f));
+        : float3(0.012f, 0.018f, 0.030f);
     float3 fallback = lerp(lerp(cube, dayRain, rainAmount), lerp(clearNight, rainNight, rainAmount), nightAmount);
 
     float3 skyNormal = normalize(lerp(wf, float3(0, 1, 0), .46f));
@@ -650,9 +646,7 @@ float3 skyReflection =
             float3(0.008f, 0.017f, 0.034f);
 
         float3 oceanAtmosphericNightRainScatter =
-            max(
-                AC_NightRainSkyColor * 0.52f,
-                float3(0.010f, 0.014f, 0.017f));
+            float3(0.010f, 0.014f, 0.017f);
 
         float3 oceanNightRainScatter =
             lerp(

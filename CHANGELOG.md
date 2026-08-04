@@ -2,6 +2,9 @@
 
 Dokumentation der gepushten Renderer-Builds.
 
+## Build 195
+- Regulaerer Push: SSR-Raymarching in SSR.h zentralisiert; LowCloud-Refinement in PS_PFX_LowCloudComposite.hlsl auf 4 Steps optimiert; AdvancedSettings in ImGuiShim und GSky.cpp entfernt; NPC-Tagging in Diffuse und LightingTrace integriert.
+
 ## Build 190
 - Regulaerer Push: Low Clouds um SkyClouds-Target in PS_PFX_LowClouds.hlsl und PS_PFX_LowCloudComposite.hlsl erweitert, um Artefakte an Alpha-Test-Silhouetten zu beheben. D3D11PfxRenderer und RenderGraph in D3D11GraphicsEngine.cpp an das neue Target angepasst; E_GodRayMode Persistenz und Menue (GothicAPI.cpp, GothicGraphicsState.h, ImGuiShim.cpp) korrigiert.
 
