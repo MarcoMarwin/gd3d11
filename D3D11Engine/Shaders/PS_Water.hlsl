@@ -561,10 +561,11 @@ float3 skyReflection =
         geometryHit);
     ssrColor = lerp(fallback, ssrColor, ssrEnabled);
 
-    // Screen-space source availability.  These flags only decide whether the
-    // cubemap fallback is allowed; they do not replace the proven v3 color,
-    // confidence or reflection-strength calculations.
-    float geometrySourceAvailable = geoValid * ssrEnabled;
+    // Use one continuous confidence weight for Ocean geometry availability and
+    // color.  Weak or distant hits retain the complementary live-sky/cubemap
+    // fallback instead of replacing it with a sky-colored geometry surrogate.
+    float geometrySourceAvailable = saturate(
+        geometryHit * waterReflectionSuppress * ssrEnabled);
     float skySourceAvailable =
         (1.0f - geometrySourceAvailable)
         * step(0.0001f, skyWeight)
@@ -572,8 +573,7 @@ float3 skyReflection =
     float cubeFallbackAvailable =
         1.0f - saturate(geometrySourceAvailable + skySourceAvailable);
 
-    ssrConfidence = saturate(
-        geometryHit * waterReflectionSuppress * ssrEnabled);
+    ssrConfidence = geometrySourceAvailable;
 
     float glintBlock = saturate(ssrConfidence * 1.45f);
     float3 sunProj = ProjectCelestial(-AC_LightPos.xyz);
@@ -593,30 +593,49 @@ float3 skyReflection =
 
     if (WM_IsOceanWater > .5f)
     {
+        // Reject weak, rapidly changing Ocean hits with the same proven smooth
+        // confidence interval already used by the stable Legacy reflection path.
+        float oceanStableGeometryConfidence = smoothstep(
+            0.22f,
+            0.72f,
+            geometryHit);
+        float oceanGeometrySourceAvailable = saturate(
+            oceanStableGeometryConfidence
+            * waterReflectionSuppress
+            * ssrEnabled);
+        float oceanSkySourceAvailable =
+            (1.0f - oceanGeometrySourceAvailable)
+            * step(0.0001f, skyWeight)
+            * ssrEnabled;
+        float oceanCubeFallbackAvailable =
+            1.0f - saturate(
+                oceanGeometrySourceAvailable
+                + oceanSkySourceAvailable);
         float total = lerp(
             cubeStrength,
             ssrStrength,
-            saturate(geometrySourceAvailable + skySourceAvailable));
-        float3 oceanScreenSpaceReflection = lerp(
-            skyReflection,
-            hitReflection,
-            geometrySourceAvailable);
-        float oceanScreenSpaceAvailable = saturate(
-            geometrySourceAvailable + skySourceAvailable);
+            saturate(
+                oceanGeometrySourceAvailable
+                + oceanSkySourceAvailable));
         float3 reflectionColor =
-            oceanScreenSpaceReflection * oceanScreenSpaceAvailable;
+            processedReflection * oceanGeometrySourceAvailable
+            + skyReflection * oceanSkySourceAvailable;
         float thick = clamp(max(depth - surfaceViewZ, 0) * viewRayScale, 0, 6000);
         float underThick = clamp(abs(depth - surfaceViewZ) * .35f, 0, 1400);
         float optical = lerp(thick, underThick, cameraBelowSurface);
         float sd = max(fwidth(thick), 1);
         float se = clamp(max(65, sd * 1.25f), 65, 160);
-        // Use the same proven soft shoreline at every time of day.  Day and
-        // night now share one transition range without any time-dependent
-        // widening, minimum color floor or separate volume mask.
+        // Keep the broad visibility fade for reflections, glints and the water
+        // mask, but restore the Ocean volume color over a shorter shallow-water
+        // interval so the seabed remains visible without washing out the water.
         float shoreEnd = max(240.0f, se * 2.60f);
         float shore = SmootherStep01(saturate(
             (thick - 1.0f)
             / max(shoreEnd - 1.0f, 1.0f)));
+        float shoreColorEnd = max(110.0f, se * 1.35f);
+        float shoreColor = SmootherStep01(saturate(
+            (thick - 1.0f)
+            / max(shoreColorEnd - 1.0f, 1.0f)));
         float3 absDay = float3(.0024, .00115, .00062);
         float3 absRain = float3(.003, .00155, .00088);
         float3 absorb = lerp(absDay, absRain, rainAmount) * lerp(1, .58f, cameraBelowSurface);
@@ -655,20 +674,19 @@ float3 skyReflection =
         scatter *= lerp(.94f, 1.06f, saturate(dot(diffuse, float3(.2126, .7152, .0722)) * 1.4f));
         float3 volume = sceneRefr * trans + scatter * (1 - trans);
         volume = lerp(scatter, volume, sceneValid);
-        // Do not apply a global material tint.  The Ocean color now comes only
-        // from depth absorption, atmospheric scatter, refraction and reflection.
-        // The same rule applies at day and night, so no uniform color layer can
-        // outline the water mesh against the bank.
-        volume = lerp(sceneClean, volume, shore);
+        // Restore the day- or night-specific Ocean volume color with the shorter
+        // color fade.  The broader shore mask remains responsible for hiding the
+        // actual water boundary and for fading reflections and glints.
+        volume = lerp(sceneClean, volume, shoreColor);
         float4 underClouds = ResolveLowCloudLayer(TX_LowClouds.SampleLevel(SS_Linear, distUV, 0), sceneRefr);
         float3 underComposedSky = sceneRefr * (1 - underClouds.a) + underClouds.rgb;
         float underSky = cameraBelowSurface * (1 - refrValid);
         volume = lerp(volume, underComposedSky, underSky);
         float underGeometry = cameraBelowSurface * refrValid;
         volume = lerp(volume, lerp(sceneRefr, volume, .32f), underGeometry);
-        // A true screen-space miss keeps some cubemap structure, but adapts
-        // it to the current water/atmosphere base.  This prevents bright dusk
-        // spots and strong directional color casts without leaving empty areas.
+        // Prepare the cubemap as an independent reflection source.  The water
+        // volume supplies only the luminance reference for this source and is
+        // blended with the completed reflection later by the existing amount.
         float3 fallbackLumaWeights = float3(.2126f, .7152f, .0722f);
         float oceanBaseLuma = max(dot(volume, fallbackLumaWeights), .0001f);
         float rawCubeLuma = max(dot(fallback, fallbackLumaWeights), .0001f);
@@ -680,35 +698,20 @@ float3 skyReflection =
         float oceanLimitedCubeLuma = dot(
             oceanLimitedCube,
             fallbackLumaWeights);
-        float3 oceanDesaturatedCube = lerp(
+        float3 oceanPreparedCube = lerp(
             oceanLimitedCubeLuma.xxx,
             oceanLimitedCube,
             .58f);
-        float oceanCubeStructureWeight = lerp(
-            .52f,
-            .82f,
-            1.0f - ssrEnabled);
-        float3 oceanHybridFallback = lerp(
-            volume,
-            oceanDesaturatedCube,
-            oceanCubeStructureWeight);
         reflectionColor +=
-            oceanHybridFallback * cubeFallbackAvailable;
-
-        float reflectionLuma = dot(reflectionColor, fallbackLumaWeights);
-        float skyReflectionProtection = skySourceAvailable;
-        float oceanFallbackInfluence = cubeFallbackAvailable;
-        float oceanFallbackLimit = max(dot(volume, float3(.2126f, .7152f, .0722f)) * 2.15f + skyReflectionProtection * 0.18f, 0.08f);
-        float oceanFallbackScale = min(1.0f, oceanFallbackLimit / max(reflectionLuma, 0.0001f));
-        reflectionColor *= lerp(1.0f, oceanFallbackScale, oceanFallbackInfluence);
-        float skySel = step(.001f, skyWeight) * (1.0f - saturate(ssrConfidence)) * ssrEnabled;
+            oceanPreparedCube * oceanCubeFallbackAvailable;
+        float skySel = step(.001f, skyWeight) * (1.0f - oceanGeometrySourceAvailable) * ssrEnabled;
         float backupDayRf = lerp(fresnel, max(fresnel, .085f), skySel);
         float currentNightRf = lerp(fresnel, max(fresnel, .120f), skySel);
-        float skyReflectionLift = skySel * (1.0f - saturate(ssrConfidence));
+        float skyReflectionLift = skySel * (1.0f - oceanGeometrySourceAvailable);
         float reflectionDriver = max(reflectFresnel, skyReflectionLift * 0.18f);
         float reflectAmount = saturate(
             lerp(0.42f, 1.0f, reflectFresnel) *
-            lerp(0.68f, 1.0f, saturate(max(ssrConfidence, skyConf))) *
+            lerp(0.68f, 1.0f, saturate(max(oceanGeometrySourceAvailable, skyConf))) *
             reflectionDriver) *
             waterReflectionSuppress;
         float backupDayAmount = saturate(backupDayRf * total);
@@ -720,15 +723,6 @@ float3 skyReflection =
             currentNightAmount,
             nightAmount) * shore * hemi;
         float3 oceanSsrColor = lerp(volume, reflectionColor, amount);
-        float oceanGeometryBlend = saturate(
-            ssrConfidence *
-            ssrStrength *
-            lerp(.48f, .92f, nightAmount) *
-            rainVis) * shore;
-        oceanSsrColor = lerp(
-            oceanSsrColor,
-            processedReflection,
-            oceanGeometryBlend);
         float rawOceanCubeOnlyLuma = max(dot(
             cubeOnlyReflectionColor,
             reflectionLumaWeights), .0001f);
@@ -882,8 +876,11 @@ float3 skyReflection =
         float legacyShoreDerivative = max(fwidth(legacyWaterThickness), 1.0f);
         float legacyShoreFadeEnd = clamp(max(65.0f, legacyShoreDerivative * 1.25f), 65.0f, 160.0f);
         float legacyShoreVisibility = SmootherStep01(saturate((legacyWaterThickness - 1.0f) / max(legacyShoreFadeEnd - 1.0f, 1.0f)));
-        // Avoid a uniform global Legacy tint at night.  Darken only relative
-        // to the live scene color, then restore sceneClean at the shoreline.
+        float legacyShoreColorEnd = clamp(max(42.0f, legacyShoreDerivative * 0.82f), 42.0f, 105.0f);
+        float legacyShoreColor = SmootherStep01(saturate((legacyWaterThickness - 1.0f) / max(legacyShoreColorEnd - 1.0f, 1.0f)));
+        // Keep the broad Legacy visibility fade for reflections, glints and the
+        // water boundary, but restore the selected day or night water color over
+        // the shorter color interval.
         float3 legacyNightRelativeColor = lerp(
             legacyColor,
             legacyColor * saturate(sceneClean * 1.10f + 0.34f),
@@ -891,7 +888,7 @@ float3 skyReflection =
         legacyColor = lerp(
             sceneClean,
             legacyNightRelativeColor,
-            legacyShoreVisibility);
+            legacyShoreColor);
         float3 legacyReflectVectorSmall = reflect(-viewDirection, legacyWavesSmall);
         float weatherLightVisibility = GetRainSkyVisibility();
         float sunSpot = pow(saturate(dot(legacyReflectVectorSmall, -AC_LightPos.xyz)), 500.0f) * 0.5f;

@@ -168,45 +168,70 @@ PS_OUTPUT PSMain( PS_INPUT Input )
 
     float originalCloudAlpha =
         saturate( clouds.a );
-
     float sunTransmissionMask =
         saturate(
             sunCore * 0.42f
             + sunHalo * 0.18f );
-
     float mediumDensityGlow =
         saturate(
             1.0f
             - abs( originalCloudAlpha - 0.52f )
                 / 0.42f );
-
     float denseCloudSuppression =
         1.0f
         - smoothstep(
             0.68f,
             0.94f,
             originalCloudAlpha );
-
     float backlightDensity =
         mediumDensityGlow
         * denseCloudSuppression;
-
     float sunBacklightMask =
         sunTransmissionMask
         * saturate( sunWeight )
         * max( 0.0f, AC_LowCloudSunLight );
-
     float3 transmittedSunColor =
         lerp(
             float3( 1.00f, 0.72f, 0.42f ),
             float3( 1.00f, 0.92f, 0.74f ),
             saturate( AC_LightPos.y * 2.5f ) );
-
+    float broadSunMask =
+        smoothstep(
+            0.82f,
+            0.97f,
+            sunAlignment )
+        * saturate( sunWeight )
+        * max( 0.0f, AC_LowCloudSunLight );
+    float broadBodyDensity =
+        smoothstep(
+            0.14f,
+            0.46f,
+            originalCloudAlpha )
+        * ( 1.0f
+            - smoothstep(
+                0.72f,
+                0.95f,
+                originalCloudAlpha ) );
+    float thinEdgeDensity =
+        smoothstep(
+            0.05f,
+            0.22f,
+            originalCloudAlpha )
+        * ( 1.0f
+            - smoothstep(
+                0.30f,
+                0.50f,
+                originalCloudAlpha ) );
     clouds.rgb +=
         transmittedSunColor
         * sunBacklightMask
         * backlightDensity
         * 0.24f;
+    clouds.rgb +=
+        transmittedSunColor
+        * broadSunMask
+        * ( broadBodyDensity * 0.10f
+            + thinEdgeDensity * 0.06f );
 
     float transmittedCloudAlpha = originalCloudAlpha;
     float layerAlpha = saturate( originalCloudAlpha + moonDiskOcclusion * ( 1.0f - originalCloudAlpha ) );
@@ -240,11 +265,43 @@ PS_OUTPUT PSMain( PS_INPUT Input )
         skySunTransmissionMask
         * saturate( sunWeight )
         * max( 0.0f, AC_LowCloudSunLight );
+    float skyBroadSunMask =
+        smoothstep(
+            0.82f,
+            0.97f,
+            skySunAlignment )
+        * saturate( sunWeight )
+        * max( 0.0f, AC_LowCloudSunLight );
+    float skyBroadBodyDensity =
+        smoothstep(
+            0.14f,
+            0.46f,
+            skyTransmittedCloudAlpha )
+        * ( 1.0f
+            - smoothstep(
+                0.72f,
+                0.95f,
+                skyTransmittedCloudAlpha ) );
+    float skyThinEdgeDensity =
+        smoothstep(
+            0.05f,
+            0.22f,
+            skyTransmittedCloudAlpha )
+        * ( 1.0f
+            - smoothstep(
+                0.30f,
+                0.50f,
+                skyTransmittedCloudAlpha ) );
     skyClouds.rgb +=
         transmittedSunColor
         * skySunBacklightMask
         * skyBacklightDensity
         * 0.24f;
+    skyClouds.rgb +=
+        transmittedSunColor
+        * skyBroadSunMask
+        * ( skyBroadBodyDensity * 0.10f
+            + skyThinEdgeDensity * 0.06f );
     float skyLayerAlpha = saturate(
         skyTransmittedCloudAlpha
         + skyMoonDiskOcclusion * ( 1.0f - skyTransmittedCloudAlpha ) );

@@ -216,7 +216,10 @@ void CSCombine( uint3 DTid : SV_DispatchThreadID )
         volumetric = foundCompatible > 0.5f ? bestVolumetric : 0.0f;
     }
     float3 radialContribution = max( TX_RadialGodRays.SampleLevel( SS_CombineClamp, fullUV, 0 ).rgb, 0.0f );
-    OutputTexture[DTid.xy] = float4( volumetric + radialContribution, 1.0f );
+    const float volumetricContributionStrength = 0.35f;
+    OutputTexture[DTid.xy] = float4(
+        volumetric * volumetricContributionStrength + radialContribution,
+        1.0f );
 }
 #elif VOLUMETRIC_GODRAYS
 #include "DepthReconstruction.h"
@@ -309,7 +312,7 @@ void CSVolumetric( uint3 DTid : SV_DispatchThreadID )
     float transmittance = 1.0f;
     float scattering = 0.0f;
     float cosTheta = saturate( dot( viewDirectionWS, normalize( GRV_LightDirectionWS ) ) );
-    float phase = 0.10f + 0.90f * pow( cosTheta, 10.0f );
+    float phase = pow( cosTheta, 10.0f );
     float cloudTransmission = 1.0f;
     uint cloudWidth;
     uint cloudHeight;
@@ -355,10 +358,11 @@ cbuffer GodRayZoomConstantBuffer : register( b0 )
 SamplerState SS_Linear : register( s0 );
 Texture2D TX_Texture0 : register( t0 ); // Mask from pass 1
 RWTexture2D<float4> OutputTexture : register( u0 );
-float InterleavedGradientNoise( float2 uv ) { float3 magic = float3( 0.06711056f, 0.00583715f, 52.9829189f ); return frac( magic.z * frac( dot( uv, magic.xy ) ) ); }
-float LensFlareLuma(float3 color) { return dot(color, float3(0.2126f, 0.7152f, 0.0722f)); }
-float LensFlareCircle(float2 uv, float2 position, float radius, float aspect) { float2 delta = uv - position; delta.x *= aspect; return 1.0f - smoothstep(radius * 0.35f, radius, length(delta)); }
-float3 BuildLensFlare(float2 uv, float2 sunPosition, float aspect, float sunVisibility) { float2 screenCenter = float2(0.5f, 0.5f); float2 flareAxis = screenCenter - sunPosition; float lookAtSun = 1.0f - smoothstep(0.08f, 0.58f, length(flareAxis)); float flareStrength = saturate(sunVisibility) * lookAtSun * max(GR_Weight, 0.0f) * 0.35f; float sunGlow = LensFlareCircle(uv, sunPosition, 0.052f, aspect); float ghost1 = LensFlareCircle(uv, sunPosition + flareAxis * 0.72f, 0.022f, aspect); float ghost2 = LensFlareCircle(uv, sunPosition + flareAxis * 1.46f, 0.032f, aspect); float3 flareColor = 0.0f; flareColor += sunGlow * float3(1.00f, 0.90f, 0.72f) * 0.34f; flareColor += ghost1 * float3(0.62f, 0.72f, 0.88f) * 0.10f; flareColor += ghost2 * float3(0.72f, 0.68f, 0.62f) * 0.07f; return flareColor * flareStrength; }
+float InterleavedGradientNoise( float2 uv )
+{
+    float3 magic = float3( 0.06711056f, 0.00583715f, 52.9829189f );
+    return frac( magic.z * frac( dot( uv, magic.xy ) ) );
+}
 [numthreads(8, 8, 1)]
 void CSMain( uint3 DTid : SV_DispatchThreadID )
 {
@@ -366,13 +370,10 @@ void CSMain( uint3 DTid : SV_DispatchThreadID )
     OutputTexture.GetDimensions( texSize.x, texSize.y );
     if ( DTid.x >= texSize.x || DTid.y >= texSize.y )
         return;
-    float2 texcoord = ( float2( DTid.xy ) + 0.5 ) / float2( texSize );
+    float2 texcoord = ( float2( DTid.xy ) + 0.5f ) / float2( texSize );
     const int NUM_SAMPLES = 64;
     float2 center = GR_Center;
-    float3 color = 0;
-    float shaftFirstMoment = 0.0f;
-    float shaftSecondMoment = 0.0f;
-    float shaftWeight = 0.0f;
+    float3 color = 0.0f;
     float illumDecay = 1.0f;
     float2 deltaTexCoord = texcoord - center;
     deltaTexCoord *= 1.0f / NUM_SAMPLES * GR_Density;
@@ -385,41 +386,10 @@ void CSMain( uint3 DTid : SV_DispatchThreadID )
         uv -= deltaTexCoord;
         if ( uv.x < 0.0f || uv.x > 1.0f || uv.y < 0.0f || uv.y > 1.0f )
             continue;
-        float4 maskSample = TX_Texture0.SampleLevel( SS_Linear, uv, 0 );
-        float sampleWeight = illumDecay;
-        float shaftSample = saturate(maskSample.a);
-        color += maskSample.rgb * sampleWeight * GR_Weight;
-        shaftFirstMoment += shaftSample * sampleWeight;
-        shaftSecondMoment += shaftSample * shaftSample * sampleWeight;
-        shaftWeight += sampleWeight;
+        color += TX_Texture0.SampleLevel( SS_Linear, uv, 0 ).rgb * illumDecay * GR_Weight;
         illumDecay *= GR_Decay;
     }
     color /= NUM_SAMPLES;
-    float aspect = texSize.y > 0 ? (float)texSize.x / (float)texSize.y : 1.0f;
-    float2 texelSize = 1.0f / max( float2(texSize), float2(1.0f, 1.0f));
-    float3 sunSample = 0.0f;
-    if (center.x >= 0.0f && center.x <= 1.0f && center.y >= 0.0f && center.y <= 1.0f) { sunSample += TX_Texture0.SampleLevel(SS_Linear, center, 0).rgb; sunSample += TX_Texture0.SampleLevel(SS_Linear, center + float2(texelSize.x * 2.0f, 0.0f), 0).rgb; sunSample += TX_Texture0.SampleLevel(SS_Linear, center - float2(texelSize.x * 2.0f, 0.0f), 0).rgb; sunSample += TX_Texture0.SampleLevel(SS_Linear, center + float2(0.0f, texelSize.y * 2.0f), 0).rgb; sunSample += TX_Texture0.SampleLevel(SS_Linear, center - float2(0.0f, texelSize.y * 2.0f), 0).rgb; }
-    float sunVisibility = saturate(LensFlareLuma(sunSample / 5.0f) * 3.0f);
-    float shaftMean = shaftFirstMoment / max(shaftWeight, 0.0001f);
-    float shaftSecond = shaftSecondMoment / max(shaftWeight, 0.0001f);
-    float shaftVariance = max(shaftSecond - shaftMean * shaftMean, 0.0f);
-    float shaftProfile = smoothstep(0.00025f, 0.00200f, shaftVariance);
-    float3 radialCore = max(color * GR_ColorMod, 0.0f);
-    float3 lensFlare = max(BuildLensFlare(texcoord, center, aspect, sunVisibility), 0.0f);
-    float3 combinedRadial = radialCore + lensFlare;
-    float3 baselineCombined = combinedRadial * 0.75f;
-    float baselineCombinedLuminance = dot(baselineCombined, float3(0.2126f, 0.7152f, 0.0722f));
-    float baselineCombinedExcess = max(baselineCombinedLuminance - 0.65f, 0.0f);
-    float compressedBaselineCombinedLuminance = baselineCombinedLuminance - baselineCombinedExcess
-        + baselineCombinedExcess / (1.0f + baselineCombinedExcess * 1.50f);
-    baselineCombined *= compressedBaselineCombinedLuminance / max(baselineCombinedLuminance, 0.0001f);
-    float3 baselineCore = radialCore * 0.75f;
-    float baselineCoreLuminance = dot(baselineCore, float3(0.2126f, 0.7152f, 0.0722f));
-    float baselineCoreExcess = max(baselineCoreLuminance - 0.65f, 0.0f);
-    float compressedBaselineCoreLuminance = baselineCoreLuminance - baselineCoreExcess
-        + baselineCoreExcess / (1.0f + baselineCoreExcess * 1.50f);
-    baselineCore *= compressedBaselineCoreLuminance / max(baselineCoreLuminance, 0.0001f);
-    float3 radialContribution = baselineCombined + shaftProfile * (radialCore - baselineCore);
-    OutputTexture[DTid.xy] = float4(radialContribution, 1.0f);
+    OutputTexture[DTid.xy] = float4( color * GR_ColorMod, 1.0f );
 }
 #endif

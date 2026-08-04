@@ -907,3 +907,9 @@ Dokumentation der gepushten Renderer-Builds.
 
 ## Build 193
 - Regulaerer Push: Radiale GodRays ueberarbeitet: AC_SunVisibility aus der Gewichtung entfernt. Sky-Alpha-Maskierung in CS_PFX_GodRayMask eingefuehrt. Zoom-Pass extrahiert shaftProfile ueber Sampling-Varianz zur Objektkantenerkennung. Combine-Pass nutzt shaftProfile fuer saubere, trennscharfe Ueberblendung zwischen gedämpftem Himmels-Radial und ungedämpften Lichtstrahlen an Kanten, ohne das Lens-Flare zu beeinflussen.
+
+## Build 194
+- CS_PFX_GodRayZoom.hlsl: Radial Blur wiederhergestellt, Legacy-Lens-Flare entfernt, volumetrische Phasenfunktion vereinheitlicht, Gewichtung bei Combine angepasst.
+- PS_PFX_LowClouds.hlsl: Breiter Sun-Backlight-Pfad (Broad Sun Mask) mit separaten Dichtemasken fuer Body und Thin-Edge implementiert.
+- PS_Water.hlsl: Shore-Intervalle vereinheitlicht, Reflexionen fuer Ocean-Geometry gedaempft und stabilisiert.
+- PS_PFX_LowCloudComposite.hlsl: Geometrie-Wolken erhalten bei niedriger Konfidenz im 5x5-Fenster einen volumetrischen Fallback (ComputeRefinedLowClouds) mit voller Raymarch-Integration (inkl. PFXBuffer-Uebergabe in D3D11PfxRenderer.cpp).

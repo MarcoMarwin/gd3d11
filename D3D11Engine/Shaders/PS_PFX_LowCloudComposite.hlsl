@@ -3,7 +3,31 @@
 // Upsamples a premultiplied low-cloud layer and blends it over the full-resolution scene.
 //--------------------------------------------------------------------------------------
 
+#define ENABLE_LOW_CLOUDS 1
 #include <AtmosphericScattering.h>
+#include "DepthReconstruction.h"
+
+cbuffer PFXBuffer : register( b0 )
+{
+    float4 HF_ProjParams;
+    matrix HF_InvView;
+    float3 HF_CameraPosition;
+    float HF_FogHeight;
+    float HF_HeightFalloff;
+    float HF_GlobalDensity;
+    float HF_WeightZNear;
+    float HF_WeightZFar;
+    float3 HF_FogColorMod;
+    float HF_FogOverride;
+    float2 HF_ProjAB;
+    float2 HF_Pad3;
+    float3 HF_RainFogColor;
+    float HF_RainGlobalDensity;
+    float HF_RainFogHeight;
+    float HF_RainHeightFalloff;
+    float HF_RainWeightZNear;
+    float HF_RainWeightZFar;
+};
 
 SamplerState SS_Linear : register( s0 );
 Texture2D TX_Backbuffer : register( t0 );
@@ -89,6 +113,50 @@ float GetLowCloudDepthWeight( float targetDepth, float sourceDepth )
     return exp2( -relativeDepthDelta * 32.0f );
 }
 
+float4 ComputeRefinedLowClouds( float2 texcoord, float depth )
+{
+    float3 viewPosition = ReconstructVSPositionFromDepthReverseZInfinite(
+        depth, texcoord, HF_ProjParams.xy );
+    float3 worldPosition = mul( float4( viewPosition, 1.0f ), HF_InvView ).xyz;
+    float cameraDistance = length( worldPosition - HF_CameraPosition );
+    float nightTimeBlend = smoothstep( 0.0f, 1.0f, saturate( -AC_LightPos.y * 4.0f ) )
+        * saturate( AC_EnableNightAtmosphere );
+    float sunWeight = saturate( AC_SunVisibility )
+        * smoothstep( 0.04f, 0.42f, AC_LightPos.y );
+    float4 clouds = ComputeWorldLowCloudVolume(
+        HF_CameraPosition, worldPosition, cameraDistance, 0.0f,
+        HF_FogHeight, HF_FogColorMod, nightTimeBlend );
+    float nightFogBrightness = lerp( 1.0f, max( 0.0f, AC_NightFogBrightness ),
+        saturate( AC_EnableNightAtmosphere ) );
+    float3 nightRainVeilColor = float3( 0.12f, 0.18f, 0.27f )
+        * nightFogBrightness / 2.5f;
+    float rainVeil = saturate( AC_RainFXWeight )
+        * lerp( 0.045f, 0.30f, nightTimeBlend );
+    float veilDistance = SmootherStep01( saturate(
+        ( cameraDistance - 3500.0f ) / 52000.0f ) );
+    float veilAmount = rainVeil * 0.45f * veilDistance;
+    clouds.rgb = lerp( clouds.rgb, nightRainVeilColor, veilAmount );
+    clouds.a *= 1.0f - veilAmount * 0.34f;
+    float originalCloudAlpha = saturate( clouds.a );
+    float3 viewDir = normalize( worldPosition - HF_CameraPosition );
+    float3 transmittedSunColor = lerp(
+        float3( 1.00f, 0.72f, 0.42f ),
+        float3( 1.00f, 0.92f, 0.74f ),
+        saturate( AC_LightPos.y * 2.5f ) );
+    float broadSunMask = smoothstep( 0.82f, 0.97f,
+        dot( viewDir, normalize( lerp(
+            float3( -0.25f, 0.72f, 0.18f ), AC_LightPos,
+            saturate( abs( AC_LightPos.y ) + 0.12f ) ) ) ) )
+        * sunWeight * max( 0.0f, AC_LowCloudSunLight );
+    float broadBodyDensity = smoothstep( 0.14f, 0.46f, originalCloudAlpha )
+        * ( 1.0f - smoothstep( 0.72f, 0.95f, originalCloudAlpha ) );
+    float thinEdgeDensity = smoothstep( 0.05f, 0.22f, originalCloudAlpha )
+        * ( 1.0f - smoothstep( 0.30f, 0.50f, originalCloudAlpha ) );
+    clouds.rgb += transmittedSunColor * broadSunMask
+        * ( broadBodyDensity * 0.10f + thinEdgeDensity * 0.06f );
+    return float4( clouds.rgb * originalCloudAlpha, originalCloudAlpha );
+}
+
 float4 SampleDepthAwareLowClouds(
     float2 texcoord, float4 pixelPosition )
 {
@@ -98,23 +166,19 @@ float4 SampleDepthAwareLowClouds(
     uint depthHeight;
     TX_LowClouds.GetDimensions( cloudWidth, cloudHeight );
     TX_FullDepth.GetDimensions( depthWidth, depthHeight );
-
     int2 cloudSize = max( int2( cloudWidth, cloudHeight ), int2( 1, 1 ) );
     int2 depthSize = max( int2( depthWidth, depthHeight ), int2( 1, 1 ) );
-    int2 targetPixel = clamp(
-        int2( pixelPosition.xy ), int2( 0, 0 ), depthSize - int2( 1, 1 ) );
+    int2 targetPixel = clamp( int2( pixelPosition.xy ),
+        int2( 0, 0 ), depthSize - int2( 1, 1 ) );
     float targetDepth = TX_FullDepth.Load( int3( targetPixel, 0 ) ).r;
-
     const float skyDepthEpsilon = 0.00001f;
-    bool targetIsSky = targetDepth < skyDepthEpsilon;
-    if ( targetIsSky )
+    if ( targetDepth < skyDepthEpsilon )
     {
         return SampleStableSkyLowClouds( texcoord );
     }
     float2 cloudPosition = texcoord * float2( cloudSize ) - 0.5f;
     int2 baseCloudPixel = int2( floor( cloudPosition ) );
     float2 cloudFraction = frac( cloudPosition );
-
     float4 filteredClouds = 0.0f;
     float totalWeight = 0.0f;
     [unroll]
@@ -123,83 +187,33 @@ float4 SampleDepthAwareLowClouds(
         [unroll]
         for ( int x = 0; x < 2; ++x )
         {
-            int2 cloudPixel = clamp(
-                baseCloudPixel + int2( x, y ),
+            int2 cloudPixel = clamp( baseCloudPixel + int2( x, y ),
                 int2( 0, 0 ), cloudSize - int2( 1, 1 ) );
             float spatialWeight =
                 (x == 0 ? 1.0f - cloudFraction.x : cloudFraction.x)
                 * (y == 0 ? 1.0f - cloudFraction.y : cloudFraction.y);
-            float sourceDepth = LoadLowCloudDepth(
-                cloudPixel, cloudSize );
+            float sourceDepth = LoadLowCloudDepth( cloudPixel, cloudSize );
             float weight = spatialWeight
                 * GetLowCloudDepthWeight( targetDepth, sourceDepth );
-            filteredClouds +=
-                TX_LowClouds.Load( int3( cloudPixel, 0 ) ) * weight;
+            filteredClouds += TX_LowClouds.Load( int3( cloudPixel, 0 ) ) * weight;
             totalWeight += weight;
         }
     }
-
-    // A confident 2x2 bilateral footprint is stable and remains the fast path.
-    // Sparse alpha-tested silhouettes must not normalize a tiny single tap to
-    // full cloud coverage because that tap changes with sub-pixel vegetation.
+    const float refinementStartWeight = 0.45f;
     const float confidentFootprintWeight = 0.60f;
     if ( totalWeight >= confidentFootprintWeight )
     {
         return filteredClouds / totalWeight;
     }
-
-    // Reconstruct uncertain edges from a wider same-class neighborhood. Blend all
-    // compatible samples instead of selecting one winner, so distant foliage keeps
-    // a temporally stable cloud layer while sky and geometry can never contaminate
-    // each other. The wider depth window is strongly weighted toward the target.
-    float4 stableClouds = 0.0f;
-    float stableWeight = 0.0f;
-    int2 searchCenter = int2( floor( cloudPosition + 0.5f ) );
-    [unroll]
-    for ( int searchY = -2; searchY <= 2; ++searchY )
+    float4 refinedClouds = ComputeRefinedLowClouds( texcoord, targetDepth );
+    if ( totalWeight <= refinementStartWeight )
     {
-        [unroll]
-        for ( int searchX = -2; searchX <= 2; ++searchX )
-        {
-            int2 cloudPixel = clamp(
-                searchCenter + int2( searchX, searchY ),
-                int2( 0, 0 ), cloudSize - int2( 1, 1 ) );
-            float sourceDepth = LoadLowCloudDepth(
-                cloudPixel, cloudSize );
-            bool sourceIsSky = sourceDepth < skyDepthEpsilon;
-            if ( sourceIsSky != targetIsSky )
-            {
-                continue;
-            }
-
-            float relativeDepthDelta = 0.0f;
-            float depthWeight = 1.0f;
-            if ( !targetIsSky )
-            {
-                relativeDepthDelta = abs( targetDepth - sourceDepth )
-                    / max( max( targetDepth, sourceDepth ), skyDepthEpsilon );
-                if ( relativeDepthDelta >= 0.30f )
-                {
-                    continue;
-                }
-                depthWeight = exp2( -relativeDepthDelta * 24.0f );
-            }
-
-            float2 spatialDelta = float2( cloudPixel ) - cloudPosition;
-            float spatialWeight = exp2(
-                -dot( spatialDelta, spatialDelta ) * 0.65f );
-            float weight = spatialWeight * depthWeight;
-            stableClouds += TX_LowClouds.Load(
-                int3( cloudPixel, 0 ) ) * weight;
-            stableWeight += weight;
-        }
+        return refinedClouds;
     }
-
-    if ( stableWeight > 0.00001f )
-    {
-        return stableClouds / stableWeight;
-    }
-    return float4( 0.0f, 0.0f, 0.0f, 0.0f );
+    float4 localClouds = filteredClouds / confidentFootprintWeight;
+    float localTrust = smoothstep(
+        refinementStartWeight, confidentFootprintWeight, totalWeight );
+    return lerp( refinedClouds, localClouds, localTrust );
 }
 
 float4 PSMain( PS_INPUT Input ) : SV_TARGET
