@@ -688,30 +688,13 @@ public:
     /** Returns the current weight of the rain-fx. The bigger value of ours and gothics is returned. */
     float GetRainFXWeight();
 
-    /** Returns the wetness of the scene. Lasts longer than RainFXWeight */
-    float GetSceneWetness();
-
-    /** Returns the slowly accumulated wetness used only for procedural puddle formation. */
-    float GetPuddleAccumulation()
-    {
-        const float rain = std::clamp( GetRainFXWeight(), 0.0f, 1.0f );
-        float deltaTime = GetDeltaTime();
-        if ( !std::isfinite( deltaTime ) )
-        {
-            deltaTime = 0.0f;
-        }
-        deltaTime = std::clamp( deltaTime, 0.0f, 0.1f );
-        if ( rain > 0.01f )
-        {
-            const float rainBuildRate = (0.35f + rain * 0.65f) / 180.0f;
-            PuddleAccumulation = std::clamp( PuddleAccumulation + deltaTime * rainBuildRate, 0.0f, 1.0f);
-        }
-        else
-        {
-            PuddleAccumulation = std::min( PuddleAccumulation, std::clamp( GetSceneWetness(), 0.0f, 1.0f ));
-        }
-        return PuddleAccumulation;
-    }
+/** Returns the wetness of the scene. Lasts longer than RainFXWeight */
+float GetSceneWetness();
+/** Returns the slowly accumulated wetness used only for procedural puddle formation. */
+float GetPuddleAccumulation() const
+{
+    return PuddleAccumulation;
+}
 
     /** Saves the users settings from the menu */
     XRESULT SaveMenuSettings( const std::string& file );

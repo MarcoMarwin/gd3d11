@@ -2,6 +2,9 @@
 
 Dokumentation der gepushten Renderer-Builds.
 
+## Build 196
+- Regulaerer Push: Pfuetzen-Zeitsteuerung in GothicAPI von Echtzeit auf Ingame-Zeit umgestellt; SSR-Raymarching in SSR.h mit Viewport-Clipping optimiert; WetGroundSSR-Tracing auf 256 Steps/2.0 Stride verfeinert, Wet-Mask-Exposure an RainFXWeight gekoppelt und GetRainExposure auf PCF-Filter umgebaut; ContactShadow-Tageszeitkopplung in D3D11PfxRenderer geloest; PS_ParticleSimple.hlsl manuell aktualisiert.
+
 ## Build 195
 - Regulaerer Push: SSR-Raymarching in SSR.h zentralisiert; LowCloud-Refinement in PS_PFX_LowCloudComposite.hlsl auf 4 Steps optimiert; AdvancedSettings in ImGuiShim und GSky.cpp entfernt; NPC-Tagging in Diffuse und LightingTrace integriert.
 

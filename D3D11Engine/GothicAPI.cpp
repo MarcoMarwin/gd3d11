@@ -67,14 +67,12 @@ struct file_deleter {
     void operator()( std::FILE* fp ) { std::fclose( fp ); }
 };
 
-// Puddle wetness remains fully visible for five real minutes after rain ends,
-// then fades monotonically during the following five real minutes.
-constexpr DWORD PUDDLE_RAIN_END_DEBOUNCE_MS = 1000;
-constexpr DWORD PUDDLE_WETNESS_HOLD_MS = 5 * 60 * 1000;
-constexpr DWORD PUDDLE_WETNESS_FADE_MS = 5 * 60 * 1000;
-constexpr DWORD PUDDLE_NEW_RAIN_CONFIRM_MS = 5 * 1000;
+// Puddles build during half an ingame hour. After rain ends they remain fully
+// visible for one ingame hour and then fade during one ingame hour.
+constexpr float PUDDLE_BUILD_DAYS = 0.5f / 24.0f;
+constexpr float PUDDLE_WETNESS_HOLD_DAYS = 1.0f / 24.0f;
+constexpr float PUDDLE_WETNESS_FADE_DAYS = 1.0f / 24.0f;
 constexpr float PUDDLE_ACTIVE_RAIN_THRESHOLD = 0.01f;
-constexpr float PUDDLE_NEW_RAIN_THRESHOLD = 0.10f;
 
 // Draw ghost from back to front of our camera
 auto CompareGhostDistance = []( const TransparencyVobInfo& a, const TransparencyVobInfo& b ) -> bool { return a.distance < b.distance; };
@@ -82,11 +80,46 @@ auto CompareGhostDistance = []( const TransparencyVobInfo& a, const Transparency
 extern float vobAnimation_WindStrength;
 
 namespace {
+    bool s_puddleClockInitialized = false;
     bool s_puddleWetnessReleasing = false;
-    DWORD s_puddleRainDropStartMs = 0;
-    DWORD s_puddleReleaseStartMs = 0;
-    DWORD s_puddleNewRainStartMs = 0;
+    float s_puddleLastMasterTime = 0.0f;
+    float s_puddleReleaseElapsedDays = 0.0f;
     float s_puddleReleaseStartWetness = 0.0f;
+    float s_puddleReleaseStartAccumulation = 0.0f;
+
+    float GetPuddleIngameDeltaDays() {
+        oCGame* game = oCGame::GetGame();
+        zCWorld* world = game ? game->_zCSession_world : nullptr;
+        zCSkyController_Outdoor* skyController = world ? world->GetSkyControllerOutdoor() : nullptr;
+        if ( !skyController ) {
+            s_puddleClockInitialized = false;
+            return 0.0f;
+        }
+
+        const float masterTime = skyController->GetMasterTime();
+        if ( !std::isfinite( masterTime ) || masterTime < 0.0f || masterTime > 1.0f ) {
+            s_puddleClockInitialized = false;
+            return 0.0f;
+        }
+
+        if ( !s_puddleClockInitialized ) {
+            s_puddleClockInitialized = true;
+            s_puddleLastMasterTime = masterTime;
+            return 0.0f;
+        }
+
+        float deltaDays = masterTime - s_puddleLastMasterTime;
+        s_puddleLastMasterTime = masterTime;
+        if ( deltaDays >= 0.0f ) {
+            return deltaDays;
+        }
+
+        if ( masterTime < 0.02f && deltaDays < -0.95f ) {
+            return deltaDays + 1.0f;
+        }
+
+        return 0.0f;
+    }
 
     constexpr const char* MATERIALS_JSON_PATH = "system\\GD3D11\\textures\\materials.json";
     constexpr const char* MATERIALS_JSON_VDFS_PATH = R"(\system\GD3D11\textures\materials.json)";
@@ -1290,12 +1323,14 @@ void GothicAPI::OnWorldLoaded() {
     RendererState.RendererSettings.ApplySkyColorValues( GetSky()->GetDaySkyTexture() == ESkyTexture::ST_OldWorld );
     RendererState.RendererSettings.ApplyWorldNightFogBrightness( LoadedWorldInfo->WorldName == "OLDWORLD" || LoadedWorldInfo->WorldName == "WORLD" );
 
-    SceneWetness = GetRainFXWeight();
-    s_puddleWetnessReleasing = false;
-    s_puddleRainDropStartMs = 0;
-    s_puddleReleaseStartMs = 0;
-    s_puddleNewRainStartMs = 0;
-    s_puddleReleaseStartWetness = 0.0f;
+SceneWetness = GetRainFXWeight();
+PuddleAccumulation = 0.0f;
+s_puddleClockInitialized = false;
+s_puddleWetnessReleasing = false;
+s_puddleLastMasterTime = 0.0f;
+s_puddleReleaseElapsedDays = 0.0f;
+s_puddleReleaseStartWetness = 0.0f;
+s_puddleReleaseStartAccumulation = 0.0f;
 
 #ifndef PUBLIC_RELEASE
     // Enable input again, disabled it when loading started
@@ -6614,77 +6649,55 @@ float GothicAPI::GetRainFXWeight() {
 /** Returns the wetness used only by persistent wet-ground and puddle rendering. */
 float GothicAPI::GetSceneWetness() {
     const float rain = std::clamp( GetRainFXWeight(), 0.0f, 1.0f );
-    const DWORD now = Toolbox::timeSinceStartMs();
+    const float deltaDays = GetPuddleIngameDeltaDays();
+
+    if ( rain > PUDDLE_ACTIVE_RAIN_THRESHOLD ) {
+        s_puddleWetnessReleasing = false;
+        s_puddleReleaseElapsedDays = 0.0f;
+        s_puddleReleaseStartWetness = 0.0f;
+        s_puddleReleaseStartAccumulation = 0.0f;
+
+        SceneWetness = (std::max)( SceneWetness, rain );
+        const float rainBuildWeight = 0.35f + rain * 0.65f;
+        PuddleAccumulation = std::clamp(
+            PuddleAccumulation + deltaDays * rainBuildWeight / PUDDLE_BUILD_DAYS,
+            0.0f,
+            1.0f );
+        return SceneWetness;
+    }
 
     if ( !s_puddleWetnessReleasing ) {
-        s_puddleNewRainStartMs = 0;
-
-        if ( rain > PUDDLE_ACTIVE_RAIN_THRESHOLD ) {
-            SceneWetness = (std::max)( SceneWetness, rain );
-            s_puddleRainDropStartMs = 0;
-            return SceneWetness;
-        }
-
-        if ( SceneWetness <= 0.0f ) {
+        if ( SceneWetness <= 0.0f && PuddleAccumulation <= 0.0f ) {
             SceneWetness = 0.0f;
-            s_puddleRainDropStartMs = 0;
-            return SceneWetness;
-        }
-
-        if ( s_puddleRainDropStartMs == 0 ) {
-            s_puddleRainDropStartMs = now;
-            return SceneWetness;
-        }
-
-        if ( now - s_puddleRainDropStartMs < PUDDLE_RAIN_END_DEBOUNCE_MS ) {
+            PuddleAccumulation = 0.0f;
             return SceneWetness;
         }
 
         s_puddleWetnessReleasing = true;
-        s_puddleReleaseStartMs = s_puddleRainDropStartMs;
+        s_puddleReleaseElapsedDays = 0.0f;
         s_puddleReleaseStartWetness = std::clamp( SceneWetness, 0.0f, 1.0f );
-        s_puddleRainDropStartMs = 0;
+        s_puddleReleaseStartAccumulation = std::clamp( PuddleAccumulation, 0.0f, 1.0f );
     }
 
-    if ( rain >= PUDDLE_NEW_RAIN_THRESHOLD ) {
-        if ( s_puddleNewRainStartMs == 0 ) {
-            s_puddleNewRainStartMs = now;
-        } else if ( now - s_puddleNewRainStartMs >= PUDDLE_NEW_RAIN_CONFIRM_MS ) {
-            s_puddleWetnessReleasing = false;
-            s_puddleRainDropStartMs = 0;
-            s_puddleReleaseStartMs = 0;
-            s_puddleNewRainStartMs = 0;
-            s_puddleReleaseStartWetness = 0.0f;
-            SceneWetness = rain;
-            return SceneWetness;
-        }
-    } else {
-        s_puddleNewRainStartMs = 0;
-    }
-
-    const DWORD releaseElapsedMs = now - s_puddleReleaseStartMs;
-
-    if ( releaseElapsedMs <= PUDDLE_WETNESS_HOLD_MS ) {
+    s_puddleReleaseElapsedDays += deltaDays;
+    if ( s_puddleReleaseElapsedDays <= PUDDLE_WETNESS_HOLD_DAYS ) {
         SceneWetness = s_puddleReleaseStartWetness;
+        PuddleAccumulation = s_puddleReleaseStartAccumulation;
         return SceneWetness;
     }
 
-    const DWORD fadeElapsedMs = releaseElapsedMs - PUDDLE_WETNESS_HOLD_MS;
-    if ( fadeElapsedMs >= PUDDLE_WETNESS_FADE_MS ) {
-        SceneWetness = 0.0f;
-        return SceneWetness;
-    }
+    const float fadeProgress = std::clamp(
+        (s_puddleReleaseElapsedDays - PUDDLE_WETNESS_HOLD_DAYS) / PUDDLE_WETNESS_FADE_DAYS,
+        0.0f,
+        1.0f );
+    const float smoothFade = fadeProgress * fadeProgress * (3.0f - 2.0f * fadeProgress);
+    SceneWetness = s_puddleReleaseStartWetness * (1.0f - smoothFade);
+    PuddleAccumulation = s_puddleReleaseStartAccumulation * (1.0f - smoothFade);
 
-    float fadeProgress =
-        fadeElapsedMs / static_cast<float>(PUDDLE_WETNESS_FADE_MS);
-    fadeProgress = std::clamp( fadeProgress, 0.0f, 1.0f );
-    const float smoothFade =
-        fadeProgress * fadeProgress * (3.0f - 2.0f * fadeProgress);
-    SceneWetness =
-        s_puddleReleaseStartWetness * (1.0f - smoothFade);
-
-    if ( SceneWetness < 0.00001f ) {
+    if ( fadeProgress >= 1.0f ) {
         SceneWetness = 0.0f;
+        PuddleAccumulation = 0.0f;
+        s_puddleWetnessReleasing = false;
     }
 
     return SceneWetness;

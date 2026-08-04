@@ -2,10 +2,8 @@
 // Non-additive particle pixel shader with scene lighting adaptation.
 //--------------------------------------------------------------------------------------
 #include <AtmosphericScattering.h>
-
 SamplerState SS_Linear : register( s0 );
 Texture2D TX_Texture0 : register( t0 );
-
 #ifdef USE_FFDATA
 struct FFData {
     float4 textureFactor;
@@ -14,7 +12,6 @@ cbuffer cbFFData : register( b0 ) {
     FFData cbFFData;
 };
 #endif
-
 struct PS_INPUT
 {
     float2 vTexcoord        : TEXCOORD0;
@@ -27,29 +24,22 @@ struct PS_INPUT
     float vParticleLightingScale : TEXCOORD8;
     float4 vPosition        : SV_POSITION;
 };
-
 float4 AdaptParticleLighting(float4 color, float particleLightingScale)
 {
     if (particleLightingScale < 0.0f)
         return color;
-
-    float packedParticleTestFlags = floor(max(AC_PadParticle1, 0.0f) + 0.5f);
+    float packedParticleTestFlags = floor(max(AC_Pad3, 0.0f) + 0.5f);
     bool disableParticleNightDimming = fmod(floor(packedParticleTestFlags / 1.0f), 2.0f) >= 1.0f;
     bool disableParticleRainAlphaReduction = fmod(floor(packedParticleTestFlags / 2.0f), 2.0f) >= 1.0f;
-
     float night = disableParticleNightDimming ? 0.0f : saturate((-AC_LightPos.y + 0.08f) * 2.5f);
     float rain = disableParticleRainAlphaReduction ? 0.0f : max(saturate(AC_RainFXWeight), saturate(AC_SceneWettness));
     float strength = saturate(AC_EnableParticleLighting * AC_ParticleLightingStrength) * saturate(particleLightingScale);
-
     float nightDim = lerp(1.0f, 0.24f, night);
     color.rgb *= lerp(1.0f, nightDim, strength);
-
     float rainAlpha = lerp(1.0f, 0.24f, rain);
     color.a *= lerp(1.0f, rainAlpha, strength);
-
     return color;
 }
-
 float4 PSMain( PS_INPUT Input ) : SV_TARGET
 {
     float4 color = TX_Texture0.Sample(SS_Linear, Input.vTexcoord);

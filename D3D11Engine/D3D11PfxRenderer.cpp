@@ -130,7 +130,7 @@ XRESULT D3D11PfxRenderer::RenderWetGroundSSR( ID3D11RenderTargetView* outputRTV,
     cb.WG_RainFogColor = rendererSettings.RainFogColor;
     cb.WG_RainFogDensity = rendererSettings.RainFogDensity;
     cb.WG_FogRange = rendererSettings.FogRange;
-    cb.WG_WetMaterialReflectionsStrength = 1.5f;
+    cb.WG_WetMaterialReflectionsStrength = 1.0f;
     cb.WG_ProceduralPuddlesStrength = 1.0f;
     cb.WG_PuddleReflectionsStrength = 1.0f;
     cb.WG_WetGroundRainImpactsStrength = 1.0f;
@@ -439,7 +439,6 @@ XRESULT D3D11PfxRenderer::RenderScreenSpaceLighting(
 
     ScreenSpaceLightingConstantBuffer cb = {};
     GSky* sky = Engine::GAPI->GetSky();
-    const float mainLightVisibility = sky ? sky->GetMainLightVisibility() : 1.0f;
     const XMFLOAT4X4& projection = Engine::GAPI->GetProjectionMatrix();
     cb.SSL_ProjParams = float4( 1.0f / projection._11, 1.0f / projection._22, projection._43, projection._33 );
     cb.SSL_Projection = projection;
@@ -447,7 +446,7 @@ XRESULT D3D11PfxRenderer::RenderScreenSpaceLighting(
     XMStoreFloat4x4( &cb.SSL_View, view );
     XMStoreFloat4x4( &cb.SSL_InvView, XMMatrixInverse( nullptr, view ) );
     cb.SSL_InvResolution = float2( 1.0f / std::max( 1, res.x ), 1.0f / std::max( 1, res.y ) );
-    cb.SSL_ContactStrength = contactActive ? settings.GetContactShadowFixedStrength() * mainLightVisibility : 0.0f;
+    cb.SSL_ContactStrength = contactActive ? settings.GetContactShadowFixedStrength() : 0.0f;
     cb.SSL_GIStrength = settings.ScreenSpaceGIStrength;
     cb.SSL_EnableContact = contactActive ? ContactShadowTransitionWeight : 0.0f;
     cb.SSL_EnableGI = giActive ? 1.0f : 0.0f;
