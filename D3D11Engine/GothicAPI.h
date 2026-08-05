@@ -848,6 +848,7 @@ private:
     std::vector<SkeletalVobInfo*> AnimatedSkeletalVobs;
     std::vector<TransparencyVobInfo> TransparencyVobs;
     std::vector<SkeletalVobInfo*> VNSkeletalVobs;
+    gtl::flat_hash_map<zCVob*, SkeletalVobInfo*> SkeletalVobMap;
 
     /** List of Vobs having a zCParticleFX-Visual */
     std::vector<zCVob*> ParticleEffectVobs;
