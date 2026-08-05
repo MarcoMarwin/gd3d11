@@ -1214,13 +1214,39 @@ XRESULT D3D11ShadowMap::DrawWorldShadow( )
 }
 
 XRESULT D3D11ShadowMap::DrawRainShadowmap() {
-    // Draw rainmap, if raining
-    if ( Engine::GAPI->GetRainFXWeight() > 0.00001f ) {
+    constexpr float activeThreshold = 0.00001f;
+    constexpr float updateDistance = 1000.0f;
+    constexpr float updateDistanceSq = updateDistance * updateDistance;
+    static bool hasLastUpdatePosition = false;
+    static XMFLOAT3 lastUpdatePosition = {};
+    static zCWorld* lastWorld = nullptr;
+    const float rainWeight = Engine::GAPI->GetRainFXWeight();
+    const float puddleAccumulation = Engine::GAPI->GetPuddleAccumulation();
+    zCWorld* currentWorld = nullptr;
+    if ( oCGame* game = oCGame::GetGame() ) {
+        currentWorld = game->_zCSession_world;
+    }
+    if ( rainWeight <= activeThreshold && puddleAccumulation <= activeThreshold ) {
+        hasLastUpdatePosition = false;
+        lastWorld = currentWorld;
+        return XR_SUCCESS;
+    }
+    const XMFLOAT3 currentPosition = Engine::GAPI->GetCameraPosition();
+    const XMVECTOR movement = XMVectorSubtract(
+        XMLoadFloat3( &currentPosition ),
+        XMLoadFloat3( &lastUpdatePosition ));
+    const float movementDistanceSq = XMVectorGetX( XMVector3LengthSq( movement ));
+    const bool updateRequired = !hasLastUpdatePosition
+        || currentWorld != lastWorld
+        || movementDistanceSq >= updateDistanceSq;
+    if ( updateRequired ) {
         auto graphicsEngine = reinterpret_cast<D3D11GraphicsEngine*>(Engine::GraphicsEngine);
         auto _ = graphicsEngine->RecordGraphicsEvent( GE_NAME( "DrawRainShadowmap" ) );
         ZoneScopedN( "DrawRainShadowmap" );
-
         graphicsEngine->Effects->DrawRainShadowmap();
+        lastUpdatePosition = currentPosition;
+        hasLastUpdatePosition = true;
+        lastWorld = currentWorld;
     }
     return XR_SUCCESS;
 }

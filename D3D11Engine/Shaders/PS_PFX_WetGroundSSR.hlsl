@@ -5,6 +5,7 @@
 #include "DepthReconstruction.h"
 #include "DS_Defines.h"
 #include "AtmosphericScattering.h"
+#include "SSR.h"
 
 cbuffer WetGroundSSRConstantBuffer : register(b0)
 {
@@ -668,122 +669,100 @@ WetGroundReflectionTrace TraceWetGroundReflection(
     float directColorWeightBase,
     float skyReflectionWeight,
     float2 skyUVOffset,
-    float fallbackVisibilityWeight)
+    float fallbackVisibilityWeight,
+    float puddleSkyLeakSuppression)
 {
     WetGroundReflectionTrace result;
     result.Color = surfaceColor;
     result.Weight = 0.0f;
     if (activeMask <= 0.001f)
         return result;
+
     float3 rayDirection = normalize(reflect(viewRay, reflectionNormal));
     if (rayDirection.y <= 0.015f)
         return result;
-    float3 rayPosition = wsPosition + reflectionNormal * 8.0f;
-    float3 previousRayPosition = rayPosition;
-    float stepSize = 18.0f;
-    float2 hitUV = 0.0f;
-    float hitWeight = 0.0f;
-    float2 skyUV = 0.0f;
-    float skyWeight = 0.0f;
-    [loop]
-    for (int i = 0; i < 30; ++i)
+
+    float2 viewportSize = 1.0f / max(WG_InvResolution, float2(1e-6f, 1e-6f));
+    float traceRoughness = saturate(hitRoughness);
+    float maxTraceDistance = lerp(3000.0f, 1800.0f, traceRoughness);
+    float traceThickness = lerp(22.0f, 36.0f, traceRoughness);
+    SSRTraceResult trace = SSRCore_TraceWorldRay(
+        TX_Depth,
+        wsPosition + reflectionNormal * 4.0f,
+        rayDirection,
+        WG_ViewProj,
+        viewportSize,
+        WG_ProjParams.z,
+        WG_ProjParams.w,
+        maxTraceDistance,
+        48,
+        5,
+        6.0f,
+        traceThickness,
+        0.10f);
+
+    float3 localFallbackReflection = SampleRoughReflection(
+        uv,
+        roughDistortion,
+        fallbackRoughness);
+    localFallbackReflection = ApplyWetGroundRainHaze(localFallbackReflection, depth, uv);
+
+    float validSkyFallback = step(0.001f, trace.skyWeight);
+    float2 reflectedSkyUV = saturate(trace.skyUV + skyUVOffset);
+    float3 skyFallbackReflection = ComposeWetGroundSky(reflectedSkyUV);
+    float skyGeometryProximity = 0.0f;
+    if (validSkyFallback > 0.0f && puddleSkyLeakSuppression > 0.0f)
     {
-        previousRayPosition = rayPosition;
-        rayPosition += rayDirection * stepSize;
-        float4 projected = mul(float4(rayPosition, 1.0f), WG_ViewProj);
-        if (projected.w <= 0.0f)
-            break;
-        projected.xyz /= projected.w;
-        float2 sampleUV = projected.xy * float2(0.5f, -0.5f) + 0.5f;
-        if (any(sampleUV < 0.0f) || any(sampleUV > 1.0f) || projected.z < 0.0f || projected.z > 1.0f)
-            break;
-        float edge = max(abs(sampleUV.x - 0.5f), abs(sampleUV.y - 0.5f)) * 2.0f;
-        float screenWeight = 1.0f - smoothstep(0.76f, 1.0f, edge);
-        float sampleDepth = TX_Depth.SampleLevel(SS_Linear, sampleUV, 0).r;
-        if (sampleDepth <= 1e-7f)
+        float2 skyProbeOffset = WG_InvResolution * 5.0f;
+        const float2 skyProbeDirections[8] =
         {
-            if (screenWeight > skyWeight)
-            {
-                skyUV = sampleUV;
-                skyWeight = screenWeight;
-            }
-            stepSize *= 1.10f;
-            continue;
-        }
-        float sampleZ = WG_ProjParams.z / (sampleDepth - WG_ProjParams.w);
-        float depthDifference = projected.w - sampleZ;
-        if (depthDifference > 0.0f && depthDifference < stepSize * 1.15f)
+            float2(1.0f, 0.0f),
+            float2(-1.0f, 0.0f),
+            float2(0.0f, 1.0f),
+            float2(0.0f, -1.0f),
+            float2(0.7071f, 0.7071f),
+            float2(-0.7071f, 0.7071f),
+            float2(0.7071f, -0.7071f),
+            float2(-0.7071f, -0.7071f)
+        };
+        float geometryProbeCount = 0.0f;
+        [unroll]
+        for (int skyProbeIndex = 0; skyProbeIndex < 8; ++skyProbeIndex)
         {
-            float3 refinementLow = previousRayPosition;
-            float3 refinementHigh = rayPosition;
-            float2 refinedUV = sampleUV;
-            float refinedScreenWeight = screenWeight;
-            float refinedDepthError = abs(depthDifference);
-            [unroll]
-            for (int refinementStep = 0; refinementStep < 4; ++refinementStep)
-            {
-                float3 refinementPosition = (refinementLow + refinementHigh) * 0.5f;
-                float4 refinementProjected = mul(float4(refinementPosition, 1.0f), WG_ViewProj);
-                if (refinementProjected.w <= 0.0f)
-                {
-                    refinementHigh = refinementPosition;
-                    continue;
-                }
-                refinementProjected.xyz /= refinementProjected.w;
-                float2 refinementUV = refinementProjected.xy * float2(0.5f, -0.5f) + 0.5f;
-                if (any(refinementUV < 0.0f) || any(refinementUV > 1.0f)
-                    || refinementProjected.z < 0.0f || refinementProjected.z > 1.0f)
-                {
-                    refinementHigh = refinementPosition;
-                    continue;
-                }
-                float refinementDepth = TX_Depth.SampleLevel(SS_Linear, refinementUV, 0).r;
-                if (refinementDepth <= 1e-7f)
-                {
-                    refinementLow = refinementPosition;
-                    continue;
-                }
-                float refinementDenominator = refinementDepth - WG_ProjParams.w;
-                if (abs(refinementDenominator) <= 1e-7f)
-                {
-                    refinementHigh = refinementPosition;
-                    continue;
-                }
-                float refinementSampleZ = WG_ProjParams.z / refinementDenominator;
-                float refinementDifference = refinementProjected.w - refinementSampleZ;
-                float candidateDepthError = abs(refinementDifference);
-                if (candidateDepthError < refinedDepthError)
-                {
-                    refinedDepthError = candidateDepthError;
-                    refinedUV = refinementUV;
-                    float refinementEdge = max(abs(refinementUV.x - 0.5f), abs(refinementUV.y - 0.5f)) * 2.0f;
-                    refinedScreenWeight = 1.0f - smoothstep(0.76f, 1.0f, refinementEdge);
-                }
-                if (refinementDifference > 0.0f)
-                    refinementHigh = refinementPosition;
-                else
-                    refinementLow = refinementPosition;
-            }
-            float maximumRefinedError = max(1.25f, stepSize * 0.22f);
-            if (refinedDepthError <= maximumRefinedError)
-            {
-                hitUV = refinedUV;
-                hitWeight = refinedScreenWeight;
-            }
-            break;
+            float2 skyProbeUV = reflectedSkyUV
+                + skyProbeDirections[skyProbeIndex] * skyProbeOffset;
+            float probeInsideScreen = step(0.0f, skyProbeUV.x)
+                * step(skyProbeUV.x, 1.0f)
+                * step(0.0f, skyProbeUV.y)
+                * step(skyProbeUV.y, 1.0f);
+            float probeDepth = TX_Depth.SampleLevel(
+                SS_Linear, saturate(skyProbeUV), 0).r;
+            geometryProbeCount += probeInsideScreen * step(1e-7f, probeDepth);
         }
-        stepSize *= 1.10f;
+        skyGeometryProximity = smoothstep(1.0f, 4.0f, geometryProbeCount);
     }
-    float3 reflectedColor = surfaceColor;
-    float reflectionWeight = 0.0f;
+    float skyLeakAttenuation = 1.0f
+        - skyGeometryProximity * saturate(puddleSkyLeakSuppression) * 0.88f;
+    float stableSkyMix = validSkyFallback
+        * smoothstep(0.18f, 0.82f, trace.skyWeight)
+        * saturate(skyReflectionWeight)
+        * skyLeakAttenuation;
+    float3 fallbackReflection = lerp(
+        localFallbackReflection,
+        skyFallbackReflection,
+        stableSkyMix);
+
+    float stableFallbackWeight = saturate(fallbackVisibilityWeight);
     float screenSpaceConfidence = 0.0f;
-    if (hitWeight > 0.0f)
+    float3 screenSpaceReflection = fallbackReflection;
+    if (trace.hit > 0.5f)
     {
-        float2 reflectedUVCandidate = hitUV + hitUVOffset;
-        float reflectedScreenFade = CalculateReflectionScreenFade(reflectedUVCandidate);
+        float2 reflectedUVCandidate = trace.hitUV + hitUVOffset;
+        float reflectedScreenFade = SSRCore_CalculateEdgeFade(reflectedUVCandidate, 0.10f);
         float2 reflectedUV = saturate(reflectedUVCandidate);
-        float2 reflectedPixel = reflectedUV / WG_InvResolution;
-        float reflectedWetSSRBlock = DecodeWetSSRBlock(SampleWetSSRBlockMask(reflectedPixel));
+        float2 reflectedPixel = reflectedUV * viewportSize;
+        float reflectedWetSSRBlock = DecodeWetSSRBlock(
+            SampleWetSSRBlockMask(reflectedPixel));
         if (reflectedWetSSRBlock <= 0.001f)
         {
             float3 directReflection = TX_Scene.SampleLevel(SS_Linear, reflectedUV, 0).rgb;
@@ -795,34 +774,33 @@ WetGroundReflectionTrace TraceWetGroundReflection(
             float reflectedDistanceWeight = 0.0f;
             if (reflectedDepth > 1e-7f)
             {
-                float3 reflectedWSPosition = ReconstructWorldPosition(reflectedDepth, reflectedUV);
+                float3 reflectedWSPosition = ReconstructWorldPosition(
+                    reflectedDepth,
+                    reflectedUV);
                 reflectedDistanceWeight = saturate(
-                    length(reflectedWSPosition - WG_CameraPosition) / max(WG_FogRange, 1.0f));
+                    length(reflectedWSPosition - WG_CameraPosition)
+                    / max(WG_FogRange, 1.0f));
             }
             float directColorWeight = directColorWeightBase * lerp(
-                1.0f, 0.22f, smoothstep(0.12f, 0.72f, reflectedDistanceWeight));
-            reflectedColor = lerp(roughReflection, directReflection, directColorWeight);
-            reflectedColor = ApplyWetGroundRainHaze(reflectedColor, reflectedDepth, reflectedUV);
-            screenSpaceConfidence = saturate(hitWeight * reflectedScreenFade);
-            reflectionWeight = hitWeight;
+                1.0f,
+                0.22f,
+                smoothstep(0.12f, 0.72f, reflectedDistanceWeight));
+            screenSpaceReflection = lerp(
+                roughReflection,
+                directReflection,
+                directColorWeight);
+            screenSpaceReflection = ApplyWetGroundRainHaze(
+                screenSpaceReflection,
+                reflectedDepth,
+                reflectedUV);
+            screenSpaceConfidence = saturate(
+                trace.confidence * reflectedScreenFade);
         }
     }
-    float3 localFallbackReflection = SampleRoughReflection(
-        uv,
-        roughDistortion,
-        fallbackRoughness);
-    localFallbackReflection = ApplyWetGroundRainHaze(localFallbackReflection, depth, uv);
-    float validSkyFallback = step(0.001f, skyWeight);
-    float2 reflectedSkyUV = saturate(skyUV + skyUVOffset);
-    float3 skyFallbackReflection = ComposeWetGroundSky(reflectedSkyUV);
-    float stableSkyMix = validSkyFallback * smoothstep(0.18f, 0.82f, skyWeight) * 0.35f;
-    float3 fallbackReflection = lerp(localFallbackReflection, skyFallbackReflection, stableSkyMix);
-    float stableFallbackWeight = saturate(fallbackVisibilityWeight);
+
     if (stableFallbackWeight > 0.0f)
     {
-        float stableGeometryCoverage = smoothstep(0.08f, 0.92f, screenSpaceConfidence);
-        float stableSkyCoverage = saturate(stableSkyMix / 0.35f);
-        float missingScreenReflection = 1.0f - saturate(max(stableGeometryCoverage, stableSkyCoverage));
+        float missingScreenReflection = 1.0f - screenSpaceConfidence;
         float downwardView = smoothstep(0.18f, 0.82f, saturate(-viewRay.y));
         float3 rawCubeReflection = max(
             TX_ReflectionCube.SampleLevel(SS_Cube, -rayDirection, 1.5f).rgb,
@@ -837,7 +815,9 @@ WetGroundReflectionTrace TraceWetGroundReflection(
             * min(1.0f, cubeLumaLimit / rawCubeLuma);
         float limitedCubeLuma = dot(limitedCubeReflection, cubeLumaWeights);
         float3 desaturatedCubeReflection = lerp(
-            limitedCubeLuma.xxx, limitedCubeReflection, 0.34f);
+            limitedCubeLuma.xxx,
+            limitedCubeReflection,
+            0.34f);
         float3 atmosphericCubeReflection = lerp(
             desaturatedCubeReflection,
             max(desaturatedCubeReflection, WG_RainFogColor * 0.42f),
@@ -847,23 +827,22 @@ WetGroundReflectionTrace TraceWetGroundReflection(
             * cubeResourceAvailable
             * lerp(0.12f, 0.30f, downwardView);
         fallbackReflection = lerp(
-            fallbackReflection, atmosphericCubeReflection, cubeFallbackMix);
+            fallbackReflection,
+            atmosphericCubeReflection,
+            cubeFallbackMix);
     }
-    if (reflectionWeight > 0.0f)
-    {
-        float stableScreenSpaceMix = smoothstep(0.08f, 0.92f, screenSpaceConfidence);
-        reflectedColor = lerp(fallbackReflection, reflectedColor, stableScreenSpaceMix);
-        reflectionWeight = max(
-            max(reflectionWeight, skyReflectionWeight),
-            stableFallbackWeight);
-    }
-    else
-    {
-        reflectedColor = fallbackReflection;
-        reflectionWeight = max(skyReflectionWeight, stableFallbackWeight);
-    }
-    result.Color = reflectedColor;
-    result.Weight = reflectionWeight;
+
+    float stableScreenSpaceMix = smoothstep(
+        0.04f,
+        0.92f,
+        screenSpaceConfidence);
+    result.Color = lerp(
+        fallbackReflection,
+        screenSpaceReflection,
+        stableScreenSpaceMix);
+    result.Weight = max(
+        max(screenSpaceConfidence, stableSkyMix),
+        stableFallbackWeight);
     return result;
 }
 float4 PSMain(PS_INPUT input) : SV_TARGET
@@ -920,8 +899,7 @@ float4 PSMain(PS_INPUT input) : SV_TARGET
     puddleMask = saturate(
         puddleMask * max(WG_ProceduralPuddlesStrength, 0.0f) * reflectionsEnabled);
     float puddleRainExposure = smoothstep(0.10f, 0.72f, rainExposure);
-    float activeRainExposureWeight = smoothstep(0.0f, 0.01f, saturate(WG_RainFXWeight));
-    float puddleExposure = lerp(1.0f, puddleRainExposure, activeRainExposureWeight);
+    float puddleExposure = puddleRainExposure;
     float puddleWetMask = saturate(
         puddleAccumulation * wetSSRVisibility * puddleMask * puddleExposure * 1.12f);
     float wetMask = saturate(materialWetMask + puddleWetMask * (1.0f - materialWetMask));
@@ -992,6 +970,27 @@ float4 PSMain(PS_INPUT input) : SV_TARGET
         * float3(0.075f, 0.085f, 0.095f)
         * rainImpactBrightness;
     surfaceColor += boundedImpactLift * saturate(solidGroundImpactMask);
+
+    float puddleBasePresence = saturate(
+        puddleWaterMask * lerp(0.62f, 1.0f, puddleBodyMask));
+    float puddleBaseLuma = dot(
+        surfaceColor, float3(0.2126f, 0.7152f, 0.0722f));
+    float3 puddleEarthTone = float3(
+        puddleBaseLuma * 0.70f,
+        puddleBaseLuma * 0.55f,
+        puddleBaseLuma * 0.38f);
+    float3 darkenedPuddleBase = surfaceColor * float3(0.80f, 0.74f, 0.66f);
+    float3 turbidPuddleBase = lerp(
+        darkenedPuddleBase,
+        puddleEarthTone,
+        0.26f);
+    float puddleBaseBlend = puddleBasePresence
+        * lerp(0.14f, 0.24f, puddleBodyMask);
+    surfaceColor = lerp(
+        surfaceColor,
+        turbidPuddleBase,
+        puddleBaseBlend);
+
     if (reflectionsEnabled <= 0.001f)
         return float4(surfaceColor, 1.0f);
 
@@ -1026,8 +1025,9 @@ float4 PSMain(PS_INPUT input) : SV_TARGET
         0.0f,
         saturate(materialWetMask * 0.72f),
         float2(0.0f, 0.0f),
+        0.0f,
         0.0f);
-    float puddleDirectColorWeight = smoothstep(0.32f, 0.94f, puddleMask) * 0.54f;
+    float puddleDirectColorWeight = smoothstep(0.32f, 0.94f, puddleMask) * 0.42f;
     WetGroundReflectionTrace puddleReflection = TraceWetGroundReflection(
         puddleTraceMask,
         wsPosition,
@@ -1038,11 +1038,12 @@ float4 PSMain(PS_INPUT input) : SV_TARGET
         surfaceColor,
         reflectionRippleOffset,
         reflectionRippleOffset,
-        0.25f,
-        0.58f,
+        0.36f,
+        0.68f,
         puddleDirectColorWeight,
         saturate(puddleWetMask * slopeWaterFade * lerp(0.35f, 1.0f, puddleMask)),
         reflectionRippleOffset * lerp(0.18f, 0.80f, puddleMask),
+        1.0f,
         1.0f);
     float materialFresnelBase = pow(
         1.0f - saturate(dot(-viewRay, materialWetNormal)), 3.0f);
@@ -1058,33 +1059,63 @@ float4 PSMain(PS_INPUT input) : SV_TARGET
         1.0f - saturate(dot(-viewRay, puddleWetNormal)), 3.0f);
     float puddleFresnel = max(puddleFresnelBase, 0.14f);
     float3 puddleReflectedColor = puddleReflection.Color;
+    float puddleContaminationNoise = PuddleValueNoise(
+        wsPosition.xz * 0.0055f + float2(191.73f, 73.19f));
+    float puddleSedimentNoise = PuddleValueNoise(
+        wsPosition.xz * 0.0120f + float2(37.11f, 241.57f));
+    float puddleContamination = saturate(
+        0.40f
+        + (puddleContaminationNoise - 0.5f) * 0.12f
+        + (puddleSedimentNoise - 0.5f) * 0.04f);
+    float3 groundLumaWeights = float3(0.2126f, 0.7152f, 0.0722f);
+    float surfaceLuma = dot(surfaceColor, groundLumaWeights);
+    float reflectedLuma = dot(puddleReflectedColor, groundLumaWeights);
+    float3 earthyReflectionTone = float3(
+        reflectedLuma * 1.02f,
+        reflectedLuma * 0.78f,
+        reflectedLuma * 0.54f);
+    float3 earthyGroundColor = lerp(
+        surfaceColor,
+        float3(surfaceLuma * 0.82f, surfaceLuma * 0.68f, surfaceLuma * 0.49f),
+        0.24f);
+    float uniformBrownTint = lerp(0.16f, 0.23f, puddleContamination);
+    puddleReflectedColor = lerp(
+        puddleReflectedColor,
+        earthyReflectionTone,
+        uniformBrownTint);
+    puddleReflectedColor *= lerp(0.92f, 0.84f, puddleContamination);
+    puddleReflectedColor = lerp(
+        puddleReflectedColor,
+        earthyGroundColor * float3(0.76f, 0.68f, 0.56f),
+        lerp(0.07f, 0.12f, puddleContamination) * puddleBodyMask);
     float puddleReflectionLuma = dot(
-        puddleReflectedColor, float3(0.2126f, 0.7152f, 0.0722f));
+        puddleReflectedColor, groundLumaWeights);
     float3 neutralWaterAmbient = lerp(
-        surfaceColor * float3(0.82f, 0.86f, 0.90f),
-        WG_RainFogColor,
-        0.18f);
+        earthyGroundColor * float3(0.76f, 0.68f, 0.56f),
+        WG_RainFogColor * float3(0.74f, 0.70f, 0.64f),
+        0.08f);
     float darkReflectionSupport = puddleWaterMask
-        * (1.0f - smoothstep(0.10f, 0.34f, puddleReflectionLuma));
+        * (1.0f - smoothstep(0.08f, 0.28f, puddleReflectionLuma));
     puddleReflectedColor = lerp(
         puddleReflectedColor,
         max(puddleReflectedColor, neutralWaterAmbient),
-        darkReflectionSupport * 0.09f);
+        darkReflectionSupport * 0.045f);
     puddleReflectionLuma = dot(
-        puddleReflectedColor, float3(0.2126f, 0.7152f, 0.0722f));
+        puddleReflectedColor, groundLumaWeights);
     float puddleHighlightCompression =
-        max(0.0f, puddleReflectionLuma - 0.58f) * lerp(0.14f, 0.30f, puddleMask);
+        max(0.0f, puddleReflectionLuma - 0.50f)
+        * lerp(0.22f, 0.40f, puddleMask);
     puddleReflectedColor *= rcp(1.0f + puddleHighlightCompression);
     puddleReflectedColor *= rcp(
-        1.0f + max(0.0f, puddleReflectionLuma - 0.95f) * 0.75f);
+        1.0f + max(0.0f, puddleReflectionLuma - 0.86f) * 0.82f);
     float puddleSurfaceFresnel = puddleWaterMask * puddleGrazing;
     puddleReflectedColor = lerp(
         puddleReflectedColor,
-        max(puddleReflectedColor, surfaceColor * float3(0.88f, 0.92f, 0.96f)),
-        puddleSurfaceFresnel * 0.075f);
+        max(puddleReflectedColor, earthyGroundColor * float3(0.82f, 0.76f, 0.68f)),
+        puddleSurfaceFresnel * 0.040f);
     float puddleReflectionBlend = saturate(
         puddleWetMask * slopeWaterFade * puddleReflection.Weight
-        * lerp(0.14f, 0.28f, puddleFresnel) * WG_Strength * 5.20f
+        * lerp(0.11f, 0.22f, puddleFresnel) * WG_Strength * 4.10f
         * max(WG_PuddleReflectionsStrength, 0.0f));
     composedColor = lerp(
         composedColor,

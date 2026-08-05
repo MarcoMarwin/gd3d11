@@ -24,16 +24,15 @@ cbuffer PFXBuffer : register( b0 )
     matrix HF_InvView;
     float3 HF_CameraPosition;
     float HF_FogHeight;
-
     float HF_HeightFalloff;
     float HF_GlobalDensity;
     float HF_WeightZNear;
     float HF_WeightZFar;
-
     float3 HF_FogColorMod;
     float HF_FogOverride;
     float2 HF_ProjAB;
-    float2 HF_Pad3;
+    float HF_NightFogRainFade;
+    float HF_Pad3;
     float3 HF_RainFogColor;
     float HF_RainGlobalDensity;
     float HF_RainFogHeight;
@@ -131,7 +130,8 @@ HF_WeightZFar );
 float activeWeatherFog = saturate(AC_RainFXWeight);
 float nightTimeBlend = smoothstep(0.0f, 1.0f, saturate(-AC_LightPos.y * 4.0f))
 * saturate(AC_EnableNightAtmosphere);
-float worldFogActivation = max(HF_FogOverride, nightTimeBlend * (1.0f - activeWeatherFog));
+float nightFogRainFade = saturate(HF_NightFogRainFade);
+float worldFogActivation = max(HF_FogOverride, nightTimeBlend * (1.0f - nightFogRainFade));
 worldFog *= worldFogActivation;
 float3 color = ApplyAtmosphericScatteringGround( position, HF_FogColorMod, true, false );
 float nightFogBrightness = lerp(1.0f, max(0.0f, AC_NightFogBrightness), saturate(AC_EnableNightAtmosphere));
@@ -397,6 +397,7 @@ rainPosition.y -= HF_RainFogHeight;
 float nightTimeBlend = smoothstep(0.0f, 1.0f, saturate(-AC_LightPos.y * 4.0f));
 float nightAtmosphereBlend = nightTimeBlend * saturate(AC_EnableNightAtmosphere);
 float activeWeatherFog = saturate(AC_RainFXWeight);
+float nightFogRainFade = saturate(HF_NightFogRainFade);
 float rainFog = 1.0f - ComputeVolumetricFogCandidate(
 rainPosition,
 rainPosOriginal,
@@ -451,7 +452,8 @@ float rainVeil = max(rainFogOpacity, rainVeilBase) * activeWeatherFog;
             -0.08f,
             0.08f,
             globalFogDominance);
-        float globalRainWinnerBlend = rainFogPresent * (
+        float rainDrivenNightFogBlend = rainFogPresent * nightFogRainFade;
+        float globalRainWinnerBlend = rainDrivenNightFogBlend * (
             (1.0f - worldFogEventPresent)
             + worldFogEventPresent * transitionRainWinnerBlend);
         float finalFogWeight = lerp(

@@ -66,12 +66,14 @@ D3D11PfxRenderer::~D3D11PfxRenderer()
     ScreenSpaceLightingHistory[1].reset();
     ScreenSpaceLightingDepthHistory[0].reset();
     ScreenSpaceLightingDepthHistory[1].reset();
-    ScreenSpaceLightingHistoryValid = false;
-    ScreenSpaceLightingHistoryIndex = 0;
-    ScreenSpaceLightingFrameIndex = 0;
-
-    m_texturePool.reset();
-    m_depthStencilPool.reset();
+ScreenSpaceLightingHistoryValid = false;
+ScreenSpaceLightingHistoryIndex = 0;
+ScreenSpaceLightingFrameIndex = 0;
+NightFogRainFade = 0.0f;
+LastNightFogRainFadeTime = 0.0f;
+NightFogRainFadeInitialized = false;
+m_texturePool.reset();
+m_depthStencilPool.reset();
 }
 
 /** Renders the distance blur effect */
@@ -614,15 +616,28 @@ XRESULT D3D11PfxRenderer::RenderPostFXComposition(
 #endif
         }
 
-        cb.HF_FogHeight = height;
-        cb.HF_ProjAB = float2( Engine::GAPI->GetProjectionMatrix()._33, Engine::GAPI->GetProjectionMatrix()._34 );
-
-        XMFLOAT3 FogColorMod;
-        XMStoreFloat3( &FogColorMod, color );
-        cb.HF_FogColorMod = FogColorMod;
-        cb.HF_RainFogColor = settings.RainFogColor;
-
-        compositionPS->GetBuffer( "PFXBuffer" ).Update( &cb ).Bind();
+cb.HF_FogHeight = height;
+cb.HF_ProjAB = float2( Engine::GAPI->GetProjectionMatrix()._33, Engine::GAPI->GetProjectionMatrix()._34 );
+float rain = sky ? std::clamp( sky->GetAtmosphereCB().AC_RainFXWeight, 0.0f, 1.0f ) : 0.0f;
+float nightWeight = sky ? std::clamp( -sky->GetAtmosphereCB().AC_LightPos.y * 4.0f, 0.0f, 1.0f ) : 0.0f;
+float targetNightFogRainFade = (nightWeight > 0.001f && rain > 0.01f) ? 1.0f : 0.0f;
+float currentTime = Engine::GAPI->GetTimeSeconds();
+if ( !NightFogRainFadeInitialized ) {
+    NightFogRainFadeInitialized = true;
+    LastNightFogRainFadeTime = currentTime;
+    NightFogRainFade = 0.0f;
+}
+float nightFogFadeDeltaTime = std::clamp( currentTime - LastNightFogRainFadeTime, 0.0f, 0.1f );
+LastNightFogRainFadeTime = currentTime;
+float nightFogFadeSpeed = targetNightFogRainFade > NightFogRainFade ? 1.75f : 0.85f;
+float nightFogFadeStep = std::clamp( nightFogFadeDeltaTime * nightFogFadeSpeed, 0.0f, 1.0f );
+NightFogRainFade = std::clamp( NightFogRainFade + (targetNightFogRainFade - NightFogRainFade) * nightFogFadeStep, 0.0f, 1.0f );
+cb.HF_Pad3 = float2( NightFogRainFade, 0.0f );
+XMFLOAT3 FogColorMod;
+XMStoreFloat3( &FogColorMod, color );
+cb.HF_FogColorMod = FogColorMod;
+cb.HF_RainFogColor = settings.RainFogColor;
+compositionPS->GetBuffer( "PFXBuffer" ).Update( &cb ).Bind();
     }
     if ( needsAtmosphere && sky ) {
         compositionPS->GetBuffer( "Atmosphere" ).Update( &sky->GetAtmosphereCB() ).Bind();

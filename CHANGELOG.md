@@ -2,6 +2,9 @@
 
 Dokumentation der gepushten Renderer-Builds.
 
+## Build 197
+- Regulaerer Push: NightFogRainFade-Tracking in D3D11PfxRenderer und PS_PFX_Composition.hlsl (weicheres Ein-/Ausblenden des Nebels nachts bei Regen); manuelle Anpassungen an PS_PFX_WetGroundSSR.hlsl; Caching-Optimierung in D3D11ShadowMap.cpp (Update-Threshold).
+
 ## Build 196
 - Regulaerer Push: Pfuetzen-Zeitsteuerung in GothicAPI von Echtzeit auf Ingame-Zeit umgestellt; SSR-Raymarching in SSR.h mit Viewport-Clipping optimiert; WetGroundSSR-Tracing auf 256 Steps/2.0 Stride verfeinert, Wet-Mask-Exposure an RainFXWeight gekoppelt und GetRainExposure auf PCF-Filter umgebaut; ContactShadow-Tageszeitkopplung in D3D11PfxRenderer geloest; PS_ParticleSimple.hlsl manuell aktualisiert.
 
