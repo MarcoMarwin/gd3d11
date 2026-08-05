@@ -1,6 +1,9 @@
 # Build Changelog
 
 Dokumentation der gepushten Renderer-Builds.
+## Build 199 (Korrekturpush)
+- Korrekturpush: BspPortalCuller Syntax- und Referenzfehler behoben (CVVH_AddNotDrawnVobToList repariert, SectorIds und LastRenderBBox ergaenzt, Settings-Variablen hinzugefuegt, Init-Reihenfolge korrigiert).
+
 
 ## Build 198
 - Regulaerer Push: NightFogRainFade Polynom-glaettung in D3D11PfxRenderer.cpp (verhindert stotternde Nebeluebergaenge durch nicht-lineare Interpolation); Anpassung der Fade-Speeds (0.35/0.55) fuer ein fluessigeres Ingame-Erlebnis.

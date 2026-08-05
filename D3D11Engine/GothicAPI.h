@@ -11,6 +11,7 @@
 #include "RenderQueue.h"
 #include "RenderToTextureBuffer.h"
 #include "ShaderIDs.h"
+#include "BspPortalCuller.h"
 
 static const char* MENU_SETTINGS_FILE = "system\\GD3D11\\UserSettings.ini";
 const float INDOOR_LIGHT_DISTANCE_SCALE_FACTOR = 0.5f;
@@ -38,6 +39,7 @@ struct RndCullContext {
     RenderStage stage;
 
     RenderQueue* queue;
+    const class BspPortalCuller* portalCuller = nullptr;
     
     struct
     {
@@ -98,6 +100,7 @@ struct BspInfo {
         IndoorLights = std::move( other.IndoorLights );
         Mobs = std::move( other.Mobs );
         NodePolygons = std::move( other.NodePolygons );
+        SectorIds = std::move( other.SectorIds );
         NumStaticLights = other.NumStaticLights;
         OriginalNode = other.OriginalNode;
         Front = other.Front;
@@ -128,6 +131,10 @@ struct BspInfo {
     zCBspBase* OriginalNode;
     BspInfo* Front;
     BspInfo* Back;
+
+    /** Sectors (rooms) this leaf holds polys of, as indices into BspPortalCuller's sector array.
+        Empty on outdoor leafs, which is the vast majority - see BspPortalCuller::BuildFromWorld. */
+    std::vector<uint16_t> SectorIds;
 };
 
 /** Pre-built linear cache of all BSP leaf bounding boxes for SIMD-accelerated frustum culling.
@@ -249,6 +256,8 @@ class zCDecal;
 class GothicAPI {
     friend struct MaterialInfo;
 public:
+    BspPortalCuller& GetPortalCuller() { return PortalCuller; }
+    const BspPortalCuller& GetPortalCuller() const { return PortalCuller; }
     GothicAPI();
     ~GothicAPI();
 
@@ -885,7 +894,7 @@ public:
     // Exposed for CollectLeafVobs/CollectVisibleVobsWithLeafCache (file-static helpers)
     BspLeafLinearCache LeafLinearCache;
 private:
-    gtl::flat_hash_map<zCVob*, SkeletalVobInfo*> SkeletalVobMap;
+    BspPortalCuller PortalCuller;
 
     /** Map of VobInfo-Lists for zCBspLeafs */
     std::unordered_map<zCBspBase*, BspInfo> BspLeafVobLists;

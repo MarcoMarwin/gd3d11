@@ -1,8 +1,7 @@
-$workspaceRoot = "C:\Users\winkler.WS\Documents\Antigravity\Projekte"
-$gitBase = "$workspaceRoot\tools\PortableGit-2.55.0.2"
+$ErrorActionPreference = "Stop"
 
-$env:PATH = "$gitBase\bin;$gitBase\cmd;$gitBase\mingw64\bin;$gitBase\mingw64\libexec\git-core;$gitBase\usr\bin;" + $env:PATH
-$env:GIT_EXEC_PATH = "$gitBase\mingw64\libexec\git-core"
+$env:PATH = "C:\Users\winkler.WS\Documents\Antigravity\Projekte\tools\PortableGit-2.55.0.2\bin;C:\Users\winkler.WS\Documents\Antigravity\Projekte\tools\PortableGit-2.55.0.2\cmd;C:\Users\winkler.WS\Documents\Antigravity\Projekte\tools\PortableGit-2.55.0.2\mingw64\bin;C:\Users\winkler.WS\Documents\Antigravity\Projekte\tools\PortableGit-2.55.0.2\mingw64\libexec\git-core;C:\Users\winkler.WS\Documents\Antigravity\Projekte\tools\PortableGit-2.55.0.2\usr\bin;" + $env:PATH
+$env:GIT_EXEC_PATH = "C:\Users\winkler.WS\Documents\Antigravity\Projekte\tools\PortableGit-2.55.0.2\mingw64\libexec\git-core"
 $env:HTTP_PROXY = ""
 $env:HTTPS_PROXY = ""
 $env:ALL_PROXY = ""
@@ -10,39 +9,44 @@ $env:GIT_HTTP_PROXY = ""
 $env:GIT_HTTPS_PROXY = ""
 $env:GIT_TERMINAL_PROMPT = "0"
 
-$credInput = "protocol=https`nhost=github.com`n`n"
-$credOutput = $credInput | & "$gitBase\mingw64\bin\git-credential-manager.exe" get
+git commit -m "Build 198"
 
-$u = ""
-$p = ""
-foreach ($line in $credOutput) {
-    if ($line -match "^username=(.*)") { $u = $matches[1].Trim() }
-    if ($line -match "^password=(.*)") { $p = $matches[1].Trim() }
+$inputStr = "protocol=https`nhost=github.com`n`n"
+$gcmPath = "C:\Users\winkler.WS\Documents\Antigravity\Projekte\tools\PortableGit-2.55.0.2\mingw64\bin\git-credential-manager.exe"
+$creds = $inputStr | & $gcmPath get
+
+$username = ""
+$password = ""
+foreach ($line in ($creds -split "`r`n")) {
+    if ($line.StartsWith("username=")) { $username = $line.Substring(9) }
+    if ($line.StartsWith("password=")) { $password = $line.Substring(9) }
 }
 
-if ($u -and $p) {
-    $raw = "$u`:$p"
-    $bytes = [System.Text.Encoding]::UTF8.GetBytes($raw)
-    $b64 = [Convert]::ToBase64String($bytes)
+if ([string]::IsNullOrEmpty($username) -or [string]::IsNullOrEmpty($password)) {
+    Write-Error "Failed to retrieve credentials."
+    exit 1
+}
 
-    git add -A
-    git commit -m "Build 183 Korrekturpush: DoF-Composite repariert, SkyEdgeBlur entfernt"
-    
-    git -c http.sslBackend=openssl -c credential.helper= -c core.askPass= -c "http.extraHeader=AUTHORIZATION: basic $b64" push origin master
+$authStr = "$($username):$($password)"
+$bytes = [System.Text.Encoding]::UTF8.GetBytes($authStr)
+$base64 = [System.Convert]::ToBase64String($bytes)
+$header = "AUTHORIZATION: basic $base64"
 
-    if ($LASTEXITCODE -eq 0) {
-        git tag -f nightly
-        git -c http.sslBackend=openssl -c credential.helper= -c core.askPass= -c "http.extraHeader=AUTHORIZATION: basic $b64" push --force origin refs/tags/nightly
-        Write-Host "Push successful"
-    } else {
-        Write-Host "Push failed"
-    }
+# Push master
+git -c http.sslBackend=openssl -c credential.helper= -c core.askPass= -c "http.extraHeader=$header" push origin master
 
-    $u = $null
-    $p = $null
-    $raw = $null
-    $bytes = $null
-    $b64 = $null
+if ($LASTEXITCODE -eq 0) {
+    # Tag and push nightly
+    git tag -f nightly
+    git -c http.sslBackend=openssl -c credential.helper= -c core.askPass= -c "http.extraHeader=$header" push --force origin refs/tags/nightly
 } else {
-    Write-Host "Credential Manager returned no output or mismatch"
+    Write-Error "Push to master failed."
 }
+
+# Cleanup
+$username = $null
+$password = $null
+$authStr = $null
+$bytes = $null
+$base64 = $null
+$header = $null
