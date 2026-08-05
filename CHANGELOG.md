@@ -2,6 +2,9 @@
 
 Dokumentation der gepushten Renderer-Builds.
 
+## Build 198
+- Regulaerer Push: NightFogRainFade Polynom-glaettung in D3D11PfxRenderer.cpp (verhindert stotternde Nebeluebergaenge durch nicht-lineare Interpolation); Anpassung der Fade-Speeds (0.35/0.55) fuer ein fluessigeres Ingame-Erlebnis.
+
 ## Build 197
 - Regulaerer Push: NightFogRainFade-Tracking in D3D11PfxRenderer und PS_PFX_Composition.hlsl (weicheres Ein-/Ausblenden des Nebels nachts bei Regen); manuelle Anpassungen an PS_PFX_WetGroundSSR.hlsl; Caching-Optimierung in D3D11ShadowMap.cpp (Update-Threshold).
 

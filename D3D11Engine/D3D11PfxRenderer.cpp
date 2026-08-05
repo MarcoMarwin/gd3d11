@@ -620,7 +620,9 @@ cb.HF_FogHeight = height;
 cb.HF_ProjAB = float2( Engine::GAPI->GetProjectionMatrix()._33, Engine::GAPI->GetProjectionMatrix()._34 );
 float rain = sky ? std::clamp( sky->GetAtmosphereCB().AC_RainFXWeight, 0.0f, 1.0f ) : 0.0f;
 float nightWeight = sky ? std::clamp( -sky->GetAtmosphereCB().AC_LightPos.y * 4.0f, 0.0f, 1.0f ) : 0.0f;
-float targetNightFogRainFade = (nightWeight > 0.001f && rain > 0.01f) ? 1.0f : 0.0f;
+float rainNightFogFade = std::clamp( (rain - 0.18f) / (0.88f - 0.18f), 0.0f, 1.0f );
+rainNightFogFade = rainNightFogFade * rainNightFogFade * (3.0f - 2.0f * rainNightFogFade);
+float targetNightFogRainFade = nightWeight * rainNightFogFade;
 float currentTime = Engine::GAPI->GetTimeSeconds();
 if ( !NightFogRainFadeInitialized ) {
     NightFogRainFadeInitialized = true;
@@ -629,7 +631,7 @@ if ( !NightFogRainFadeInitialized ) {
 }
 float nightFogFadeDeltaTime = std::clamp( currentTime - LastNightFogRainFadeTime, 0.0f, 0.1f );
 LastNightFogRainFadeTime = currentTime;
-float nightFogFadeSpeed = targetNightFogRainFade > NightFogRainFade ? 1.75f : 0.85f;
+float nightFogFadeSpeed = targetNightFogRainFade > NightFogRainFade ? 0.35f : 0.55f;
 float nightFogFadeStep = std::clamp( nightFogFadeDeltaTime * nightFogFadeSpeed, 0.0f, 1.0f );
 NightFogRainFade = std::clamp( NightFogRainFade + (targetNightFogRainFade - NightFogRainFade) * nightFogFadeStep, 0.0f, 1.0f );
 cb.HF_Pad3 = float2( NightFogRainFade, 0.0f );
