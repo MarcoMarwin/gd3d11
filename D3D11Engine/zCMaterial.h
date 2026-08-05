@@ -10,6 +10,7 @@
 const int zMAT_GROUP_WATER = 5;
 const int zMAT_GROUP_SNOW = 6;
 
+class zCBspSector;
 class zCTexAniCtrl {
 private:
     int	AniChannel;
@@ -172,6 +173,12 @@ public:
     zTRnd_AlphaBlendFunc GetAlphaFunc() {
         MaterialFlags& flags = GetFlags();
         return flags.rndAlphaBlendFunc;
+    }
+    zCBspSector* GetBspSectorFront() const {
+        return *reinterpret_cast<zCBspSector* const*>(THISPTR_OFFSET( GothicMemoryLocations::zCMaterial::Offset_BspSectorFront ));
+    }
+    zCBspSector* GetBspSectorBack() const {
+        return *reinterpret_cast<zCBspSector* const*>(THISPTR_OFFSET( GothicMemoryLocations::zCMaterial::Offset_BspSectorBack ));
     }
 
     void SetAlphaFunc( zTRnd_AlphaBlendFunc func ) {

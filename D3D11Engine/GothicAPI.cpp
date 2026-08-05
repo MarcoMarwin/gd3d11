@@ -4313,14 +4313,6 @@ void GothicAPI::CollectVisibleVobs(
     ctx.drawFlags.CollectMobs = true;
     ctx.drawFlags.CollectLights = true;
 
-    bool haveCameraMatrices = zCCamera::GetCamera() != nullptr;
-    if ( haveCameraMatrices && PortalCuller.IsActive() ) {
-        oCGame* game = oCGame::GetGame();
-        XMMATRIX worldToClip = XMMatrixMultiply( GetViewMatrixXM(), XMLoadFloat4x4( &RendererState.m_projMatrix ) );
-        PortalCuller.Solve( worldToClip, ctx.cameraPosition, game ? game->_zCSession_camVob : nullptr );
-        ctx.portalCuller = &PortalCuller;
-    }
-
     CollectVisibleVobs( ctx );
 
     if ( RendererState.RendererSettings.SortRenderQueue ) {
@@ -7103,6 +7095,20 @@ void GothicAPI::CollectVisibleVobs( const RndCullContext& ctx ) {
     if ( !singlePassCtx.drawFlags.CollectLargeVobs && !singlePassCtx.drawFlags.CollectSmallVobs ) {
         singlePassCtx.drawFlags.CollectLargeVobs = true;
         singlePassCtx.drawFlags.CollectSmallVobs = true;
+    }
+    if ( singlePassCtx.stage == RenderStage::STAGE_DRAW_WORLD && PortalCuller.IsActive() ) {
+        if ( zCCamera* cam = zCCamera::GetCamera() ) {
+            cam->Activate();
+            const auto& view = cam->trafoView;
+            const auto& proj = cam->trafoProjection;
+            XMMATRIX worldToClip = XMMatrixMultiply(
+                XMMatrixTranspose( XMLoadFloat4x4( &view ) ),
+                XMLoadFloat4x4( &proj )
+            );
+            oCGame* game = oCGame::GetGame();
+            PortalCuller.Solve( worldToClip, singlePassCtx.cameraPosition, game ? game->_zCSession_camVob : nullptr );
+            singlePassCtx.portalCuller = &PortalCuller;
+        }
     }
     collectTree( singlePassCtx );
 

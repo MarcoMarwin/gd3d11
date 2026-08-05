@@ -1,6 +1,5 @@
 #include "pch.h"
 #include "BspPortalCuller.h"
-
 #include "GothicAPI.h"
 #include "Engine.h"
 #include "Logger.h"
@@ -8,23 +7,19 @@
 #include "zCMaterial.h"
 #include "zCPolygon.h"
 #include "zCVob.h"
+#include <algorithm>
 
 using namespace DirectX;
 
-namespace {
-    /** ZenGin caps sector recursion at 40 (zCBspSector::ActivateSectorRec). Non-convex sectors
-        produce cyclic portal chains, so a hard cap is not optional. */
+namespace
+{
     constexpr int MAX_SECTOR_DEPTH = 40;
-
-    /** Upper bound on sector activations per frame. Reaching it means the world's portal graph is
-        pathological; we stop expanding (and log once) rather than truncating silently. */
     constexpr int MAX_SECTOR_VISITS = 4096;
-
-    /** Clip-space w below this is treated as behind the camera. */
     constexpr float CLIP_W_EPSILON = 1e-4f;
 }
 
-void BspPortalCuller::Clear() {
+void BspPortalCuller::Clear()
+{
     Portals.clear();
     Sectors.clear();
     SectorIdByPtr.clear();
@@ -34,100 +29,146 @@ void BspPortalCuller::Clear() {
     Apertures.clear();
     CurrentStamp = 0;
     WarnedBudget = false;
+    VisitBudget = 0;
     LastStats = Stats{};
 }
 
-void BspPortalCuller::BuildFromWorld( zCBspTree* tree ) {
+void BspPortalCuller::BuildFromWorld(zCBspTree* tree)
+{
     Clear();
 
-    if ( !tree )
+    if (!Enabled || !tree)
+    {
         return;
+    }
 
-    // Indoor-mode worlds (dungeons) never classify anything as an indoor VOB in the first place
-    // (see GothicAPI::BuildBspVobMapCacheHelper), so there is nothing here to gate.
-    if ( tree->GetBspTreeMode() != zBSP_MODE_OUTDOOR )
+    if (tree->GetBspTreeMode() != zBSP_MODE_OUTDOOR)
+    {
         return;
+    }
 
     zCArray<zCBspSector*>& sectorList = tree->GetSectorList();
-    if ( sectorList.NumInArray <= 0 || !sectorList.Array )
+    if (sectorList.NumInArray <= 0 || !sectorList.Array)
+    {
         return;
+    }
 
     const int numSectors = sectorList.NumInArray;
-    if ( numSectors > SECTOR_OUTDOOR ) {
-        LogWarn() << "BspPortalCuller: world has " << numSectors
-            << " sectors, more than the 16-bit sector id space allows - portal culling disabled";
+    if (numSectors >= SECTOR_OUTDOOR)
+    {
+        LogWarn() << "BspPortalCuller: world has " << numSectors << " sectors, portal culling disabled";
+        Clear();
         return;
     }
 
-    Sectors.resize( numSectors );
+    Sectors.resize(numSectors);
     BspRoot = tree->GetRootNode();
+    SectorIdByPtr.reserve(static_cast<size_t>(numSectors) * 2);
 
-    // Key sectors by pointer, not by their own sectorIndex field: a disagreement between the two
-    // would silently mis-address our arrays and cull the room the player is standing in.
-    SectorIdByPtr.reserve( numSectors * 2 );
-    for ( int i = 0; i < numSectors; i++ ) {
-        if ( sectorList.Array[i] )
-            SectorIdByPtr.emplace( sectorList.Array[i], static_cast<uint16_t>(i) );
+    for (int i = 0; i < numSectors; ++i)
+    {
+        if (sectorList.Array[i])
+        {
+            SectorIdByPtr.emplace(sectorList.Array[i], static_cast<uint16_t>(i));
+        }
     }
 
-    auto idOf = [&]( zCBspSector* s ) -> uint16_t {
-        if ( !s ) return SECTOR_OUTDOOR;
-        auto it = SectorIdByPtr.find( s );
+    auto idOf = [&](zCBspSector* sector) -> uint16_t
+    {
+        if (!sector)
+        {
+            return SECTOR_OUTDOOR;
+        }
+
+        auto it = SectorIdByPtr.find(sector);
         return it != SectorIdByPtr.end() ? it->second : SECTOR_OUTDOOR;
     };
 
     int numLeafsTagged = 0;
-    for ( int i = 0; i < numSectors; i++ ) {
+
+    for (int i = 0; i < numSectors; ++i)
+    {
         zCBspSector* sector = sectorList.Array[i];
-        if ( !sector ) continue;
-        const uint16_t sectorId = static_cast<uint16_t>(i);
-
-        // --- Leafs of this sector -> BspInfo::SectorIds -------------------------------------
-        zCArray<zCBspBase*>& nodes = sector->GetSectorNodes();
-        for ( int n = 0; n < nodes.NumInArray; n++ ) {
-            zCBspBase* leaf = nodes.Array[n];
-            if ( !leaf ) continue;
-
-            BspInfo* info = Engine::GAPI->GetNewBspNode( leaf );
-            if ( !info ) continue;
-
-            // A leaf can hold polys of several sectors; keep all of them (visible if ANY is).
-            if ( std::find( info->SectorIds.begin(), info->SectorIds.end(), sectorId ) == info->SectorIds.end() ) {
-                info->SectorIds.push_back( sectorId );
-                numLeafsTagged++;
-            }
-
-            Sector& s = Sectors[sectorId];
-            s.BoundsMin.x = std::min( s.BoundsMin.x, leaf->BBox3D.Min.x );
-            s.BoundsMin.y = std::min( s.BoundsMin.y, leaf->BBox3D.Min.y );
-            s.BoundsMin.z = std::min( s.BoundsMin.z, leaf->BBox3D.Min.z );
-            s.BoundsMax.x = std::max( s.BoundsMax.x, leaf->BBox3D.Max.x );
-            s.BoundsMax.y = std::max( s.BoundsMax.y, leaf->BBox3D.Max.y );
-            s.BoundsMax.z = std::max( s.BoundsMax.z, leaf->BBox3D.Max.z );
-            s.HasBounds = true;
+        if (!sector)
+        {
+            continue;
         }
 
-        // --- Portals of this sector ---------------------------------------------------------
+        const uint16_t sectorId = static_cast<uint16_t>(i);
+        Sector& currentSector = Sectors[sectorId];
+
+        zCArray<zCBspBase*>& nodes = sector->GetSectorNodes();
+        for (int n = 0; n < nodes.NumInArray; ++n)
+        {
+            zCBspBase* leaf = nodes.Array[n];
+            if (!leaf)
+            {
+                continue;
+            }
+
+            BspInfo* info = Engine::GAPI->GetNewBspNode(leaf);
+            if (!info)
+            {
+                continue;
+            }
+
+            if (std::find(info->SectorIds.begin(), info->SectorIds.end(), sectorId) == info->SectorIds.end())
+            {
+                info->SectorIds.push_back(sectorId);
+                ++numLeafsTagged;
+            }
+
+            currentSector.BoundsMin.x = std::min(currentSector.BoundsMin.x, leaf->BBox3D.Min.x);
+            currentSector.BoundsMin.y = std::min(currentSector.BoundsMin.y, leaf->BBox3D.Min.y);
+            currentSector.BoundsMin.z = std::min(currentSector.BoundsMin.z, leaf->BBox3D.Min.z);
+            currentSector.BoundsMax.x = std::max(currentSector.BoundsMax.x, leaf->BBox3D.Max.x);
+            currentSector.BoundsMax.y = std::max(currentSector.BoundsMax.y, leaf->BBox3D.Max.y);
+            currentSector.BoundsMax.z = std::max(currentSector.BoundsMax.z, leaf->BBox3D.Max.z);
+            currentSector.HasBounds = true;
+        }
+
         zCArray<zCPolygon*>& portals = sector->GetSectorPortals();
-        for ( int p = 0; p < portals.NumInArray; p++ ) {
+        for (int p = 0; p < portals.NumInArray; ++p)
+        {
             zCPolygon* poly = portals.Array[p];
-            if ( !poly ) continue;
+            if (!poly || !poly->IsPortal())
+            {
+                continue;
+            }
 
             zCMaterial* mat = poly->GetMaterial();
-            if ( !mat ) continue;
+            if (!mat)
+            {
+                continue;
+            }
 
             const uint8_t numVerts = poly->GetNumPolyVertices();
             zCVertex** verts = poly->getVertices();
-            if ( numVerts < 3 || !verts ) continue;
+            if (numVerts < 3 || !verts)
+            {
+                continue;
+            }
 
             Portal portal;
-            portal.Verts.reserve( numVerts );
+            portal.Verts.reserve(numVerts);
+
             bool vertsOk = true;
-            for ( uint8_t v = 0; v < numVerts; v++ ) {
-                if ( !verts[v] ) { vertsOk = false; break; }
-                portal.Verts.push_back( verts[v]->Position );
+            for (uint8_t v = 0; v < numVerts; ++v)
+            {
+                if (!verts[v])
+                {
+                    vertsOk = false;
+                    break;
+                }
+
+                const auto& pos = verts[v]->Position;
+                portal.Verts.emplace_back(pos.x, pos.y, pos.z);
             }
-            if ( !vertsOk ) continue;
+
+            if (!vertsOk)
+            {
+                continue;
+            }
 
             const zTPlane& plane = poly->GetPolyPlane();
             portal.PlaneNormal = plane.Normal;
@@ -136,129 +177,141 @@ void BspPortalCuller::BuildFromWorld( zCBspTree* tree ) {
             zCBspSector* front = mat->GetBspSectorFront();
             zCBspSector* back = mat->GetBspSectorBack();
 
-            if ( !front ) {
-                // Outdoor(front) -> indoor(back) door. zCBspBase::RenderNodeOutdoor activates the
-                // BACK sector through these; zCBspSector::ActivateSectorRec explicitly skips them,
-                // so they are entry points only, never traversed from the inside.
-                portal.TargetSector = idOf( back );
-                if ( portal.TargetSector == SECTOR_OUTDOOR ) continue;
+            if (!front)
+            {
+                portal.TargetSector = idOf(back);
+                if (portal.TargetSector == SECTOR_OUTDOOR)
+                {
+                    continue;
+                }
 
-                OutdoorEntryPortals.push_back( static_cast<uint32_t>(Portals.size()) );
-                Portals.push_back( std::move( portal ) );
-            } else {
-                // Traversable from inside `front` (which is this sector) towards `back`.
-                // A null back means the portal opens into the outdoor.
-                portal.TargetSector = idOf( back );
-
+                OutdoorEntryPortals.push_back(static_cast<uint32_t>(Portals.size()));
+                Portals.push_back(std::move(portal));
+            }
+            else
+            {
+                portal.TargetSector = idOf(back);
                 const uint32_t portalIdx = static_cast<uint32_t>(Portals.size());
-                Portals.push_back( std::move( portal ) );
+                Portals.push_back(std::move(portal));
 
-                // Register on the sector the poly actually belongs to, not blindly on `i`:
-                // CreateBspSectors2 files a portal under its FRONT sector, but be defensive.
-                const uint16_t owner = idOf( front );
-                Sectors[owner != SECTOR_OUTDOOR ? owner : sectorId].OutgoingPortals.push_back( portalIdx );
+                const uint16_t owner = idOf(front);
+                Sectors[owner != SECTOR_OUTDOOR ? owner : sectorId].OutgoingPortals.push_back(portalIdx);
             }
         }
     }
 
-    Stamps.assign( numSectors, 0 );
-    Apertures.assign( numSectors, ScreenBox2D{} );
-    CurrentStamp = 0;
-
+    Stamps.assign(Sectors.size(), 0);
+    Apertures.assign(Sectors.size(), ScreenBox2D{});
     BuildReachability();
 
     LastStats.NumSectors = numSectors;
     LastStats.NumPortals = static_cast<int>(Portals.size());
 
     LogInfo() << "BspPortalCuller: " << numSectors << " sectors, " << Portals.size()
-        << " portals (" << OutdoorEntryPortals.size() << " outdoor entries), "
-        << numLeafsTagged << " leaf/sector links";
-    if ( LastStats.UnreachableSectors > 0 ) {
-        LogWarn() << "BspPortalCuller: " << LastStats.UnreachableSectors << " of " << numSectors
-            << " sectors cannot be reached from the outdoor through any portal chain - those are"
-            " never culled. Portal data of this world is incomplete for culling purposes.";
-    }
+              << " portals, " << numLeafsTagged << " leaf sector links";
 }
 
-/** A sector the outdoor cannot reach through portals would be invisible forever once the camera
-    steps outside it, because nothing would ever activate it. Rather than guess why the world's
-    portal data says so, mark those rooms uncullable - the cost is bounded and correctness is not. */
-void BspPortalCuller::BuildReachability() {
+void BspPortalCuller::BuildReachability()
+{
     std::vector<uint16_t> queue;
-    std::vector<bool> reached( Sectors.size(), false );
+    std::vector<bool> reached(Sectors.size(), false);
 
-    for ( uint32_t portalIdx : OutdoorEntryPortals ) {
+    for (uint32_t portalIdx : OutdoorEntryPortals)
+    {
         const uint16_t target = Portals[portalIdx].TargetSector;
-        if ( target < Sectors.size() && !reached[target] ) {
+        if (target < Sectors.size() && !reached[target])
+        {
             reached[target] = true;
-            queue.push_back( target );
+            queue.push_back(target);
         }
     }
 
-    while ( !queue.empty() ) {
-        const uint16_t s = queue.back();
+    while (!queue.empty())
+    {
+        const uint16_t sector = queue.back();
         queue.pop_back();
-        for ( uint32_t portalIdx : Sectors[s].OutgoingPortals ) {
+
+        for (uint32_t portalIdx : Sectors[sector].OutgoingPortals)
+        {
             const uint16_t target = Portals[portalIdx].TargetSector;
-            if ( target < Sectors.size() && !reached[target] ) {
+            if (target < Sectors.size() && !reached[target])
+            {
                 reached[target] = true;
-                queue.push_back( target );
+                queue.push_back(target);
             }
         }
     }
 
     int unreachable = 0;
-    for ( size_t i = 0; i < Sectors.size(); i++ ) {
-        if ( !reached[i] ) {
+    for (size_t i = 0; i < Sectors.size(); ++i)
+    {
+        if (!reached[i])
+        {
             Sectors[i].AlwaysActive = true;
-            unreachable++;
+            ++unreachable;
         }
     }
+
     LastStats.UnreachableSectors = unreachable;
 }
 
-zCBspBase* BspPortalCuller::FindLeaf( const XMFLOAT3& position ) const {
+zCBspBase* BspPortalCuller::FindLeaf(const XMFLOAT3& position) const
+{
     zCBspBase* node = BspRoot;
-    int guard = 256; // the tree is balanced; this only protects against corrupt data
-    while ( node && !node->IsLeaf() && --guard > 0 ) {
-        zCBspNode* n = static_cast<zCBspNode*>(node);
-        const float side = n->Plane.Normal.x * position.x
-                         + n->Plane.Normal.y * position.y
-                         + n->Plane.Normal.z * position.z
-                         - n->Plane.Distance;
-        zCBspBase* next = side > 0.0f ? n->Front : n->Back;
-        if ( !next ) break;
-        node = next;
-    }
-    return (node && node->IsLeaf()) ? node : nullptr;
-}
+    int guard = 256;
 
-ScreenBox2D BspPortalCuller::ProjectPolygon( FXMMATRIX worldToClip, const XMFLOAT3* verts, size_t numVerts ) {
-    ScreenBox2D box;
-    if ( numVerts < 3 ) return box;
+    while (node && !node->IsLeaf() && --guard > 0)
+    {
+        zCBspNode* bspNode = static_cast<zCBspNode*>(node);
+        const float side = bspNode->Plane.Normal.x * position.x
+            + bspNode->Plane.Normal.y * position.y
+            + bspNode->Plane.Normal.z * position.z
+            - bspNode->Plane.Distance;
 
-    // Sutherland-Hodgman against the w>0 plane only. Vertices outside the side planes still
-    // project to valid (out-of-range) NDC, and the final clamp to the viewport handles those;
-    // vertices at or behind the eye would produce garbage, so those edges must be split.
-    XMVECTOR prev = XMVector4Transform( XMVectorSetW( XMLoadFloat3( &verts[numVerts - 1] ), 1.0f ), worldToClip );
-    float prevW = XMVectorGetW( prev );
-    bool prevIn = prevW > CLIP_W_EPSILON;
-
-    for ( size_t i = 0; i < numVerts; i++ ) {
-        XMVECTOR cur = XMVector4Transform( XMVectorSetW( XMLoadFloat3( &verts[i] ), 1.0f ), worldToClip );
-        const float curW = XMVectorGetW( cur );
-        const bool curIn = curW > CLIP_W_EPSILON;
-
-        if ( curIn != prevIn ) {
-            // Split the edge where w crosses the epsilon plane
-            const float t = (CLIP_W_EPSILON - prevW) / (curW - prevW);
-            XMVECTOR mid = XMVectorLerp( prev, cur, t );
-            const float midW = std::max( XMVectorGetW( mid ), CLIP_W_EPSILON );
-            box.Add( XMVectorGetX( mid ) / midW, XMVectorGetY( mid ) / midW );
+        zCBspBase* next = side > 0.0f ? bspNode->Front : bspNode->Back;
+        if (!next)
+        {
+            break;
         }
 
-        if ( curIn ) {
-            box.Add( XMVectorGetX( cur ) / curW, XMVectorGetY( cur ) / curW );
+        node = next;
+    }
+
+    return node && node->IsLeaf() ? node : nullptr;
+}
+
+ScreenBox2D XM_CALLCONV BspPortalCuller::ProjectPolygon(FXMMATRIX worldToClip, const XMFLOAT3* verts, size_t numVerts)
+{
+    ScreenBox2D box;
+    if (!verts || numVerts < 3)
+    {
+        return box;
+    }
+
+    XMVECTOR prev = XMVector4Transform(XMVectorSetW(XMLoadFloat3(&verts[numVerts - 1]), 1.0f), worldToClip);
+    float prevW = XMVectorGetW(prev);
+    bool prevIn = prevW > CLIP_W_EPSILON;
+
+    for (size_t i = 0; i < numVerts; ++i)
+    {
+        XMVECTOR cur = XMVector4Transform(XMVectorSetW(XMLoadFloat3(&verts[i]), 1.0f), worldToClip);
+        const float curW = XMVectorGetW(cur);
+        const bool curIn = curW > CLIP_W_EPSILON;
+
+        if (curIn != prevIn)
+        {
+            const float t = (CLIP_W_EPSILON - prevW) / (curW - prevW);
+            XMVECTOR mid = XMVectorLerp(prev, cur, t);
+            const float midW = XMVectorGetW(mid);
+            if (midW > CLIP_W_EPSILON)
+            {
+                box.Add(XMVectorGetX(mid) / midW, XMVectorGetY(mid) / midW);
+            }
+        }
+
+        if (curIn)
+        {
+            box.Add(XMVectorGetX(cur) / curW, XMVectorGetY(cur) / curW);
         }
 
         prev = cur;
@@ -266,80 +319,107 @@ ScreenBox2D BspPortalCuller::ProjectPolygon( FXMMATRIX worldToClip, const XMFLOA
         prevIn = curIn;
     }
 
-    if ( box.IsEmpty() )
+    if (box.IsEmpty())
+    {
         return box;
+    }
 
-    return box.ClippedTo( ScreenBox2D::FullViewport() );
+    box.MinX = std::clamp(box.MinX, -1.0f, 1.0f);
+    box.MinY = std::clamp(box.MinY, -1.0f, 1.0f);
+    box.MaxX = std::clamp(box.MaxX, -1.0f, 1.0f);
+    box.MaxY = std::clamp(box.MaxY, -1.0f, 1.0f);
+    return box;
 }
 
-void BspPortalCuller::ActivateSector( uint16_t sector, const ScreenBox2D& aperture, uint16_t cameFrom, int depth ) {
-    if ( sector >= Sectors.size() || aperture.IsEmpty() )
-        return;
+bool BspPortalCuller::IsSectorActive(uint16_t sector) const
+{
+    return sector < Stamps.size() && Stamps[sector] == CurrentStamp;
+}
 
-    if ( depth > MAX_SECTOR_DEPTH )
+void BspPortalCuller::ActivateSector(uint16_t sector, const ScreenBox2D& aperture, uint16_t cameFrom, int depth)
+{
+    if (sector >= Sectors.size() || aperture.IsEmpty())
+    {
         return;
+    }
 
-    if ( --VisitBudget < 0 ) {
-        if ( !WarnedBudget ) {
+    if (depth > MAX_SECTOR_DEPTH)
+    {
+        return;
+    }
+
+    if (--VisitBudget < 0)
+    {
+        if (!WarnedBudget)
+        {
+            LogWarn() << "BspPortalCuller: sector visit budget reached";
             WarnedBudget = true;
-            LogWarn() << "BspPortalCuller: sector activation budget (" << MAX_SECTOR_VISITS
-                << ") exhausted - portal graph may be cyclic. Culling stays conservative.";
         }
         return;
     }
 
     const bool firstVisit = Stamps[sector] != CurrentStamp;
-    if ( firstVisit ) {
+    if (firstVisit)
+    {
         Stamps[sector] = CurrentStamp;
         Apertures[sector] = aperture;
-    } else {
-        // Reached again through a different chain. Only re-expand when this chain actually widens
-        // the aperture, otherwise we would re-walk the whole subgraph for nothing.
-        if ( Apertures[sector].Contains( aperture ) )
+    }
+    else
+    {
+        if (Apertures[sector].Contains(aperture))
+        {
             return;
-        Apertures[sector].Merge( aperture );
+        }
+        Apertures[sector].Merge(aperture);
     }
 
-    for ( uint32_t portalIdx : Sectors[sector].OutgoingPortals ) {
+    for (uint32_t portalIdx : Sectors[sector].OutgoingPortals)
+    {
         const Portal& portal = Portals[portalIdx];
-
-        // Backface cull: the portal's front normal points into the sector we are standing in,
-        // so a visible portal has the camera on its front side (zCPolygon::IsBackfacing).
         const float side = portal.PlaneNormal.x * SolveCameraPos.x
-                         + portal.PlaneNormal.y * SolveCameraPos.y
-                         + portal.PlaneNormal.z * SolveCameraPos.z
-                         - portal.PlaneDistance;
-        if ( side < 0.0f )
+            + portal.PlaneNormal.y * SolveCameraPos.y
+            + portal.PlaneNormal.z * SolveCameraPos.z
+            - portal.PlaneDistance;
+
+        if (side < 0.0f)
+        {
             continue;
+        }
 
-        ScreenBox2D portalBox = ProjectPolygon( SolveWorldToClip, portal.Verts.data(), portal.Verts.size() );
-        if ( portalBox.IsEmpty() )
+        ScreenBox2D portalBox = ProjectPolygon(SolveWorldToClip, portal.Verts.data(), portal.Verts.size());
+        if (portalBox.IsEmpty())
+        {
             continue;
+        }
 
-        portalBox = portalBox.ClippedTo( aperture );
-        if ( portalBox.IsEmpty() )
+        portalBox = portalBox.ClippedTo(aperture);
+        if (portalBox.IsEmpty())
+        {
             continue;
+        }
 
-        if ( portal.TargetSector == SECTOR_OUTDOOR )
-            continue; // Opens into the outdoor - outdoor VOBs are never sector-gated.
-
-        // Same cycle guard the original uses: never step straight back into the sector we came from.
-        if ( portal.TargetSector == cameFrom )
+        if (portal.TargetSector == SECTOR_OUTDOOR || portal.TargetSector == cameFrom)
+        {
             continue;
+        }
 
-        ActivateSector( portal.TargetSector, portalBox, sector, depth + 1 );
+        ActivateSector(portal.TargetSector, portalBox, sector, depth + 1);
     }
 }
 
-void BspPortalCuller::Solve( FXMMATRIX worldToClip, const XMFLOAT3& cameraPosition, zCVob* cameraVob ) {
-    if ( !IsActive() )
+void XM_CALLCONV BspPortalCuller::Solve(FXMMATRIX worldToClip, const XMFLOAT3& cameraPosition, zCVob* cameraVob)
+{
+    if (!IsActive())
+    {
         return;
+    }
 
-    ZoneScopedN( "BspPortalCuller::Solve" );
+    ZoneScopedN("BspPortalCuller::Solve");
 
-    CurrentStamp++;
-    if ( CurrentStamp == 0 ) { // wrapped - stale stamps would read as active
-        std::fill( Stamps.begin(), Stamps.end(), 0u );
+    ++CurrentStamp;
+    if (CurrentStamp == 0)
+    {
+        std::fill(Stamps.begin(), Stamps.end(), 0u);
         CurrentStamp = 1;
     }
 
@@ -347,153 +427,186 @@ void BspPortalCuller::Solve( FXMMATRIX worldToClip, const XMFLOAT3& cameraPositi
     SolveCameraPos = cameraPosition;
     VisitBudget = MAX_SECTOR_VISITS;
 
-    // --- Where is the camera? ----------------------------------------------------------------
-    // zCBspTree::Render raycasts straight down for this; the ground poly is the same answer for
-    // every case except standing exactly on a portal, which we handle conservatively below.
     uint16_t cameraSector = SECTOR_OUTDOOR;
     bool cameraOutdoor = true;
     bool ambiguous = false;
 
-    // Under-culling here is harmless, over-culling empties the room the player is standing in,
-    // so the camera's sector is resolved from two independent sources and both are activated.
-    static thread_local std::vector<uint16_t> camSectors;
-    camSectors.clear();
+    static thread_local std::vector<uint16_t> cameraSectors;
+    cameraSectors.clear();
 
-    if ( !cameraVob ) {
-        // No camera vob yet (menu / level transition) - do not cull anything.
+    if (!cameraVob)
+    {
         ambiguous = true;
-    } else {
-        if ( zCPolygon* ground = cameraVob->GetGroundPoly() ) {
-            if ( ground->IsPortal() ) {
-                // Standing in a doorway: the ground poly cannot name one room. Fall through to
-                // the leaf lookup below, which returns every sector touching this spot.
-            } else if ( zCMaterial* mat = ground->GetMaterial() ) {
-                if ( zCBspSector* front = mat->GetBspSectorFront() ) {
-                    auto it = SectorIdByPtr.find( front );
-                    if ( it != SectorIdByPtr.end() )
-                        camSectors.push_back( it->second );
+    }
+    else
+    {
+        if (zCPolygon* ground = cameraVob->GetGroundPoly())
+        {
+            if (!ground->IsPortal())
+            {
+                if (zCMaterial* mat = ground->GetMaterial())
+                {
+                    if (zCBspSector* front = mat->GetBspSectorFront())
+                    {
+                        auto it = SectorIdByPtr.find(front);
+                        if (it != SectorIdByPtr.end())
+                        {
+                            cameraSectors.push_back(it->second);
+                        }
+                    }
                 }
             }
         }
 
-        // Second source: every sector owning a poly in the camera's own BSP leaf. Catches vobs
-        // standing on non-sector geometry (rugs, crates) inside a room, and doorways, where the
-        // ground poly alone would wrongly report "outdoor" and cull the room away.
-        if ( zCBspBase* leaf = FindLeaf( cameraPosition ) ) {
-            if ( BspInfo* info = Engine::GAPI->GetNewBspNode( leaf ) ) {
-                for ( uint16_t s : info->SectorIds ) {
-                    if ( std::find( camSectors.begin(), camSectors.end(), s ) == camSectors.end() )
-                        camSectors.push_back( s );
+        if (zCBspBase* leaf = FindLeaf(cameraPosition))
+        {
+            if (BspInfo* info = Engine::GAPI->GetNewBspNode(leaf))
+            {
+                for (uint16_t sector : info->SectorIds)
+                {
+                    if (std::find(cameraSectors.begin(), cameraSectors.end(), sector) == cameraSectors.end())
+                    {
+                        cameraSectors.push_back(sector);
+                    }
                 }
             }
         }
 
-        if ( !camSectors.empty() ) {
+        if (!cameraSectors.empty())
+        {
             cameraOutdoor = false;
-            cameraSector = camSectors[0];
+            cameraSector = cameraSectors[0];
         }
     }
 
     const ScreenBox2D fullScreen = ScreenBox2D::FullViewport();
 
-    // Any room close enough to walk into is seeded outright, in addition to whatever the portal
-    // walk finds. The screen aperture of a doorway you are standing next to is a poor predictor of
-    // what you can see of the room behind it (you can lean past the frame, doors are split across
-    // several polys, and the aperture collapses as soon as a door edge leaves the screen). Seeding
-    // rather than stamping matters: these sectors must still propagate into their neighbours.
-    if ( !ambiguous && NearSectorRadius > 0.0f ) {
+    if (!ambiguous && NearSectorRadius > 0.0f)
+    {
         const float radiusSq = NearSectorRadius * NearSectorRadius;
-        for ( size_t i = 0; i < Sectors.size(); i++ ) {
-            const Sector& s = Sectors[i];
-            if ( !s.HasBounds ) continue;
+        for (size_t i = 0; i < Sectors.size(); ++i)
+        {
+            const Sector& sector = Sectors[i];
+            if (!sector.HasBounds)
+            {
+                continue;
+            }
 
-            const float dx = std::max( 0.0f, std::max( s.BoundsMin.x - cameraPosition.x, cameraPosition.x - s.BoundsMax.x ) );
-            const float dy = std::max( 0.0f, std::max( s.BoundsMin.y - cameraPosition.y, cameraPosition.y - s.BoundsMax.y ) );
-            const float dz = std::max( 0.0f, std::max( s.BoundsMin.z - cameraPosition.z, cameraPosition.z - s.BoundsMax.z ) );
-            if ( dx * dx + dy * dy + dz * dz < radiusSq ) {
-                ActivateSector( static_cast<uint16_t>(i), fullScreen, SECTOR_OUTDOOR, 0 );
+            const float dx = std::max(0.0f, std::max(sector.BoundsMin.x - cameraPosition.x, cameraPosition.x - sector.BoundsMax.x));
+            const float dy = std::max(0.0f, std::max(sector.BoundsMin.y - cameraPosition.y, cameraPosition.y - sector.BoundsMax.y));
+            const float dz = std::max(0.0f, std::max(sector.BoundsMin.z - cameraPosition.z, cameraPosition.z - sector.BoundsMax.z));
+
+            if (dx * dx + dy * dy + dz * dz < radiusSq)
+            {
+                ActivateSector(static_cast<uint16_t>(i), fullScreen, SECTOR_OUTDOOR, 0);
             }
         }
     }
 
-    if ( ambiguous ) {
-        // Conservative fallback, mirrors ZenGin's "CamPos ist keinem Sektor zuordbar" branch:
-        // mark every sector active for this frame.
-        std::fill( Stamps.begin(), Stamps.end(), CurrentStamp );
-        std::fill( Apertures.begin(), Apertures.end(), fullScreen );
-    } else if ( !cameraOutdoor ) {
-        for ( uint16_t s : camSectors )
-            ActivateSector( s, fullScreen, SECTOR_OUTDOOR, 0 );
-    } else {
-        // Outdoors: seed from every outdoor->indoor door that is facing us and on screen.
-        // This is zCBspBase::RenderNodeOutdoor's portal branch, minus the fade handling.
-        for ( uint32_t portalIdx : OutdoorEntryPortals ) {
+    if (ambiguous)
+    {
+        std::fill(Stamps.begin(), Stamps.end(), CurrentStamp);
+        std::fill(Apertures.begin(), Apertures.end(), fullScreen);
+    }
+    else if (!cameraOutdoor)
+    {
+        for (uint16_t sector : cameraSectors)
+        {
+            ActivateSector(sector, fullScreen, SECTOR_OUTDOOR, 0);
+        }
+    }
+    else
+    {
+        for (uint32_t portalIdx : OutdoorEntryPortals)
+        {
             const Portal& portal = Portals[portalIdx];
-
             const float side = portal.PlaneNormal.x * cameraPosition.x
-                             + portal.PlaneNormal.y * cameraPosition.y
-                             + portal.PlaneNormal.z * cameraPosition.z
-                             - portal.PlaneDistance;
-            if ( side < 0.0f )
-                continue;
+                + portal.PlaneNormal.y * cameraPosition.y
+                + portal.PlaneNormal.z * cameraPosition.z
+                - portal.PlaneDistance;
 
-            ScreenBox2D portalBox = ProjectPolygon( worldToClip, portal.Verts.data(), portal.Verts.size() );
-            if ( portalBox.IsEmpty() )
+            if (side < 0.0f)
+            {
                 continue;
+            }
 
-            ActivateSector( portal.TargetSector, portalBox, SECTOR_OUTDOOR, 0 );
+            ScreenBox2D portalBox = ProjectPolygon(worldToClip, portal.Verts.data(), portal.Verts.size());
+            if (!portalBox.IsEmpty())
+            {
+                ActivateSector(portal.TargetSector, portalBox, SECTOR_OUTDOOR, 0);
+            }
         }
     }
 
-    // Uncullable rooms get a fresh full-screen aperture every frame, so the per-VOB aperture test
-    // can never reject them against a box left over from an earlier frame.
-    for ( size_t i = 0; i < Sectors.size(); i++ ) {
-        if ( Sectors[i].AlwaysActive ) {
+    for (size_t i = 0; i < Sectors.size(); ++i)
+    {
+        if (Sectors[i].AlwaysActive)
+        {
             Stamps[i] = CurrentStamp;
             Apertures[i] = fullScreen;
         }
     }
 
     int active = 0;
-    for ( uint32_t s : Stamps ) {
-        if ( s == CurrentStamp ) active++;
+    for (uint32_t stamp : Stamps)
+    {
+        if (stamp == CurrentStamp)
+        {
+            ++active;
+        }
     }
+
     LastStats.ActiveSectors = active;
     LastStats.CameraOutdoor = cameraOutdoor;
     LastStats.CameraSector = cameraSector;
 
-    ZoneText( "activeSectors", std::size( "activeSectors" ) - 1 );
-    ZoneValue( active );
+    ZoneText("activeSectors", std::size("activeSectors") - 1);
+    ZoneValue(active);
 }
 
-bool BspPortalCuller::IsLeafVisible( const BspInfo& leaf ) const {
-    // No sector -> plain outdoor leaf, never gated.
-    if ( leaf.SectorIds.empty() )
+bool BspPortalCuller::IsLeafVisible(const BspInfo& leaf) const
+{
+    if (leaf.SectorIds.empty())
+    {
         return true;
-
-    for ( uint16_t s : leaf.SectorIds ) {
-        if ( IsSectorActive( s ) )
-            return true;
     }
+
+    for (uint16_t sector : leaf.SectorIds)
+    {
+        if (IsSectorActive(sector))
+        {
+            return true;
+        }
+    }
+
     return false;
 }
 
-bool BspPortalCuller::IsBoxVisibleInLeafSectors( const BspInfo& leaf, const XMFLOAT3& bbMin, const XMFLOAT3& bbMax ) const {
-    if ( leaf.SectorIds.empty() )
+bool BspPortalCuller::IsBoxVisibleInLeafSectors(const BspInfo& leaf, const XMFLOAT3& bbMin, const XMFLOAT3& bbMax) const
+{
+    if (leaf.SectorIds.empty())
+    {
         return true;
-
-    // Widest aperture among the leaf's active sectors, then one projection of the box against it.
-    ScreenBox2D aperture;
-    for ( uint16_t s : leaf.SectorIds ) {
-        if ( IsSectorActive( s ) )
-            aperture.Merge( Apertures[s] );
     }
-    if ( aperture.IsEmpty() )
-        return false;
 
-    // A full-viewport aperture can never reject anything - skip the projection entirely.
-    if ( aperture.MinX <= -1.0f && aperture.MinY <= -1.0f && aperture.MaxX >= 1.0f && aperture.MaxY >= 1.0f )
+    ScreenBox2D aperture;
+    for (uint16_t sector : leaf.SectorIds)
+    {
+        if (IsSectorActive(sector))
+        {
+            aperture.Merge(Apertures[sector]);
+        }
+    }
+
+    if (aperture.IsEmpty())
+    {
+        return false;
+    }
+
+    if (aperture.MinX <= -1.0f && aperture.MinY <= -1.0f && aperture.MaxX >= 1.0f && aperture.MaxY >= 1.0f)
+    {
         return true;
+    }
 
     const XMFLOAT3 corners[8] = {
         { bbMin.x, bbMin.y, bbMin.z }, { bbMax.x, bbMin.y, bbMin.z },
@@ -503,20 +616,22 @@ bool BspPortalCuller::IsBoxVisibleInLeafSectors( const BspInfo& leaf, const XMFL
     };
 
     ScreenBox2D boxOnScreen;
-    bool anyInFront = false;
-    for ( const XMFLOAT3& c : corners ) {
-        XMVECTOR clip = XMVector4Transform( XMVectorSetW( XMLoadFloat3( &c ), 1.0f ), SolveWorldToClip );
-        const float w = XMVectorGetW( clip );
-        if ( w <= CLIP_W_EPSILON ) {
-            // Box straddles/contains the eye - cannot bound it safely on screen, keep it.
+    for (const XMFLOAT3& corner : corners)
+    {
+        XMVECTOR clip = XMVector4Transform(XMVectorSetW(XMLoadFloat3(&corner), 1.0f), SolveWorldToClip);
+        const float w = XMVectorGetW(clip);
+        if (w <= CLIP_W_EPSILON)
+        {
             return true;
         }
-        anyInFront = true;
-        boxOnScreen.Add( XMVectorGetX( clip ) / w, XMVectorGetY( clip ) / w );
+
+        boxOnScreen.Add(XMVectorGetX(clip) / w, XMVectorGetY(clip) / w);
     }
 
-    if ( !anyInFront || boxOnScreen.IsEmpty() )
+    if (boxOnScreen.IsEmpty())
+    {
         return false;
+    }
 
-    return boxOnScreen.Overlaps( aperture );
+    return boxOnScreen.Overlaps(aperture);
 }

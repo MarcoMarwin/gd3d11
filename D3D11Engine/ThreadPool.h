@@ -1,19 +1,20 @@
 #pragma once
-#include <deque>
-#include <functional>
-#include <thread>
-#include <condition_variable>
-#include <mutex>
-#include <stop_token>
-#include <random>
-#include <atomic>
-#include <vector>
-#include <queue>
-#include <memory>
-#include <future>
-#include <stdexcept>
 #include <algorithm>
+#include <atomic>
+#include <chrono>
+#include <condition_variable>
+#include <functional>
+#include <future>
+#include <memory>
+#include <mutex>
+#include <queue>
+#include <stdexcept>
+#include <stop_token>
+#include <string>
+#include <thread>
+#include <type_traits>
 #include <utility>
+#include <vector>
 
 template <typename T>
 struct TaskHandle
@@ -32,126 +33,143 @@ class ThreadPool
 public:
     ThreadPool(
         const wchar_t* poolIdentifier,
-        size_t threads = std::clamp( static_cast<size_t>(std::thread::hardware_concurrency()), static_cast<size_t>(1),
-            static_cast<size_t>(6) ) );
+        size_t threads = std::clamp(
+            static_cast<size_t>(std::thread::hardware_concurrency()),
+            static_cast<size_t>(1),
+            static_cast<size_t>(6)));
 
-    //  enqueue returns a TaskHandle and expects 'F' to accept std::stop_source as its first param
     template <typename F, typename... Args>
-    auto enqueue( F&& f, Args&&... args ) {
+    auto enqueue(F&& f, Args&&... args)
+    {
         using ReturnType = std::invoke_result_t<F, std::stop_token, Args...>;
 
         std::stop_source token;
-
-        auto task = std::packaged_task<ReturnType()>(
-            [f = std::forward<F>( f ),
-             token,
-             ...args = std::forward<Args>( args )]() mutable {
-                 return std::invoke( std::move( f ), token.get_token(), std::forward<Args>(args)...);
-            }
-        );
-
-        std::future<ReturnType> future = task.get_future();
-        {
-            std::scoped_lock lock( queue_mutex );
-
-            if ( stop ) {
-                throw std::runtime_error( "enqueue on stopped ThreadPool" );
-            }
-
-            tasks.emplace( [task = std::move(task)]() mutable
+        auto sharedTask = std::make_shared<std::packaged_task<ReturnType()>>(
+            [func = std::forward<F>(f), token, ...capturedArgs = std::forward<Args>(args)]() mutable -> ReturnType
             {
-                task();
-            }, token );
-        }
-        condition.notify_one();
+                return std::invoke(std::move(func), token.get_token(), std::move(capturedArgs)...);
+            });
 
-        return TaskHandle<ReturnType>{std::move( future ), token};
+        std::future<ReturnType> future = sharedTask->get_future();
+
+        {
+            std::scoped_lock lock(queue_mutex);
+            if (stop)
+            {
+                throw std::runtime_error("enqueue on stopped ThreadPool");
+            }
+
+            tasks.emplace(
+                [sharedTask]() mutable
+                {
+                    (*sharedTask)();
+                },
+                token);
+        }
+
+        condition.notify_one();
+        return TaskHandle<ReturnType>{ std::move(future), token };
     }
 
     ~ThreadPool();
 
-    size_t getNumThreads() { return numThreads; }
+    size_t getNumThreads()
+    {
+        return numThreads;
+    }
 
     bool getIsBusy()
     {
-        std::unique_lock<std::mutex> lock( queue_mutex );
+        std::unique_lock<std::mutex> lock(queue_mutex);
         return !tasks.empty() || activeTasks.load() > 0;
     }
 
     void clearAndFlush()
     {
-        // Swap out the tasks quickly to minimize mutex lock time
-        std::queue<std::pair<std::move_only_function<void()>, std::stop_source>> pending_tasks;
+        std::queue<std::pair<std::function<void()>, std::stop_source>> pendingTasks;
+
         {
-            std::unique_lock<std::mutex> lock( queue_mutex );
-            std::swap( tasks, pending_tasks );
+            std::unique_lock<std::mutex> lock(queue_mutex);
+            std::swap(tasks, pendingTasks);
         }
 
-        // Cancel and invoke all pending tasks so promises are fulfilled gracefully
-        while ( !pending_tasks.empty() ) {
-            auto& taskItem = pending_tasks.front();
-            taskItem.second.request_stop(); // Trigger the cancellation state
-            taskItem.first(); // Invoke the task, assume it will immediately return.
-            pending_tasks.pop();
+        while (!pendingTasks.empty())
+        {
+            auto taskItem = std::move(pendingTasks.front());
+            pendingTasks.pop();
+
+            taskItem.second.request_stop();
+            taskItem.first();
         }
 
-        // Wait for actively running tasks to finish
-        while ( getIsBusy() ) {
-            std::this_thread::sleep_for( std::chrono::milliseconds( 10 ) );
+        while (getIsBusy())
+        {
+            std::this_thread::sleep_for(std::chrono::milliseconds(10));
         }
     }
 
 private:
     std::vector<std::thread> workers;
-    std::queue<std::pair<std::move_only_function<void()>, std::stop_source>> tasks;
-
-    std::atomic_int activeTasks{0};
+    std::queue<std::pair<std::function<void()>, std::stop_source>> tasks;
+    std::atomic_int activeTasks{ 0 };
     std::mutex queue_mutex;
     std::condition_variable condition;
-    bool stop;
-    size_t numThreads;
+    bool stop = false;
+    size_t numThreads = 0;
 };
 
 inline ThreadPool::ThreadPool(const wchar_t* poolIdentifier, size_t threads)
     : stop(false)
+    , numThreads(threads)
 {
-    numThreads = threads;
+    std::wstring identifier = std::wstring(L"GD3D11-") + std::wstring(poolIdentifier ? poolIdentifier : L"ThreadPool");
 
-    std::wstring identifier = std::wstring(L"GD3D11-") + std::wstring(poolIdentifier);
     for (size_t i = 0; i < threads; ++i)
+    {
         workers.emplace_back(
             [](ThreadPool* pool, size_t workerId, const std::wstring& descriptionPrefix)
             {
-                SetThreadDescription( GetCurrentThread(), (descriptionPrefix+std::to_wstring(workerId)).c_str() );
+                SetThreadDescription(GetCurrentThread(), (descriptionPrefix + std::to_wstring(workerId)).c_str());
+
                 for (;;)
                 {
-                    std::move_only_function<void()> task;
+                    std::function<void()> task;
 
                     {
                         std::unique_lock<std::mutex> lock(pool->queue_mutex);
-                        pool->condition.wait(lock,
-                                             [pool] { return pool->stop || !pool->tasks.empty(); });
+                        pool->condition.wait(lock, [pool]
+                        {
+                            return pool->stop || !pool->tasks.empty();
+                        });
 
-                        pool->activeTasks.fetch_add(1);
                         if (pool->stop && pool->tasks.empty())
                         {
-                            pool->activeTasks.fetch_sub(1);
                             return;
                         }
 
-                        // Extract just the function to execute
                         task = std::move(pool->tasks.front().first);
                         pool->tasks.pop();
+                        pool->activeTasks.fetch_add(1);
                     }
 
+                    try
                     {
-                        ZoneScopedN( "ThreadPool Worker Task" );
+                        ZoneScopedN("ThreadPool Worker Task");
                         task();
                     }
+                    catch (...)
+                    {
+                        pool->activeTasks.fetch_sub(1);
+                        throw;
+                    }
+
                     pool->activeTasks.fetch_sub(1);
                 }
-            }, this, i, identifier
-        );
+            },
+            this,
+            i,
+            identifier);
+    }
 }
 
 inline ThreadPool::~ThreadPool()
@@ -160,7 +178,14 @@ inline ThreadPool::~ThreadPool()
         std::unique_lock<std::mutex> lock(queue_mutex);
         stop = true;
     }
+
     condition.notify_all();
+
     for (std::thread& worker : workers)
-        worker.join();
+    {
+        if (worker.joinable())
+        {
+            worker.join();
+        }
+    }
 }
