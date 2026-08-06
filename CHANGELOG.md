@@ -1,9 +1,6 @@
 # Build Changelog
 
 Dokumentation der gepushten Renderer-Builds.
-## Build 199 (Korrekturpush)
-- Korrekturpush: BspPortalCuller Syntax- und Referenzfehler behoben (CVVH_AddNotDrawnVobToList repariert, SectorIds und LastRenderBBox ergaenzt, Settings-Variablen hinzugefuegt, Init-Reihenfolge korrigiert).
-
 
 ## Build 198
 - Regulaerer Push: NightFogRainFade Polynom-glaettung in D3D11PfxRenderer.cpp (verhindert stotternde Nebeluebergaenge durch nicht-lineare Interpolation); Anpassung der Fade-Speeds (0.35/0.55) fuer ein fluessigeres Ingame-Erlebnis.
@@ -928,3 +925,6 @@ Dokumentation der gepushten Renderer-Builds.
 - PS_PFX_LowClouds.hlsl: Breiter Sun-Backlight-Pfad (Broad Sun Mask) mit separaten Dichtemasken fuer Body und Thin-Edge implementiert.
 - PS_Water.hlsl: Shore-Intervalle vereinheitlicht, Reflexionen fuer Ocean-Geometry gedaempft und stabilisiert.
 - PS_PFX_LowCloudComposite.hlsl: Geometrie-Wolken erhalten bei niedriger Konfidenz im 5x5-Fenster einen volumetrischen Fallback (ComputeRefinedLowClouds) mit voller Raymarch-Integration (inkl. PFXBuffer-Uebergabe in D3D11PfxRenderer.cpp).
+
+## Build 199
+- Regulaerer Push: BspPortalCuller (Portal Culling System) implementiert und in GothicAPI, WorldObjects, ShadowMap und PointLight verknuepft.

@@ -40,7 +40,6 @@ bool VobInfo::ComputeIndoorLightMask() const {
 void VobInfo::UpdateState() {
     WorldMatrix = *Vob->GetWorldMatrixPtr();
     LastRenderPosition = Vob->GetPositionWorld();
-    LastRenderBBox = Vob->GetBBox();
 
     const bool currentIndoorVob = Vob->IsIndoorVob();
     if ( !HasIndoorLightMaskSample || currentIndoorVob != IsIndoorVob ) {

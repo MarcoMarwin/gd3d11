@@ -1,7 +1,7 @@
 #pragma once
 #include "pch.h"
 #include "HookedFunctions.h"
-#include "zTypes.h"
+
 #pragma pack (push, 1)	
 #ifdef BUILD_GOTHIC_2_6_fix
 struct PolyFlags {
@@ -114,16 +114,11 @@ public:
     zCMaterial* GetMaterial() const {
         return *reinterpret_cast<zCMaterial**>(THISPTR_OFFSET( GothicMemoryLocations::zCPolygon::Offset_Material ));
     }
+
     void SetMaterial( zCMaterial* material ) {
         *reinterpret_cast<zCMaterial**>(THISPTR_OFFSET( GothicMemoryLocations::zCPolygon::Offset_Material )) = material;
     }
-    const zTPlane& GetPolyPlane() const {
-        return *reinterpret_cast<const zTPlane*>(THISPTR_OFFSET( GothicMemoryLocations::zCPolygon::Offset_PolyPlane ));
-    }
-    bool IsPortal() const {
-        PolyFlags* flags = GetPolyFlags();
-        return flags && flags->PortalPoly != 0;
-    }
+
     float3 GetLightStatAtPos(float3& position) {
         float3 colorStat;
         reinterpret_cast<void( __fastcall* )( zCPolygon*, DWORD, float3&, float3& )>( GothicMemoryLocations::zCPolygon::GetLightStatAtPos )( this, 0, colorStat, position );

@@ -678,8 +678,6 @@ struct GothicRendererSettings {
         EnableVSync = false;
         DoZPrepass = true;
         SortRenderQueue = false;
-        EnablePortalCulling = true;
-        PortalCullingNearRadius = 1500.0f;
         EnableSSR = true;
         SSRStrength = 1.0f; // UI-normalized: 1.0 equals the former 1.4 slider value.
         WaterCubemapStrength = 1.0f;
@@ -940,10 +938,6 @@ struct GothicRendererSettings {
     float DoFNearBlurDistance;
     float DoFNearBlurStrength;
     bool SortRenderQueue;
-    /** Skip VOBs of rooms the camera cannot see into through any chain of portals. */
-    bool EnablePortalCulling;
-    /** Rooms within this distance of the camera are never portal-culled (Gothic units). */
-    float PortalCullingNearRadius;
     EPointLightShadowMode EnablePointlightShadows;
     bool PartialDynamicShadowUpdates;
     bool EnableTiledLighting;

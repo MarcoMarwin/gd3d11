@@ -1132,7 +1132,6 @@ void GothicAPI::ResetVobs() {
     RegisteredVobs.clear();
     BspLeafVobLists.clear();
     LeafLinearCache.Clear();
-    PortalCuller.Clear();
     DynamicallyAddedVobs.clear();
     DecalVobs.clear();
     VobsByVisual.clear();
@@ -4312,7 +4311,6 @@ void GothicAPI::CollectVisibleVobs(
     ctx.drawFlags.CollectSmallVobs = true;
     ctx.drawFlags.CollectMobs = true;
     ctx.drawFlags.CollectLights = true;
-
     CollectVisibleVobs( ctx );
 
     if ( RendererState.RendererSettings.SortRenderQueue ) {
@@ -4796,8 +4794,7 @@ static void CVVH_AddNotDrawnVobToList(
         float distSq,
         const RndCullContext& ctx,
         DirectX::ContainmentType bspContainment,
-        BspTreeVobVisitor* visitor,
-        const BspInfo* portalLeaf = nullptr
+        BspTreeVobVisitor* visitor
     ) {
     const auto camPos = XMLoadFloat3( &ctx.cameraPosition );
     const bool cullingEnabled = ctx.drawFlags.CullVobs;
@@ -4812,13 +4809,8 @@ static void CVVH_AddNotDrawnVobToList(
 
         if ( bspContainment != ContainmentType::CONTAINS // only do frustum check if previously "INTERSECTS"
             && cullingEnabled
-            && !ctx.frustum.Intersects( it->LastRenderBBox ) ) {
+            && !ctx.frustum.Intersects( it->Vob->GetBBox() ) ) {
             continue;
-        }
-        if ( portalLeaf ) {
-            const zTBBox3D& bb = it->LastRenderBBox;
-            if ( !ctx.portalCuller->IsBoxVisibleInLeafSectors( *portalLeaf, bb.Min, bb.Max ) )
-                continue;
         }
         if ( it->Vob->GetVisualAlpha() ) {
             ctx.queue->PushTransparencyVob( TransparencyVobInfo{ std::sqrtf( vdSq ), it->Vob->GetVobTransparency(), nullptr, it } );
@@ -5461,11 +5453,6 @@ void GothicAPI::BuildBspVobMapCache() {
     ConfigureAllPointlightShadowSources();
 
     BuildBspLeafLinearCache();
-
-    // Needs the BspInfo mirror tree above to exist - it tags the leafs with their sector ids.
-    PortalCuller.SetEnabled( RendererState.RendererSettings.EnablePortalCulling );
-    PortalCuller.SetNearSectorRadius( RendererState.RendererSettings.PortalCullingNearRadius );
-    PortalCuller.BuildFromWorld( LoadedWorldInfo->BspTree );
 }
 
 void GothicAPI::BuildBspLeafLinearCache() {
@@ -6776,10 +6763,7 @@ static void CollectLeafVobs(
 
     if ( ctx.drawFlags.DrawVOBs ) {
         if ( collectIndoorVobs && leafDistSq < vobIndoorDistSq ) {
-            if ( !ctx.portalCuller || ctx.portalCuller->IsLeafVisible( *base ) ) {
-                CVVH_AddNotDrawnVobToList( listA, vobIndoorDistSq, ctx, clipResult, visitor,
-                    ctx.portalCuller ? base : nullptr );
-            }
+            CVVH_AddNotDrawnVobToList( listA, vobIndoorDistSq, ctx, clipResult, visitor );
         }
 
         if ( collectSmallVobs && leafDistSq < vobOutdoorSmallDistSq ) {
@@ -7095,20 +7079,6 @@ void GothicAPI::CollectVisibleVobs( const RndCullContext& ctx ) {
     if ( !singlePassCtx.drawFlags.CollectLargeVobs && !singlePassCtx.drawFlags.CollectSmallVobs ) {
         singlePassCtx.drawFlags.CollectLargeVobs = true;
         singlePassCtx.drawFlags.CollectSmallVobs = true;
-    }
-    if ( singlePassCtx.stage == RenderStage::STAGE_DRAW_WORLD && PortalCuller.IsActive() ) {
-        if ( zCCamera* cam = zCCamera::GetCamera() ) {
-            cam->Activate();
-            const auto& view = cam->trafoView;
-            const auto& proj = cam->trafoProjection;
-            XMMATRIX worldToClip = XMMatrixMultiply(
-                XMMatrixTranspose( XMLoadFloat4x4( &view ) ),
-                XMLoadFloat4x4( &proj )
-            );
-            oCGame* game = oCGame::GetGame();
-            PortalCuller.Solve( worldToClip, singlePassCtx.cameraPosition, game ? game->_zCSession_camVob : nullptr );
-            singlePassCtx.portalCuller = &PortalCuller;
-        }
     }
     collectTree( singlePassCtx );
 

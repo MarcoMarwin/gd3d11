@@ -479,9 +479,9 @@ void D3D11PointLight::StartReInit() {
 
         // Add to queue
         m_PendingInit.cancel( ); // Cancel any pending init first, we only care about the latest one
-        m_PendingInit = Engine::WorkerThreadPool->enqueue( [this] (const std::stop_token& token)
+        m_PendingInit = Engine::WorkerThreadPool->enqueue( [this] (const CancellationToken& token)
         {
-            if (token.stop_requested()) {
+            if (token.isCancelled()) {
                 InitDone = true;
                 return;
             }

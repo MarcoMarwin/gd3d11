@@ -201,24 +201,13 @@ class zCVobLight;
 class zCBspLeaf : public zCBspBase {
 public:
     int LastTimeLighted;
-    zCArray<zCVob*> LeafVobList;
+    zCArray<zCVob*>	LeafVobList;
     zCArray<zCVobLight*> LightVobList;
-    UINT                lastTimeActivated;        // last time activated by portal
-    short                    sectorIndex;            // sector this leaf was activated by
+
+    UINT				lastTimeActivated;		// last time activated by portal
+    short					sectorIndex;			// sector this leaf was activated by
 };
-/** One room of a portal-compiled world. The compiler emits these for every sector; they own the BSP leafs their polys live in plus the portal polys leading out of them. */
-class zCBspSector {
-public:
-    zCArray<zCBspBase*>& GetSectorNodes() {
-        return *reinterpret_cast<zCArray<zCBspBase*>*>(THISPTR_OFFSET( GothicMemoryLocations::zCBspSector::Offset_SectorNodes ));
-    }
-    zCArray<zCPolygon*>& GetSectorPortals() {
-        return *reinterpret_cast<zCArray<zCPolygon*>*>(THISPTR_OFFSET( GothicMemoryLocations::zCBspSector::Offset_SectorPortals ));
-    }
-    unsigned long GetSectorIndex() const {
-        return *reinterpret_cast<unsigned long*>(THISPTR_OFFSET( GothicMemoryLocations::zCBspSector::Offset_SectorIndex ));
-    }
-};
+
 /** BspTree-Object which holds the world */
 class zCBspTree {
 public:
@@ -288,12 +277,7 @@ public:
     zCMesh* GetMesh() {
         return *reinterpret_cast<zCMesh**>(THISPTR_OFFSET( GothicMemoryLocations::zCBspTree::Offset_WorldMesh ));
     }
-    zCArray<zCBspSector*>& GetSectorList() {
-        return *reinterpret_cast<zCArray<zCBspSector*>*>(THISPTR_OFFSET( GothicMemoryLocations::zCBspTree::Offset_SectorList ));
-    }
-    zCArray<zCPolygon*>& GetPortalList() {
-        return *reinterpret_cast<zCArray<zCPolygon*>*>(THISPTR_OFFSET( GothicMemoryLocations::zCBspTree::Offset_PortalList ));
-    }
+
 private:
 
 };
