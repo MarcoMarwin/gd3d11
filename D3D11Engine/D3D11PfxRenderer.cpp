@@ -772,12 +772,20 @@ XRESULT D3D11PfxRenderer::RenderLowCloudLayer(
 
     vs->Apply();
 
-    auto res = engine->GetResolution();
-    const INT2 cloudRes( std::max( 1, (res.x + 3) / 4 ), std::max( 1, (res.y + 3) / 4 ) );
+    const INT2 res = engine->GetResolution();
+
+    Microsoft::WRL::ComPtr<ID3D11Resource> cloudLayerResource;
+    cloudLayerRTV->GetResource( cloudLayerResource.GetAddressOf() );
+    Microsoft::WRL::ComPtr<ID3D11Texture2D> cloudLayerTexture;
+    if ( !cloudLayerResource || FAILED( cloudLayerResource.As( &cloudLayerTexture ) ) || !cloudLayerTexture ) {
+        return XR_FAILED;
+    }
+    D3D11_TEXTURE2D_DESC cloudLayerDesc = {};
+    cloudLayerTexture->GetDesc( &cloudLayerDesc );
 
     D3D11_VIEWPORT vp = {};
-    vp.Width = static_cast<float>( cloudRes.x );
-    vp.Height = static_cast<float>( cloudRes.y );
+    vp.Width = static_cast<float>( cloudLayerDesc.Width );
+    vp.Height = static_cast<float>( cloudLayerDesc.Height );
     vp.MinDepth = 0.0f;
     vp.MaxDepth = 1.0f;
     context->RSSetViewports( 1, &vp );

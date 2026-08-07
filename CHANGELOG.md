@@ -943,3 +943,5 @@ Dokumentation der gepushten Renderer-Builds.
 - Korrekturpush: Viewport in RenderLowCloudLayer greift statt auf dynamisches RenderTarget-Auslesen wieder auf eine lokale cloudRes-Berechnung zurueck (synchronisiert auf /4).
 
 - Korrekturpush: Signatur-Mismatch behoben (cloudRes-Parameter in D3D11PfxRenderer.h analog zur .cpp entfernt).
+
+- Korrekturpush: Erneuter Rollback zur dynamischen Viewport-Dimensionierung via RenderTarget-GetDesc() in RenderLowCloudLayer (Sicherstellung der Sync-Integritaet).
