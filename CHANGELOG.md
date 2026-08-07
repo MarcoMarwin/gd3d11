@@ -939,3 +939,5 @@ Dokumentation der gepushten Renderer-Builds.
 - Korrekturpush: Manuelle Code-Zentralisierung fuer cloudRes und Anpassungen auf /4 durch den Benutzer uebernommen.
 
 - Korrekturpush: Viewport in RenderLowCloudLayer liest Dimensionen nun laufzeitsicher direkt aus der RenderTarget-Textur, um Asynchronitaeten bei /4-Aufloesung auszuschliessen.
+
+- Korrekturpush: Viewport in RenderLowCloudLayer greift statt auf dynamisches RenderTarget-Auslesen wieder auf eine lokale cloudRes-Berechnung zurueck (synchronisiert auf /4).
