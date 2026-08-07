@@ -98,7 +98,8 @@ public:
                                  ID3D11RenderTargetView* cloudDepthRTV,
                                  ID3D11RenderTargetView* skyCloudLayerRTV,
                                  ID3D11ShaderResourceView* sceneSRV,
-                                 ID3D11ShaderResourceView* depthSRV );
+                                 ID3D11ShaderResourceView* depthSRV,
+                                 const INT2& cloudRes );
 
     XRESULT CompositeLowClouds( ID3D11RenderTargetView* outputRTV,
                                 ID3D11ShaderResourceView* sceneSRV,

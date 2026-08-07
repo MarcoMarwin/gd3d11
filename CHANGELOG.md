@@ -935,3 +935,5 @@ Dokumentation der gepushten Renderer-Builds.
 - Korrekturpush: D3D11PfxRenderer Fix.
 
 - Korrekturpush: Low-Cloud-Dimensionen vorerst auf /2 zurueckgesetzt (Fehlersuche fuer /4 dauert an).
+
+- Korrekturpush: Manuelle Code-Zentralisierung fuer cloudRes und Anpassungen auf /4 durch den Benutzer uebernommen.
