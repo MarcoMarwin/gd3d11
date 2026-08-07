@@ -683,12 +683,12 @@ struct GothicRendererSettings {
         WaterCubemapStrength = 1.0f;
         EnableSSS = true;
         SSSIntensity = 1.0f; // Default Backlit Vegetation intensity.
-        EnableContactShadows = true;
+        EnableContactShadows = false;
         EnableScreenSpaceGI = false;
         ScreenSpaceGIStrength = 1.0f;
         EnableParticleLighting = true;
         ParticleLightingStrength = 1.0f;
-        EnableDoF = true;
+        EnableDoF = false;
         DoFGaussBlur = false;
         DoFFocusDistance = 12000.0f;
         DoFFocusRange = 8000.0f;

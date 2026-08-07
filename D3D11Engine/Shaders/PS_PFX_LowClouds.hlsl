@@ -106,6 +106,9 @@ PS_OUTPUT PSMain( PS_INPUT Input )
 
     float globalShadow = 0.0f;
     float sunWeight = saturate( AC_SunVisibility ) * smoothstep( 0.04f, 0.42f, AC_LightPos.y );
+    float3 sunDir = normalize( lerp( float3( -0.25f, 0.72f, 0.18f ), AC_LightPos, saturate( abs( AC_LightPos.y ) + 0.12f ) ) );
+    float3 moonDir = normalize( lerp( float3( 0.22f, 0.64f, -0.28f ), AC_MoonPos, saturate( abs( AC_MoonPos.y ) + 0.12f ) ) );
+    float moonDiskWeight = saturate( AC_MoonVisibility ) * saturate( AC_EnableNightAtmosphere ) * smoothstep( 0.02f, 0.34f, AC_MoonPos.y );
 
     float4 clouds = ComputeWorldLowCloudVolume(
         HF_CameraPosition,
@@ -120,15 +123,12 @@ PS_OUTPUT PSMain( PS_INPUT Input )
     skyWorldPosition = mul( float4( skyWorldPosition, 1.0f ), HF_InvView ).xyz;
     float skyCameraDistance = length( skyWorldPosition - HF_CameraPosition );
     float3 skyViewDir = normalize( skyWorldPosition - HF_CameraPosition );
-    float3 skySunDir = normalize( lerp( float3( -0.25f, 0.72f, 0.18f ), AC_LightPos, saturate( abs( AC_LightPos.y ) + 0.12f ) ) );
-    float3 skyMoonDir = normalize( lerp( float3( 0.22f, 0.64f, -0.28f ), AC_MoonPos, saturate( abs( AC_MoonPos.y ) + 0.12f ) ) );
-    float skyMoonDiskWeight = saturate( AC_MoonVisibility ) * saturate( AC_EnableNightAtmosphere ) * smoothstep( 0.02f, 0.34f, AC_MoonPos.y );
-    float skySunAlignment = dot( skyViewDir, skySunDir );
-    float skyMoonAlignment = dot( skyViewDir, skyMoonDir );
+    float skySunAlignment = dot( skyViewDir, sunDir );
+    float skyMoonAlignment = dot( skyViewDir, moonDir );
     float skySunCore = smoothstep( 0.99920f, 0.99986f, skySunAlignment ) * sunWeight;
     float skySunHalo = smoothstep( 0.99200f, 0.99860f, skySunAlignment ) * sunWeight;
-    float skyMoonCore = smoothstep( 0.99935f, 0.99988f, skyMoonAlignment ) * skyMoonDiskWeight;
-    float skyMoonHalo = smoothstep( 0.99500f, 0.99900f, skyMoonAlignment ) * skyMoonDiskWeight;
+    float skyMoonCore = smoothstep( 0.99935f, 0.99988f, skyMoonAlignment ) * moonDiskWeight;
+    float skyMoonHalo = smoothstep( 0.99500f, 0.99900f, skyMoonAlignment ) * moonDiskWeight;
     float4 skyClouds = clouds;
     if ( depthFootprint.hasSky && depthFootprint.hasGeometry )
     {
@@ -143,9 +143,6 @@ PS_OUTPUT PSMain( PS_INPUT Input )
     }
 
     float3 viewDir = normalize( worldPosition - HF_CameraPosition );
-    float3 sunDir = normalize( lerp( float3( -0.25f, 0.72f, 0.18f ), AC_LightPos, saturate( abs( AC_LightPos.y ) + 0.12f ) ) );
-    float3 moonDir = normalize( lerp( float3( 0.22f, 0.64f, -0.28f ), AC_MoonPos, saturate( abs( AC_MoonPos.y ) + 0.12f ) ) );
-    float moonDiskWeight = saturate( AC_MoonVisibility ) * saturate( AC_EnableNightAtmosphere ) * smoothstep( 0.02f, 0.34f, AC_MoonPos.y );
     float sunAlignment = dot( viewDir, sunDir );
     float moonAlignment = dot( viewDir, moonDir );
     float sunCore = smoothstep( 0.99920f, 0.99986f, sunAlignment ) * sunWeight * skyPixel;

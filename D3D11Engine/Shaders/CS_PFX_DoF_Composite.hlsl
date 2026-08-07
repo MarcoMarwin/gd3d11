@@ -105,18 +105,17 @@ float ComputeNearCoCFromDepth( float d, float2 texcoord )
     return ComputeNearCoCFromLinearDepth( CameraDistanceFromDepth( d, texcoord ) );
 }
 
-float ComputeCoCFromDepth( float d, float focusDepth, float2 texcoord )
+float2 ComputeCoCsFromDepth( float d, float focusDepth, float2 texcoord )
 {
     if ( IsSkyDepth( d ) )
         return 0.0f;
 
     const float linearDepth = CameraDistanceFromDepth( d, texcoord );
     const float farCoC = saturate( ( linearDepth - focusDepth ) / DoF_FocusRange );
-    const float nearCoC=ComputeNearCoCFromLinearDepth(linearDepth)*(1.0f-ReflectionReceiverMask(texcoord));
-    return max( farCoC, nearCoC );
+    const float nearCoC = ComputeNearCoCFromLinearDepth( linearDepth )
+        * ( 1.0f - ReflectionReceiverMask( texcoord ) );
+    return float2( max( farCoC, nearCoC ), nearCoC );
 }
-
-
 
 [numthreads(8, 8, 1)]
 void CSMain( uint3 DTid : SV_DispatchThreadID )
@@ -146,31 +145,31 @@ void CSMain( uint3 DTid : SV_DispatchThreadID )
         return;
     }
 
-    float cocC = ComputeCoCFromDepth( depthC, focusDepth, texcoord );
-    float depthL = TX_Depth.SampleLevel( SS_Linear, texcoord + float2( -dtexel.x, 0 ), 0 ).r;
-    float depthR = TX_Depth.SampleLevel( SS_Linear, texcoord + float2(  dtexel.x, 0 ), 0 ).r;
-    float depthU = TX_Depth.SampleLevel( SS_Linear, texcoord + float2( 0, -dtexel.y ), 0 ).r;
-    float depthD = TX_Depth.SampleLevel( SS_Linear, texcoord + float2( 0,  dtexel.y ), 0 ).r;
-    float cocL = IsSkyDepth( depthL ) ? cocC : ComputeCoCFromDepth( depthL, focusDepth, texcoord + float2( -dtexel.x, 0 ) );
-    float cocR = IsSkyDepth( depthR ) ? cocC : ComputeCoCFromDepth( depthR, focusDepth, texcoord + float2(  dtexel.x, 0 ) );
-    float cocU = IsSkyDepth( depthU ) ? cocC : ComputeCoCFromDepth( depthU, focusDepth, texcoord + float2( 0, -dtexel.y ) );
-    float cocD = IsSkyDepth( depthD ) ? cocC : ComputeCoCFromDepth( depthD, focusDepth, texcoord + float2( 0,  dtexel.y ) );
-    float2 nearUvC = texcoord;
-    float2 nearUvL = texcoord + float2( -dtexel.x, 0 );
-    float2 nearUvR = texcoord + float2(  dtexel.x, 0 );
-    float2 nearUvU = texcoord + float2( 0, -dtexel.y );
-    float2 nearUvD = texcoord + float2( 0,  dtexel.y );
+    const float2 uvL = texcoord + float2( -dtexel.x, 0.0f );
+    const float2 uvR = texcoord + float2(  dtexel.x, 0.0f );
+    const float2 uvU = texcoord + float2( 0.0f, -dtexel.y );
+    const float2 uvD = texcoord + float2( 0.0f,  dtexel.y );
+    float depthL = TX_Depth.SampleLevel( SS_Linear, uvL, 0 ).r;
+    float depthR = TX_Depth.SampleLevel( SS_Linear, uvR, 0 ).r;
+    float depthU = TX_Depth.SampleLevel( SS_Linear, uvU, 0 ).r;
+    float depthD = TX_Depth.SampleLevel( SS_Linear, uvD, 0 ).r;
 
-    float nearC = ComputeNearCoCFromDepth( depthC, nearUvC )
-        * (1.0f - ReflectionReceiverMask(nearUvC));
-    float nearL = ComputeNearCoCFromDepth( depthL, nearUvL )
-        * (1.0f - ReflectionReceiverMask(nearUvL));
-    float nearR = ComputeNearCoCFromDepth( depthR, nearUvR )
-        * (1.0f - ReflectionReceiverMask(nearUvR));
-    float nearU = ComputeNearCoCFromDepth( depthU, nearUvU )
-        * (1.0f - ReflectionReceiverMask(nearUvU));
-    float nearD = ComputeNearCoCFromDepth( depthD, nearUvD )
-        * (1.0f - ReflectionReceiverMask(nearUvD));
+    const float2 cocNearC = ComputeCoCsFromDepth( depthC, focusDepth, texcoord );
+    const float2 cocNearL = IsSkyDepth( depthL ) ? float2( cocNearC.x, 0.0f ) : ComputeCoCsFromDepth( depthL, focusDepth, uvL );
+    const float2 cocNearR = IsSkyDepth( depthR ) ? float2( cocNearC.x, 0.0f ) : ComputeCoCsFromDepth( depthR, focusDepth, uvR );
+    const float2 cocNearU = IsSkyDepth( depthU ) ? float2( cocNearC.x, 0.0f ) : ComputeCoCsFromDepth( depthU, focusDepth, uvU );
+    const float2 cocNearD = IsSkyDepth( depthD ) ? float2( cocNearC.x, 0.0f ) : ComputeCoCsFromDepth( depthD, focusDepth, uvD );
+
+    const float cocC = cocNearC.x;
+    const float cocL = cocNearL.x;
+    const float cocR = cocNearR.x;
+    const float cocU = cocNearU.x;
+    const float cocD = cocNearD.x;
+    const float nearC = cocNearC.y;
+    const float nearL = cocNearL.y;
+    const float nearR = cocNearR.y;
+    const float nearU = cocNearU.y;
+    const float nearD = cocNearD.y;
     float nearNeighbourCoC = max( max( nearC, nearL ), max( nearR, max( nearU, nearD ) ) );
 
     float2 inwardShift = float2(

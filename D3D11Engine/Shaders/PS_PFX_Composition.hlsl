@@ -452,8 +452,13 @@ float rainVeil = max(rainFogOpacity, rainVeilBase) * activeWeatherFog;
             -0.08f,
             0.08f,
             globalFogDominance);
+        float rainVisibilityBlend = smoothstep(0.0f, 0.18f, activeWeatherFog);
         float rainDrivenNightFogBlend = rainFogPresent * nightFogRainFade;
-        float globalRainWinnerBlend = rainDrivenNightFogBlend * (
+        float rainDrivenRainFogBlend = lerp(
+            rainVisibilityBlend,
+            rainDrivenNightFogBlend,
+            nightAtmosphereBlend);
+        float globalRainWinnerBlend = rainDrivenRainFogBlend * (
             (1.0f - worldFogEventPresent)
             + worldFogEventPresent * transitionRainWinnerBlend);
         float finalFogWeight = lerp(

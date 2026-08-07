@@ -931,9 +931,9 @@ void ApplyGraphicsPresets( GothicRendererSettings& s, bool applyRuntimeUpdates =
     case GothicRendererSettings::GRAPHICS_MEDIUM:
         s.ShadowMapSize = 2048;
         s.AoMode = AOMode::AO_XEGTAO;
-        s.EnableContactShadows = true;
+        s.EnableContactShadows = false;
         s.EnableScreenSpaceGI = false;
-        s.EnableDoF = true;
+        s.EnableDoF = false;
         s.EnableDynamicClouds = true;
         if ( IsWindEffectsControlVisible() ) s.WindQuality = GothicRendererSettings::EWindQuality::WIND_QUALITY_ADVANCED;
         s.OutdoorSmallVobDrawRadius = ObjectDrawDistanceUiToMeters( 5 );

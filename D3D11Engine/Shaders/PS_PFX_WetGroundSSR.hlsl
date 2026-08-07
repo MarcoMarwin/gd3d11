@@ -1008,7 +1008,8 @@ float4 PSMain(PS_INPUT input) : SV_TARGET
     float3 puddleWetNormal = normalize(
         puddlePlaneNormal + float3(rainNormalDistortion.x, 0.0f, rainNormalDistortion.y));
     float2 reflectionRippleOffset = rippleDistortion * float2(0.0040f, 0.0040f);
-    float materialTraceMask = saturate(materialWetMask);
+    float materialTraceMask = saturate(
+        materialWetMask * (1.0f - smoothstep(0.04f, 0.35f, puddleWetMask)));
     float puddleTraceMask = saturate(puddleWetMask * slopeWaterFade);
     WetGroundReflectionTrace materialReflection = TraceWetGroundReflection(
         materialTraceMask,
