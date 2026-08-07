@@ -928,3 +928,6 @@ Dokumentation der gepushten Renderer-Builds.
 
 ## Build 199
 - Regulaerer Push: BspPortalCuller (Portal Culling System) implementiert und in GothicAPI, WorldObjects, ShadowMap und PointLight verknuepft.
+
+## Build 200
+- Korrekturpush: GitHub-Build repariert / korrigiert.
