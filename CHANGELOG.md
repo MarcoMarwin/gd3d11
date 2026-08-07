@@ -933,3 +933,5 @@ Dokumentation der gepushten Renderer-Builds.
 - Korrekturpush: GitHub-Build repariert / korrigiert.
 - Korrekturpush: Weitere Fixes (zweiter Upload).
 - Korrekturpush: D3D11PfxRenderer Fix.
+
+- Korrekturpush: Low-Cloud-Dimensionen vorerst auf /2 zurueckgesetzt (Fehlersuche fuer /4 dauert an).
