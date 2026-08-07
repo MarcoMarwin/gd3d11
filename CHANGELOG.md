@@ -932,3 +932,4 @@ Dokumentation der gepushten Renderer-Builds.
 ## Build 200
 - Korrekturpush: GitHub-Build repariert / korrigiert.
 - Korrekturpush: Weitere Fixes (zweiter Upload).
+- Korrekturpush: D3D11PfxRenderer Fix.

@@ -773,7 +773,7 @@ XRESULT D3D11PfxRenderer::RenderLowCloudLayer(
     vs->Apply();
 
     auto res = engine->GetResolution();
-    const INT2 cloudRes( std::max( 1, (res.x + 3) / 4 ), std::max( 1, (res.y + 3) / 4 ) );
+    const INT2 cloudRes( std::max( 1, (res.x + 2) / 3 ), std::max( 1, (res.y + 2) / 3 ) );
 
     D3D11_VIEWPORT vp = {};
     vp.Width = static_cast<float>( cloudRes.x );
@@ -940,7 +940,7 @@ XRESULT D3D11PfxRenderer::RenderLowClouds( ID3D11RenderTargetView* outputRTV,
 
     D3D11GraphicsEngine* engine = reinterpret_cast<D3D11GraphicsEngine*>(Engine::GraphicsEngine);
     auto res = engine->GetResolution();
-    const INT2 cloudRes( std::max( 1, (res.x + 3) / 4 ), std::max( 1, (res.y + 3) / 4 ) );
+    const INT2 cloudRes( std::max( 1, (res.x + 2) / 3 ), std::max( 1, (res.y + 2) / 3 ) );
     auto lowCloudLayer = m_texturePool->Acquire( TexturePool::Description{ cloudRes.x, cloudRes.y, DXGI_FORMAT_R16G16B16A16_FLOAT } );
     auto lowCloudDepth = m_texturePool->Acquire( TexturePool::Description{ cloudRes.x, cloudRes.y, DXGI_FORMAT_R32_FLOAT } );
     auto skyCloudLayer = m_texturePool->Acquire( TexturePool::Description{ cloudRes.x, cloudRes.y, DXGI_FORMAT_R16G16B16A16_FLOAT } );
