@@ -690,8 +690,7 @@ XRESULT D3D11PfxRenderer::RenderLowCloudLayer(
     ID3D11RenderTargetView* cloudDepthRTV,
     ID3D11RenderTargetView* skyCloudLayerRTV,
     ID3D11ShaderResourceView* sceneSRV,
-    ID3D11ShaderResourceView* depthSRV,
-    const INT2& cloudRes ) {
+    ID3D11ShaderResourceView* depthSRV ) {
     if ( !cloudLayerRTV || !cloudDepthRTV || !skyCloudLayerRTV || !sceneSRV || !depthSRV ) {
         return XR_SUCCESS;
     }
@@ -775,9 +774,18 @@ XRESULT D3D11PfxRenderer::RenderLowCloudLayer(
 
     const INT2 res = engine->GetResolution();
 
+    Microsoft::WRL::ComPtr<ID3D11Resource> cloudLayerResource;
+    cloudLayerRTV->GetResource( cloudLayerResource.GetAddressOf() );
+    Microsoft::WRL::ComPtr<ID3D11Texture2D> cloudLayerTexture;
+    if ( !cloudLayerResource || FAILED( cloudLayerResource.As( &cloudLayerTexture ) ) || !cloudLayerTexture ) {
+        return XR_FAILED;
+    }
+    D3D11_TEXTURE2D_DESC cloudLayerDesc = {};
+    cloudLayerTexture->GetDesc( &cloudLayerDesc );
+
     D3D11_VIEWPORT vp = {};
-    vp.Width = static_cast<float>( cloudRes.x );
-    vp.Height = static_cast<float>( cloudRes.y );
+    vp.Width = static_cast<float>( cloudLayerDesc.Width );
+    vp.Height = static_cast<float>( cloudLayerDesc.Height );
     vp.MinDepth = 0.0f;
     vp.MaxDepth = 1.0f;
     context->RSSetViewports( 1, &vp );
@@ -956,8 +964,7 @@ XRESULT D3D11PfxRenderer::RenderLowClouds( ID3D11RenderTargetView* outputRTV,
         lowCloudDepth->GetRenderTargetView().Get(),
         skyCloudLayer->GetRenderTargetView().Get(),
         sceneSRV,
-        depthSRV,
-        cloudRes );
+        depthSRV );
     if ( result != XR_SUCCESS ) {
         return result;
     }

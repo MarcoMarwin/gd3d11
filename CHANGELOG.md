@@ -937,3 +937,5 @@ Dokumentation der gepushten Renderer-Builds.
 - Korrekturpush: Low-Cloud-Dimensionen vorerst auf /2 zurueckgesetzt (Fehlersuche fuer /4 dauert an).
 
 - Korrekturpush: Manuelle Code-Zentralisierung fuer cloudRes und Anpassungen auf /4 durch den Benutzer uebernommen.
+
+- Korrekturpush: Viewport in RenderLowCloudLayer liest Dimensionen nun laufzeitsicher direkt aus der RenderTarget-Textur, um Asynchronitaeten bei /4-Aufloesung auszuschliessen.
