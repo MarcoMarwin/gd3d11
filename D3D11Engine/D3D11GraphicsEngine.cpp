@@ -7076,11 +7076,7 @@ void XM_CALLCONV D3D11GraphicsEngine::DrawWorldAroundForWorldShadow( FXMVECTOR p
         currentFrustum = &alwaysContainingFrustum;
     }
 
-    // World geometry is already reduced by section collection. A cascade frustum
-    // edge-case around sun zenith can reject only worldmesh while VOB/NPC casters
-    // still render, so keep worldmesh shadow culling conservative here.
-    Frustum relaxedWorldShadowFrustum = Frustum::AlwaysContainingFrustum();
-    const Frustum* worldMeshShadowFrustum = &relaxedWorldShadowFrustum;
+    const Frustum* worldMeshShadowFrustum = currentFrustum;
 
     if ( Engine::GAPI->GetRendererState().RendererSettings.DrawWorldMesh ) {
         TracyD3D11ZoneCGX( "Shadows::DrawWorldMesh" );

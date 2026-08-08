@@ -947,3 +947,5 @@ Dokumentation der gepushten Renderer-Builds.
 - Korrekturpush: Erneuter Rollback zur dynamischen Viewport-Dimensionierung via RenderTarget-GetDesc() in RenderLowCloudLayer (Sicherstellung der Sync-Integritaet).
 
 - Korrekturpush: Diverse manuelle Feinabstimmungen (DoF default an, dynamische Wolken default aus, reduzierte RainFog-Opacity, erweiterte Tag/Nacht-Farbtonkorrektur fuer WetGroundSSR und Ozean-Reflexionen).
+
+- Korrekturpush: Kaskaden-Frustum fuer Shadow-Weltmesh wiederhergestellt (behebt massiven Triangle-Overhead durch AlwaysContainingFrustum-Workaround).
