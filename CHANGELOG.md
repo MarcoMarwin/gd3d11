@@ -959,3 +959,5 @@ Dokumentation der gepushten Renderer-Builds.
 - Korrekturpush: Groundfog-Erkennung erweitert (Swampfog/Dunst in NewWorld wird wieder vom Renderer als echter Nebel mit korrektem Culling und Lighting behandelt). Weichere Uferuebergaenge beim Color-Blending des Legacy-Wassers hinzugefuegt.
 
 - Korrekturpush: Groundfog-Erkennung (NewWorld Sumpfnebel) ueberarbeitet (sichere Erkennung ueber Firesmoke-Textur und BlendMode statt generischer Namenssuche, um False-Positives bei magischen Effekten/Feuer zu vermeiden).
+
+- Korrekturpush: Groundfog-Erkennung weiter verfeinert (Vermeidung von False-Positives bei echten Rauch-Effekten wie humansmoke durch zusaetzliche Namensausnahmen, Emissive-Logik bereinigt).

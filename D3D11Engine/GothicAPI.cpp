@@ -140,13 +140,24 @@ namespace {
         return texture && IsGroundFogName( texture->GetNameWithoutExt() );
     }
 
-    bool IsGroundFogFiresmokeFallbackTexture( zCTexture* texture, int blendMode ) {
+    bool IsNonGroundFogFiresmokeName( std::string name ) {
+        name = ToLowerMaterialName( std::move( name ) );
+        return name.find( "fire_smoke" ) != std::string::npos
+            || name.find( "humansmoke" ) != std::string::npos
+            || name.find( "human_smoke" ) != std::string::npos;
+    }
+
+    bool IsGroundFogFiresmokeFallbackTexture( zCTexture* texture, int blendMode, const std::string& contextName ) {
         if ( !texture || blendMode != zRND_ALPHA_FUNC_BLEND )
+            return false;
+
+        if ( IsNonGroundFogFiresmokeName( contextName ) )
             return false;
 
         const std::string name = ToLowerMaterialName( texture->GetNameWithoutExt() );
         return name.find( "firesmoke" ) != std::string::npos;
     }
+
     bool IsSmokeName( std::string name ) {
         name = ToLowerMaterialName( std::move( name ) );
         return name.find( "smoke" ) != std::string::npos
@@ -191,14 +202,14 @@ namespace {
                     const int blendMode = static_cast<int>(emitter->GetVisAlphaFunc());
                     if ( zCTexture* texture = emitter->GetBaseVisTexture() ) {
                         if ( IsGroundFogParticleTexture( texture )
-                            || IsGroundFogFiresmokeFallbackTexture( texture, blendMode ) ) {
+                            || IsGroundFogFiresmokeFallbackTexture( texture, blendMode, name ) ) {
                             return true;
                         }
                     }
                     if ( zTParticle* firstParticle = particle->GetFirstParticle() ) {
                         if ( zCTexture* texture = emitter->GetVisTexture( firstParticle ) ) {
                             if ( IsGroundFogParticleTexture( texture )
-                                || IsGroundFogFiresmokeFallbackTexture( texture, blendMode ) ) {
+                                || IsGroundFogFiresmokeFallbackTexture( texture, blendMode, name ) ) {
                                 return true;
                             }
                         }
@@ -258,11 +269,12 @@ namespace {
             return false;
 
         const std::string name = ToLowerMaterialName( texture->GetNameWithoutExt() );
-        // Fog PFX may use additive blending in Gothic data, but should stay soft scene fog.
+        // Explicit groundfog-named textures stay non-emissive. FIRESMOKE is handled
+        // by blend mode: FIRESMOKE+BLEND can be ground fog, FIRESMOKE+ADD stays additive.
         if ( IsGroundFogName( name ) )
             return false;
-        // FIRESMOKE+ADD is Gothic's LAVAFOG, not an emissive flame.
-        return name.find( "firesmoke" ) == std::string::npos;
+
+        return true;
     }
 
     bool IsFlameVisualName( std::string name ) {
@@ -3444,8 +3456,7 @@ void GothicAPI::DrawParticleFX( zCVob* source, zCParticleFX* fx, ParticleFrameDa
 
         const bool groundFogParticle =
             IsGroundFogParticleVob( source )
-            || IsGroundFogParticleTexture( texture )
-            || IsGroundFogFiresmokeFallbackTexture( texture, sourceBlendMode );
+            || IsGroundFogParticleTexture( texture );
 
         const bool smokeOrFogParticle =
             groundFogParticle
