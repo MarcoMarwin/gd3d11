@@ -54,6 +54,11 @@ namespace Engine {
 
     /** Called when the game is about to close */
     void OnShutDown() {
+        static bool shutdownStarted = false;
+        if ( shutdownStarted ) {
+            return;
+        }
+        shutdownStarted = true;
         LogInfo() << "Shutting down...";
         if ( Engine::RenderingThreadPool ) {
             Engine::RenderingThreadPool->clearAndFlush();

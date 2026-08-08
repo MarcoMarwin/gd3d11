@@ -3514,9 +3514,11 @@ void GothicAPI::DrawParticleFX( zCVob* source, zCParticleFX* fx, ParticleFrameDa
                 // here only for translucent ground fog so its original linear
                 // emitter opacity survives the shader path.
                 color.w = std::pow( color.w, 1.0f / 2.2f );
-                // Ground fog uses 35% final visibility while dry and retains
-                // 70% of that dry visibility during full rain.
-                color.w *= std::lerp( 0.35f, 0.245f, particleRainWeight );
+                // Ground fog targets 35% final visibility while dry and retains
+                // 70% of that final visibility during full rain. These factors are
+                // inverse-gamma compensated because VS_ParticlePoint raises alpha
+                // again later in the particle shader path.
+                color.w *= std::lerp( 0.62052346f, 0.52765277f, particleRainWeight );
             } else if ( smokeOrFogParticle ) {
                 // Regular smoke and fog preserve the current 50% final visibility
                 // while dry and retain 70% of that dry visibility during full rain.

@@ -380,6 +380,19 @@ PS_OUTPUT PSMain(PS_INPUT Input)
     float normalSmooth = 0.34f + 0.18f * SmootherStep01(saturate((waterViewDistance - 1500) / 12000));
     float3 geoDir = reflect(viewDirection, normalize(lerp(wf, float3(0, 1, 0), normalSmooth)));
     float3 cube = max(TX_ReflectionCube.Sample(SS_Linear, reflVec).rgb, 0);
+    // When SSR is enabled but a grazing-angle ray has no stable scene/sky hit,
+    // the static cubemap becomes the fallback source. At night that cubemap can
+    // look too bright compared to real SSR, so dim only this fallback path while
+    // leaving daytime, SSR-off and valid SSR hits unchanged.
+    float lowLightReflectionAmount = saturate(max(
+        nightAmount,
+        saturate((0.28f - AC_LightPos.y) * 2.8f)));
+    float grazingFallbackAmount = saturate(
+        ssrEnabled * lowLightReflectionAmount * smoothstep(0.12f, 0.78f, reflectFresnel));
+    float ssrNightCubeFallbackDim = lerp(
+        1.0f,
+        0.14f,
+        grazingFallbackAmount);
     float cubeOnlyReflectionAmount = saturate(
         lerp(0.35f, 1.0f, reflectFresnel) * 0.5f * reflectFresnel)
         * waterReflectionSuppress;
@@ -532,6 +545,8 @@ float3 skyReflection =
     float geometryHit = saturate(ssrConfidence);
     float skyConf = saturate(skyWeight * lerp(.90f, .80f, rainAmount));
     float3 skyBack = lerp(fallback, skyReflection, skyConf);
+    // The no-hit SSR fallback must stay darker at night than real scene-space hits.
+    skyBack *= lerp(1.0f, ssrNightCubeFallbackDim, 1.0f - geometryHit);
     float skyBackLuma = max(dot(skyBack, reflectionLumaWeights), .0001f);
     float nightEdgeFloor = lerp(
         .055f,
@@ -615,7 +630,7 @@ float3 skyReflection =
                 + oceanSkySourceAvailable));
         float3 reflectionColor =
             processedReflection * oceanGeometrySourceAvailable
-            + skyReflection * oceanSkySourceAvailable;
+            + (skyReflection * ssrNightCubeFallbackDim) * oceanSkySourceAvailable;
         float thick = clamp(max(depth - surfaceViewZ, 0) * viewRayScale, 0, 6000);
         float underThick = clamp(abs(depth - surfaceViewZ) * .35f, 0, 1400);
         float optical = lerp(thick, underThick, cameraBelowSurface);
@@ -696,6 +711,7 @@ float3 skyReflection =
             oceanLimitedCubeLuma.xxx,
             oceanLimitedCube,
             .58f);
+        oceanPreparedCube *= ssrNightCubeFallbackDim;
         reflectionColor +=
             oceanPreparedCube * oceanCubeFallbackAvailable;
         float skySel = step(.001f, skyWeight) * (1.0f - oceanGeometrySourceAvailable) * ssrEnabled;
@@ -722,6 +738,10 @@ float3 skyReflection =
             backupDayAmount,
             currentNightAmount,
             nightAmount) * shore * hemi;
+        amount *= lerp(
+            1.0f,
+            0.62f,
+            saturate((oceanSkySourceAvailable + oceanCubeFallbackAvailable) * grazingFallbackAmount));
         float3 oceanSsrColor = lerp(volume, reflectionColor, amount);
         float rawOceanCubeOnlyLuma = max(dot(
             cubeOnlyReflectionColor,
@@ -753,7 +773,11 @@ float3 skyReflection =
         float3 smallRefl = reflect(-viewDirection, ws);
         float weather = GetRainSkyVisibility();
         float sunSpot = pow(saturate(dot(smallRefl, -AC_LightPos.xyz)), 500) * .5f * smoothstep(-.04f, .08f, AC_LightPos.y) * smoothstep(0.0f, 0.08f, saturate(AC_SunVisibility)) * weather * sunCloudTransmission * (1 - glintBlock);
-        float glintControl = max(cubeStrength, ssrStrength) * shore;
+        float oceanFallbackGlintDim = lerp(
+            1.0f,
+            0.25f,
+            saturate((1.0f - oceanGeometrySourceAvailable) * grazingFallbackAmount));
+        float glintControl = max(cubeStrength, ssrStrength) * shore * oceanFallbackGlintDim;
         color += lerp(float3(1.2, .6, .2), float3(5, 5, 5), AC_LightPos.y) * sunSpot * glintControl;
         float3 moonDir = normalize(-AC_MoonPos.xyz);
         float moonSpot = pow(saturate(dot(smallRefl, moonDir)), 420) * .15f * smoothstep(-.04f, .08f, AC_MoonPos.y) * smoothstep(0.0f, 0.08f, saturate(AC_MoonVisibility)) * weather * moonCloudTransmission * (1 - glintBlock);
@@ -925,6 +949,7 @@ float3 skyReflection =
             legacyLimitedCubeLuma.xxx,
             legacyLimitedCube,
             .38f);
+        legacyDesaturatedCube *= ssrNightCubeFallbackDim;
         float legacyCubeStructureWeight = lerp(
             .28f,
             .72f,

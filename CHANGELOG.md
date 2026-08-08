@@ -953,3 +953,5 @@ Dokumentation der gepushten Renderer-Builds.
 - Korrekturpush: Sky-Edge-Blur im DoF-Composite implementiert und statische Silhouette-Confidence entfernt, um Himmelsuebergaenge unscharfer Objekte weicher zu mischen.
 
 - Regulaerer Push: Umstellung der Release-Tags auf explizite Versionierung (v18.0) und Entfernung des Build-Prefixes aus Release-Artefakten.
+
+- Korrekturpush: Access Violation beim Prozessende behoben (Shutdown-Logik aus DllMain entfernt). Inverse-Gamma-Korrektur fuer Groundfogs korrigiert (35% Sichtbarkeit wiederhergestellt). SSR-Fallback-Cubemap fuer Wasser bei Nacht abgedunkelt.

@@ -474,7 +474,7 @@ int WINAPI hooked_WinMain( HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR l
     exit( -1 );
 }
 
-BOOL WINAPI DllMain( HINSTANCE hInst, DWORD reason, LPVOID ) {
+BOOL WINAPI DllMain( HINSTANCE hInst, DWORD reason, LPVOID lpvReserved ) {
     if ( DetourIsHelperProcess() ) {
         return TRUE;
     }
@@ -561,14 +561,22 @@ BOOL WINAPI DllMain( HINSTANCE hInst, DWORD reason, LPVOID ) {
         ddraw.RegisterSpecialCase = GetProcAddress( ddraw.dll, "RegisterSpecialCase" );
         ddraw.ReleaseDDThreadLock = GetProcAddress( ddraw.dll, "ReleaseDDThreadLock" );
     } else if ( reason == DLL_PROCESS_DETACH ) {
-        Engine::OnShutDown();
+        // During normal process termination DllMain runs under the loader lock,
+        // after other threads may already be gone. Do not flush thread pools,
+        // call exit(), uninitialize COM, or unload ddraw.dll from this path.
+        if ( lpvReserved != nullptr ) {
+            return TRUE;
+        }
 
+        // Explicit FreeLibrary unload: keep cleanup minimal and avoid the
+        // renderer hard-shutdown path because it exits the process.
         if ( comInitialized ) {
             comInitialized = false;
             CoUninitialize();
         }
         if ( ddraw.dll ) {
             FreeLibrary( ddraw.dll );
+            ddraw.dll = nullptr;
         }
 
         LogInfo() << "DDRAW Proxy DLL signing off.\n";
