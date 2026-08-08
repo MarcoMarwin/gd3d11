@@ -23,6 +23,7 @@ runs:
 
         if ($env:GITHUB_REF_TYPE -eq "tag") {
           $tagOrGitShortHash = $env:GITHUB_REF_NAME
+          $buildPrefix = ""
         } else {
           $shortHash = $env:GITHUB_SHA.Substring(0, 9)
           $tagOrGitShortHash = "git-$shortHash"
