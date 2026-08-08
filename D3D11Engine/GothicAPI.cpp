@@ -132,8 +132,24 @@ namespace {
     }
         bool IsGroundFogName( std::string name ) {
         name = ToLowerMaterialName( std::move( name ) );
-        return name.find( "groundfog" ) != std::string::npos
-            || name.find( "ground_fog" ) != std::string::npos;
+        const bool hasFogMarker = name.find( "groundfog" ) != std::string::npos
+            || name.find( "ground_fog" ) != std::string::npos
+            || name.find( "ground fog" ) != std::string::npos
+            || name.find( "lavafog" ) != std::string::npos
+            || name.find( "waterfog" ) != std::string::npos
+            || name.find( "firesmoke" ) != std::string::npos
+            || name.find( "watersmoke" ) != std::string::npos
+            || name.find( "groundsmoke" ) != std::string::npos
+            || name.find( "mist" ) != std::string::npos
+            || name.find( "nebel" ) != std::string::npos
+            || name.find( "dunst" ) != std::string::npos
+            || name.find( "fog" ) != std::string::npos;
+        if ( !hasFogMarker )
+            return false;
+
+        return name.find( "fireball" ) == std::string::npos
+            && name.find( "spell" ) == std::string::npos
+            && name.find( "magic" ) == std::string::npos;
     }
 
     bool IsGroundFogParticleTexture( zCTexture* texture ) {
@@ -166,12 +182,28 @@ namespace {
     }
 
     bool IsGroundFogParticleVob( zCVob* source ) {
-        if ( !source ) return false;
+        if ( !source )
+            return false;
+
         std::string name = source->GetName();
         if ( zCVisual* visual = source->GetVisual() ) {
             name += " ";
             if ( const char* objectName = visual->GetObjectName() ) {
                 name += objectName;
+            }
+            if ( zCParticleFX* particle = reinterpret_cast<zCParticleFX*>(visual) ) {
+                if ( zCParticleEmitter* emitter = particle->GetEmitter() ) {
+                    if ( zCTexture* texture = emitter->GetBaseVisTexture() ) {
+                        name += " ";
+                        name += texture->GetNameWithoutExt();
+                    }
+                    if ( zTParticle* firstParticle = particle->GetFirstParticle() ) {
+                        if ( zCTexture* texture = emitter->GetVisTexture( firstParticle ) ) {
+                            name += " ";
+                            name += texture->GetNameWithoutExt();
+                        }
+                    }
+                }
             }
         }
         return IsGroundFogName( std::move( name ) );
@@ -3409,11 +3441,11 @@ void GothicAPI::DrawParticleFX( zCVob* source, zCParticleFX* fx, ParticleFrameDa
             IsWaterfallParticleTexture( texture );
 
         const bool groundFogParticle =
-            IsGroundFogParticleVob( source );
+            IsGroundFogParticleVob( source )
+            || IsGroundFogParticleTexture( texture );
 
         const bool smokeOrFogParticle =
             groundFogParticle
-            || IsGroundFogParticleTexture( texture )
             || IsSmokeParticleVob( source )
             || IsSmokeParticleTexture( texture );
         const int sourceBlendMode = static_cast<int>(fx->GetEmitter()->GetVisAlphaFunc());

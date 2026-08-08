@@ -955,3 +955,5 @@ Dokumentation der gepushten Renderer-Builds.
 - Regulaerer Push: Umstellung der Release-Tags auf explizite Versionierung (v18.0) und Entfernung des Build-Prefixes aus Release-Artefakten.
 
 - Korrekturpush: Access Violation beim Prozessende behoben (Shutdown-Logik aus DllMain entfernt). Inverse-Gamma-Korrektur fuer Groundfogs korrigiert (35% Sichtbarkeit wiederhergestellt). SSR-Fallback-Cubemap fuer Wasser bei Nacht abgedunkelt.
+
+- Korrekturpush: Groundfog-Erkennung erweitert (Swampfog/Dunst in NewWorld wird wieder vom Renderer als echter Nebel mit korrektem Culling und Lighting behandelt). Weichere Uferuebergaenge beim Color-Blending des Legacy-Wassers hinzugefuegt.

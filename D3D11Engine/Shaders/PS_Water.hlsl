@@ -900,11 +900,19 @@ float3 skyReflection =
         float legacyShoreDerivative = max(fwidth(legacyWaterThickness), 1.0f);
         float legacyShoreFadeEnd = clamp(max(65.0f, legacyShoreDerivative * 1.25f), 65.0f, 160.0f);
         float legacyShoreVisibility = SmootherStep01(saturate((legacyWaterThickness - 1.0f) / max(legacyShoreFadeEnd - 1.0f, 1.0f)));
-        float legacyShoreColorEnd = clamp(max(42.0f, legacyShoreDerivative * 0.82f), 42.0f, 105.0f);
-        float legacyShoreColor = SmootherStep01(saturate((legacyWaterThickness - 1.0f) / max(legacyShoreColorEnd - 1.0f, 1.0f)));
+        // Legacy distorted refraction can sample deeper water beside the actual
+        // shoreline, which makes the water tint start too abruptly on sloped
+        // banks. Use the more conservative thickness for color only, then make
+        // the color-volume transition wider than the reflection/visibility fade.
+        float legacyCenterShoreThickness = clamp(legacyCenterThickness, 0.0f, 6000.0f);
+        float legacyShoreColorThickness = min(legacyWaterThickness, legacyCenterShoreThickness);
+        float legacyShoreColorDerivative = max(fwidth(legacyShoreColorThickness), 1.0f);
+        float legacyShoreColorStart = max(22.0f, legacyShoreColorDerivative * 0.18f);
+        float legacyShoreColorEnd = clamp(max(260.0f, legacyShoreColorDerivative * 2.85f), 260.0f, 520.0f);
+        float legacyShoreColor = SmootherStep01(saturate((legacyShoreColorThickness - legacyShoreColorStart) / max(legacyShoreColorEnd - legacyShoreColorStart, 1.0f)));
         // Keep the broad Legacy visibility fade for reflections, glints and the
         // water boundary, but restore the selected day or night water color over
-        // the shorter color interval.
+        // the softer color interval.
         float3 legacyNightRelativeColor = lerp(
             legacyColor,
             legacyColor * saturate(sceneClean * 1.10f + 0.34f),
