@@ -709,9 +709,15 @@ float3 skyReflection =
             reflectionDriver) *
             waterReflectionSuppress;
         float backupDayAmount = saturate(backupDayRf * total);
+        float oceanNightGeometryAmount = saturate(
+            oceanGeometrySourceAvailable
+            * ssrStrength
+            * 0.78f);
         float currentNightAmount = saturate(max(
-            currentNightRf * total * 0.92f,
-            reflectAmount * total));
+            max(
+                currentNightRf * total * 0.92f,
+                reflectAmount * total),
+            oceanNightGeometryAmount));
         float amount = lerp(
             backupDayAmount,
             currentNightAmount,

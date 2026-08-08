@@ -408,8 +408,8 @@ HF_RainWeightZFar );
 float nightFogBrightness = lerp(1.0f, max(0.0f, AC_NightFogBrightness), saturate(AC_EnableNightAtmosphere));
 float3 nightRainVeilColor = float3(0.12f, 0.18f, 0.27f) * nightFogBrightness / 2.5f;
 float3 rainVeilColor = lerp(HF_RainFogColor, nightRainVeilColor, nightAtmosphereBlend);
-float rainFogOpacity = saturate(rainFog) * 0.75f;
-float rainVeilBase = lerp(0.040f, 0.17f, nightAtmosphereBlend);
+float rainFogOpacity = saturate(rainFog) * 0.60f;
+float rainVeilBase = lerp(0.032f, 0.135f, nightAtmosphereBlend);
 float rainVeil = max(rainFogOpacity, rainVeilBase) * activeWeatherFog;
         float worldFogEventPresent = step(0.0001f, HF_FogOverride);
         float rainFogPresent = step(0.0001f, activeWeatherFog);
@@ -439,7 +439,7 @@ float rainVeil = max(rainFogOpacity, rainVeilBase) * activeWeatherFog;
             * worldFogReferenceMaxOpacity
             * saturate(HF_FogOverride);
         rainFogReferenceOpacity = max(
-            saturate(rainFogReferenceOpacity) * 0.75f,
+            saturate(rainFogReferenceOpacity) * 0.60f,
             rainVeilBase)
             * activeWeatherFog;
         float strongestReferenceOpacity = max(

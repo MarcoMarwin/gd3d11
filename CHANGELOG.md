@@ -945,3 +945,5 @@ Dokumentation der gepushten Renderer-Builds.
 - Korrekturpush: Signatur-Mismatch behoben (cloudRes-Parameter in D3D11PfxRenderer.h analog zur .cpp entfernt).
 
 - Korrekturpush: Erneuter Rollback zur dynamischen Viewport-Dimensionierung via RenderTarget-GetDesc() in RenderLowCloudLayer (Sicherstellung der Sync-Integritaet).
+
+- Korrekturpush: Diverse manuelle Feinabstimmungen (DoF default an, dynamische Wolken default aus, reduzierte RainFog-Opacity, erweiterte Tag/Nacht-Farbtonkorrektur fuer WetGroundSSR und Ozean-Reflexionen).

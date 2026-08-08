@@ -176,7 +176,7 @@ float3 CalculatePuddleGeometricWorldNormal(
     float tangentXLength = length(tangentX);
     float tangentYLength = length(tangentY);
     float cameraDistance = length(wsPosition - WG_CameraPosition);
-    float maximumTangentLength = max(24.0f, cameraDistance * 0.012f);
+    float maximumTangentLength = max(96.0f, cameraDistance * 0.040f);
     float3 geometricNormal = cross(tangentY, tangentX);
     float geometricNormalLengthSq = dot(geometricNormal, geometricNormal);
     geometryValidity = step(1e-5f, min(tangentXLength, tangentYLength))
@@ -975,11 +975,24 @@ float4 PSMain(PS_INPUT input) : SV_TARGET
         puddleWaterMask * lerp(0.62f, 1.0f, puddleBodyMask));
     float puddleBaseLuma = dot(
         surfaceColor, float3(0.2126f, 0.7152f, 0.0722f));
-    float3 puddleEarthTone = float3(
+    float3 warmPuddleEarthTone = float3(
         puddleBaseLuma * 0.70f,
         puddleBaseLuma * 0.55f,
         puddleBaseLuma * 0.38f);
-    float3 darkenedPuddleBase = surfaceColor * float3(0.80f, 0.74f, 0.66f);
+    float3 coolPuddleEarthTone = float3(
+        puddleBaseLuma * 0.48f,
+        puddleBaseLuma * 0.58f,
+        puddleBaseLuma * 0.72f);
+    float3 puddleEarthTone = lerp(
+        warmPuddleEarthTone,
+        coolPuddleEarthTone,
+        rainImpactNightAmount);
+    float3 warmPuddleBase = surfaceColor * float3(0.80f, 0.74f, 0.66f);
+    float3 coolPuddleBase = surfaceColor * float3(0.66f, 0.72f, 0.82f);
+    float3 darkenedPuddleBase = lerp(
+        warmPuddleBase,
+        coolPuddleBase,
+        rainImpactNightAmount);
     float3 turbidPuddleBase = lerp(
         darkenedPuddleBase,
         puddleEarthTone,
@@ -1008,8 +1021,7 @@ float4 PSMain(PS_INPUT input) : SV_TARGET
     float3 puddleWetNormal = normalize(
         puddlePlaneNormal + float3(rainNormalDistortion.x, 0.0f, rainNormalDistortion.y));
     float2 reflectionRippleOffset = rippleDistortion * float2(0.0040f, 0.0040f);
-    float materialTraceMask = saturate(
-        materialWetMask * (1.0f - smoothstep(0.04f, 0.35f, puddleWetMask)));
+    float materialTraceMask = saturate(materialWetMask);
     float puddleTraceMask = saturate(puddleWetMask * slopeWaterFade);
     WetGroundReflectionTrace materialReflection = TraceWetGroundReflection(
         materialTraceMask,
@@ -1071,15 +1083,35 @@ float4 PSMain(PS_INPUT input) : SV_TARGET
     float3 groundLumaWeights = float3(0.2126f, 0.7152f, 0.0722f);
     float surfaceLuma = dot(surfaceColor, groundLumaWeights);
     float reflectedLuma = dot(puddleReflectedColor, groundLumaWeights);
-    float3 earthyReflectionTone = float3(
+    float3 warmReflectionTone = float3(
         reflectedLuma * 1.02f,
         reflectedLuma * 0.78f,
         reflectedLuma * 0.54f);
+    float3 coolReflectionTone = float3(
+        reflectedLuma * 0.62f,
+        reflectedLuma * 0.78f,
+        reflectedLuma * 1.00f);
+    float3 earthyReflectionTone = lerp(
+        warmReflectionTone,
+        coolReflectionTone,
+        rainImpactNightAmount);
+    float3 warmGroundTone = float3(
+        surfaceLuma * 0.82f,
+        surfaceLuma * 0.68f,
+        surfaceLuma * 0.49f);
+    float3 coolGroundTone = float3(
+        surfaceLuma * 0.58f,
+        surfaceLuma * 0.70f,
+        surfaceLuma * 0.86f);
     float3 earthyGroundColor = lerp(
         surfaceColor,
-        float3(surfaceLuma * 0.82f, surfaceLuma * 0.68f, surfaceLuma * 0.49f),
+        lerp(warmGroundTone, coolGroundTone, rainImpactNightAmount),
         0.24f);
-    float uniformBrownTint = lerp(0.16f, 0.23f, puddleContamination);
+    float warmBrownTint = lerp(0.16f, 0.23f, puddleContamination);
+    float uniformBrownTint = lerp(
+        warmBrownTint,
+        warmBrownTint * 0.22f,
+        rainImpactNightAmount);
     puddleReflectedColor = lerp(
         puddleReflectedColor,
         earthyReflectionTone,

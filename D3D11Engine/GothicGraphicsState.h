@@ -688,7 +688,7 @@ struct GothicRendererSettings {
         ScreenSpaceGIStrength = 1.0f;
         EnableParticleLighting = true;
         ParticleLightingStrength = 1.0f;
-        EnableDoF = false;
+        EnableDoF = true;
         DoFGaussBlur = false;
         DoFFocusDistance = 12000.0f;
         DoFFocusRange = 8000.0f;
@@ -759,7 +759,7 @@ struct GothicRendererSettings {
         NightDarkeningMax = 1.0f;
 
         EnableRain = true;
-        EnableDynamicClouds = true;
+        EnableDynamicClouds = false;
 
         GodRayDecay = 0.97f;
         GodRayWeight = 0.85f;
