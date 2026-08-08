@@ -117,6 +117,44 @@ float2 ComputeCoCsFromDepth( float d, float focusDepth, float2 texcoord )
     return float2( max( farCoC, nearCoC ), nearCoC );
 }
 
+static const int SKY_EDGE_SAMPLE_COUNT = 24;
+
+float2 GetSkyEdgeSpiralSample( int index )
+{
+    float radius = sqrt( ( float( index ) + 0.5f ) / float( SKY_EDGE_SAMPLE_COUNT ) );
+    float angle = float( index ) * 2.39996323f;
+    return float2( cos( angle ), sin( angle ) ) * radius;
+}
+
+float4 GetSkyEdgeBlurSample( float2 texcoord, float2 dtexel, float focusDepth )
+{
+    float3 colorAccum = 0.0f;
+    float coverageAccum = 0.0f;
+    float kernelAccum = 0.0f;
+    float edgeRadius = clamp( max( DoF_BokehRadius, DoF_MaxBlur ) * 0.22f, 2.0f, 10.0f );
+
+    [unroll]
+    for ( int i = 0; i < SKY_EDGE_SAMPLE_COUNT; ++i )
+    {
+        float2 offset = GetSkyEdgeSpiralSample( i );
+        float2 sampleUV = texcoord + offset * edgeRadius * dtexel;
+        float depth = TX_Depth.SampleLevel( SS_Linear, sampleUV, 0 ).r;
+        float coc = IsSkyDepth( depth ) ? 0.0f : ComputeCoCsFromDepth( depth, focusDepth, sampleUV ).x;
+        float4 blur = TX_Blur.SampleLevel( SS_Linear, sampleUV, 0 );
+        float radialWeight = exp( -dot( offset, offset ) * 2.4f );
+        float geometryWeight = IsSkyDepth( depth ) ? 0.0f : smoothstep( 0.12f, 0.65f, coc );
+        float sampleWeight = radialWeight * geometryWeight;
+
+        colorAccum += blur.rgb * sampleWeight;
+        coverageAccum += sampleWeight;
+        kernelAccum += radialWeight;
+    }
+
+    float coverage = saturate( coverageAccum / max( kernelAccum, 0.001f ) * 2.2f );
+    float blend = smoothstep( 0.02f, 0.85f, coverage );
+    return float4( colorAccum / max( coverageAccum, 0.001f ), blend );
+}
+
 [numthreads(8, 8, 1)]
 void CSMain( uint3 DTid : SV_DispatchThreadID )
 {
@@ -141,7 +179,8 @@ void CSMain( uint3 DTid : SV_DispatchThreadID )
     float4 blurSample = TX_Blur.SampleLevel( SS_Linear, texcoord, 0 );
     if ( IsSkyDepth( depthC ) )
     {
-        OutputComposite[DTid.xy] = float4( sharpColor, 1.0f );
+        float4 skyEdgeBlur = GetSkyEdgeBlurSample( texcoord, dtexel, focusDepth );
+        OutputComposite[DTid.xy] = float4( lerp( sharpColor, skyEdgeBlur.rgb, skyEdgeBlur.a ), 1.0f );
         return;
     }
 
@@ -198,13 +237,8 @@ void CSMain( uint3 DTid : SV_DispatchThreadID )
     // close NPCs and objects must soften across their silhouette instead of staying cut out.
     float nearForegroundWeight = smoothstep( 0.02f, 0.20f, nearNeighbourCoC );
     float compositeCoC = lerp( minCoC, max( cocC, blurSample.a ), nearForegroundWeight );
-    // Stabilize sub-pixel alpha-tested silhouettes without replacing real sky or cloud color.
-    // A thin geometry center surrounded by sky keeps more of the already composed scene,
-    // while coherent geometry retains the full existing DoF result.
-    float geometryCoverage = ( 1.0f + ( IsSkyDepth( depthL ) ? 0.0f : 1.0f ) + ( IsSkyDepth( depthR ) ? 0.0f : 1.0f ) + ( IsSkyDepth( depthU ) ? 0.0f : 1.0f ) + ( IsSkyDepth( depthD ) ? 0.0f : 1.0f ) ) * 0.2f;
-    float silhouetteConfidence = smoothstep( 0.20f, 0.80f, geometryCoverage );
-    // Bilinear-upsampled half-res bokeh blur
-    float blendFactor = smoothstep( 0.0f, 1.0f, compositeCoC ) * silhouetteConfidence;
+    // Bilinear-upsampled half-res bokeh blur. Match Build 096 background DoF strength.
+    float blendFactor = smoothstep( 0.0f, 1.0f, compositeCoC );
     float3 finalColor = lerp( sharpColor, blurSample.rgb, blendFactor );
     OutputComposite[DTid.xy] = float4( finalColor, 1.0f );
 }

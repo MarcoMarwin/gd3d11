@@ -949,3 +949,5 @@ Dokumentation der gepushten Renderer-Builds.
 - Korrekturpush: Diverse manuelle Feinabstimmungen (DoF default an, dynamische Wolken default aus, reduzierte RainFog-Opacity, erweiterte Tag/Nacht-Farbtonkorrektur fuer WetGroundSSR und Ozean-Reflexionen).
 
 - Korrekturpush: Kaskaden-Frustum fuer Shadow-Weltmesh wiederhergestellt (behebt massiven Triangle-Overhead durch AlwaysContainingFrustum-Workaround).
+
+- Korrekturpush: Sky-Edge-Blur im DoF-Composite implementiert und statische Silhouette-Confidence entfernt, um Himmelsuebergaenge unscharfer Objekte weicher zu mischen.
