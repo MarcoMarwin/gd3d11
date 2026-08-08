@@ -132,28 +132,20 @@ namespace {
     }
         bool IsGroundFogName( std::string name ) {
         name = ToLowerMaterialName( std::move( name ) );
-        const bool hasFogMarker = name.find( "groundfog" ) != std::string::npos
-            || name.find( "ground_fog" ) != std::string::npos
-            || name.find( "ground fog" ) != std::string::npos
-            || name.find( "lavafog" ) != std::string::npos
-            || name.find( "waterfog" ) != std::string::npos
-            || name.find( "firesmoke" ) != std::string::npos
-            || name.find( "watersmoke" ) != std::string::npos
-            || name.find( "groundsmoke" ) != std::string::npos
-            || name.find( "mist" ) != std::string::npos
-            || name.find( "nebel" ) != std::string::npos
-            || name.find( "dunst" ) != std::string::npos
-            || name.find( "fog" ) != std::string::npos;
-        if ( !hasFogMarker )
-            return false;
-
-        return name.find( "fireball" ) == std::string::npos
-            && name.find( "spell" ) == std::string::npos
-            && name.find( "magic" ) == std::string::npos;
+        return name.find( "groundfog" ) != std::string::npos
+            || name.find( "ground_fog" ) != std::string::npos;
     }
 
     bool IsGroundFogParticleTexture( zCTexture* texture ) {
         return texture && IsGroundFogName( texture->GetNameWithoutExt() );
+    }
+
+    bool IsGroundFogFiresmokeFallbackTexture( zCTexture* texture, int blendMode ) {
+        if ( !texture || blendMode != zRND_ALPHA_FUNC_BLEND )
+            return false;
+
+        const std::string name = ToLowerMaterialName( texture->GetNameWithoutExt() );
+        return name.find( "firesmoke" ) != std::string::npos;
     }
     bool IsSmokeName( std::string name ) {
         name = ToLowerMaterialName( std::move( name ) );
@@ -191,16 +183,24 @@ namespace {
             if ( const char* objectName = visual->GetObjectName() ) {
                 name += objectName;
             }
+            if ( IsGroundFogName( name ) ) {
+                return true;
+            }
             if ( zCParticleFX* particle = reinterpret_cast<zCParticleFX*>(visual) ) {
                 if ( zCParticleEmitter* emitter = particle->GetEmitter() ) {
+                    const int blendMode = static_cast<int>(emitter->GetVisAlphaFunc());
                     if ( zCTexture* texture = emitter->GetBaseVisTexture() ) {
-                        name += " ";
-                        name += texture->GetNameWithoutExt();
+                        if ( IsGroundFogParticleTexture( texture )
+                            || IsGroundFogFiresmokeFallbackTexture( texture, blendMode ) ) {
+                            return true;
+                        }
                     }
                     if ( zTParticle* firstParticle = particle->GetFirstParticle() ) {
                         if ( zCTexture* texture = emitter->GetVisTexture( firstParticle ) ) {
-                            name += " ";
-                            name += texture->GetNameWithoutExt();
+                            if ( IsGroundFogParticleTexture( texture )
+                                || IsGroundFogFiresmokeFallbackTexture( texture, blendMode ) ) {
+                                return true;
+                            }
                         }
                     }
                 }
@@ -3439,17 +3439,18 @@ void GothicAPI::DrawParticleFX( zCVob* source, zCParticleFX* fx, ParticleFrameDa
 
         const bool waterfallParticle =
             IsWaterfallParticleTexture( texture );
+        const int sourceBlendMode = static_cast<int>(fx->GetEmitter()->GetVisAlphaFunc());
+        const int blendMode = sourceBlendMode;
 
         const bool groundFogParticle =
             IsGroundFogParticleVob( source )
-            || IsGroundFogParticleTexture( texture );
+            || IsGroundFogParticleTexture( texture )
+            || IsGroundFogFiresmokeFallbackTexture( texture, sourceBlendMode );
 
         const bool smokeOrFogParticle =
             groundFogParticle
             || IsSmokeParticleVob( source )
             || IsSmokeParticleTexture( texture );
-        const int sourceBlendMode = static_cast<int>(fx->GetEmitter()->GetVisAlphaFunc());
-        const int blendMode = sourceBlendMode;
         const bool emissiveParticle = !groundFogParticle && !waterfallParticle
             && IsEmissiveParticleTexture( texture, sourceBlendMode );
         const float particleRainWeight = std::clamp( GetRainFXWeight(), 0.0f, 1.0f );
