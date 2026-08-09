@@ -649,7 +649,7 @@ unsigned int D3D11GraphicsEngine::UpdateAndBindWindowCutouts( bool daylightPass 
         MeshVisualInfo* sharedVisualInfo = nullptr;
         for ( BaseVobInfo* baseVob : registeredVobs ) {
             if ( auto* vobInfo = dynamic_cast<VobInfo*>( baseVob ) ) {
-                sharedVisualInfo = vobInfo->VisualInfo;
+                sharedVisualInfo = dynamic_cast<MeshVisualInfo*>( vobInfo->VisualInfo );
                 if ( sharedVisualInfo ) {
                     break;
                 }
@@ -682,7 +682,7 @@ unsigned int D3D11GraphicsEngine::UpdateAndBindWindowCutouts( bool daylightPass 
 
             XMVECTOR localMin;
             XMVECTOR localMax;
-            if ( !GetWindowGlassLocalBounds( vobInfo->VisualInfo, localMin, localMax ) ) {
+            if ( !GetWindowGlassLocalBounds( sharedVisualInfo, localMin, localMax ) ) {
                 continue;
             }
             const XMVECTOR localCenter = (localMin + localMax) * 0.5f;

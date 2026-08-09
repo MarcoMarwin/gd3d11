@@ -971,3 +971,4 @@ Dokumentation der gepushten Renderer-Builds.
 - Korrekturpush: Tile-based Window Cutouts implementiert. Die Cutout-Schleife im Pixel Shader wertet nun eine 2D-Tile-Maske aus, um nur noch die Fensterausschnitte zu berechnen, die den aktuellen Bildschirm-Tile schneiden. Das verbessert die Shader-Performance massiv.
 - Korrekturpush: OilLamp Emission Logic überarbeitet. Bei der Zuweisung von Lichtern an Öllampen (ConfigureAllPointlightShadowSources) werden nun statische Lichter im Suchradius bevorzugt. Nur wenn kein statisches Licht gefunden wird, greift das System auf das nächste dynamische Licht zurück.
 - Korrekturpush: MeshVisualInfo um WindowGlassBounds erweitert für präziseres Bounding-Box-Tracking von Fensterscheiben.
+- Korrekturpush: C++ Typecast-Fix in der Window-Cutout-Logik (Korrektur von BaseVisualInfo auf MeshVisualInfo per dynamic_cast).
