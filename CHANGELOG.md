@@ -962,5 +962,5 @@ Dokumentation der gepushten Renderer-Builds.
 
 - Korrekturpush: Groundfog-Erkennung weiter verfeinert (Vermeidung von False-Positives bei echten Rauch-Effekten wie humansmoke durch zusaetzliche Namensausnahmen, Emissive-Logik bereinigt).
 
-### Build 201
-- Neues Feature: Test-Build (Nightly). Oellampen-Emission und Window-Cutout Shader-Features.
+### Build 202
+- Korrekturpush: Nightly-Fix fuer Shader. Die WorldPosition wird nun korrekt als echte Weltkoordinate aus dem Vertex Shader (VS_Ex und VS_ExInstancedObj) exportiert, wodurch die Window-Cutout-Logik und das korrekte Clipping in den Pixel Shadern (z. B. GBuffer und Forward-Rendering) wieder fehlerfrei arbeiten.

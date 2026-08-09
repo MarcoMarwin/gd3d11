@@ -576,6 +576,12 @@ ID3D11ShaderResourceView* D3D11GraphicsEngine::GetWindowGlassReplacementSRV() {
 unsigned int D3D11GraphicsEngine::UpdateAndBindWindowCutouts( bool daylightPass ) {
     constexpr size_t MaxWindowCutouts = 32;
     constexpr float MaxWindowDistance = 12000.0f;
+    // Gothic mods occasionally contain invalid or enormously padded visual
+    // bounding boxes. Never allow one of those to turn into a world-sized
+    // pixel-shader discard volume.
+    constexpr float MinWindowExtent = 0.05f;
+    constexpr float MaxWindowExtent = 500.0f;
+    constexpr float MaxWindowDepthExtent = 150.0f;
     // The mask is selected by camera side. OUT visuals may therefore reach
     // through the wall for the outside-to-inside view without also opening the
     // reverse view when Gothic omitted the corresponding IN visual.
@@ -636,13 +642,28 @@ unsigned int D3D11GraphicsEngine::UpdateAndBindWindowCutouts( bool daylightPass 
                 XMVectorGetY( localExtents ) * scaleY,
                 XMVectorGetZ( localExtents ) * scaleZ,
             };
+            const XMVECTOR center = XMVector3TransformCoord( localCenter, world );
+            XMFLOAT3 centerValues;
+            XMStoreFloat3( &centerValues, center );
+            if ( !std::isfinite( centerValues.x ) || !std::isfinite( centerValues.y )
+                || !std::isfinite( centerValues.z )
+                || !std::isfinite( extents[0] ) || !std::isfinite( extents[1] )
+                || !std::isfinite( extents[2] )
+                || extents[0] < MinWindowExtent || extents[1] < MinWindowExtent
+                || extents[2] < MinWindowExtent
+                || extents[0] > MaxWindowExtent || extents[1] > MaxWindowExtent
+                || extents[2] > MaxWindowExtent ) {
+                continue;
+            }
             const size_t thinAxis = extents[0] <= extents[1]
                 ? (extents[0] <= extents[2] ? 0u : 2u)
                 : (extents[1] <= extents[2] ? 1u : 2u);
+            if ( extents[thinAxis] > MaxWindowDepthExtent ) {
+                continue;
+            }
             extents[thinAxis] += WallReachPadding;
 
             WindowCutoutVolume volume = {};
-            const XMVECTOR center = XMVector3TransformCoord( localCenter, world );
             XMStoreFloat4( &volume.CenterExtentX, XMVectorSetW( center, extents[0] ) );
             XMStoreFloat4( &volume.AxisXExtentY, XMVectorSetW( axisX, extents[1] ) );
             XMStoreFloat4( &volume.AxisYExtentZ, XMVectorSetW( axisY, extents[2] ) );

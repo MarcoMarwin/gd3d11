@@ -77,9 +77,20 @@ cbuffer WindowCutoutConstants : register( b6 )
 void ClipWindowCutouts(float3 worldPosition)
 {
     [loop]
-    for (uint i = 0; i < WindowCutoutCount; ++i)
+    for (uint i = 0; i < min(WindowCutoutCount, 32u); ++i)
     {
         WindowCutoutVolume cutout = WindowCutouts[i];
+        const float3 extents = float3(cutout.CenterExtentX.w,
+            cutout.AxisXExtentY.w, cutout.AxisYExtentZ.w);
+        const float3 axisLengthsSq = float3(
+            dot(cutout.AxisXExtentY.xyz, cutout.AxisXExtentY.xyz),
+            dot(cutout.AxisYExtentZ.xyz, cutout.AxisYExtentZ.xyz),
+            dot(cutout.AxisZPadding.xyz, cutout.AxisZPadding.xyz));
+        // Defense in depth for malformed/modded visual bounds and stale data.
+        // Valid normalized axes are ~1 and valid window volumes stay compact.
+        if (any(extents <= 0.0f) || any(extents > 535.0f)
+            || any(axisLengthsSq < 0.8f) || any(axisLengthsSq > 1.2f))
+            continue;
         float3 relativePosition = worldPosition - cutout.CenterExtentX.xyz;
         float distanceX = abs(dot(relativePosition, cutout.AxisXExtentY.xyz));
         float distanceY = abs(dot(relativePosition, cutout.AxisYExtentZ.xyz));
@@ -112,6 +123,7 @@ struct PS_INPUT
 	float4 vCurrClipPos     : TEXCOORD6;  // Current clip position for velocity (from instanced VS)
 	float4 vPrevClipPos     : TEXCOORD7;  // Previous clip position for velocity (from instanced VS)
 	float4 vEmissiveColor   : TEXCOORD8;
+	float3 vWorldPosition   : TEXCOORD9;
 	float4 vPosition		: SV_POSITION;
 };
 
@@ -201,7 +213,7 @@ FORWARD_PLUS_PS_OUTPUT PSMain( PS_INPUT Input )
 	float vegetationReceiverMask = max(vegetationBacklitMask, alphaTestedMaterial * twoSidedBacklitMaterial);
 
 	float3 vsPosition = Input.vViewPosition;
-	float3 wsPosition = mul(float4(vsPosition, 1), SQ_InvView).xyz;
+	float3 wsPosition = Input.vWorldPosition;
 	ClipWindowCutouts(wsPosition);
 	
 	float pixelDistZ = abs(vsPosition.z);
@@ -280,14 +292,14 @@ FORWARD_PLUS_PS_OUTPUT PSMain( PS_INPUT Input )
 #if WINDOW_DEPTH_ONLY == 1
 void PSMain( PS_INPUT Input )
 {
-	float3 wsPosition = mul(float4(Input.vViewPosition, 1), SQ_InvView).xyz;
+	float3 wsPosition = Input.vWorldPosition;
 	ClipWindowCutouts(wsPosition);
 }
 DEFERRED_PS_OUTPUT PSMainDISABLED( PS_INPUT Input ) : SV_TARGET
 #elif ALPHATEST_SHADOWS == 1
 void PSMain( PS_INPUT Input )
 {
-	float3 wsPosition = mul(float4(Input.vViewPosition, 1), SQ_InvView).xyz;
+	float3 wsPosition = Input.vWorldPosition;
 	ClipWindowCutouts(wsPosition);
 	float4 color = TX_Texture0.Sample(SS_Linear, Input.vTexcoord);
 
@@ -309,7 +321,7 @@ DEFERRED_PS_OUTPUT PSMain( PS_INPUT Input ) : SV_TARGET
 	output.vTransparencyAndCompositionMask = 0.0f;
 	output.vReactiveMask = GetFsr3DialogReactiveMask();
 
-	float3 wsPosition = mul(float4(Input.vViewPosition, 1), SQ_InvView).xyz;
+	float3 wsPosition = Input.vWorldPosition;
 	ClipWindowCutouts(wsPosition);
 
 	float2 materialUV = Input.vTexcoord;
