@@ -673,7 +673,9 @@ unsigned int D3D11GraphicsEngine::UpdateAndBindWindowCutouts( bool daylightPass 
                 continue;
             }
 
-            const XMMATRIX world = vobInfo->Vob->GetWorldMatrixXM();
+            // Gothic stores VOB transforms transposed for shader upload. CPU
+            // geometry transforms need the conventional DirectXMath layout.
+            const XMMATRIX world = XMMatrixTranspose( vobInfo->Vob->GetWorldMatrixXM() );
             const XMVECTOR worldPosition = vobInfo->Vob->GetPositionWorldXM();
             const float distanceSq = XMVectorGetX( XMVector3LengthSq( worldPosition - cameraPosition ) );
             if ( distanceSq > MaxWindowDistance * MaxWindowDistance ) {

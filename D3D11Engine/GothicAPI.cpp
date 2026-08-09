@@ -5263,11 +5263,12 @@ void GothicAPI::ConfigureAllPointlightShadowSources() const {
         anchor.Info = vobInfo;
         anchor.Position = midpoint;
         anchor.ShadowAnchor = midpoint;
-        anchor.ShadowAnchor.y += 50.0f;
+        anchor.ShadowAnchor.y += 20.0f;
 
         const XMVECTOR localLampForward = XMVectorSet( 0.0f, 0.0f, 1.0f, 0.0f );
+        const XMMATRIX lampWorld = XMMatrixTranspose( vobInfo->Vob->GetWorldMatrixXM() );
         const XMVECTOR worldLampForward = XMVector3Normalize(
-            XMVector3TransformNormal( localLampForward, vobInfo->Vob->GetWorldMatrixXM() ) );
+            XMVector3TransformNormal( localLampForward, lampWorld ) );
         XMStoreFloat3(
             &anchor.ShadowAnchor,
             XMLoadFloat3( &anchor.ShadowAnchor ) + worldLampForward * OIL_LAMP_FORWARD_OFFSET );
@@ -5307,7 +5308,6 @@ void GothicAPI::ConfigureAllPointlightShadowSources() const {
         if ( oilLampClaims[lightIndex].size() == 1 ) {
             OilLampAnchor& oilLamp = oilLampAnchors[oilLampClaims[lightIndex].front()];
             assignAnchor( lights[lightIndex], oilLamp.ShadowAnchor );
-
         }
         // Multiple independent oillamps claim this light: keep the authored position.
     }
