@@ -18,6 +18,7 @@ class zCMaterial;
 class zCPolygon;
 class D3D11VertexBuffer;
 class zCVob;
+class zCVobLight;
 class zCTexture;
 class zCLightmap;
 struct zCModelNodeInst;
@@ -360,6 +361,10 @@ struct VobInfo : public BaseVobInfo {
     /** Color the underlaying polygon has */
     DWORD GroundColor;
 
+    /** Closest unambiguously associated point light for NW_CITY_OILLAMP_01. */
+    zCVobLight* OilLampEmissionLight = nullptr;
+    float OilLampEmissionLightDistanceSq = FLT_MAX;
+
     void StorePreviousTransform() {
         PrevWorldMatrix = WorldMatrix;
         HasValidPrevMatrix = true;
@@ -369,7 +374,6 @@ struct VobInfo : public BaseVobInfo {
     bool HasValidPrevMatrix;
 };
 
-class zCVobLight;
 class BaseShadowedPointLight;
 struct VobLightInfo {
     VobLightInfo() = default;

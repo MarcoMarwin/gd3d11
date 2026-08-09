@@ -387,6 +387,12 @@ XRESULT D3D11ShaderManager::Init() {
             {"ALPHATEST_SHADOWS", "1"},
             } ) );
 
+    Shaders.push_back( ShaderInfo::make<PShaderID::PS_WindowCutoutDepth>( "PS_Diffuse.hlsl" )
+        .with_macros( {
+            {"NORMALMAPPING", "0"},
+            {"WINDOW_DEPTH_ONLY", "1"},
+        } ) );
+
     Shaders.push_back( ShaderInfo::make<PShaderID::PS_DiffuseNormalmappedAlphaTest>( "PS_Diffuse.hlsl" )
         .with_macros( {
             {"NORMALMAPPING", "1"},

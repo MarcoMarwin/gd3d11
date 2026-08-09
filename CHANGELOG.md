@@ -961,3 +961,6 @@ Dokumentation der gepushten Renderer-Builds.
 - Korrekturpush: Groundfog-Erkennung (NewWorld Sumpfnebel) ueberarbeitet (sichere Erkennung ueber Firesmoke-Textur und BlendMode statt generischer Namenssuche, um False-Positives bei magischen Effekten/Feuer zu vermeiden).
 
 - Korrekturpush: Groundfog-Erkennung weiter verfeinert (Vermeidung von False-Positives bei echten Rauch-Effekten wie humansmoke durch zusaetzliche Namensausnahmen, Emissive-Logik bereinigt).
+
+### Build 201
+- Neues Feature: Test-Build (Nightly). Oellampen-Emission und Window-Cutout Shader-Features.

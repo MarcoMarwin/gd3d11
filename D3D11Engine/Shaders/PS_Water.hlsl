@@ -885,6 +885,17 @@ float3 skyReflection =
         float3 legacySceneChroma = legacySceneClean / legacySceneLuma;
         float legacyColorLuma = max(dot(legacyColor, float3(0.2126f, 0.7152f, 0.0722f)), 0.001f);
         float3 legacyColorWithSceneHue = legacySceneChroma * legacyColorLuma;
+        // Preserve Build 200's subtle scene-hue mix, but never let it push an
+        // already correct Legacy base channel far enough to create the confirmed
+        // red/blue artifacts. With the existing 0.42 blend, these bounds limit
+        // the final per-channel deviation to roughly +/-15 percent.
+        float3 legacyHueDeviationLimit = max(
+            abs(legacyColor) * 0.35f,
+            float3(0.005f, 0.005f, 0.005f));
+        legacyColorWithSceneHue = clamp(
+            legacyColorWithSceneHue,
+            legacyColor - legacyHueDeviationLimit,
+            legacyColor + legacyHueDeviationLimit);
         float legacySubmergedColorMask = step(0.000001f, legacyRawDepthRefracted);
         legacyColor = lerp(legacyColor, legacyColorWithSceneHue, legacySubmergedColorMask * 0.42f);
         // Legacy edge foam removed.

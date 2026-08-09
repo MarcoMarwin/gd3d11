@@ -4412,6 +4412,17 @@ void GothicAPI::CollectVisibleVobs(
                 // This lets indoor point lights affect static indoor vobs/decorations like BSP polys.
                 vii.color = (vii.color & 0x00FFFFFFu) | 0x0D000000u;
             }
+
+            if ( it->OilLampEmissionLight && it->OilLampEmissionLight->IsEnabled() ) {
+                // Keep animated light colors and the visible lamp in lockstep.
+                it->OilLampEmissionLight->DoAnimation();
+                const DWORD gothicColor = it->OilLampEmissionLight->GetLightColor();
+                const DWORD red = (gothicColor >> 16) & 0xFFu;
+                const DWORD green = (gothicColor >> 8) & 0xFFu;
+                const DWORD blue = gothicColor & 0xFFu;
+                // INSTANCE_EMISSIVE_COLOR is R8G8B8A8 in memory; pack ABGR on little endian.
+                vii.emissiveColor = 0xFF000000u | (blue << 16) | (green << 8) | red;
+            }
             vii.windStrenth = 0.0f;
             vii.canBeAffectedByPlayer = 0;
 
@@ -4937,6 +4948,10 @@ void GothicAPI::ConfigurePointlightShadowSource( VobLightInfo* lightInfo ) const
 void GothicAPI::ConfigureAllPointlightShadowSources() const {
     constexpr float LINK_RADIUS = 150.0f;
     constexpr float LINK_RADIUS_SQ = LINK_RADIUS * LINK_RADIUS;
+    // NW_CITY_OILLAMP_01 is authored with its wall mount towards local -Z and
+    // its luminous glass towards local +Z. Keep the light inside the visible
+    // lamp body regardless of the VOB's world rotation.
+    constexpr float OIL_LAMP_FORWARD_OFFSET = 12.0f;
     const size_t INVALID_INDEX = static_cast<size_t>(-1);
 
     auto isLightVob = []( zCVob* vob ) {
@@ -5209,6 +5224,7 @@ void GothicAPI::ConfigureAllPointlightShadowSources() const {
 
     struct OilLampAnchor {
         zCVob* Vob = nullptr;
+        VobInfo* Info = nullptr;
         XMFLOAT3 Position = {};
         XMFLOAT3 ShadowAnchor = {};
     };
@@ -5216,7 +5232,13 @@ void GothicAPI::ConfigureAllPointlightShadowSources() const {
 
     for ( const auto& vobEntry : VobMap ) {
         VobInfo* vobInfo = vobEntry.second;
-        if ( !vobInfo || !vobInfo->Vob || !vobInfo->Vob->GetShowVisual() || hasVisualFXAncestor( vobInfo->Vob ) )
+        if ( !vobInfo )
+            continue;
+
+        vobInfo->OilLampEmissionLight = nullptr;
+        vobInfo->OilLampEmissionLightDistanceSq = FLT_MAX;
+
+        if ( !vobInfo->Vob || !vobInfo->Vob->GetShowVisual() || hasVisualFXAncestor( vobInfo->Vob ) )
             continue;
 
         std::string identity;
@@ -5238,9 +5260,17 @@ void GothicAPI::ConfigureAllPointlightShadowSources() const {
 
         OilLampAnchor anchor;
         anchor.Vob = vobInfo->Vob;
+        anchor.Info = vobInfo;
         anchor.Position = midpoint;
         anchor.ShadowAnchor = midpoint;
         anchor.ShadowAnchor.y += 50.0f;
+
+        const XMVECTOR localLampForward = XMVectorSet( 0.0f, 0.0f, 1.0f, 0.0f );
+        const XMVECTOR worldLampForward = XMVector3Normalize(
+            XMVector3TransformNormal( localLampForward, vobInfo->Vob->GetWorldMatrixXM() ) );
+        XMStoreFloat3(
+            &anchor.ShadowAnchor,
+            XMLoadFloat3( &anchor.ShadowAnchor ) + worldLampForward * OIL_LAMP_FORWARD_OFFSET );
         oilLampAnchors.push_back( anchor );
     }
 
@@ -5274,8 +5304,16 @@ void GothicAPI::ConfigureAllPointlightShadowSources() const {
 
         resolvedByVisualAnchor[lightIndex] = true;
         lights[lightIndex].Info->AllowsPointlightShadows = true;
-        if ( oilLampClaims[lightIndex].size() == 1 )
-            assignAnchor( lights[lightIndex], oilLampAnchors[oilLampClaims[lightIndex].front()].ShadowAnchor );
+        if ( oilLampClaims[lightIndex].size() == 1 ) {
+            OilLampAnchor& oilLamp = oilLampAnchors[oilLampClaims[lightIndex].front()];
+            assignAnchor( lights[lightIndex], oilLamp.ShadowAnchor );
+
+            const float candidateDistanceSq = distanceSq( lights[lightIndex].Position, oilLamp.Position );
+            if ( oilLamp.Info && candidateDistanceSq < oilLamp.Info->OilLampEmissionLightDistanceSq ) {
+                oilLamp.Info->OilLampEmissionLight = lights[lightIndex].Info->Vob;
+                oilLamp.Info->OilLampEmissionLightDistanceSq = candidateDistanceSq;
+            }
+        }
         // Multiple independent oillamps claim this light: keep the authored position.
     }
 

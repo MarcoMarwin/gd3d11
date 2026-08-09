@@ -526,6 +526,9 @@ public:
 private:
     bool PrepareAndBindWindMetadata( const std::vector<MeshVisualInfo*>& activeVisuals );
     void UnbindWindMetadata();
+    ID3D11ShaderResourceView* GetWindowGlassReplacementSRV();
+    unsigned int UpdateAndBindWindowCutouts( bool daylightPass = false );
+    void UnbindWindowCutouts();
 
     std::vector<AlphaMeshData> m_AlphaMeshes;
     std::vector<VobLightInfo*> m_FrameLights;
@@ -533,6 +536,8 @@ private:
 
     /** Optional per-visual wind metadata for FL11+ instanced VOB rendering. */
     std::unique_ptr<D3D11VertexBuffer> WindMetadataBuffer;
+    std::unique_ptr<D3D11Texture> WindowGlassReplacementTexture;
+    std::unique_ptr<D3D11ConstantBuffer> WindowCutoutConstantsBuffer;
     
     /** World-Mesh indirect buffer */
     std::unique_ptr<D3D11IndirectBuffer> WorldMeshIndirectBuffer;

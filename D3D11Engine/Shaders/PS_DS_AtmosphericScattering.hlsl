@@ -5,6 +5,30 @@
 #include "DepthReconstruction.h"
 
 #include <AtmosphericScattering.h>
+// NW_MISC_OILLAMP_02 emission helpers. Kept local so shader deployment needs
+// no additional include file.
+float OilLampBrightnessMask(float3 diffuseColor)
+{
+    const float luminance = dot(diffuseColor, float3(0.2126f, 0.7152f, 0.0722f));
+    return smoothstep(0.32f, 0.82f, luminance);
+}
+
+float3 DecodeOilLampLightColor(float encoded)
+{
+    if (encoded <= 0.0f)
+        return 0.0f;
+
+    const uint packed = min((uint)round(encoded * 1024.0f), 1024u) - 1u;
+    const uint red = packed / 128u;
+    const uint green = (packed / 8u) & 15u;
+    const uint blue = packed & 7u;
+    return float3(red * (1.0f / 7.0f), green * (1.0f / 15.0f), blue * (1.0f / 7.0f));
+}
+
+float3 ComputeOilLampEmission(float3 diffuseColor, float3 linkedLightColor)
+{
+    return linkedLightColor * OilLampBrightnessMask(diffuseColor) * 1.35f;
+}
 
 #ifndef MAX_CSM_CASCADES
 #define MAX_CSM_CASCADES 4
@@ -228,8 +252,12 @@ float4 PSMain(PS_INPUT Input) : SV_TARGET
 	float fresnel = f8*f2;
     litPixel += lerp(fresnel * litPixel * 0.5f, 0.0f, sun);
 
+	// NW_MISC_OILLAMP_02 uses the linked point-light color encoded in gb3.w.
+	// A VOB without an unambiguous enabled light writes zero and stays non-emissive.
+	litPixel += ComputeOilLampEmission(diffuse.rgb, DecodeOilLampLightColor(gb3.w));
+
 	// Run scattering
-    litPixel = ApplyAtmosphericScatteringGround(wsPosition, litPixel.rgb);
+	litPixel = ApplyAtmosphericScatteringGround(wsPosition, litPixel.rgb);
 
 
     // Fix indoor stuff

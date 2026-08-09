@@ -676,6 +676,9 @@ public:
     /** Returns the map of static mesh visuals */
     const gtl::flat_hash_map<zCProgMeshProto*, MeshVisualInfo*>& GetStaticMeshVisuals() { return StaticMeshVisuals; }
 
+    /** Returns all registered VOB instances grouped by their Gothic visual. */
+    const gtl::flat_hash_map<zCVisual*, std::vector<BaseVobInfo*>>& GetVobsByVisual() const { return VobsByVisual; }
+
     /** Returns the collection of PolyStrip meshes infos */
     const std::map<zCTexture*, PolyStripInfo>& GetPolyStripInfos() { return PolyStripInfos; };
 

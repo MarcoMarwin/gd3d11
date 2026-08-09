@@ -15,13 +15,26 @@ struct VobInstanceInfo {
     // General purpose slot. Used by instanced VOB rendering to store an index
     // into optional per-visual metadata buffers.
     DWORD GP_Slot;
+    // RGBA8 point-light color used only by explicitly emissive VOB materials.
+    DWORD emissiveColor;
 };
+static_assert( offsetof( VobInstanceInfo, emissiveColor ) == 144 );
+static_assert( sizeof( VobInstanceInfo ) == 148 );
 
 struct VobWindMetadata {
     float MinHeight;
     float MaxHeight;
     float2 Padding;
 };
+
+/** Oriented local volume cut from the Gothic world mesh by an actual window VOB. */
+struct WindowCutoutVolume {
+    XMFLOAT4 CenterExtentX;
+    XMFLOAT4 AxisXExtentY;
+    XMFLOAT4 AxisYExtentZ;
+    XMFLOAT4 AxisZPadding;
+};
+static_assert( sizeof( WindowCutoutVolume ) == 64 );
 
 /** Per-instance data for instanced node attachment rendering */
 struct NodeAttachmentInstanceData {

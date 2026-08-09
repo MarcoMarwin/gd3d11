@@ -55,6 +55,7 @@ struct VS_INPUT
     float4 InstanceColor : INSTANCE_COLOR;
     float2 InstanceWind : INSTANCE_WINDFLUENCE;
     uint InstanceWindMetaIndex : INSTANCE_WIND_META_INDEX;
+    float4 InstanceEmissiveColor : INSTANCE_EMISSIVE_COLOR;
 };
 
 struct VS_OUTPUT
@@ -66,6 +67,7 @@ struct VS_OUTPUT
     float3 vViewPosition    : TEXCOORD5;
     float4 vCurrClipPos     : TEXCOORD6;  // Current clip position for velocity
     float4 vPrevClipPos     : TEXCOORD7;  // Previous clip position for velocity
+    float4 vEmissiveColor   : TEXCOORD8;
     
     float4 vPosition        : SV_POSITION;
 };
@@ -259,6 +261,7 @@ VS_OUTPUT VSMain( VS_INPUT Input )
     Output.vTexcoord = Input.vTex1;
     Output.vTexcoord2 = Input.vTex2;
     Output.vDiffuse = Input.InstanceColor;
+    Output.vEmissiveColor = Input.InstanceEmissiveColor;
     Output.vNormalVS = mul(Input.vNormal, mul((float3x3)Input.InstanceWorldMatrix, (float3x3)frame.M_View));
     Output.vViewPosition = mul(float4(worldPos, 1.0), frame.M_View);
     

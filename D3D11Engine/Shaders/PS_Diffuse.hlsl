@@ -5,6 +5,28 @@
 #include <FFFog.h>
 #include <DS_Defines.h>
 #include <Toolbox.h>
+// NW_MISC_OILLAMP_02 emission helpers. Kept local so shader deployment needs
+// no additional include file.
+float OilLampBrightnessMask(float3 diffuseColor)
+{
+    const float luminance = dot(diffuseColor, float3(0.2126f, 0.7152f, 0.0722f));
+    return smoothstep(0.32f, 0.82f, luminance);
+}
+
+float EncodeOilLampLightColor(float3 color)
+{
+    if (max(color.r, max(color.g, color.b)) <= 0.0f)
+        return 0.0f;
+
+    const uint3 quantized = uint3(round(saturate(color) * float3(7.0f, 15.0f, 7.0f)));
+    const uint packed = quantized.r * 128u + quantized.g * 8u + quantized.b;
+    return (packed + 1u) * (1.0f / 1024.0f);
+}
+
+float3 ComputeOilLampEmission(float3 diffuseColor, float3 linkedLightColor)
+{
+    return linkedLightColor * OilLampBrightnessMask(diffuseColor) * 1.35f;
+}
 
 cbuffer MI_MaterialInfo : register( b2 )
 {
@@ -37,6 +59,40 @@ Texture2D	TX_Texture2 : register( t2 );
 Texture2D	TX_Displacement : register( t13 );
 TextureCube	TX_ReflectionCube : register( t4 );
 
+struct WindowCutoutVolume
+{
+    float4 CenterExtentX;
+    float4 AxisXExtentY;
+    float4 AxisYExtentZ;
+    float4 AxisZPadding;
+};
+
+cbuffer WindowCutoutConstants : register( b6 )
+{
+    WindowCutoutVolume WindowCutouts[32];
+    uint WindowCutoutCount;
+    float3 WindowCutoutPadding;
+}
+
+void ClipWindowCutouts(float3 worldPosition)
+{
+    [loop]
+    for (uint i = 0; i < WindowCutoutCount; ++i)
+    {
+        WindowCutoutVolume cutout = WindowCutouts[i];
+        float3 relativePosition = worldPosition - cutout.CenterExtentX.xyz;
+        float distanceX = abs(dot(relativePosition, cutout.AxisXExtentY.xyz));
+        float distanceY = abs(dot(relativePosition, cutout.AxisYExtentZ.xyz));
+        float distanceZ = abs(dot(relativePosition, cutout.AxisZPadding.xyz));
+        if (distanceX <= cutout.CenterExtentX.w
+            && distanceY <= cutout.AxisXExtentY.w
+            && distanceZ <= cutout.AxisYExtentZ.w)
+        {
+            discard;
+        }
+    }
+}
+
 #ifdef FORWARD_PLUS
 #include <include/ForwardPlusLighting.hlsl>
 // Pre-computed screen-space CSM shadow mask from the shadow mask pre-pass (bound at t12)
@@ -55,6 +111,7 @@ struct PS_INPUT
 	float3 vViewPosition	: TEXCOORD5;
 	float4 vCurrClipPos     : TEXCOORD6;  // Current clip position for velocity (from instanced VS)
 	float4 vPrevClipPos     : TEXCOORD7;  // Previous clip position for velocity (from instanced VS)
+	float4 vEmissiveColor   : TEXCOORD8;
 	float4 vPosition		: SV_POSITION;
 };
 
@@ -105,6 +162,9 @@ FORWARD_PLUS_PS_OUTPUT PSMain( PS_INPUT Input )
 		TX_Displacement, materialUV, SS_Linear, MI_ParallaxOcclusionStrength);
 #endif
 	float4 color = TX_Texture0.Sample(SS_Linear, materialUV);
+	float3 oilLampLightColor = 0.0f;
+	if (MI_MaterialPadding0 > 0.5f)
+		oilLampLightColor = Input.vEmissiveColor.rgb * Input.vEmissiveColor.a;
 
 	// clip but only use z approximation
 	ClipDistanceEffect(abs(Input.vViewPosition.z), DIST_DrawDistance, color.r * 2 - 1, 500.0f);
@@ -142,6 +202,7 @@ FORWARD_PLUS_PS_OUTPUT PSMain( PS_INPUT Input )
 
 	float3 vsPosition = Input.vViewPosition;
 	float3 wsPosition = mul(float4(vsPosition, 1), SQ_InvView).xyz;
+	ClipWindowCutouts(wsPosition);
 	
 	float pixelDistZ = abs(vsPosition.z);
 
@@ -189,6 +250,9 @@ FORWARD_PLUS_PS_OUTPUT PSMain( PS_INPUT Input )
 
 	float3 litPixel = FP_ComputeSunLighting(wsPosition, vsPosition, nrm, color.rgb, specIntensity, specPower, shadow, vertLighting, twoSidedBacklitMaterial, vegetationBacklitMask);
 	
+	// The lamp emits only when this exact VOB has an associated enabled light.
+	litPixel += ComputeOilLampEmission(color.rgb, oilLampLightColor);
+
 	// Atmospheric scattering
 	litPixel = ApplyAtmosphericScatteringGround(wsPosition, litPixel);
 
@@ -202,7 +266,8 @@ FORWARD_PLUS_PS_OUTPUT PSMain( PS_INPUT Input )
 	output.vNrm = EncodeNormalGBuffer(nrm);
 	float encodedSpecIntensity = MI_Color.a < -1.5f ? -(specIntensity + 3.0f)
 		: (MI_Color.a < -0.5f ? -(specIntensity + 1.0f) : specIntensity);
-	output.vSI_SP = float4(encodedSpecIntensity, specPower, saturate(MI_WetGroundSSRStrength), 0.0f);
+	output.vSI_SP = float4(encodedSpecIntensity, specPower, saturate(MI_WetGroundSSRStrength),
+		EncodeOilLampLightColor(oilLampLightColor));
 	output.vVelocity = CalculateVelocity(Input.vCurrClipPos, Input.vPrevClipPos);
 
 	return output;
@@ -212,9 +277,18 @@ FORWARD_PLUS_PS_OUTPUT PSMain( PS_INPUT Input )
 //--------------------------------------------------------------------------------------
 // Deferred GBuffer Output
 //--------------------------------------------------------------------------------------
-#if ALPHATEST_SHADOWS == 1
+#if WINDOW_DEPTH_ONLY == 1
 void PSMain( PS_INPUT Input )
 {
+	float3 wsPosition = mul(float4(Input.vViewPosition, 1), SQ_InvView).xyz;
+	ClipWindowCutouts(wsPosition);
+}
+DEFERRED_PS_OUTPUT PSMainDISABLED( PS_INPUT Input ) : SV_TARGET
+#elif ALPHATEST_SHADOWS == 1
+void PSMain( PS_INPUT Input )
+{
+	float3 wsPosition = mul(float4(Input.vViewPosition, 1), SQ_InvView).xyz;
+	ClipWindowCutouts(wsPosition);
 	float4 color = TX_Texture0.Sample(SS_Linear, Input.vTexcoord);
 
 	// clip but only use z approximation
@@ -235,12 +309,18 @@ DEFERRED_PS_OUTPUT PSMain( PS_INPUT Input ) : SV_TARGET
 	output.vTransparencyAndCompositionMask = 0.0f;
 	output.vReactiveMask = GetFsr3DialogReactiveMask();
 
+	float3 wsPosition = mul(float4(Input.vViewPosition, 1), SQ_InvView).xyz;
+	ClipWindowCutouts(wsPosition);
+
 	float2 materialUV = Input.vTexcoord;
 #if NORMALMAPPING == 1
 	materialUV = parallax_occlusion_mapping(Input.vNormalVS, Input.vViewPosition,
 		TX_Displacement, materialUV, SS_Linear, MI_ParallaxOcclusionStrength);
 #endif
 	float4 color = TX_Texture0.Sample(SS_Linear, materialUV);
+	float3 oilLampLightColor = 0.0f;
+	if (MI_MaterialPadding0 > 0.5f)
+		oilLampLightColor = Input.vEmissiveColor.rgb * Input.vEmissiveColor.a;
 	
 	// Do alphatest if wanted
 #if ALPHATEST == 1
@@ -285,7 +365,7 @@ DEFERRED_PS_OUTPUT PSMain( PS_INPUT Input ) : SV_TARGET
 	output.vSI_SP.y = deferredSpecPower;
 #endif
 	output.vSI_SP.z = saturate(MI_WetGroundSSRStrength);
-	output.vSI_SP.w = 0.0f;
+	output.vSI_SP.w = EncodeOilLampLightColor(oilLampLightColor);
 
 	// Calculate velocity for motion vectors
 	// For instanced objects (VOBs, skeletal meshes), vCurrClipPos/vPrevClipPos come from VS
