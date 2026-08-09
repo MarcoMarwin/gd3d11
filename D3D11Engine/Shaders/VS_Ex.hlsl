@@ -36,7 +36,6 @@ struct VS_OUTPUT
 	float3 vViewPosition	: TEXCOORD5;
 	float4 vCurrClipPos     : TEXCOORD6;
 	float4 vPrevClipPos     : TEXCOORD7;
-	float3 vWorldPosition   : TEXCOORD9;
 	float4 vPosition		: SV_POSITION;
 };
 
@@ -59,7 +58,6 @@ VS_OUTPUT VSMain( VS_INPUT Input )
 	Output.vDiffuse.a = Input.vDiffuse.a * cbInstance.M_Color.a;
 	Output.vNormalVS = mul(Input.vNormal, (float3x3)mul(cbInstance.M_World, frame.M_View));
 	Output.vViewPosition = mul(float4(positionWorld,1), frame.M_View);
-	Output.vWorldPosition = positionWorld;
 
 	// Motion Vectors - use UNJITTERED matrices for correct velocity
 	Output.vCurrClipPos = mul(float4(positionWorld, 1.0), frame.M_UnjitteredViewProj);

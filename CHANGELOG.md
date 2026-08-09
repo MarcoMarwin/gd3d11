@@ -964,3 +964,6 @@ Dokumentation der gepushten Renderer-Builds.
 
 ### Build 202
 - Korrekturpush: Nightly-Fix fuer Shader. Die WorldPosition wird nun korrekt als echte Weltkoordinate aus dem Vertex Shader (VS_Ex und VS_ExInstancedObj) exportiert, wodurch die Window-Cutout-Logik und das korrekte Clipping in den Pixel Shadern (z. B. GBuffer und Forward-Rendering) wieder fehlerfrei arbeiten.
+
+### Build 203
+- Korrekturpush: CBuffer/CPU-InverseView Architektur für Window-Cutouts. Die WorldPosition-Exporte aus den Vertex Shadern wurden zurückgerollt, stattdessen wird die Inverse View Matrix einmalig pro Frame auf CPU-Seite berechnet und in den CutoutConstants-CBuffer hochgeladen. Dies vermeidet Vertex-Shader-Aufblähungen und erzielt das gleiche Ergebnis robuster im Pixel Shader.

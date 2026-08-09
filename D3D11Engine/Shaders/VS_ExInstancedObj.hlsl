@@ -68,7 +68,6 @@ struct VS_OUTPUT
     float4 vCurrClipPos     : TEXCOORD6;  // Current clip position for velocity
     float4 vPrevClipPos     : TEXCOORD7;  // Previous clip position for velocity
     float4 vEmissiveColor   : TEXCOORD8;
-    float3 vWorldPosition   : TEXCOORD9;
     
     float4 vPosition        : SV_POSITION;
 };
@@ -265,7 +264,6 @@ VS_OUTPUT VSMain( VS_INPUT Input )
     Output.vEmissiveColor = Input.InstanceEmissiveColor;
     Output.vNormalVS = mul(Input.vNormal, mul((float3x3)Input.InstanceWorldMatrix, (float3x3)frame.M_View));
     Output.vViewPosition = mul(float4(worldPos, 1.0), frame.M_View);
-    Output.vWorldPosition = worldPos;
     
     // Store clip positions for velocity calculation in pixel shader
     // Use UNJITTERED matrices for correct velocity (jitter would cause incorrect motion)

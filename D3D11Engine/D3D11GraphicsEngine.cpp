@@ -679,10 +679,13 @@ unsigned int D3D11GraphicsEngine::UpdateAndBindWindowCutouts( bool daylightPass 
     }
 
     struct alignas(16) CutoutConstants {
+        XMFLOAT4X4 InvView;
         WindowCutoutVolume Volumes[MaxWindowCutouts];
         unsigned int Count;
         float Padding[3];
     } constants = {};
+    XMStoreFloat4x4( &constants.InvView, XMMatrixInverse( nullptr,
+        XMLoadFloat4x4( &Engine::GAPI->GetRendererState().TransformState.TransformView ) ) );
     constants.Count = static_cast<unsigned int>(candidates.size());
     for ( size_t i = 0; i < candidates.size(); ++i ) {
         constants.Volumes[i] = candidates[i].Volume;
@@ -699,6 +702,7 @@ unsigned int D3D11GraphicsEngine::UpdateAndBindWindowCutouts( bool daylightPass 
 
 void D3D11GraphicsEngine::UnbindWindowCutouts() {
     struct alignas(16) CutoutConstants {
+        XMFLOAT4X4 InvView;
         WindowCutoutVolume Volumes[32];
         unsigned int Count;
         float Padding[3];

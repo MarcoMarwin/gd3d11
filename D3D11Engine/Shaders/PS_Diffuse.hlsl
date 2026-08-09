@@ -69,6 +69,7 @@ struct WindowCutoutVolume
 
 cbuffer WindowCutoutConstants : register( b6 )
 {
+    matrix WindowCutoutInvView;
     WindowCutoutVolume WindowCutouts[32];
     uint WindowCutoutCount;
     float3 WindowCutoutPadding;
@@ -123,7 +124,6 @@ struct PS_INPUT
 	float4 vCurrClipPos     : TEXCOORD6;  // Current clip position for velocity (from instanced VS)
 	float4 vPrevClipPos     : TEXCOORD7;  // Previous clip position for velocity (from instanced VS)
 	float4 vEmissiveColor   : TEXCOORD8;
-	float3 vWorldPosition   : TEXCOORD9;
 	float4 vPosition		: SV_POSITION;
 };
 
@@ -213,7 +213,7 @@ FORWARD_PLUS_PS_OUTPUT PSMain( PS_INPUT Input )
 	float vegetationReceiverMask = max(vegetationBacklitMask, alphaTestedMaterial * twoSidedBacklitMaterial);
 
 	float3 vsPosition = Input.vViewPosition;
-	float3 wsPosition = Input.vWorldPosition;
+	float3 wsPosition = mul(float4(vsPosition, 1.0f), WindowCutoutInvView).xyz;
 	ClipWindowCutouts(wsPosition);
 	
 	float pixelDistZ = abs(vsPosition.z);
@@ -292,14 +292,14 @@ FORWARD_PLUS_PS_OUTPUT PSMain( PS_INPUT Input )
 #if WINDOW_DEPTH_ONLY == 1
 void PSMain( PS_INPUT Input )
 {
-	float3 wsPosition = Input.vWorldPosition;
+	float3 wsPosition = mul(float4(Input.vViewPosition, 1.0f), WindowCutoutInvView).xyz;
 	ClipWindowCutouts(wsPosition);
 }
 DEFERRED_PS_OUTPUT PSMainDISABLED( PS_INPUT Input ) : SV_TARGET
 #elif ALPHATEST_SHADOWS == 1
 void PSMain( PS_INPUT Input )
 {
-	float3 wsPosition = Input.vWorldPosition;
+	float3 wsPosition = mul(float4(Input.vViewPosition, 1.0f), WindowCutoutInvView).xyz;
 	ClipWindowCutouts(wsPosition);
 	float4 color = TX_Texture0.Sample(SS_Linear, Input.vTexcoord);
 
@@ -321,7 +321,7 @@ DEFERRED_PS_OUTPUT PSMain( PS_INPUT Input ) : SV_TARGET
 	output.vTransparencyAndCompositionMask = 0.0f;
 	output.vReactiveMask = GetFsr3DialogReactiveMask();
 
-	float3 wsPosition = Input.vWorldPosition;
+	float3 wsPosition = mul(float4(Input.vViewPosition, 1.0f), WindowCutoutInvView).xyz;
 	ClipWindowCutouts(wsPosition);
 
 	float2 materialUV = Input.vTexcoord;
