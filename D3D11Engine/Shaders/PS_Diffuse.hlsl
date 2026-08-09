@@ -73,25 +73,27 @@ cbuffer WindowCutoutConstants : register( b6 )
     WindowCutoutVolume WindowCutouts[32];
     uint WindowCutoutCount;
     float3 WindowCutoutPadding;
+    uint4 WindowCutoutTileMasks[36];
+    float2 WindowCutoutPixelToTile;
+    float2 WindowCutoutTileOrigin;
+    uint2 WindowCutoutTileCount;
+    uint2 WindowCutoutTilePadding;
 }
 
-void ClipWindowCutouts(float3 worldPosition)
+void ClipWindowCutouts(float3 worldPosition, float2 pixelPosition)
 {
+    uint2 tile = min(uint2(max(pixelPosition - WindowCutoutTileOrigin, 0.0f)
+        * WindowCutoutPixelToTile),
+        max(WindowCutoutTileCount, 1u) - 1u);
+    uint tileIndex = tile.y * WindowCutoutTileCount.x + tile.x;
+    uint4 packedMasks = WindowCutoutTileMasks[tileIndex >> 2u];
+    uint tileMask = packedMasks[tileIndex & 3u];
     [loop]
     for (uint i = 0; i < min(WindowCutoutCount, 32u); ++i)
     {
-        WindowCutoutVolume cutout = WindowCutouts[i];
-        const float3 extents = float3(cutout.CenterExtentX.w,
-            cutout.AxisXExtentY.w, cutout.AxisYExtentZ.w);
-        const float3 axisLengthsSq = float3(
-            dot(cutout.AxisXExtentY.xyz, cutout.AxisXExtentY.xyz),
-            dot(cutout.AxisYExtentZ.xyz, cutout.AxisYExtentZ.xyz),
-            dot(cutout.AxisZPadding.xyz, cutout.AxisZPadding.xyz));
-        // Defense in depth for malformed/modded visual bounds and stale data.
-        // Valid normalized axes are ~1 and valid window volumes stay compact.
-        if (any(extents <= 0.0f) || any(extents > 535.0f)
-            || any(axisLengthsSq < 0.8f) || any(axisLengthsSq > 1.2f))
+        if ((tileMask & (1u << i)) == 0u)
             continue;
+        WindowCutoutVolume cutout = WindowCutouts[i];
         float3 relativePosition = worldPosition - cutout.CenterExtentX.xyz;
         float distanceX = abs(dot(relativePosition, cutout.AxisXExtentY.xyz));
         float distanceY = abs(dot(relativePosition, cutout.AxisYExtentZ.xyz));
@@ -214,7 +216,7 @@ FORWARD_PLUS_PS_OUTPUT PSMain( PS_INPUT Input )
 
 	float3 vsPosition = Input.vViewPosition;
 	float3 wsPosition = mul(float4(vsPosition, 1.0f), WindowCutoutInvView).xyz;
-	ClipWindowCutouts(wsPosition);
+	ClipWindowCutouts(wsPosition, Input.vPosition.xy);
 	
 	float pixelDistZ = abs(vsPosition.z);
 
@@ -293,14 +295,14 @@ FORWARD_PLUS_PS_OUTPUT PSMain( PS_INPUT Input )
 void PSMain( PS_INPUT Input )
 {
 	float3 wsPosition = mul(float4(Input.vViewPosition, 1.0f), WindowCutoutInvView).xyz;
-	ClipWindowCutouts(wsPosition);
+	ClipWindowCutouts(wsPosition, Input.vPosition.xy);
 }
 DEFERRED_PS_OUTPUT PSMainDISABLED( PS_INPUT Input ) : SV_TARGET
 #elif ALPHATEST_SHADOWS == 1
 void PSMain( PS_INPUT Input )
 {
 	float3 wsPosition = mul(float4(Input.vViewPosition, 1.0f), WindowCutoutInvView).xyz;
-	ClipWindowCutouts(wsPosition);
+	ClipWindowCutouts(wsPosition, Input.vPosition.xy);
 	float4 color = TX_Texture0.Sample(SS_Linear, Input.vTexcoord);
 
 	// clip but only use z approximation
@@ -322,7 +324,7 @@ DEFERRED_PS_OUTPUT PSMain( PS_INPUT Input ) : SV_TARGET
 	output.vReactiveMask = GetFsr3DialogReactiveMask();
 
 	float3 wsPosition = mul(float4(Input.vViewPosition, 1.0f), WindowCutoutInvView).xyz;
-	ClipWindowCutouts(wsPosition);
+	ClipWindowCutouts(wsPosition, Input.vPosition.xy);
 
 	float2 materialUV = Input.vTexcoord;
 #if NORMALMAPPING == 1

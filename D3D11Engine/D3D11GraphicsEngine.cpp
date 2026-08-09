@@ -290,6 +290,55 @@ namespace
         return _stricmp( textureName.c_str(), "OBJ_CITY_WINDOWSTONE_01" ) == 0;
     }
 
+    bool GetWindowGlassLocalBounds( MeshVisualInfo* visual, XMVECTOR& localMin, XMVECTOR& localMax ) {
+        if ( !visual ) {
+            return false;
+        }
+
+        if ( visual->WindowGlassBoundsInitialized ) {
+            if ( visual->HasWindowGlassBounds ) {
+                localMin = XMLoadFloat3( &visual->WindowGlassBounds.Min );
+                localMax = XMLoadFloat3( &visual->WindowGlassBounds.Max );
+            }
+            return visual->HasWindowGlassBounds;
+        }
+        visual->WindowGlassBoundsInitialized = true;
+
+        XMFLOAT3 minValues( FLT_MAX, FLT_MAX, FLT_MAX );
+        XMFLOAT3 maxValues( -FLT_MAX, -FLT_MAX, -FLT_MAX );
+        bool foundVertex = false;
+        for ( const auto& [material, meshes] : visual->Meshes ) {
+            zCTexture* texture = material ? material->GetTextureSingle() : nullptr;
+            if ( !texture || _stricmp( texture->GetNameWithoutExt().c_str(),
+                "OBJ_CITY_WINDOWSTONE_01" ) != 0 ) {
+                continue;
+            }
+            for ( const MeshInfo* mesh : meshes ) {
+                if ( !mesh ) {
+                    continue;
+                }
+                for ( const ExVertexStruct& vertex : mesh->Vertices ) {
+                    minValues.x = std::min( minValues.x, vertex.Position.x );
+                    minValues.y = std::min( minValues.y, vertex.Position.y );
+                    minValues.z = std::min( minValues.z, vertex.Position.z );
+                    maxValues.x = std::max( maxValues.x, vertex.Position.x );
+                    maxValues.y = std::max( maxValues.y, vertex.Position.y );
+                    maxValues.z = std::max( maxValues.z, vertex.Position.z );
+                    foundVertex = true;
+                }
+            }
+        }
+        if ( !foundVertex ) {
+            return false;
+        }
+        visual->WindowGlassBounds.Min = minValues;
+        visual->WindowGlassBounds.Max = maxValues;
+        visual->HasWindowGlassBounds = true;
+        localMin = XMLoadFloat3( &minValues );
+        localMax = XMLoadFloat3( &maxValues );
+        return true;
+    }
+
 
 
     bool IsOceanWaterTexture( zCTexture* texture ) {
@@ -585,7 +634,7 @@ unsigned int D3D11GraphicsEngine::UpdateAndBindWindowCutouts( bool daylightPass 
     // The mask is selected by camera side. OUT visuals may therefore reach
     // through the wall for the outside-to-inside view without also opening the
     // reverse view when Gothic omitted the corresponding IN visual.
-    constexpr float WallReachPadding = 35.0f;
+    constexpr float WallReachPadding = 100.0f;
 
     struct Candidate {
         float DistanceSq;
@@ -593,17 +642,30 @@ unsigned int D3D11GraphicsEngine::UpdateAndBindWindowCutouts( bool daylightPass 
     };
     std::vector<Candidate> candidates;
     const XMVECTOR cameraPosition = Engine::GAPI->GetCameraPositionXM();
-    const bool cameraIndoor = oCGame::IsSessionCameraIndoor();
+    const bool cameraIndoor = Engine::GAPI->IsCameraIndoor();
 
     for ( const auto& [visual, registeredVobs] : Engine::GAPI->GetVobsByVisual() ) {
         (void)visual;
+        MeshVisualInfo* sharedVisualInfo = nullptr;
+        for ( BaseVobInfo* baseVob : registeredVobs ) {
+            if ( auto* vobInfo = dynamic_cast<VobInfo*>( baseVob ) ) {
+                sharedVisualInfo = vobInfo->VisualInfo;
+                if ( sharedVisualInfo ) {
+                    break;
+                }
+            }
+        }
+        if ( !sharedVisualInfo
+            || !(daylightPass
+                ? IsIndoorWindowVisual( sharedVisualInfo->VisualName )
+                : IsWindowVisualForCameraSide( sharedVisualInfo->VisualName, cameraIndoor )) ) {
+            continue;
+        }
+
         for ( BaseVobInfo* baseVob : registeredVobs ) {
             auto* vobInfo = dynamic_cast<VobInfo*>( baseVob );
             if ( !vobInfo || !vobInfo->Vob || !vobInfo->VisualInfo
-                || !vobInfo->Vob->GetShowVisual()
-                || !(daylightPass
-                    ? IsIndoorWindowVisual( vobInfo->VisualInfo->VisualName )
-                    : IsWindowVisualForCameraSide( vobInfo->VisualInfo->VisualName, cameraIndoor )) ) {
+                || !vobInfo->Vob->GetShowVisual() ) {
                 continue;
             }
             if ( !daylightPass && Engine::GAPI->GetCameraBBox3DInFrustum(
@@ -618,9 +680,11 @@ unsigned int D3D11GraphicsEngine::UpdateAndBindWindowCutouts( bool daylightPass 
                 continue;
             }
 
-            const zTBBox3D& bbox = vobInfo->VisualInfo->BBox;
-            const XMVECTOR localMin = XMLoadFloat3( &bbox.Min );
-            const XMVECTOR localMax = XMLoadFloat3( &bbox.Max );
+            XMVECTOR localMin;
+            XMVECTOR localMax;
+            if ( !GetWindowGlassLocalBounds( vobInfo->VisualInfo, localMin, localMax ) ) {
+                continue;
+            }
             const XMVECTOR localCenter = (localMin + localMax) * 0.5f;
             const XMVECTOR localExtents = (localMax - localMin) * 0.5f;
 
@@ -642,6 +706,9 @@ unsigned int D3D11GraphicsEngine::UpdateAndBindWindowCutouts( bool daylightPass 
                 XMVectorGetY( localExtents ) * scaleY,
                 XMVectorGetZ( localExtents ) * scaleZ,
             };
+            const size_t thinAxis = extents[0] <= extents[1]
+                ? (extents[0] <= extents[2] ? 0u : 2u)
+                : (extents[1] <= extents[2] ? 1u : 2u);
             const XMVECTOR center = XMVector3TransformCoord( localCenter, world );
             XMFLOAT3 centerValues;
             XMStoreFloat3( &centerValues, center );
@@ -649,15 +716,20 @@ unsigned int D3D11GraphicsEngine::UpdateAndBindWindowCutouts( bool daylightPass 
                 || !std::isfinite( centerValues.z )
                 || !std::isfinite( extents[0] ) || !std::isfinite( extents[1] )
                 || !std::isfinite( extents[2] )
-                || extents[0] < MinWindowExtent || extents[1] < MinWindowExtent
-                || extents[2] < MinWindowExtent
+                || extents[0] < 0.0f || extents[1] < 0.0f || extents[2] < 0.0f
                 || extents[0] > MaxWindowExtent || extents[1] > MaxWindowExtent
                 || extents[2] > MaxWindowExtent ) {
                 continue;
             }
-            const size_t thinAxis = extents[0] <= extents[1]
-                ? (extents[0] <= extents[2] ? 0u : 2u)
-                : (extents[1] <= extents[2] ? 1u : 2u);
+            for ( size_t axis = 0; axis < 3; ++axis ) {
+                if ( axis != thinAxis && extents[axis] < MinWindowExtent ) {
+                    extents[axis] = 0.0f;
+                }
+            }
+            if ( extents[(thinAxis + 1) % 3] == 0.0f
+                || extents[(thinAxis + 2) % 3] == 0.0f ) {
+                continue;
+            }
             if ( extents[thinAxis] > MaxWindowDepthExtent ) {
                 continue;
             }
@@ -678,17 +750,118 @@ unsigned int D3D11GraphicsEngine::UpdateAndBindWindowCutouts( bool daylightPass 
         candidates.resize( MaxWindowCutouts );
     }
 
-    struct alignas(16) CutoutConstants {
-        XMFLOAT4X4 InvView;
-        WindowCutoutVolume Volumes[MaxWindowCutouts];
-        unsigned int Count;
-        float Padding[3];
-    } constants = {};
+    WindowCutoutConstants constants = {};
     XMStoreFloat4x4( &constants.InvView, XMMatrixInverse( nullptr,
         XMLoadFloat4x4( &Engine::GAPI->GetRendererState().TransformState.TransformView ) ) );
     constants.Count = static_cast<unsigned int>(candidates.size());
     for ( size_t i = 0; i < candidates.size(); ++i ) {
         constants.Volumes[i] = candidates[i].Volume;
+    }
+
+    constexpr unsigned int TileCountX = 16;
+    constexpr unsigned int TileCountY = 9;
+    constants.TileCountX = TileCountX;
+    constants.TileCountY = TileCountY;
+    UINT viewportCount = 1;
+    D3D11_VIEWPORT viewport = {};
+    GetContext()->RSGetViewports( &viewportCount, &viewport );
+    uint32_t* tileMasks = reinterpret_cast<uint32_t*>( constants.TileMasks );
+    auto addToAllTiles = [&]( uint32_t bit ) {
+        for ( unsigned int tile = 0; tile < TileCountX * TileCountY; ++tile ) {
+            tileMasks[tile] |= bit;
+        }
+    };
+
+    if ( viewportCount == 1 && viewport.Width > 0.0f && viewport.Height > 0.0f ) {
+        constants.PixelToTile = XMFLOAT2( TileCountX / viewport.Width, TileCountY / viewport.Height );
+        constants.TileOrigin = XMFLOAT2( viewport.TopLeftX, viewport.TopLeftY );
+        const XMMATRIX view = XMMatrixTranspose( XMLoadFloat4x4(
+            &Engine::GAPI->GetRendererState().TransformState.TransformView ) );
+        const XMMATRIX projection = XMMatrixTranspose(
+            XMLoadFloat4x4( &Engine::GAPI->GetProjectionMatrix() ) );
+        const XMMATRIX identity = XMMatrixIdentity();
+
+        for ( size_t i = 0; i < candidates.size(); ++i ) {
+            const WindowCutoutVolume& volume = candidates[i].Volume;
+            const XMVECTOR center = XMLoadFloat4( &volume.CenterExtentX );
+            const XMVECTOR axes[3] = {
+                XMLoadFloat4( &volume.AxisXExtentY ),
+                XMLoadFloat4( &volume.AxisYExtentZ ),
+                XMLoadFloat4( &volume.AxisZPadding ),
+            };
+            const float extents[3] = {
+                volume.CenterExtentX.w,
+                volume.AxisXExtentY.w,
+                volume.AxisYExtentZ.w,
+            };
+            float minX = FLT_MAX;
+            float minY = FLT_MAX;
+            float maxX = -FLT_MAX;
+            float maxY = -FLT_MAX;
+            bool useAllTiles = false;
+            for ( int x = -1; x <= 1; x += 2 ) {
+                for ( int y = -1; y <= 1; y += 2 ) {
+                    for ( int z = -1; z <= 1; z += 2 ) {
+                        XMVECTOR corner = center
+                            + axes[0] * (extents[0] * static_cast<float>(x))
+                            + axes[1] * (extents[1] * static_cast<float>(y))
+                            + axes[2] * (extents[2] * static_cast<float>(z));
+                        XMFLOAT3 projected;
+                        XMStoreFloat3( &projected, XMVector3Project( corner,
+                            viewport.TopLeftX, viewport.TopLeftY, viewport.Width, viewport.Height,
+                            viewport.MinDepth, viewport.MaxDepth, projection, view, identity ) );
+                        if ( !std::isfinite( projected.x ) || !std::isfinite( projected.y )
+                            || !std::isfinite( projected.z ) || projected.z <= 0.0f ) {
+                            useAllTiles = true;
+                            continue;
+                        }
+                        minX = std::min( minX, projected.x );
+                        minY = std::min( minY, projected.y );
+                        maxX = std::max( maxX, projected.x );
+                        maxY = std::max( maxY, projected.y );
+                    }
+                }
+            }
+
+            const uint32_t bit = 1u << static_cast<uint32_t>(i);
+            if ( useAllTiles || minX > maxX || minY > maxY ) {
+                addToAllTiles( bit );
+                continue;
+            }
+            int minTileX = static_cast<int>(std::floor(
+                (minX - viewport.TopLeftX) * TileCountX / viewport.Width)) - 1;
+            int minTileY = static_cast<int>(std::floor(
+                (minY - viewport.TopLeftY) * TileCountY / viewport.Height)) - 1;
+            int maxTileX = static_cast<int>(std::floor(
+                (maxX - viewport.TopLeftX) * TileCountX / viewport.Width)) + 1;
+            int maxTileY = static_cast<int>(std::floor(
+                (maxY - viewport.TopLeftY) * TileCountY / viewport.Height)) + 1;
+            minTileX = std::clamp( minTileX, 0, static_cast<int>(TileCountX) - 1 );
+            minTileY = std::clamp( minTileY, 0, static_cast<int>(TileCountY) - 1 );
+            maxTileX = std::clamp( maxTileX, 0, static_cast<int>(TileCountX) - 1 );
+            maxTileY = std::clamp( maxTileY, 0, static_cast<int>(TileCountY) - 1 );
+            for ( int tileY = minTileY; tileY <= maxTileY; ++tileY ) {
+                for ( int tileX = minTileX; tileX <= maxTileX; ++tileX ) {
+                    tileMasks[tileY * TileCountX + tileX] |= bit;
+                }
+            }
+        }
+    } else {
+        for ( size_t i = 0; i < candidates.size(); ++i ) {
+            addToAllTiles( 1u << static_cast<uint32_t>(i) );
+        }
+        constants.PixelToTile = XMFLOAT2( 0.0f, 0.0f );
+    }
+
+    if ( Engine::GAPI->GetRendererState().RendererSettings.EnableDebugLog ) {
+        static unsigned int lastVisualCount = UINT_MAX;
+        static unsigned int lastDaylightCount = UINT_MAX;
+        unsigned int& lastCount = daylightPass ? lastDaylightCount : lastVisualCount;
+        if ( lastCount != constants.Count ) {
+            LogInfo() << "Window cutouts (" << (daylightPass ? "daylight" : "camera")
+                << "): " << constants.Count << ", cameraIndoor=" << cameraIndoor;
+            lastCount = constants.Count;
+        }
     }
 
     if ( !WindowCutoutConstantsBuffer ) {
@@ -701,12 +874,9 @@ unsigned int D3D11GraphicsEngine::UpdateAndBindWindowCutouts( bool daylightPass 
 }
 
 void D3D11GraphicsEngine::UnbindWindowCutouts() {
-    struct alignas(16) CutoutConstants {
-        XMFLOAT4X4 InvView;
-        WindowCutoutVolume Volumes[32];
-        unsigned int Count;
-        float Padding[3];
-    } constants = {};
+    WindowCutoutConstants constants = {};
+    constants.TileCountX = 1;
+    constants.TileCountY = 1;
     if ( WindowCutoutConstantsBuffer ) {
         WindowCutoutConstantsBuffer->UpdateBuffer( &constants )->BindToPixelShader( 6 );
     }

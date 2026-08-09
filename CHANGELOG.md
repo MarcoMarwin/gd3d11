@@ -967,3 +967,7 @@ Dokumentation der gepushten Renderer-Builds.
 
 ### Build 203
 - Korrekturpush: CBuffer/CPU-InverseView Architektur für Window-Cutouts. Die WorldPosition-Exporte aus den Vertex Shadern wurden zurückgerollt, stattdessen wird die Inverse View Matrix einmalig pro Frame auf CPU-Seite berechnet und in den CutoutConstants-CBuffer hochgeladen. Dies vermeidet Vertex-Shader-Aufblähungen und erzielt das gleiche Ergebnis robuster im Pixel Shader.
+
+- Korrekturpush: Tile-based Window Cutouts implementiert. Die Cutout-Schleife im Pixel Shader wertet nun eine 2D-Tile-Maske aus, um nur noch die Fensterausschnitte zu berechnen, die den aktuellen Bildschirm-Tile schneiden. Das verbessert die Shader-Performance massiv.
+- Korrekturpush: OilLamp Emission Logic überarbeitet. Bei der Zuweisung von Lichtern an Öllampen (ConfigureAllPointlightShadowSources) werden nun statische Lichter im Suchradius bevorzugt. Nur wenn kein statisches Licht gefunden wird, greift das System auf das nächste dynamische Licht zurück.
+- Korrekturpush: MeshVisualInfo um WindowGlassBounds erweitert für präziseres Bounding-Box-Tracking von Fensterscheiben.

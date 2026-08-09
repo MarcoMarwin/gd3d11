@@ -5308,13 +5308,49 @@ void GothicAPI::ConfigureAllPointlightShadowSources() const {
             OilLampAnchor& oilLamp = oilLampAnchors[oilLampClaims[lightIndex].front()];
             assignAnchor( lights[lightIndex], oilLamp.ShadowAnchor );
 
-            const float candidateDistanceSq = distanceSq( lights[lightIndex].Position, oilLamp.Position );
-            if ( oilLamp.Info && candidateDistanceSq < oilLamp.Info->OilLampEmissionLightDistanceSq ) {
-                oilLamp.Info->OilLampEmissionLight = lights[lightIndex].Info->Vob;
-                oilLamp.Info->OilLampEmissionLightDistanceSq = candidateDistanceSq;
-            }
         }
         // Multiple independent oillamps claim this light: keep the authored position.
+    }
+
+    // Emission-color linking is independent of shadow-anchor ownership. One
+    // authored light may legitimately tint several nearby lamps even though it
+    // cannot be moved to more than one shadow anchor. Static lights always win;
+    // a dynamic light is used only when no eligible static light exists in the
+    // complete lamp-link radius.
+    for ( OilLampAnchor& oilLamp : oilLampAnchors ) {
+        if ( !oilLamp.Info )
+            continue;
+
+        size_t nearestStatic = INVALID_INDEX;
+        size_t nearestDynamic = INVALID_INDEX;
+        float nearestStaticDistanceSq = LINK_RADIUS_SQ;
+        float nearestDynamicDistanceSq = LINK_RADIUS_SQ;
+        for ( size_t lightIndex = 0; lightIndex < lights.size(); ++lightIndex ) {
+            if ( resolvedByFlame[lightIndex] )
+                continue;
+
+            const float candidateDistanceSq = distanceSq( lights[lightIndex].Position, oilLamp.Position );
+            if ( candidateDistanceSq > LINK_RADIUS_SQ )
+                continue;
+
+            if ( lights[lightIndex].Info->Vob->IsStatic() ) {
+                if ( candidateDistanceSq <= nearestStaticDistanceSq ) {
+                    nearestStaticDistanceSq = candidateDistanceSq;
+                    nearestStatic = lightIndex;
+                }
+            } else if ( candidateDistanceSq <= nearestDynamicDistanceSq ) {
+                nearestDynamicDistanceSq = candidateDistanceSq;
+                nearestDynamic = lightIndex;
+            }
+        }
+
+        const size_t selectedLight = nearestStatic != INVALID_INDEX ? nearestStatic : nearestDynamic;
+        if ( selectedLight != INVALID_INDEX ) {
+            oilLamp.Info->OilLampEmissionLight = lights[selectedLight].Info->Vob;
+            oilLamp.Info->OilLampEmissionLightDistanceSq = nearestStatic != INVALID_INDEX
+                ? nearestStaticDistanceSq
+                : nearestDynamicDistanceSq;
+        }
     }
 
     struct ParentAnchor {

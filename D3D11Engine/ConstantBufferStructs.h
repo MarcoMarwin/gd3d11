@@ -36,6 +36,22 @@ struct WindowCutoutVolume {
 };
 static_assert( sizeof( WindowCutoutVolume ) == 64 );
 
+struct WindowCutoutConstants {
+    XMFLOAT4X4 InvView;
+    WindowCutoutVolume Volumes[32];
+    uint32_t Count;
+    float Padding[3];
+    // 16 x 9 screen tiles, packed four uint masks per vector. Each bit selects
+    // one of the 32 volumes that can affect that tile.
+    XMUINT4 TileMasks[36];
+    XMFLOAT2 PixelToTile;
+    XMFLOAT2 TileOrigin;
+    uint32_t TileCountX;
+    uint32_t TileCountY;
+    uint32_t TilePadding[2];
+};
+static_assert( sizeof( WindowCutoutConstants ) == 2736 );
+
 /** Per-instance data for instanced node attachment rendering */
 struct NodeAttachmentInstanceData {
     XMFLOAT4X4 World;

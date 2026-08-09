@@ -228,7 +228,13 @@ struct MeshVisualInfo : public BaseVisualInfo {
         FullMesh = nullptr;
         LastAniUpdateFrame = 0;
         NeedsAlphaTesting = false;
+        WindowGlassBoundsInitialized = false;
+        HasWindowGlassBounds = false;
     }
+
+    bool WindowGlassBoundsInitialized;
+    bool HasWindowGlassBounds;
+    zTBBox3D WindowGlassBounds;
     
     MeshVisualInfo(MeshVisualInfo&& other) = default;
     MeshVisualInfo& operator=( MeshVisualInfo&& ) = default;
