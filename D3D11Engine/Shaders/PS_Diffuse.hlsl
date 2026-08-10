@@ -162,6 +162,7 @@ FORWARD_PLUS_PS_OUTPUT PSMain( PS_INPUT Input )
 	// Match Kirides Nightly temporal masks for opaque world geometry.
 	output.vTransparencyAndCompositionMask = 0.0f;
 	output.vReactiveMask = GetFsr3DialogReactiveMask();
+	output.vWorldGeometryMask = 1.0f;
 
 	float2 materialUV = Input.vTexcoord;
 #if NORMALMAPPING == 1
@@ -325,6 +326,7 @@ DEFERRED_PS_OUTPUT PSMain( PS_INPUT Input ) : SV_TARGET
 	// Match Kirides Nightly temporal masks for opaque world geometry.
 	output.vTransparencyAndCompositionMask = 0.0f;
 	output.vReactiveMask = GetFsr3DialogReactiveMask();
+	output.vWorldGeometryMask = 1.0f;
 
 	float3 wsPosition = mul(float4(Input.vViewPosition, 1.0f), WindowCutoutInvView).xyz;
 	ClipWindowCutouts(wsPosition, Input.vPosition.xy);

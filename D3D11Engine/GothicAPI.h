@@ -502,6 +502,8 @@ public:
 
     /** Returns the midpoint of the current world */
     WorldInfo* GetLoadedWorldInfo() { return LoadedWorldInfo.get(); }
+    /** True only after the world VOB/BSP caches have been built completely. */
+    bool IsWorldRenderCacheReady() const { return LeafLinearCache.Count != 0; }
 
     /** Returns wether the camera is indoor or not */
     bool IsCameraIndoor();

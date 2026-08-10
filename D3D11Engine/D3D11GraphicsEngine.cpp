@@ -289,7 +289,10 @@ namespace
         }
 
         const float dayBrightness = std::lerp( 1.0f, 0.5f, rainFactor );
-        return std::lerp( 0.10f, dayBrightness, daylightFactor );
+        // Keep the authored fractional-alpha glass readable at night. The
+        // transparent replay has no reflection probe, so a small ambient floor
+        // is a more stable approximation than driving its RGB almost to black.
+        return std::lerp( 0.35f, dayBrightness, daylightFactor );
     }
 
     bool IsWindowGlassMaterial( const MeshVisualInfo* visual, const zCTexture* texture ) {
@@ -643,10 +646,12 @@ void D3D11GraphicsEngine::EnsureFrameVobVisibilityCollected() {
         return;
 
     const WorldInfo* loadedWorld = Engine::GAPI->GetLoadedWorldInfo();
-    if ( !loadedWorld || !loadedWorld->BspTree ) {
+    if ( !loadedWorld || !loadedWorld->BspTree
+        || !Engine::GAPI->IsWorldRenderCacheReady() ) {
         // DrawWorldMesh also runs for startup/loading screens, before Gothic
-        // has supplied a BSP tree. Keep the cache uncollected so a world that
-        // becomes available later in this frame can still be collected.
+        // has finished its BSP/VOB caches. A non-null tree alone is not enough:
+        // during level startup it can already exist while its VOB ownership is
+        // still being mutated. Keep the cache uncollected until finalization.
         return;
     }
 
@@ -775,6 +780,14 @@ void D3D11GraphicsEngine::RebuildWindowCutoutVolumeCache() {
 unsigned int D3D11GraphicsEngine::UpdateAndBindWindowCutouts( bool daylightPass ) {
     constexpr size_t MaxWindowCutouts = 32;
     constexpr float MaxWindowDistance = 12000.0f;
+
+    // Loading and menu frames may render after Gothic has published a BSP
+    // pointer but before BuildBspVobMapCache has completed. Never inspect or
+    // retain window VOB pointers during that interval.
+    if ( !Engine::GAPI || !Engine::GAPI->IsWorldRenderCacheReady() ) {
+        UnbindWindowCutouts();
+        return 0;
+    }
 
     const uint64_t windowGeneration = Engine::GAPI->GetCityWindowConfigurationGeneration();
     if ( WindowCutoutCacheGeneration != windowGeneration ) {
@@ -1711,7 +1724,9 @@ XRESULT D3D11GraphicsEngine::RecreateBuffers() {
 
 
     auto roundedTextureResolution = GetResolution( );
-    const bool renderBuffersAlive = DepthStencilBuffer && DepthStencilBufferCopy && VelocityBuffer && Backbuffer && m_SwapchainDepthStencilBuffer;
+    const bool renderBuffersAlive = DepthStencilBuffer && DepthStencilBufferCopy
+        && WindowWorldGeometryMask && VelocityBuffer && Backbuffer
+        && m_SwapchainDepthStencilBuffer;
     if ( lastRoundedTextureResolution == roundedTextureResolution && renderBuffersAlive ) {
         // same resolution, just adjusting the viewport
         return XR_SUCCESS;
@@ -1729,6 +1744,16 @@ XRESULT D3D11GraphicsEngine::RecreateBuffers() {
     DepthStencilBufferCopy = std::make_unique<RenderToTextureBuffer>(
         GetDevice().Get(), roundedTextureResolution.x, roundedTextureResolution.y, DXGI_FORMAT_R32_TYPELESS, nullptr,
         DXGI_FORMAT_R32_FLOAT, DXGI_FORMAT_R32_FLOAT );
+
+    // One byte per pixel, written only while the static Gothic world mesh is
+    // submitted. Window validation can therefore ignore VOBs and NPCs without
+    // another geometry pass or a full-resolution depth copy.
+    WindowWorldGeometryMask = std::make_unique<RenderToTextureBuffer>(
+        GetDevice().Get(), roundedTextureResolution.x, roundedTextureResolution.y,
+        DXGI_FORMAT_R8_UNORM );
+    SetDebugName( WindowWorldGeometryMask->GetTexture().Get(), "WindowWorldGeometryMask->TEX" );
+    SetDebugName( WindowWorldGeometryMask->GetShaderResView().Get(), "WindowWorldGeometryMask->SRV" );
+    SetDebugName( WindowWorldGeometryMask->GetRenderTargetView().Get(), "WindowWorldGeometryMask->RTV" );
 
     // Create PFX-Renderer
     if ( !PfxRenderer ) PfxRenderer = std::make_unique<D3D11PfxRenderer>();
@@ -5966,6 +5991,26 @@ XRESULT D3D11GraphicsEngine::DrawWorldMesh( bool noTextures ) {
         noTextures = true;
     }
 
+    ID3D11RenderTargetView* previousWorldRTVs[D3D11_SIMULTANEOUS_RENDER_TARGET_COUNT] = {};
+    ID3D11DepthStencilView* previousWorldDSV = nullptr;
+    const bool captureWorldGeometryMask = !isZPrepass
+        && WindowWorldGeometryMask
+        && WindowWorldGeometryMask->GetRenderTargetView().Get();
+    if ( captureWorldGeometryMask ) {
+        constexpr float clearMask[4] = { 0.0f, 0.0f, 0.0f, 0.0f };
+        GetContext()->ClearRenderTargetView(
+            WindowWorldGeometryMask->GetRenderTargetView().Get(), clearMask );
+
+        GetContext()->OMGetRenderTargets( D3D11_SIMULTANEOUS_RENDER_TARGET_COUNT,
+            previousWorldRTVs, &previousWorldDSV );
+        ID3D11RenderTargetView* worldRTVs[D3D11_SIMULTANEOUS_RENDER_TARGET_COUNT] = {};
+        for ( UINT i = 0; i < D3D11_SIMULTANEOUS_RENDER_TARGET_COUNT; ++i ) {
+            worldRTVs[i] = previousWorldRTVs[i];
+        }
+        worldRTVs[6] = WindowWorldGeometryMask->GetRenderTargetView().Get();
+        GetContext()->OMSetRenderTargets( 7, worldRTVs, previousWorldDSV );
+    }
+
     // Setup default renderstates
     SetDefaultStates();
 
@@ -6293,6 +6338,19 @@ XRESULT D3D11GraphicsEngine::DrawWorldMesh( bool noTextures ) {
     }
 
     UnbindWindowCutouts();
+
+    if ( captureWorldGeometryMask ) {
+        GetContext()->OMSetRenderTargets( D3D11_SIMULTANEOUS_RENDER_TARGET_COUNT,
+            previousWorldRTVs, previousWorldDSV );
+        for ( ID3D11RenderTargetView* rtv : previousWorldRTVs ) {
+            if ( rtv ) {
+                rtv->Release();
+            }
+        }
+        if ( previousWorldDSV ) {
+            previousWorldDSV->Release();
+        }
+    }
     return XR_SUCCESS;
 }
 
@@ -8773,6 +8831,15 @@ XRESULT D3D11GraphicsEngine::DrawFrameAlphaMeshes() {
         auto _scopeAlphaReplay = RecordGraphicsEvent( GE_NAME( "DrawFrameAlphaMeshes::Replay" ) );
         PShaderID activeAlphaShader = PShaderID::PS_Simple;
         const float windowGlassBrightness = GetWindowGlassBrightness();
+        ID3D11ShaderResourceView* windowSceneDepthSRV = DepthStencilBufferCopy
+            ? DepthStencilBufferCopy->GetShaderResView().Get()
+            : nullptr;
+        ID3D11ShaderResourceView* windowWorldMaskSRV = WindowWorldGeometryMask
+            ? WindowWorldGeometryMask->GetShaderResView().Get()
+            : nullptr;
+        const bool windowSkyGuardAvailable = windowSceneDepthSRV && windowWorldMaskSRV
+            && Engine::GAPI->GetRendererState().RendererSettings.DrawWorldMesh;
+        bool windowSkyGuardBound = false;
         bool twoSidedWindowGlass = false;
         enum class ReplayBlendMode { None, Alpha, Additive };
         ReplayBlendMode activeBlendMode = ReplayBlendMode::None;
@@ -8789,17 +8856,33 @@ XRESULT D3D11GraphicsEngine::DrawFrameAlphaMeshes() {
                 ? PShaderID::PS_Simple_FF
                 : PShaderID::PS_Simple;
             if ( wantedAlphaShader != activeAlphaShader ) {
+                if ( windowSkyGuardBound && !isWindowGlass ) {
+                    ID3D11ShaderResourceView* nullSRVs[2] = {};
+                    GetContext()->PSSetShaderResources( 14, 2, nullSRVs );
+                    windowSkyGuardBound = false;
+                }
+
                 SetActivePixelShader( wantedAlphaShader );
                 ActivePS->Apply();
                 activeAlphaShader = wantedAlphaShader;
 
                 if ( isWindowGlass ) {
+                    if ( windowSkyGuardAvailable ) {
+                        ID3D11ShaderResourceView* guardSRVs[2] = {
+                            windowSceneDepthSRV, windowWorldMaskSRV
+                        };
+                        GetContext()->PSSetShaderResources( 14, 2, guardSRVs );
+                        windowSkyGuardBound = true;
+                    }
+
                     PsSimpleFFdata windowGlassData = {};
+                    const float lowerScreenBoundary =
+                        static_cast<float>(GetResolution().y) * 0.5f;
                     windowGlassData.textureFactor = float4(
                         windowGlassBrightness,
                         windowGlassBrightness,
                         windowGlassBrightness,
-                        -1.0f );
+                        windowSkyGuardAvailable ? -lowerScreenBoundary : -1.0f );
                     ActivePS->GetBuffer( "cbFFData" )
                         .Update( &windowGlassData )
                         .Bind();
@@ -8882,6 +8965,11 @@ XRESULT D3D11GraphicsEngine::DrawFrameAlphaMeshes() {
 
             // Reset visual
             vi->StartNewFrame();
+        }
+
+        if ( windowSkyGuardBound ) {
+            ID3D11ShaderResourceView* nullSRVs[2] = {};
+            GetContext()->PSSetShaderResources( 14, 2, nullSRVs );
         }
     }
 

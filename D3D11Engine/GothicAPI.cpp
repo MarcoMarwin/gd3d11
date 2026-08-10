@@ -583,7 +583,9 @@ namespace {
 
         // Oil-lamp glass must never drift into neutral white. Low-saturation
         // sources use Gothic's warm lamp white; chromatic sources snap to the
-        // nearest of six stable hues so animated lights cannot wash the lamp out.
+        // nearest stable hue so animated lights cannot wash the lamp out. The
+        // yellow sector deliberately falls back to warm white: yellow occurred
+        // too frequently for ordinary Gothic lamp lights.
         float paletteRed = 237.0f;
         float paletteGreen = 211.0f;
         float paletteBlue = 165.0f;
@@ -603,18 +605,20 @@ namespace {
             }
 
             const int hueSector = static_cast<int>(std::floor((hue + 30.0f) / 60.0f)) % 6;
-            static constexpr float palette[6][3] = {
-                { 255.0f,  64.0f,  32.0f }, // red
-                { 255.0f, 220.0f,  40.0f }, // yellow
-                {  64.0f, 255.0f,  80.0f }, // green
-                {  48.0f, 220.0f, 255.0f }, // cyan
-                {  64.0f, 105.0f, 255.0f }, // blue
-                { 190.0f,  64.0f, 255.0f }  // violet
-            };
-            paletteRed = palette[hueSector][0];
-            paletteGreen = palette[hueSector][1];
-            paletteBlue = palette[hueSector][2];
-            paletteIndex = static_cast<DWORD>(hueSector) + 2u;
+            if ( hueSector != 1 ) {
+                static constexpr float palette[6][3] = {
+                    { 255.0f,  64.0f,  32.0f }, // red
+                    { 237.0f, 211.0f, 165.0f }, // warm-white fallback
+                    {  64.0f, 255.0f,  80.0f }, // green
+                    {  48.0f, 220.0f, 255.0f }, // cyan
+                    {  64.0f, 105.0f, 255.0f }, // blue
+                    { 190.0f,  64.0f, 255.0f }  // violet
+                };
+                paletteRed = palette[hueSector][0];
+                paletteGreen = palette[hueSector][1];
+                paletteBlue = palette[hueSector][2];
+                paletteIndex = static_cast<DWORD>(hueSector) + 2u;
+            }
         }
 
         auto toByte = []( float channel ) -> DWORD {
@@ -3902,7 +3906,10 @@ void GothicAPI::DrawParticleFX( zCVob* source, zCParticleFX* fx, ParticleFrameDa
             ii.position = p->PositionWS;
             ii.color = color;
             ii.velocity = p->Vel;
-            ii.particleLightingScale = emissiveParticle ? -1.0f : (waterfallParticle ? 0.25f : 1.0f);
+            // Values above one are a scoped marker; the shaders still use full
+            // lighting strength but give dense ground fog a darker night floor.
+            ii.particleLightingScale = emissiveParticle ? -1.0f
+                : (groundFogParticle ? 2.0f : (waterfallParticle ? 0.25f : 1.0f));
 
             if ( fx->GetEmitter()->GetVisAlignment() == 2 ) {
                 if ( zCVob* connectedVob = fx->GetConnectedVob() ) {
@@ -4730,9 +4737,9 @@ void GothicAPI::CollectVisibleVobs(
             if ( !window || !window->CityWindowFacingInitialized )
                 return false;
 
-            // Keep the VOB visible for five degrees beyond its geometric edge.
+            // Keep the VOB visible for fifteen degrees beyond its geometric edge.
             // Comparing squared values avoids a normalize/square-root per window.
-            constexpr float BackfaceToleranceSinSq = 0.0075961235f; // sin(5 deg)^2
+            constexpr float BackfaceToleranceSinSq = 0.0669872981f; // sin(15 deg)^2
             const XMVECTOR toCamera = cameraPosition
                 - XMLoadFloat3( &window->CityWindowCenter );
             const float facing = XMVectorGetX( XMVector3Dot(

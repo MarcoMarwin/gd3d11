@@ -544,6 +544,7 @@ private:
     /** Optional per-visual wind metadata for FL11+ instanced VOB rendering. */
     std::unique_ptr<D3D11VertexBuffer> WindMetadataBuffer;
     std::unique_ptr<D3D11Texture> WindowGlassReplacementTexture;
+    std::unique_ptr<RenderToTextureBuffer> WindowWorldGeometryMask;
     std::unique_ptr<D3D11ConstantBuffer> WindowCutoutConstantsBuffer;
     std::vector<CachedWindowCutoutVolume> WindowCutoutVolumeCache;
     uint64_t WindowCutoutCacheGeneration = static_cast<uint64_t>(-1);

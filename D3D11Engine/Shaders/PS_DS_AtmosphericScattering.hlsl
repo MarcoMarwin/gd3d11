@@ -18,7 +18,7 @@ float3 DecodeOilLampLightColor(float encoded)
     const uint paletteIndex = min((uint)round(saturate(encoded) * (255.0f / 32.0f)), 7u);
     if (paletteIndex == 1u) return float3(237.0f, 211.0f, 165.0f) * (1.0f / 255.0f);
     if (paletteIndex == 2u) return float3(255.0f,  64.0f,  32.0f) * (1.0f / 255.0f);
-    if (paletteIndex == 3u) return float3(255.0f, 220.0f,  40.0f) * (1.0f / 255.0f);
+    if (paletteIndex == 3u) return float3(237.0f, 211.0f, 165.0f) * (1.0f / 255.0f);
     if (paletteIndex == 4u) return float3( 64.0f, 255.0f,  80.0f) * (1.0f / 255.0f);
     if (paletteIndex == 5u) return float3( 48.0f, 220.0f, 255.0f) * (1.0f / 255.0f);
     if (paletteIndex == 6u) return float3( 64.0f, 105.0f, 255.0f) * (1.0f / 255.0f);
