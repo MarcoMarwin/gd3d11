@@ -680,6 +680,9 @@ public:
     /** Returns all registered VOB instances grouped by their Gothic visual. */
     const gtl::flat_hash_map<zCVisual*, std::vector<BaseVobInfo*>>& GetVobsByVisual() const { return VobsByVisual; }
 
+    /** Changes whenever static city-window pointers or configuration change. */
+    uint64_t GetCityWindowConfigurationGeneration() const { return CityWindowConfigurationGeneration; }
+
     /** Returns the collection of PolyStrip meshes infos */
     const std::map<zCTexture*, PolyStripInfo>& GetPolyStripInfos() { return PolyStripInfos; };
 
@@ -905,6 +908,9 @@ private:
 
     /** Maps visuals to vobs */
     gtl::flat_hash_map<zCVisual*, std::vector<BaseVobInfo*>> VobsByVisual;
+
+    /** Invalidates renderer-side city-window caches without retaining stale VOB pointers. */
+    uint64_t CityWindowConfigurationGeneration = 0;
 
     /** Map of textures */
     gtl::flat_hash_map<std::string, MyDirectDrawSurface7*> SurfacesByName;

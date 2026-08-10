@@ -151,7 +151,8 @@ static bool IsOilLampEmissiveTexture( const zCTexture* texture ) {
 }
 
 static MaterialInfo::Buffer GetEffectiveMaterialBuffer(
-    const MaterialInfo* info, MyDirectDrawSurface7* surface, const zCTexture* texture = nullptr ) {
+    const MaterialInfo* info, MyDirectDrawSurface7* surface,
+    const zCTexture* texture = nullptr, bool windowGlassSplit = false ) {
     MaterialInfo defaults;
     MaterialInfo::Buffer buffer = info ? info->buffer : defaults.buffer;
 
@@ -165,6 +166,7 @@ static MaterialInfo::Buffer GetEffectiveMaterialBuffer(
 
     // Transient renderer marker; deliberately not part of Materials.json.
     buffer.Padding0 = IsOilLampEmissiveTexture( texture ) ? 1.0f : 0.0f;
+    buffer.Padding1 = windowGlassSplit ? 1.0f : 0.0f;
 
     return buffer;
 }
@@ -280,6 +282,23 @@ namespace
             return false;
         }
         return Engine::GAPI->GetSky()->GetAtmosphereCB().AC_SunVisibility > 0.001f;
+    }
+
+    float GetWindowGlassBrightness() {
+        float daylightFactor = 1.0f;
+        float rainFactor = 0.0f;
+        if ( Engine::GAPI ) {
+            if ( GSky* sky = Engine::GAPI->GetSky() ) {
+                const auto& atmosphere = sky->GetAtmosphereCB();
+                const float linearDaylight = std::clamp(
+                    (atmosphere.AC_LightPos.y + 0.08f) / 0.20f, 0.0f, 1.0f );
+                daylightFactor = linearDaylight * linearDaylight * (3.0f - 2.0f * linearDaylight);
+                rainFactor = std::clamp( atmosphere.AC_SceneWettness, 0.0f, 1.0f );
+            }
+        }
+
+        const float dayBrightness = std::lerp( 1.0f, 0.5f, rainFactor );
+        return std::lerp( 0.10f, dayBrightness, daylightFactor );
     }
 
     bool IsWindowGlassMaterial( const MeshVisualInfo* visual, const zCTexture* texture ) {
@@ -622,71 +641,36 @@ ID3D11ShaderResourceView* D3D11GraphicsEngine::GetWindowGlassReplacementSRV() {
     return WindowGlassReplacementTexture->GetShaderResourceView().Get();
 }
 
-unsigned int D3D11GraphicsEngine::UpdateAndBindWindowCutouts( bool daylightPass ) {
-    constexpr size_t MaxWindowCutouts = 32;
-    constexpr float MaxWindowDistance = 12000.0f;
+void D3D11GraphicsEngine::RebuildWindowCutoutVolumeCache() {
     // Gothic mods occasionally contain invalid or enormously padded visual
     // bounding boxes. Never allow one of those to turn into a world-sized
     // pixel-shader discard volume.
     constexpr float MinWindowExtent = 0.05f;
     constexpr float MaxWindowExtent = 500.0f;
     constexpr float MaxWindowDepthExtent = 150.0f;
-    // The mask is selected by camera side. OUT visuals may therefore reach
-    // through the wall for the outside-to-inside view without also opening the
-    // reverse view when Gothic omitted the corresponding IN visual.
     constexpr float WallReachPadding = 100.0f;
 
-    struct Candidate {
-        float DistanceSq;
-        WindowCutoutVolume Volume;
-    };
-    std::vector<Candidate> candidates;
-    const XMVECTOR cameraPosition = Engine::GAPI->GetCameraPositionXM();
-    const bool cameraIndoor = Engine::GAPI->IsCameraIndoor();
-
+    WindowCutoutVolumeCache.clear();
+    WindowCutoutVolumeCache.reserve( 64 );
     for ( const auto& [visual, registeredVobs] : Engine::GAPI->GetVobsByVisual() ) {
         (void)visual;
-        MeshVisualInfo* sharedVisualInfo = nullptr;
-        for ( BaseVobInfo* baseVob : registeredVobs ) {
-            if ( auto* vobInfo = dynamic_cast<VobInfo*>( baseVob ) ) {
-                sharedVisualInfo = dynamic_cast<MeshVisualInfo*>( vobInfo->VisualInfo );
-                if ( sharedVisualInfo ) {
-                    break;
-                }
-            }
-        }
-        if ( !sharedVisualInfo
-            || !(daylightPass
-                ? IsIndoorWindowVisual( sharedVisualInfo->VisualName )
-                : IsWindowVisualForCameraSide( sharedVisualInfo->VisualName, cameraIndoor )) ) {
-            continue;
-        }
-
         for ( BaseVobInfo* baseVob : registeredVobs ) {
             auto* vobInfo = dynamic_cast<VobInfo*>( baseVob );
-            if ( !vobInfo || !vobInfo->Vob || !vobInfo->VisualInfo
-                || !vobInfo->Vob->GetShowVisual()
-                || (vobInfo->CityWindowValidationInitialized
-                    && !vobInfo->CityWindowTransparencyValid) ) {
-                continue;
-            }
-            if ( !daylightPass && Engine::GAPI->GetCameraBBox3DInFrustum(
-                vobInfo->Vob, EGothicCullFlags::CullSidesNear, false ) == ZTCAM_CLIPTYPE_OUT ) {
+            auto* visualInfo = vobInfo
+                ? dynamic_cast<MeshVisualInfo*>( vobInfo->VisualInfo )
+                : nullptr;
+            if ( !vobInfo || !vobInfo->Vob || !vobInfo->VobSection || !visualInfo
+                || !IsWindowGlassVisual( visualInfo->VisualName ) ) {
                 continue;
             }
 
-            // Gothic stores VOB transforms transposed for shader upload. CPU
-            // geometry transforms need the conventional DirectXMath layout.
+            // These four window VOB types are static world geometry. Cache
+            // their transformed glass OBB once per world; visibility, pairing
+            // and camera-distance decisions remain dynamic below.
             const XMMATRIX world = XMMatrixTranspose( vobInfo->Vob->GetWorldMatrixXM() );
-            const XMVECTOR worldPosition = vobInfo->Vob->GetPositionWorldXM();
-            const float distanceSq = XMVectorGetX( XMVector3LengthSq( worldPosition - cameraPosition ) );
-            if ( distanceSq > MaxWindowDistance * MaxWindowDistance ) {
-                continue;
-            }
-
             XMVECTOR localMin;
             XMVECTOR localMax;
-            if ( !GetWindowGlassLocalBounds( sharedVisualInfo, localMin, localMax ) ) {
+            if ( !GetWindowGlassLocalBounds( visualInfo, localMin, localMax ) ) {
                 continue;
             }
             const XMVECTOR localCenter = (localMin + localMax) * 0.5f;
@@ -731,10 +715,8 @@ unsigned int D3D11GraphicsEngine::UpdateAndBindWindowCutouts( bool daylightPass 
                 }
             }
             if ( extents[(thinAxis + 1) % 3] == 0.0f
-                || extents[(thinAxis + 2) % 3] == 0.0f ) {
-                continue;
-            }
-            if ( extents[thinAxis] > MaxWindowDepthExtent ) {
+                || extents[(thinAxis + 2) % 3] == 0.0f
+                || extents[thinAxis] > MaxWindowDepthExtent ) {
                 continue;
             }
             extents[thinAxis] += WallReachPadding;
@@ -744,8 +726,75 @@ unsigned int D3D11GraphicsEngine::UpdateAndBindWindowCutouts( bool daylightPass 
             XMStoreFloat4( &volume.AxisXExtentY, XMVectorSetW( axisX, extents[1] ) );
             XMStoreFloat4( &volume.AxisYExtentZ, XMVectorSetW( axisY, extents[2] ) );
             XMStoreFloat4( &volume.AxisZPadding, axisZ );
-            candidates.push_back( { distanceSq, volume } );
+            WindowCutoutVolumeCache.push_back( { vobInfo, visualInfo, volume } );
         }
+    }
+}
+
+unsigned int D3D11GraphicsEngine::UpdateAndBindWindowCutouts( bool daylightPass ) {
+    constexpr size_t MaxWindowCutouts = 32;
+    constexpr float MaxWindowDistance = 12000.0f;
+
+    const uint64_t windowGeneration = Engine::GAPI->GetCityWindowConfigurationGeneration();
+    if ( WindowCutoutCacheGeneration != windowGeneration ) {
+        RebuildWindowCutoutVolumeCache();
+        WindowCutoutCacheGeneration = windowGeneration;
+    }
+
+    struct Candidate {
+        float DistanceSq;
+        WindowCutoutVolume Volume;
+    };
+    static thread_local std::vector<Candidate> candidates;
+    candidates.clear();
+    candidates.reserve( std::min( WindowCutoutVolumeCache.size(), MaxWindowCutouts + 1 ) );
+    const XMVECTOR cameraPosition = Engine::GAPI->GetCameraPositionXM();
+    const bool cameraIndoor = Engine::GAPI->IsCameraIndoor();
+
+    for ( const CachedWindowCutoutVolume& cached : WindowCutoutVolumeCache ) {
+        VobInfo* vobInfo = cached.Vob;
+        MeshVisualInfo* sharedVisualInfo = cached.Visual;
+        if ( !vobInfo || !vobInfo->Vob || !sharedVisualInfo
+            || !vobInfo->Vob->GetShowVisual()
+            || (vobInfo->CityWindowValidationInitialized
+                && !vobInfo->CityWindowTransparencyValid) ) {
+            continue;
+        }
+
+        if ( vobInfo->WindowCounterpart && vobInfo->WindowCounterpart->Vob ) {
+            // A confirmed geometric pair is independent of misleading
+            // _IN/_OUT mesh names. Use only the camera-near plane for both
+            // visual and daylight cutouts; both volumes cover one opening.
+            const float ownDistanceSq = XMVectorGetX( XMVector3LengthSq(
+                vobInfo->Vob->GetPositionWorldXM() - cameraPosition ) );
+            const float counterpartDistanceSq = XMVectorGetX( XMVector3LengthSq(
+                vobInfo->WindowCounterpart->Vob->GetPositionWorldXM() - cameraPosition ) );
+            const bool fartherFromCamera = ownDistanceSq > counterpartDistanceSq + 0.01f;
+            const bool stableTieBreak = std::abs( ownDistanceSq - counterpartDistanceSq ) <= 0.01f
+                && std::less<VobInfo*>{}(vobInfo->WindowCounterpart, vobInfo);
+            if ( fartherFromCamera || stableTieBreak )
+                continue;
+        } else {
+            // Gothic can omit one side entirely. Preserve the authored-name
+            // fallback for those unpaired windows so an exterior-only VOB
+            // does not accidentally open the wall from the interior side.
+            const bool fallbackSideMatches = daylightPass
+                ? IsIndoorWindowVisual( sharedVisualInfo->VisualName )
+                : IsWindowVisualForCameraSide( sharedVisualInfo->VisualName, cameraIndoor );
+            if ( !fallbackSideMatches )
+                continue;
+        }
+        if ( !daylightPass && Engine::GAPI->GetCameraBBox3DInFrustum(
+            vobInfo->Vob, EGothicCullFlags::CullSidesNear, false ) == ZTCAM_CLIPTYPE_OUT ) {
+            continue;
+        }
+
+        const XMVECTOR worldPosition = vobInfo->Vob->GetPositionWorldXM();
+        const float distanceSq = XMVectorGetX( XMVector3LengthSq( worldPosition - cameraPosition ) );
+        if ( distanceSq > MaxWindowDistance * MaxWindowDistance ) {
+            continue;
+        }
+        candidates.push_back( { distanceSq, cached.Volume } );
     }
 
     if ( candidates.size() > MaxWindowCutouts ) {
@@ -8368,6 +8417,7 @@ XRESULT D3D11GraphicsEngine::DrawVOBsInstanced() {
             MaterialInfo* lastMatInfo = nullptr;
             float lastMaterialClassMarker = 999.0f;
             bool lastOilLampEmissiveTexture = false;
+            bool lastWindowGlassSplit = false;
 
             zCTexture* lastTex = nullptr;
             ID3D11ShaderResourceView* lastDiffuseTex = nullptr;
@@ -8511,6 +8561,7 @@ XRESULT D3D11GraphicsEngine::DrawVOBsInstanced() {
 
                         const bool materialMarkerChanged = materialClassMarker != lastMaterialClassMarker;
                         const bool oilLampMarkerChanged = oilLampEmissiveTexture != lastOilLampEmissiveTexture;
+                        const bool windowGlassMarkerChanged = isWindowGlass != lastWindowGlassSplit;
                         // Material data decides whether a real normalmap participates; no wet distortion fallback is used.
                         if ( lastTex != tx
                             || lastDiffuseTex != srv[0]
@@ -8518,7 +8569,8 @@ XRESULT D3D11GraphicsEngine::DrawVOBsInstanced() {
                             || lastFxTex != srv[2]
                             || lastDispTex != srv[3]
                             || materialMarkerChanged
-                            || oilLampMarkerChanged ) {
+                            || oilLampMarkerChanged
+                            || windowGlassMarkerChanged ) {
 
                             lastTex = tx;
                             lastDiffuseTex = srv[0];
@@ -8527,6 +8579,7 @@ XRESULT D3D11GraphicsEngine::DrawVOBsInstanced() {
                             lastDispTex = srv[3];
                             lastMaterialClassMarker = materialClassMarker;
                             lastOilLampEmissiveTexture = oilLampEmissiveTexture;
+                            lastWindowGlassSplit = isWindowGlass;
 
                             if ( wantShader ) {
                                 GetContext()->PSSetShaderResources( 0, isZPrepass ? 1 : 3, srv );
@@ -8550,8 +8603,10 @@ XRESULT D3D11GraphicsEngine::DrawVOBsInstanced() {
                                         .Bind();
                                 }
 
-                                if ( materialMarkerChanged || oilLampMarkerChanged || (info && !info->IsSame( lastMatInfo )) ) {
-                                    auto materialBuffer = GetEffectiveMaterialBuffer( info, tx->GetSurface(), tx );
+                                if ( materialMarkerChanged || oilLampMarkerChanged || windowGlassMarkerChanged
+                                    || (info && !info->IsSame( lastMatInfo )) ) {
+                                    auto materialBuffer = GetEffectiveMaterialBuffer(
+                                        info, tx->GetSurface(), tx, isWindowGlass );
                                     if ( materialClassMarker != 0.0f ) {
                                         materialBuffer.Color.w = materialClassMarker;
                                     }
@@ -8726,6 +8781,7 @@ XRESULT D3D11GraphicsEngine::DrawFrameAlphaMeshes() {
         TracyD3D11ZoneCGX( "DrawFrameAlphaMeshes::Replay" );
         auto _scopeAlphaReplay = RecordGraphicsEvent( GE_NAME( "DrawFrameAlphaMeshes::Replay" ) );
         PShaderID activeAlphaShader = PShaderID::PS_Simple;
+        const float windowGlassBrightness = GetWindowGlassBrightness();
         for ( auto const& alphaMesh : m_AlphaMeshes ) {
             const MeshKey& mk = alphaMesh.mk;
             zCTexture* tx = mk.Material->GetAniTexture();
@@ -8746,7 +8802,11 @@ XRESULT D3D11GraphicsEngine::DrawFrameAlphaMeshes() {
 
                 if ( isWindowGlass ) {
                     PsSimpleFFdata windowGlassData = {};
-                    windowGlassData.textureFactor = float4( 1.0f, 1.0f, 1.0f, -1.0f );
+                    windowGlassData.textureFactor = float4(
+                        windowGlassBrightness,
+                        windowGlassBrightness,
+                        windowGlassBrightness,
+                        -1.0f );
                     ActivePS->GetBuffer( "cbFFData" )
                         .Update( &windowGlassData )
                         .Bind();

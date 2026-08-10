@@ -15,7 +15,7 @@ struct VobInstanceInfo {
     // General purpose slot. Used by instanced VOB rendering to store an index
     // into optional per-visual metadata buffers.
     DWORD GP_Slot;
-    // RGBA8 point-light color used only by explicitly emissive VOB materials.
+    // RGB8 emission color plus an A8 palette code for explicitly emissive VOB materials.
     DWORD emissiveColor;
 };
 static_assert( offsetof( VobInstanceInfo, emissiveColor ) == 144 );

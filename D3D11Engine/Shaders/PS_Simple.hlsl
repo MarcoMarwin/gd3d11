@@ -44,7 +44,8 @@ float4 PSMain( PS_INPUT Input ) : SV_TARGET
 	// City_Window replacement. Its solid texels already ran through the lit pass.
 	if (cbFFData.textureFactor.a < 0.0f)
 	{
-		clip((170.0f / 255.0f) - color.a);
+		if (color.a > (170.0f / 255.0f))
+			discard;
 		color.rgb *= Input.vDiffuse.rgb * cbFFData.textureFactor.rgb;
 		return color;
 	}

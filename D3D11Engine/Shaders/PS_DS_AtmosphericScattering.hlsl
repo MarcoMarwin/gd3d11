@@ -15,14 +15,15 @@ float OilLampBrightnessMask(float3 diffuseColor)
 
 float3 DecodeOilLampLightColor(float encoded)
 {
-    if (encoded <= 0.0f)
-        return 0.0f;
-
-    const uint packed = min((uint)round(encoded * 1024.0f), 1024u) - 1u;
-    const uint red = packed / 128u;
-    const uint green = (packed / 8u) & 15u;
-    const uint blue = packed & 7u;
-    return float3(red * (1.0f / 7.0f), green * (1.0f / 15.0f), blue * (1.0f / 7.0f));
+    const uint paletteIndex = min((uint)round(saturate(encoded) * (255.0f / 32.0f)), 7u);
+    if (paletteIndex == 1u) return float3(237.0f, 211.0f, 165.0f) * (1.0f / 255.0f);
+    if (paletteIndex == 2u) return float3(255.0f,  64.0f,  32.0f) * (1.0f / 255.0f);
+    if (paletteIndex == 3u) return float3(255.0f, 220.0f,  40.0f) * (1.0f / 255.0f);
+    if (paletteIndex == 4u) return float3( 64.0f, 255.0f,  80.0f) * (1.0f / 255.0f);
+    if (paletteIndex == 5u) return float3( 48.0f, 220.0f, 255.0f) * (1.0f / 255.0f);
+    if (paletteIndex == 6u) return float3( 64.0f, 105.0f, 255.0f) * (1.0f / 255.0f);
+    if (paletteIndex == 7u) return float3(190.0f,  64.0f, 255.0f) * (1.0f / 255.0f);
+    return 0.0f;
 }
 
 float3 ComputeOilLampEmission(float3 diffuseColor, float3 linkedLightColor)
@@ -252,9 +253,13 @@ float4 PSMain(PS_INPUT Input) : SV_TARGET
 	float fresnel = f8*f2;
     litPixel += lerp(fresnel * litPixel * 0.5f, 0.0f, sun);
 
-	// NW_MISC_OILLAMP_02 uses the linked point-light color encoded in gb3.w.
+	// NW_MISC_OILLAMP_02 restores the linked point-light palette ID from gb3.w.
 	// A VOB without an unambiguous enabled light writes zero and stays non-emissive.
-	litPixel += ComputeOilLampEmission(diffuse.rgb, DecodeOilLampLightColor(gb3.w));
+	// Oil-lamp pixels are sparse, so skip palette decoding and mask evaluation
+	// for the rest of this full-screen deferred pass.
+	[branch]
+	if (gb3.w > 0.0f)
+		litPixel += ComputeOilLampEmission(diffuse.rgb, DecodeOilLampLightColor(gb3.w));
 
 	// Run scattering
 	litPixel = ApplyAtmosphericScatteringGround(wsPosition, litPixel.rgb);

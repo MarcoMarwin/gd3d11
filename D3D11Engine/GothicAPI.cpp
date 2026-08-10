@@ -317,13 +317,7 @@ namespace {
             || hasNameToken( "nw_city_oillamp_01" );
     }
 
-    enum class CityWindowSide {
-        None,
-        Inside,
-        Outside
-    };
-
-    CityWindowSide GetCityWindowSide( std::string visualName ) {
+    bool IsSupportedCityWindowVisual( std::string visualName ) {
         visualName = ToLowerMaterialName( std::move( visualName ) );
         const size_t slash = visualName.find_last_of( "\\/" );
         if ( slash != std::string::npos )
@@ -332,15 +326,10 @@ namespace {
         if ( extension != std::string::npos )
             visualName.erase( extension );
 
-        if ( visualName == "nw_city_window_wood_in_01"
-            || visualName == "nw_city_window_wood_in_02" ) {
-            return CityWindowSide::Inside;
-        }
-        if ( visualName == "nw_city_window_stone_out_01"
-            || visualName == "nw_city_window_wood_out_01" ) {
-            return CityWindowSide::Outside;
-        }
-        return CityWindowSide::None;
+        return visualName == "nw_city_window_wood_in_01"
+            || visualName == "nw_city_window_wood_in_02"
+            || visualName == "nw_city_window_stone_out_01"
+            || visualName == "nw_city_window_wood_out_01";
     }
 
     bool GetCityWindowGlassLocalGeometry(
@@ -396,7 +385,6 @@ namespace {
 
     struct CityWindowPairVolume {
         VobInfo* Info = nullptr;
-        CityWindowSide Side = CityWindowSide::None;
         XMFLOAT3 Center = {};
         XMFLOAT3 Axes[3] = {};
         XMFLOAT3 FrontNormal = {};
@@ -409,8 +397,7 @@ namespace {
         if ( !visual || !info->Vob )
             return false;
 
-        const CityWindowSide side = GetCityWindowSide( visual->VisualName );
-        if ( side == CityWindowSide::None )
+        if ( !IsSupportedCityWindowVisual( visual->VisualName ) )
             return false;
 
         XMVECTOR localMin;
@@ -423,7 +410,6 @@ namespace {
         const XMMATRIX world = XMMatrixTranspose( info->Vob->GetWorldMatrixXM() );
 
         volume.Info = info;
-        volume.Side = side;
         XMStoreFloat3( &volume.Center, XMVector3TransformCoord( localCenter, world ) );
 
         const XMVECTOR localAxes[3] = {
@@ -464,13 +450,18 @@ namespace {
         const CityWindowPairVolume& b ) {
         constexpr float CounterpartDepthMask = 100.0f;
         constexpr float MinimumNormalAlignment = 0.75f;
-
-        if ( a.Side == b.Side || a.Side == CityWindowSide::None || b.Side == CityWindowSide::None )
-            return false;
+        constexpr float MinimumPlaneSeparation = 1.0f;
 
         const XMVECTOR aNormal = XMLoadFloat3( &a.Axes[a.ThinAxis] );
         const XMVECTOR bNormal = XMLoadFloat3( &b.Axes[b.ThinAxis] );
         if ( std::abs( XMVectorGetX( XMVector3Dot( aNormal, bNormal ) ) ) < MinimumNormalAlignment )
+            return false;
+
+        // A counterpart must occupy the other plane of the opening. Merely
+        // overlapping or duplicated VOBs on the same wall face are not pairs.
+        const XMVECTOR centerDelta = XMLoadFloat3( &b.Center ) - XMLoadFloat3( &a.Center );
+        const float planeSeparation = std::abs( XMVectorGetX( XMVector3Dot( centerDelta, aNormal ) ) );
+        if ( planeSeparation <= MinimumPlaneSeparation )
             return false;
 
         auto overlapsMask = []( const CityWindowPairVolume& source,
@@ -620,7 +611,7 @@ namespace {
         const float minChannel = std::min( red, std::min( green, blue ) );
 
         if ( maxChannel <= 0.0f )
-            return 0xFF000000u;
+            return 0u;
 
         // Oil-lamp glass must never drift into neutral white. Low-saturation
         // sources use Gothic's warm lamp white; chromatic sources snap to the
@@ -628,6 +619,7 @@ namespace {
         float paletteRed = 237.0f;
         float paletteGreen = 211.0f;
         float paletteBlue = 165.0f;
+        DWORD paletteIndex = 1u;
         const float saturation = (maxChannel - minChannel) / maxChannel;
         if ( saturation >= 0.38f ) {
             float hue;
@@ -654,18 +646,19 @@ namespace {
             paletteRed = palette[hueSector][0];
             paletteGreen = palette[hueSector][1];
             paletteBlue = palette[hueSector][2];
+            paletteIndex = static_cast<DWORD>(hueSector) + 2u;
         }
 
-        const float palettePeak = std::max( paletteRed, std::max( paletteGreen, paletteBlue ) );
-        const float intensity = std::min( 1.0f, maxChannel / palettePeak );
-        auto toByte = [intensity]( float channel ) -> DWORD {
-            return static_cast<DWORD>(std::lround(channel * intensity));
+        auto toByte = []( float channel ) -> DWORD {
+            return static_cast<DWORD>(std::lround(channel));
         };
         const DWORD outRed = toByte( paletteRed );
         const DWORD outGreen = toByte( paletteGreen );
         const DWORD outBlue = toByte( paletteBlue );
-        // INSTANCE_EMISSIVE_COLOR is R8G8B8A8 in memory; pack ABGR on little endian.
-        return 0xFF000000u | (outBlue << 16) | (outGreen << 8) | outRed;
+        // INSTANCE_EMISSIVE_COLOR is R8G8B8A8 in memory. RGB carries the exact
+        // prescribed color; alpha carries a stable palette ID in 32-byte steps.
+        const DWORD paletteCode = paletteIndex * 32u;
+        return (paletteCode << 24) | (outBlue << 16) | (outGreen << 8) | outRed;
     }
 
     float ClampMaterialScalar( float value, float fallback, float minValue, float maxValue ) {
@@ -1489,6 +1482,10 @@ void GothicAPI::ResetVobs() {
     if ( Engine::WorkerThreadPool ) {
         Engine::WorkerThreadPool->clearAndFlush();
     }
+
+    // Renderer caches must stop trusting world-owned VOB pointers before the
+    // objects below are destroyed, even if loading aborts before reconfiguration.
+    ++CityWindowConfigurationGeneration;
     
 
     // Stability: deferred queues store raw D3D pointers to textures that can be destroyed below.
@@ -2688,6 +2685,8 @@ void GothicAPI::OnRemovedVob( zCVob* vob, zCWorld* world ) {
 
     VobInfo* vi = VobMap[vob];
     SkeletalVobInfo* svi = SkeletalVobMap[vob];
+    const bool reconfigureCityWindows = vi && vi->VisualInfo
+        && IsSupportedCityWindowVisual( vi->VisualInfo->VisualName );
 
     // Tell all dynamic lights that we removed a vob they could have cached
     for ( auto& vlit : VobLightMap ) {
@@ -2827,6 +2826,12 @@ void GothicAPI::OnRemovedVob( zCVob* vob, zCWorld* world ) {
 
     // delete light info, if valid
     if ( li ) delete li;
+
+    // Dynamic window removal can invalidate both the renderer volume cache and
+    // the remaining window's counterpart pointer. Rebuild the rare static
+    // relationship here, never in the per-frame path.
+    if ( reconfigureCityWindows )
+        ConfigureCityWindowCounterparts();
 }
 
 /** Called on a SetVisual-Call of a vob */
@@ -2926,6 +2931,8 @@ void GothicAPI::OnAddVob( zCVob* vob, zCWorld* world ) {
                 if ( !BspLeafVobLists.empty() ) { // Check if this is the initial loading
                     // It's not, chose this as a dynamically added vob
                     DynamicallyAddedVobs.push_back( vi );
+                    if ( IsSupportedCityWindowVisual( vi->VisualInfo->VisualName ) )
+                        ConfigureCityWindowCounterparts();
                 }
             } else {
                 // Must be inventory
@@ -4783,8 +4790,8 @@ void GothicAPI::CollectVisibleVobs(
             }
 
             if ( it->OilLampEmissionLight && it->OilLampEmissionLight->IsEnabled() ) {
-                // Keep animated light colors and the visible lamp in lockstep.
-                it->OilLampEmissionLight->DoAnimation();
+                // Animation is advanced by the normal point-light renderer.
+                // Sampling it here must not mutate the same light a second time.
                 const DWORD gothicColor = it->OilLampEmissionLight->GetLightColor();
                 vii.emissiveColor = QuantizeOilLampEmissionColor( gothicColor );
             }
@@ -5313,6 +5320,8 @@ void GothicAPI::ConfigurePointlightShadowSource( VobLightInfo* lightInfo ) const
 }
 
 void GothicAPI::ConfigureCityWindowCounterparts() {
+    ++CityWindowConfigurationGeneration;
+
     struct PairCandidate {
         size_t First = 0;
         size_t Second = 0;
@@ -5358,33 +5367,6 @@ void GothicAPI::ConfigureCityWindowCounterparts() {
         }
     }
 
-    std::unordered_map<VobInfo*, CityWindowPairVolume*> volumeByInfo;
-    volumeByInfo.reserve( windows.size() );
-    for ( CityWindowPairVolume& window : windows )
-        volumeByInfo.emplace( window.Info, &window );
-
-    // Paired windows remove the remaining normal-sign ambiguity without making
-    // validation depend on the existence of a counterpart.
-    for ( CityWindowPairVolume& window : windows ) {
-        if ( !window.Info->WindowCounterpart || window.Side != CityWindowSide::Outside )
-            continue;
-        const auto counterpartIt = volumeByInfo.find( window.Info->WindowCounterpart );
-        if ( counterpartIt == volumeByInfo.end() )
-            continue;
-
-        CityWindowPairVolume& insideWindow = *counterpartIt->second;
-        const XMVECTOR outsideToInside = XMVector3Normalize(
-            XMLoadFloat3( &insideWindow.Center ) - XMLoadFloat3( &window.Center ) );
-        XMVECTOR outsideFront = XMLoadFloat3( &window.FrontNormal );
-        XMVECTOR insideFront = XMLoadFloat3( &insideWindow.FrontNormal );
-        if ( XMVectorGetX( XMVector3Dot( outsideFront, outsideToInside ) ) > 0.0f )
-            outsideFront = -outsideFront;
-        if ( XMVectorGetX( XMVector3Dot( insideFront, outsideToInside ) ) < 0.0f )
-            insideFront = -insideFront;
-        XMStoreFloat3( &window.FrontNormal, outsideFront );
-        XMStoreFloat3( &insideWindow.FrontNormal, insideFront );
-    }
-
     size_t validCount = 0;
     size_t fallbackCount = 0;
     for ( const CityWindowPairVolume& window : windows ) {
@@ -5400,10 +5382,6 @@ void GothicAPI::ConfigureCityWindowCounterparts() {
 void GothicAPI::ConfigureAllPointlightShadowSources() const {
     constexpr float LINK_RADIUS = 150.0f;
     constexpr float LINK_RADIUS_SQ = LINK_RADIUS * LINK_RADIUS;
-    // NW_CITY_OILLAMP_01 is authored with its wall mount towards local -Z and
-    // its luminous glass towards local +Z. Keep the light inside the visible
-    // lamp body regardless of the VOB's world rotation.
-    constexpr float OIL_LAMP_FORWARD_OFFSET = 25.0f;
     const size_t INVALID_INDEX = static_cast<size_t>(-1);
 
     auto isLightVob = []( zCVob* vob ) {
@@ -5679,6 +5657,10 @@ void GothicAPI::ConfigureAllPointlightShadowSources() const {
         VobInfo* Info = nullptr;
         XMFLOAT3 Position = {};
         XMFLOAT3 ShadowAnchor = {};
+        size_t NearestStaticLight = 0;
+        size_t NearestDynamicLight = 0;
+        float NearestStaticDistanceSq = FLT_MAX;
+        float NearestDynamicDistanceSq = FLT_MAX;
     };
     std::vector<OilLampAnchor> oilLampAnchors;
 
@@ -5716,20 +5698,14 @@ void GothicAPI::ConfigureAllPointlightShadowSources() const {
         anchor.Position = midpoint;
         anchor.ShadowAnchor = midpoint;
         anchor.ShadowAnchor.y += 50.0f;
-
-        const XMVECTOR localLampForward = XMVectorSet( 0.0f, 0.0f, 1.0f, 0.0f );
-        const XMMATRIX lampWorld = XMMatrixTranspose( vobInfo->Vob->GetWorldMatrixXM() );
-        const XMVECTOR worldLampForward = XMVector3Normalize(
-            XMVector3TransformNormal( localLampForward, lampWorld ) );
-        XMStoreFloat3(
-            &anchor.ShadowAnchor,
-            XMLoadFloat3( &anchor.ShadowAnchor ) + worldLampForward * OIL_LAMP_FORWARD_OFFSET );
+        anchor.NearestStaticLight = INVALID_INDEX;
+        anchor.NearestDynamicLight = INVALID_INDEX;
         oilLampAnchors.push_back( anchor );
     }
 
     std::vector<std::vector<size_t>> oilLampClaims( lights.size() );
     for ( size_t oilLampIndex = 0; oilLampIndex < oilLampAnchors.size(); ++oilLampIndex ) {
-        const OilLampAnchor& oilLamp = oilLampAnchors[oilLampIndex];
+        OilLampAnchor& oilLamp = oilLampAnchors[oilLampIndex];
         for ( int staticKind = 0; staticKind < 2; ++staticKind ) {
             size_t bestLight = INVALID_INDEX;
             float bestDistanceSq = LINK_RADIUS_SQ;
@@ -5745,8 +5721,16 @@ void GothicAPI::ConfigureAllPointlightShadowSources() const {
                     bestLight = lightIndex;
                 }
             }
-            if ( bestLight != INVALID_INDEX )
+            if ( bestLight != INVALID_INDEX ) {
                 oilLampClaims[bestLight].push_back( oilLampIndex );
+                if ( staticKind != 0 ) {
+                    oilLamp.NearestStaticLight = bestLight;
+                    oilLamp.NearestStaticDistanceSq = bestDistanceSq;
+                } else {
+                    oilLamp.NearestDynamicLight = bestLight;
+                    oilLamp.NearestDynamicDistanceSq = bestDistanceSq;
+                }
+            }
         }
     }
 
@@ -5769,47 +5753,21 @@ void GothicAPI::ConfigureAllPointlightShadowSources() const {
     // cannot be moved to more than one shadow anchor. Static lights always win;
     // a dynamic light is used only when no eligible static light exists in the
     // complete lamp-link radius.
-    size_t oilLampStaticEmissionLinks = 0;
-    size_t oilLampDynamicEmissionLinks = 0;
     for ( OilLampAnchor& oilLamp : oilLampAnchors ) {
         if ( !oilLamp.Info )
             continue;
 
-        size_t nearestStatic = INVALID_INDEX;
-        size_t nearestDynamic = INVALID_INDEX;
-        float nearestStaticDistanceSq = LINK_RADIUS_SQ;
-        float nearestDynamicDistanceSq = LINK_RADIUS_SQ;
-        for ( size_t lightIndex = 0; lightIndex < lights.size(); ++lightIndex ) {
-            const float candidateDistanceSq = distanceSq( lights[lightIndex].Position, oilLamp.Position );
-            if ( candidateDistanceSq > LINK_RADIUS_SQ )
-                continue;
-
-            if ( lights[lightIndex].Info->Vob->IsStatic() ) {
-                if ( candidateDistanceSq <= nearestStaticDistanceSq ) {
-                    nearestStaticDistanceSq = candidateDistanceSq;
-                    nearestStatic = lightIndex;
-                }
-            } else if ( candidateDistanceSq <= nearestDynamicDistanceSq ) {
-                nearestDynamicDistanceSq = candidateDistanceSq;
-                nearestDynamic = lightIndex;
-            }
-        }
-
-        const size_t selectedLight = nearestStatic != INVALID_INDEX ? nearestStatic : nearestDynamic;
+        const bool hasStaticLight = oilLamp.NearestStaticLight != INVALID_INDEX;
+        const size_t selectedLight = hasStaticLight
+            ? oilLamp.NearestStaticLight
+            : oilLamp.NearestDynamicLight;
         if ( selectedLight != INVALID_INDEX ) {
             oilLamp.Info->OilLampEmissionLight = lights[selectedLight].Info->Vob;
-            oilLamp.Info->OilLampEmissionLightDistanceSq = nearestStatic != INVALID_INDEX
-                ? nearestStaticDistanceSq
-                : nearestDynamicDistanceSq;
-            nearestStatic != INVALID_INDEX
-                ? ++oilLampStaticEmissionLinks
-                : ++oilLampDynamicEmissionLinks;
+            oilLamp.Info->OilLampEmissionLightDistanceSq = hasStaticLight
+                ? oilLamp.NearestStaticDistanceSq
+                : oilLamp.NearestDynamicDistanceSq;
         }
     }
-    LogInfo() << "Oil-lamp emission links: " << oilLampStaticEmissionLinks
-        << " static, " << oilLampDynamicEmissionLinks << " dynamic fallback, "
-        << (oilLampAnchors.size() - oilLampStaticEmissionLinks - oilLampDynamicEmissionLinks)
-        << " unlinked";
 
     struct ParentAnchor {
         zCVob* Parent = nullptr;

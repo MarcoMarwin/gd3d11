@@ -13,16 +13,6 @@ float OilLampBrightnessMask(float3 diffuseColor)
     return smoothstep(0.32f, 0.82f, luminance);
 }
 
-float EncodeOilLampLightColor(float3 color)
-{
-    if (max(color.r, max(color.g, color.b)) <= 0.0f)
-        return 0.0f;
-
-    const uint3 quantized = uint3(round(saturate(color) * float3(7.0f, 15.0f, 7.0f)));
-    const uint packed = quantized.r * 128u + quantized.g * 8u + quantized.b;
-    return (packed + 1u) * (1.0f / 1024.0f);
-}
-
 float3 ComputeOilLampEmission(float3 diffuseColor, float3 linkedLightColor)
 {
     return linkedLightColor * OilLampBrightnessMask(diffuseColor) * 1.35f;
@@ -88,11 +78,14 @@ void ClipWindowCutouts(float3 worldPosition, float2 pixelPosition)
     uint tileIndex = tile.y * WindowCutoutTileCount.x + tile.x;
     uint4 packedMasks = WindowCutoutTileMasks[tileIndex >> 2u];
     uint tileMask = packedMasks[tileIndex & 3u];
+    if (tileMask == 0u)
+        return;
+
     [loop]
-    for (uint i = 0; i < min(WindowCutoutCount, 32u); ++i)
+    while (tileMask != 0u)
     {
-        if ((tileMask & (1u << i)) == 0u)
-            continue;
+        uint i = (uint)firstbitlow(tileMask);
+        tileMask &= tileMask - 1u;
         WindowCutoutVolume cutout = WindowCutouts[i];
         float3 relativePosition = worldPosition - cutout.CenterExtentX.xyz;
         float distanceX = abs(dot(relativePosition, cutout.AxisXExtentY.xyz));
@@ -176,9 +169,14 @@ FORWARD_PLUS_PS_OUTPUT PSMain( PS_INPUT Input )
 		TX_Displacement, materialUV, SS_Linear, MI_ParallaxOcclusionStrength);
 #endif
 	float4 color = TX_Texture0.Sample(SS_Linear, materialUV);
+	if (MI_MaterialPadding1 > 0.5f && color.a <= (170.0f / 255.0f))
+		discard;
 	float3 oilLampLightColor = 0.0f;
-	if (MI_MaterialPadding0 > 0.5f)
-		oilLampLightColor = Input.vEmissiveColor.rgb * Input.vEmissiveColor.a;
+	float oilLampPaletteCode = 0.0f;
+	if (MI_MaterialPadding0 > 0.5f) {
+		oilLampLightColor = Input.vEmissiveColor.rgb;
+		oilLampPaletteCode = Input.vEmissiveColor.a;
+	}
 
 	// clip but only use z approximation
 	ClipDistanceEffect(abs(Input.vViewPosition.z), DIST_DrawDistance, color.r * 2 - 1, 500.0f);
@@ -264,8 +262,11 @@ FORWARD_PLUS_PS_OUTPUT PSMain( PS_INPUT Input )
 
 	float3 litPixel = FP_ComputeSunLighting(wsPosition, vsPosition, nrm, color.rgb, specIntensity, specPower, shadow, vertLighting, twoSidedBacklitMaterial, vegetationBacklitMask);
 	
-	// The lamp emits only when this exact VOB has an associated enabled light.
-	litPixel += ComputeOilLampEmission(color.rgb, oilLampLightColor);
+	// The branch is uniform for ordinary material draws and avoids evaluating
+	// the lamp mask on every non-lamp VOB pixel.
+	[branch]
+	if (oilLampPaletteCode > 0.0f)
+		litPixel += ComputeOilLampEmission(color.rgb, oilLampLightColor);
 
 	// Atmospheric scattering
 	litPixel = ApplyAtmosphericScatteringGround(wsPosition, litPixel);
@@ -281,7 +282,7 @@ FORWARD_PLUS_PS_OUTPUT PSMain( PS_INPUT Input )
 	float encodedSpecIntensity = MI_Color.a < -1.5f ? -(specIntensity + 3.0f)
 		: (MI_Color.a < -0.5f ? -(specIntensity + 1.0f) : specIntensity);
 	output.vSI_SP = float4(encodedSpecIntensity, specPower, saturate(MI_WetGroundSSRStrength),
-		EncodeOilLampLightColor(oilLampLightColor));
+		oilLampPaletteCode);
 	output.vVelocity = CalculateVelocity(Input.vCurrClipPos, Input.vPrevClipPos);
 
 	return output;
@@ -304,6 +305,8 @@ void PSMain( PS_INPUT Input )
 	float3 wsPosition = mul(float4(Input.vViewPosition, 1.0f), WindowCutoutInvView).xyz;
 	ClipWindowCutouts(wsPosition, Input.vPosition.xy);
 	float4 color = TX_Texture0.Sample(SS_Linear, Input.vTexcoord);
+	if (MI_MaterialPadding1 > 0.5f && color.a <= (170.0f / 255.0f))
+		discard;
 
 	// clip but only use z approximation
 	ClipDistanceEffect(abs(Input.vViewPosition.z), DIST_DrawDistance, color.r * 2 - 1, 500.0f);
@@ -332,9 +335,14 @@ DEFERRED_PS_OUTPUT PSMain( PS_INPUT Input ) : SV_TARGET
 		TX_Displacement, materialUV, SS_Linear, MI_ParallaxOcclusionStrength);
 #endif
 	float4 color = TX_Texture0.Sample(SS_Linear, materialUV);
+	if (MI_MaterialPadding1 > 0.5f && color.a <= (170.0f / 255.0f))
+		discard;
 	float3 oilLampLightColor = 0.0f;
-	if (MI_MaterialPadding0 > 0.5f)
-		oilLampLightColor = Input.vEmissiveColor.rgb * Input.vEmissiveColor.a;
+	float oilLampPaletteCode = 0.0f;
+	if (MI_MaterialPadding0 > 0.5f) {
+		oilLampLightColor = Input.vEmissiveColor.rgb;
+		oilLampPaletteCode = Input.vEmissiveColor.a;
+	}
 	
 	// Do alphatest if wanted
 #if ALPHATEST == 1
@@ -379,7 +387,7 @@ DEFERRED_PS_OUTPUT PSMain( PS_INPUT Input ) : SV_TARGET
 	output.vSI_SP.y = deferredSpecPower;
 #endif
 	output.vSI_SP.z = saturate(MI_WetGroundSSRStrength);
-	output.vSI_SP.w = EncodeOilLampLightColor(oilLampLightColor);
+	output.vSI_SP.w = oilLampPaletteCode;
 
 	// Calculate velocity for motion vectors
 	// For instanced objects (VOBs, skeletal meshes), vCurrClipPos/vPrevClipPos come from VS

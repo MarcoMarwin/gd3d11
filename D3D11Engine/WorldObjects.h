@@ -374,7 +374,7 @@ struct VobInfo : public BaseVobInfo {
     zCVobLight* OilLampEmissionLight = nullptr;
     float OilLampEmissionLightDistanceSq = FLT_MAX;
 
-    /** Opposite IN/OUT city-window instance occupying the same local opening. */
+    /** Geometrically opposite city-window instance occupying the same opening. */
     VobInfo* WindowCounterpart = nullptr;
 
     /** Stable per-world decision: use transparent City_Window and cut the wall. */
