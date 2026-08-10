@@ -6,6 +6,8 @@ cbuffer GhostAlphaInfo : register( b0 )
 	float2 GA_ViewportSize;
     float GA_Alpha;
     float GA_LightingScale;
+    float3 GA_LightingTint;
+    float GA_Pad;
 };
 
 
@@ -39,5 +41,5 @@ float4 PSMain( PS_INPUT Input ) : SV_TARGET
 
 	float4 color = TX_Texture0.Sample(SS_Linear, Input.vTexcoord);
     float lightingScale = max(GA_LightingScale, 0.0f);
-    return float4(color.rgb * lightingScale, color.a * GA_Alpha);
+    return float4(color.rgb * lightingScale * GA_LightingTint, color.a * GA_Alpha);
 }

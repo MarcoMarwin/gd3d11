@@ -262,6 +262,18 @@ namespace
         return false;
     }
 
+    bool IsCityWindowFeatureReady() {
+        if ( !Engine::GAPI || !Engine::GAPI->IsWorldRenderCacheReady() ) {
+            return false;
+        }
+        const WorldInfo* loadedWorld = Engine::GAPI->GetLoadedWorldInfo();
+        if ( !loadedWorld || !loadedWorld->BspTree ) {
+            return false;
+        }
+        const oCGame* game = oCGame::GetGame();
+        return game && game->_zCSession_world;
+    }
+
     bool IsIndoorWindowVisual( const std::string& visualName ) {
         const std::string stem = NormalizeVisualStemForMarker( visualName );
         return stem == "NW_CITY_WINDOW_WOOD_IN_01"
@@ -609,6 +621,13 @@ D3D11GraphicsEngine::~D3D11GraphicsEngine() {
 }
 
 ID3D11ShaderResourceView* D3D11GraphicsEngine::GetWindowGlassReplacementSRV() {
+    // Loading screens and the main menu also pass through regular renderer
+    // draw code. Do not load or expose any window-only resource until Gothic
+    // has finalized the gameplay world and its renderer-side BSP cache.
+    if ( !IsCityWindowFeatureReady() ) {
+        return nullptr;
+    }
+
     if ( WindowGlassReplacementTexture ) {
         return WindowGlassReplacementTexture->GetShaderResourceView().Get();
     }
@@ -633,6 +652,44 @@ ID3D11ShaderResourceView* D3D11GraphicsEngine::GetWindowGlassReplacementSRV() {
     WindowGlassReplacementTexture = std::move( replacement );
     LogInfo() << "Loaded VOB-scoped window glass replacement: " << replacementPath.string();
     return WindowGlassReplacementTexture->GetShaderResourceView().Get();
+}
+
+bool D3D11GraphicsEngine::EnsureWindowWorldGeometryMask() {
+    if ( !IsCityWindowFeatureReady() || !GetDevice().Get() ) {
+        return false;
+    }
+
+    const INT2 maskSize = GetResolution();
+    if ( maskSize.x <= 0 || maskSize.y <= 0 ) {
+        return false;
+    }
+
+    if ( WindowWorldGeometryMask
+        && WindowWorldGeometryMask->GetSizeX() == static_cast<UINT>(maskSize.x)
+        && WindowWorldGeometryMask->GetSizeY() == static_cast<UINT>(maskSize.y)
+        && WindowWorldGeometryMask->GetTexture()
+        && WindowWorldGeometryMask->GetShaderResView()
+        && WindowWorldGeometryMask->GetRenderTargetView() ) {
+        return true;
+    }
+
+    HRESULT result = E_FAIL;
+    auto mask = std::make_unique<RenderToTextureBuffer>(
+        GetDevice().Get(), static_cast<UINT>(maskSize.x), static_cast<UINT>(maskSize.y),
+        DXGI_FORMAT_R8_UNORM, &result, DXGI_FORMAT_UNKNOWN, DXGI_FORMAT_UNKNOWN,
+        1, 1, D3D11_BIND_RENDER_TARGET | D3D11_BIND_SHADER_RESOURCE );
+    if ( FAILED( result ) || !mask->GetTexture() || !mask->GetShaderResView()
+        || !mask->GetRenderTargetView() ) {
+        WindowWorldGeometryMask.reset();
+        LogWarn() << "Failed to create the gameplay-only window geometry mask";
+        return false;
+    }
+
+    SetDebugName( mask->GetTexture().Get(), "Window World Geometry Mask" );
+    SetDebugName( mask->GetShaderResView().Get(), "Window World Geometry Mask SRV" );
+    SetDebugName( mask->GetRenderTargetView().Get(), "Window World Geometry Mask RTV" );
+    WindowWorldGeometryMask = std::move( mask );
+    return true;
 }
 
 void D3D11GraphicsEngine::EnsureFrameVobVisibilityCollected() {
@@ -1725,8 +1782,7 @@ XRESULT D3D11GraphicsEngine::RecreateBuffers() {
 
     auto roundedTextureResolution = GetResolution( );
     const bool renderBuffersAlive = DepthStencilBuffer && DepthStencilBufferCopy
-        && WindowWorldGeometryMask && VelocityBuffer && Backbuffer
-        && m_SwapchainDepthStencilBuffer;
+        && VelocityBuffer && Backbuffer && m_SwapchainDepthStencilBuffer;
     if ( lastRoundedTextureResolution == roundedTextureResolution && renderBuffersAlive ) {
         // same resolution, just adjusting the viewport
         return XR_SUCCESS;
@@ -1745,15 +1801,10 @@ XRESULT D3D11GraphicsEngine::RecreateBuffers() {
         GetDevice().Get(), roundedTextureResolution.x, roundedTextureResolution.y, DXGI_FORMAT_R32_TYPELESS, nullptr,
         DXGI_FORMAT_R32_FLOAT, DXGI_FORMAT_R32_FLOAT );
 
-    // One byte per pixel, written only while the static Gothic world mesh is
-    // submitted. Window validation can therefore ignore VOBs and NPCs without
-    // another geometry pass or a full-resolution depth copy.
-    WindowWorldGeometryMask = std::make_unique<RenderToTextureBuffer>(
-        GetDevice().Get(), roundedTextureResolution.x, roundedTextureResolution.y,
-        DXGI_FORMAT_R8_UNORM );
-    SetDebugName( WindowWorldGeometryMask->GetTexture().Get(), "WindowWorldGeometryMask->TEX" );
-    SetDebugName( WindowWorldGeometryMask->GetShaderResView().Get(), "WindowWorldGeometryMask->SRV" );
-    SetDebugName( WindowWorldGeometryMask->GetRenderTargetView().Get(), "WindowWorldGeometryMask->RTV" );
+    // Window-only resources are created lazily after Gothic has completed its
+    // gameplay-world BSP cache. Display-mode setup and menu/loading frames must
+    // remain entirely independent from the window feature.
+    WindowWorldGeometryMask.reset();
 
     // Create PFX-Renderer
     if ( !PfxRenderer ) PfxRenderer = std::make_unique<D3D11PfxRenderer>();
@@ -5994,8 +6045,7 @@ XRESULT D3D11GraphicsEngine::DrawWorldMesh( bool noTextures ) {
     ID3D11RenderTargetView* previousWorldRTVs[D3D11_SIMULTANEOUS_RENDER_TARGET_COUNT] = {};
     ID3D11DepthStencilView* previousWorldDSV = nullptr;
     const bool captureWorldGeometryMask = !isZPrepass
-        && WindowWorldGeometryMask
-        && WindowWorldGeometryMask->GetRenderTargetView().Get();
+        && EnsureWindowWorldGeometryMask();
     if ( captureWorldGeometryMask ) {
         constexpr float clearMask[4] = { 0.0f, 0.0f, 0.0f, 0.0f };
         GetContext()->ClearRenderTargetView(
@@ -7858,7 +7908,8 @@ void XM_CALLCONV D3D11GraphicsEngine::DrawWorldAroundForWorldShadow( FXMVECTOR p
 
             zCTexture* tx = meshKey.Material->GetAniTexture();
             const bool directionalDaylightPass = RenderingStage == DES_SHADOWMAP && IsSunDaylightActive();
-            const bool windowGlassMaterial = IsWindowGlassMaterial( staticMeshVisual, tx );
+            const bool windowGlassMaterial = IsCityWindowFeatureReady()
+                && IsWindowGlassMaterial( staticMeshVisual, tx );
             const bool indoorWindowGlass = directionalDaylightPass
                 && windowGlassMaterial
                 && IsIndoorWindowVisual( staticMeshVisual->VisualName );
@@ -8282,7 +8333,8 @@ XRESULT D3D11GraphicsEngine::DrawVOBsInstanced() {
                     };
 
                     for ( auto smv : activeVisuals ) {
-                        const bool scopedWindowVisual = IsWindowGlassVisual( smv->VisualName );
+                        const bool scopedWindowVisual = IsCityWindowFeatureReady()
+                            && IsWindowGlassVisual( smv->VisualName );
                         if ( !scopedWindowVisual
                             || smv->InstanceVobs.size() != smv->Instances.size() ) {
                             appendCachedVisual( smv,
@@ -8489,7 +8541,8 @@ XRESULT D3D11GraphicsEngine::DrawVOBsInstanced() {
                     const float materialClassMarker = IsTwoSidedBacklitVegetationVisual(
                         cachedVisual->Visual->VisualName ) ? -2.0f : 0.0f;
                     zCTexture* tx = meshKey.Material ? meshKey.Material->GetAniTexture() : nullptr;
-                    const bool isScopedWindowMaterial = IsWindowGlassMaterial( cachedVisual->Visual, tx );
+                    const bool isScopedWindowMaterial = IsCityWindowFeatureReady()
+                        && IsWindowGlassMaterial( cachedVisual->Visual, tx );
                     const bool isWindowFallbackMaterial = cachedVisual->WindowFallbackOpaque
                         && isScopedWindowMaterial;
                     const bool isWindowGlass = !cachedVisual->WindowFallbackOpaque
@@ -8837,7 +8890,8 @@ XRESULT D3D11GraphicsEngine::DrawFrameAlphaMeshes() {
         ID3D11ShaderResourceView* windowWorldMaskSRV = WindowWorldGeometryMask
             ? WindowWorldGeometryMask->GetShaderResView().Get()
             : nullptr;
-        const bool windowSkyGuardAvailable = windowSceneDepthSRV && windowWorldMaskSRV
+        const bool windowSkyGuardAvailable = IsCityWindowFeatureReady()
+            && windowSceneDepthSRV && windowWorldMaskSRV
             && Engine::GAPI->GetRendererState().RendererSettings.DrawWorldMesh;
         bool windowSkyGuardBound = false;
         bool twoSidedWindowGlass = false;
@@ -8850,7 +8904,8 @@ XRESULT D3D11GraphicsEngine::DrawFrameAlphaMeshes() {
 
             // Check for alphablending on world mesh
             bool blendAdd = mk.Material->GetAlphaFunc() == zMAT_ALPHA_FUNC_ADD;
-            const bool isWindowGlass = IsWindowGlassMaterial( alphaMesh.vi, tx );
+            const bool isWindowGlass = IsCityWindowFeatureReady()
+                && IsWindowGlassMaterial( alphaMesh.vi, tx );
 
             const PShaderID wantedAlphaShader = isWindowGlass
                 ? PShaderID::PS_Simple_FF
@@ -9816,16 +9871,24 @@ void D3D11GraphicsEngine::DrawDecalList( const std::vector<zCVob*>& decals, bool
     gacb.GA_ViewportSize = float2( Engine::GraphicsEngine->GetResolution().x, Engine::GraphicsEngine->GetResolution().y );
     gacb.GA_Alpha = 1.0f;
     gacb.GA_LightingScale = 1.0f;
+    gacb.GA_LightingTint = float3( 1.0f, 1.0f, 1.0f );
+    gacb.GA_Pad = 0.0f;
     if ( !lighting ) {
         auto saturateDecal = []( float v ) { return v < 0.0f ? 0.0f : ( v > 1.0f ? 1.0f : v ); };
         if ( auto sky = Engine::GAPI->GetSky() ) {
             const auto& atmo = sky->GetAtmosphereCB();
-            float night = saturateDecal( ( -atmo.AC_LightPos.y + 0.08f ) * 2.5f );
+            float night = saturateDecal( ( -atmo.AC_LightPos.y + 0.08f ) * 2.5f )
+                * saturateDecal( atmo.AC_EnableNightAtmosphere );
             float rain = std::max( saturateDecal( atmo.AC_RainFXWeight ), saturateDecal( atmo.AC_SceneWettness ) );
             gacb.GA_LightingScale = ( 1.0f + ( 0.34f - 1.0f ) * night ) * ( 1.0f + ( 0.78f - 1.0f ) * rain );
+            gacb.GA_LightingTint = float3(
+                1.0f + ( 0.50f - 1.0f ) * night * 0.80f,
+                1.0f + ( 0.65f - 1.0f ) * night * 0.80f,
+                1.0f );
         }
     }
     const float ambientDecalLightingScale = gacb.GA_LightingScale;
+    const float3 ambientDecalLightingTint = gacb.GA_LightingTint;
 
     int lastAlphaFunc = -1;
     zCTexture* lastTex = nullptr;
@@ -9880,6 +9943,9 @@ void D3D11GraphicsEngine::DrawDecalList( const std::vector<zCVob*>& decals, bool
             const float lightingScale = instances[start].ignoreDayLight ? 1.0f : ambientDecalLightingScale;
             if ( lastLightingScale != lightingScale ) {
                 gacb.GA_LightingScale = lightingScale;
+                gacb.GA_LightingTint = instances[start].ignoreDayLight
+                    ? float3( 1.0f, 1.0f, 1.0f )
+                    : ambientDecalLightingTint;
                 psBufGAI.Update( &gacb );
                 lastLightingScale = lightingScale;
             }

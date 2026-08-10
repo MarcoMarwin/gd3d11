@@ -6,6 +6,8 @@ cbuffer GhostAlphaInfo : register( b0 )
 	float2 GA_ViewportSize;
     float GA_Alpha;
     float GA_LightingScale;
+    float3 GA_LightingTint;
+    float GA_Pad;
 };
 
 //--------------------------------------------------------------------------------------

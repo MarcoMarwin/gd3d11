@@ -960,11 +960,7 @@ float4 PSMain(PS_INPUT input) : SV_TARGET
 
     float solidGroundImpactMask = (1.0f - smoothstep(0.12f, 0.72f, puddleMask)) * centralImpactVisibility;
     float3 surfaceColor = sceneColor;
-    float rainImpactNightAmount = smoothstep(
-        0.0f,
-        1.0f,
-        saturate(-AC_LightPos.y * 4.0f))
-        * saturate(AC_EnableNightAtmosphere);
+    float rainImpactNightAmount = GetAmbientNightWeight();
     float rainImpactBrightness = lerp(1.0f, 0.40f, rainImpactNightAmount);
     float3 boundedImpactLift = max(1.0f - saturate(surfaceColor), 0.0f)
         * float3(0.075f, 0.085f, 0.095f)
@@ -979,16 +975,15 @@ float4 PSMain(PS_INPUT input) : SV_TARGET
         puddleBaseLuma * 0.70f,
         puddleBaseLuma * 0.55f,
         puddleBaseLuma * 0.38f);
-    float3 coolPuddleEarthTone = float3(
-        puddleBaseLuma * 0.48f,
-        puddleBaseLuma * 0.58f,
-        puddleBaseLuma * 0.72f);
+    float3 coolPuddleEarthTone = ApplyAmbientNightTint(
+        warmPuddleEarthTone, 0.85f);
     float3 puddleEarthTone = lerp(
         warmPuddleEarthTone,
         coolPuddleEarthTone,
         rainImpactNightAmount);
     float3 warmPuddleBase = surfaceColor * float3(0.80f, 0.74f, 0.66f);
-    float3 coolPuddleBase = surfaceColor * float3(0.66f, 0.72f, 0.82f);
+    float3 coolPuddleBase = ApplyAmbientNightTint(
+        warmPuddleBase, 0.70f);
     float3 darkenedPuddleBase = lerp(
         warmPuddleBase,
         coolPuddleBase,
@@ -1087,10 +1082,8 @@ float4 PSMain(PS_INPUT input) : SV_TARGET
         reflectedLuma * 1.02f,
         reflectedLuma * 0.78f,
         reflectedLuma * 0.54f);
-    float3 coolReflectionTone = float3(
-        reflectedLuma * 0.62f,
-        reflectedLuma * 0.78f,
-        reflectedLuma * 1.00f);
+    float3 coolReflectionTone = ApplyAmbientNightTint(
+        warmReflectionTone, 0.90f);
     float3 earthyReflectionTone = lerp(
         warmReflectionTone,
         coolReflectionTone,
@@ -1099,10 +1092,8 @@ float4 PSMain(PS_INPUT input) : SV_TARGET
         surfaceLuma * 0.82f,
         surfaceLuma * 0.68f,
         surfaceLuma * 0.49f);
-    float3 coolGroundTone = float3(
-        surfaceLuma * 0.58f,
-        surfaceLuma * 0.70f,
-        surfaceLuma * 0.86f);
+    float3 coolGroundTone = ApplyAmbientNightTint(
+        warmGroundTone, 0.80f);
     float3 earthyGroundColor = lerp(
         surfaceColor,
         lerp(warmGroundTone, coolGroundTone, rainImpactNightAmount),

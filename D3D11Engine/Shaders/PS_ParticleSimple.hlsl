@@ -31,11 +31,12 @@ float4 AdaptParticleLighting(float4 color, float particleLightingScale)
     float packedParticleTestFlags = floor(max(AC_Pad3, 0.0f) + 0.5f);
     bool disableParticleNightDimming = fmod(floor(packedParticleTestFlags / 1.0f), 2.0f) >= 1.0f;
     bool disableParticleRainAlphaReduction = fmod(floor(packedParticleTestFlags / 2.0f), 2.0f) >= 1.0f;
-    float night = disableParticleNightDimming ? 0.0f : saturate((-AC_LightPos.y + 0.08f) * 2.5f);
+    float night = disableParticleNightDimming ? 0.0f : GetAmbientNightWeight();
     float rain = disableParticleRainAlphaReduction ? 0.0f : max(saturate(AC_RainFXWeight), saturate(AC_SceneWettness));
     float strength = saturate(AC_EnableParticleLighting * AC_ParticleLightingStrength) * saturate(particleLightingScale);
     const bool groundFog = particleLightingScale > 1.5f;
     const float nightFloor = groundFog ? 0.10f : 0.24f;
+    color.rgb = ApplyAmbientNightTint(color.rgb, night * strength * 0.80f);
     float nightDim = lerp(1.0f, nightFloor, night);
     color.rgb *= lerp(1.0f, nightDim, strength);
     float rainAlpha = lerp(1.0f, 0.24f, rain);

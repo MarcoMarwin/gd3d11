@@ -43,12 +43,14 @@ PS_OUTPUT PSMain( PS_INPUT Input )
 
 	if (Input.vParticleLightingScale >= 0.0f)
 	{
-		float nightParticle = saturate((-AC_LightPos.y + 0.08f) * 2.5f);
+		float nightParticle = GetAmbientNightWeight();
 		float rainParticle = max(saturate(AC_RainFXWeight), saturate(AC_SceneWettness));
 		float lightingStrength = saturate(AC_EnableParticleLighting * AC_ParticleLightingStrength) * saturate(Input.vParticleLightingScale);
 
 		const bool groundFog = Input.vParticleLightingScale > 1.5f;
 		const float nightFloor = groundFog ? 0.10f : 0.28f;
+		color.rgb = ApplyAmbientNightTint(
+			color.rgb, nightParticle * lightingStrength * 0.80f);
 		float nightDim = lerp(1.0f, nightFloor, nightParticle);
 		color.rgb *= lerp(1.0f, nightDim, lightingStrength);
 

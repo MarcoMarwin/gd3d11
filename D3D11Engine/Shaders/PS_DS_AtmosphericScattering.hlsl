@@ -28,7 +28,8 @@ float3 DecodeOilLampLightColor(float encoded)
 
 float3 ComputeOilLampEmission(float3 diffuseColor, float3 linkedLightColor)
 {
-    return linkedLightColor * OilLampBrightnessMask(diffuseColor) * 1.35f;
+    const float3 linearLightColor = pow(saturate(linkedLightColor), 2.2f);
+    return linearLightColor * OilLampBrightnessMask(diffuseColor) * 1.10f;
 }
 
 #ifndef MAX_CSM_CASCADES

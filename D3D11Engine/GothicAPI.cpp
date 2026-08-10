@@ -2903,7 +2903,8 @@ void GothicAPI::OnAddVob( zCVob* vob, zCWorld* world ) {
                 if ( !BspLeafVobLists.empty() ) { // Check if this is the initial loading
                     // It's not, chose this as a dynamically added vob
                     DynamicallyAddedVobs.push_back( vi );
-                    if ( IsSupportedCityWindowVisual( vi->VisualInfo->VisualName ) )
+                    if ( IsWorldRenderCacheReady()
+                        && IsSupportedCityWindowVisual( vi->VisualInfo->VisualName ) )
                         ConfigureCityWindows();
                 }
             } else {
@@ -3633,10 +3634,11 @@ void GothicAPI::DrawTransparencyVobs() {
             g->BindActivePixelShader();
 
             // Update transparency alpha information
-            GhostAlphaConstantBuffer gacb;
+            GhostAlphaConstantBuffer gacb = {};
             gacb.GA_ViewportSize = float2( Engine::GraphicsEngine->GetResolution().x, Engine::GraphicsEngine->GetResolution().y );
             gacb.GA_Alpha = TransVobInfo.alpha;
             gacb.GA_LightingScale = 1.0f;
+            gacb.GA_LightingTint = float3( 1.0f, 1.0f, 1.0f );
             psBufGAI.Update( &gacb ).Bind();
             DrawSkeletalMeshVob( TransVobInfo.skeletalVob, TransVobInfo.distance, false );
         } else if ( TransVobInfo.normalVob ) {
@@ -3671,10 +3673,11 @@ void GothicAPI::DrawTransparencyVobs() {
             g->BindActivePixelShader();
 
             // Update transparency alpha information
-            GhostAlphaConstantBuffer gacb;
+            GhostAlphaConstantBuffer gacb = {};
             gacb.GA_ViewportSize = float2( Engine::GraphicsEngine->GetResolution().x, Engine::GraphicsEngine->GetResolution().y );
             gacb.GA_Alpha = TransVobInfo.alpha;
             gacb.GA_LightingScale = 1.0f;
+            gacb.GA_LightingTint = float3( 1.0f, 1.0f, 1.0f );
             psBufGAI.Update( &gacb ).Bind();
 
             for ( auto const& materialMesh : TransVobInfo.normalVob->VisualInfo->Meshes ) {
@@ -4733,8 +4736,10 @@ void GothicAPI::CollectVisibleVobs(
     // they should be unique at this point.
 
     if ( collectFlags & COLLECT_MUTATE ) {
-        auto isWindowBackFacing = [&cameraPosition]( const VobInfo* window ) {
-            if ( !window || !window->CityWindowFacingInitialized )
+        const bool cityWindowFeatureReady = IsWorldRenderCacheReady();
+        auto isWindowBackFacing = [&cameraPosition, cityWindowFeatureReady]( const VobInfo* window ) {
+            if ( !cityWindowFeatureReady || !window
+                || !window->CityWindowFacingInitialized )
                 return false;
 
             // Keep the VOB visible for fifteen degrees beyond its geometric edge.
@@ -5305,7 +5310,12 @@ void GothicAPI::ConfigurePointlightShadowSource( VobLightInfo* lightInfo ) const
 void GothicAPI::ConfigureCityWindows() {
     ++CityWindowConfigurationGeneration;
 
-    if ( !LoadedWorldInfo || !LoadedWorldInfo->BspTree )
+    if ( !LoadedWorldInfo || !LoadedWorldInfo->BspTree
+        || !IsWorldRenderCacheReady() )
+        return;
+
+    const oCGame* game = oCGame::GetGame();
+    if ( !game || !game->_zCSession_world )
         return;
 
     std::vector<CityWindowVolume> windows;
@@ -5949,11 +5959,15 @@ void GothicAPI::BuildBspVobMapCache() {
 
     BuildBspVobMapCacheHelper( LoadedWorldInfo->BspTree->GetRootNode() );
 
-    // Resolve static window and light/flame data after the complete world is known.
+    // Publish the linear BSP cache first. Window validation performs world
+    // queries and must never run while Gothic is still constructing/loading
+    // the world or while startup/menu rendering is active.
+    BuildBspLeafLinearCache();
+
+    // Resolve static window and light/flame data only after the complete world
+    // and renderer-side BSP cache are known to be ready.
     ConfigureCityWindows();
     ConfigureAllPointlightShadowSources();
-
-    BuildBspLeafLinearCache();
 }
 
 void GothicAPI::BuildBspLeafLinearCache() {

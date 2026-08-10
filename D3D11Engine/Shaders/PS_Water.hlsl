@@ -311,6 +311,7 @@ PS_OUTPUT PSMain(PS_INPUT Input)
         waterfallSsrOffCos,
         waterfallSsrFullCos,
         waterGeometryUp);
+    float waterfallSurfaceMask = 1.0f - steepWaterSsrFactor;
 
     float waterReflectionSuppress = lerp(0.12f, 1.0f, steepWaterSsrFactor);
     ssrStrength *= lerp(0.45f, 1.0f, steepWaterSsrFactor);
@@ -904,7 +905,14 @@ float3 skyReflection =
             legacyColor - legacyHueDeviationLimit,
             legacyColor + legacyHueDeviationLimit);
         float legacySubmergedColorMask = step(0.000001f, legacyRawDepthRefracted);
-        legacyColor = lerp(legacyColor, legacyColorWithSceneHue, legacySubmergedColorMask * 0.42f);
+        // Horizontal Legacy water receives its scene-hue correction here. On
+        // steep waterfall geometry the final reflection/fallback composition
+        // still follows below, so its equivalent correction is applied to the
+        // completed color instead.
+        legacyColor = lerp(
+            legacyColor,
+            legacyColorWithSceneHue,
+            legacySubmergedColorMask * steepWaterSsrFactor * 0.42f);
         // Legacy edge foam removed.
         float cleanLegacyDepthRefracted = LinearizeWaterDepth(TX_Depth.Sample(SS_Linear, legacyDistUV).r);
         float legacyWaterThickness = clamp(
@@ -1031,6 +1039,28 @@ float3 skyReflection =
             legacyAdaptiveCubeOnlyColor,
             legacyCubeOnlyAmount);
         float3 legacyFinalColor = lerp(legacyCubeOnlyColor, legacySsrFinalColor, ssrEnabled);
+
+        // Steep water/waterfalls use the same bounded scene-hue transfer as
+        // horizontal Legacy water, but only after reflection and cubemap
+        // fallback have been composed. This prevents those later sources from
+        // reintroducing the red/blue channel excursions on waterfall surfaces.
+        float legacyWaterfallColorLuma = max(dot(
+            legacyFinalColor,
+            float3(0.2126f, 0.7152f, 0.0722f)), 0.001f);
+        float3 legacyWaterfallColorWithSceneHue =
+            legacySceneChroma * legacyWaterfallColorLuma;
+        float3 legacyWaterfallHueDeviationLimit = max(
+            abs(legacyFinalColor) * 0.35f,
+            float3(0.005f, 0.005f, 0.005f));
+        legacyWaterfallColorWithSceneHue = clamp(
+            legacyWaterfallColorWithSceneHue,
+            legacyFinalColor - legacyWaterfallHueDeviationLimit,
+            legacyFinalColor + legacyWaterfallHueDeviationLimit);
+        legacyFinalColor = lerp(
+            legacyFinalColor,
+            legacyWaterfallColorWithSceneHue,
+            legacySubmergedColorMask * waterfallSurfaceMask * 0.42f);
+
         finalColor = legacyFinalColor;
         maskOut = lerp(0.25f, 1.0f, step(0.5f, WM_DisableRainEffects));
     }

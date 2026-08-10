@@ -527,6 +527,7 @@ private:
     bool PrepareAndBindWindMetadata( const std::vector<MeshVisualInfo*>& activeVisuals );
     void UnbindWindMetadata();
     ID3D11ShaderResourceView* GetWindowGlassReplacementSRV();
+    bool EnsureWindowWorldGeometryMask();
     void EnsureFrameVobVisibilityCollected();
     void RebuildWindowCutoutVolumeCache();
     unsigned int UpdateAndBindWindowCutouts( bool daylightPass = false );

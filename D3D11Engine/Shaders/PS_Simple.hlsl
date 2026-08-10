@@ -43,10 +43,13 @@ float EvaluateWindowSkyPath(int2 pixelPosition, int2 targetSize, float halfHeigh
 
 	// A bounded vertical probe is the deliberate compromise here: it is local to
 	// City_Window glass pixels and avoids a full-screen connected-component pass.
+	// Eight probes left gaps of more than a hundred pixels at 1080p and could
+	// jump over a wall strip. Twenty-four is still bounded and restricted to
+	// lower-half sky pixels of the four supported window VOBs.
 	[unroll]
-	for (int stepIndex = 1; stepIndex <= 8; ++stepIndex)
+	for (int stepIndex = 1; stepIndex <= 24; ++stepIndex)
 	{
-		const float t = float(stepIndex) * (1.0f / 8.0f);
+		const float t = float(stepIndex) * (1.0f / 24.0f);
 		const int sampleY = clamp(int(lerp(float(pixelPosition.y), 0.0f, t)),
 			0, targetSize.y - 1);
 		const int2 samplePosition = int2(laneX, sampleY);
@@ -86,6 +89,11 @@ float4 PSMain( PS_INPUT Input ) : SV_TARGET
 		if (color.a > (170.0f / 255.0f))
 			discard;
 
+		// Preserve the authored glass layer even in panes whose DDS alpha reaches
+		// zero. Without this floor the sky was visually unobstructed although the
+		// frame/grid still rendered correctly.
+		color.a = max(color.a, 0.18f);
+
 		// A factor below -1 enables the City_Window sky safeguard and its
 		// magnitude carries the fixed screen midpoint in render-target pixels.
 		if (cbFFData.textureFactor.a < -1.5f)
@@ -111,12 +119,13 @@ float4 PSMain( PS_INPUT Input ) : SV_TARGET
 						pixelPosition, targetSize, halfHeight, -featherWidth);
 					const float rightPath = EvaluateWindowSkyPath(
 						pixelPosition, targetSize, halfHeight, featherWidth);
-					// A clear center path remains fully valid. The two neighboring
-					// paths only feather pixels along the validity boundary.
-					const float pathConfidence = max(
-						centerPath, (leftPath + rightPath) * 0.5f);
+					// The pixel's own vertical path is authoritative. Neighboring
+					// lanes only soften the horizontal edge; they must never make an
+					// isolated lower-half sky pixel transparent on their own.
+					const float pathConfidence = centerPath * 0.75f
+						+ (leftPath + rightPath) * 0.125f;
 					const float validTransparency = smoothstep(
-						0.0f, 1.0f, pathConfidence);
+						0.20f, 0.80f, pathConfidence);
 					const float lowerHalfFade = smoothstep(
 						halfHeight, halfHeight + featherWidth, Input.vPosition.y);
 					color.a = lerp(color.a, 1.0f,

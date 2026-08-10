@@ -135,6 +135,22 @@ float SmootherStep01(float x)
 	return x * x * x * (x * (x * 6.0f - 15.0f) + 10.0f);
 }
 
+// Shared lightweight day/night modulation for translucent scene effects.
+// This deliberately does not apply distance fog or atmospheric scattering:
+// particles, decals and wet surfaces already participate in their own passes.
+float GetAmbientNightWeight()
+{
+	return saturate((-AC_LightPos.y + 0.08f) * 2.5f)
+		* saturate(AC_EnableNightAtmosphere);
+}
+
+float3 ApplyAmbientNightTint(float3 color, float amount)
+{
+	const float luminance = dot(color, float3(0.2126f, 0.7152f, 0.0722f));
+	const float3 coldNightColor = luminance * float3(0.50f, 0.65f, 1.0f);
+	return lerp(color, coldNightColor, saturate(amount));
+}
+
 float GetRainCloudTransitionWeight()
 {
 	return smoothstep(0.02f, 0.55f, saturate(AC_RainFXWeight));

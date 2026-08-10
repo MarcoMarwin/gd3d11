@@ -15,7 +15,12 @@ float OilLampBrightnessMask(float3 diffuseColor)
 
 float3 ComputeOilLampEmission(float3 diffuseColor, float3 linkedLightColor)
 {
-    return linkedLightColor * OilLampBrightnessMask(diffuseColor) * 1.35f;
+    // INSTANCE_EMISSIVE_COLOR contains the authored/palette color in sRGB.
+    // Convert it before adding it to the linear HDR lighting buffer. Treating
+    // the sRGB bytes as linear and multiplying by 1.35 clipped warm white into
+    // an apparently cold neutral white.
+    const float3 linearLightColor = pow(saturate(linkedLightColor), 2.2f);
+    return linearLightColor * OilLampBrightnessMask(diffuseColor) * 1.10f;
 }
 
 cbuffer MI_MaterialInfo : register( b2 )
