@@ -23,6 +23,7 @@ class zCTexture;
 class zCLightmap;
 struct zCModelNodeInst;
 struct BspInfo;
+struct VobInfo;
 class zCQuadMark;
 struct MaterialInfo;
 
@@ -252,6 +253,7 @@ struct MeshVisualInfo : public BaseVisualInfo {
     /** Starts a new frame for this mesh */
     void StartNewFrame() {
         Instances.clear();
+        InstanceVobs.clear();
     }
 
     std::map<MeshKey, std::vector<MeshInfo*>, cmpMeshKey> MeshesByTexture;
@@ -261,6 +263,7 @@ struct MeshVisualInfo : public BaseVisualInfo {
 
     //zCProgMeshProto* Visual;
     std::vector<VobInstanceInfo> Instances;
+    std::vector<VobInfo*> InstanceVobs;
     unsigned int StartInstanceNum;
 
     /** Full mesh of this */
@@ -370,6 +373,13 @@ struct VobInfo : public BaseVobInfo {
     /** Closest unambiguously associated point light for NW_CITY_OILLAMP_01. */
     zCVobLight* OilLampEmissionLight = nullptr;
     float OilLampEmissionLightDistanceSq = FLT_MAX;
+
+    /** Opposite IN/OUT city-window instance occupying the same local opening. */
+    VobInfo* WindowCounterpart = nullptr;
+
+    /** Stable per-world decision: use transparent City_Window and cut the wall. */
+    bool CityWindowTransparencyValid = true;
+    bool CityWindowValidationInitialized = false;
 
     void StorePreviousTransform() {
         PrevWorldMatrix = WorldMatrix;

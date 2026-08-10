@@ -581,6 +581,7 @@ public:
 
     /** Resolves world flame and parent-vob pointlight associations globally. */
     void ConfigureAllPointlightShadowSources() const;
+    void ConfigureCityWindowCounterparts();
 
     /** Returns the new node from tha base node */
     BspInfo* GetNewBspNode( zCBspBase* base );

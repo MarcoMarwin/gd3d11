@@ -562,6 +562,7 @@ private:
             MeshVisualInfo* Visual = nullptr;
             std::vector<VobInstanceInfo> Instances;
             unsigned int                 StartInstanceNum = 0;
+            bool                         WindowFallbackOpaque = false;
         };
 
         struct SortKeyBuilder {

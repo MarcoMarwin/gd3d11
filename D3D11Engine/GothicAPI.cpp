@@ -317,6 +317,384 @@ namespace {
             || hasNameToken( "nw_city_oillamp_01" );
     }
 
+    enum class CityWindowSide {
+        None,
+        Inside,
+        Outside
+    };
+
+    CityWindowSide GetCityWindowSide( std::string visualName ) {
+        visualName = ToLowerMaterialName( std::move( visualName ) );
+        const size_t slash = visualName.find_last_of( "\\/" );
+        if ( slash != std::string::npos )
+            visualName.erase( 0, slash + 1 );
+        const size_t extension = visualName.find_last_of( '.' );
+        if ( extension != std::string::npos )
+            visualName.erase( extension );
+
+        if ( visualName == "nw_city_window_wood_in_01"
+            || visualName == "nw_city_window_wood_in_02" ) {
+            return CityWindowSide::Inside;
+        }
+        if ( visualName == "nw_city_window_stone_out_01"
+            || visualName == "nw_city_window_wood_out_01" ) {
+            return CityWindowSide::Outside;
+        }
+        return CityWindowSide::None;
+    }
+
+    bool GetCityWindowGlassLocalGeometry(
+        MeshVisualInfo* visual,
+        XMVECTOR& localMin,
+        XMVECTOR& localMax,
+        XMVECTOR& localFrontNormal ) {
+        if ( !visual )
+            return false;
+
+        XMFLOAT3 minValues( FLT_MAX, FLT_MAX, FLT_MAX );
+        XMFLOAT3 maxValues( -FLT_MAX, -FLT_MAX, -FLT_MAX );
+        XMVECTOR normalSum = XMVectorZero();
+        bool foundVertex = false;
+        for ( const auto& [material, meshes] : visual->Meshes ) {
+            zCTexture* texture = material ? material->GetTextureSingle() : nullptr;
+            if ( !texture || _stricmp( texture->GetNameWithoutExt().c_str(),
+                "OBJ_CITY_WINDOWSTONE_01" ) != 0 ) {
+                continue;
+            }
+
+            for ( const MeshInfo* mesh : meshes ) {
+                if ( !mesh )
+                    continue;
+                for ( const ExVertexStruct& vertex : mesh->Vertices ) {
+                    minValues.x = std::min( minValues.x, vertex.Position.x );
+                    minValues.y = std::min( minValues.y, vertex.Position.y );
+                    minValues.z = std::min( minValues.z, vertex.Position.z );
+                    maxValues.x = std::max( maxValues.x, vertex.Position.x );
+                    maxValues.y = std::max( maxValues.y, vertex.Position.y );
+                    maxValues.z = std::max( maxValues.z, vertex.Position.z );
+                    normalSum += XMLoadFloat3( vertex.Normal.toXMFLOAT3() );
+                    foundVertex = true;
+                }
+            }
+        }
+        if ( !foundVertex )
+            return false;
+
+        localMin = XMLoadFloat3( &minValues );
+        localMax = XMLoadFloat3( &maxValues );
+        const float normalLengthSq = XMVectorGetX( XMVector3LengthSq( normalSum ) );
+        localFrontNormal = normalLengthSq > 0.000001f
+            ? XMVector3Normalize( normalSum )
+            : XMVectorZero();
+
+        visual->WindowGlassBoundsInitialized = true;
+        visual->HasWindowGlassBounds = true;
+        visual->WindowGlassBounds.Min = minValues;
+        visual->WindowGlassBounds.Max = maxValues;
+        return true;
+    }
+
+    struct CityWindowPairVolume {
+        VobInfo* Info = nullptr;
+        CityWindowSide Side = CityWindowSide::None;
+        XMFLOAT3 Center = {};
+        XMFLOAT3 Axes[3] = {};
+        XMFLOAT3 FrontNormal = {};
+        float Extents[3] = {};
+        int ThinAxis = 0;
+    };
+
+    bool BuildCityWindowPairVolume( VobInfo* info, CityWindowPairVolume& volume ) {
+        auto* visual = info ? dynamic_cast<MeshVisualInfo*>( info->VisualInfo ) : nullptr;
+        if ( !visual || !info->Vob )
+            return false;
+
+        const CityWindowSide side = GetCityWindowSide( visual->VisualName );
+        if ( side == CityWindowSide::None )
+            return false;
+
+        XMVECTOR localMin;
+        XMVECTOR localMax;
+        XMVECTOR localFrontNormal;
+        if ( !GetCityWindowGlassLocalGeometry( visual, localMin, localMax, localFrontNormal ) )
+            return false;
+        const XMVECTOR localCenter = (localMin + localMax) * 0.5f;
+        const XMVECTOR localExtents = (localMax - localMin) * 0.5f;
+        const XMMATRIX world = XMMatrixTranspose( info->Vob->GetWorldMatrixXM() );
+
+        volume.Info = info;
+        volume.Side = side;
+        XMStoreFloat3( &volume.Center, XMVector3TransformCoord( localCenter, world ) );
+
+        const XMVECTOR localAxes[3] = {
+            XMVectorSet( 1.0f, 0.0f, 0.0f, 0.0f ),
+            XMVectorSet( 0.0f, 1.0f, 0.0f, 0.0f ),
+            XMVectorSet( 0.0f, 0.0f, 1.0f, 0.0f )
+        };
+        const float localExtentValues[3] = {
+            XMVectorGetX( localExtents ),
+            XMVectorGetY( localExtents ),
+            XMVectorGetZ( localExtents )
+        };
+
+        for ( int axis = 0; axis < 3; ++axis ) {
+            const XMVECTOR scaledAxis = XMVector3TransformNormal( localAxes[axis], world );
+            const float scale = XMVectorGetX( XMVector3Length( scaledAxis ) );
+            if ( !std::isfinite( scale ) || scale <= 0.0001f )
+                return false;
+            XMStoreFloat3( &volume.Axes[axis], scaledAxis / scale );
+            volume.Extents[axis] = localExtentValues[axis] * scale;
+        }
+
+        volume.ThinAxis = 0;
+        if ( volume.Extents[1] < volume.Extents[volume.ThinAxis] )
+            volume.ThinAxis = 1;
+        if ( volume.Extents[2] < volume.Extents[volume.ThinAxis] )
+            volume.ThinAxis = 2;
+
+        XMVECTOR worldFrontNormal = XMVector3TransformNormal( localFrontNormal, world );
+        if ( XMVectorGetX( XMVector3LengthSq( worldFrontNormal ) ) <= 0.000001f )
+            worldFrontNormal = XMLoadFloat3( &volume.Axes[volume.ThinAxis] );
+        XMStoreFloat3( &volume.FrontNormal, XMVector3Normalize( worldFrontNormal ) );
+        return true;
+    }
+
+    bool CityWindowVolumesShareOpening(
+        const CityWindowPairVolume& a,
+        const CityWindowPairVolume& b ) {
+        constexpr float CounterpartDepthMask = 100.0f;
+        constexpr float MinimumNormalAlignment = 0.75f;
+
+        if ( a.Side == b.Side || a.Side == CityWindowSide::None || b.Side == CityWindowSide::None )
+            return false;
+
+        const XMVECTOR aNormal = XMLoadFloat3( &a.Axes[a.ThinAxis] );
+        const XMVECTOR bNormal = XMLoadFloat3( &b.Axes[b.ThinAxis] );
+        if ( std::abs( XMVectorGetX( XMVector3Dot( aNormal, bNormal ) ) ) < MinimumNormalAlignment )
+            return false;
+
+        auto overlapsMask = []( const CityWindowPairVolume& source,
+                                const CityWindowPairVolume& candidate ) {
+            const XMVECTOR delta = XMLoadFloat3( &candidate.Center ) - XMLoadFloat3( &source.Center );
+            for ( int axis = 0; axis < 3; ++axis ) {
+                const XMVECTOR sourceAxis = XMLoadFloat3( &source.Axes[axis] );
+                float candidateRadius = 0.0f;
+                for ( int candidateAxis = 0; candidateAxis < 3; ++candidateAxis ) {
+                    candidateRadius += std::abs( XMVectorGetX( XMVector3Dot(
+                        sourceAxis, XMLoadFloat3( &candidate.Axes[candidateAxis] ) ) ) )
+                        * candidate.Extents[candidateAxis];
+                }
+                const float depthPadding = axis == source.ThinAxis ? CounterpartDepthMask : 0.0f;
+                const float centerDistance = std::abs( XMVectorGetX( XMVector3Dot( delta, sourceAxis ) ) );
+                if ( centerDistance > source.Extents[axis] + candidateRadius + depthPadding )
+                    return false;
+            }
+            return true;
+        };
+
+        return overlapsMask( a, b ) && overlapsMask( b, a );
+    }
+
+    struct CityWindowTraceHit {
+        XMFLOAT3 Position = {};
+        XMFLOAT3 Triangle[3] = {};
+        float Distance = FLT_MAX;
+        bool Indoor = false;
+    };
+
+    bool TraceCityWindowWorld(
+        GothicAPI* api,
+        FXMVECTOR origin,
+        FXMVECTOR direction,
+        float maxDistance,
+        CityWindowTraceHit& result ) {
+        XMFLOAT3 originValues;
+        XMFLOAT3 directionValues;
+        XMStoreFloat3( &originValues, origin );
+        XMStoreFloat3( &directionValues, XMVector3Normalize( direction ) );
+        if ( !api->TraceWorldMesh( originValues, directionValues, result.Position,
+            nullptr, result.Triangle, nullptr, nullptr, &result.Indoor ) ) {
+            return false;
+        }
+
+        result.Distance = XMVectorGetX( XMVector3Length(
+            XMLoadFloat3( &result.Position ) - origin ) );
+        return std::isfinite( result.Distance ) && result.Distance <= maxDistance;
+    }
+
+    XMVECTOR GetCityWindowSamplePoint(
+        const CityWindowPairVolume& window,
+        float horizontal,
+        float vertical ) {
+        int surfaceAxes[2] = {};
+        int surfaceAxisCount = 0;
+        for ( int axis = 0; axis < 3; ++axis ) {
+            if ( axis != window.ThinAxis )
+                surfaceAxes[surfaceAxisCount++] = axis;
+        }
+
+        return XMLoadFloat3( &window.Center )
+            + XMLoadFloat3( &window.Axes[surfaceAxes[0]] )
+                * (window.Extents[surfaceAxes[0]] * horizontal)
+            + XMLoadFloat3( &window.Axes[surfaceAxes[1]] )
+                * (window.Extents[surfaceAxes[1]] * vertical);
+    }
+
+    bool CityWindowSampleFitsWallReach(
+        GothicAPI* api,
+        const CityWindowPairVolume& window,
+        FXMVECTOR samplePoint ) {
+        constexpr float FrontProbeDistance = 80.0f;
+        constexpr float MaxTraceDistance = 420.0f;
+        constexpr float MaxNearbyWallLayerGap = 220.0f;
+        constexpr float TraceAdvance = 2.0f;
+        constexpr float WallReachPadding = 100.0f;
+
+        const XMVECTOR frontNormal = XMLoadFloat3( &window.FrontNormal );
+        const XMVECTOR inward = -frontNormal;
+        const XMVECTOR origin = samplePoint + frontNormal * FrontProbeDistance;
+
+        CityWindowTraceHit firstHit;
+        if ( !TraceCityWindowWorld( api, origin, inward, MaxTraceDistance, firstHit ) )
+            return false;
+
+        // A window floating noticeably away from every wall is never opened.
+        const float firstRelativeDepth = XMVectorGetX( XMVector3Dot(
+            XMLoadFloat3( &firstHit.Position ) - samplePoint, inward ) );
+        if ( std::abs( firstRelativeDepth ) > FrontProbeDistance )
+            return false;
+
+        const XMVECTOR secondOrigin = XMLoadFloat3( &firstHit.Position ) + inward * TraceAdvance;
+        CityWindowTraceHit secondHit;
+        if ( !TraceCityWindowWorld( api, secondOrigin, inward,
+            MaxTraceDistance - firstHit.Distance, secondHit ) ) {
+            return true; // Single-plane Gothic walls are valid.
+        }
+
+        const float layerGap = XMVectorGetX( XMVector3Length(
+            XMLoadFloat3( &secondHit.Position ) - XMLoadFloat3( &firstHit.Position ) ) );
+        const float secondRelativeDepth = XMVectorGetX( XMVector3Dot(
+            XMLoadFloat3( &secondHit.Position ) - samplePoint, inward ) );
+        const float allowedReach = window.Extents[window.ThinAxis] + WallReachPadding;
+
+        // A nearby parallel back face beyond the cutout volume indicates a wall
+        // that is too thick at this portion of the window. Distant room walls are
+        // deliberately ignored instead of being mistaken for wall thickness.
+        const XMVECTOR firstEdge0 = XMLoadFloat3( &firstHit.Triangle[1] ) - XMLoadFloat3( &firstHit.Triangle[0] );
+        const XMVECTOR firstEdge1 = XMLoadFloat3( &firstHit.Triangle[2] ) - XMLoadFloat3( &firstHit.Triangle[0] );
+        const XMVECTOR secondEdge0 = XMLoadFloat3( &secondHit.Triangle[1] ) - XMLoadFloat3( &secondHit.Triangle[0] );
+        const XMVECTOR secondEdge1 = XMLoadFloat3( &secondHit.Triangle[2] ) - XMLoadFloat3( &secondHit.Triangle[0] );
+        const XMVECTOR firstNormal = XMVector3Normalize( XMVector3Cross( firstEdge0, firstEdge1 ) );
+        const XMVECTOR secondNormal = XMVector3Normalize( XMVector3Cross( secondEdge0, secondEdge1 ) );
+        const float normalAlignment = std::abs( XMVectorGetX( XMVector3Dot( firstNormal, secondNormal ) ) );
+
+        return !(layerGap <= MaxNearbyWallLayerGap
+            && normalAlignment >= 0.70f
+            && secondRelativeDepth > allowedReach);
+    }
+
+    bool CityWindowOutsideHasEnclosedInterior(
+        GothicAPI* api,
+        const CityWindowPairVolume& window,
+        FXMVECTOR samplePoint ) {
+        constexpr float WallReachPadding = 100.0f;
+        constexpr float InteriorProbeOffset = 15.0f;
+        constexpr float MaxRoomHeight = 1200.0f;
+
+        const XMVECTOR inward = -XMLoadFloat3( &window.FrontNormal );
+        const XMVECTOR probe = samplePoint + inward
+            * (window.Extents[window.ThinAxis] + WallReachPadding + InteriorProbeOffset);
+        CityWindowTraceHit floorHit;
+        CityWindowTraceHit ceilingHit;
+        const bool hasFloor = TraceCityWindowWorld(
+            api, probe, XMVectorSet( 0, -1, 0, 0 ), MaxRoomHeight, floorHit );
+        const bool hasCeiling = TraceCityWindowWorld(
+            api, probe, XMVectorSet( 0, 1, 0, 0 ), MaxRoomHeight, ceilingHit );
+        return hasFloor && hasCeiling;
+    }
+
+    bool ValidateCityWindowTransparency(
+        GothicAPI* api,
+        const CityWindowPairVolume& window ) {
+        static constexpr float SampleOffsets[3] = { -0.65f, 0.0f, 0.65f };
+        int validWallSamples = 0;
+        int enclosedInteriorSamples = 0;
+        for ( float vertical : SampleOffsets ) {
+            for ( float horizontal : SampleOffsets ) {
+                const XMVECTOR sample = GetCityWindowSamplePoint( window, horizontal, vertical );
+                if ( CityWindowSampleFitsWallReach( api, window, sample ) )
+                    ++validWallSamples;
+                if ( window.Side == CityWindowSide::Outside
+                    && CityWindowOutsideHasEnclosedInterior( api, window, sample ) ) {
+                    ++enclosedInteriorSamples;
+                }
+            }
+        }
+
+        // One bad edge sample is tolerated. Half-covered or floating windows fail.
+        if ( validWallSamples < 8 )
+            return false;
+        if ( window.Side == CityWindowSide::Outside && enclosedInteriorSamples < 7 )
+            return false;
+        return true;
+    }
+
+    DWORD QuantizeOilLampEmissionColor( DWORD gothicColor ) {
+        const float red = static_cast<float>((gothicColor >> 16) & 0xFFu);
+        const float green = static_cast<float>((gothicColor >> 8) & 0xFFu);
+        const float blue = static_cast<float>(gothicColor & 0xFFu);
+        const float maxChannel = std::max( red, std::max( green, blue ) );
+        const float minChannel = std::min( red, std::min( green, blue ) );
+
+        if ( maxChannel <= 0.0f )
+            return 0xFF000000u;
+
+        // Oil-lamp glass must never drift into neutral white. Low-saturation
+        // sources use Gothic's warm lamp white; chromatic sources snap to the
+        // nearest of six stable hues so animated lights cannot wash the lamp out.
+        float paletteRed = 237.0f;
+        float paletteGreen = 211.0f;
+        float paletteBlue = 165.0f;
+        const float saturation = (maxChannel - minChannel) / maxChannel;
+        if ( saturation >= 0.38f ) {
+            float hue;
+            const float chroma = maxChannel - minChannel;
+            if ( maxChannel == red ) {
+                hue = 60.0f * ((green - blue) / chroma);
+                if ( hue < 0.0f )
+                    hue += 360.0f;
+            } else if ( maxChannel == green ) {
+                hue = 60.0f * (2.0f + (blue - red) / chroma);
+            } else {
+                hue = 60.0f * (4.0f + (red - green) / chroma);
+            }
+
+            const int hueSector = static_cast<int>(std::floor((hue + 30.0f) / 60.0f)) % 6;
+            static constexpr float palette[6][3] = {
+                { 255.0f,  64.0f,  32.0f }, // red
+                { 255.0f, 220.0f,  40.0f }, // yellow
+                {  64.0f, 255.0f,  80.0f }, // green
+                {  48.0f, 220.0f, 255.0f }, // cyan
+                {  64.0f, 105.0f, 255.0f }, // blue
+                { 190.0f,  64.0f, 255.0f }  // violet
+            };
+            paletteRed = palette[hueSector][0];
+            paletteGreen = palette[hueSector][1];
+            paletteBlue = palette[hueSector][2];
+        }
+
+        const float palettePeak = std::max( paletteRed, std::max( paletteGreen, paletteBlue ) );
+        const float intensity = std::min( 1.0f, maxChannel / palettePeak );
+        auto toByte = [intensity]( float channel ) -> DWORD {
+            return static_cast<DWORD>(std::lround(channel * intensity));
+        };
+        const DWORD outRed = toByte( paletteRed );
+        const DWORD outGreen = toByte( paletteGreen );
+        const DWORD outBlue = toByte( paletteBlue );
+        // INSTANCE_EMISSIVE_COLOR is R8G8B8A8 in memory; pack ABGR on little endian.
+        return 0xFF000000u | (outBlue << 16) | (outGreen << 8) | outRed;
+    }
+
     float ClampMaterialScalar( float value, float fallback, float minValue, float maxValue ) {
         if ( !std::isfinite( value ) ) {
             return fallback;
@@ -4400,7 +4778,25 @@ void GothicAPI::CollectVisibleVobs(
     // they should be unique at this point.
 
     if ( collectFlags & COLLECT_MUTATE ) {
+        std::unordered_set<VobInfo*> visibleStaticVobs;
+        visibleStaticVobs.reserve( renderQueue.vobs.size() );
+        for ( VobInfo* visibleVob : renderQueue.vobs )
+            visibleStaticVobs.insert( visibleVob );
+
         for ( auto it : renderQueue.vobs ) {
+            if ( it->WindowCounterpart
+                && visibleStaticVobs.contains( it->WindowCounterpart ) ) {
+                const float ownDistanceSq = XMVectorGetX( XMVector3LengthSq(
+                    it->Vob->GetPositionWorldXM() - cameraPosition ) );
+                const float counterpartDistanceSq = XMVectorGetX( XMVector3LengthSq(
+                    it->WindowCounterpart->Vob->GetPositionWorldXM() - cameraPosition ) );
+                const bool fartherFromCamera = ownDistanceSq > counterpartDistanceSq + 0.01f;
+                const bool stableTieBreak = std::abs( ownDistanceSq - counterpartDistanceSq ) <= 0.01f
+                    && std::less<VobInfo*>{}(it->WindowCounterpart, it);
+                if ( fartherFromCamera || stableTieBreak )
+                    continue;
+            }
+
             it->UpdateState();
 
             VobInstanceInfo vii = {};
@@ -4417,11 +4813,7 @@ void GothicAPI::CollectVisibleVobs(
                 // Keep animated light colors and the visible lamp in lockstep.
                 it->OilLampEmissionLight->DoAnimation();
                 const DWORD gothicColor = it->OilLampEmissionLight->GetLightColor();
-                const DWORD red = (gothicColor >> 16) & 0xFFu;
-                const DWORD green = (gothicColor >> 8) & 0xFFu;
-                const DWORD blue = gothicColor & 0xFFu;
-                // INSTANCE_EMISSIVE_COLOR is R8G8B8A8 in memory; pack ABGR on little endian.
-                vii.emissiveColor = 0xFF000000u | (blue << 16) | (green << 8) | red;
+                vii.emissiveColor = QuantizeOilLampEmissionColor( gothicColor );
             }
             vii.windStrenth = 0.0f;
             vii.canBeAffectedByPlayer = 0;
@@ -4431,7 +4823,9 @@ void GothicAPI::CollectVisibleVobs(
                 vii.canBeAffectedByPlayer = (!it->Vob->GetDynColl() ? 1.0f : 0.0f);
                 ProcessVobAnimation( it->Vob, aniMode, vii );
             }
-            reinterpret_cast<MeshVisualInfo*>(it->VisualInfo)->Instances.push_back( vii );
+            auto* meshVisual = reinterpret_cast<MeshVisualInfo*>(it->VisualInfo);
+            meshVisual->Instances.push_back( vii );
+            meshVisual->InstanceVobs.push_back( it );
         }
 
         if ( renderQueue.transparent.size() ) {
@@ -4945,13 +5339,98 @@ void GothicAPI::ConfigurePointlightShadowSource( VobLightInfo* lightInfo ) const
         lightInfo->AllowsPointlightShadows = true;
 }
 
+void GothicAPI::ConfigureCityWindowCounterparts() {
+    struct PairCandidate {
+        size_t First = 0;
+        size_t Second = 0;
+        float DistanceSq = FLT_MAX;
+    };
+
+    std::vector<CityWindowPairVolume> windows;
+    windows.reserve( 64 );
+    for ( const auto& vobEntry : VobMap ) {
+        VobInfo* info = vobEntry.second;
+        if ( !info )
+            continue;
+
+        info->WindowCounterpart = nullptr;
+        info->CityWindowTransparencyValid = true;
+        info->CityWindowValidationInitialized = false;
+        CityWindowPairVolume volume;
+        if ( BuildCityWindowPairVolume( info, volume ) )
+            windows.push_back( volume );
+    }
+
+    std::vector<PairCandidate> candidates;
+    for ( size_t first = 0; first < windows.size(); ++first ) {
+        for ( size_t second = first + 1; second < windows.size(); ++second ) {
+            if ( !CityWindowVolumesShareOpening( windows[first], windows[second] ) )
+                continue;
+
+            const XMVECTOR delta = XMLoadFloat3( &windows[second].Center )
+                - XMLoadFloat3( &windows[first].Center );
+            candidates.push_back( { first, second, XMVectorGetX( XMVector3LengthSq( delta ) ) } );
+        }
+    }
+
+    std::sort( candidates.begin(), candidates.end(), []( const PairCandidate& a, const PairCandidate& b ) {
+        return a.DistanceSq < b.DistanceSq;
+    } );
+    for ( const PairCandidate& candidate : candidates ) {
+        VobInfo* first = windows[candidate.First].Info;
+        VobInfo* second = windows[candidate.Second].Info;
+        if ( !first->WindowCounterpart && !second->WindowCounterpart ) {
+            first->WindowCounterpart = second;
+            second->WindowCounterpart = first;
+        }
+    }
+
+    std::unordered_map<VobInfo*, CityWindowPairVolume*> volumeByInfo;
+    volumeByInfo.reserve( windows.size() );
+    for ( CityWindowPairVolume& window : windows )
+        volumeByInfo.emplace( window.Info, &window );
+
+    // Paired windows remove the remaining normal-sign ambiguity without making
+    // validation depend on the existence of a counterpart.
+    for ( CityWindowPairVolume& window : windows ) {
+        if ( !window.Info->WindowCounterpart || window.Side != CityWindowSide::Outside )
+            continue;
+        const auto counterpartIt = volumeByInfo.find( window.Info->WindowCounterpart );
+        if ( counterpartIt == volumeByInfo.end() )
+            continue;
+
+        CityWindowPairVolume& insideWindow = *counterpartIt->second;
+        const XMVECTOR outsideToInside = XMVector3Normalize(
+            XMLoadFloat3( &insideWindow.Center ) - XMLoadFloat3( &window.Center ) );
+        XMVECTOR outsideFront = XMLoadFloat3( &window.FrontNormal );
+        XMVECTOR insideFront = XMLoadFloat3( &insideWindow.FrontNormal );
+        if ( XMVectorGetX( XMVector3Dot( outsideFront, outsideToInside ) ) > 0.0f )
+            outsideFront = -outsideFront;
+        if ( XMVectorGetX( XMVector3Dot( insideFront, outsideToInside ) ) < 0.0f )
+            insideFront = -insideFront;
+        XMStoreFloat3( &window.FrontNormal, outsideFront );
+        XMStoreFloat3( &insideWindow.FrontNormal, insideFront );
+    }
+
+    size_t validCount = 0;
+    size_t fallbackCount = 0;
+    for ( const CityWindowPairVolume& window : windows ) {
+        const bool valid = ValidateCityWindowTransparency( this, window );
+        window.Info->CityWindowTransparencyValid = valid;
+        window.Info->CityWindowValidationInitialized = true;
+        valid ? ++validCount : ++fallbackCount;
+    }
+    LogInfo() << "City window validation: " << validCount << " transparent, "
+        << fallbackCount << " opaque fallback";
+}
+
 void GothicAPI::ConfigureAllPointlightShadowSources() const {
     constexpr float LINK_RADIUS = 150.0f;
     constexpr float LINK_RADIUS_SQ = LINK_RADIUS * LINK_RADIUS;
     // NW_CITY_OILLAMP_01 is authored with its wall mount towards local -Z and
     // its luminous glass towards local +Z. Keep the light inside the visible
     // lamp body regardless of the VOB's world rotation.
-    constexpr float OIL_LAMP_FORWARD_OFFSET = 12.0f;
+    constexpr float OIL_LAMP_FORWARD_OFFSET = 25.0f;
     const size_t INVALID_INDEX = static_cast<size_t>(-1);
 
     auto isLightVob = []( zCVob* vob ) {
@@ -5263,7 +5742,7 @@ void GothicAPI::ConfigureAllPointlightShadowSources() const {
         anchor.Info = vobInfo;
         anchor.Position = midpoint;
         anchor.ShadowAnchor = midpoint;
-        anchor.ShadowAnchor.y += 20.0f;
+        anchor.ShadowAnchor.y += 50.0f;
 
         const XMVECTOR localLampForward = XMVectorSet( 0.0f, 0.0f, 1.0f, 0.0f );
         const XMMATRIX lampWorld = XMMatrixTranspose( vobInfo->Vob->GetWorldMatrixXM() );
@@ -5569,7 +6048,8 @@ void GothicAPI::BuildBspVobMapCache() {
 
     BuildBspVobMapCacheHelper( LoadedWorldInfo->BspTree->GetRootNode() );
 
-    // Resolve all flame and parent-vob associations after the complete world is known.
+    // Resolve window counterparts and light/flame associations after the complete world is known.
+    ConfigureCityWindowCounterparts();
     ConfigureAllPointlightShadowSources();
 
     BuildBspLeafLinearCache();

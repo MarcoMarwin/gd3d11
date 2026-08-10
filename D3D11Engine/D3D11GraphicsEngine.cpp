@@ -665,7 +665,9 @@ unsigned int D3D11GraphicsEngine::UpdateAndBindWindowCutouts( bool daylightPass 
         for ( BaseVobInfo* baseVob : registeredVobs ) {
             auto* vobInfo = dynamic_cast<VobInfo*>( baseVob );
             if ( !vobInfo || !vobInfo->Vob || !vobInfo->VisualInfo
-                || !vobInfo->Vob->GetShowVisual() ) {
+                || !vobInfo->Vob->GetShowVisual()
+                || (vobInfo->CityWindowValidationInitialized
+                    && !vobInfo->CityWindowTransparencyValid) ) {
                 continue;
             }
             if ( !daylightPass && Engine::GAPI->GetCameraBBox3DInFrustum(
@@ -7596,7 +7598,9 @@ void XM_CALLCONV D3D11GraphicsEngine::DrawWorldAroundForWorldShadow( FXMVECTOR p
                 GothicAPI::ProcessVobAnimation( it->Vob, aniMode, vii );
             }
 
-            reinterpret_cast<MeshVisualInfo*>(it->VisualInfo)->Instances.push_back( vii );
+            auto* meshVisual = reinterpret_cast<MeshVisualInfo*>(it->VisualInfo);
+            meshVisual->Instances.push_back( vii );
+            meshVisual->InstanceVobs.push_back( it );
         }
 
         TracyD3D11ZoneNX( "Shadows::DrawVOBs" );
@@ -7828,7 +7832,7 @@ void XM_CALLCONV D3D11GraphicsEngine::DrawWorldAroundForWorldShadow( FXMVECTOR p
         }
 
         for ( auto [_, sm] : Engine::GAPI->GetStaticMeshVisuals() ) {
-            sm->Instances.clear();
+            sm->StartNewFrame();
         }
     }
 
@@ -8161,16 +8165,49 @@ XRESULT D3D11GraphicsEngine::DrawVOBsInstanced() {
                 // Snapshot visuals + instance data into cache so subsequent passes
                 // don't rely on MeshVisualInfo::Instances, which may be mutated by shadow passes
                 cache.vobVisuals.clear();
-                cache.vobVisuals.reserve( activeVisuals.size() );
+                cache.vobVisuals.reserve( activeVisuals.size() + 16 );
                 {
                     UINT loc = 0;
-                    for ( auto smv : activeVisuals ) {
+                    auto appendCachedVisual = [&cache, &loc](
+                        MeshVisualInfo* visual,
+                        std::vector<VobInstanceInfo>&& instances,
+                        bool windowFallbackOpaque ) {
+                        if ( instances.empty() )
+                            return;
                         FrameGeometryCache::CachedVobVisual cv;
-                        cv.Visual = smv;
-                        cv.Instances = smv->Instances;
+                        cv.Visual = visual;
+                        cv.Instances = std::move( instances );
                         cv.StartInstanceNum = loc;
-                        loc += static_cast<UINT>(smv->Instances.size());
+                        cv.WindowFallbackOpaque = windowFallbackOpaque;
+                        loc += static_cast<UINT>(cv.Instances.size());
                         cache.vobVisuals.push_back( std::move( cv ) );
+                    };
+
+                    for ( auto smv : activeVisuals ) {
+                        const bool scopedWindowVisual = IsWindowGlassVisual( smv->VisualName );
+                        if ( !scopedWindowVisual
+                            || smv->InstanceVobs.size() != smv->Instances.size() ) {
+                            appendCachedVisual( smv,
+                                std::vector<VobInstanceInfo>( smv->Instances ), false );
+                            continue;
+                        }
+
+                        std::vector<VobInstanceInfo> transparentInstances;
+                        std::vector<VobInstanceInfo> fallbackInstances;
+                        transparentInstances.reserve( smv->Instances.size() );
+                        fallbackInstances.reserve( smv->Instances.size() );
+                        for ( size_t instanceIndex = 0;
+                            instanceIndex < smv->Instances.size(); ++instanceIndex ) {
+                            const VobInfo* instanceVob = smv->InstanceVobs[instanceIndex];
+                            const bool opaqueFallback = instanceVob
+                                && instanceVob->CityWindowValidationInitialized
+                                && !instanceVob->CityWindowTransparencyValid;
+                            (opaqueFallback ? fallbackInstances : transparentInstances)
+                                .push_back( smv->Instances[instanceIndex] );
+                        }
+
+                        appendCachedVisual( smv, std::move( transparentInstances ), false );
+                        appendCachedVisual( smv, std::move( fallbackInstances ), true );
                     }
                 }
 
@@ -8333,6 +8370,7 @@ XRESULT D3D11GraphicsEngine::DrawVOBsInstanced() {
             bool lastOilLampEmissiveTexture = false;
 
             zCTexture* lastTex = nullptr;
+            ID3D11ShaderResourceView* lastDiffuseTex = nullptr;
             ID3D11ShaderResourceView* lastNrmTex = nullptr;
             ID3D11ShaderResourceView* lastFxTex = nullptr;
             ID3D11ShaderResourceView* lastDispTex = nullptr;
@@ -8352,11 +8390,15 @@ XRESULT D3D11GraphicsEngine::DrawVOBsInstanced() {
                     const float materialClassMarker = IsTwoSidedBacklitVegetationVisual(
                         cachedVisual->Visual->VisualName ) ? -2.0f : 0.0f;
                     zCTexture* tx = meshKey.Material ? meshKey.Material->GetAniTexture() : nullptr;
-                    const bool isWindowGlass = IsWindowGlassMaterial( cachedVisual->Visual, tx );
+                    const bool isScopedWindowMaterial = IsWindowGlassMaterial( cachedVisual->Visual, tx );
+                    const bool isWindowFallbackMaterial = cachedVisual->WindowFallbackOpaque
+                        && isScopedWindowMaterial;
+                    const bool isWindowGlass = !cachedVisual->WindowFallbackOpaque
+                        && isScopedWindowMaterial;
                     const bool isAlphaBlendMesh = meshKey.Material &&
-                        (isWindowGlass ||
+                        (!isWindowFallbackMaterial && (isWindowGlass ||
                          meshKey.Material->GetAlphaFunc() == zMAT_ALPHA_FUNC_BLEND ||
-                         meshKey.Material->GetAlphaFunc() == zMAT_ALPHA_FUNC_ADD);
+                         meshKey.Material->GetAlphaFunc() == zMAT_ALPHA_FUNC_ADD));
 
                     if ( isAlphaBlendMesh ) {
                         if ( !isZPrepass ) {
@@ -8368,7 +8410,12 @@ XRESULT D3D11GraphicsEngine::DrawVOBsInstanced() {
                             alphaMesh.instances = cachedVisual->Instances;
                             m_AlphaMeshes.push_back( std::move( alphaMesh ) );
                         }
-                        continue;
+                        // This material combines solid lattice/frame texels with
+                        // fractional-alpha glass. Keep the solid part in the normal
+                        // lit VOB path; only the glass is replayed transparently.
+                        if ( !isWindowGlass ) {
+                            continue;
+                        }
                     }
 
                     float expectedSmallRadius = renderSettings.OutdoorSmallVobDrawRadius - cachedVisual->Visual->MeshSize;
@@ -8444,14 +8491,18 @@ XRESULT D3D11GraphicsEngine::DrawVOBsInstanced() {
                             continue;
                         }
                         // Previously this forced alpha testing, now we need to check material flags as well for that and only enable the shader if absolutely necessery
-                        const bool wantShader = !isZPrepass || (tx->HasAlphaChannel() || meshKey.Material->HasAlphaTest());
+                        const bool wantShader = !isZPrepass || isWindowGlass
+                            || tx->HasAlphaChannel() || meshKey.Material->HasAlphaTest();
 
                         MyDirectDrawSurface7* surface = tx->GetSurface();
                         ID3D11ShaderResourceView* srv[4];
                         MaterialInfo* info = meshKey.Info;
 
                         // Get diffuse and normalmap
-                        srv[0] = surface->GetEngineTexture()->GetShaderResourceView().Get();
+                        srv[0] = isWindowGlass ? GetWindowGlassReplacementSRV() : nullptr;
+                        if ( !srv[0] ) {
+                            srv[0] = surface->GetEngineTexture()->GetShaderResourceView().Get();
+                        }
                         srv[1] = GetMaterialNormalmapSRV( surface, info );
                         srv[2] = surface->GetFxMap()
                             ? surface->GetFxMap()->GetShaderResourceView().Get()
@@ -8462,6 +8513,7 @@ XRESULT D3D11GraphicsEngine::DrawVOBsInstanced() {
                         const bool oilLampMarkerChanged = oilLampEmissiveTexture != lastOilLampEmissiveTexture;
                         // Material data decides whether a real normalmap participates; no wet distortion fallback is used.
                         if ( lastTex != tx
+                            || lastDiffuseTex != srv[0]
                             || lastNrmTex != srv[1]
                             || lastFxTex != srv[2]
                             || lastDispTex != srv[3]
@@ -8469,6 +8521,7 @@ XRESULT D3D11GraphicsEngine::DrawVOBsInstanced() {
                             || oilLampMarkerChanged ) {
 
                             lastTex = tx;
+                            lastDiffuseTex = srv[0];
                             lastNrmTex = srv[1];
                             lastFxTex = srv[2];
                             lastDispTex = srv[3];
@@ -8481,10 +8534,13 @@ XRESULT D3D11GraphicsEngine::DrawVOBsInstanced() {
                                     GetContext()->PSSetShaderResources( 13, 1, &srv[3] );
                                 }
 
+                                const int effectiveAlphaFunc = isWindowFallbackMaterial
+                                    ? zMAT_ALPHA_FUNC_NONE
+                                    : meshKey.Material->GetAlphaFunc();
                                 if ( BindShaderForTexture( tx,
-                                    tx->HasAlphaChannel()
+                                    isWindowGlass || tx->HasAlphaChannel()
                                     || meshKey.Material->HasAlphaTest()
-                                    , meshKey.Material->GetAlphaFunc(),
+                                    , effectiveAlphaFunc,
                                     meshKey.Info->MaterialType ) ) {
 
                                     PsSimpleFFdata ffdata = { };
@@ -8529,7 +8585,7 @@ XRESULT D3D11GraphicsEngine::DrawVOBsInstanced() {
                         }
                     }
                     if ( clear ) {
-                        cv.Visual->Instances.clear();
+                        cv.Visual->StartNewFrame();
                     }
                 }
             }
@@ -8669,6 +8725,7 @@ XRESULT D3D11GraphicsEngine::DrawFrameAlphaMeshes() {
     {
         TracyD3D11ZoneCGX( "DrawFrameAlphaMeshes::Replay" );
         auto _scopeAlphaReplay = RecordGraphicsEvent( GE_NAME( "DrawFrameAlphaMeshes::Replay" ) );
+        PShaderID activeAlphaShader = PShaderID::PS_Simple;
         for ( auto const& alphaMesh : m_AlphaMeshes ) {
             const MeshKey& mk = alphaMesh.mk;
             zCTexture* tx = mk.Material->GetAniTexture();
@@ -8678,6 +8735,23 @@ XRESULT D3D11GraphicsEngine::DrawFrameAlphaMeshes() {
             bool blendAdd = mk.Material->GetAlphaFunc() == zMAT_ALPHA_FUNC_ADD;
             const bool isWindowGlass = IsWindowGlassMaterial( alphaMesh.vi, tx );
             bool blendBlend = isWindowGlass || mk.Material->GetAlphaFunc() == zMAT_ALPHA_FUNC_BLEND;
+
+            const PShaderID wantedAlphaShader = isWindowGlass
+                ? PShaderID::PS_Simple_FF
+                : PShaderID::PS_Simple;
+            if ( wantedAlphaShader != activeAlphaShader ) {
+                SetActivePixelShader( wantedAlphaShader );
+                ActivePS->Apply();
+                activeAlphaShader = wantedAlphaShader;
+
+                if ( isWindowGlass ) {
+                    PsSimpleFFdata windowGlassData = {};
+                    windowGlassData.textureFactor = float4( 1.0f, 1.0f, 1.0f, -1.0f );
+                    ActivePS->GetBuffer( "cbFFData" )
+                        .Update( &windowGlassData )
+                        .Bind();
+                }
+            }
 
             // Bind texture
             MeshInfo* mi = alphaMesh.mi;

@@ -38,6 +38,18 @@ struct PS_INPUT
 float4 PSMain( PS_INPUT Input ) : SV_TARGET
 {
 	float4 color = TX_Texture0.Sample(SS_Linear, Input.vTexcoord);
+
+#ifdef USE_FFDATA
+	// A negative factor alpha selects the transparent portion of the scoped
+	// City_Window replacement. Its solid texels already ran through the lit pass.
+	if (cbFFData.textureFactor.a < 0.0f)
+	{
+		clip((170.0f / 255.0f) - color.a);
+		color.rgb *= Input.vDiffuse.rgb * cbFFData.textureFactor.rgb;
+		return color;
+	}
+#endif
+
 	color *= Input.vDiffuse;
 #ifdef USE_FFDATA
 	color *= cbFFData.textureFactor;
