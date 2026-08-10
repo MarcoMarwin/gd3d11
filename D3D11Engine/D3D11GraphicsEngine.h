@@ -527,13 +527,13 @@ private:
     bool PrepareAndBindWindMetadata( const std::vector<MeshVisualInfo*>& activeVisuals );
     void UnbindWindMetadata();
     ID3D11ShaderResourceView* GetWindowGlassReplacementSRV();
+    void EnsureFrameVobVisibilityCollected();
     void RebuildWindowCutoutVolumeCache();
     unsigned int UpdateAndBindWindowCutouts( bool daylightPass = false );
     void UnbindWindowCutouts();
 
     struct CachedWindowCutoutVolume {
         VobInfo* Vob = nullptr;
-        MeshVisualInfo* Visual = nullptr;
         WindowCutoutVolume Volume = {};
     };
 
@@ -547,6 +547,9 @@ private:
     std::unique_ptr<D3D11ConstantBuffer> WindowCutoutConstantsBuffer;
     std::vector<CachedWindowCutoutVolume> WindowCutoutVolumeCache;
     uint64_t WindowCutoutCacheGeneration = static_cast<uint64_t>(-1);
+    std::vector<VobInfo*> m_CollectedCameraVobs;
+    std::vector<SkeletalVobInfo*> m_CollectedCameraMobs;
+    uint64_t m_CollectedVobWorldGeneration = static_cast<uint64_t>(-1);
     
     /** World-Mesh indirect buffer */
     std::unique_ptr<D3D11IndirectBuffer> WorldMeshIndirectBuffer;
@@ -620,6 +623,7 @@ private:
         };
 
         bool worldMeshBuilt    = false;  ///< CollectVisibleSections + MDI arg build + buffer upload done
+        bool vobVisibilityCollected = false; ///< Final camera VOB list collected once for VOBs and window cutouts
         bool vobInstancesUploaded = false; ///< CollectVisibleVobs + DynamicInstancingBuffer upload done
         bool vobWindMetadataPrepared = false; ///< Wind metadata prepared for cached vob visuals
         bool skeletalBonesUploaded = false; ///< FL11 packed skeletal bone buffers uploaded for main/z-prepass reuse
@@ -627,6 +631,7 @@ private:
         std::vector<WorldMeshSectionInfo*> visibleSections;
         std::vector<D3D11_DRAW_INDEXED_INSTANCED_INDIRECT_ARGS> drawIndirectArgs;
         std::vector<CachedWorldMeshDraw> sortedDepthWorldMeshes;
+        std::vector<VobInfo*> visibleWindowVobs;
         D3D11IndirectBuffer*           MainWorldIndirectArgsBuffer = nullptr;
         D3D11VertexBuffer*             MainVobInstancingBuffer = nullptr;
         std::vector<VobWindMetadata>   vobWindMetadata;
@@ -639,12 +644,14 @@ private:
 
         void Reset() {
             worldMeshBuilt      = false;
+            vobVisibilityCollected = false;
             vobInstancesUploaded = false;
             vobWindMetadataPrepared = false;
             skeletalBonesUploaded = false;
             visibleSections.clear();
             drawIndirectArgs.clear();
             sortedDepthWorldMeshes.clear();
+            visibleWindowVobs.clear();
             MainWorldIndirectArgsBuffer = nullptr;
             MainVobInstancingBuffer = nullptr;
             vobWindMetadata.clear();

@@ -262,15 +262,6 @@ namespace
         return false;
     }
 
-    bool IsWindowVisualForCameraSide( const std::string& visualName, bool cameraIndoor ) {
-        const std::string stem = NormalizeVisualStemForMarker( visualName );
-        const bool innerVisual = stem == "NW_CITY_WINDOW_WOOD_IN_01"
-            || stem == "NW_CITY_WINDOW_WOOD_IN_02";
-        const bool outerVisual = stem == "NW_CITY_WINDOW_STONE_OUT_01"
-            || stem == "NW_CITY_WINDOW_WOOD_OUT_01";
-        return cameraIndoor ? innerVisual : outerVisual;
-    }
-
     bool IsIndoorWindowVisual( const std::string& visualName ) {
         const std::string stem = NormalizeVisualStemForMarker( visualName );
         return stem == "NW_CITY_WINDOW_WOOD_IN_01"
@@ -641,6 +632,47 @@ ID3D11ShaderResourceView* D3D11GraphicsEngine::GetWindowGlassReplacementSRV() {
     return WindowGlassReplacementTexture->GetShaderResourceView().Get();
 }
 
+void D3D11GraphicsEngine::EnsureFrameVobVisibilityCollected() {
+    auto& cache = m_FrameGeometryCache;
+    if ( cache.vobVisibilityCollected )
+        return;
+
+    cache.vobVisibilityCollected = true;
+    cache.visibleWindowVobs.clear();
+    const auto& renderSettings = Engine::GAPI->GetRendererState().RendererSettings;
+    if ( !renderSettings.DrawVOBs && !renderSettings.EnableDynamicLighting )
+        return;
+
+    const uint64_t worldGeneration = Engine::GAPI->GetCityWindowConfigurationGeneration();
+    if ( m_CollectedVobWorldGeneration != worldGeneration ) {
+        // FixViewFrustum deliberately retains a camera list between frames. A
+        // world/window reconfiguration must never retain its raw VOB pointers.
+        m_CollectedCameraVobs.clear();
+        m_CollectedCameraMobs.clear();
+        m_CollectedVobWorldGeneration = worldGeneration;
+    }
+
+    if ( !renderSettings.FixViewFrustum || m_CollectedCameraVobs.empty() ) {
+        m_FrameLights.clear();
+        ZoneScopedN( "D3D11GraphicsEngine::EnsureFrameVobVisibilityCollected" );
+        Engine::GAPI->CollectVisibleVobs( m_CollectedCameraVobs, m_FrameLights,
+            m_CollectedCameraMobs, EGothicCullFlags::CullAll,
+            EBspTreeCollectFlags::COLLECT_ALL_MUTATE );
+    }
+    cache.cachedMobs = m_CollectedCameraMobs;
+
+    if ( renderSettings.DrawVOBs ) {
+        cache.visibleWindowVobs.reserve( std::min(
+            m_CollectedCameraVobs.size(), WindowCutoutVolumeCache.size() ) );
+        for ( VobInfo* vobInfo : m_CollectedCameraVobs ) {
+            if ( vobInfo && vobInfo->CityWindowValidationInitialized )
+                cache.visibleWindowVobs.push_back( vobInfo );
+        }
+        std::sort( cache.visibleWindowVobs.begin(), cache.visibleWindowVobs.end(),
+            std::less<VobInfo*>{} );
+    }
+}
+
 void D3D11GraphicsEngine::RebuildWindowCutoutVolumeCache() {
     // Gothic mods occasionally contain invalid or enormously padded visual
     // bounding boxes. Never allow one of those to turn into a world-sized
@@ -665,8 +697,8 @@ void D3D11GraphicsEngine::RebuildWindowCutoutVolumeCache() {
             }
 
             // These four window VOB types are static world geometry. Cache
-            // their transformed glass OBB once per world; visibility, pairing
-            // and camera-distance decisions remain dynamic below.
+            // their transformed glass OBB once per world; final visibility and
+            // camera-distance decisions remain dynamic below.
             const XMMATRIX world = XMMatrixTranspose( vobInfo->Vob->GetWorldMatrixXM() );
             XMVECTOR localMin;
             XMVECTOR localMax;
@@ -726,7 +758,7 @@ void D3D11GraphicsEngine::RebuildWindowCutoutVolumeCache() {
             XMStoreFloat4( &volume.AxisXExtentY, XMVectorSetW( axisX, extents[1] ) );
             XMStoreFloat4( &volume.AxisYExtentZ, XMVectorSetW( axisY, extents[2] ) );
             XMStoreFloat4( &volume.AxisZPadding, axisZ );
-            WindowCutoutVolumeCache.push_back( { vobInfo, visualInfo, volume } );
+            WindowCutoutVolumeCache.push_back( { vobInfo, volume } );
         }
     }
 }
@@ -740,6 +772,8 @@ unsigned int D3D11GraphicsEngine::UpdateAndBindWindowCutouts( bool daylightPass 
         RebuildWindowCutoutVolumeCache();
         WindowCutoutCacheGeneration = windowGeneration;
     }
+    if ( !daylightPass )
+        EnsureFrameVobVisibilityCollected();
 
     struct Candidate {
         float DistanceSq;
@@ -749,43 +783,20 @@ unsigned int D3D11GraphicsEngine::UpdateAndBindWindowCutouts( bool daylightPass 
     candidates.clear();
     candidates.reserve( std::min( WindowCutoutVolumeCache.size(), MaxWindowCutouts + 1 ) );
     const XMVECTOR cameraPosition = Engine::GAPI->GetCameraPositionXM();
-    const bool cameraIndoor = Engine::GAPI->IsCameraIndoor();
 
     for ( const CachedWindowCutoutVolume& cached : WindowCutoutVolumeCache ) {
         VobInfo* vobInfo = cached.Vob;
-        MeshVisualInfo* sharedVisualInfo = cached.Visual;
-        if ( !vobInfo || !vobInfo->Vob || !sharedVisualInfo
+        if ( !vobInfo || !vobInfo->Vob
             || !vobInfo->Vob->GetShowVisual()
             || (vobInfo->CityWindowValidationInitialized
                 && !vobInfo->CityWindowTransparencyValid) ) {
             continue;
         }
 
-        if ( vobInfo->WindowCounterpart && vobInfo->WindowCounterpart->Vob ) {
-            // A confirmed geometric pair is independent of misleading
-            // _IN/_OUT mesh names. Use only the camera-near plane for both
-            // visual and daylight cutouts; both volumes cover one opening.
-            const float ownDistanceSq = XMVectorGetX( XMVector3LengthSq(
-                vobInfo->Vob->GetPositionWorldXM() - cameraPosition ) );
-            const float counterpartDistanceSq = XMVectorGetX( XMVector3LengthSq(
-                vobInfo->WindowCounterpart->Vob->GetPositionWorldXM() - cameraPosition ) );
-            const bool fartherFromCamera = ownDistanceSq > counterpartDistanceSq + 0.01f;
-            const bool stableTieBreak = std::abs( ownDistanceSq - counterpartDistanceSq ) <= 0.01f
-                && std::less<VobInfo*>{}(vobInfo->WindowCounterpart, vobInfo);
-            if ( fartherFromCamera || stableTieBreak )
-                continue;
-        } else {
-            // Gothic can omit one side entirely. Preserve the authored-name
-            // fallback for those unpaired windows so an exterior-only VOB
-            // does not accidentally open the wall from the interior side.
-            const bool fallbackSideMatches = daylightPass
-                ? IsIndoorWindowVisual( sharedVisualInfo->VisualName )
-                : IsWindowVisualForCameraSide( sharedVisualInfo->VisualName, cameraIndoor );
-            if ( !fallbackSideMatches )
-                continue;
-        }
-        if ( !daylightPass && Engine::GAPI->GetCameraBBox3DInFrustum(
-            vobInfo->Vob, EGothicCullFlags::CullSidesNear, false ) == ZTCAM_CLIPTYPE_OUT ) {
+        if ( !daylightPass && !std::binary_search(
+            m_FrameGeometryCache.visibleWindowVobs.begin(),
+            m_FrameGeometryCache.visibleWindowVobs.end(), vobInfo,
+            std::less<VobInfo*>{} ) ) {
             continue;
         }
 
@@ -904,17 +915,6 @@ unsigned int D3D11GraphicsEngine::UpdateAndBindWindowCutouts( bool daylightPass 
             addToAllTiles( 1u << static_cast<uint32_t>(i) );
         }
         constants.PixelToTile = XMFLOAT2( 0.0f, 0.0f );
-    }
-
-    if ( Engine::GAPI->GetRendererState().RendererSettings.EnableDebugLog ) {
-        static unsigned int lastVisualCount = UINT_MAX;
-        static unsigned int lastDaylightCount = UINT_MAX;
-        unsigned int& lastCount = daylightPass ? lastDaylightCount : lastVisualCount;
-        if ( lastCount != constants.Count ) {
-            LogInfo() << "Window cutouts (" << (daylightPass ? "daylight" : "camera")
-                << "): " << constants.Count << ", cameraIndoor=" << cameraIndoor;
-            lastCount = constants.Count;
-        }
     }
 
     if ( !WindowCutoutConstantsBuffer ) {
@@ -8090,10 +8090,9 @@ void D3D11GraphicsEngine::ApplyWindProps( VS_ExConstantBuffer_Wind& windBuff ) {
 
 /** Draws the static vobs instanced */
 XRESULT D3D11GraphicsEngine::DrawVOBsInstanced() {
-    static std::vector<VobInfo*> vobs;
-    static std::vector<SkeletalVobInfo*> mobs;
-
     const auto& renderSettings = Engine::GAPI->GetRendererState().RendererSettings;
+    auto& vobs = m_CollectedCameraVobs;
+    auto& mobs = m_CollectedCameraMobs;
 
     {
         TracyD3D11ZoneCGX( "DrawVOBsInstanced" );
@@ -8161,25 +8160,8 @@ XRESULT D3D11GraphicsEngine::DrawVOBsInstanced() {
 
         if ( renderSettings.DrawVOBs ||
             renderSettings.EnableDynamicLighting ) {
-            if ( !m_FrameGeometryCache.vobInstancesUploaded ) {
-                if ( !renderSettings.FixViewFrustum ||
-                    (renderSettings.FixViewFrustum &&
-                        vobs.empty()) ) {
-                    m_FrameLights.clear();
-
-                    UINT collect = EBspTreeCollectFlags::COLLECT_ALL_MUTATE;
-                    if ( isZPrepass ) {
-                        // collect &= ~(EBspTreeCollectFlags::COLLECT_LIGHTS);
-                    }
-
-                    ZoneScopedN( "DrawVOBsInstanced::CollectVisibleVobs" );
-                    auto _scopeCollectVisibleVobs = RecordGraphicsEvent( GE_NAME( "DrawVOBsInstanced::CollectVisibleVobs" ) );
-                    Engine::GAPI->CollectVisibleVobs( vobs, m_FrameLights, mobs, EGothicCullFlags::CullAll, (EBspTreeCollectFlags)collect );
-                }
-                // Snapshot mobs into cache; the static mobs vector is cleared at
-                // end of this function, so the lit pass would find it empty otherwise.
-                m_FrameGeometryCache.cachedMobs = mobs;
-            }
+            if ( !m_FrameGeometryCache.vobInstancesUploaded )
+                EnsureFrameVobVisibilityCollected();
         }
 
         if ( renderSettings.DrawVOBs ) {

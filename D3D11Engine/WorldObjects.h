@@ -231,11 +231,14 @@ struct MeshVisualInfo : public BaseVisualInfo {
         NeedsAlphaTesting = false;
         WindowGlassBoundsInitialized = false;
         HasWindowGlassBounds = false;
+        HasWindowGlassFrontNormal = false;
     }
 
     bool WindowGlassBoundsInitialized;
     bool HasWindowGlassBounds;
+    bool HasWindowGlassFrontNormal;
     zTBBox3D WindowGlassBounds;
+    XMFLOAT3 WindowGlassFrontNormal = {};
     
     MeshVisualInfo(MeshVisualInfo&& other) = default;
     MeshVisualInfo& operator=( MeshVisualInfo&& ) = default;
@@ -374,8 +377,10 @@ struct VobInfo : public BaseVobInfo {
     zCVobLight* OilLampEmissionLight = nullptr;
     float OilLampEmissionLightDistanceSq = FLT_MAX;
 
-    /** Geometrically opposite city-window instance occupying the same opening. */
-    VobInfo* WindowCounterpart = nullptr;
+    /** Stable world-space glass plane used for front/back-side selection. */
+    XMFLOAT3 CityWindowCenter = {};
+    XMFLOAT3 CityWindowFrontNormal = {};
+    bool CityWindowFacingInitialized = false;
 
     /** Stable per-world decision: use transparent City_Window and cut the wall. */
     bool CityWindowTransparencyValid = true;
