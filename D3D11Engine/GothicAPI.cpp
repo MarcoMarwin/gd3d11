@@ -2795,10 +2795,11 @@ void GothicAPI::OnRemovedVob( zCVob* vob, zCWorld* world ) {
     // delete light info, if valid
     if ( li ) delete li;
 
-    // Dynamic window removal invalidates the renderer volume cache. Rebuild
-    // the rare static window data here, never in the per-frame path.
+    // Removal only invalidates renderer-owned raw-pointer caches. Revalidating
+    // every remaining window here is both unnecessary and unsafe while Gothic
+    // may be dismantling its BSP/world geometry during a level transition.
     if ( reconfigureCityWindows )
-        ConfigureCityWindows();
+        ++CityWindowConfigurationGeneration;
 }
 
 /** Called on a SetVisual-Call of a vob */
@@ -4725,17 +4726,25 @@ void GothicAPI::CollectVisibleVobs(
     // they should be unique at this point.
 
     if ( collectFlags & COLLECT_MUTATE ) {
-        auto windowFacing = [&cameraPosition]( const VobInfo* window ) {
+        auto isWindowBackFacing = [&cameraPosition]( const VobInfo* window ) {
             if ( !window || !window->CityWindowFacingInitialized )
-                return 0.0f;
-            return XMVectorGetX( XMVector3Dot(
-                cameraPosition - XMLoadFloat3( &window->CityWindowCenter ),
-                XMLoadFloat3( &window->CityWindowFrontNormal ) ) );
+                return false;
+
+            // Keep the VOB visible for five degrees beyond its geometric edge.
+            // Comparing squared values avoids a normalize/square-root per window.
+            constexpr float BackfaceToleranceSinSq = 0.0075961235f; // sin(5 deg)^2
+            const XMVECTOR toCamera = cameraPosition
+                - XMLoadFloat3( &window->CityWindowCenter );
+            const float facing = XMVectorGetX( XMVector3Dot(
+                toCamera, XMLoadFloat3( &window->CityWindowFrontNormal ) ) );
+            const float distanceSq = XMVectorGetX( XMVector3LengthSq( toCamera ) );
+            return facing < 0.0f
+                && facing * facing > distanceSq * BackfaceToleranceSinSq;
         };
 
         size_t visibleVobWriteIndex = 0;
         for ( VobInfo* it : renderQueue.vobs ) {
-            if ( it->CityWindowFacingInitialized && windowFacing( it ) < -0.01f ) {
+            if ( isWindowBackFacing( it ) ) {
                 // Every supported window is governed solely by its real glass
                 // face, so its untextured back never reaches the draw list.
                 continue;
@@ -5288,6 +5297,9 @@ void GothicAPI::ConfigurePointlightShadowSource( VobLightInfo* lightInfo ) const
 
 void GothicAPI::ConfigureCityWindows() {
     ++CityWindowConfigurationGeneration;
+
+    if ( !LoadedWorldInfo || !LoadedWorldInfo->BspTree )
+        return;
 
     std::vector<CityWindowVolume> windows;
     windows.reserve( 64 );

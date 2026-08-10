@@ -637,11 +637,20 @@ void D3D11GraphicsEngine::EnsureFrameVobVisibilityCollected() {
     if ( cache.vobVisibilityCollected )
         return;
 
-    cache.vobVisibilityCollected = true;
     cache.visibleWindowVobs.clear();
     const auto& renderSettings = Engine::GAPI->GetRendererState().RendererSettings;
     if ( !renderSettings.DrawVOBs && !renderSettings.EnableDynamicLighting )
         return;
+
+    const WorldInfo* loadedWorld = Engine::GAPI->GetLoadedWorldInfo();
+    if ( !loadedWorld || !loadedWorld->BspTree ) {
+        // DrawWorldMesh also runs for startup/loading screens, before Gothic
+        // has supplied a BSP tree. Keep the cache uncollected so a world that
+        // becomes available later in this frame can still be collected.
+        return;
+    }
+
+    cache.vobVisibilityCollected = true;
 
     const uint64_t worldGeneration = Engine::GAPI->GetCityWindowConfigurationGeneration();
     if ( m_CollectedVobWorldGeneration != worldGeneration ) {
@@ -772,7 +781,7 @@ unsigned int D3D11GraphicsEngine::UpdateAndBindWindowCutouts( bool daylightPass 
         RebuildWindowCutoutVolumeCache();
         WindowCutoutCacheGeneration = windowGeneration;
     }
-    if ( !daylightPass )
+    if ( !daylightPass && !WindowCutoutVolumeCache.empty() )
         EnsureFrameVobVisibilityCollected();
 
     struct Candidate {
@@ -8764,6 +8773,9 @@ XRESULT D3D11GraphicsEngine::DrawFrameAlphaMeshes() {
         auto _scopeAlphaReplay = RecordGraphicsEvent( GE_NAME( "DrawFrameAlphaMeshes::Replay" ) );
         PShaderID activeAlphaShader = PShaderID::PS_Simple;
         const float windowGlassBrightness = GetWindowGlassBrightness();
+        bool twoSidedWindowGlass = false;
+        enum class ReplayBlendMode { None, Alpha, Additive };
+        ReplayBlendMode activeBlendMode = ReplayBlendMode::None;
         for ( auto const& alphaMesh : m_AlphaMeshes ) {
             const MeshKey& mk = alphaMesh.mk;
             zCTexture* tx = mk.Material->GetAniTexture();
@@ -8772,7 +8784,6 @@ XRESULT D3D11GraphicsEngine::DrawFrameAlphaMeshes() {
             // Check for alphablending on world mesh
             bool blendAdd = mk.Material->GetAlphaFunc() == zMAT_ALPHA_FUNC_ADD;
             const bool isWindowGlass = IsWindowGlassMaterial( alphaMesh.vi, tx );
-            bool blendBlend = isWindowGlass || mk.Material->GetAlphaFunc() == zMAT_ALPHA_FUNC_BLEND;
 
             const PShaderID wantedAlphaShader = isWindowGlass
                 ? PShaderID::PS_Simple_FF
@@ -8822,31 +8833,37 @@ XRESULT D3D11GraphicsEngine::DrawFrameAlphaMeshes() {
             GetContext()->PSSetShaderResources( 0, 3, srv );
             GetContext()->PSSetShaderResources( 13, 1, &srv[3] );
 
-            if ( isWindowGlass ) {
-                // The scoped replacement contains a genuine fractional alpha channel;
-                // always select regular alpha blending even if a previous replay item
-                // left another blend mode active.
-                Engine::GAPI->GetRendererState().BlendState.SetAlphaBlending();
-                Engine::GAPI->GetRendererState().BlendState.SetDirty();
-
-                Engine::GAPI->GetRendererState().DepthState.DepthWriteEnabled = false;
-                Engine::GAPI->GetRendererState().DepthState.SetDirty();
-
-                UpdateRenderStates();
-            } else if ( (blendAdd || blendBlend) &&
-                !Engine::GAPI->GetRendererState().BlendState.BlendEnabled ) {
-                if ( blendAdd )
-                    Engine::GAPI->GetRendererState().BlendState.SetAdditiveBlending();
-                else if ( blendBlend )
-                    Engine::GAPI->GetRendererState().BlendState.SetAlphaBlending();
-
-                Engine::GAPI->GetRendererState().BlendState.SetDirty();
-
-                Engine::GAPI->GetRendererState().DepthState.DepthWriteEnabled = false;
-                Engine::GAPI->GetRendererState().DepthState.SetDirty();
-
-                UpdateRenderStates();
+            bool renderStateChanged = false;
+            if ( twoSidedWindowGlass != isWindowGlass ) {
+                // VOB-level front/back selection already removed an unwanted
+                // window instance. Disable triangle backface culling only for
+                // the surviving glass replay, because Gothic's IN meshes can
+                // use the opposite winding for their glass plane.
+                Engine::GAPI->GetRendererState().RasterizerState.CullMode = isWindowGlass
+                    ? GothicRasterizerStateInfo::CM_CULL_NONE
+                    : GothicRasterizerStateInfo::CM_CULL_BACK;
+                Engine::GAPI->GetRendererState().RasterizerState.SetDirty();
+                twoSidedWindowGlass = isWindowGlass;
+                renderStateChanged = true;
             }
+
+            const ReplayBlendMode wantedBlendMode = blendAdd && !isWindowGlass
+                ? ReplayBlendMode::Additive
+                : ReplayBlendMode::Alpha;
+            if ( activeBlendMode != wantedBlendMode ) {
+                if ( wantedBlendMode == ReplayBlendMode::Additive )
+                    Engine::GAPI->GetRendererState().BlendState.SetAdditiveBlending();
+                else
+                    Engine::GAPI->GetRendererState().BlendState.SetAlphaBlending();
+                Engine::GAPI->GetRendererState().BlendState.SetDirty();
+                Engine::GAPI->GetRendererState().DepthState.DepthWriteEnabled = false;
+                Engine::GAPI->GetRendererState().DepthState.SetDirty();
+                activeBlendMode = wantedBlendMode;
+                renderStateChanged = true;
+            }
+
+            if ( renderStateChanged )
+                UpdateRenderStates();
 
             // TODO: apply MaterialInfoBuffer.Update(&mk.Info->buffer) ?
 
