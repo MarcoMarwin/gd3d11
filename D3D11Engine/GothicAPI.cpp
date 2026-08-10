@@ -540,7 +540,7 @@ namespace {
                 * (window.Extents[surfaceAxes[1]] * vertical);
     }
 
-    bool CityWindowSampleFitsWallReach(
+    bool CityWindowSampleIsClearlyBlocked(
         GothicAPI* api,
         const CityWindowPairVolume& window,
         FXMVECTOR samplePoint ) {
@@ -556,19 +556,18 @@ namespace {
 
         CityWindowTraceHit firstHit;
         if ( !TraceCityWindowWorld( api, origin, inward, MaxTraceDistance, firstHit ) )
-            return false;
+            return false; // Inconclusive: never turn an otherwise valid window opaque.
 
-        // A window floating noticeably away from every wall is never opened.
         const float firstRelativeDepth = XMVectorGetX( XMVector3Dot(
             XMLoadFloat3( &firstHit.Position ) - samplePoint, inward ) );
         if ( std::abs( firstRelativeDepth ) > FrontProbeDistance )
-            return false;
+            return false; // The traced surface cannot be identified as this window's wall.
 
         const XMVECTOR secondOrigin = XMLoadFloat3( &firstHit.Position ) + inward * TraceAdvance;
         CityWindowTraceHit secondHit;
         if ( !TraceCityWindowWorld( api, secondOrigin, inward,
             MaxTraceDistance - firstHit.Distance, secondHit ) ) {
-            return true; // Single-plane Gothic walls are valid.
+            return false; // Single-plane Gothic walls are valid.
         }
 
         const float layerGap = XMVectorGetX( XMVector3Length(
@@ -588,55 +587,29 @@ namespace {
         const XMVECTOR secondNormal = XMVector3Normalize( XMVector3Cross( secondEdge0, secondEdge1 ) );
         const float normalAlignment = std::abs( XMVectorGetX( XMVector3Dot( firstNormal, secondNormal ) ) );
 
-        return !(layerGap <= MaxNearbyWallLayerGap
+        return layerGap <= MaxNearbyWallLayerGap
             && normalAlignment >= 0.70f
-            && secondRelativeDepth > allowedReach);
-    }
-
-    bool CityWindowOutsideHasEnclosedInterior(
-        GothicAPI* api,
-        const CityWindowPairVolume& window,
-        FXMVECTOR samplePoint ) {
-        constexpr float WallReachPadding = 100.0f;
-        constexpr float InteriorProbeOffset = 15.0f;
-        constexpr float MaxRoomHeight = 1200.0f;
-
-        const XMVECTOR inward = -XMLoadFloat3( &window.FrontNormal );
-        const XMVECTOR probe = samplePoint + inward
-            * (window.Extents[window.ThinAxis] + WallReachPadding + InteriorProbeOffset);
-        CityWindowTraceHit floorHit;
-        CityWindowTraceHit ceilingHit;
-        const bool hasFloor = TraceCityWindowWorld(
-            api, probe, XMVectorSet( 0, -1, 0, 0 ), MaxRoomHeight, floorHit );
-        const bool hasCeiling = TraceCityWindowWorld(
-            api, probe, XMVectorSet( 0, 1, 0, 0 ), MaxRoomHeight, ceilingHit );
-        return hasFloor && hasCeiling;
+            && secondRelativeDepth > allowedReach;
     }
 
     bool ValidateCityWindowTransparency(
         GothicAPI* api,
         const CityWindowPairVolume& window ) {
         static constexpr float SampleOffsets[3] = { -0.65f, 0.0f, 0.65f };
-        int validWallSamples = 0;
-        int enclosedInteriorSamples = 0;
+        int clearlyBlockedSamples = 0;
         for ( float vertical : SampleOffsets ) {
             for ( float horizontal : SampleOffsets ) {
                 const XMVECTOR sample = GetCityWindowSamplePoint( window, horizontal, vertical );
-                if ( CityWindowSampleFitsWallReach( api, window, sample ) )
-                    ++validWallSamples;
-                if ( window.Side == CityWindowSide::Outside
-                    && CityWindowOutsideHasEnclosedInterior( api, window, sample ) ) {
-                    ++enclosedInteriorSamples;
-                }
+                if ( CityWindowSampleIsClearlyBlocked( api, window, sample ) )
+                    ++clearlyBlockedSamples;
             }
         }
 
-        // One bad edge sample is tolerated. Half-covered or floating windows fail.
-        if ( validWallSamples < 8 )
-            return false;
-        if ( window.Side == CityWindowSide::Outside && enclosedInteriorSamples < 7 )
-            return false;
-        return true;
+        // Fail open unless a majority of the aperture positively identifies a
+        // nearby parallel wall layer beyond the cutout reach. Missing traces,
+        // room-floor probes and ambiguous Gothic geometry are not proof that a
+        // window is blocked; treating them as such made every window opaque.
+        return clearlyBlockedSamples < 5;
     }
 
     DWORD QuantizeOilLampEmissionColor( DWORD gothicColor ) {
@@ -5796,6 +5769,8 @@ void GothicAPI::ConfigureAllPointlightShadowSources() const {
     // cannot be moved to more than one shadow anchor. Static lights always win;
     // a dynamic light is used only when no eligible static light exists in the
     // complete lamp-link radius.
+    size_t oilLampStaticEmissionLinks = 0;
+    size_t oilLampDynamicEmissionLinks = 0;
     for ( OilLampAnchor& oilLamp : oilLampAnchors ) {
         if ( !oilLamp.Info )
             continue;
@@ -5805,9 +5780,6 @@ void GothicAPI::ConfigureAllPointlightShadowSources() const {
         float nearestStaticDistanceSq = LINK_RADIUS_SQ;
         float nearestDynamicDistanceSq = LINK_RADIUS_SQ;
         for ( size_t lightIndex = 0; lightIndex < lights.size(); ++lightIndex ) {
-            if ( resolvedByFlame[lightIndex] )
-                continue;
-
             const float candidateDistanceSq = distanceSq( lights[lightIndex].Position, oilLamp.Position );
             if ( candidateDistanceSq > LINK_RADIUS_SQ )
                 continue;
@@ -5829,8 +5801,15 @@ void GothicAPI::ConfigureAllPointlightShadowSources() const {
             oilLamp.Info->OilLampEmissionLightDistanceSq = nearestStatic != INVALID_INDEX
                 ? nearestStaticDistanceSq
                 : nearestDynamicDistanceSq;
+            nearestStatic != INVALID_INDEX
+                ? ++oilLampStaticEmissionLinks
+                : ++oilLampDynamicEmissionLinks;
         }
     }
+    LogInfo() << "Oil-lamp emission links: " << oilLampStaticEmissionLinks
+        << " static, " << oilLampDynamicEmissionLinks << " dynamic fallback, "
+        << (oilLampAnchors.size() - oilLampStaticEmissionLinks - oilLampDynamicEmissionLinks)
+        << " unlinked";
 
     struct ParentAnchor {
         zCVob* Parent = nullptr;

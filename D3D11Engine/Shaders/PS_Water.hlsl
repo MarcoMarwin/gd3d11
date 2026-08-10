@@ -332,15 +332,19 @@ PS_OUTPUT PSMain(PS_INPUT Input)
     bool ssrActive = ssrStrength > 0.0001f;
 
     float2 wtBase = Input.vWorldPosition.xz / 1000.0f;
-    // Reverse the previously rotated ocean drift by another 180 degrees in
-    // top view. The resulting ocean-only mapping is (X, Z) -> (-Z, X).
-    float2 wtOceanRotated = float2(-wtBase.y, wtBase.x);
-    float2 wt = lerp(wtBase, wtOceanRotated, step(0.5f, WM_IsOceanWater));
-    float3 ds = TX_Distortion.Sample(SS_Linear, wt * DIST_SMALL_SCALE + RI_Time * DIST_SMALL_SPEED).xyz * 2 - 1;
-    ds += TX_Distortion.Sample(SS_Linear, wt * float2(-1, 0.7f) * DIST_SMALL_SCALE + RI_Time * DIST_SMALL_SPEED * 2).xyz * 2 - 1;
+    const float oceanMask = step(0.5f, WM_IsOceanWater);
+    // Keep the last spatial mapping that visibly moved away from the harbour
+    // shore, then reverse time only for ocean water. Reversing the animation
+    // phase gives the exact opposite (towards shore) without rotating wave
+    // detail or affecting rivers, lakes and waterfalls.
+    float2 wtOceanRotated = float2(wtBase.y, -wtBase.x);
+    float2 wt = lerp(wtBase, wtOceanRotated, oceanMask);
+    float waterTime = RI_Time * lerp(1.0f, -1.0f, oceanMask);
+    float3 ds = TX_Distortion.Sample(SS_Linear, wt * DIST_SMALL_SCALE + waterTime * DIST_SMALL_SPEED).xyz * 2 - 1;
+    ds += TX_Distortion.Sample(SS_Linear, wt * float2(-1, 0.7f) * DIST_SMALL_SCALE + waterTime * DIST_SMALL_SPEED * 2).xyz * 2 - 1;
     ds *= 0.5f;
-    float3 db = TX_Distortion.Sample(SS_Linear, wt * DIST_BIG_SCALE + RI_Time * DIST_BIG_SPEED).xyz * 2 - 1;
-    db += TX_Distortion.Sample(SS_Linear, wt * float2(-1, 0.7f) * DIST_BIG_SCALE + RI_Time * DIST_BIG_SPEED * 1.2f).xyz * 2 - 1;
+    float3 db = TX_Distortion.Sample(SS_Linear, wt * DIST_BIG_SCALE + waterTime * DIST_BIG_SPEED).xyz * 2 - 1;
+    db += TX_Distortion.Sample(SS_Linear, wt * float2(-1, 0.7f) * DIST_BIG_SCALE + waterTime * DIST_BIG_SPEED * 1.2f).xyz * 2 - 1;
     db *= 0.5f;
 
     float farScale = lerp(1, 0.58f, SmootherStep01(saturate((waterViewDistance - 14000) / 38000)));
