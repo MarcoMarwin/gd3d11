@@ -144,6 +144,7 @@ enum class CShaderID : size_t {
     CS_PFX_XeGTAO_Ultra,
     CS_PFX_XeGTAO_Denoise,
     CS_PFX_XeGTAO_DenoiseLast,
+    CS_WindowSkyVisibility,
     CS_PFX_Sharpen,
     COUNT
 };

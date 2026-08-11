@@ -9,9 +9,11 @@ SamplerState SS_Linear : register( s0 );
 Texture2D	TX_Texture0 : register( t0 );
 Texture2D	TX_WindowSceneDepth : register( t14 );
 Texture2D	TX_WindowWorldMask : register( t15 );
+Texture2D	TX_WindowSkyVisibility : register( t16 );
 
 struct FFData {
 	float4 textureFactor;
+	float4 windowParams;
 };
 
 cbuffer cbFFData : register( b0 ) {
@@ -70,6 +72,30 @@ float EvaluateWindowSkyPath(int2 pixelPosition, int2 targetSize, float halfHeigh
 
 	return 0.0f;
 }
+
+float EvaluateCachedWindowSkyVisibility(
+	int2 pixelPosition, int2 targetSize, float featherWidth)
+{
+	uint maskWidth;
+	uint maskHeight;
+	TX_WindowSkyVisibility.GetDimensions(maskWidth, maskHeight);
+	if (maskWidth == 0u || maskHeight == 0u)
+		return 0.0f;
+
+	const float2 uv = (float2(pixelPosition) + 0.5f) / float2(targetSize);
+	const float horizontalOffset = featherWidth / float(targetSize.x);
+	const float2 halfTexel = 0.5f / float2(maskWidth, maskHeight);
+	const float2 centerUV = clamp(uv, halfTexel, 1.0f - halfTexel);
+	const float center = TX_WindowSkyVisibility.SampleLevel(
+		SS_Linear, centerUV, 0.0f).r;
+	const float left = TX_WindowSkyVisibility.SampleLevel(
+		SS_Linear, clamp(centerUV - float2(horizontalOffset, 0.0f),
+			halfTexel, 1.0f - halfTexel), 0.0f).r;
+	const float right = TX_WindowSkyVisibility.SampleLevel(
+		SS_Linear, clamp(centerUV + float2(horizontalOffset, 0.0f),
+			halfTexel, 1.0f - halfTexel), 0.0f).r;
+	return saturate((left + center * 2.0f + right) * 0.25f);
+}
 #endif
 
 
@@ -88,16 +114,14 @@ float4 PSMain( PS_INPUT Input ) : SV_TARGET
 		if (color.a > (170.0f / 255.0f))
 			discard;
 
-		// Preserve the authored glass layer even in panes whose DDS alpha reaches
-		// zero. Without this floor the sky was visually unobstructed although the
-		// frame/grid still rendered correctly.
-		color.a = max(color.a, 0.18f);
+		// Soften overly opaque authored panes but retain a firm visibility floor.
+		// This keeps glass present over sky, world geometry, decals and effects
+		// without making it read as a bright opaque sheet.
+		color.a = max(color.a * 0.82f, 0.16f);
 
-		// A factor below -1 enables the City_Window sky safeguard and its
-		// magnitude carries the fixed screen midpoint in render-target pixels.
-		if (cbFFData.textureFactor.a < -1.5f)
+		if (cbFFData.windowParams.y > 0.5f)
 		{
-			const float halfHeight = -cbFFData.textureFactor.a;
+			const float halfHeight = cbFFData.windowParams.x;
 			if (Input.vPosition.y >= halfHeight)
 			{
 				uint targetWidth;
@@ -108,36 +132,41 @@ float4 PSMain( PS_INPUT Input ) : SV_TARGET
 					int2(0, 0), targetSize - 1);
 				const float sceneDepth = TX_WindowSceneDepth.Load(
 					int3(pixelPosition, 0)).r;
-				if (sceneDepth <= 1e-7f)
+				const float currentWorldBlocker = TX_WindowWorldMask.Load(
+					int3(pixelPosition, 0)).r;
+				// Keep a full-resolution final check around the reduced mask. It
+				// prevents bilinear feathering from crossing an actual world pixel.
+				if (sceneDepth <= 1e-7f && currentWorldBlocker < 0.5f)
 				{
 					const float featherWidth = clamp(
 						float(min(targetWidth, targetHeight)) * 0.01f, 8.0f, 20.0f);
-					const float centerPath = EvaluateWindowSkyPath(
-						pixelPosition, targetSize, halfHeight, 0);
-					float pathConfidence = centerPath;
-					// A valid center lane is authoritative and needs no neighboring
-					// probes. Only a blocked center can sit on a horizontal mask edge;
-					// preserve the old two-sided feather there, evaluating the right
-					// lane only when the left lane was open. The common case therefore
-					// executes one path instead of three.
+					float pathConfidence;
 					[branch]
-					if (centerPath < 0.5f)
+					if (cbFFData.windowParams.z > 0.5f)
 					{
+						pathConfidence = EvaluateCachedWindowSkyVisibility(
+							pixelPosition, targetSize, featherWidth);
+					}
+					else
+					{
+						// Feature-level-10 fallback: retain the exact full-resolution
+						// path test when compute/UAV support is unavailable.
+						const float centerPath = EvaluateWindowSkyPath(
+							pixelPosition, targetSize, halfHeight, 0);
 						const float leftPath = EvaluateWindowSkyPath(
 							pixelPosition, targetSize, halfHeight, -int(featherWidth));
-						float rightPath = 0.0f;
-						[branch]
-						if (leftPath > 0.5f)
-							rightPath = EvaluateWindowSkyPath(
-								pixelPosition, targetSize, halfHeight, int(featherWidth));
-						pathConfidence = (leftPath + rightPath) * 0.125f;
+						const float rightPath = EvaluateWindowSkyPath(
+							pixelPosition, targetSize, halfHeight, int(featherWidth));
+						pathConfidence =
+							(leftPath + centerPath * 2.0f + rightPath) * 0.25f;
 					}
 					const float validTransparency = smoothstep(
-						0.20f, 0.80f, pathConfidence);
+						0.16f, 0.84f, pathConfidence);
 					const float lowerHalfFade = smoothstep(
 						halfHeight, halfHeight + featherWidth, Input.vPosition.y);
 					color.a = lerp(color.a, 1.0f,
-						(1.0f - validTransparency) * lowerHalfFade);
+						(1.0f - validTransparency) * lowerHalfFade
+							* saturate(cbFFData.windowParams.w));
 				}
 			}
 		}

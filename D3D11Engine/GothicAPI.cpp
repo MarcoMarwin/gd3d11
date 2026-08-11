@@ -581,17 +581,16 @@ namespace {
         if ( maxChannel <= 0.0f )
             return 0u;
 
-        // Oil-lamp glass must never drift into neutral white. Low-saturation
-        // sources use Gothic's warm lamp white; chromatic sources snap to the
-        // nearest stable hue so animated lights cannot wash the lamp out. The
-        // yellow sector deliberately falls back to warm white: yellow occurred
-        // too frequently for ordinary Gothic lamp lights.
+        // Keep the authored warm lamp white dominant. All chromatic hues use
+        // the same saturation threshold; yellow deliberately remains warm
+        // white because it is the normal color range of an oil flame.
         float paletteRed = 237.0f;
         float paletteGreen = 211.0f;
         float paletteBlue = 165.0f;
         DWORD paletteIndex = 1u;
         const float saturation = (maxChannel - minChannel) / maxChannel;
-        if ( saturation >= 0.38f ) {
+        constexpr float StrongChromaticSaturation = 0.55f;
+        if ( saturation >= StrongChromaticSaturation ) {
             float hue;
             const float chroma = maxChannel - minChannel;
             if ( maxChannel == red ) {
@@ -605,6 +604,7 @@ namespace {
             }
 
             const int hueSector = static_cast<int>(std::floor((hue + 30.0f) / 60.0f)) % 6;
+
             if ( hueSector != 1 ) {
                 static constexpr float palette[6][3] = {
                     { 255.0f,  64.0f,  32.0f }, // red

@@ -531,6 +531,7 @@ private:
     void UnbindWindMetadata();
     ID3D11ShaderResourceView* GetWindowGlassReplacementSRV();
     bool EnsureWindowWorldGeometryMask();
+    bool BuildWindowSkyVisibilityMask();
     void EnsureFrameVobVisibilityCollected();
     void RebuildWindowCutoutVolumeCache();
     unsigned int UpdateAndBindWindowCutouts( bool daylightPass = false );
@@ -550,7 +551,9 @@ private:
     std::unique_ptr<D3D11VertexBuffer> WindMetadataBuffer;
     std::unique_ptr<D3D11Texture> WindowGlassReplacementTexture;
     std::unique_ptr<RenderToTextureBuffer> WindowWorldGeometryMask;
+    std::unique_ptr<RenderToTextureBuffer> WindowSkyVisibilityMask;
     bool WindowWorldGeometryMaskValidThisFrame = false;
+    bool WindowSkyVisibilityMaskValidThisFrame = false;
     std::unique_ptr<D3D11ConstantBuffer> WindowCutoutConstantsBuffer;
     std::vector<CachedWindowCutoutVolume> WindowCutoutVolumeCache;
     uint64_t WindowCutoutCacheGeneration = static_cast<uint64_t>(-1);
