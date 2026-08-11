@@ -45,6 +45,7 @@ struct ParticleBatchKey {
 struct ParticleRenderInfo {
     GothicBlendStateInfo BlendState;
     int BlendMode = zRND_ALPHA_FUNC_BLEND;
+    zCTexture* TextureOverride = nullptr;
 };
 
 struct ParticleInstanceInfo {
@@ -373,9 +374,11 @@ struct VobInfo : public BaseVobInfo {
     /** Color the underlaying polygon has */
     DWORD GroundColor;
 
-    /** Closest unambiguously associated point light for NW_CITY_OILLAMP_01. */
-    zCVobLight* OilLampEmissionLight = nullptr;
-    float OilLampEmissionLightDistanceSq = FLT_MAX;
+    /** Stable emission sources for NW_CITY_OILLAMP_01. The cached color is a
+        one-time mix and therefore never follows a light's color animation. */
+    zCVobLight* OilLampEmissionStaticLight = nullptr;
+    zCVobLight* OilLampEmissionDynamicLight = nullptr;
+    DWORD OilLampEmissionColor = 0u;
 
     /** Stable world-space glass plane used for front/back-side selection. */
     XMFLOAT3 CityWindowCenter = {};

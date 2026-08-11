@@ -8937,6 +8937,46 @@ XRESULT D3D11GraphicsEngine::DrawAlphaMeshList(
     SetupVS_ExMeshDrawCall();
     SetupVS_ExConstantBuffer();
 
+    float windowSkyGuardDistanceWeight = 0.0f;
+    if ( windowGlassOnly ) {
+        constexpr float FullSkyGuardDistance = 1000.0f;
+        constexpr float SkyGuardFadeEndDistance = 1500.0f;
+        float nearestDistanceSq = FLT_MAX;
+        const XMVECTOR cameraPosition = Engine::GAPI->GetCameraPositionXM();
+        for ( const VobInfo* window : m_FrameGeometryCache.visibleWindowVobs ) {
+            if ( !window || !window->Vob
+                || (window->CityWindowValidationInitialized
+                    && !window->CityWindowTransparencyValid) ) {
+                continue;
+            }
+            const float distanceSq = XMVectorGetX( XMVector3LengthSq(
+                window->Vob->GetPositionWorldXM() - cameraPosition ) );
+            nearestDistanceSq = std::min( nearestDistanceSq, distanceSq );
+        }
+
+        if ( nearestDistanceSq < SkyGuardFadeEndDistance * SkyGuardFadeEndDistance ) {
+            const float nearestDistance = std::sqrt( nearestDistanceSq );
+            const float fade = std::clamp(
+                (nearestDistance - FullSkyGuardDistance)
+                    / (SkyGuardFadeEndDistance - FullSkyGuardDistance),
+                0.0f, 1.0f );
+            const float smoothFade = fade * fade * (3.0f - 2.0f * fade);
+            windowSkyGuardDistanceWeight = 1.0f - smoothFade;
+        }
+    }
+
+    if ( windowSkyGuardDistanceWeight > 0.0f
+        && DepthStencilBuffer && DepthStencilBufferCopy ) {
+        // The regular end-of-frame depth copy happens after the final window
+        // replay. Refresh it here while the current depth buffer is detached,
+        // otherwise the sky guard compares this frame's world mask against the
+        // previous frame's depth. That mismatch makes enclosed lower-screen sky
+        // holes leak whenever the camera or an occluder moved.
+        GetContext()->OMSetRenderTargets(
+            1, HDRBackBuffer->GetRenderTargetView().GetAddressOf(), nullptr );
+        CopyDepthStencil();
+    }
+
     GetContext()->OMSetRenderTargets( 1, HDRBackBuffer->GetRenderTargetView().GetAddressOf(),
         DepthStencilBuffer->GetDepthStencilView().Get() );
 
@@ -9024,33 +9064,6 @@ XRESULT D3D11GraphicsEngine::DrawAlphaMeshList(
         ID3D11ShaderResourceView* windowWorldMaskSRV = windowGlassOnly && WindowWorldGeometryMask
             ? WindowWorldGeometryMask->GetShaderResView().Get()
             : nullptr;
-        float windowSkyGuardDistanceWeight = 0.0f;
-        if ( windowGlassOnly ) {
-            constexpr float FullSkyGuardDistance = 1000.0f;
-            constexpr float SkyGuardFadeEndDistance = 1500.0f;
-            float nearestDistanceSq = FLT_MAX;
-            const XMVECTOR cameraPosition = Engine::GAPI->GetCameraPositionXM();
-            for ( const VobInfo* window : m_FrameGeometryCache.visibleWindowVobs ) {
-                if ( !window || !window->Vob
-                    || (window->CityWindowValidationInitialized
-                        && !window->CityWindowTransparencyValid) ) {
-                    continue;
-                }
-                const float distanceSq = XMVectorGetX( XMVector3LengthSq(
-                    window->Vob->GetPositionWorldXM() - cameraPosition ) );
-                nearestDistanceSq = std::min( nearestDistanceSq, distanceSq );
-            }
-
-            if ( nearestDistanceSq < SkyGuardFadeEndDistance * SkyGuardFadeEndDistance ) {
-                const float nearestDistance = std::sqrt( nearestDistanceSq );
-                const float fade = std::clamp(
-                    (nearestDistance - FullSkyGuardDistance)
-                        / (SkyGuardFadeEndDistance - FullSkyGuardDistance),
-                    0.0f, 1.0f );
-                const float smoothFade = fade * fade * (3.0f - 2.0f * fade);
-                windowSkyGuardDistanceWeight = 1.0f - smoothFade;
-            }
-        }
         const bool windowSkyGuardAvailable = windowGlassOnly
             && windowSkyGuardDistanceWeight > 0.0f
             && WindowWorldGeometryMaskValidThisFrame && IsCityWindowFeatureReady()
@@ -10557,19 +10570,26 @@ void D3D11GraphicsEngine::DrawFrameParticles(
     Context->IASetPrimitiveTopology( D3D11_PRIMITIVE_TOPOLOGY_TRIANGLESTRIP );
     UpdateRenderStates();
 
+    const auto bindParticleTexture = []( zCTexture* texture, const ParticleRenderInfo& renderInfo ) {
+        zCTexture* textureToBind = renderInfo.TextureOverride
+            ? renderInfo.TextureOverride
+            : texture;
+        if ( textureToBind && textureToBind->CacheIn( 0.6f ) == zRES_CACHED_IN ) {
+            textureToBind->Bind( 0 );
+            return true;
+        }
+        return false;
+    };
+
     for ( auto const& textureParticleRenderInfo : pvecAdd ) {
         zCTexture* tx = std::get<0>( textureParticleRenderInfo );
+        ParticleRenderInfo& partInfo = *std::get<1>( textureParticleRenderInfo );
         std::vector<ParticleInstanceInfo>& instances = *std::get<2>( textureParticleRenderInfo );
 
         if ( instances.empty() ) continue;
 
-        if ( tx ) {
-            // Bind it
-            if ( tx->CacheIn( 0.6f ) == zRES_CACHED_IN )
-                tx->Bind( 0 );
-            else
-                continue;
-        }
+        if ( !bindParticleTexture( tx, partInfo ) )
+            continue;
 
         // Push data for the particles to the GPU
         EnsureTempVertexBufferSize( TempParticlesVertexBuffer, sizeof( ParticleInstanceInfo ) * instances.size() );
@@ -10595,13 +10615,8 @@ void D3D11GraphicsEngine::DrawFrameParticles(
 
         if ( instances.empty() ) continue;
 
-        if ( tx ) {
-            // Bind it
-            if ( tx->CacheIn( 0.6f ) == zRES_CACHED_IN )
-                tx->Bind( 0 );
-            else
-                continue;
-        }
+        if ( !bindParticleTexture( tx, partInfo ) )
+            continue;
 
         GothicBlendStateInfo& blendState = partInfo.BlendState;
 

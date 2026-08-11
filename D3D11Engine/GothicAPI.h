@@ -802,6 +802,7 @@ private:
         std::vector<WorldMeshSectionInfo*>& sections,
         bool useSectionRadiusFilter ) const;
     bool UseWorldSectionBVH() const;
+    zCTexture* GetParticleLightingTextureReplacement( zCTexture* texture ) const;
 
     /** Collects polygons in the given AABB */
     void CollectPolygonsInAABBRec( BspInfo* base, const zTBBox3D& bbox, std::vector<zCPolygon*>& list );
@@ -923,6 +924,10 @@ private:
 
     /** Map of textures */
     gtl::flat_hash_map<std::string, MyDirectDrawSurface7*> SurfacesByName;
+
+    /** Pre-resolved particle texture pairs used while dynamic particle darkening is active. */
+    std::array<MyDirectDrawSurface7*, 4> ParticleDarkSurfaces{};
+    std::array<MyDirectDrawSurface7*, 4> ParticleBrightSurfaces{};
 
     /** Directory we started in */
     std::string StartDirectory;

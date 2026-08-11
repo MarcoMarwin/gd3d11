@@ -581,16 +581,16 @@ namespace {
         if ( maxChannel <= 0.0f )
             return 0u;
 
-        // Keep the authored warm lamp white dominant. All chromatic hues use
-        // the same saturation threshold; yellow deliberately remains warm
-        // white because it is the normal color range of an oil flame.
+        // Keep the authored warm lamp white dominant. Required chroma follows
+        // perceptual distance from an oil flame instead of using one global
+        // HSV threshold: red/orange needs overwhelming evidence, while cool
+        // hues are already unmistakable at substantially lower saturation.
         float paletteRed = 237.0f;
         float paletteGreen = 211.0f;
         float paletteBlue = 165.0f;
         DWORD paletteIndex = 1u;
         const float saturation = (maxChannel - minChannel) / maxChannel;
-        constexpr float StrongChromaticSaturation = 0.75f;
-        if ( saturation >= StrongChromaticSaturation ) {
+        if ( maxChannel > minChannel ) {
             float hue;
             const float chroma = maxChannel - minChannel;
             if ( maxChannel == red ) {
@@ -605,7 +605,31 @@ namespace {
 
             const int hueSector = static_cast<int>(std::floor((hue + 30.0f) / 60.0f)) % 6;
 
-            if ( hueSector != 1 ) {
+            // Center thresholds: red 90%, green 55%, cyan 45%, blue 40%,
+            // violet 50%. Additional boundary anchors form a continuous warm
+            // corridor around yellow/orange and prevent an abrupt red special
+            // case. Yellow remains the natural warm-white fallback regardless.
+            static constexpr float hueAnchors[] = {
+                0.0f, 30.0f, 90.0f, 120.0f, 180.0f,
+                240.0f, 300.0f, 330.0f, 360.0f
+            };
+            static constexpr float saturationAnchors[] = {
+                0.90f, 1.01f, 0.70f, 0.55f, 0.45f,
+                0.40f, 0.50f, 0.85f, 0.90f
+            };
+            float requiredSaturation = saturationAnchors[0];
+            for ( size_t anchor = 1; anchor < std::size( hueAnchors ); ++anchor ) {
+                if ( hue <= hueAnchors[anchor] ) {
+                    const float interval = hueAnchors[anchor] - hueAnchors[anchor - 1];
+                    const float blend = (hue - hueAnchors[anchor - 1]) / interval;
+                    requiredSaturation = std::lerp(
+                        saturationAnchors[anchor - 1],
+                        saturationAnchors[anchor], blend );
+                    break;
+                }
+            }
+
+            if ( hueSector != 1 && saturation >= requiredSaturation ) {
                 static constexpr float palette[6][3] = {
                     { 255.0f,  64.0f,  32.0f }, // red
                     { 237.0f, 211.0f, 165.0f }, // warm-white fallback
@@ -631,6 +655,19 @@ namespace {
         // prescribed color; alpha carries a stable palette ID in 32-byte steps.
         const DWORD paletteCode = paletteIndex * 32u;
         return (paletteCode << 24) | (outBlue << 16) | (outGreen << 8) | outRed;
+    }
+
+    DWORD MixOilLampEmissionColors( DWORD first, DWORD second ) {
+        auto averageChannel = []( DWORD left, DWORD right ) -> DWORD {
+            return (left + right + 1u) / 2u;
+        };
+        const DWORD red = averageChannel(
+            (first >> 16) & 0xFFu, (second >> 16) & 0xFFu );
+        const DWORD green = averageChannel(
+            (first >> 8) & 0xFFu, (second >> 8) & 0xFFu );
+        const DWORD blue = averageChannel(
+            first & 0xFFu, second & 0xFFu );
+        return (red << 16) | (green << 8) | blue;
     }
 
     float ClampMaterialScalar( float value, float fallback, float minValue, float maxValue ) {
@@ -2683,9 +2720,16 @@ void GothicAPI::OnRemovedVob( zCVob* vob, zCWorld* world ) {
         zCVobLight* removedLight = static_cast<zCVobLight*>(vob);
         for ( auto& [mappedVob, mappedInfo] : VobMap ) {
             (void)mappedVob;
-            if ( mappedInfo && mappedInfo->OilLampEmissionLight == removedLight ) {
-                mappedInfo->OilLampEmissionLight = nullptr;
-                mappedInfo->OilLampEmissionLightDistanceSq = FLT_MAX;
+            if ( mappedInfo
+                && (mappedInfo->OilLampEmissionStaticLight == removedLight
+                    || mappedInfo->OilLampEmissionDynamicLight == removedLight) ) {
+                if ( mappedInfo->OilLampEmissionStaticLight == removedLight )
+                    mappedInfo->OilLampEmissionStaticLight = nullptr;
+                if ( mappedInfo->OilLampEmissionDynamicLight == removedLight )
+                    mappedInfo->OilLampEmissionDynamicLight = nullptr;
+                // Rebuilt after dynamic world changes; never retain a mixture
+                // which was derived from a light that no longer exists.
+                mappedInfo->OilLampEmissionColor = 0u;
             }
         }
     }
@@ -3822,6 +3866,12 @@ void GothicAPI::DrawParticleFX( zCVob* source, zCParticleFX* fx, ParticleFrameDa
         // Blend mode is part of the batch key because Gothic reuses particle textures
         // across effects with incompatible blend states (for example LAVAFOG and smoke).
         ParticleRenderInfo& inf = FrameParticleInfo[batchKey];
+        const auto& rendererSettings = RendererState.RendererSettings;
+        const bool particleDarkeningActive = rendererSettings.EnableParticleLighting
+            && rendererSettings.ParticleLightingStrength > 0.0f;
+        inf.TextureOverride = particleDarkeningActive
+            ? GetParticleLightingTextureReplacement( texture )
+            : nullptr;
 
         switch ( blendMode ) {
         case zRND_ALPHA_FUNC_ADD:
@@ -4795,16 +4845,20 @@ void GothicAPI::CollectVisibleVobs(
                 vii.color = (vii.color & 0x00FFFFFFu) | 0x0D000000u;
             }
 
-            zCVobLight* emissionLight = IsWorldRenderCacheReady()
-                ? it->OilLampEmissionLight : nullptr;
-            const auto emissionInfo = emissionLight
-                ? VobLightMap.find( emissionLight ) : VobLightMap.end();
-            if ( emissionInfo != VobLightMap.end() && emissionInfo->second
-                && emissionLight->IsEnabled() ) {
-                // Animation is advanced by the normal point-light renderer.
-                // Sampling it here must not mutate the same light a second time.
-                const DWORD gothicColor = emissionLight->GetLightColor();
-                vii.emissiveColor = QuantizeOilLampEmissionColor( gothicColor );
+            auto linkedEmissionLightIsEnabled = [&]( zCVobLight* light ) {
+                if ( !light )
+                    return false;
+                const auto lightInfo = VobLightMap.find( light );
+                return lightInfo != VobLightMap.end() && lightInfo->second
+                    && light->IsEnabled();
+            };
+            if ( IsWorldRenderCacheReady() && it->OilLampEmissionColor != 0u
+                && (linkedEmissionLightIsEnabled( it->OilLampEmissionStaticLight )
+                    || linkedEmissionLightIsEnabled( it->OilLampEmissionDynamicLight )) ) {
+                // The color was captured once while the world cache was built.
+                // Light animation may still illuminate the scene normally, but
+                // it can no longer animate the visible lamp material.
+                vii.emissiveColor = it->OilLampEmissionColor;
             }
             vii.windStrenth = 0.0f;
             vii.canBeAffectedByPlayer = 0;
@@ -5381,6 +5435,7 @@ void GothicAPI::ConfigureCityWindows() {
 void GothicAPI::ConfigureAllPointlightShadowSources() const {
     constexpr float LINK_RADIUS = 150.0f;
     constexpr float LINK_RADIUS_SQ = LINK_RADIUS * LINK_RADIUS;
+    constexpr float PARTICLE_FLAME_HEIGHT_OFFSET = 25.0f;
     const size_t INVALID_INDEX = static_cast<size_t>(-1);
 
     auto isLightVob = []( zCVob* vob ) {
@@ -5536,6 +5591,7 @@ void GothicAPI::ConfigureAllPointlightShadowSources() const {
     struct ResolvedFlameGroup {
         zCVob* Parent = nullptr;
         bool IsMultiFlame = false;
+        bool RaiseAnchorAboveCenter = false;
         XMFLOAT3 Anchor = {};
         std::vector<XMFLOAT3> Positions;
         std::vector<zCVob*> Vobs;
@@ -5556,14 +5612,18 @@ void GothicAPI::ConfigureAllPointlightShadowSources() const {
             resolved.Vobs.push_back( flame.Vob );
         }
 
-        // One TGA and one PFX represent the same visible flame; the TGA position wins.
+        // One TGA and one PFX represent the same visible flame. The particle
+        // position is the actual flame center and therefore takes precedence;
+        // a decal-only flame remains centered on the decal without an offset.
         if ( !resolved.IsMultiFlame ) {
-            if ( group.Decals.size() == 1 )
-                resolved.Anchor = group.Decals.front().Position;
-            else if ( group.Particles.size() == 1 )
+            if ( group.Particles.size() == 1 ) {
                 resolved.Anchor = group.Particles.front().Position;
-            else
+                resolved.RaiseAnchorAboveCenter = true;
+            } else if ( group.Decals.size() == 1 ) {
+                resolved.Anchor = group.Decals.front().Position;
+            } else {
                 continue;
+            }
         }
         resolvedFlames.push_back( std::move( resolved ) );
     }
@@ -5644,8 +5704,10 @@ void GothicAPI::ConfigureAllPointlightShadowSources() const {
         resolvedByFlame[lightIndex] = true;
         lights[lightIndex].Info->AllowsPointlightShadows = true;
         if ( flameClaims[lightIndex].size() == 1 ) {
-            XMFLOAT3 shadowAnchor = resolvedFlames[flameClaims[lightIndex].front()].Anchor;
-            shadowAnchor.y += 25.0f;
+            const ResolvedFlameGroup& flame = resolvedFlames[flameClaims[lightIndex].front()];
+            XMFLOAT3 shadowAnchor = flame.Anchor;
+            if ( flame.RaiseAnchorAboveCenter )
+                shadowAnchor.y += PARTICLE_FLAME_HEIGHT_OFFSET;
             assignAnchor( lights[lightIndex], shadowAnchor );
         }
         // Multiple independent flames claim this light: keep the authored position.
@@ -5668,8 +5730,9 @@ void GothicAPI::ConfigureAllPointlightShadowSources() const {
         if ( !vobInfo )
             continue;
 
-        vobInfo->OilLampEmissionLight = nullptr;
-        vobInfo->OilLampEmissionLightDistanceSq = FLT_MAX;
+        vobInfo->OilLampEmissionStaticLight = nullptr;
+        vobInfo->OilLampEmissionDynamicLight = nullptr;
+        vobInfo->OilLampEmissionColor = 0u;
 
         if ( !vobInfo->Vob || !vobInfo->Vob->GetShowVisual() || hasVisualFXAncestor( vobInfo->Vob ) )
             continue;
@@ -5749,23 +5812,32 @@ void GothicAPI::ConfigureAllPointlightShadowSources() const {
 
     // Emission-color linking is independent of shadow-anchor ownership. One
     // authored light may legitimately tint several nearby lamps even though it
-    // cannot be moved to more than one shadow anchor. Static lights always win;
-    // a dynamic light is used only when no eligible static light exists in the
-    // complete lamp-link radius.
+    // cannot be moved to more than one shadow anchor. Capture static and dynamic
+    // sources together: their colors are mixed once, while later color
+    // animation remains exclusive to scene illumination.
     for ( OilLampAnchor& oilLamp : oilLampAnchors ) {
         if ( !oilLamp.Info )
             continue;
 
-        const bool hasStaticLight = oilLamp.NearestStaticLight != INVALID_INDEX;
-        const size_t selectedLight = hasStaticLight
-            ? oilLamp.NearestStaticLight
-            : oilLamp.NearestDynamicLight;
-        if ( selectedLight != INVALID_INDEX ) {
-            oilLamp.Info->OilLampEmissionLight = lights[selectedLight].Info->Vob;
-            oilLamp.Info->OilLampEmissionLightDistanceSq = hasStaticLight
-                ? oilLamp.NearestStaticDistanceSq
-                : oilLamp.NearestDynamicDistanceSq;
+        zCVobLight* staticLight = oilLamp.NearestStaticLight != INVALID_INDEX
+            ? lights[oilLamp.NearestStaticLight].Info->Vob : nullptr;
+        zCVobLight* dynamicLight = oilLamp.NearestDynamicLight != INVALID_INDEX
+            ? lights[oilLamp.NearestDynamicLight].Info->Vob : nullptr;
+        oilLamp.Info->OilLampEmissionStaticLight = staticLight;
+        oilLamp.Info->OilLampEmissionDynamicLight = dynamicLight;
+
+        DWORD mixedColor = 0u;
+        if ( staticLight && dynamicLight ) {
+            mixedColor = MixOilLampEmissionColors(
+                staticLight->GetLightColor(), dynamicLight->GetLightColor() );
+        } else if ( staticLight ) {
+            mixedColor = staticLight->GetLightColor();
+        } else if ( dynamicLight ) {
+            mixedColor = dynamicLight->GetLightColor();
         }
+        if ( mixedColor != 0u )
+            oilLamp.Info->OilLampEmissionColor =
+                QuantizeOilLampEmissionColor( mixedColor );
     }
 
     struct ParentAnchor {
@@ -6145,6 +6217,30 @@ MaterialInfo* GothicAPI::GetMaterialInfoFrom( zCTexture* tex, const std::string_
 /** Adds a surface */
 void GothicAPI::AddSurface( const std::string& name, MyDirectDrawSurface7* surface ) {
     SurfacesByName[name] = surface;
+
+    static constexpr const char* darkTextureNames[] = {
+        "FIRESMOKE_DARK",
+        "WAVEEFFECT_TOP_DARK",
+        "WATERWALL_DARK",
+        "WATERFIST_EXPL_DARK"
+    };
+    static constexpr const char* brightTextureNames[] = {
+        "FIRESMOKE",
+        "WAVEEFFECT_TOP_BRIGHT",
+        "WATERWALL_BRIGHT",
+        "WATERFIST_EXPL_BRIGHT"
+    };
+
+    for ( size_t i = 0; i < ParticleDarkSurfaces.size(); ++i ) {
+        if ( _stricmp( name.c_str(), darkTextureNames[i] ) == 0 ) {
+            ParticleDarkSurfaces[i] = surface;
+            return;
+        }
+        if ( _stricmp( name.c_str(), brightTextureNames[i] ) == 0 ) {
+            ParticleBrightSurfaces[i] = surface;
+            return;
+        }
+    }
 }
 
 /** Gets a surface by texturename */
@@ -6155,6 +6251,31 @@ MyDirectDrawSurface7* GothicAPI::GetSurface( const std::string& name ) {
 /** Removes a surface */
 void GothicAPI::RemoveSurface( MyDirectDrawSurface7* surface ) {
     SurfacesByName.erase( surface->GetTextureName() );
+
+    for ( size_t i = 0; i < ParticleDarkSurfaces.size(); ++i ) {
+        if ( ParticleDarkSurfaces[i] == surface )
+            ParticleDarkSurfaces[i] = nullptr;
+        if ( ParticleBrightSurfaces[i] == surface )
+            ParticleBrightSurfaces[i] = nullptr;
+    }
+}
+
+zCTexture* GothicAPI::GetParticleLightingTextureReplacement( zCTexture* texture ) const {
+    if ( !texture )
+        return nullptr;
+
+    MyDirectDrawSurface7* sourceSurface = texture->GetSurface();
+    for ( size_t i = 0; i < ParticleDarkSurfaces.size(); ++i ) {
+        if ( ParticleDarkSurfaces[i] != sourceSurface )
+            continue;
+
+        MyDirectDrawSurface7* replacement = ParticleBrightSurfaces[i];
+        return replacement && replacement->IsSurfaceReady() && replacement->GetEngineTexture()
+            ? replacement->GetGothicTexture()
+            : nullptr;
+    }
+
+    return nullptr;
 }
 
 /** Returns the loaded skeletal mesh vobs */
