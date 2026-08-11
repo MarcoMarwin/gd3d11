@@ -33,14 +33,21 @@ float4 AdaptParticleLighting(float4 color, float particleLightingScale)
     bool disableParticleRainAlphaReduction = fmod(floor(packedParticleTestFlags / 2.0f), 2.0f) >= 1.0f;
     float night = disableParticleNightDimming ? 0.0f : GetAmbientNightWeight();
     float rain = disableParticleRainAlphaReduction ? 0.0f : max(saturate(AC_RainFXWeight), saturate(AC_SceneWettness));
-    float strength = saturate(AC_EnableParticleLighting * AC_ParticleLightingStrength) * saturate(particleLightingScale);
-    const bool groundFog = particleLightingScale > 1.5f;
-    const float nightFloor = groundFog ? 0.10f : 0.24f;
-    color.rgb = ApplyAmbientNightTint(color.rgb, night * strength * 0.80f);
+    const bool groundFog = particleLightingScale > 1.5f && particleLightingScale < 2.5f;
+    const bool waterParticle = particleLightingScale >= 2.5f;
+    const float enabledStrength = saturate(AC_EnableParticleLighting * AC_ParticleLightingStrength);
+    const float regularStrength = enabledStrength * saturate(particleLightingScale);
+    const float nightStrength = waterParticle ? enabledStrength : regularStrength;
+    // Preserve the former 0.25 water-particle rain response while allowing
+    // its night lighting to use the full renderer strength.
+    const float rainStrength = waterParticle ? enabledStrength * 0.25f : regularStrength;
+    const float nightFloor = (groundFog || waterParticle) ? 0.10f : 0.24f;
+    const float nightTintStrength = waterParticle ? 1.0f : 0.80f;
+    color.rgb = ApplyAmbientNightTint(color.rgb, night * nightStrength * nightTintStrength);
     float nightDim = lerp(1.0f, nightFloor, night);
-    color.rgb *= lerp(1.0f, nightDim, strength);
+    color.rgb *= lerp(1.0f, nightDim, nightStrength);
     float rainAlpha = lerp(1.0f, 0.24f, rain);
-    color.a *= lerp(1.0f, rainAlpha, strength);
+    color.a *= lerp(1.0f, rainAlpha, rainStrength);
     return color;
 }
 float4 PSMain( PS_INPUT Input ) : SV_TARGET

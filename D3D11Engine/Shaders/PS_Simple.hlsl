@@ -132,41 +132,18 @@ float4 PSMain( PS_INPUT Input ) : SV_TARGET
 					int2(0, 0), targetSize - 1);
 				const float sceneDepth = TX_WindowSceneDepth.Load(
 					int3(pixelPosition, 0)).r;
-				const float currentWorldBlocker = TX_WindowWorldMask.Load(
-					int3(pixelPosition, 0)).r;
-				// Keep a full-resolution final check around the reduced mask. It
-				// prevents bilinear feathering from crossing an actual world pixel.
-				if (sceneDepth <= 1e-7f && currentWorldBlocker < 0.5f)
+				// The horizontal screen centre is intentionally camera-independent.
+				// Clear depth below it is Gothic's floor/void sky case, not a valid
+				// sky path through the pane. Resolve it directly: the former vertical
+				// connectivity test could reconnect the hole through the wall cutout.
+				if (sceneDepth <= 1e-7f)
 				{
 					const float featherWidth = clamp(
 						float(min(targetWidth, targetHeight)) * 0.01f, 8.0f, 20.0f);
-					float pathConfidence;
-					[branch]
-					if (cbFFData.windowParams.z > 0.5f)
-					{
-						pathConfidence = EvaluateCachedWindowSkyVisibility(
-							pixelPosition, targetSize, featherWidth);
-					}
-					else
-					{
-						// Feature-level-10 fallback: retain the exact full-resolution
-						// path test when compute/UAV support is unavailable.
-						const float centerPath = EvaluateWindowSkyPath(
-							pixelPosition, targetSize, halfHeight, 0);
-						const float leftPath = EvaluateWindowSkyPath(
-							pixelPosition, targetSize, halfHeight, -int(featherWidth));
-						const float rightPath = EvaluateWindowSkyPath(
-							pixelPosition, targetSize, halfHeight, int(featherWidth));
-						pathConfidence =
-							(leftPath + centerPath * 2.0f + rightPath) * 0.25f;
-					}
-					const float validTransparency = smoothstep(
-						0.16f, 0.84f, pathConfidence);
 					const float lowerHalfFade = smoothstep(
 						halfHeight, halfHeight + featherWidth, Input.vPosition.y);
 					color.a = lerp(color.a, 1.0f,
-						(1.0f - validTransparency) * lowerHalfFade
-							* saturate(cbFFData.windowParams.w));
+						lowerHalfFade * saturate(cbFFData.windowParams.w));
 				}
 			}
 		}

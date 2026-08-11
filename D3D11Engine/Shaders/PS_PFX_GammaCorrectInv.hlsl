@@ -50,9 +50,13 @@ float4 PSMain( PS_INPUT Input ) : SV_TARGET
 	[branch] if (G_OutputDitherStrength > 0.0f)
 	{
 		float outputLuminance = dot(corrected, float3(0.2126f, 0.7152f, 0.0722f));
-		float darkGradientWeight = 1.0f - smoothstep(0.45f, 0.85f, outputLuminance);
+		// Keep output dithering active across the mid/high luminance range as
+		// shallow wall and foliage lighting gradients can band well above the
+		// old dark-only cutoff. Fade only close to white, where saturation makes
+		// the noise ineffective and could otherwise leave a visible grain.
+		float outputDitherWeight = 1.0f - smoothstep(0.82f, 0.98f, outputLuminance);
 		float outputNoise = FinalOutputDither(uint2(Input.vPosition.xy));
-		corrected += outputNoise * G_OutputDitherStrength * darkGradientWeight;
+		corrected += outputNoise * G_OutputDitherStrength * outputDitherWeight;
 	}
 
 	return float4(saturate(corrected), saturate(color.a));

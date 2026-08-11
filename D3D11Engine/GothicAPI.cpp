@@ -3978,10 +3978,11 @@ void GothicAPI::DrawParticleFX( zCVob* source, zCParticleFX* fx, ParticleFrameDa
             ii.position = p->PositionWS;
             ii.color = color;
             ii.velocity = p->Vel;
-            // Values above one are a scoped marker; the shaders still use full
-            // lighting strength but give dense ground fog a darker night floor.
+            // Values above one are scoped markers; the shaders still use full
+            // lighting strength but select separate night floors for dense
+            // ground fog and water particles.
             ii.particleLightingScale = emissiveParticle ? -1.0f
-                : (groundFogParticle ? 2.0f : (waterfallParticle ? 0.25f : 1.0f));
+                : (groundFogParticle ? 2.0f : (waterfallParticle ? 3.0f : 1.0f));
 
             if ( fx->GetEmitter()->GetVisAlignment() == 2 ) {
                 if ( zCVob* connectedVob = fx->GetConnectedVob() ) {
@@ -5628,91 +5629,6 @@ void GothicAPI::ConfigureAllPointlightShadowSources() const {
         resolvedFlames.push_back( std::move( resolved ) );
     }
 
-    std::vector<bool> blockedByMultiFlame( lights.size(), false );
-    for ( const ResolvedFlameGroup& group : resolvedFlames ) {
-        if ( !group.IsMultiFlame )
-            continue;
-        for ( size_t lightIndex = 0; lightIndex < lights.size(); ++lightIndex ) {
-            for ( const XMFLOAT3& flamePosition : group.Positions ) {
-                if ( distanceSq( lights[lightIndex].Position, flamePosition ) <= LINK_RADIUS_SQ ) {
-                    blockedByMultiFlame[lightIndex] = true;
-                    lights[lightIndex].Info->AllowsPointlightShadows = true;
-                    break;
-                }
-            }
-        }
-    }
-
-    auto lightIsRelatedToFlameGroup = [&]( const LightRecord& light, const ResolvedFlameGroup& group ) {
-        if ( parentsRelated( light.Parent, group.Parent ) )
-            return true;
-        for ( zCVob* flameVob : group.Vobs ) {
-            if ( isAncestorOrSame( light.Info->Vob, flameVob ) || isAncestorOrSame( flameVob, light.Info->Vob ) )
-                return true;
-        }
-        return false;
-    };
-
-    std::vector<std::vector<size_t>> flameClaims( lights.size() );
-    for ( size_t groupIndex = 0; groupIndex < resolvedFlames.size(); ++groupIndex ) {
-        const ResolvedFlameGroup& group = resolvedFlames[groupIndex];
-        if ( group.IsMultiFlame )
-            continue;
-
-        for ( int staticKind = 0; staticKind < 2; ++staticKind ) {
-            size_t bestLight = INVALID_INDEX;
-            float bestDistanceSq = LINK_RADIUS_SQ;
-            bool bestIsRelated = false;
-            for ( size_t lightIndex = 0; lightIndex < lights.size(); ++lightIndex ) {
-                if ( blockedByMultiFlame[lightIndex] )
-                    continue;
-                if ( static_cast<int>(lights[lightIndex].Info->Vob->IsStatic()) != staticKind )
-                    continue;
-
-                const float candidateDistanceSq = distanceSq( lights[lightIndex].Position, group.Anchor );
-                if ( candidateDistanceSq > LINK_RADIUS_SQ )
-                    continue;
-                const bool candidateIsRelated = lightIsRelatedToFlameGroup( lights[lightIndex], group );
-                if ( bestLight == INVALID_INDEX
-                    || (candidateIsRelated && !bestIsRelated)
-                    || (candidateIsRelated == bestIsRelated && candidateDistanceSq < bestDistanceSq) ) {
-                    bestDistanceSq = candidateDistanceSq;
-                    bestLight = lightIndex;
-                    bestIsRelated = candidateIsRelated;
-                }
-            }
-            if ( bestLight != INVALID_INDEX )
-                flameClaims[bestLight].push_back( groupIndex );
-        }
-    }
-
-    std::vector<bool> resolvedByFlame( lights.size(), false );
-    auto assignAnchor = [&]( LightRecord& light, const XMFLOAT3& anchor ) {
-        light.Info->AllowsPointlightShadows = true;
-        light.Info->HasFlameAnchor = true;
-        XMStoreFloat3( &light.Info->FlameAnchorOffset, XMLoadFloat3( &anchor ) - XMLoadFloat3( &light.Position ) );
-    };
-
-    for ( size_t lightIndex = 0; lightIndex < lights.size(); ++lightIndex ) {
-        if ( blockedByMultiFlame[lightIndex] ) {
-            resolvedByFlame[lightIndex] = true;
-            continue;
-        }
-        if ( flameClaims[lightIndex].empty() )
-            continue;
-
-        resolvedByFlame[lightIndex] = true;
-        lights[lightIndex].Info->AllowsPointlightShadows = true;
-        if ( flameClaims[lightIndex].size() == 1 ) {
-            const ResolvedFlameGroup& flame = resolvedFlames[flameClaims[lightIndex].front()];
-            XMFLOAT3 shadowAnchor = flame.Anchor;
-            if ( flame.RaiseAnchorAboveCenter )
-                shadowAnchor.y += PARTICLE_FLAME_HEIGHT_OFFSET;
-            assignAnchor( lights[lightIndex], shadowAnchor );
-        }
-        // Multiple independent flames claim this light: keep the authored position.
-    }
-
     struct OilLampAnchor {
         zCVob* Vob = nullptr;
         VobInfo* Info = nullptr;
@@ -5765,15 +5681,15 @@ void GothicAPI::ConfigureAllPointlightShadowSources() const {
         oilLampAnchors.push_back( anchor );
     }
 
-    std::vector<std::vector<size_t>> oilLampClaims( lights.size() );
+    // Emission links deliberately remain independent from exclusive shadow
+    // anchor ownership. They may use the nearest static and dynamic lights even
+    // when either light is geometrically owned by another visible fixture.
     for ( size_t oilLampIndex = 0; oilLampIndex < oilLampAnchors.size(); ++oilLampIndex ) {
         OilLampAnchor& oilLamp = oilLampAnchors[oilLampIndex];
         for ( int staticKind = 0; staticKind < 2; ++staticKind ) {
             size_t bestLight = INVALID_INDEX;
             float bestDistanceSq = LINK_RADIUS_SQ;
             for ( size_t lightIndex = 0; lightIndex < lights.size(); ++lightIndex ) {
-                if ( resolvedByFlame[lightIndex] )
-                    continue;
                 if ( static_cast<int>(lights[lightIndex].Info->Vob->IsStatic()) != staticKind )
                     continue;
 
@@ -5784,7 +5700,6 @@ void GothicAPI::ConfigureAllPointlightShadowSources() const {
                 }
             }
             if ( bestLight != INVALID_INDEX ) {
-                oilLampClaims[bestLight].push_back( oilLampIndex );
                 if ( staticKind != 0 ) {
                     oilLamp.NearestStaticLight = bestLight;
                     oilLamp.NearestStaticDistanceSq = bestDistanceSq;
@@ -5796,18 +5711,109 @@ void GothicAPI::ConfigureAllPointlightShadowSources() const {
         }
     }
 
-    std::vector<bool> resolvedByVisualAnchor = resolvedByFlame;
+    auto assignAnchor = [&]( LightRecord& light, const XMFLOAT3& anchor ) {
+        light.Info->AllowsPointlightShadows = true;
+        light.Info->HasFlameAnchor = true;
+        XMStoreFloat3( &light.Info->FlameAnchorOffset,
+            XMLoadFloat3( &anchor ) - XMLoadFloat3( &light.Position ) );
+    };
+
+    enum class VisualAnchorKind {
+        SingleFlame,
+        MultiFlame,
+        OilLamp
+    };
+    struct VisualAnchorCandidate {
+        VisualAnchorKind Kind = VisualAnchorKind::SingleFlame;
+        size_t SourceIndex = INVALID_INDEX;
+        zCVob* Parent = nullptr;
+        zCVob* Vob = nullptr;
+        XMFLOAT3 Position = {};
+    };
+    std::vector<VisualAnchorCandidate> visualAnchors;
+    visualAnchors.reserve( resolvedFlames.size() + oilLampAnchors.size() );
+    for ( size_t flameIndex = 0; flameIndex < resolvedFlames.size(); ++flameIndex ) {
+        const ResolvedFlameGroup& flame = resolvedFlames[flameIndex];
+        if ( flame.IsMultiFlame ) {
+            // A multi-flame group participates in nearest-owner selection, but
+            // has no single safe target position. Use its nearest member only
+            // for scoring; winning this candidate preserves the authored light.
+            for ( const XMFLOAT3& position : flame.Positions ) {
+                visualAnchors.push_back( {
+                    VisualAnchorKind::MultiFlame, flameIndex,
+                    flame.Parent, nullptr, position } );
+            }
+        } else {
+            visualAnchors.push_back( {
+                VisualAnchorKind::SingleFlame, flameIndex,
+                flame.Parent, flame.Vobs.empty() ? nullptr : flame.Vobs.front(),
+                flame.Anchor } );
+        }
+    }
+    for ( size_t oilLampIndex = 0; oilLampIndex < oilLampAnchors.size(); ++oilLampIndex ) {
+        const OilLampAnchor& oilLamp = oilLampAnchors[oilLampIndex];
+        visualAnchors.push_back( {
+            VisualAnchorKind::OilLamp, oilLampIndex,
+            getPersistentParent( oilLamp.Vob ), oilLamp.Vob,
+            oilLamp.Position } );
+    }
+
+    auto lightIsRelatedToAnchor = [&]( const LightRecord& light,
+        const VisualAnchorCandidate& anchor ) {
+        if ( parentsRelated( light.Parent, anchor.Parent ) )
+            return true;
+        if ( anchor.Kind == VisualAnchorKind::MultiFlame ) {
+            const ResolvedFlameGroup& flame = resolvedFlames[anchor.SourceIndex];
+            return std::any_of( flame.Vobs.begin(), flame.Vobs.end(),
+                [&]( zCVob* flameVob ) {
+                    return isAncestorOrSame( light.Info->Vob, flameVob )
+                        || isAncestorOrSame( flameVob, light.Info->Vob );
+                } );
+        }
+        return isAncestorOrSame( light.Info->Vob, anchor.Vob )
+            || isAncestorOrSame( anchor.Vob, light.Info->Vob );
+    };
+
+    std::vector<bool> resolvedByVisualAnchor( lights.size(), false );
     for ( size_t lightIndex = 0; lightIndex < lights.size(); ++lightIndex ) {
-        if ( oilLampClaims[lightIndex].empty() )
+        size_t bestAnchor = INVALID_INDEX;
+        float bestDistanceSq = LINK_RADIUS_SQ;
+        bool bestIsRelated = false;
+        for ( size_t anchorIndex = 0; anchorIndex < visualAnchors.size(); ++anchorIndex ) {
+            const VisualAnchorCandidate& candidate = visualAnchors[anchorIndex];
+            const float candidateDistanceSq = distanceSq(
+                lights[lightIndex].Position, candidate.Position );
+            if ( candidateDistanceSq > LINK_RADIUS_SQ )
+                continue;
+            const bool candidateIsRelated = lightIsRelatedToAnchor(
+                lights[lightIndex], candidate );
+            if ( bestAnchor == INVALID_INDEX
+                || (candidateIsRelated && !bestIsRelated)
+                || (candidateIsRelated == bestIsRelated
+                    && candidateDistanceSq < bestDistanceSq) ) {
+                bestAnchor = anchorIndex;
+                bestDistanceSq = candidateDistanceSq;
+                bestIsRelated = candidateIsRelated;
+            }
+        }
+        if ( bestAnchor == INVALID_INDEX )
             continue;
 
         resolvedByVisualAnchor[lightIndex] = true;
         lights[lightIndex].Info->AllowsPointlightShadows = true;
-        if ( oilLampClaims[lightIndex].size() == 1 ) {
-            OilLampAnchor& oilLamp = oilLampAnchors[oilLampClaims[lightIndex].front()];
-            assignAnchor( lights[lightIndex], oilLamp.ShadowAnchor );
+        const VisualAnchorCandidate& winner = visualAnchors[bestAnchor];
+        if ( winner.Kind == VisualAnchorKind::SingleFlame ) {
+            const ResolvedFlameGroup& flame = resolvedFlames[winner.SourceIndex];
+            XMFLOAT3 shadowAnchor = flame.Anchor;
+            if ( flame.RaiseAnchorAboveCenter )
+                shadowAnchor.y += PARTICLE_FLAME_HEIGHT_OFFSET;
+            assignAnchor( lights[lightIndex], shadowAnchor );
+        } else if ( winner.Kind == VisualAnchorKind::OilLamp ) {
+            assignAnchor( lights[lightIndex],
+                oilLampAnchors[winner.SourceIndex].ShadowAnchor );
         }
-        // Multiple independent oillamps claim this light: keep the authored position.
+        // A nearest multi-flame group enables shadows but deliberately keeps
+        // the authored position because no unique visible flame exists.
     }
 
     // Emission-color linking is independent of shadow-anchor ownership. One

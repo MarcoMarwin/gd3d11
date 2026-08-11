@@ -2645,7 +2645,9 @@ XRESULT D3D11GraphicsEngine::Present() {
         gcb.G_Gamma = Engine::GAPI->GetGammaValue();
         gcb.G_Brightness = Engine::GAPI->GetBrightnessValue();
         // Dither exactly once immediately before the final 8-bit presentation.
-        gcb.G_OutputDitherStrength = 1.0f / 255.0f;
+        // Slightly exceed one 8-bit output step so shallow lighting gradients
+        // do not resolve into visible bands before display quantization.
+        gcb.G_OutputDitherStrength = 1.25f / 255.0f;
         ActivePS->GetBuffer( "GammaCorrectConstantBuffer" ).Update( &gcb ).Bind();
 
         PfxRenderer->CopyTextureToRTV( Backbuffer->GetShaderResView(), presentationRTV, {}, true );
@@ -9066,11 +9068,13 @@ XRESULT D3D11GraphicsEngine::DrawAlphaMeshList(
             : nullptr;
         const bool windowSkyGuardAvailable = windowGlassOnly
             && windowSkyGuardDistanceWeight > 0.0f
-            && WindowWorldGeometryMaskValidThisFrame && IsCityWindowFeatureReady()
-            && windowSceneDepthSRV && windowWorldMaskSRV
+            && IsCityWindowFeatureReady() && windowSceneDepthSRV
             && Engine::GAPI->GetRendererState().RendererSettings.DrawWorldMesh;
-        const bool windowSkyVisibilityAvailable = windowSkyGuardAvailable
-            && BuildWindowSkyVisibilityMask();
+        // The guard follows the deliberately fixed horizontal screen centre:
+        // clear depth below it is the invalid floor/void sky case directly.
+        // Do not run the former screen-column connectivity pass; it could
+        // incorrectly reconnect that lower sky through the window opening.
+        const bool windowSkyVisibilityAvailable = false;
         bool windowSkyGuardBound = false;
         bool twoSidedWindowGlass = false;
         enum class ReplayBlendMode { None, Alpha, Additive };
