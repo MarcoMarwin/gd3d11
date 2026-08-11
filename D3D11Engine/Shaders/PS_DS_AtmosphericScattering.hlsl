@@ -254,6 +254,10 @@ float4 PSMain(PS_INPUT Input) : SV_TARGET
 	float fresnel = f8*f2;
     litPixel += lerp(fresnel * litPixel * 0.5f, 0.0f, sun);
 
+	// Atmospheric scattering affects reflected surface lighting, not light
+	// emitted by the lamp itself.
+	litPixel = ApplyAtmosphericScatteringGround(wsPosition, litPixel.rgb);
+
 	// NW_MISC_OILLAMP_02 restores the linked point-light palette ID from gb3.w.
 	// A VOB without an unambiguous enabled light writes zero and stays non-emissive.
 	// Oil-lamp pixels are sparse, so skip palette decoding and mask evaluation
@@ -261,9 +265,6 @@ float4 PSMain(PS_INPUT Input) : SV_TARGET
 	[branch]
 	if (gb3.w > 0.0f)
 		litPixel += ComputeOilLampEmission(diffuse.rgb, DecodeOilLampLightColor(gb3.w));
-
-	// Run scattering
-	litPixel = ApplyAtmosphericScatteringGround(wsPosition, litPixel.rgb);
 
 
     // Fix indoor stuff

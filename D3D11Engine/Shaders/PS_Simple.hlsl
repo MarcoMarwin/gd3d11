@@ -35,18 +35,16 @@ struct PS_INPUT
 
 #ifdef USE_FFDATA
 float EvaluateWindowSkyPath(int2 pixelPosition, int2 targetSize, float halfHeight,
-	float horizontalOffset)
+	int horizontalOffset)
 {
-	float pathOpen = 1.0f;
-	float reachedUpperSky = 0.0f;
-	const int laneX = clamp(pixelPosition.x + int(horizontalOffset), 0, targetSize.x - 1);
+	const int laneX = clamp(pixelPosition.x + horizontalOffset, 0, targetSize.x - 1);
 
-	// A bounded vertical probe is the deliberate compromise here: it is local to
-	// City_Window glass pixels and avoids a full-screen connected-component pass.
-	// Eight probes left gaps of more than a hundred pixels at 1080p and could
-	// jump over a wall strip. Twenty-four is still bounded and restricted to
-	// lower-half sky pixels of the four supported window VOBs.
-	[unroll]
+	// Keep the 24-sample coverage of the original safeguard, but do not unroll or
+	// finish a path whose result is already known. Most lanes encounter either a
+	// nearby wall blocker or upper-screen sky after only a few iterations. The
+	// previous branchless/unrolled form always issued every depth/mask load for
+	// all three lanes of every affected glass pixel.
+	[loop]
 	for (int stepIndex = 1; stepIndex <= 24; ++stepIndex)
 	{
 		const float t = float(stepIndex) * (1.0f / 24.0f);
@@ -58,18 +56,19 @@ float EvaluateWindowSkyPath(int2 pixelPosition, int2 targetSize, float halfHeigh
 		// bound while VOBs and NPCs render, so they cannot interrupt it.
 		const float worldBlocker = TX_WindowWorldMask.Load(
 			int3(samplePosition, 0)).r;
-		pathOpen *= 1.0f - step(0.5f, worldBlocker);
+		if (worldBlocker >= 0.5f)
+			return 0.0f;
 
 		if (sampleY < halfHeight)
 		{
 			const float sampleDepth = TX_WindowSceneDepth.Load(
 				int3(samplePosition, 0)).r;
-			const float sampleIsSky = 1.0f - step(1e-7f, sampleDepth);
-			reachedUpperSky = max(reachedUpperSky, pathOpen * sampleIsSky);
+			if (sampleDepth <= 1e-7f)
+				return 1.0f;
 		}
 	}
 
-	return reachedUpperSky;
+	return 0.0f;
 }
 #endif
 
@@ -114,16 +113,25 @@ float4 PSMain( PS_INPUT Input ) : SV_TARGET
 					const float featherWidth = clamp(
 						float(min(targetWidth, targetHeight)) * 0.01f, 8.0f, 20.0f);
 					const float centerPath = EvaluateWindowSkyPath(
-						pixelPosition, targetSize, halfHeight, 0.0f);
-					const float leftPath = EvaluateWindowSkyPath(
-						pixelPosition, targetSize, halfHeight, -featherWidth);
-					const float rightPath = EvaluateWindowSkyPath(
-						pixelPosition, targetSize, halfHeight, featherWidth);
-					// The pixel's own vertical path is authoritative. Neighboring
-					// lanes only soften the horizontal edge; they must never make an
-					// isolated lower-half sky pixel transparent on their own.
-					const float pathConfidence = centerPath * 0.75f
-						+ (leftPath + rightPath) * 0.125f;
+						pixelPosition, targetSize, halfHeight, 0);
+					float pathConfidence = centerPath;
+					// A valid center lane is authoritative and needs no neighboring
+					// probes. Only a blocked center can sit on a horizontal mask edge;
+					// preserve the old two-sided feather there, evaluating the right
+					// lane only when the left lane was open. The common case therefore
+					// executes one path instead of three.
+					[branch]
+					if (centerPath < 0.5f)
+					{
+						const float leftPath = EvaluateWindowSkyPath(
+							pixelPosition, targetSize, halfHeight, -int(featherWidth));
+						float rightPath = 0.0f;
+						[branch]
+						if (leftPath > 0.5f)
+							rightPath = EvaluateWindowSkyPath(
+								pixelPosition, targetSize, halfHeight, int(featherWidth));
+						pathConfidence = (leftPath + rightPath) * 0.125f;
+					}
 					const float validTransparency = smoothstep(
 						0.20f, 0.80f, pathConfidence);
 					const float lowerHalfFade = smoothstep(

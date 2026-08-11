@@ -1447,6 +1447,10 @@ void GothicAPI::ReloadPlayerVob() {
 }
 /** Resets only the vobs */
 void GothicAPI::ResetVobs() {
+    // Revoke access before waiting for workers or touching any world-owned
+    // object. Loading-screen/render callbacks may still occur during teardown.
+    WorldRenderCacheReady.store( false, std::memory_order_release );
+
     // Complete all active renderer work before deleting world-owned resources.
     if ( Engine::RenderingThreadPool ) {
         Engine::RenderingThreadPool->clearAndFlush();
@@ -2670,6 +2674,21 @@ void GothicAPI::OnRemovedVob( zCVob* vob, zCWorld* world ) {
     }
 
     VobLightInfo* li = VobLightMap[static_cast<zCVobLight*>(vob)];
+
+    // Oil-lamp emission links are non-owning world pointers. Revoke every
+    // reference before Gothic destroys or recycles the linked light VOB;
+    // otherwise the next visibility collection can call IsEnabled() through a
+    // stale pointer while a world is being changed dynamically.
+    if ( li ) {
+        zCVobLight* removedLight = static_cast<zCVobLight*>(vob);
+        for ( auto& [mappedVob, mappedInfo] : VobMap ) {
+            (void)mappedVob;
+            if ( mappedInfo && mappedInfo->OilLampEmissionLight == removedLight ) {
+                mappedInfo->OilLampEmissionLight = nullptr;
+                mappedInfo->OilLampEmissionLightDistanceSq = FLT_MAX;
+            }
+        }
+    }
 
     // Erase it from the particle-effect list
     auto pit = std::find( ParticleEffectVobs.begin(), ParticleEffectVobs.end(), vob );
@@ -4776,10 +4795,15 @@ void GothicAPI::CollectVisibleVobs(
                 vii.color = (vii.color & 0x00FFFFFFu) | 0x0D000000u;
             }
 
-            if ( it->OilLampEmissionLight && it->OilLampEmissionLight->IsEnabled() ) {
+            zCVobLight* emissionLight = IsWorldRenderCacheReady()
+                ? it->OilLampEmissionLight : nullptr;
+            const auto emissionInfo = emissionLight
+                ? VobLightMap.find( emissionLight ) : VobLightMap.end();
+            if ( emissionInfo != VobLightMap.end() && emissionInfo->second
+                && emissionLight->IsEnabled() ) {
                 // Animation is advanced by the normal point-light renderer.
                 // Sampling it here must not mutate the same light a second time.
-                const DWORD gothicColor = it->OilLampEmissionLight->GetLightColor();
+                const DWORD gothicColor = emissionLight->GetLightColor();
                 vii.emissiveColor = QuantizeOilLampEmissionColor( gothicColor );
             }
             vii.windStrenth = 0.0f;
@@ -5310,8 +5334,9 @@ void GothicAPI::ConfigurePointlightShadowSource( VobLightInfo* lightInfo ) const
 void GothicAPI::ConfigureCityWindows() {
     ++CityWindowConfigurationGeneration;
 
-    if ( !LoadedWorldInfo || !LoadedWorldInfo->BspTree
-        || !IsWorldRenderCacheReady() )
+    // Initial world setup calls this immediately before publishing the renderer
+    // cache; dynamic reconfiguration is gated by its caller.
+    if ( !LoadedWorldInfo || !LoadedWorldInfo->BspTree )
         return;
 
     const oCGame* game = oCGame::GetGame();
@@ -5965,12 +5990,17 @@ void GothicAPI::BuildBspVobMapCache() {
     BuildBspLeafLinearCache();
 
     // Resolve static window and light/flame data only after the complete world
-    // and renderer-side BSP cache are known to be ready.
+    // and renderer-side BSP cache have been built. Publish readiness only after
+    // both feature configurations are complete, so loading-screen callbacks can
+    // never observe partially initialized window/light links.
     ConfigureCityWindows();
     ConfigureAllPointlightShadowSources();
+    WorldRenderCacheReady.store(
+        LeafLinearCache.Count != 0, std::memory_order_release );
 }
 
 void GothicAPI::BuildBspLeafLinearCache() {
+    WorldRenderCacheReady.store( false, std::memory_order_release );
     LeafLinearCache.Clear();
     BspInfo* root = &BspLeafVobLists[LoadedWorldInfo->BspTree->GetRootNode()];
     LeafLinearCache.Build( root );

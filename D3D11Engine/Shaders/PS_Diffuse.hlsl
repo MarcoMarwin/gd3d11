@@ -77,6 +77,11 @@ cbuffer WindowCutoutConstants : register( b6 )
 
 void ClipWindowCutouts(float3 worldPosition, float2 pixelPosition)
 {
+	// Startup, loading screens and worlds without visible validated windows keep
+	// b6 unbound or publish Count == 0. Exit before any tile arithmetic/indexing.
+	if (WindowCutoutCount == 0u)
+		return;
+
     uint2 tile = min(uint2(max(pixelPosition - WindowCutoutTileOrigin, 0.0f)
         * WindowCutoutPixelToTile),
         max(WindowCutoutTileCount, 1u) - 1u);
@@ -268,14 +273,15 @@ FORWARD_PLUS_PS_OUTPUT PSMain( PS_INPUT Input )
 
 	float3 litPixel = FP_ComputeSunLighting(wsPosition, vsPosition, nrm, color.rgb, specIntensity, specPower, shadow, vertLighting, twoSidedBacklitMaterial, vegetationBacklitMask);
 	
-	// The branch is uniform for ordinary material draws and avoids evaluating
-	// the lamp mask on every non-lamp VOB pixel.
+	// Atmospheric scattering affects reflected surface lighting, not light
+	// emitted by the lamp itself.
+	litPixel = ApplyAtmosphericScatteringGround(wsPosition, litPixel);
+
+	// Keep self-emission independent of day/night atmosphere, matching the
+	// additive point-light stage below.
 	[branch]
 	if (oilLampPaletteCode > 0.0f)
 		litPixel += ComputeOilLampEmission(color.rgb, oilLampLightColor);
-
-	// Atmospheric scattering
-	litPixel = ApplyAtmosphericScatteringGround(wsPosition, litPixel);
 
 	// Point lights, only when close enough
 	if (pixelDistZ < 6000.0f) 

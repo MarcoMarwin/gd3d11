@@ -152,7 +152,7 @@ static bool IsOilLampEmissiveTexture( const zCTexture* texture ) {
 
 static MaterialInfo::Buffer GetEffectiveMaterialBuffer(
     const MaterialInfo* info, MyDirectDrawSurface7* surface,
-    const zCTexture* texture = nullptr, bool windowGlassSplit = false ) {
+    bool oilLampEmissive = false, bool windowGlassSplit = false ) {
     MaterialInfo defaults;
     MaterialInfo::Buffer buffer = info ? info->buffer : defaults.buffer;
 
@@ -165,7 +165,7 @@ static MaterialInfo::Buffer GetEffectiveMaterialBuffer(
     }
 
     // Transient renderer marker; deliberately not part of Materials.json.
-    buffer.Padding0 = IsOilLampEmissiveTexture( texture ) ? 1.0f : 0.0f;
+    buffer.Padding0 = oilLampEmissive ? 1.0f : 0.0f;
     buffer.Padding1 = windowGlassSplit ? 1.0f : 0.0f;
 
     return buffer;
@@ -1805,6 +1805,7 @@ XRESULT D3D11GraphicsEngine::RecreateBuffers() {
     // gameplay-world BSP cache. Display-mode setup and menu/loading frames must
     // remain entirely independent from the window feature.
     WindowWorldGeometryMask.reset();
+    WindowWorldGeometryMaskValidThisFrame = false;
 
     // Create PFX-Renderer
     if ( !PfxRenderer ) PfxRenderer = std::make_unique<D3D11PfxRenderer>();
@@ -3126,7 +3127,7 @@ bool D3D11GraphicsEngine::BindTextureNRFX( zCTexture* tex, bool bindShader, bool
     srvs[1] = GetMaterialNormalmapSRV( tex->GetSurface(), info );
 
     if ( info && GetActivePS() ) {
-        auto materialBuffer = GetEffectiveMaterialBuffer( info, tex->GetSurface(), tex );
+        auto materialBuffer = GetEffectiveMaterialBuffer( info, tex->GetSurface() );
         if ( materialClassMarker != 0.0f ) {
             materialBuffer.Color.w = materialClassMarker;
         }
@@ -4757,16 +4758,6 @@ XRESULT D3D11GraphicsEngine::OnStartWorldRendering() {
         } );
     }
 
-    graph.AddPass( RG_PASS_NAME("Draw Frame AlphaMeshes"), [&]( RGBuilder& builder, RenderPass& pass ) {
-        // Setup / Declare
-        builder.Write( backBufferHandle );
-
-        pass.m_executeCallback = [this](const RenderGraph&)-> void {
-            TracyD3D11ZoneCGX( "D3D11GraphicsEngine::Draw Frame AlphaMeshes" );
-            DrawFrameAlphaMeshes();
-        };
-    });
-
     // Shared state for the PostFX composition pass
     ID3D11ShaderResourceView* compositionGodRaysSRV = nullptr;
     ID3D11ShaderResourceView* compositionScreenSpaceLightingSRV = nullptr;
@@ -4831,6 +4822,23 @@ XRESULT D3D11GraphicsEngine::OnStartWorldRendering() {
             };
         } );
     }
+
+    // Ordinary alpha-blended VOB surfaces are composited after the sky. Window
+    // glass is deliberately retained for the final scene-transparency pass so
+    // every later scene element remains behind the pane.
+    // geometry hides the late sky through depth, which used to mask this
+    // ordering bug for ordinary glass. Window pixels looking directly at the
+    // clear-depth sky have no such blocker: drawing the sky afterwards replaced
+    // both their authored glass alpha and the lower-screen opacity safeguard.
+    graph.AddPass( RG_PASS_NAME("Draw Frame AlphaMeshes"), [&]( RGBuilder& builder, RenderPass& pass ) {
+        builder.Write( backBufferHandle );
+
+        pass.m_executeCallback = [this](const RenderGraph&)-> void {
+            TracyD3D11ZoneCGX( "D3D11GraphicsEngine::Draw Frame AlphaMeshes" );
+            DrawFrameAlphaMeshes();
+        };
+    });
+
     if ( renderTemporalSkyVelocity ) {
         graph.AddPass( RG_PASS_NAME( "Sky Velocity" ), [&]( RGBuilder& builder, RenderPass& pass ) {
             builder.Read( velocityBufferHandle );
@@ -5534,6 +5542,20 @@ XRESULT D3D11GraphicsEngine::OnStartWorldRendering() {
 
 #endif
 
+    // Window glass is the final scene-space transparency layer. At this point
+    // sky, world/VOB geometry, every decal class, water, rain, ghosts, particles
+    // and poly strips are already present, so none of them can bypass the pane's
+    // authored alpha. Keep HDR/AA after it so the glass still participates in
+    // the normal final image processing.
+    graph.AddPass( RG_PASS_NAME("Draw Window Glass"), [&]( RGBuilder& builder, RenderPass& pass ) {
+        builder.Write( backBufferHandle );
+
+        pass.m_executeCallback = [this](const RenderGraph&)-> void {
+            TracyD3D11ZoneCGX( "D3D11GraphicsEngine::Draw Window Glass" );
+            DrawWindowAlphaMeshes();
+        };
+   });
+
     // Draw debug lines
     graph.AddPass( RG_PASS_NAME("Draw Debug Lines"), [&]( RGBuilder& builder, RenderPass& pass ) {
         builder.Write( backBufferHandle );
@@ -6031,6 +6053,7 @@ XRESULT D3D11GraphicsEngine::DrawMeshInfoListAlphablended( const std::vector<std
 
 
 XRESULT D3D11GraphicsEngine::DrawWorldMesh( bool noTextures ) {
+    WindowWorldGeometryMaskValidThisFrame = false;
     if ( !Engine::GAPI->GetRendererState().RendererSettings.DrawWorldMesh )
         return XR_SUCCESS;
 
@@ -6042,10 +6065,20 @@ XRESULT D3D11GraphicsEngine::DrawWorldMesh( bool noTextures ) {
         noTextures = true;
     }
 
+    // Resolve visible window cutouts before allocating/binding the auxiliary
+    // world mask. Worlds and camera views without a relevant window must pay
+    // none of the full-resolution R8 MRT cost.
+    SetDefaultStates();
+    XMMATRIX view = Engine::GAPI->GetViewMatrixXM();
+    Engine::GAPI->SetViewTransformXM( view );
+    Engine::GAPI->ResetWorldTransform();
+    const unsigned int windowCutoutCount = UpdateAndBindWindowCutouts();
+
     ID3D11RenderTargetView* previousWorldRTVs[D3D11_SIMULTANEOUS_RENDER_TARGET_COUNT] = {};
     ID3D11DepthStencilView* previousWorldDSV = nullptr;
-    const bool captureWorldGeometryMask = !isZPrepass
+    const bool captureWorldGeometryMask = !isZPrepass && windowCutoutCount != 0
         && EnsureWindowWorldGeometryMask();
+    WindowWorldGeometryMaskValidThisFrame = captureWorldGeometryMask;
     if ( captureWorldGeometryMask ) {
         constexpr float clearMask[4] = { 0.0f, 0.0f, 0.0f, 0.0f };
         GetContext()->ClearRenderTargetView(
@@ -6060,13 +6093,6 @@ XRESULT D3D11GraphicsEngine::DrawWorldMesh( bool noTextures ) {
         worldRTVs[6] = WindowWorldGeometryMask->GetRenderTargetView().Get();
         GetContext()->OMSetRenderTargets( 7, worldRTVs, previousWorldDSV );
     }
-
-    // Setup default renderstates
-    SetDefaultStates();
-
-    XMMATRIX view = Engine::GAPI->GetViewMatrixXM();
-    Engine::GAPI->SetViewTransformXM( view );
-    Engine::GAPI->ResetWorldTransform();
 
     SetActivePixelShader( PShaderID::PS_Diffuse );
     SetActiveVertexShader( VShaderID::VS_Ex );
@@ -6105,8 +6131,6 @@ XRESULT D3D11GraphicsEngine::DrawWorldMesh( bool noTextures ) {
             .Bind();
     };
     updatePSBuffers();
-    const unsigned int windowCutoutCount = UpdateAndBindWindowCutouts();
-
     static std::vector<WorldMeshSectionInfo*> renderList;
     if ( !m_FrameGeometryCache.worldMeshBuilt ) {
         Engine::GAPI->CollectVisibleSections( m_FrameGeometryCache.visibleSections, nullptr, true );
@@ -6365,7 +6389,7 @@ XRESULT D3D11GraphicsEngine::DrawWorldMesh( bool noTextures ) {
                     if ( info->IsSame( lastInfo ) ) {
                         materialInfoBufferAllocation = lastMatCbAllocation;
                     } else {
-                        auto materialBuffer = GetEffectiveMaterialBuffer( info, surface, mesh.first.Texture );
+                        auto materialBuffer = GetEffectiveMaterialBuffer( info, surface );
                         materialInfoBufferAllocation = PerObjectMaterialInfoPooledBuffer->Allocate( GetContext().Get(), &materialBuffer, sizeof( materialBuffer ) );
                     }
                 }
@@ -8269,7 +8293,9 @@ XRESULT D3D11GraphicsEngine::DrawVOBsInstanced() {
 
         if ( !isZPrepass ) {
             m_AlphaMeshes.clear();
+            m_WindowAlphaMeshes.clear();
             m_AlphaMeshes.reserve( 64 );
+            m_WindowAlphaMeshes.reserve( 16 );
         }
 
         if ( isZPrepass ) {
@@ -8560,7 +8586,8 @@ XRESULT D3D11GraphicsEngine::DrawVOBsInstanced() {
                             alphaMesh.vi = cachedVisual->Visual;
                             alphaMesh.StartInstanceNum = cachedVisual->StartInstanceNum;
                             alphaMesh.instances = cachedVisual->Instances;
-                            m_AlphaMeshes.push_back( std::move( alphaMesh ) );
+                            (isWindowGlass ? m_WindowAlphaMeshes : m_AlphaMeshes)
+                                .push_back( std::move( alphaMesh ) );
                         }
                         // This material combines solid lattice/frame texels with
                         // fractional-alpha glass. Keep the solid part in the normal
@@ -8598,7 +8625,8 @@ XRESULT D3D11GraphicsEngine::DrawVOBsInstanced() {
                         windBuffer.Update( &g_windBuffer );
                     }
 
-                    const bool oilLampEmissiveTexture = IsOilLampEmissiveTexture( tx );
+                    const bool oilLampEmissiveTexture = IsCityWindowFeatureReady()
+                        && IsOilLampEmissiveTexture( tx );
 
                     if ( !tx ) {
 #ifndef BUILD_SPACER_NET
@@ -8708,7 +8736,8 @@ XRESULT D3D11GraphicsEngine::DrawVOBsInstanced() {
                                 if ( materialMarkerChanged || oilLampMarkerChanged || windowGlassMarkerChanged
                                     || (info && !info->IsSame( lastMatInfo )) ) {
                                     auto materialBuffer = GetEffectiveMaterialBuffer(
-                                        info, tx->GetSurface(), tx, isWindowGlass );
+                                        info, tx->GetSurface(), oilLampEmissiveTexture,
+                                        isWindowGlass );
                                     if ( materialClassMarker != 0.0f ) {
                                         materialBuffer.Color.w = materialClassMarker;
                                     }
@@ -8790,7 +8819,17 @@ XRESULT D3D11GraphicsEngine::DrawVOBsInstanced() {
 
 /** Draws the static VOBs */
 XRESULT D3D11GraphicsEngine::DrawFrameAlphaMeshes() {
-    if ( m_AlphaMeshes.empty() ) {
+    return DrawAlphaMeshList( m_AlphaMeshes, false );
+}
+
+/** Draws window glass after all scene-space effects that may lie behind it. */
+XRESULT D3D11GraphicsEngine::DrawWindowAlphaMeshes() {
+    return DrawAlphaMeshList( m_WindowAlphaMeshes, true );
+}
+
+XRESULT D3D11GraphicsEngine::DrawAlphaMeshList(
+    std::vector<AlphaMeshData>& alphaMeshes, bool windowGlassOnly ) {
+    if ( alphaMeshes.empty() ) {
         return XR_SUCCESS;
     }
 
@@ -8810,14 +8849,14 @@ XRESULT D3D11GraphicsEngine::DrawFrameAlphaMeshes() {
         DepthStencilBuffer->GetDepthStencilView().Get() );
 
     bool useWindMetadata = false;
-    if ( ActiveVS && ActiveVS->GetInputIndex( "WindMetaData" ) != -1 && !m_AlphaMeshes.empty() ) {
+    if ( ActiveVS && ActiveVS->GetInputIndex( "WindMetaData" ) != -1 && !alphaMeshes.empty() ) {
         std::unordered_map<MeshVisualInfo*, DWORD> metadataByVisual;
-        metadataByVisual.reserve( m_AlphaMeshes.size() );
+        metadataByVisual.reserve( alphaMeshes.size() );
 
         m_WindMetadataStaging.clear();
-        m_WindMetadataStaging.reserve( m_AlphaMeshes.size() );
+        m_WindMetadataStaging.reserve( alphaMeshes.size() );
 
-        for ( auto& alphaData : m_AlphaMeshes ) {
+        for ( auto& alphaData : alphaMeshes ) {
             MeshVisualInfo* visual = alphaData.vi;
             if ( !visual ) {
                 continue;
@@ -8883,29 +8922,32 @@ XRESULT D3D11GraphicsEngine::DrawFrameAlphaMeshes() {
         TracyD3D11ZoneCGX( "DrawFrameAlphaMeshes::Replay" );
         auto _scopeAlphaReplay = RecordGraphicsEvent( GE_NAME( "DrawFrameAlphaMeshes::Replay" ) );
         PShaderID activeAlphaShader = PShaderID::PS_Simple;
-        const float windowGlassBrightness = GetWindowGlassBrightness();
-        ID3D11ShaderResourceView* windowSceneDepthSRV = DepthStencilBufferCopy
+        // The two lists are disjoint. Avoid all window resource/state work in
+        // the ordinary alpha pass, which is normally the much larger list.
+        const float windowGlassBrightness = windowGlassOnly
+            ? GetWindowGlassBrightness() : 1.0f;
+        ID3D11ShaderResourceView* windowSceneDepthSRV = windowGlassOnly && DepthStencilBufferCopy
             ? DepthStencilBufferCopy->GetShaderResView().Get()
             : nullptr;
-        ID3D11ShaderResourceView* windowWorldMaskSRV = WindowWorldGeometryMask
+        ID3D11ShaderResourceView* windowWorldMaskSRV = windowGlassOnly && WindowWorldGeometryMask
             ? WindowWorldGeometryMask->GetShaderResView().Get()
             : nullptr;
-        const bool windowSkyGuardAvailable = IsCityWindowFeatureReady()
+        const bool windowSkyGuardAvailable = windowGlassOnly
+            && WindowWorldGeometryMaskValidThisFrame && IsCityWindowFeatureReady()
             && windowSceneDepthSRV && windowWorldMaskSRV
             && Engine::GAPI->GetRendererState().RendererSettings.DrawWorldMesh;
         bool windowSkyGuardBound = false;
         bool twoSidedWindowGlass = false;
         enum class ReplayBlendMode { None, Alpha, Additive };
         ReplayBlendMode activeBlendMode = ReplayBlendMode::None;
-        for ( auto const& alphaMesh : m_AlphaMeshes ) {
+        for ( auto const& alphaMesh : alphaMeshes ) {
             const MeshKey& mk = alphaMesh.mk;
             zCTexture* tx = mk.Material->GetAniTexture();
             if ( !tx ) continue;
 
             // Check for alphablending on world mesh
             bool blendAdd = mk.Material->GetAlphaFunc() == zMAT_ALPHA_FUNC_ADD;
-            const bool isWindowGlass = IsCityWindowFeatureReady()
-                && IsWindowGlassMaterial( alphaMesh.vi, tx );
+            const bool isWindowGlass = windowGlassOnly;
 
             const PShaderID wantedAlphaShader = isWindowGlass
                 ? PShaderID::PS_Simple_FF
@@ -9032,7 +9074,7 @@ XRESULT D3D11GraphicsEngine::DrawFrameAlphaMeshes() {
         UnbindWindMetadata();
     }
 
-    m_AlphaMeshes.clear();
+    alphaMeshes.clear();
 
     return XR_SUCCESS;
 }
@@ -9140,7 +9182,7 @@ XRESULT D3D11GraphicsEngine::DrawPolyStrips( bool noTextures ) {
                 UpdateRenderStates();
             }
 
-            auto materialBuffer = GetEffectiveMaterialBuffer( info, tx->GetSurface(), tx );
+            auto materialBuffer = GetEffectiveMaterialBuffer( info, tx->GetSurface() );
             materialInfoBuffer.Update( &materialBuffer, sizeof( materialBuffer ) );
 
         } else {

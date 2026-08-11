@@ -1,6 +1,7 @@
 #pragma once
 
 #include "pch.h"
+#include <atomic>
 #include "AlignedAllocator.h"
 #include "Frustum.h"
 #include "GothicGraphicsState.h"
@@ -502,8 +503,10 @@ public:
 
     /** Returns the midpoint of the current world */
     WorldInfo* GetLoadedWorldInfo() { return LoadedWorldInfo.get(); }
-    /** True only after the world VOB/BSP caches have been built completely. */
-    bool IsWorldRenderCacheReady() const { return LeafLinearCache.Count != 0; }
+    /** True only after the world VOB/BSP caches have been published completely. */
+    bool IsWorldRenderCacheReady() const {
+        return WorldRenderCacheReady.load( std::memory_order_acquire );
+    }
 
     /** Returns wether the camera is indoor or not */
     bool IsCameraIndoor();
@@ -894,6 +897,10 @@ public:
     // Exposed for CollectLeafVobs/CollectVisibleVobsWithLeafCache (file-static helpers)
     BspLeafLinearCache LeafLinearCache;
 private:
+    // Explicit lifecycle flag. LeafLinearCache.Count alone is insufficient:
+    // during ResetVobs it can remain non-zero while world-owned objects are
+    // already being dismantled.
+    std::atomic_bool WorldRenderCacheReady{ false };
     gtl::flat_hash_map<zCVob*, SkeletalVobInfo*> SkeletalVobMap;
 
     /** Map of VobInfo-Lists for zCBspLeafs */

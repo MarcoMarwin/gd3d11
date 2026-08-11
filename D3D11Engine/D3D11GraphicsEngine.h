@@ -301,6 +301,7 @@ public:
     /** Draws the static vobs instanced */
     XRESULT DrawVOBsInstanced();
     XRESULT DrawFrameAlphaMeshes();
+    XRESULT DrawWindowAlphaMeshes();
 
     /** Set wind props in const buffer */
     void ApplyWindProps( VS_ExConstantBuffer_Wind& windBuff );
@@ -524,6 +525,8 @@ public:
     /** Reflection */
     Microsoft::WRL::ComPtr<ID3D11ShaderResourceView> ReflectionCube;
 private:
+    XRESULT DrawAlphaMeshList( std::vector<AlphaMeshData>& alphaMeshes,
+        bool windowGlassOnly );
     bool PrepareAndBindWindMetadata( const std::vector<MeshVisualInfo*>& activeVisuals );
     void UnbindWindMetadata();
     ID3D11ShaderResourceView* GetWindowGlassReplacementSRV();
@@ -539,6 +542,7 @@ private:
     };
 
     std::vector<AlphaMeshData> m_AlphaMeshes;
+    std::vector<AlphaMeshData> m_WindowAlphaMeshes;
     std::vector<VobLightInfo*> m_FrameLights;
     std::vector<VobWindMetadata> m_WindMetadataStaging;
 
@@ -546,6 +550,7 @@ private:
     std::unique_ptr<D3D11VertexBuffer> WindMetadataBuffer;
     std::unique_ptr<D3D11Texture> WindowGlassReplacementTexture;
     std::unique_ptr<RenderToTextureBuffer> WindowWorldGeometryMask;
+    bool WindowWorldGeometryMaskValidThisFrame = false;
     std::unique_ptr<D3D11ConstantBuffer> WindowCutoutConstantsBuffer;
     std::vector<CachedWindowCutoutVolume> WindowCutoutVolumeCache;
     uint64_t WindowCutoutCacheGeneration = static_cast<uint64_t>(-1);
