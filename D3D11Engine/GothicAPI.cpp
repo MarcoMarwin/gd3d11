@@ -589,7 +589,7 @@ namespace {
         float paletteBlue = 165.0f;
         DWORD paletteIndex = 1u;
         const float saturation = (maxChannel - minChannel) / maxChannel;
-        constexpr float StrongChromaticSaturation = 0.55f;
+        constexpr float StrongChromaticSaturation = 0.75f;
         if ( saturation >= StrongChromaticSaturation ) {
             float hue;
             const float chroma = maxChannel - minChannel;

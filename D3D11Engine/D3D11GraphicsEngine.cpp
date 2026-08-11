@@ -747,7 +747,8 @@ bool D3D11GraphicsEngine::BuildWindowSkyVisibilityMask() {
         WindowSkyVisibilityMask = std::move( mask );
     }
 
-    const auto shader = GetShaderManager().GetCShader( CShaderID::CS_WindowSkyVisibility );
+    const auto shader = GetShaderManager().GetCShader(
+        CShaderID::CS_WindowSkyVisibility );
     if ( !shader ) {
         return false;
     }
@@ -755,11 +756,12 @@ bool D3D11GraphicsEngine::BuildWindowSkyVisibilityMask() {
     TracyD3D11ZoneCGX( "BuildWindowSkyVisibilityMask" );
     auto _scopeWindowSkyVisibility = RecordGraphicsEvent(
         GE_NAME( "BuildWindowSkyVisibilityMask" ) );
-    shader->Apply();
     // The previous frame may still expose this texture to the pixel stage.
     // D3D11 forbids binding the same subresource as SRV and UAV at once.
     ID3D11ShaderResourceView* nullOutputSRV = nullptr;
     GetContext()->PSSetShaderResources( 16, 1, &nullOutputSRV );
+
+    shader->Apply();
     ID3D11ShaderResourceView* inputs[2] = {
         DepthStencilBufferCopy->GetShaderResView().Get(),
         WindowWorldGeometryMask->GetShaderResView().Get()
@@ -772,8 +774,8 @@ bool D3D11GraphicsEngine::BuildWindowSkyVisibilityMask() {
     GetContext()->Dispatch( maskWidth, 1, 1 );
 
     ID3D11UnorderedAccessView* nullUAV = nullptr;
-    ID3D11ShaderResourceView* nullSRVs[2] = {};
     GetContext()->CSSetUnorderedAccessViews( 0, 1, &nullUAV, nullptr );
+    ID3D11ShaderResourceView* nullSRVs[2] = {};
     GetContext()->CSSetShaderResources( 0, 2, nullSRVs );
     GetContext()->CSSetShader( nullptr, nullptr, 0 );
     WindowSkyVisibilityMaskValidThisFrame = true;
@@ -9024,8 +9026,8 @@ XRESULT D3D11GraphicsEngine::DrawAlphaMeshList(
             : nullptr;
         float windowSkyGuardDistanceWeight = 0.0f;
         if ( windowGlassOnly ) {
-            constexpr float FullSkyGuardDistance = 2000.0f;
-            constexpr float SkyGuardFadeEndDistance = 3000.0f;
+            constexpr float FullSkyGuardDistance = 1000.0f;
+            constexpr float SkyGuardFadeEndDistance = 1500.0f;
             float nearestDistanceSq = FLT_MAX;
             const XMVECTOR cameraPosition = Engine::GAPI->GetCameraPositionXM();
             for ( const VobInfo* window : m_FrameGeometryCache.visibleWindowVobs ) {
