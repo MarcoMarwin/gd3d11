@@ -9,7 +9,10 @@
 
 class D3D11GraphicsShader;
 class D3D11ConstantBuffer;
-constexpr size_t MAX_SHADER_CB = 6;
+// D3D11 exposes 14 constant-buffer slots per shader stage. Keep the reflected
+// buffer storage and the slot lookup table at the API limit; shaders using b6+
+// must never write past an old project-local six-slot assumption.
+constexpr size_t MAX_SHADER_CB = D3D11_COMMONSHADER_CONSTANT_BUFFER_API_SLOT_COUNT;
 constexpr size_t INVALID_SHADER_CB_SLOT = 255;
 
 struct GraphicsShaderConstantBuffer

@@ -2,6 +2,9 @@
 
 Dokumentation der gepushten Renderer-Builds.
 
+
+## Build 204
+- Korrekturpush: Sicherheits-Fix für Constant Buffer Bounds. MAX_SHADER_CB wurde von 6 auf 14 (D3D11_COMMONSHADER_CONSTANT_BUFFER_API_SLOT_COUNT) erhöht, um Out-of-Bounds Zugriffe beim Reflektieren von Shadern (z.B. durch Cutout-Konstanten an b6) zu verhindern.
 ## Build 198
 - Regulaerer Push: NightFogRainFade Polynom-glaettung in D3D11PfxRenderer.cpp (verhindert stotternde Nebeluebergaenge durch nicht-lineare Interpolation); Anpassung der Fade-Speeds (0.35/0.55) fuer ein fluessigeres Ingame-Erlebnis.
 
@@ -987,3 +990,4 @@ Dokumentation der gepushten Renderer-Builds.
 - Korrekturpush: Particle Night-Tint und Transparency-CBuffer. Bodennebel (und andere Partikel) nutzen nun GetAmbientNightWeight() und erhalten über ApplyAmbientNightTint eine echte nächtliche Tönung. In PS_Transparency wurde zudem ein GA_LightingTint Parameter in den Constant Buffer aufgenommen.
 - Korrekturpush: Legacy Waterfalls Hue-Correction (PS_Water.hlsl). Steile Wasserfälle erhalten nun dieselbe Scene-Hue-Korrektur wie horizontales Wasser, allerdings erst nach der Reflection/Cubemap-Komposition, um Farbabweichungen in den Rot/Blau-Kanälen zu verhindern.
 - Regulärer Push: Abschließende Optimierungen in Build 203. EvaluateWindowSkyPath bricht nun im [loop] frühzeitig ab, wenn das Ergebnis feststeht, und die horizontalen Probes werden nur ausgeführt, wenn der mittlere Pfad blockiert ist. Die Cache-Logik in GothicAPI nutzt std::atomic_bool. Atmospheric Scattering wird nun korrekt NACH der Öllampen-Emission angewendet.
+

@@ -79,12 +79,21 @@ void D3D11GraphicsShader::OnReflectShader(ID3DBlob* blob, ID3D11ShaderReflection
     // Loop through every resource bound to this shader
     size_t cbIndex = 0;
     for ( UINT i = 0; i < shaderDesc.BoundResources; ++i ) {
-        D3D11_SHADER_INPUT_BIND_DESC resourceDesc;
-        if ( SUCCEEDED( pReflection->GetResourceBindingDesc( i, &resourceDesc ) ) ) {
-            OnReflectShaderResource(pReflection, shaderDesc, resourceDesc);
-        }
+        D3D11_SHADER_INPUT_BIND_DESC resourceDesc = {};
+        if ( FAILED( pReflection->GetResourceBindingDesc( i, &resourceDesc ) ) )
+            continue;
+
+        OnReflectShaderResource(pReflection, shaderDesc, resourceDesc);
 
         if ( resourceDesc.Type == D3D_SHADER_INPUT_TYPE::D3D_SIT_CBUFFER ) {
+            if ( cbIndex >= ConstantBuffers.size()
+                || resourceDesc.BindPoint >= ConstantBufferIndexBySlot.size() ) {
+                LogError() << "Shader constant buffer exceeds D3D11 slot storage: "
+                    << (resourceDesc.Name ? resourceDesc.Name : "<unnamed>")
+                    << " at b" << resourceDesc.BindPoint;
+                continue;
+            }
+
             auto pCB = pReflection->GetConstantBufferByName( resourceDesc.Name );
 
             D3D11_SHADER_BUFFER_DESC cbDesc;
