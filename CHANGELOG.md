@@ -3,6 +3,9 @@
 Dokumentation der gepushten Renderer-Builds.
 
 
+
+## Build 205
+- Korrekturpush: Nachtrag für Build 204. GetGothicTexture() wurde in MyDirectDrawSurface7.h ergänzt, was vom Particle Texture-Swap Mechanismus in GothicAPI zwingend benötigt wird.
 ## Build 204
 - Korrekturpush: Sicherheits-Fix für Constant Buffer Bounds. MAX_SHADER_CB wurde von 6 auf 14 (D3D11_COMMONSHADER_CONSTANT_BUFFER_API_SLOT_COUNT) erhöht, um Out-of-Bounds Zugriffe beim Reflektieren von Shadern (z.B. durch Cutout-Konstanten an b6) zu verhindern.
 ## Build 198
@@ -994,3 +997,4 @@ Dokumentation der gepushten Renderer-Builds.
 - Korrekturpush: Compute Shader WindowSkyVisibility. Die teure Screen-Space Raycast-Logik fr City_Windows wurde in einen eigenen Compute Shader (CS_WindowSkyVisibility.hlsl) ausgelagert, der das Ergebnis nun pro Frame in einer reduzierten Maske cacht. PS_Simple greift nur noch auf diese Textur zu, was die Fragment-Shader deutlich entlastet. Zudem wurde der Alpha-Bereich fr das Glas sanft abgedunkelt.
 - Korrekturpush: Feintuning an WindowSkyVisibility und OilLamps. In D3D11GraphicsEngine wird das SRV nun explizit ungebunden, BEVOR der Compute-Shader aufgerufen wird, um D3D11 Hazard-Warnungen (gleichzeitiges Binden von SRV und UAV) zu beheben. Die SkyGuard-Distanz für Fenster wurde von 2000-3000 auf 1000-1500 reduziert, um den Effekt im Nahbereich schneller greifen zu lassen. Für Öllampen (GothicAPI) wurde die StrongChromaticSaturation von 0.55 auf 0.75 erhöht, damit leicht gefärbte Flammen öfter den weißen Fallback nutzen.
 - Regulärer Push: Abschließende Optimierungen in Build 204. Implementierung eines Textur-Swap-Mechanismus für Partikel (Dark/Bright Textures wie FIRESMOKE_DARK zu FIRESMOKE) in GothicAPI, um dynamische Verdunkelung zu unterstützen. Öllampen mischen nun einmalig die Farben aus statischen und dynamischen Lichtquellen (MixOilLampEmissionColors), sodass die Lampen-Emission stabil bleibt und nicht mehr unangenehm mit Licht-Animationen flackert.
+

@@ -97,6 +97,9 @@ public:
     /** Returns the name of this surface */
     const std::string& GetTextureName();
 
+    /** Returns the Gothic texture owning this surface. */
+    zCTexture* GetGothicTexture() const { return GothicTexture; }
+
     /** Sets this texture ready to use */
     void SetReady(const bool ready ) { IsReady = ready; }
 
