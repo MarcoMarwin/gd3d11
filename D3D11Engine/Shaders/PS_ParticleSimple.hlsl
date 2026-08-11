@@ -44,6 +44,14 @@ float4 AdaptParticleLighting(float4 color, float particleLightingScale)
     const float nightFloor = (groundFog || waterParticle) ? 0.10f : 0.24f;
     const float nightTintStrength = waterParticle ? 1.0f : 0.80f;
     color.rgb = ApplyAmbientNightTint(color.rgb, night * nightStrength * nightTintStrength);
+    if (waterParticle)
+    {
+        // Water keeps the shared ground-fog night tint, then receives a small
+        // steel-blue bias so dense overlapping spray does not return to grey.
+        const float waterNightTint = night * nightStrength;
+        color.rgb *= lerp(float3(1.0f, 1.0f, 1.0f),
+            float3(0.78f, 0.90f, 1.08f), waterNightTint);
+    }
     float nightDim = lerp(1.0f, nightFloor, night);
     color.rgb *= lerp(1.0f, nightDim, nightStrength);
     float rainAlpha = lerp(1.0f, 0.24f, rain);

@@ -3869,8 +3869,10 @@ void GothicAPI::DrawParticleFX( zCVob* source, zCParticleFX* fx, ParticleFrameDa
         const auto& rendererSettings = RendererState.RendererSettings;
         const bool particleDarkeningActive = rendererSettings.EnableParticleLighting
             && rendererSettings.ParticleLightingStrength > 0.0f;
+        inf.TextureOverrideRequired = false;
         inf.TextureOverride = particleDarkeningActive
-            ? GetParticleLightingTextureReplacement( texture )
+            ? GetParticleLightingTextureReplacement(
+                texture, &inf.TextureOverrideRequired )
             : nullptr;
 
         switch ( blendMode ) {
@@ -6266,7 +6268,10 @@ void GothicAPI::RemoveSurface( MyDirectDrawSurface7* surface ) {
     }
 }
 
-zCTexture* GothicAPI::GetParticleLightingTextureReplacement( zCTexture* texture ) const {
+zCTexture* GothicAPI::GetParticleLightingTextureReplacement(
+    zCTexture* texture, bool* replacementRequired ) const {
+    if ( replacementRequired )
+        *replacementRequired = false;
     if ( !texture )
         return nullptr;
 
@@ -6275,10 +6280,13 @@ zCTexture* GothicAPI::GetParticleLightingTextureReplacement( zCTexture* texture 
         if ( ParticleDarkSurfaces[i] != sourceSurface )
             continue;
 
+        // A recognized Dark texture must never reach the renderer while
+        // dynamic particle lighting is active. Report the requirement
+        // separately from readiness so nullptr cannot mean "use Dark".
+        if ( replacementRequired )
+            *replacementRequired = true;
         MyDirectDrawSurface7* replacement = ParticleBrightSurfaces[i];
-        return replacement && replacement->IsSurfaceReady() && replacement->GetEngineTexture()
-            ? replacement->GetGothicTexture()
-            : nullptr;
+        return replacement ? replacement->GetGothicTexture() : nullptr;
     }
 
     return nullptr;

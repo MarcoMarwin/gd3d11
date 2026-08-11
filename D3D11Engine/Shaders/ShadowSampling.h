@@ -189,7 +189,11 @@ int GetBlueNoiseStartIndex(float2 screenPos, int cascadeIndex, int patternSize, 
 #if SHD_BLUE_NOISE
     return (int)(GetShadowBlueNoise(screenPos, cascadeIndex, sampleOffset) * (float)size) % size;
 #else
-    return sampleOffset % size;
+    // Keep the fallback deterministic, but vary the selected Poisson subset
+    // per pixel. A constant start index turns shallow shadow gradients into
+    // visible screen-aligned bands.
+    return (int)(GetShadowBlueNoise(screenPos, cascadeIndex, sampleOffset)
+        * (float)size) % size;
 #endif
 }
 
@@ -207,7 +211,10 @@ float2x2 GetPoissonRotationMatrixForCascade(float2 screenPos, int cascadeIndex)
 #if SHD_BLUE_NOISE
     return RotationMatrixFromNoise(GetShadowBlueNoise(screenPos, cascadeIndex, 0));
 #else
-    return float2x2(1.0f, 0.0f, 0.0f, 1.0f);
+    // Hash rotation costs no texture fetch and removes the directional fields
+    // produced by an identically oriented kernel on every receiver pixel.
+    return RotationMatrixFromNoise(
+        GetShadowBlueNoise(screenPos, cascadeIndex, 0));
 #endif
 }
 
@@ -222,8 +229,8 @@ float2x2 GetPoissonRotationMatrixRForCascade(float2 screenPos, int cascadeIndex,
     rawNoise = GetShadowBlueNoise(screenPos, cascadeIndex, 0);
     return RotationMatrixFromNoise(rawNoise);
 #else
-    rawNoise = 0.5f;
-    return float2x2(1.0f, 0.0f, 0.0f, 1.0f);
+    rawNoise = GetShadowBlueNoise(screenPos, cascadeIndex, 0);
+    return RotationMatrixFromNoise(rawNoise);
 #endif
 }
 

@@ -133,7 +133,21 @@ float nightTimeBlend = smoothstep(0.0f, 1.0f, saturate(-AC_LightPos.y * 4.0f))
 float nightFogRainFade = saturate(HF_NightFogRainFade);
 float worldFogActivation = max(HF_FogOverride, nightTimeBlend * (1.0f - nightFogRainFade));
 worldFog *= worldFogActivation;
-float3 color = ApplyAtmosphericScatteringGround( position, HF_FogColorMod, true, false );
+// Regional Gothic fog zones previously fed a camera-relative, height-shifted
+// vector into a function that expects world space. Correct only their daytime
+// geometry color; dry/night fog, sky pixels and the independent rain veil keep
+// the established path exactly.
+float worldFogDayGeometryWeight = saturate(HF_FogOverride)
+    * smoothstep(0.02f, 0.18f, AC_LightPos.y)
+    * (1.0f - skyPixel);
+float3 worldFogColorPosition = worldFogDayGeometryWeight > 0.0001f
+    ? posOriginal
+    : position;
+float3 color = ApplyAtmosphericScatteringGround(
+    worldFogColorPosition,
+    HF_FogColorMod,
+    true,
+    false);
 float nightFogBrightness = lerp(1.0f, max(0.0f, AC_NightFogBrightness), saturate(AC_EnableNightAtmosphere));
 float3 nightFogColor = float3(0.12f, 0.18f, 0.27f) * nightFogBrightness;
 color = lerp(color, nightFogColor, nightTimeBlend);

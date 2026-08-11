@@ -62,6 +62,14 @@ PS_OUTPUT PSMain( PS_INPUT Input )
 		const float nightTintStrength = waterParticle ? 1.0f : 0.80f;
 		color.rgb = ApplyAmbientNightTint(
 			color.rgb, nightParticle * nightLightingStrength * nightTintStrength);
+		if (waterParticle)
+		{
+			// Match the simple particle path: retain the shared cool atmosphere
+			// and add a restrained steel-blue bias for overlapping water spray.
+			const float waterNightTint = nightParticle * nightLightingStrength;
+			color.rgb *= lerp(float3(1.0f, 1.0f, 1.0f),
+				float3(0.78f, 0.90f, 1.08f), waterNightTint);
+		}
 		float nightDim = lerp(1.0f, nightFloor, nightParticle);
 		color.rgb *= lerp(1.0f, nightDim, nightLightingStrength);
 

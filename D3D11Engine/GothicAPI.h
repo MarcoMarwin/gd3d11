@@ -802,7 +802,8 @@ private:
         std::vector<WorldMeshSectionInfo*>& sections,
         bool useSectionRadiusFilter ) const;
     bool UseWorldSectionBVH() const;
-    zCTexture* GetParticleLightingTextureReplacement( zCTexture* texture ) const;
+    zCTexture* GetParticleLightingTextureReplacement(
+        zCTexture* texture, bool* replacementRequired = nullptr ) const;
 
     /** Collects polygons in the given AABB */
     void CollectPolygonsInAABBRec( BspInfo* base, const zTBBox3D& bbox, std::vector<zCPolygon*>& list );

@@ -80,6 +80,7 @@ struct PS_INPUT
 float4 PSMain( PS_INPUT Input ) : SV_TARGET
 {
 	float expDepth = TX_Depth.Sample(SS_Linear, Input.vTexcoord).r;
+	float skyPixel = 1.0f - step(0.00001f, expDepth);
 	
 	float3 position = VSPositionFromDepth(expDepth, Input.vTexcoord);
 	
@@ -101,7 +102,20 @@ float4 PSMain( PS_INPUT Input ) : SV_TARGET
 	* saturate(AC_EnableNightAtmosphere);
 	float worldFogActivation = max(HF_FogOverride, nightTimeBlend * (1.0f - activeWeatherFog));
 	worldFog *= worldFogActivation;
-	float3 worldFogColor = ApplyAtmosphericScatteringGround(position, HF_FogColorMod, true, false);
+	// Match the composition path: only daytime geometry inside a Gothic fog
+	// zone receives the corrected world-space scattering input. Rain fog and
+	// all non-override rendering remain unchanged.
+	float worldFogDayGeometryWeight = saturate(HF_FogOverride)
+		* smoothstep(0.02f, 0.18f, AC_LightPos.y)
+		* (1.0f - skyPixel);
+	float3 worldFogColorPosition = worldFogDayGeometryWeight > 0.0001f
+		? posOriginal
+		: position;
+	float3 worldFogColor = ApplyAtmosphericScatteringGround(
+		worldFogColorPosition,
+		HF_FogColorMod,
+		true,
+		false);
 	float nightFogBrightness = lerp(1.0f, max(0.0f, AC_NightFogBrightness), saturate(AC_EnableNightAtmosphere));
 	float3 nightFogColor = float3(0.12f, 0.18f, 0.27f) * nightFogBrightness;
 	worldFogColor = lerp(worldFogColor, nightFogColor, nightTimeBlend);

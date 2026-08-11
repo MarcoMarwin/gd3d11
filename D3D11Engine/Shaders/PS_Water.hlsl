@@ -24,7 +24,8 @@ cbuffer RefractionInfo : register(b2)
 
 cbuffer WaterMaterialInfo : register(b3)
 {
-    float WM_PaddingLegacy0;
+    // 0: all water, 1: steep waterfall contributor, 2: non-steep water.
+    float WM_RenderMode;
     float WM_DisableRainEffects;
     float WM_OceanWaterTintStrength;
     float WM_IsOceanWater;
@@ -312,6 +313,11 @@ PS_OUTPUT PSMain(PS_INPUT Input)
         waterfallSsrFullCos,
         waterGeometryUp);
     float waterfallSurfaceMask = 1.0f - steepWaterSsrFactor;
+
+    if (WM_RenderMode > 0.5f && WM_RenderMode < 1.5f)
+        clip(waterfallSurfaceMask - 0.0001f);
+    else if (WM_RenderMode >= 1.5f)
+        clip(0.0001f - waterfallSurfaceMask);
 
     float waterReflectionSuppress = lerp(0.12f, 1.0f, steepWaterSsrFactor);
     ssrStrength *= lerp(0.45f, 1.0f, steepWaterSsrFactor);
@@ -926,6 +932,16 @@ float3 skyReflection =
         float legacyShoreDerivative = max(fwidth(legacyWaterThickness), 1.0f);
         float legacyShoreFadeEnd = clamp(max(65.0f, legacyShoreDerivative * 1.25f), 65.0f, 160.0f);
         float legacyShoreVisibility = SmootherStep01(saturate((legacyWaterThickness - 1.0f) / max(legacyShoreFadeEnd - 1.0f, 1.0f)));
+        // Depth behind a vertical water sheet describes the distance to the
+        // wall, not the depth of a water body.  Do not interpret that small
+        // distance as shoreline shallows or narrow texture-driven waterfalls
+        // are faded into the copied scene.  Horizontal water keeps the exact
+        // depth-based shoreline behaviour; the existing inclination mask gives
+        // us a smooth transition for sloped water geometry.
+        legacyShoreVisibility = lerp(
+            legacyShoreVisibility,
+            1.0f,
+            waterfallSurfaceMask);
         // Legacy distorted refraction can sample deeper water beside the actual
         // shoreline, which makes the water tint start too abruptly on sloped
         // banks. Use the more conservative thickness for color only, then make
@@ -936,6 +952,10 @@ float3 skyReflection =
         float legacyShoreColorStart = max(22.0f, legacyShoreColorDerivative * 0.18f);
         float legacyShoreColorEnd = clamp(max(260.0f, legacyShoreColorDerivative * 2.85f), 260.0f, 520.0f);
         float legacyShoreColor = SmootherStep01(saturate((legacyShoreColorThickness - legacyShoreColorStart) / max(legacyShoreColorEnd - legacyShoreColorStart, 1.0f)));
+        legacyShoreColor = lerp(
+            legacyShoreColor,
+            1.0f,
+            waterfallSurfaceMask);
         // Keep the broad Legacy visibility fade for reflections, glints and the
         // water boundary, but restore the selected day or night water color over
         // the softer color interval.
@@ -943,8 +963,14 @@ float3 skyReflection =
             legacyColor,
             legacyColor * saturate(sceneClean * 1.10f + 0.34f),
             nightAmount);
+        // The world mesh already defines where the water surface ends. Depth
+        // behind that mesh may control volume and the shallow-water transition,
+        // but it must never replace the surface with the unmodified scene: a
+        // leaf just below the plane would otherwise punch a moving hole into
+        // the water. Keep the computed surface layer everywhere inside the mesh
+        // and use the shallow factor only to blend its night-relative color.
         legacyColor = lerp(
-            sceneClean,
+            legacyColor,
             legacyNightRelativeColor,
             legacyShoreColor);
         float3 legacyReflectVectorSmall = reflect(-viewDirection, legacyWavesSmall);
@@ -1059,7 +1085,10 @@ float3 skyReflection =
         legacyFinalColor = lerp(
             legacyFinalColor,
             legacyWaterfallColorWithSceneHue,
-            legacySubmergedColorMask * waterfallSurfaceMask * 0.42f);
+            // Scene hue changes abruptly when the sampled wall switches sides
+            // of a thin waterfall. Keep only a subtle transfer on steep water;
+            // horizontal Legacy water retains its established 0.42 strength.
+            legacySubmergedColorMask * waterfallSurfaceMask * 0.14f);
 
         finalColor = legacyFinalColor;
         maskOut = lerp(0.25f, 1.0f, step(0.5f, WM_DisableRainEffects));
