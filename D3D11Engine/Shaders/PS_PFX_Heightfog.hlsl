@@ -111,10 +111,11 @@ float4 PSMain( PS_INPUT Input ) : SV_TARGET
 	// Match composition: only daytime geometry in an explicit Gothic fog zone
 	// is forced completely into fog at the configured far range.
 	float worldFogGeometryDistance = length(posOriginal - HF_CameraPosition);
-	float worldFogOcclusionStart = lerp(HF_WeightZNear, HF_WeightZFar, 0.72f);
+	float worldFogOcclusionStart = lerp(HF_WeightZNear, HF_WeightZFar, 0.45f);
+	float worldFogOcclusionEnd = lerp(HF_WeightZNear, HF_WeightZFar, 0.82f);
 	float worldFogFarOcclusion = smoothstep(
 		worldFogOcclusionStart,
-		max(HF_WeightZFar, worldFogOcclusionStart + 1.0f),
+		max(worldFogOcclusionEnd, worldFogOcclusionStart + 1.0f),
 		worldFogGeometryDistance) * worldFogDayGeometryWeight;
 	worldFog = max(worldFog, worldFogFarOcclusion);
 	float3 worldFogColorPosition = worldFogDayGeometryWeight > 0.0001f
@@ -125,6 +126,12 @@ float4 PSMain( PS_INPUT Input ) : SV_TARGET
 		HF_FogColorMod,
 		true,
 		false);
+	// Match composition: the fully occluded daytime regional-fog field is a
+	// uniform zone color, so distant terrain cannot survive as a blue silhouette.
+	worldFogColor = lerp(
+		worldFogColor,
+		HF_FogColorMod,
+		worldFogFarOcclusion);
 	float nightFogBrightness = lerp(1.0f, max(0.0f, AC_NightFogBrightness), saturate(AC_EnableNightAtmosphere));
 	float3 nightFogColor = float3(0.12f, 0.18f, 0.27f) * nightFogBrightness;
 	worldFogColor = lerp(worldFogColor, nightFogColor, nightTimeBlend);

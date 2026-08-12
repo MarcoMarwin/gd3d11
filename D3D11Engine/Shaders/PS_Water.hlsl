@@ -24,8 +24,7 @@ cbuffer RefractionInfo : register(b2)
 
 cbuffer WaterMaterialInfo : register(b3)
 {
-    // 0: all water, 1: steep waterfall contributor, 2: non-steep water.
-    float WM_RenderMode;
+    float WM_PaddingLegacy0;
     float WM_DisableRainEffects;
     float WM_OceanWaterTintStrength;
     float WM_IsOceanWater;
@@ -313,9 +312,6 @@ PS_OUTPUT PSMain(PS_INPUT Input)
         waterfallSsrFullCos,
         waterGeometryUp);
     float waterfallSurfaceMask = 1.0f - steepWaterSsrFactor;
-
-    if (WM_RenderMode > 0.5f && WM_RenderMode < 1.5f)
-        clip(waterfallSurfaceMask - 0.02f);
 
     float waterReflectionSuppress = lerp(0.12f, 1.0f, steepWaterSsrFactor);
     ssrStrength *= lerp(0.45f, 1.0f, steepWaterSsrFactor);

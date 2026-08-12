@@ -198,7 +198,7 @@ namespace
     static ID3D11ShaderResourceView* s_nullSRVs[16] = { nullptr };
 
     struct WaterMaterialInfoConstantBuffer {
-        float WM_RenderMode;
+        float WM_PaddingLegacy0;
         float WM_DisableRainEffects;
         float WM_OceanWaterTintStrength;
         float WM_IsOceanWater;
@@ -386,30 +386,9 @@ namespace
         return stem.rfind( "NW_WATER_LAKE", 0 ) == 0;
     }
 
-    bool MeshContainsSteepWaterGeometry( MeshInfo* mesh ) {
-        if ( !mesh ) {
-            return false;
-        }
-        if ( mesh->WaterGeometryClass >= 0 ) {
-            return mesh->WaterGeometryClass != 0;
-        }
-
-        // Match PS_Water's start of the existing 39-50 degree waterfall mask.
-        constexpr float waterfallSsrFullCos = 0.77714596f;
-        bool containsSteepWater = false;
-        for ( const ExVertexStruct& vertex : mesh->Vertices ) {
-            if ( std::abs( vertex.Normal.y ) < waterfallSsrFullCos ) {
-                containsSteepWater = true;
-                break;
-            }
-        }
-        mesh->WaterGeometryClass = containsSteepWater ? 1 : 0;
-        return containsSteepWater;
-    }
-
     void FillWaterMaterialInfo( WaterMaterialInfoConstantBuffer& wmcb, zCTexture* texture ) {
         const auto& settings = Engine::GAPI->GetRendererState().RendererSettings;
-        wmcb.WM_RenderMode = 0.0f;
+        wmcb.WM_PaddingLegacy0 = 0.0f;
         wmcb.WM_DisableRainEffects = 0.0f;
         wmcb.WM_OceanWaterTintStrength = settings.OceanWaterColorStrength;
         wmcb.WM_IsOceanWater = IsOceanWaterTexture( texture ) ? 1.0f : 0.0f;
@@ -6600,10 +6579,8 @@ void D3D11GraphicsEngine::DrawWaterSurfaces( ID3D11RenderTargetView* waterMaskRT
 
     static std::vector<D3D11_DRAW_INDEXED_INSTANCED_INDIRECT_ARGS> waterDrawArgs;
     static std::vector<WaterTextureBatch> waterBatches;
-    static std::vector<WaterTextureBatch> waterfallBatches;
     waterDrawArgs.clear();
     waterBatches.clear();
-    waterfallBatches.clear();
 
     {
         ZoneScopedN( "DrawWaterSurfaces::BuildBatches" );
@@ -6628,34 +6605,6 @@ void D3D11GraphicsEngine::DrawWaterSurfaces( ID3D11RenderTargetView* waterMaskRT
             waterBatches.push_back( batch );
         }
 
-        // Keep the regular arguments contiguous for the existing Z prepass.
-        // Only meshes which can actually contain steep pixels are duplicated
-        // into the early waterfall contributor pass.
-        for ( const auto& [texture, meshes] : FrameWaterSurfaces ) {
-            WaterTextureBatch batch;
-            batch.texture = texture;
-            batch.argsOffset = static_cast<unsigned int>( waterDrawArgs.size() );
-            batch.drawCount = 0;
-
-            for ( MeshInfo* mesh : meshes ) {
-                if ( !MeshContainsSteepWaterGeometry( mesh ) ) {
-                    continue;
-                }
-
-                D3D11_DRAW_INDEXED_INSTANCED_INDIRECT_ARGS args;
-                args.IndexCountPerInstance = static_cast<UINT>( mesh->Indices.size() );
-                args.InstanceCount = 1;
-                args.StartIndexLocation = mesh->BaseIndexLocation;
-                args.BaseVertexLocation = 0;
-                args.StartInstanceLocation = 0;
-                waterDrawArgs.push_back( args );
-                batch.drawCount++;
-            }
-
-            if ( batch.drawCount > 0 ) {
-                waterfallBatches.push_back( batch );
-            }
-        }
     }
 
     constexpr unsigned int argStride = sizeof( D3D11_DRAW_INDEXED_INSTANCED_INDIRECT_ARGS );
@@ -6676,74 +6625,6 @@ void D3D11GraphicsEngine::DrawWaterSurfaces( ID3D11RenderTargetView* waterMaskRT
             WaterIndirectBuffer->UpdateBuffer(
                 waterDrawArgs.data(), static_cast<unsigned int>( requiredSize ) );
         }
-    }
-
-    // === Steep-water reflection contributor ===
-    // Render only the already existing waterfall inclination path into the
-    // scene before horizontal water traces SSR. Particles remain untouched.
-    if ( !waterfallBatches.empty() ) {
-        ZoneScopedN( "DrawWaterSurfaces::WaterfallContributor" );
-        auto _scopeWaterfallContributor = RecordGraphicsEvent(
-            GE_NAME( "DrawWaterSurfaces::WaterfallContributor" ) );
-
-        Engine::GAPI->GetRendererState().BlendState.ColorWritesEnabled = true;
-        Engine::GAPI->GetRendererState().BlendState.SetDirty();
-        Engine::GAPI->GetRendererState().DepthState.DepthWriteEnabled = true;
-        Engine::GAPI->GetRendererState().DepthState.SetDirty();
-        UpdateRenderStates();
-
-        SetActivePixelShader( PShaderID::PS_Water );
-        ActivePS->Apply();
-        DistortionTexture->BindToPixelShader( 4 );
-        GetContext()->PSSetShaderResources(
-            5, 1, tempBuffer->GetShaderResView().GetAddressOf() );
-        DepthStencilBufferCopy->BindToPixelShader( GetContext().Get(), 2 );
-
-        auto Resolution = GetResolution();
-        RefractionInfoConstantBuffer ricb = {};
-        ricb.RI_Projection = Engine::GAPI->GetProjectionMatrix();
-        ricb.RI_ViewportSize = float2( Resolution.x, Resolution.y );
-        ricb.RI_Time = Engine::GAPI->GetTimeSeconds();
-        ricb.RI_CameraPosition = float3( Engine::GAPI->GetCameraPosition() );
-        UpdateRefractionViewProjection( ricb );
-        ActivePS->GetBuffer( "RefractionInfo" ).Update( &ricb ).Bind();
-
-        ID3D11ShaderResourceView* reflectionCubeSrv = ReflectionCube.Get();
-        GetContext()->PSSetShaderResources( 3, 1, &reflectionCubeSrv );
-        GetContext()->PSSetShaderResources( 6, 1, &lowCloudLayerSRV );
-
-        for ( const WaterTextureBatch& batch : waterfallBatches ) {
-            batch.texture->CacheIn( -1 );
-            batch.texture->Bind( 0 );
-
-            WaterMaterialInfoConstantBuffer wmcb = {};
-            FillWaterMaterialInfo( wmcb, batch.texture );
-            wmcb.WM_RenderMode = 1.0f;
-            ActivePS->GetBuffer( "WaterMaterialInfo" ).Update( &wmcb ).Bind();
-
-            if ( !FeatureLevel10Compatibility ) {
-                DrawMultiIndexedInstancedIndirect( Context.Get(),
-                    batch.drawCount,
-                    WaterIndirectBuffer->GetIndirectBuffer().Get(),
-                    batch.argsOffset * argStride, argStride );
-            } else {
-                for ( unsigned int i = 0; i < batch.drawCount; ++i ) {
-                    const auto& args = waterDrawArgs[batch.argsOffset + i];
-                    DrawVertexBufferIndexedUINT( nullptr, nullptr,
-                        args.IndexCountPerInstance, args.StartIndexLocation );
-                }
-            }
-        }
-
-        // Refresh both SSR inputs after the waterfalls have contributed. The
-        // resources must be detached before they become copy destinations.
-        GetContext()->PSSetShaderResources( 0, 7, s_nullSRVs );
-        GetContext()->OMSetRenderTargets( 0, nullptr, nullptr );
-        GetContext()->CopyResource(
-            tempBuffer->GetTexture().Get(), HDRBackBuffer->GetTexture().Get() );
-        CopyDepthStencil();
-        GetContext()->OMSetRenderTargets( waterTargetCount, waterTargets,
-            DepthStencilBuffer->GetDepthStencilView().Get() );
     }
 
     // === Z-Prepass ===
@@ -6825,11 +6706,6 @@ void D3D11GraphicsEngine::DrawWaterSurfaces( ID3D11RenderTargetView* waterMaskRT
 
                 WaterMaterialInfoConstantBuffer wmcb = {};
                 FillWaterMaterialInfo( wmcb, batch.texture );
-                // Redraw the complete water surface in the final pass. The
-                // early steep contributor exists only to feed SSR; splitting
-                // the visible result at an interpolated inclination threshold
-                // made shallow waterfall transitions flicker between passes.
-                wmcb.WM_RenderMode = 0.0f;
                 ActivePS->GetBuffer( "WaterMaterialInfo" ).Update( &wmcb ).Bind();
 
                 DrawMultiIndexedInstancedIndirect( Context.Get(),
@@ -6845,7 +6721,6 @@ void D3D11GraphicsEngine::DrawWaterSurfaces( ID3D11RenderTargetView* waterMaskRT
 
                 WaterMaterialInfoConstantBuffer wmcb = {};
                 FillWaterMaterialInfo( wmcb, batch.texture );
-                wmcb.WM_RenderMode = 0.0f;
                 ActivePS->GetBuffer( "WaterMaterialInfo" ).Update( &wmcb ).Bind();
 
                 for ( unsigned int i = 0; i < batch.drawCount; i++ ) {
@@ -9200,9 +9075,6 @@ XRESULT D3D11GraphicsEngine::DrawAlphaMeshList(
         ID3D11ShaderResourceView* windowSceneDepthSRV = windowGlassOnly && DepthStencilBufferCopy
             ? DepthStencilBufferCopy->GetShaderResView().Get()
             : nullptr;
-        ID3D11ShaderResourceView* windowWorldMaskSRV = windowGlassOnly && WindowWorldGeometryMask
-            ? WindowWorldGeometryMask->GetShaderResView().Get()
-            : nullptr;
         const bool windowSkyGuardAvailable = windowGlassOnly
             && windowSkyGuardDistanceWeight > 0.0f
             && IsCityWindowFeatureReady() && windowSceneDepthSRV
@@ -9234,36 +9106,37 @@ XRESULT D3D11GraphicsEngine::DrawAlphaMeshList(
                 ActivePS->Apply();
                 activeAlphaShader = wantedAlphaShader;
 
-                if ( isWindowGlass ) {
-                    if ( windowSkyGuardAvailable ) {
-                        ID3D11ShaderResourceView* guardSRVs[3] = {
-                            windowSceneDepthSRV,
-                            windowWorldMaskSRV,
-                            windowSkyVisibilityAvailable
-                                ? WindowSkyVisibilityMask->GetShaderResView().Get()
-                                : nullptr
-                        };
-                        GetContext()->PSSetShaderResources( 14, 3, guardSRVs );
-                        windowSkyGuardBound = true;
-                    }
+            }
 
-                    PsSimpleFFdata windowGlassData = {};
-                    const float lowerScreenBoundary =
-                        static_cast<float>(GetResolution().y) * 0.5f;
-                    windowGlassData.textureFactor = float4(
-                        windowGlassTint.x,
-                        windowGlassTint.y,
-                        windowGlassTint.z,
-                        -1.0f );
-                    windowGlassData.windowParams = float4(
-                        lowerScreenBoundary,
-                        windowSkyGuardAvailable ? 1.0f : 0.0f,
-                        windowSkyVisibilityAvailable ? 1.0f : 0.0f,
-                        windowSkyGuardDistanceWeight );
-                    ActivePS->GetBuffer( "cbFFData" )
-                        .Update( &windowGlassData )
-                        .Bind();
+            // PS_Simple is already active when this replay begins, so window
+            // state must be bound per window draw, not only on a shader change.
+            if ( isWindowGlass ) {
+                if ( windowSkyGuardAvailable && !windowSkyGuardBound ) {
+                    ID3D11ShaderResourceView* skyVisibilitySRV =
+                        windowSkyVisibilityAvailable
+                        ? WindowSkyVisibilityMask->GetShaderResView().Get()
+                        : nullptr;
+                    GetContext()->PSSetShaderResources(
+                        14, 1, &windowSceneDepthSRV );
+                    GetContext()->PSSetShaderResources(
+                        16, 1, &skyVisibilitySRV );
+                    windowSkyGuardBound = true;
                 }
+
+                PsSimpleFFdata windowGlassData = {};
+                windowGlassData.textureFactor = float4(
+                    windowGlassTint.x,
+                    windowGlassTint.y,
+                    windowGlassTint.z,
+                    -1.0f );
+                windowGlassData.windowParams = float4(
+                    static_cast<float>(GetResolution().y) * 0.5f,
+                    windowSkyGuardAvailable ? 1.0f : 0.0f,
+                    windowSkyVisibilityAvailable ? 1.0f : 0.0f,
+                    windowSkyGuardDistanceWeight );
+                ActivePS->GetBuffer( "cbFFData" )
+                    .Update( &windowGlassData )
+                    .Bind();
             }
 
             // Bind texture
@@ -9345,8 +9218,9 @@ XRESULT D3D11GraphicsEngine::DrawAlphaMeshList(
         }
 
         if ( windowSkyGuardBound ) {
-            ID3D11ShaderResourceView* nullSRVs[3] = {};
-            GetContext()->PSSetShaderResources( 14, 3, nullSRVs );
+            ID3D11ShaderResourceView* nullSRV = nullptr;
+            GetContext()->PSSetShaderResources( 14, 1, &nullSRV );
+            GetContext()->PSSetShaderResources( 16, 1, &nullSRV );
         }
     }
 

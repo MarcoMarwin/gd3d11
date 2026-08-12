@@ -107,7 +107,6 @@ struct MeshInfo {
         BaseIndexLocation = 0;
         MeshIndex = -1;
         meshId = 0;
-        WaterGeometryClass = -1;
     }
 
     MeshInfo( MeshInfo&& other ) = default;
@@ -132,10 +131,6 @@ struct MeshInfo {
     unsigned int BaseIndexLocation;
     unsigned int MeshIndex;
     uint16_t meshId;
-
-    // Lazily cached from immutable world-mesh vertex normals:
-    // -1 unknown, 0 horizontal-only, 1 contains steep water geometry.
-    signed char WaterGeometryClass;
 };
 
 /** World mesh with precomputed object-space bounds for fast culling. */

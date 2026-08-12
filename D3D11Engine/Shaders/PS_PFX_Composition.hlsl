@@ -144,10 +144,11 @@ float worldFogDayGeometryWeight = saturate(HF_FogOverride)
 // range instead of leaving a blue atmospheric silhouette behind. This term is
 // deliberately gated away from night fog, rain fog and sky pixels.
 float worldFogGeometryDistance = length(posOriginal - HF_CameraPosition);
-float worldFogOcclusionStart = lerp(HF_WeightZNear, HF_WeightZFar, 0.72f);
+float worldFogOcclusionStart = lerp(HF_WeightZNear, HF_WeightZFar, 0.45f);
+float worldFogOcclusionEnd = lerp(HF_WeightZNear, HF_WeightZFar, 0.82f);
 float worldFogFarOcclusion = smoothstep(
     worldFogOcclusionStart,
-    max(HF_WeightZFar, worldFogOcclusionStart + 1.0f),
+    max(worldFogOcclusionEnd, worldFogOcclusionStart + 1.0f),
     worldFogGeometryDistance) * worldFogDayGeometryWeight;
 worldFog = max(worldFog, worldFogFarOcclusion);
 float3 worldFogColorPosition = worldFogDayGeometryWeight > 0.0001f
@@ -158,6 +159,11 @@ float3 color = ApplyAtmosphericScatteringGround(
     HF_FogColorMod,
     true,
     false);
+// Once daytime regional fog has reached its opaque far field, positional
+// atmospheric tint must no longer encode the hidden terrain silhouette.
+// Converge to the zone's uniform authored fog color; night and weather fog do
+// not contribute to worldFogFarOcclusion and retain their existing colors.
+color = lerp(color, HF_FogColorMod, worldFogFarOcclusion);
 float nightFogBrightness = lerp(1.0f, max(0.0f, AC_NightFogBrightness), saturate(AC_EnableNightAtmosphere));
 float3 nightFogColor = float3(0.12f, 0.18f, 0.27f) * nightFogBrightness;
 color = lerp(color, nightFogColor, nightTimeBlend);

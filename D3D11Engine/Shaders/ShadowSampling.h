@@ -189,11 +189,7 @@ int GetBlueNoiseStartIndex(float2 screenPos, int cascadeIndex, int patternSize, 
 #if SHD_BLUE_NOISE
     return (int)(GetShadowBlueNoise(screenPos, cascadeIndex, sampleOffset) * (float)size) % size;
 #else
-    // Keep the fallback deterministic, but vary the selected Poisson subset
-    // per pixel. A constant start index turns shallow shadow gradients into
-    // visible screen-aligned bands.
-    return (int)(GetShadowBlueNoise(screenPos, cascadeIndex, sampleOffset)
-        * (float)size) % size;
+    return sampleOffset % size;
 #endif
 }
 
@@ -211,10 +207,7 @@ float2x2 GetPoissonRotationMatrixForCascade(float2 screenPos, int cascadeIndex)
 #if SHD_BLUE_NOISE
     return RotationMatrixFromNoise(GetShadowBlueNoise(screenPos, cascadeIndex, 0));
 #else
-    // Hash rotation costs no texture fetch and removes the directional fields
-    // produced by an identically oriented kernel on every receiver pixel.
-    return RotationMatrixFromNoise(
-        GetShadowBlueNoise(screenPos, cascadeIndex, 0));
+    return float2x2(1.0f, 0.0f, 0.0f, 1.0f);
 #endif
 }
 
@@ -229,8 +222,8 @@ float2x2 GetPoissonRotationMatrixRForCascade(float2 screenPos, int cascadeIndex,
     rawNoise = GetShadowBlueNoise(screenPos, cascadeIndex, 0);
     return RotationMatrixFromNoise(rawNoise);
 #else
-    rawNoise = GetShadowBlueNoise(screenPos, cascadeIndex, 0);
-    return RotationMatrixFromNoise(rawNoise);
+    rawNoise = 0.5f;
+    return float2x2(1.0f, 0.0f, 0.0f, 1.0f);
 #endif
 }
 
@@ -688,15 +681,6 @@ float ComputeCascadedShadowValueSoft(float3 wsPosition, float viewSpaceZ, float 
         }
     }
 
-    // PCF/PCSS returns only a small number of discrete visibility levels.
-    // Break up wide CSM bands with a zero-mean, screen-stable sub-step dither;
-    // fully lit and fully shadowed pixels remain untouched.
-    if (selectedCascade >= 0)
-    {
-        float csmPenumbraGate = saturate(4.0f * shadow * (1.0f - shadow));
-        float csmDither = GetShadowBlueNoise(screenPos, selectedCascade, 11) - 0.5f;
-        shadow = saturate(shadow + csmDither * (1.0f / 16.0f) * csmPenumbraGate);
-    }
     return shadow;
 }
 
