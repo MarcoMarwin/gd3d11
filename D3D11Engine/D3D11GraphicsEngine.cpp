@@ -8102,9 +8102,12 @@ bool D3D11GraphicsEngine::PrepareAndBindWindMetadata( const std::vector<MeshVisu
                     zCVertex** vertices = ground ? ground->getVertices() : nullptr;
                     if ( ground && ground->GetNumPolyVertices() >= 3 && vertices
                         && vertices[0] && vertices[1] && vertices[2] ) {
-                        const XMVECTOR p0 = XMLoadFloat3( &vertices[0]->Position );
-                        const XMVECTOR p1 = XMLoadFloat3( &vertices[1]->Position );
-                        const XMVECTOR p2 = XMLoadFloat3( &vertices[2]->Position );
+                        const float3& gp0 = vertices[0]->Position;
+                        const float3& gp1 = vertices[1]->Position;
+                        const float3& gp2 = vertices[2]->Position;
+                        const XMVECTOR p0 = XMVectorSet( gp0.x, gp0.y, gp0.z, 0.0f );
+                        const XMVECTOR p1 = XMVectorSet( gp1.x, gp1.y, gp1.z, 0.0f );
+                        const XMVECTOR p2 = XMVectorSet( gp2.x, gp2.y, gp2.z, 0.0f );
                         XMVECTOR normal = XMVector3Cross( XMVectorSubtract( p1, p0 ), XMVectorSubtract( p2, p0 ) );
                         const float lengthSq = XMVectorGetX( XMVector3LengthSq( normal ) );
                         if ( lengthSq > 1.0e-8f ) {

@@ -117,10 +117,17 @@ XRESULT D3D11LegacyDeferredShading::DrawPointlightLights(
         plcb.Pl_PositionWorld = light->GetEffectivePositionWorld();
         plcb.PL_Outdoor = light->IsIndoorVob ? 0.0f : 1.0f;
         plcb.PL_IgnoreIndoorOutdoorLimit = light->IgnoreIndoorOutdoorLimit ? 1.0f : 0.0f;
-        plcb.PL_ShadowSoftness = std::max( settings.ShadowSoftness * 2.0f, minimumTemporalShadowSoftness );
-
         float dist;
         XMStoreFloat( &dist, XMVector3Length( XMLoadFloat3( plcb.Pl_PositionWorld.toXMFLOAT3() ) - Engine::GAPI->GetCameraPositionXM() ) );
+
+        // Encode the per-light tap tier without growing the hot constant buffer:
+        // the shader removes the marker before using the unchanged softness.
+        constexpr float kFarShadowTapMarker = 16.0f;
+        const float pointShadowSoftness = std::max(
+            settings.ShadowSoftness * 2.0f, minimumTemporalShadowSoftness );
+        const float highQualityDistance = std::max( 1200.0f, plcb.PL_Range * 2.0f );
+        plcb.PL_ShadowSoftness = pointShadowSoftness
+            + (dist > highQualityDistance ? kFarShadowTapMarker : 0.0f);
 
         const float lightRange = plcb.PL_Range;
         const float shadowFadeEnd = std::max( settings.GetEffectiveVisualFXDrawRadius() - lightRange, 1.0f );

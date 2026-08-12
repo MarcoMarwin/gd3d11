@@ -651,7 +651,12 @@ D3D11TiledDeferredShading::CullResult D3D11TiledDeferredShading::CullLights(
         tl.ShadowStrength = shadowDistanceFade;
         tl.IsIndoor = light->Vob && light->Vob->IsIndoorVob() ? 1.0f : 0.0f;
         tl.IgnoreIndoorOutdoorLimit = light->IgnoreIndoorOutdoorLimit ? 1.0f : 0.0f;
-        tl.ShadowSoftness = std::max( settings.ShadowSoftness * 2.0f, minimumTemporalShadowSoftness );
+        constexpr float kFarShadowTapMarker = 16.0f;
+        const float pointShadowSoftness = std::max(
+            settings.ShadowSoftness * 2.0f, minimumTemporalShadowSoftness );
+        const float highQualityDistance = std::max( 1200.0f, lightRange * 2.0f );
+        tl.ShadowSoftness = pointShadowSoftness
+            + (dist > highQualityDistance ? kFarShadowTapMarker : 0.0f);
 
         if ( hasShadow ) {
             constexpr int kShadowHasDynamic = 0x40000000;
