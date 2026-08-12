@@ -1496,6 +1496,15 @@ void GothicAPI::ResetVobs() {
         Engine::WorkerThreadPool->clearAndFlush();
     }
 
+    // This queue owns no lights; it only caches raw VobLightInfo pointers for
+    // deferred shadow updates. Revoke them before deleting the world lights.
+    // A loading-screen render callback must never observe entries from the
+    // world that is currently being torn down.
+    if ( auto* graphicsEngine = dynamic_cast<D3D11GraphicsEngine*>( Engine::GraphicsEngine ) ) {
+        graphicsEngine->FrameShadowUpdateLights.clear();
+        graphicsEngine->DebugPointlight = nullptr;
+    }
+
     // Renderer caches must stop trusting world-owned VOB pointers before the
     // objects below are destroyed, even if loading aborts before reconfiguration.
     ++CityWindowConfigurationGeneration;

@@ -117,6 +117,8 @@ XRESULT D3D11LegacyDeferredShading::DrawPointlightLights(
         plcb.Pl_PositionWorld = light->GetEffectivePositionWorld();
         plcb.PL_Outdoor = light->IsIndoorVob ? 0.0f : 1.0f;
         plcb.PL_IgnoreIndoorOutdoorLimit = light->IgnoreIndoorOutdoorLimit ? 1.0f : 0.0f;
+        // Preserve Build 207's established wide penumbra. Band suppression is
+        // handled in the sampling kernel without reducing the chosen softness.
         plcb.PL_ShadowSoftness = std::max( settings.ShadowSoftness * 2.0f, minimumTemporalShadowSoftness );
 
         float dist;

@@ -33,24 +33,20 @@ namespace {
         return ffxResource;
     }
 
-    ID3D11Resource* GetResourceFromView( ID3D11View* view ) {
-        if ( !view ) {
-            return nullptr;
-        }
-        ID3D11Resource* resource = nullptr;
-        view->GetResource( &resource );
-        if ( resource ) {
-            resource->Release();
-        }
-        return resource;
-    }
-
     FfxResource WrapView(
         ID3D11View* view,
         const wchar_t* name,
         FfxResourceStates state = FFX_RESOURCE_STATE_COMPUTE_READ )
     {
-        return WrapResource( GetResourceFromView( view ), name, state );
+        if ( !view ) {
+            return {};
+        }
+
+        // GetResource adds one COM reference. Keep it alive while the FFX
+        // descriptor is built and release it automatically before returning.
+        Microsoft::WRL::ComPtr<ID3D11Resource> resource;
+        view->GetResource( resource.GetAddressOf() );
+        return WrapResource( resource.Get(), name, state );
     }
 
     void UnbindComputeResources( ID3D11DeviceContext* context ) {

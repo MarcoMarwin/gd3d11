@@ -387,15 +387,16 @@ namespace
 
     void FillWaterMaterialInfo( WaterMaterialInfoConstantBuffer& wmcb, zCTexture* texture ) {
         const WorldInfo* world = Engine::GAPI->GetLoadedWorldInfo();
-        const bool mediterraneanOcean = world && world->WorldName == "ADDONWORLD";
+        const bool mediterraneanOcean = world
+            && NormalizeVisualStemForMarker( world->WorldName ) == "ADDONWORLD";
         wmcb.WM_OceanClimate = mediterraneanOcean ? 1.0f : 0.0f;
         wmcb.WM_DisableRainEffects = 0.0f;
-        wmcb.WM_OceanWaterTintStrength = mediterraneanOcean ? 0.18f : 0.38f;
+        wmcb.WM_OceanWaterTintStrength = mediterraneanOcean ? 0.42f : 0.18f;
         wmcb.WM_IsOceanWater = IsOceanWaterTexture( texture ) ? 1.0f : 0.0f;
         // Pre-normalized to luminance 1.0 so the pixel shader only changes
         // chroma, not exposure, without a per-pixel dot product and divide.
         wmcb.WM_OceanWaterTint = mediterraneanOcean
-            ? XMFLOAT3( 0.846026f, 1.034031f, 1.116284f )
+            ? XMFLOAT3( 0.580591f, 1.108402f, 1.161183f )
             : XMFLOAT3( 0.894520f, 1.026067f, 1.052377f );
         wmcb.WM_Padding0 = 0.0f;
         // The shader applies this state only to ocean water. Legacy water remains unchanged.
@@ -4739,7 +4740,13 @@ XRESULT D3D11GraphicsEngine::OnStartWorldRendering() {
     bool compositionGodRays = (rendererState.RendererSettings.AreGodRaysEnabled() && isOutdoor);
     bool compositionHeightFog = (rendererState.RendererSettings.DrawFog && isOutdoor);
     const float dynamicCloudRainWeight = Engine::GAPI->GetRainFXWeight();
-    bool compositionLowClouds = (!isDragonIsland && rendererState.RendererSettings.EnableDynamicClouds && rendererState.RendererSettings.DrawFog && isOutdoor && dynamicCloudRainWeight < 0.90f);
+    const float dynamicCloudWorldFog = std::clamp( Engine::GAPI->GetFogOverride(), 0.0f, 1.0f );
+    // The shader fades clouds continuously from fog override 0.08 to 0.55.
+    // Once fully hidden, omit the raymarch and every dependent cloud pass.
+    const bool dynamicCloudsVisibleThroughWorldFog = dynamicCloudWorldFog < 0.55f;
+    bool compositionLowClouds = (!isDragonIsland && rendererState.RendererSettings.EnableDynamicClouds
+        && rendererState.RendererSettings.DrawFog && isOutdoor && dynamicCloudRainWeight < 0.90f
+        && dynamicCloudsVisibleThroughWorldFog);
     const bool fsr3UpscalingActive = GetDevice()->GetFeatureLevel() >= D3D_FEATURE_LEVEL_11_0
         && rendererState.RendererSettings.Upscaler == GothicRendererSettings::UPSCALER_FSR_3
         && rendererState.RendererSettings.ResolutionScalePercent <= 100
@@ -8076,6 +8083,9 @@ bool D3D11GraphicsEngine::PrepareAndBindWindMetadata( const std::vector<MeshVisu
         VobWindMetadata metadata = {};
         metadata.MinHeight = visual->BBox.Min.y;
         metadata.MaxHeight = visual->BBox.Max.y;
+        metadata.HorizontalExtent = float2(
+            std::max( (visual->BBox.Max.x - visual->BBox.Min.x) * 0.5f, 0.001f ),
+            std::max( (visual->BBox.Max.z - visual->BBox.Min.z) * 0.5f, 0.001f ) );
         m_WindMetadataStaging.push_back( metadata );
 
         for ( auto& instance : visual->Instances ) {
@@ -8843,6 +8853,9 @@ XRESULT D3D11GraphicsEngine::DrawAlphaMeshList(
                 VobWindMetadata metadata = {};
                 metadata.MinHeight = visual->BBox.Min.y;
                 metadata.MaxHeight = visual->BBox.Max.y;
+                metadata.HorizontalExtent = float2(
+                    std::max( (visual->BBox.Max.x - visual->BBox.Min.x) * 0.5f, 0.001f ),
+                    std::max( (visual->BBox.Max.z - visual->BBox.Min.z) * 0.5f, 0.001f ) );
                 m_WindMetadataStaging.push_back( metadata );
             }
 
@@ -10501,13 +10514,11 @@ void D3D11GraphicsEngine::DrawFrameParticles(
 
 /** Called when a vob was removed from the world */
 XRESULT D3D11GraphicsEngine::OnVobRemovedFromWorld( zCVob* vob ) {
-    // Take out of shadowupdate queue
-    for ( auto&& it = FrameShadowUpdateLights.begin(); it != FrameShadowUpdateLights.end(); ++it ) {
-        if ( (*it)->Vob == vob ) {
-            FrameShadowUpdateLights.erase( it );
-            break;
-        }
-    }
+    // Remove every deferred occurrence. The queue is non-owning and duplicate
+    // entries must not survive after their world light has been destroyed.
+    FrameShadowUpdateLights.remove_if( [vob]( const VobLightInfo* light ) {
+        return !light || light->Vob == vob;
+    } );
 
     DebugPointlight = nullptr;
 

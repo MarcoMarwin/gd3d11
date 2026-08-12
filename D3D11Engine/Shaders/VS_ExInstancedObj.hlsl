@@ -34,7 +34,7 @@ struct WindMetaDataEntry
 {
     float minHeight;
     float maxHeight;
-    float2 padding;
+    float2 horizontalExtent;
 };
 
 StructuredBuffer<WindMetaDataEntry> WindMetaData;
@@ -75,54 +75,67 @@ struct VS_OUTPUT
 #if SHD_WIND
 
 //less then trunkStiffness (%) will be absolutely stay, like tree trunk
-static const float trunkStiffness = 0.12f;
-static const float phaseVariation = 0.40f;
-static const float windStrengMult = 16.0f; // original engine uses [0.1 -> 5] range, we use higher values in formulas 
+static const float windStrengMult = 16.0f; // Preserve the established Spacer wind-strength scale.
 static const float PI_2 = 6.283185; // 2 * PI
 
-float GetInstancePhaseOffset(float4x4 objMatrix, float maxHeightValue)
+float GetInstancePhaseOffset(float2 objectWorldXZ, float maxHeightValue)
 {
-    // Random seed by object's matrix
-    // Combine object matrix and maxHeight for more stable randomness
-    float seed = dot(objMatrix._11_22_33, float3(12.9898, 78.233, 53.539)) + maxHeightValue;
-    return frac(sin(seed) * 43758.5453) * phaseVariation;
+    // Stable per-instance phase. World position also makes nearby vegetation
+    // share the broad gust front instead of oscillating as isolated objects.
+    float seed = dot(objectWorldXZ, float2(0.0129898f, 0.078233f))
+        + maxHeightValue * 0.0053539f;
+    return frac(sin(seed) * 43758.5453f) * PI_2;
 }
 
-float3 ApplyTreeWind(float3 vertexPos, float3 direction, float heightNorm, float timeSec, float4x4 instMatrix, float maxHeightValue, float windStrength)
+float3 ApplyVegetationWind(
+    float3 vertexPos,
+    float3 direction,
+    float heightNorm,
+    float timeSec,
+    float2 objectWorldXZ,
+    float maxHeightValue,
+    float2 horizontalExtent,
+    float objectHeight,
+    float windStrength)
 {
-    // Calculate if vertex should be affected (1 if heightNorm >= trunkStiffness, 0 otherwise)
-    float shouldAffect = saturate(sign(heightNorm - trunkStiffness + 0.0001f));
-    
-    float instancePhase = GetInstancePhaseOffset(instMatrix, maxHeightValue) * PI_2;
-    
-    // Smooth height factor with more natural falloff
-    float adjustedHeight = saturate((heightNorm - trunkStiffness) / (1.0 - trunkStiffness)) * shouldAffect;
-    float heightFactor = pow(adjustedHeight, 2.6f);
-    
-    // Main wave
-    float mainWave = sin(timeSec * 1.0 + heightNorm * 3.0 + instancePhase) * 0.8;
-    
-    // Second wave
-    float secondaryWave = cos(timeSec * 0.7 + heightNorm * 5.0 + instancePhase * 1.5) * 0.80;
-    
-    // Inertia
-    float inertiaEffect = sin(timeSec * 0.3 + heightNorm * 8.0) * 0.1;
-    
-    // Height amplitude
-    float topSmoothing = smoothstep(0.7, 0.9, adjustedHeight);
-    
-    // Combine waves
-    float combinedWave = (mainWave + secondaryWave * 0.5) * (1.0 - topSmoothing * 0.3) + inertiaEffect * topSmoothing;
-    
-    // Chaotical motion
-    float leafTurbulence = (sin(timeSec * 4.0 + vertexPos.x * 15.0) +
-                          cos(timeSec * 3.7 + vertexPos.z * 12.0)) * 0.05 * topSmoothing;
-    
-    // Final offset
-    float3 windOffset = direction * windStrength * windStrengMult *
-                       (combinedWave + leafTurbulence) * heightFactor;
-    
-    return windOffset;
+    float maxHorizontalExtent = max(max(horizontalExtent.x, horizontalExtent.y), 0.001f);
+    float slenderness = objectHeight / (maxHorizontalExtent * 2.0f);
+    float treeProfile = smoothstep(1.8f, 4.5f, slenderness);
+
+    // Small plants may bend close to the soil; tree-like objects retain a
+    // firmer trunk. The smooth cubic ramp prevents a visible hinge line.
+    float anchorHeight = lerp(0.045f, 0.11f, treeProfile);
+    float bend = saturate((heightNorm - anchorHeight) / max(1.0f - anchorHeight, 0.001f));
+    bend = bend * bend * (3.0f - 2.0f * bend);
+    bend *= lerp(1.0f, heightNorm, treeProfile);
+
+    float3 horizontalDirection = float3(direction.x, 0.0f, direction.z);
+    horizontalDirection *= rsqrt(max(dot(horizontalDirection, horizontalDirection), 0.0001f));
+    float3 crossDirection = float3(-horizontalDirection.z, 0.0f, horizontalDirection.x);
+
+    float instancePhase = GetInstancePhaseOffset(objectWorldXZ, maxHeightValue);
+    float gustPhase = timeSec * 0.34f
+        + dot(objectWorldXZ, horizontalDirection.xz) * 0.0011f;
+    float gust = 0.72f + 0.28f * sin(gustPhase);
+
+    // Broad downwind bending plus restrained crosswind inertia. Keeping the
+    // main response predominantly downwind avoids the old metronome motion.
+    float mainWave = sin(timeSec * 0.88f + instancePhase + heightNorm * 1.35f);
+    float downwind = (0.52f + 0.48f * mainWave) * gust;
+    float crosswind = sin(timeSec * 1.31f + instancePhase * 1.71f + heightNorm * 2.4f)
+        * 0.16f * gust;
+
+    // Approximate branch/leaf freedom from distance to the local centre. This
+    // uses existing bounds and avoids vertex textures or authored weight data.
+    float2 radialPosition = vertexPos.xz / max(horizontalExtent, float2(0.001f, 0.001f));
+    float edgeWeight = smoothstep(0.25f, 0.85f, saturate(length(radialPosition)));
+    float detailWeight = edgeWeight * smoothstep(0.42f, 0.82f, heightNorm);
+    float detailWave = sin(timeSec * 3.15f + instancePhase * 2.13f
+        + dot(vertexPos.xz, float2(0.071f, 0.053f))) * 0.055f * detailWeight;
+
+    float amplitude = windStrength * windStrengMult * bend;
+    return (horizontalDirection * (downwind + detailWave)
+        + crossDirection * crosswind) * amplitude;
 }
 #endif
 
@@ -207,12 +220,14 @@ VS_OUTPUT VSMain( VS_INPUT Input )
     float3 prevPosition = Input.vPosition;
     float localMinHeight = minHeight;
     float localMaxHeight = maxHeight;
+    float2 localHorizontalExtent = float2(1.0f, 1.0f);
     float interactionWindScale = 1.0f;
 
 #if WIND_META_SRV
     WindMetaDataEntry meta = WindMetaData[Input.InstanceWindMetaIndex];
     localMinHeight = meta.minHeight;
     localMaxHeight = meta.maxHeight;
+    localHorizontalExtent = meta.horizontalExtent;
 #endif
 
 #if SHD_INFLUENCE
@@ -236,15 +251,19 @@ VS_OUTPUT VSMain( VS_INPUT Input )
         // Protect 0 height
         float heightRange = max(localMaxHeight - localMinHeight, 0.001);
         float vertexHeightNorm = saturate((Input.vPosition.y - localMinHeight) / heightRange);
+        float2 currentObjectWorldXZ = mul(float4(0.0f, 0.0f, 0.0f, 1.0f), Input.InstanceWorldMatrix).xz;
+        float2 previousObjectWorldXZ = mul(float4(0.0f, 0.0f, 0.0f, 1.0f), Input.InstancePrevWorldMatrix).xz;
 
         // Apply current and previous wind phases with the same local interaction
         // attenuation so FSR receives consistent vegetation motion vectors.
         float3 windDirection = normalize(windDir);
-        float3 currentWindOffset = ApplyTreeWind(
-            Input.vPosition, windDirection, vertexHeightNorm, globalTime, Input.InstanceWorldMatrix, localMaxHeight, Input.InstanceWind.x
+        float3 currentWindOffset = ApplyVegetationWind(
+            Input.vPosition, windDirection, vertexHeightNorm, globalTime, currentObjectWorldXZ,
+            localMaxHeight, localHorizontalExtent, heightRange, Input.InstanceWind.x
         );
-        float3 previousWindOffset = ApplyTreeWind(
-            Input.vPosition, windDirection, vertexHeightNorm, prevGlobalTime, Input.InstancePrevWorldMatrix, localMaxHeight, Input.InstanceWind.x
+        float3 previousWindOffset = ApplyVegetationWind(
+            Input.vPosition, windDirection, vertexHeightNorm, prevGlobalTime, previousObjectWorldXZ,
+            localMaxHeight, localHorizontalExtent, heightRange, Input.InstanceWind.x
         );
         position += currentWindOffset * interactionWindScale;
         prevPosition += previousWindOffset * interactionWindScale;

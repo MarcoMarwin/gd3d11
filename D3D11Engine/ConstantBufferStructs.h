@@ -24,8 +24,9 @@ static_assert( sizeof( VobInstanceInfo ) == 148 );
 struct VobWindMetadata {
     float MinHeight;
     float MaxHeight;
-    float2 Padding;
+    float2 HorizontalExtent;
 };
+static_assert( sizeof( VobWindMetadata ) == 16 );
 
 /** Oriented local volume cut from the Gothic world mesh by an actual window VOB. */
 struct WindowCutoutVolume {

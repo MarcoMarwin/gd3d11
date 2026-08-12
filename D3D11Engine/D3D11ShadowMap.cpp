@@ -997,6 +997,14 @@ std::vector<float> D3D11ShadowMap::ComputeCascadeSplits( float nearPlane, float 
 XRESULT D3D11ShadowMap::DrawPointlightShadows( std::vector<VobLightInfo*>& lights ) {
     ZoneScopedN( "DrawPointlightShadows" );
 
+    auto* graphicsEngine = reinterpret_cast<D3D11GraphicsEngine*>( Engine::GraphicsEngine );
+    if ( !Engine::GAPI || !Engine::GAPI->IsWorldRenderCacheReady() ) {
+        // Loading screens can still execute renderer callbacks while the old
+        // world is being destroyed. Do not touch any raw world pointers here;
+        // ResetVobs clears the deferred queue after flushing renderer workers.
+        return XR_SUCCESS;
+    }
+
     auto& settings = Engine::GAPI->GetRendererState().RendererSettings;
     // Shadow resources follow the same frame visibility that is already limited by VisualFXDrawRadius.
     for ( auto& it : Engine::GAPI->VobLightMap ) {
@@ -1018,7 +1026,6 @@ XRESULT D3D11ShadowMap::DrawPointlightShadows( std::vector<VobLightInfo*>& light
         return XR_SUCCESS;
     }
     
-    auto graphicsEngine = reinterpret_cast<D3D11GraphicsEngine*>(Engine::GraphicsEngine);
     auto _ = graphicsEngine->RecordGraphicsEvent( GE_NAME( "DrawPointlightShadows" ) );
 
     graphicsEngine->SetDefaultStates();

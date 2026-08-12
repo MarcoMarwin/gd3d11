@@ -302,6 +302,16 @@ PS_OUTPUT PSMain( PS_INPUT Input )
     float skyLayerAlpha = saturate(
         skyTransmittedCloudAlpha
         + skyMoonDiskOcclusion * ( 1.0f - skyTransmittedCloudAlpha ) );
+
+    // Gothic fog zones already provide a smoothly interpolated override. Fade
+    // the premultiplied cloud layer with that same transition so clouds, their
+    // water reflections and god-ray occlusion disappear together in world fog.
+    float worldFogCloudVisibility = 1.0f - smoothstep( 0.08f, 0.55f, saturate( HF_FogOverride ) );
+    transmittedCloudAlpha *= worldFogCloudVisibility;
+    layerAlpha *= worldFogCloudVisibility;
+    skyTransmittedCloudAlpha *= worldFogCloudVisibility;
+    skyLayerAlpha *= worldFogCloudVisibility;
+
     PS_OUTPUT output;
     output.Clouds = float4( clouds.rgb * transmittedCloudAlpha, layerAlpha );
     output.Depth = expDepth;
