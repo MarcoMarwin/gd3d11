@@ -632,18 +632,13 @@ float ComputeShadowValue(float2 uv, float3 wsPosition, Texture2D shadowmap, Samp
 // CSM: Shadow-Sampling with soft shadows and cascade blending
 // Uses SQ_ShadowSoftness for configurable shadow edge softness
 //--------------------------------------------------------------------------------------
-float ComputeCascadedShadowValueSoft(float3 wsPosition, float viewSpaceZ,
-    float vertLighting, float bias, float2 screenPos, float forceStablePCF,
-    float receiverGrazing)
+float ComputeCascadedShadowValueSoft(float3 wsPosition, float viewSpaceZ, float vertLighting, float bias, float2 screenPos, float forceStablePCF)
 {
     float shadow = vertLighting;
     // Apply distance-based softness scaling
     // Shadows get slightly softer with distance (simulating penumbra growth)
     float distanceFactor = saturate(abs(viewSpaceZ) / 5000.0f);
-    float grazingFootprint = lerp(
-        1.0f, 1.75f, smoothstep(0.70f, 0.98f, saturate(receiverGrazing)));
-    float softness = SQ_ShadowSoftness * (1.0f + distanceFactor * 0.5f)
-        * grazingFootprint;
+    float softness = SQ_ShadowSoftness * (1.0f + distanceFactor * 0.5f);
 
     int selectedCascade = -1;
     float4 vShadowPos;

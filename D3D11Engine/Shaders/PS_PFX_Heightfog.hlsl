@@ -102,32 +102,25 @@ float4 PSMain( PS_INPUT Input ) : SV_TARGET
 	* saturate(AC_EnableNightAtmosphere);
 	float worldFogActivation = max(HF_FogOverride, nightTimeBlend * (1.0f - activeWeatherFog));
 	worldFog *= worldFogActivation;
-	// Match the composition path: only daytime geometry inside a Gothic fog
-	// zone receives the corrected world-space scattering input. Rain fog and
-	// all non-override rendering remain unchanged.
-	float regionalDayTransition = 1.0f - smoothstep(0.0f, 0.75f, nightTimeBlend);
-	float worldFogDayGeometryWeight = saturate(HF_FogOverride)
-		* regionalDayTransition
-		* (1.0f - activeWeatherFog)
-		* (1.0f - skyPixel);
-	// Match composition: only daytime geometry in an explicit Gothic fog zone
-	// is forced completely into fog at the configured far range.
+	// Explicit Gothic world-fog zones conceal distant geometry identically at
+	// every time of day. Rain remains an independent veil composed later.
+	float worldFogGeometryWeight = saturate(HF_FogOverride) * (1.0f - skyPixel);
 	float worldFogGeometryDistance = length(posOriginal - HF_CameraPosition);
 	float worldFogOcclusionStart = lerp(HF_WeightZNear, HF_WeightZFar, 0.45f);
 	float worldFogOcclusionEnd = lerp(HF_WeightZNear, HF_WeightZFar, 0.82f);
 	float worldFogFarOcclusion = smoothstep(
 		worldFogOcclusionStart,
 		max(worldFogOcclusionEnd, worldFogOcclusionStart + 1.0f),
-		worldFogGeometryDistance) * worldFogDayGeometryWeight;
+		worldFogGeometryDistance) * worldFogGeometryWeight;
 	worldFog = max(worldFog, worldFogFarOcclusion);
 	float3 worldFogColorPosition = lerp(
-		position, posOriginal, worldFogDayGeometryWeight);
+		position, posOriginal, worldFogGeometryWeight);
 	float3 worldFogColor = ApplyAtmosphericScatteringGround(
 		worldFogColorPosition,
 		HF_FogColorMod,
 		true,
 		false);
-	// Match composition: the fully occluded daytime regional-fog field is a
+	// Match composition: the fully occluded regional-fog field is a
 	// uniform zone color, so distant terrain cannot survive as a blue silhouette.
 	worldFogColor = lerp(
 		worldFogColor,
@@ -140,6 +133,7 @@ float4 PSMain( PS_INPUT Input ) : SV_TARGET
 	float darknessFactor = lerp(dayDarknessFactor, 2.0f, nightTimeBlend);
 	float maxFogOpacity = lerp(1.0f, 0.85f, nightTimeBlend);
 	float worldFogOpacity = saturate(worldFog) * maxFogOpacity;
+	worldFogOpacity = max(worldFogOpacity, worldFogFarOcclusion);
 	float3 rainPosition = posOriginal - HF_CameraPosition;
 	rainPosition.y -= HF_RainFogHeight;
 	float rainFog = 1.0f - ComputeVolumetricFogCandidate(

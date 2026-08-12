@@ -129,7 +129,15 @@ void CSMain( uint3 groupID : SV_GroupID, uint3 threadID : SV_GroupThreadID, uint
     for ( uint i = threadIndex; i < TotalLights; i += numThreads ) {
         TiledPointLight light = SB_Lights[i];
 
-        if ( SphereInsideAABB( light.PositionView, light.Range * 1.05f, aabbMin, aabbMax ) ) {
+        // The depth-derived tile AABB is only a coarse approximation of the
+        // tile frustum. At grazing receiver angles its hard sphere test could
+        // reject an entire 16x16 tile although edge pixels were still inside
+        // the light. Admit one half tile diagonal as a conservative guard;
+        // the lighting pass still applies the exact per-pixel range test.
+        float cullingGuard = min(
+            0.5f * length(aabbMax - aabbMin), light.Range * 0.15f);
+        if ( SphereInsideAABB( light.PositionView, light.Range + cullingGuard,
+            aabbMin, aabbMax ) ) {
             uint index;
             InterlockedAdd( gs_TileLightCount, 1, index );
             if ( index < MAX_LIGHTS_PER_TILE ) {

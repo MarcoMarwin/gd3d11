@@ -29,15 +29,29 @@ float IsBlockedWindowSky(int2 pixelPosition, int2 targetSize, float skyCutoff)
 		? 1.0f : 0.0f;
 }
 
-float2 WindowUvDeltaToScreenDelta(float2 uvDelta, float2 uvDx, float2 uvDy)
+float2 WindowUvToScreenPosition(
+	float2 targetUv, float2 uvOverW, float reciprocalW,
+	float2 uvOverWDx, float2 uvOverWDy,
+	float reciprocalWDx, float reciprocalWDy,
+	float2 screenPosition)
 {
-	const float determinant = uvDx.x * uvDy.y - uvDy.x * uvDx.y;
+	// Perspective-correct UV is A/B, where A = UV/W and B = 1/W are
+	// screen-linear. Reconstruct that homography so every pixel of the planar
+	// window projects a row sample to exactly the same screen position.
+	const float2 equationX = uvOverWDx - targetUv * reciprocalWDx;
+	const float2 equationY = uvOverWDy - targetUv * reciprocalWDy;
+	const float2 rightHandSide = targetUv * reciprocalW - uvOverW;
+	const float determinant = equationX.x * equationY.y
+		- equationX.y * equationY.x;
 	if (abs(determinant) <= 1e-8f)
-		return float2(0.0f, 0.0f);
+		return screenPosition;
 
-	return float2(
-		(uvDelta.x * uvDy.y - uvDelta.y * uvDy.x) / determinant,
-		(uvDelta.y * uvDx.x - uvDelta.x * uvDx.y) / determinant);
+	const float2 screenDelta = float2(
+		(rightHandSide.x * equationY.y - equationX.y * rightHandSide.y)
+			/ determinant,
+		(equationX.x * rightHandSide.y - rightHandSide.x * equationY.x)
+			/ determinant);
+	return screenPosition + screenDelta;
 }
 
 //--------------------------------------------------------------------------------------
@@ -67,10 +81,14 @@ float4 PSMain( PS_INPUT Input ) : SV_TARGET
 	// City_Window replacement. Its solid texels already ran through the lit pass.
 	if (cbFFData.textureFactor.a < 0.0f)
 	{
-		// Derivatives must be evaluated before the alpha discard so the opaque
-		// lattice cannot invalidate neighboring pane-row projections.
-		const float2 uvDx = ddx(Input.vTexcoord);
-		const float2 uvDy = ddy(Input.vTexcoord);
+		// Evaluate derivatives while all lanes are active. The following discard
+		// removes the opaque lattice and must not invalidate pane-row projection.
+		const float reciprocalW = Input.vPosition.w;
+		const float2 uvOverW = Input.vTexcoord * reciprocalW;
+		const float2 uvOverWDx = ddx(uvOverW);
+		const float2 uvOverWDy = ddy(uvOverW);
+		const float reciprocalWDx = ddx(reciprocalW);
+		const float reciprocalWDy = ddy(reciprocalW);
 
 		if (color.a > (170.0f / 255.0f))
 			discard;
@@ -90,7 +108,7 @@ float4 PSMain( PS_INPUT Input ) : SV_TARGET
 
 			// City_Window.dds has five pane rows separated by an opaque lattice.
 			// If a row sees sky in the lower screen third, that complete row and
-			// every row below it become opaque. Three samples cover its three panes.
+			// every row below it become opaque. Two fixed samples cover each pane.
 			const int currentRow = clamp((int)(saturate(Input.vTexcoord.y) * 5.0f), 0, 4);
 			const float paneColumnCenters[3] = {
 				1.0f / 6.0f, 3.0f / 6.0f, 5.0f / 6.0f
@@ -108,8 +126,10 @@ float4 PSMain( PS_INPUT Input ) : SV_TARGET
 					{
 						const float sampleRow = (row + paneRowOffsets[rowSample]) / 5.0f;
 						const float2 sampleUv = float2(paneColumnCenters[column], sampleRow);
-						const float2 samplePosition = Input.vPosition.xy
-							+ WindowUvDeltaToScreenDelta(sampleUv - Input.vTexcoord, uvDx, uvDy);
+						const float2 samplePosition = WindowUvToScreenPosition(
+							sampleUv, uvOverW, reciprocalW,
+							uvOverWDx, uvOverWDy, reciprocalWDx, reciprocalWDy,
+							Input.vPosition.xy);
 						rowSkyVisible = max(rowSkyVisible, IsBlockedWindowSky(
 							int2(samplePosition), targetSize, skyCutoff));
 						if (rowSkyVisible > 0.5f)

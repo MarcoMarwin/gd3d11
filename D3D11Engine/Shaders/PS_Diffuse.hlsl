@@ -248,9 +248,7 @@ FORWARD_PLUS_PS_OUTPUT PSMain( PS_INPUT Input )
 				float3 biasedWsPosition = ApplyReceiverNormalBias(
 					wsPosition, wsNormal, wsLightDirection, texelWorldSize, vegetationReceiverMask);
 				shadow = ComputeCascadedShadowValueSoft(
-					biasedWsPosition, vsPosition.z, vertLighting, 0.0f,
-					Input.vPosition.xy, npcMaterial,
-					1.0f - saturate(abs(dot(wsNormal, wsLightDirection))));
+					biasedWsPosition, vsPosition.z, vertLighting, 0.0f, Input.vPosition.xy, npcMaterial);
 			}
 		#else
 			float3 wsNormal = normalize(mul(float4(nrm, 0.0f), SQ_InvView).xyz);
@@ -261,10 +259,7 @@ FORWARD_PLUS_PS_OUTPUT PSMain( PS_INPUT Input )
 
 			float3 biasedWsPosition = ApplyReceiverNormalBias(wsPosition, wsNormal, wsLightDirection, texelWorldSize, vegetationReceiverMask);
 
-			shadow = ComputeCascadedShadowValueSoft(
-				biasedWsPosition, vsPosition.z, vertLighting, 0.0f,
-				Input.vPosition.xy, npcMaterial,
-				1.0f - saturate(abs(dot(wsNormal, wsLightDirection))));
+			shadow = ComputeCascadedShadowValueSoft(biasedWsPosition, vsPosition.z, vertLighting, 0.0f, Input.vPosition.xy, npcMaterial);
 		#endif
 	} else {
 		float3 wsNormal = normalize(mul(float4(nrm, 0.0f), SQ_InvView).xyz);

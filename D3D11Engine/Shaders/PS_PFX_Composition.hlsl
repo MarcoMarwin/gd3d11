@@ -133,37 +133,26 @@ float nightTimeBlend = smoothstep(0.0f, 1.0f, saturate(-AC_LightPos.y * 4.0f))
 float nightFogRainFade = saturate(HF_NightFogRainFade);
 float worldFogActivation = max(HF_FogOverride, nightTimeBlend * (1.0f - nightFogRainFade));
 worldFog *= worldFogActivation;
-// Regional Gothic fog zones previously fed a camera-relative, height-shifted
-// vector into a function that expects world space. Correct only their daytime
-// geometry color; dry/night fog, sky pixels and the independent rain veil keep
-// the established path exactly.
-float regionalDayTransition = 1.0f - smoothstep(0.0f, 0.75f, nightTimeBlend);
-float worldFogDayGeometryWeight = saturate(HF_FogOverride)
-    * regionalDayTransition
-    * (1.0f - activeWeatherFog)
-    * (1.0f - skyPixel);
-// A daytime regional Gothic fog zone must fully conceal geometry at its far
-// range instead of leaving a blue atmospheric silhouette behind. This term is
-// deliberately gated away from night fog, rain fog and sky pixels.
+// Explicit Gothic world-fog zones conceal distant geometry identically at all
+// times of day. Rain remains an independent veil composed later.
+float worldFogGeometryWeight = saturate(HF_FogOverride) * (1.0f - skyPixel);
 float worldFogGeometryDistance = length(posOriginal - HF_CameraPosition);
 float worldFogOcclusionStart = lerp(HF_WeightZNear, HF_WeightZFar, 0.45f);
 float worldFogOcclusionEnd = lerp(HF_WeightZNear, HF_WeightZFar, 0.82f);
 float worldFogFarOcclusion = smoothstep(
     worldFogOcclusionStart,
     max(worldFogOcclusionEnd, worldFogOcclusionStart + 1.0f),
-    worldFogGeometryDistance) * worldFogDayGeometryWeight;
+    worldFogGeometryDistance) * worldFogGeometryWeight;
 worldFog = max(worldFog, worldFogFarOcclusion);
 float3 worldFogColorPosition = lerp(
-    position, posOriginal, worldFogDayGeometryWeight);
+    position, posOriginal, worldFogGeometryWeight);
 float3 color = ApplyAtmosphericScatteringGround(
     worldFogColorPosition,
     HF_FogColorMod,
     true,
     false);
-// Once daytime regional fog has reached its opaque far field, positional
-// atmospheric tint must no longer encode the hidden terrain silhouette.
-// Converge to the zone's uniform authored fog color; night and weather fog do
-// not contribute to worldFogFarOcclusion and retain their existing colors.
+// Once regional fog has reached its opaque far field, positional atmospheric
+// tint must no longer encode the hidden terrain silhouette.
 color = lerp(color, HF_FogColorMod, worldFogFarOcclusion);
 float nightFogBrightness = lerp(1.0f, max(0.0f, AC_NightFogBrightness), saturate(AC_EnableNightAtmosphere));
 float3 nightFogColor = float3(0.12f, 0.18f, 0.27f) * nightFogBrightness;
@@ -171,7 +160,9 @@ color = lerp(color, nightFogColor, nightTimeBlend);
 float dayDarknessFactor = max(1.0f, 2.0f - max(0.0f, AC_LightPos.y));
 float darknessFactor = lerp(dayDarknessFactor, 2.5f, nightTimeBlend);
 float maxFogOpacity = lerp(1.0f, 0.85f, nightTimeBlend);
-return float4(saturate(color / darknessFactor), saturate(worldFog) * maxFogOpacity);
+float worldFogOpacity = saturate(worldFog) * maxFogOpacity;
+worldFogOpacity = max(worldFogOpacity, worldFogFarOcclusion);
+return float4(saturate(color / darknessFactor), saturate(worldFogOpacity));
 }
 #endif
 
