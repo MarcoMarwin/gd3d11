@@ -256,6 +256,7 @@ void D3D11GraphicsEngineBase::UpdateTransformsCB() {
 
     VS_ExConstantBuffer_PerFrame cb = {};
     cb.View = view;
+    XMStoreFloat4x4( &cb.InvView, XMMatrixInverse( nullptr, XMLoadFloat4x4( &view ) ) );
     cb.Projection = proj;
     XMStoreFloat4x4( &cb.ViewProj, XMMatrixMultiply( XMLoadFloat4x4( &proj ), XMLoadFloat4x4( &view ) ) );
 

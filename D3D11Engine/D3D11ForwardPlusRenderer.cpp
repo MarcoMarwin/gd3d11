@@ -124,7 +124,10 @@ void D3D11ForwardPlusRenderer::AddGeometryPasses(
             auto size = engine.GetResolution();
             shadowMaskResource = builder.CreateTexture( {
                 static_cast<uint32_t>( size.x ), static_cast<uint32_t>( size.y ),
-                DXGI_FORMAT_R8_UNORM, L"ShadowMask" } );
+                // Preserve the fractional PCSS/PCF result. R8 quantized the mask to
+                // 256 levels before lighting and produced visible contour bands in
+                // shallow shadow gradients.
+                DXGI_FORMAT_R16_UNORM, L"ShadowMask" } );
             builder.Write( shadowMaskResource );
             builder.Write( backBufferHandle );
 
@@ -292,6 +295,12 @@ void D3D11ForwardPlusRenderer::AddGeometryPasses(
                     tiledDeferred->IsShadowArrayCreated() ? tiledDeferred->GetShadowCubeArraySRV() : nullptr,
                 };
                 context->PSSetShaderResources( 8, 4, lightSRVs );
+                ID3D11ShaderResourceView* dynamicShadowArray = tiledDeferred->IsShadowArrayCreated()
+                    ? tiledDeferred->GetDynamicShadowCubeArraySRV() : nullptr;
+                context->PSSetShaderResources( 13, 1, &dynamicShadowArray );
+                ID3D11ShaderResourceView* staticLowShadowArray = tiledDeferred->IsShadowArrayCreated()
+                    ? tiledDeferred->GetStaticLowShadowCubeArraySRV() : nullptr;
+                context->PSSetShaderResources( 20, 1, &staticLowShadowArray );
             }
 
             // --- Bind shadow mask at t12 ---
@@ -310,8 +319,9 @@ void D3D11ForwardPlusRenderer::AddGeometryPasses(
             context->PSSetShaderResources( 3, 1, s_nullSRVs );
             context->PSSetShaderResources( 6, 1, s_nullSRVs );
             context->PSSetShaderResources( 8, 4, s_nullSRVs );
-            context->PSSetShaderResources( 12, 1, s_nullSRVs );
+            context->PSSetShaderResources( 12, 2, s_nullSRVs );
             context->PSSetShaderResources( 14, MAX_CSM_CASCADES, s_nullSRVs );
+            context->PSSetShaderResources( 20, 1, s_nullSRVs );
 
             // Restore default depth comparison
             depthState.SetDefault();

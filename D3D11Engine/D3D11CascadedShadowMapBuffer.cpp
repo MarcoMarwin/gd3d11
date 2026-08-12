@@ -50,7 +50,9 @@ HRESULT D3D11CascadedShadowMapBuffer::Resize( UINT size ) {
     texDesc.Height = m_size;
     texDesc.MipLevels = 1;
     texDesc.ArraySize = m_numCascades;
-    texDesc.Format = DXGI_FORMAT_R16_TYPELESS;
+    // Match the DX12 CSM path: shallow light angles magnify D16 depth steps
+    // into visible receiver bands before PCSS/PCF filtering can smooth them.
+    texDesc.Format = DXGI_FORMAT_R32_TYPELESS;
     texDesc.SampleDesc.Count = 1;
     texDesc.SampleDesc.Quality = 0;
     texDesc.Usage = D3D11_USAGE_DEFAULT;
@@ -68,7 +70,7 @@ HRESULT D3D11CascadedShadowMapBuffer::Resize( UINT size ) {
     // Create per-slice depth stencil views
     for ( UINT i = 0; i < m_numCascades; ++i ) {
         D3D11_DEPTH_STENCIL_VIEW_DESC dsvDesc = {};
-        dsvDesc.Format = DXGI_FORMAT_D16_UNORM;
+        dsvDesc.Format = DXGI_FORMAT_D32_FLOAT;
         dsvDesc.ViewDimension = D3D11_DSV_DIMENSION_TEXTURE2DARRAY;
         dsvDesc.Texture2DArray.MipSlice = 0;
         dsvDesc.Texture2DArray.FirstArraySlice = i;
@@ -85,7 +87,7 @@ HRESULT D3D11CascadedShadowMapBuffer::Resize( UINT size ) {
 
     // Create shader resource view for the entire array
     D3D11_SHADER_RESOURCE_VIEW_DESC srvDesc = {};
-    srvDesc.Format = DXGI_FORMAT_R16_UNORM;
+    srvDesc.Format = DXGI_FORMAT_R32_FLOAT;
     srvDesc.ViewDimension = D3D11_SRV_DIMENSION_TEXTURE2DARRAY;
     srvDesc.Texture2DArray.MostDetailedMip = 0;
     srvDesc.Texture2DArray.MipLevels = 1;

@@ -64,9 +64,13 @@ public:
     void ReleaseShadowMap();
 
     // Tiled deferred slot management (renders directly into shared TextureCubeArray)
-    void SetTiledSlot( int slot, RenderToDepthStencilBuffer* target, D3D11TiledDeferredShading* owner );
+    void SetTiledSlot( int slot, RenderToDepthStencilBuffer* staticTarget, RenderToDepthStencilBuffer* dynamicTarget, D3D11TiledDeferredShading* owner );
     void ClearTiledSlot();
     int GetTiledSlot() const { return m_TiledSlotIndex; }
+    bool IsTiledStaticLowRes() const { return m_TiledSlotIndex >= 128; }
+    bool HasValidDynamicOverlay() const { return m_DynamicShadowValid; }
+    bool ShouldReleaseForVisibility( bool visible );
+    void OnTiledSlotEvicted();
     void SetCurrentResolution( int r ) { m_CurrentResolution = r; }
 
 protected:
@@ -100,6 +104,7 @@ protected:
     int m_CurrentResolution = 0; // Track current LOD size
     XMFLOAT4X4 CubeMapViewMatrices[6];
     XMFLOAT3 LastUpdatePosition;
+    float LastUpdateRange = 0.0f;
     DWORD LastUpdateColor;
     bool DynamicLight;
     std::atomic<bool> InitDone;
@@ -110,6 +115,9 @@ protected:
     // Tiled deferred slot (non-owning, owned by D3D11TiledDeferredShading)
     int m_TiledSlotIndex = -1;
     RenderToDepthStencilBuffer* m_TiledDepthTarget = nullptr;
+    RenderToDepthStencilBuffer* m_TiledDynamicDepthTarget = nullptr;
     D3D11TiledDeferredShading* m_TiledOwner = nullptr;
+    bool m_DynamicShadowValid = false;
+    uint8_t m_InvisibleFrameCount = 0;
     TaskHandle<void> m_PendingInit;
 };

@@ -570,11 +570,14 @@ XRESULT D3D11ShadowMap::PrepareRender()
 
     static XMVECTOR s_previousLightDir = currentDir;
     static bool s_lightDirInitialized = false;
-    // Sun and moon use separate phase-shifted paths. Reset their cached shadow
-    // directions at the horizon instead of interpolating through a zero vector.
+    // A savegame load can change the sky time (and therefore the light direction)
+    // discontinuously. Do not spend several seconds interpolating from the previous
+    // save's shadows to the new time. Normal per-frame sky movement is far below
+    // this angular threshold and remains smoothed.
     bool resetCascadeDirections = false;
+    constexpr float maxContinuousLightDirectionDot = 0.9995f; // about 1.8 degrees
     if ( s_lightDirInitialized &&
-        XMVectorGetX( XMVector3Dot( s_previousLightDir, currentDir ) ) < 0.0f ) {
+        XMVectorGetX( XMVector3Dot( s_previousLightDir, currentDir ) ) < maxContinuousLightDirectionDot ) {
         s_previousLightDir = currentDir;
         resetCascadeDirections = true;
     }
@@ -1002,8 +1005,9 @@ XRESULT D3D11ShadowMap::DrawPointlightShadows( std::vector<VobLightInfo*>& light
             continue;
         }
 
-        if ( !info->Vob->IsEnabled() || !info->VisibleInFrame ) {
-            if ( D3D11PointLight* pl = dynamic_cast<D3D11PointLight*>(info->LightShadowBuffers.get()) ) {
+        if ( D3D11PointLight* pl = dynamic_cast<D3D11PointLight*>(info->LightShadowBuffers.get()) ) {
+            const bool visible = info->Vob->IsEnabled() && info->VisibleInFrame;
+            if ( pl->ShouldReleaseForVisibility( visible ) ) {
                 pl->ClearTiledSlot();
                 pl->ReleaseShadowMap();
             }
@@ -1056,23 +1060,72 @@ XRESULT D3D11ShadowMap::DrawPointlightShadows( std::vector<VobLightInfo*>& light
         }
 
         if ( D3D11PointLight* pl = dynamic_cast<D3D11PointLight*>(light->LightShadowBuffers.get()) ) {
-            // Preset-controlled point-light shadow resolution. In dynamic mode
-            // visible eligible lights update every frame so actor/VFX shadows do not lag.
+            // Preset-controlled point-light shadow resolution.
             int desiredResolution = std::clamp( settings.PointlightShadowMapSize, 64, 512 );
-            if ( dynamicMode && !staticOnlyMode ) {
-                light->UpdateShadows = true;
+            if ( dynamicMode ) {
+                const XMVECTOR lightPosition = light->GetEffectivePositionWorldXM();
+                const float lightRange = std::max( light->Vob->GetLightRange(), 0.0f );
+
+                float cameraDistance = FLT_MAX;
+                XMStoreFloat( &cameraDistance, XMVector3Length(
+                    lightPosition - Engine::GAPI->GetCameraPositionXM() ) );
+
+                float heroDistance = FLT_MAX;
+                if ( zCVob* hero = Engine::GAPI->GetPlayerVob() ) {
+                    const XMFLOAT3 heroPosition = hero->GetPositionWorld();
+                    XMStoreFloat( &heroDistance, XMVector3Length(
+                        lightPosition - XMLoadFloat3( &heroPosition ) ) );
+                }
+
+                // Never round-robin a light capable of casting a visible hero
+                // shadow. Camera-near lights receive the same per-frame tier.
+                const bool affectsHero = heroDistance <= lightRange + 250.0f;
+                const bool cameraNear = cameraDistance <= lightRange + 1200.0f;
+                if ( affectsHero || cameraNear ) {
+                    light->UpdateShadows = true;
+                }
+            }
+
+            float allocationCameraDistance = FLT_MAX;
+            XMStoreFloat( &allocationCameraDistance, XMVector3Length(
+                light->GetEffectivePositionWorldXM() - Engine::GAPI->GetCameraPositionXM() ) );
+            float allocationHeroDistance = FLT_MAX;
+            if ( zCVob* hero = Engine::GAPI->GetPlayerVob() ) {
+                const XMFLOAT3 heroPosition = hero->GetPositionWorld();
+                XMStoreFloat( &allocationHeroDistance, XMVector3Length(
+                    light->GetEffectivePositionWorldXM() - XMLoadFloat3( &heroPosition ) ) );
+            }
+            const float allocationRange = std::max( light->Vob->GetLightRange(), 0.0f );
+            const bool heroRelevant = allocationHeroDistance <= allocationRange + 250.0f;
+            const float slotPriority = heroRelevant ? 0.0f
+                : std::min( allocationCameraDistance * allocationCameraDistance,
+                    allocationHeroDistance * allocationHeroDistance );
+            const bool eligibleForStaticLowRes = light->Vob->IsStatic()
+                && !light->IsDynamicVobLight && !light->IsVisualFXLight;
+            const float lowTierBoundary = light->Vob->GetLightRange()
+                + (pl->IsTiledStaticLowRes() ? 2000.0f : 3000.0f);
+            const bool staticLowRes = eligibleForStaticLowRes && !heroRelevant
+                && allocationCameraDistance > lowTierBoundary;
+            if ( isTiledShadingEnabled && pl->GetTiledSlot() >= 0 && !pl->IsTiledStaticLowRes() ) {
+                m_TiledDeferred->TouchSlotPriority( pl->GetTiledSlot(), slotPriority );
             }
 
             // Acquire memory if it doesn't have it (or resolution changed)
-            if ( !pl->HasShadowMap( requiredShadowMapKind ) || pl->GetShadowMapResolution() != desiredResolution ) {
+            if ( !pl->HasShadowMap( requiredShadowMapKind )
+                || pl->GetShadowMapResolution() != desiredResolution
+                || (isTiledShadingEnabled && pl->IsTiledStaticLowRes() != staticLowRes) ) {
                 pl->ClearTiledSlot();
                 pl->ReleaseShadowMap();
 
                 // Try tiled slot when tiled lighting is active.
                 if ( isTiledShadingEnabled ) {
-                    int slot = m_TiledDeferred->AllocateSlot( static_cast<uint32_t>(desiredResolution) );
+                    int slot = m_TiledDeferred->AllocateSlot(
+                        static_cast<uint32_t>(desiredResolution), staticLowRes, pl, slotPriority );
                     if ( slot >= 0 ) {
-                        pl->SetTiledSlot( slot, m_TiledDeferred->GetSlotTarget( slot ), m_TiledDeferred.get() );
+                        pl->SetTiledSlot( slot,
+                            m_TiledDeferred->GetSlotTarget( slot ),
+                            m_TiledDeferred->GetDynamicSlotTarget( slot ),
+                            m_TiledDeferred.get() );
                         pl->SetCurrentResolution( desiredResolution );
                     } else {
                         light->UpdateShadows = false;
@@ -1093,6 +1146,11 @@ XRESULT D3D11ShadowMap::DrawPointlightShadows( std::vector<VobLightInfo*>& light
             if ( isInited ) {
                 // Immediate Priority: Light moved, was just created, or explicit flag set
                 if ( needsUpdate || light->UpdateShadows ) {
+                    auto& queue = graphicsEngine->FrameShadowUpdateLights;
+                    auto queued = std::find( queue.begin(), queue.end(), light );
+                    if ( queued != queue.end() ) {
+                        queue.erase( queued );
+                    }
                     importantUpdates.emplace_back( light );
                 }
                 // Background Priority: Add to round-robin queue if not already there
@@ -1101,6 +1159,9 @@ XRESULT D3D11ShadowMap::DrawPointlightShadows( std::vector<VobLightInfo*>& light
                     if ( std::find( queue.begin(), queue.end(), light ) == queue.end() ) {
                         queue.emplace_back( light );
                     }
+                } else if ( !staticOnlyMode ) {
+                    // Preserve the setting's original full-update semantics.
+                    importantUpdates.emplace_back( light );
                 } else if ( staticOnlyMode ) {
                     auto& queue = graphicsEngine->FrameShadowUpdateLights;
                     auto queued = std::find( queue.begin(), queue.end(), light );
@@ -1113,8 +1174,22 @@ XRESULT D3D11ShadowMap::DrawPointlightShadows( std::vector<VobLightInfo*>& light
     }
 
     // Render the immediate priority lights
+    int lowStaticRenders = 0;
+    constexpr int maxLowStaticRendersPerFrame = 4;
     for ( auto const& importantUpdate : importantUpdates ) {
-        static_cast<D3D11PointLight*>(importantUpdate->LightShadowBuffers.get())->RenderCubemap( true, m_PointLightCB.get() );
+        auto* pointLight = static_cast<D3D11PointLight*>(importantUpdate->LightShadowBuffers.get());
+        if ( pointLight->IsTiledStaticLowRes() && !pointLight->IsStaticShadowReady()
+            && lowStaticRenders >= maxLowStaticRendersPerFrame ) {
+            auto& queue = graphicsEngine->FrameShadowUpdateLights;
+            if ( std::find( queue.begin(), queue.end(), importantUpdate ) == queue.end() ) {
+                queue.emplace_back( importantUpdate );
+            }
+            continue;
+        }
+        if ( pointLight->IsTiledStaticLowRes() && !pointLight->IsStaticShadowReady() ) {
+            ++lowStaticRenders;
+        }
+        pointLight->RenderCubemap( true, m_PointLightCB.get() );
         importantUpdate->UpdateShadows = false;
     }
 
@@ -1128,10 +1203,14 @@ XRESULT D3D11ShadowMap::DrawPointlightShadows( std::vector<VobLightInfo*>& light
         auto light = graphicsEngine->FrameShadowUpdateLights.front();
         graphicsEngine->FrameShadowUpdateLights.pop_front();
 
-        if ( !light ) continue;
+        if ( !light || !light->Vob || !light->Vob->IsEnabled() || !light->VisibleInFrame ) continue;
 
         D3D11PointLight* l = static_cast<D3D11PointLight*>( light->LightShadowBuffers.get() );
         if ( !l ) continue;
+
+        // A queued light can lose its shared slot to a much closer challenger.
+        // Do not spend one of the two background updates on a stale entry.
+        if ( !l->HasShadowMap( requiredShadowMapKind ) ) continue;
 
         if ( staticOnlyMode && l->IsStaticShadowReady() && !l->NeedsUpdate() ) {
             light->UpdateShadows = false;

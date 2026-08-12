@@ -316,6 +316,7 @@ struct AdvanceRainConstantBuffer {
 
 struct VS_ExConstantBuffer_PerFrame {
     XMFLOAT4X4 View;
+    XMFLOAT4X4 InvView;
     XMFLOAT4X4 Projection;
     XMFLOAT4X4 ViewProj;           // Jittered for rendering
     XMFLOAT4X4 PrevViewProj;       // Previous frame's unjittered view-projection for motion vectors

@@ -43,46 +43,13 @@ StructuredBuffer<LightGrid> SB_LightGrid : register( t9 );
 StructuredBuffer<uint> SB_LightIndexList : register( t10 );
 
 TextureCubeArray TX_ShadowCubeArray : register( t11 );
+TextureCubeArray TX_DynamicShadowCubeArray : register( t12 );
+TextureCubeArray TX_StaticLowShadowCubeArray : register( t20 );
 
 float3 VSPositionFromDepth( float depth, uint2 pixelCoord ) {
     return ReconstructVSPositionFromDepthReverseZInfinite( depth, pixelCoord, ViewportSize, ProjParams.xy );
 }
 
-
-float ComputeIndoorDoorFloorBleed(float indoorPixel, float3 wsPosition, float3 wsNormal, float3 vsPosition, float3 lightPosView, float3 lightPosWorld, float lightRange, uint2 pixelCoord, float currentDepth)
-{
-	float outdoorPixel = 1.0f - indoorPixel;
-	float floorMask = smoothstep(0.40f, 0.70f, wsNormal.y);
-	float belowLight = smoothstep(-80.0f, 160.0f, lightPosWorld.y - wsPosition.y);
-	float surfaceMask = lerp(0.35f, 1.0f, floorMask);
-	float baseMask = outdoorPixel * surfaceMask * belowLight;
-	if (baseMask <= 0.0f)
-		return 0.0f;
-
-	const float bleedWorldSize = 30.0f;
-	float worldPixel = max(2.0f * abs(vsPosition.z) * max(ProjParams.x / ViewportSize.x, ProjParams.y / ViewportSize.y), 0.02f);
-	int maxRadius = clamp((int)(bleedWorldSize / worldPixel + 0.5f), 1, 768);
-	float doorwayProbe = 0.0f;
-	[unroll] for (int r = 0; r < 7; ++r)
-	{
-		int radius = max(1, (maxRadius * (r + 1)) / 7);
-		[unroll] for (int d = 0; d < 8; ++d)
-		{
-			int sx = (d == 0 || d == 4 || d == 5) ? radius : ((d == 1 || d == 6 || d == 7) ? -radius : 0);
-			int sy = (d == 2 || d == 4 || d == 6) ? radius : ((d == 3 || d == 5 || d == 7) ? -radius : 0);
-			int2 sampleCoord = clamp(int2(pixelCoord) + int2(sx, sy), int2(0, 0), int2(ViewportSize) - int2(1, 1));
-			float4 sampleDiffuse = TX_Diffuse.Load(int3(sampleCoord, 0));
-			float sampleIndoor = sampleDiffuse.a < 0.5f ? 1.0f : 0.0f;
-			float sampleDepth = TX_Depth.Load(int3(sampleCoord, 0)).r;
-			float3 sampleVS = VSPositionFromDepth(sampleDepth, sampleCoord);
-			float worldDistance = length(sampleVS - vsPosition);
-			float worldFade = saturate(1.0f - worldDistance / bleedWorldSize);
-			doorwayProbe = max(doorwayProbe, sampleIndoor * worldFade);
-		}
-	}
-
-	return baseMask * doorwayProbe;
-}
 
 RWTexture2D<float4> RW_HDR : register( u0 );
 
@@ -149,16 +116,24 @@ void CSMain( uint3 groupID : SV_GroupID, uint3 threadID : SV_GroupThreadID, uint
 
         // Apply shadow if this light has a shadow cubemap and contribution is non-negligible
         if ( light.ShadowCubeIndex >= 0 && any( lighting > 0.001f ) ) {
-            float shadow = PLS_SampleShadowCubeArray( TX_ShadowCubeArray, SS_Comp, wsPosition, wsNormal, light.PositionWorld, light.Range, light.ShadowCubeIndex, light.ShadowSoftness );
+            const int shadowSlot = light.ShadowCubeIndex & 0x1fffffff;
+            const bool lowStatic = (light.ShadowCubeIndex & 0x20000000) != 0;
+            float shadow;
+            if ( lowStatic )
+                shadow = PLS_SampleShadowCubeArray( TX_StaticLowShadowCubeArray, SS_Comp, wsPosition, wsNormal, light.PositionWorld, light.Range, shadowSlot, max(light.ShadowSoftness, 1.25f) );
+            else
+                shadow = PLS_SampleShadowCubeArray( TX_ShadowCubeArray, SS_Comp, wsPosition, wsNormal, light.PositionWorld, light.Range, shadowSlot, light.ShadowSoftness );
+            if ( shadow > 0.001f && (light.ShadowCubeIndex & 0x40000000) != 0 )
+            {
+                shadow *= PLS_SampleShadowCubeArray( TX_DynamicShadowCubeArray, SS_Comp, wsPosition, wsNormal, light.PositionWorld, light.Range, shadowSlot, light.ShadowSoftness );
+            }
             lighting *= lerp(1.0f, shadow, saturate(light.ShadowStrength));
         }
 
+        // Retain the exact indoor/outdoor leak barrier. Avoid neighborhood probes:
+        // their integer sample radii created visible lighting bands.
         float indoorPixel = diffuse.a < 0.5f ? 1.0f : 0.0f;
-        float doorFloorBleed = 0.0f;
-        if ( light.IsIndoor > 0.5f && light.IgnoreIndoorOutdoorLimit < 0.5f ) {
-            doorFloorBleed = ComputeIndoorDoorFloorBleed(indoorPixel, wsPosition, wsNormal, vsPosition, light.PositionView, light.PositionWorld, light.Range, pixelCoord, expDepth);
-        }
-        float indoorBoundary = saturate( (1.0f - light.IsIndoor) + light.IsIndoor * max(indoorPixel, doorFloorBleed) );
+        float indoorBoundary = saturate((1.0f - light.IsIndoor) + light.IsIndoor * indoorPixel);
         lighting *= lerp(indoorBoundary, 1.0f, saturate(light.IgnoreIndoorOutdoorLimit));
 
         lighting = saturate( lighting );

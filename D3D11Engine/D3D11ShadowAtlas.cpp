@@ -115,7 +115,9 @@ HRESULT D3D11ShadowAtlas::Resize( UINT cascade0Size ) {
     texDesc.Height = m_atlasHeight;
     texDesc.MipLevels = 1;
     texDesc.ArraySize = 1;
-    texDesc.Format = DXGI_FORMAT_R16_TYPELESS;
+    // Keep the atlas fallback at the same precision as the texture-array CSM.
+    // D16 produces visible depth contours on receivers at shallow light angles.
+    texDesc.Format = DXGI_FORMAT_R32_TYPELESS;
     texDesc.SampleDesc.Count = 1;
     texDesc.SampleDesc.Quality = 0;
     texDesc.Usage = D3D11_USAGE_DEFAULT;
@@ -133,7 +135,7 @@ HRESULT D3D11ShadowAtlas::Resize( UINT cascade0Size ) {
 
     // Create single DSV for the entire atlas
     D3D11_DEPTH_STENCIL_VIEW_DESC dsvDesc = {};
-    dsvDesc.Format = DXGI_FORMAT_D16_UNORM;
+    dsvDesc.Format = DXGI_FORMAT_D32_FLOAT;
     dsvDesc.ViewDimension = D3D11_DSV_DIMENSION_TEXTURE2D;
     dsvDesc.Texture2D.MipSlice = 0;
     dsvDesc.Flags = 0;
@@ -147,7 +149,7 @@ HRESULT D3D11ShadowAtlas::Resize( UINT cascade0Size ) {
 
     // Create SRV (Texture2D, not array)
     D3D11_SHADER_RESOURCE_VIEW_DESC srvDesc = {};
-    srvDesc.Format = DXGI_FORMAT_R16_UNORM;
+    srvDesc.Format = DXGI_FORMAT_R32_FLOAT;
     srvDesc.ViewDimension = D3D11_SRV_DIMENSION_TEXTURE2D;
     srvDesc.Texture2D.MostDetailedMip = 0;
     srvDesc.Texture2D.MipLevels = 1;

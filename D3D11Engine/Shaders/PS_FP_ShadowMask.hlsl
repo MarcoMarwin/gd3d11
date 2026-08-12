@@ -3,7 +3,8 @@
 // Screen-space shadow mask pre-pass for Forward+ rendering.
 //
 // Reads the Z-prepass depth buffer, reconstructs world-space position per pixel,
-// and outputs a pre-computed CSM shadow value to an R8_UNORM texture.
+// and outputs a pre-computed CSM shadow value to an R16_UNORM texture. The extra
+// precision is required for smooth PCSS/PCF penumbrae; R8 visibly quantizes them.
 // PS_Diffuse.hlsl (FORWARD_PLUS branch) samples this texture at t12 instead of
 // running ComputeCascadedShadowValueSoft inline per fragment.
 //

@@ -1,5 +1,5 @@
-// Velocity Buffer Pixel Shader with depth-aware dilation
-// Generates screen-space motion vectors from depth buffer reprojection.
+// Camera velocity fallback. FSR3 performs its own depth-aware dilation, so the
+// producer must provide the exact center-pixel vector without a 3x3 max filter.
 
 cbuffer VelocityConstants : register(b0) {
     float4x4 InvViewProj;      // Current frame's UNJITTERED inverse view-projection
@@ -57,41 +57,8 @@ float2 CalculateVelocity(float2 texCoord, float depth) {
     return prevUV - currentUV;
 }
 
-float2 DilateVelocity3x3(float2 texCoord, float2 pixelSize) {
-    float centerDepth = TX_Depth.SampleLevel(SS_Point, texCoord, 0).r;
-    float2 centerVelocity = CalculateVelocity(texCoord, centerDepth);
-    if (IsSkyDepth(centerDepth)) {
-        return centerVelocity;
-    }
-
-    float2 bestVelocity = centerVelocity;
-    float bestMagnitudeSq = dot(centerVelocity, centerVelocity);
-    float depthTolerance = 0.002f + saturate(1.0f - centerDepth) * 0.006f;
-
-    [unroll]
-    for (int y = -1; y <= 1; y++) {
-        [unroll]
-        for (int x = -1; x <= 1; x++) {
-            float2 sampleUV = clamp(texCoord + float2(x, y) * pixelSize, pixelSize, 1.0 - pixelSize);
-            float depth = TX_Depth.SampleLevel(SS_Point, sampleUV, 0).r;
-            if (IsSkyDepth(depth) || abs(depth - centerDepth) > depthTolerance) {
-                continue;
-            }
-
-            float2 velocity = CalculateVelocity(sampleUV, depth);
-            float magnitudeSq = dot(velocity, velocity);
-            if (magnitudeSq > bestMagnitudeSq * 1.25f) {
-                bestVelocity = velocity;
-                bestMagnitudeSq = magnitudeSq;
-            }
-        }
-    }
-
-    return bestVelocity;
-}
-
 float2 PSMain(PS_INPUT Input) : SV_TARGET {
     float2 texCoord = Input.vTexcoord;
-    float2 pixelSize = 1.0 / Resolution;
-    return DilateVelocity3x3(texCoord, pixelSize);
+    float depth = TX_Depth.SampleLevel(SS_Point, texCoord, 0).r;
+    return CalculateVelocity(texCoord, depth);
 }

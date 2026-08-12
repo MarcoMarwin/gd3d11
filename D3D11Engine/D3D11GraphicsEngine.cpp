@@ -5756,6 +5756,7 @@ void D3D11GraphicsEngine::SetupVS_ExConstantBuffer() {
 
     VS_ExConstantBuffer_PerFrame cb;
     cb.View = view;
+    XMStoreFloat4x4( &cb.InvView, XMMatrixInverse( nullptr, XMLoadFloat4x4( &view ) ) );
     cb.Projection = proj;
     XMStoreFloat4x4( &cb.ViewProj, XMMatrixMultiply( XMLoadFloat4x4( &proj ), XMLoadFloat4x4( &view ) ) );
     cb.PrevViewProj = m_PrevViewProjMatrix;
@@ -7967,7 +7968,12 @@ void XM_CALLCONV D3D11GraphicsEngine::DrawWorldAroundForWorldShadow( FXMVECTOR p
         }
     }
 
-    if ( Engine::GAPI->GetRendererState().RendererSettings.DrawSkeletalMeshes ) {
+    // Animated characters are sub-texel in the far CSM cascades but still pay
+    // the full skinning and draw cost. Keep all characters in cascade 0 and
+    // only the hero/near actors in cascade 1; cascades 2+ use static casters.
+    const bool skeletalCascadeRelevant = params.CascadeIndex < 0 || params.CascadeIndex <= 1;
+    if ( Engine::GAPI->GetRendererState().RendererSettings.DrawSkeletalMeshes
+        && skeletalCascadeRelevant ) {
         ZoneScopedN( "Shadows::DrawSkeletalMeshes" );
         auto _1 = RecordGraphicsEvent( GE_NAME( "Shadows::DrawSkeletalMeshes" ) );
 
@@ -7986,6 +7992,16 @@ void XM_CALLCONV D3D11GraphicsEngine::DrawWorldAroundForWorldShadow( FXMVECTOR p
             // Ghosts shouldn't have shadows
             if ( skeletalMeshVob->Vob->GetVisualAlpha() && skeletalMeshVob->Vob->GetVobTransparency() < 0.7f ) {
                 continue;
+            }
+
+            if ( params.CascadeIndex == 1 && skeletalMeshVob->Vob != Engine::GAPI->GetPlayerVob() ) {
+                constexpr float secondCascadeActorRadius = 4000.0f;
+                const XMVECTOR cameraDelta = skeletalMeshVob->Vob->GetPositionWorldXM()
+                    - Engine::GAPI->GetCameraPositionXM();
+                if ( XMVectorGetX( XMVector3LengthSq( cameraDelta ) )
+                    > secondCascadeActorRadius * secondCascadeActorRadius ) {
+                    continue;
+                }
             }
 
             if ( XMVector3Greater(XMVector3LengthSq( skeletalMeshVob->Vob->GetPositionWorldXM() - position ), vSkeletalRadiusSq) ) {

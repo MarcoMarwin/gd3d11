@@ -50,42 +50,6 @@ float3 VSPositionFromDepth(float depth, float2 vTexCoord)
 	return ReconstructVSPositionFromDepthReverseZInfinite( depth, vTexCoord, PL_ProjParams.xy ) * PL_ProjParams.z;
 }
 
-float ComputeIndoorDoorFloorBleed(float indoorPixel, float3 wsPosition, float3 wsNormal, float3 vsPosition, float3 lightPosWorld, float lightRange, float2 pixelCoord, float currentDepth)
-{
-	float outdoorPixel = 1.0f - indoorPixel;
-	float floorMask = smoothstep(0.40f, 0.70f, wsNormal.y);
-	float belowLight = smoothstep(-80.0f, 160.0f, lightPosWorld.y - wsPosition.y);
-	float surfaceMask = lerp(0.35f, 1.0f, floorMask);
-	float baseMask = outdoorPixel * surfaceMask * belowLight;
-	if (baseMask <= 0.0f)
-		return 0.0f;
-
-	const float bleedWorldSize = 30.0f;
-	float worldPixel = max(2.0f * abs(vsPosition.z) * max(PL_ProjParams.x / PL_ViewportSize.x, PL_ProjParams.y / PL_ViewportSize.y), 0.02f);
-	int maxRadius = clamp((int)(bleedWorldSize / worldPixel + 0.5f), 1, 768);
-	int2 baseCoord = clamp(int2(pixelCoord), int2(0, 0), int2(PL_ViewportSize) - int2(1, 1));
-	float doorwayProbe = 0.0f;
-	[unroll] for (int r = 0; r < 7; ++r)
-	{
-		int radius = max(1, (maxRadius * (r + 1)) / 7);
-		[unroll] for (int d = 0; d < 8; ++d)
-		{
-			int sx = (d == 0 || d == 4 || d == 5) ? radius : ((d == 1 || d == 6 || d == 7) ? -radius : 0);
-			int sy = (d == 2 || d == 4 || d == 6) ? radius : ((d == 3 || d == 5 || d == 7) ? -radius : 0);
-			int2 sampleCoord = clamp(baseCoord + int2(sx, sy), int2(0, 0), int2(PL_ViewportSize) - int2(1, 1));
-			float4 sampleDiffuse = TX_Diffuse.Load(int3(sampleCoord, 0));
-			float sampleIndoor = sampleDiffuse.a < 0.5f ? 1.0f : 0.0f;
-			float sampleDepth = TX_Depth.Load(int3(sampleCoord, 0)).r;
-			float2 sampleUV = (float2(sampleCoord) + 0.5f) / PL_ViewportSize;
-			float3 sampleVS = VSPositionFromDepth(sampleDepth, sampleUV);
-			float worldDistance = length(sampleVS - vsPosition);
-			float worldFade = saturate(1.0f - worldDistance / bleedWorldSize);
-			doorwayProbe = max(doorwayProbe, sampleIndoor * worldFade);
-		}
-	}
-
-	return baseMask * doorwayProbe;
-}
 //--------------------------------------------------------------------------------------
 // Blinn-Phong Lighting Reflection Model
 //--------------------------------------------------------------------------------------
@@ -181,16 +145,11 @@ float4 PSMain( PS_INPUT Input ) : SV_TARGET
 		lightDir, normal, V, vegetationBacklitMask, twoSidedBacklitMaterial,
 		AC_EnableSSS, AC_SSSIntensity, 0.42f);
 	
-	// Keep indoor point lights from leaking onto outdoor pixels, but allow a small
-	// distance-stable doorway bleed so thresholds do not form a hard camera-dependent line.
-	float indoor = 1.0f - PL_Outdoor;
+	// Indoor lights must not leak onto outdoor geometry. Use the exact per-pixel
+	// classification; the former multi-ring doorway probe introduced quantized bands.
 	float indoorPixel = diffuse.a < 0.5f ? 1.0f : 0.0f;
-	float doorFloorBleed = 0.0f;
-	if (indoor > 0.5f && PL_IgnoreIndoorOutdoorLimit < 0.5f)
-	{
-		doorFloorBleed = ComputeIndoorDoorFloorBleed(indoorPixel, wsPosition, wsNormal, vsPosition, Pl_PositionWorld, PL_Range, Input.vPosition.xy, expDepth);
-	}
-	float indoorBoundary = saturate(PL_Outdoor + indoor * max(indoorPixel, doorFloorBleed));
+	float indoorBoundary = saturate(PL_Outdoor + (1.0f - PL_Outdoor) * indoorPixel);
 	lighting *= lerp(indoorBoundary, 1.0f, saturate(PL_IgnoreIndoorOutdoorLimit));
+
 	return float4(saturate(lighting),1);
 }

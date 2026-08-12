@@ -22,6 +22,7 @@ D3D11PointLight::D3D11PointLight( VobLightInfo* info, bool dynamicLight ) {
     Engine::GAPI->VobLightMap[info->Vob] = info;
 
     XMStoreFloat3( &LastUpdatePosition, LightInfo->GetEffectivePositionWorldXM() );
+    LastUpdateRange = LightInfo->Vob->GetLightRange();
 
     m_DepthCubemap = nullptr;
     m_StaticDepthCubemap = nullptr;
@@ -87,14 +88,16 @@ void D3D11PointLight::ReleaseShadowMap() {
 
 }
 
-void D3D11PointLight::SetTiledSlot( int slot, RenderToDepthStencilBuffer* target, D3D11TiledDeferredShading* owner ) {
+void D3D11PointLight::SetTiledSlot( int slot, RenderToDepthStencilBuffer* staticTarget, RenderToDepthStencilBuffer* dynamicTarget, D3D11TiledDeferredShading* owner ) {
     m_TiledSlotIndex = slot;
-    m_TiledDepthTarget = target;
+    m_TiledDepthTarget = staticTarget;
+    m_TiledDynamicDepthTarget = dynamicTarget;
     m_TiledOwner = owner;
 
     StartReInit();
     DrawnOnce = false;
     m_StaticShadowReady = false;
+    m_DynamicShadowValid = false;
 }
 
 void D3D11PointLight::ClearTiledSlot() {
@@ -103,9 +106,38 @@ void D3D11PointLight::ClearTiledSlot() {
     }
     m_TiledSlotIndex = -1;
     m_TiledDepthTarget = nullptr;
+    m_TiledDynamicDepthTarget = nullptr;
     m_TiledOwner = nullptr;
     m_StaticShadowReady = false;
+    m_DynamicShadowValid = false;
 
+}
+
+bool D3D11PointLight::ShouldReleaseForVisibility( bool visible ) {
+    if ( visible ) {
+        m_InvisibleFrameCount = 0;
+        return false;
+    }
+
+    // A short retention window prevents visibility-edge oscillation from
+    // constantly destroying and reallocating otherwise valid cube slots.
+    constexpr uint8_t kInvisibleRetentionFrames = 12;
+    if ( m_InvisibleFrameCount < kInvisibleRetentionFrames ) {
+        ++m_InvisibleFrameCount;
+    }
+    return m_InvisibleFrameCount >= kInvisibleRetentionFrames;
+}
+
+void D3D11PointLight::OnTiledSlotEvicted() {
+    // Called by the shared pool after ownership has already moved. Do not call
+    // FreeSlot here or the replacement light would lose the same slot.
+    m_TiledSlotIndex = -1;
+    m_TiledDepthTarget = nullptr;
+    m_TiledDynamicDepthTarget = nullptr;
+    m_TiledOwner = nullptr;
+    m_StaticShadowReady = false;
+    m_DynamicShadowValid = false;
+    DrawnOnce = false;
 }
 
 int D3D11PointLight::GetCurrentShadowMode() const {
@@ -126,6 +158,7 @@ void D3D11PointLight::HandleShadowModeChange( int shadowMode ) {
 
     if ( shadowMode != GothicRendererSettings::PLS_UPDATE_DYNAMIC ) {
         ReleaseStaticAsideShadowMap();
+        m_DynamicShadowValid = false;
     }
 }
 
@@ -267,16 +300,17 @@ bool D3D11PointLight::NeedsUpdate() {
 
     FXMVECTOR lastPos = XMLoadFloat3( &LastUpdatePosition );
     const bool moved = !XMVector3Equal( LightInfo->GetEffectivePositionWorldXM(), lastPos );
+    const bool rangeChanged = std::abs( LightInfo->Vob->GetLightRange() - LastUpdateRange ) > 1.0f;
 
     if ( shadowMode == GothicRendererSettings::PLS_STATIC_ONLY ) {
-        return moved || !m_StaticShadowReady || NotYetDrawn();
+        return moved || rangeChanged || !m_StaticShadowReady || NotYetDrawn();
     }
 
     if ( shadowMode == GothicRendererSettings::PLS_UPDATE_DYNAMIC ) {
-        return moved || !m_StaticShadowReady || NotYetDrawn();
+        return moved || rangeChanged || !m_StaticShadowReady || NotYetDrawn();
     }
 
-    return moved || NotYetDrawn();
+    return moved || rangeChanged || NotYetDrawn();
 }
 
 /** Returns true if the light could need an update, but it's not very important */
@@ -314,9 +348,10 @@ void D3D11PointLight::RenderCubemap( bool forceUpdate, D3D11ConstantBuffer* View
 
     FXMVECTOR xmlastPos = XMLoadFloat3( &LastUpdatePosition );
     const bool moved = !XMVector3Equal( LightInfo->GetEffectivePositionWorldXM(), xmlastPos );
+    const bool rangeChanged = std::abs( LightInfo->Vob->GetLightRange() - LastUpdateRange ) > 1.0f;
 
-    if ( moved ) {
-        // Position changed, refresh our caches
+    if ( moved || rangeChanged ) {
+        // Position or influence volume changed, refresh all spatial caches.
         VobCache.clear();
         SkeletalVobCache.clear();
 
@@ -325,7 +360,7 @@ void D3D11PointLight::RenderCubemap( bool forceUpdate, D3D11ConstantBuffer* View
         m_StaticShadowReady = false;
     }
 
-    if ( shadowMode == GothicRendererSettings::PLS_STATIC_ONLY && !moved && m_StaticShadowReady && DrawnOnce ) {
+    if ( shadowMode == GothicRendererSettings::PLS_STATIC_ONLY && !moved && !rangeChanged && m_StaticShadowReady && DrawnOnce ) {
         return;
     }
 
@@ -401,6 +436,7 @@ void D3D11PointLight::RenderCubemap( bool forceUpdate, D3D11ConstantBuffer* View
 
     LastUpdateColor = LightInfo->Vob->GetLightColor();
     XMStoreFloat3( &LastUpdatePosition, vEyePt );
+    LastUpdateRange = LightInfo->Vob->GetLightRange();
     DrawnOnce = true;
 }
 
@@ -424,6 +460,30 @@ void D3D11PointLight::RenderFullCubemap() {
     }
 
     if ( shadowMode == GothicRendererSettings::PLS_UPDATE_DYNAMIC ) {
+        // Low-resolution tiled slots are reserved for truly static lights.
+        // They never need an animated twin or a full-resolution aside copy.
+        if ( m_TiledDepthTarget && !m_TiledDynamicDepthTarget ) {
+            if ( !m_StaticShadowReady ) {
+                RenderStaticShadowPass( *m_TiledDepthTarget, true );
+                m_StaticShadowReady = true;
+            }
+            m_DynamicShadowValid = false;
+            return;
+        }
+
+        // Tiled/Forward+ keeps static and animated depth in separate persistent arrays.
+        // This removes six CopySubresourceRegion calls per update and lets an
+        // unscheduled distant light retain its last valid animated overlay.
+        if ( m_TiledDepthTarget && m_TiledDynamicDepthTarget ) {
+            if ( !m_StaticShadowReady ) {
+                RenderStaticShadowPass( *m_TiledDepthTarget, true );
+                m_StaticShadowReady = true;
+            }
+            RenderAnimatedShadowPass( *m_TiledDynamicDepthTarget, true );
+            m_DynamicShadowValid = true;
+            return;
+        }
+
         DepthStencilPool* dsPool = engine->GetPfxRenderer()->GetDepthStencilPool();
         AcquireStaticAsideShadowMap( dsPool, m_CurrentResolution );
 
@@ -464,6 +524,7 @@ bool D3D11PointLight::IsReady()
 void D3D11PointLight::Invalidate() {
     DrawnOnce = false;
     m_StaticShadowReady = false;
+    m_DynamicShadowValid = false;
     VobCache.clear();
     SkeletalVobCache.clear();
     WorldCacheInvalid = true;

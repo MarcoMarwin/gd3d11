@@ -4,6 +4,7 @@
 struct VS_ExConstantBuffer_PerFrame
 {
 	matrix M_View;
+	matrix M_InvView;
 	matrix M_Proj;
 	matrix M_ViewProj;
 	matrix M_PrevViewProj;

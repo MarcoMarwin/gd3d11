@@ -10,10 +10,12 @@
 
 struct RenderToTextureBuffer;
 struct RenderToDepthStencilBuffer;
+class D3D11PointLight;
 
 constexpr uint32_t MAX_TILED_LIGHTS = 1024;
 
 constexpr uint32_t MAX_SHADOW_CUBEMAPS = 128;
+constexpr uint32_t MAX_STATIC_SHADOW_CUBEMAPS = 340; // 2040 array slices, below D3D11's 2048 limit
 
 struct TiledPointLight {
     DirectX::XMFLOAT3 PositionView;
@@ -64,12 +66,16 @@ public:
     ID3D11ShaderResourceView* GetLightGridSRV() const { return m_LightGridSRV.Get(); }
     ID3D11ShaderResourceView* GetLightIndexListSRV() const { return m_LightIndexListSRV.Get(); }
     ID3D11ShaderResourceView* GetShadowCubeArraySRV() const { return m_ShadowCubeArraySRV.Get(); }
+    ID3D11ShaderResourceView* GetDynamicShadowCubeArraySRV() const { return m_DynamicShadowCubeArraySRV.Get(); }
+    ID3D11ShaderResourceView* GetStaticLowShadowCubeArraySRV() const { return m_StaticLowShadowCubeArraySRV.Get(); }
     bool IsShadowArrayCreated() const { return m_ShadowArrayCreated; }
 
     // Shadow cubemap array slot management
-    int AllocateSlot( uint32_t shadowCubeSize );
+    int AllocateSlot( uint32_t shadowCubeSize, bool staticLowRes, D3D11PointLight* owner, float priority );
     void FreeSlot( int slot );
+    void TouchSlotPriority( int slot, float priority );
     RenderToDepthStencilBuffer* GetSlotTarget( int slot );
+    RenderToDepthStencilBuffer* GetDynamicSlotTarget( int slot );
 
 private:
     void EnsureBuffers( uint32_t numTilesX, uint32_t numTilesY );
@@ -99,9 +105,21 @@ private:
     // Shadow cubemap array for tiled shadowed lights (lazy-created)
     Microsoft::WRL::ComPtr<ID3D11Texture2D> m_ShadowCubeArray;
     Microsoft::WRL::ComPtr<ID3D11ShaderResourceView> m_ShadowCubeArraySRV;
+    Microsoft::WRL::ComPtr<ID3D11Texture2D> m_DynamicShadowCubeArray;
+    Microsoft::WRL::ComPtr<ID3D11ShaderResourceView> m_DynamicShadowCubeArraySRV;
+    Microsoft::WRL::ComPtr<ID3D11Texture2D> m_StaticLowShadowCubeArray;
+    Microsoft::WRL::ComPtr<ID3D11ShaderResourceView> m_StaticLowShadowCubeArraySRV;
     std::bitset<MAX_SHADOW_CUBEMAPS> m_SlotInUse;
     std::array<Microsoft::WRL::ComPtr<ID3D11DepthStencilView>, MAX_SHADOW_CUBEMAPS> m_SlotDSVs;
     std::array<std::unique_ptr<RenderToDepthStencilBuffer>, MAX_SHADOW_CUBEMAPS> m_SlotViews;
+    std::array<Microsoft::WRL::ComPtr<ID3D11DepthStencilView>, MAX_SHADOW_CUBEMAPS> m_DynamicSlotDSVs;
+    std::array<std::unique_ptr<RenderToDepthStencilBuffer>, MAX_SHADOW_CUBEMAPS> m_DynamicSlotViews;
+    std::array<D3D11PointLight*, MAX_SHADOW_CUBEMAPS> m_SlotOwners{};
+    std::array<float, MAX_SHADOW_CUBEMAPS> m_SlotPriorities{};
+    std::bitset<MAX_STATIC_SHADOW_CUBEMAPS> m_StaticLowSlotInUse;
+    std::array<D3D11PointLight*, MAX_STATIC_SHADOW_CUBEMAPS> m_StaticLowSlotOwners{};
+    std::array<Microsoft::WRL::ComPtr<ID3D11DepthStencilView>, MAX_STATIC_SHADOW_CUBEMAPS> m_StaticLowSlotDSVs;
+    std::array<std::unique_ptr<RenderToDepthStencilBuffer>, MAX_STATIC_SHADOW_CUBEMAPS> m_StaticLowSlotViews;
     bool m_ShadowArrayCreated = false;
     uint32_t m_ShadowCubeSize = 0;
 

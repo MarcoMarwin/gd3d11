@@ -93,11 +93,32 @@ void D3D11TiledDeferredShading::EnsureShadowArray( uint32_t shadowCubeSize ) {
     if ( m_ShadowArrayCreated && m_ShadowCubeSize == shadowCubeSize ) return;
 
     if ( m_ShadowArrayCreated && m_ShadowCubeSize != shadowCubeSize ) {
+        // Detach every light before reusing the same numerical slots for the
+        // replacement textures. Otherwise a later ClearTiledSlot() from an old
+        // owner could free a slot that already belongs to another light.
+        for ( D3D11PointLight* owner : m_SlotOwners ) {
+            if ( owner ) owner->OnTiledSlotEvicted();
+        }
+        for ( D3D11PointLight* owner : m_StaticLowSlotOwners ) {
+            if ( owner ) owner->OnTiledSlotEvicted();
+        }
         m_SlotInUse.reset();
+        m_SlotOwners.fill( nullptr );
+        m_SlotPriorities.fill( FLT_MAX );
+        m_StaticLowSlotInUse.reset();
+        m_StaticLowSlotOwners.fill( nullptr );
         for ( auto& dsv : m_SlotDSVs ) dsv.Reset();
         for ( auto& view : m_SlotViews ) view.reset();
+        for ( auto& dsv : m_DynamicSlotDSVs ) dsv.Reset();
+        for ( auto& view : m_DynamicSlotViews ) view.reset();
         m_ShadowCubeArraySRV.Reset();
         m_ShadowCubeArray.Reset();
+        m_DynamicShadowCubeArraySRV.Reset();
+        m_DynamicShadowCubeArray.Reset();
+        for ( auto& dsv : m_StaticLowSlotDSVs ) dsv.Reset();
+        for ( auto& view : m_StaticLowSlotViews ) view.reset();
+        m_StaticLowShadowCubeArraySRV.Reset();
+        m_StaticLowShadowCubeArray.Reset();
         m_ShadowArrayCreated = false;
     }
 
@@ -122,6 +143,21 @@ void D3D11TiledDeferredShading::EnsureShadowArray( uint32_t shadowCubeSize ) {
     }
     SetDebugName( m_ShadowCubeArray.Get(), "TiledDeferred_ShadowCubeArray" );
 
+    // Animated overlays are temporal and contain only skeletal/attachment
+    // casters. Capping them at 128 keeps the second persistent array at about
+    // 24 MiB even when the static point-shadow preset uses 256/512 faces.
+    D3D11_TEXTURE2D_DESC dynamicDesc = desc;
+    const uint32_t dynamicShadowCubeSize = std::min<uint32_t>( shadowCubeSize, 128u );
+    dynamicDesc.Width = dynamicShadowCubeSize;
+    dynamicDesc.Height = dynamicShadowCubeSize;
+    hr = m_device->CreateTexture2D( &dynamicDesc, nullptr, m_DynamicShadowCubeArray.ReleaseAndGetAddressOf() );
+    if ( FAILED( hr ) || m_DynamicShadowCubeArray.Get() == nullptr ) {
+        LogError() << "Failed to create tiled dynamic shadow cube array. HRESULT: " << std::hex << hr;
+        m_ShadowCubeArray.Reset();
+        return;
+    }
+    SetDebugName( m_DynamicShadowCubeArray.Get(), "TiledDeferred_DynamicShadowCubeArray" );
+
     // SRV for sampling in the tiled shading CS
     D3D11_SHADER_RESOURCE_VIEW_DESC srvDesc = {};
     srvDesc.Format = DXGI_FORMAT_R16_UNORM;
@@ -138,6 +174,37 @@ void D3D11TiledDeferredShading::EnsureShadowArray( uint32_t shadowCubeSize ) {
         return;
     }
     SetDebugName( m_ShadowCubeArraySRV.Get(), "TiledDeferred_ShadowCubeArray_SRV" );
+
+    hr = m_device->CreateShaderResourceView( m_DynamicShadowCubeArray.Get(), &srvDesc, m_DynamicShadowCubeArraySRV.ReleaseAndGetAddressOf() );
+    if ( FAILED( hr ) || m_DynamicShadowCubeArraySRV.Get() == nullptr ) {
+        LogError() << "Failed to create tiled dynamic shadow cube array SRV. HRESULT: " << std::hex << hr;
+        m_ShadowCubeArraySRV.Reset();
+        m_ShadowCubeArray.Reset();
+        m_DynamicShadowCubeArray.Reset();
+        return;
+    }
+    SetDebugName( m_DynamicShadowCubeArraySRV.Get(), "TiledDeferred_DynamicShadowCubeArray_SRV" );
+
+    D3D11_TEXTURE2D_DESC lowDesc = desc;
+    lowDesc.Width = 32;
+    lowDesc.Height = 32;
+    lowDesc.ArraySize = MAX_STATIC_SHADOW_CUBEMAPS * 6;
+    hr = m_device->CreateTexture2D( &lowDesc, nullptr, m_StaticLowShadowCubeArray.ReleaseAndGetAddressOf() );
+    if ( FAILED( hr ) || !m_StaticLowShadowCubeArray ) {
+        LogError() << "Failed to create static low-resolution shadow cube array. HRESULT: " << std::hex << hr;
+        return;
+    }
+    SetDebugName( m_StaticLowShadowCubeArray.Get(), "TiledDeferred_StaticLowShadowCubeArray" );
+
+    D3D11_SHADER_RESOURCE_VIEW_DESC lowSrvDesc = srvDesc;
+    lowSrvDesc.TextureCubeArray.NumCubes = MAX_STATIC_SHADOW_CUBEMAPS;
+    hr = m_device->CreateShaderResourceView( m_StaticLowShadowCubeArray.Get(), &lowSrvDesc,
+        m_StaticLowShadowCubeArraySRV.ReleaseAndGetAddressOf() );
+    if ( FAILED( hr ) || !m_StaticLowShadowCubeArraySRV ) {
+        LogError() << "Failed to create static low-resolution shadow cube SRV. HRESULT: " << std::hex << hr;
+        return;
+    }
+    SetDebugName( m_StaticLowShadowCubeArraySRV.Get(), "TiledDeferred_StaticLowShadowCubeArray_SRV" );
 
     // Per-slot DSVs (6 faces each) and RenderToDepthStencilBuffer view wrappers
     for ( uint32_t slot = 0; slot < MAX_SHADOW_CUBEMAPS; slot++ ) {
@@ -162,30 +229,122 @@ void D3D11TiledDeferredShading::EnsureShadowArray( uint32_t shadowCubeSize ) {
         m_SlotViews[slot] = std::make_unique<RenderToDepthStencilBuffer>(
             m_ShadowCubeArray, m_SlotDSVs[slot], nullptr,
             shadowCubeSize, shadowCubeSize );
+
+        hr = m_device->CreateDepthStencilView( m_DynamicShadowCubeArray.Get(), &dsvDesc, m_DynamicSlotDSVs[slot].ReleaseAndGetAddressOf() );
+        if ( FAILED( hr ) || m_DynamicSlotDSVs[slot].Get() == nullptr ) {
+            LogError() << "Failed to create tiled dynamic shadow cube array DSV. HRESULT: " << std::hex << hr;
+            for ( auto& dsv : m_SlotDSVs ) dsv.Reset();
+            for ( auto& view : m_SlotViews ) view.reset();
+            for ( auto& dsv : m_DynamicSlotDSVs ) dsv.Reset();
+            for ( auto& view : m_DynamicSlotViews ) view.reset();
+            m_ShadowCubeArraySRV.Reset();
+            m_ShadowCubeArray.Reset();
+            m_DynamicShadowCubeArraySRV.Reset();
+            m_DynamicShadowCubeArray.Reset();
+            return;
+        }
+        m_DynamicSlotViews[slot] = std::make_unique<RenderToDepthStencilBuffer>(
+            m_DynamicShadowCubeArray, m_DynamicSlotDSVs[slot], nullptr,
+            dynamicShadowCubeSize, dynamicShadowCubeSize );
     }
 
     m_ShadowArrayCreated = true;
 }
 
-int D3D11TiledDeferredShading::AllocateSlot( uint32_t shadowCubeSize ) {
+int D3D11TiledDeferredShading::AllocateSlot(
+    uint32_t shadowCubeSize, bool staticLowRes, D3D11PointLight* owner, float priority ) {
     EnsureShadowArray( shadowCubeSize );
+    if ( !m_ShadowArrayCreated ) {
+        return -1;
+    }
+
+    if ( staticLowRes ) {
+        for ( uint32_t i = 0; i < MAX_STATIC_SHADOW_CUBEMAPS; ++i ) {
+            if ( !m_StaticLowSlotInUse[i] ) {
+                if ( !m_StaticLowSlotViews[i] ) {
+                    D3D11_DEPTH_STENCIL_VIEW_DESC dsvDesc = {};
+                    dsvDesc.Format = DXGI_FORMAT_D16_UNORM;
+                    dsvDesc.ViewDimension = D3D11_DSV_DIMENSION_TEXTURE2DARRAY;
+                    dsvDesc.Texture2DArray.FirstArraySlice = i * 6;
+                    dsvDesc.Texture2DArray.ArraySize = 6;
+                    dsvDesc.Texture2DArray.MipSlice = 0;
+                    const HRESULT hr = m_device->CreateDepthStencilView(
+                        m_StaticLowShadowCubeArray.Get(), &dsvDesc,
+                        m_StaticLowSlotDSVs[i].ReleaseAndGetAddressOf() );
+                    if ( FAILED( hr ) || !m_StaticLowSlotDSVs[i] ) {
+                        LogError() << "Failed to create static low-resolution shadow DSV. HRESULT: " << std::hex << hr;
+                        continue;
+                    }
+                    m_StaticLowSlotViews[i] = std::make_unique<RenderToDepthStencilBuffer>(
+                        m_StaticLowShadowCubeArray, m_StaticLowSlotDSVs[i], nullptr, 32, 32 );
+                }
+                m_StaticLowSlotInUse[i] = true;
+                m_StaticLowSlotOwners[i] = owner;
+                return static_cast<int>(MAX_SHADOW_CUBEMAPS + i);
+            }
+        }
+        return -1;
+    }
     for ( uint32_t i = 0; i < MAX_SHADOW_CUBEMAPS; i++ ) {
         if ( !m_SlotInUse[i] ) {
             m_SlotInUse[i] = true;
+            m_SlotOwners[i] = owner;
+            m_SlotPriorities[i] = priority;
             return static_cast<int>(i);
         }
+    }
+
+    // Sticky ownership: a challenger only replaces the least relevant detail
+    // slot when it is substantially closer. This prevents camera turns from
+    // shuffling cube indices while still guaranteeing a slot for the hero.
+    uint32_t worstSlot = 0;
+    for ( uint32_t i = 1; i < MAX_SHADOW_CUBEMAPS; ++i ) {
+        if ( m_SlotPriorities[i] > m_SlotPriorities[worstSlot] ) worstSlot = i;
+    }
+    constexpr float kIncumbentBias = 0.35f;
+    if ( priority < m_SlotPriorities[worstSlot] * kIncumbentBias ) {
+        if ( m_SlotOwners[worstSlot] && m_SlotOwners[worstSlot] != owner ) {
+            m_SlotOwners[worstSlot]->OnTiledSlotEvicted();
+        }
+        m_SlotOwners[worstSlot] = owner;
+        m_SlotPriorities[worstSlot] = priority;
+        return static_cast<int>(worstSlot);
     }
     return -1;
 }
 
 void D3D11TiledDeferredShading::FreeSlot( int slot ) {
-    if ( slot >= 0 && static_cast<uint32_t>(slot) < MAX_SHADOW_CUBEMAPS )
+    if ( slot >= static_cast<int>(MAX_SHADOW_CUBEMAPS)
+        && slot < static_cast<int>(MAX_SHADOW_CUBEMAPS + MAX_STATIC_SHADOW_CUBEMAPS) ) {
+        const int lowSlot = slot - MAX_SHADOW_CUBEMAPS;
+        m_StaticLowSlotInUse[lowSlot] = false;
+        m_StaticLowSlotOwners[lowSlot] = nullptr;
+    } else if ( slot >= 0 && static_cast<uint32_t>(slot) < MAX_SHADOW_CUBEMAPS ) {
         m_SlotInUse[slot] = false;
+        m_SlotOwners[slot] = nullptr;
+        m_SlotPriorities[slot] = FLT_MAX;
+    }
+}
+
+void D3D11TiledDeferredShading::TouchSlotPriority( int slot, float priority ) {
+    if ( slot >= 0 && static_cast<uint32_t>(slot) < MAX_SHADOW_CUBEMAPS ) {
+        m_SlotPriorities[slot] = priority;
+    }
 }
 
 RenderToDepthStencilBuffer* D3D11TiledDeferredShading::GetSlotTarget( int slot ) {
+    if ( slot >= static_cast<int>(MAX_SHADOW_CUBEMAPS)
+        && slot < static_cast<int>(MAX_SHADOW_CUBEMAPS + MAX_STATIC_SHADOW_CUBEMAPS)
+        && m_ShadowArrayCreated )
+        return m_StaticLowSlotViews[slot - MAX_SHADOW_CUBEMAPS].get();
     if ( slot >= 0 && static_cast<uint32_t>(slot) < MAX_SHADOW_CUBEMAPS && m_ShadowArrayCreated )
         return m_SlotViews[slot].get();
+    return nullptr;
+}
+
+RenderToDepthStencilBuffer* D3D11TiledDeferredShading::GetDynamicSlotTarget( int slot ) {
+    if ( slot >= 0 && static_cast<uint32_t>(slot) < MAX_SHADOW_CUBEMAPS && m_ShadowArrayCreated )
+        return m_DynamicSlotViews[slot].get();
     return nullptr;
 }
 
@@ -326,7 +485,11 @@ XRESULT D3D11TiledDeferredShading::DrawPointlightLights(
 
         // Bind shadow cubemap array SRV
         if ( cullResult.HasShadowedTiledLights && m_ShadowArrayCreated ) {
-            context->CSSetShaderResources( 11, 1, m_ShadowCubeArraySRV.GetAddressOf() );
+            ID3D11ShaderResourceView* shadowArrays[2] = {
+                m_ShadowCubeArraySRV.Get(), m_DynamicShadowCubeArraySRV.Get()
+            };
+            context->CSSetShaderResources( 11, 2, shadowArrays );
+            context->CSSetShaderResources( 20, 1, m_StaticLowShadowCubeArraySRV.GetAddressOf() );
         }
 
         // Bind HDR UAV
@@ -338,8 +501,10 @@ XRESULT D3D11TiledDeferredShading::DrawPointlightLights(
         // Unbind everything
         ID3D11UnorderedAccessView* nullUAV = nullptr;
         context->CSSetUnorderedAccessViews( 0, 1, &nullUAV, nullptr );
-        ID3D11ShaderResourceView* nullSRVs[12] = {};
-        context->CSSetShaderResources( 0, 12, nullSRVs );
+        ID3D11ShaderResourceView* nullSRVs[13] = {};
+        context->CSSetShaderResources( 0, 13, nullSRVs );
+        ID3D11ShaderResourceView* nullLowShadow = nullptr;
+        context->CSSetShaderResources( 20, 1, &nullLowShadow );
         context->CSSetShader( nullptr, nullptr, 0 );
 
         // Restore HDR as RTV
@@ -424,7 +589,7 @@ D3D11TiledDeferredShading::CullResult D3D11TiledDeferredShading::CullLights(
         if ( settings.EnablePointlightShadows > 0 ) {
             pl = light->LightShadowBuffers ? static_cast<D3D11PointLight*>(light->LightShadowBuffers.get()) : nullptr;
             if ( pl && pl->IsInited() && pl->HasShadowMap( 1 ) ) {
-                hasShadow = true;
+                hasShadow = !pl->IsTiledStaticLowRes() || pl->IsStaticShadowReady();
             }
         }
 
@@ -489,7 +654,14 @@ D3D11TiledDeferredShading::CullResult D3D11TiledDeferredShading::CullLights(
         tl.ShadowSoftness = std::max( settings.ShadowSoftness * 2.0f, minimumTemporalShadowSoftness );
 
         if ( hasShadow ) {
-            tl.ShadowCubeIndex = pl->GetTiledSlot();
+            constexpr int kShadowHasDynamic = 0x40000000;
+            constexpr int kShadowLowStatic = 0x20000000;
+            const int physicalSlot = pl->IsTiledStaticLowRes()
+                ? pl->GetTiledSlot() - static_cast<int>(MAX_SHADOW_CUBEMAPS)
+                : pl->GetTiledSlot();
+            tl.ShadowCubeIndex = physicalSlot
+                | (pl->HasValidDynamicOverlay() ? kShadowHasDynamic : 0)
+                | (pl->IsTiledStaticLowRes() ? kShadowLowStatic : 0);
             hasShadowedTiledLights = true;
         } else {
             tl.ShadowCubeIndex = -1;
