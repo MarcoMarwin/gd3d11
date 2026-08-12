@@ -315,9 +315,7 @@ PS_OUTPUT PSMain(PS_INPUT Input)
     float waterfallSurfaceMask = 1.0f - steepWaterSsrFactor;
 
     if (WM_RenderMode > 0.5f && WM_RenderMode < 1.5f)
-        clip(waterfallSurfaceMask - 0.0001f);
-    else if (WM_RenderMode >= 1.5f)
-        clip(0.0001f - waterfallSurfaceMask);
+        clip(waterfallSurfaceMask - 0.02f);
 
     float waterReflectionSuppress = lerp(0.12f, 1.0f, steepWaterSsrFactor);
     ssrStrength *= lerp(0.45f, 1.0f, steepWaterSsrFactor);

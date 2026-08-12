@@ -108,6 +108,15 @@ float4 PSMain( PS_INPUT Input ) : SV_TARGET
 	float worldFogDayGeometryWeight = saturate(HF_FogOverride)
 		* smoothstep(0.02f, 0.18f, AC_LightPos.y)
 		* (1.0f - skyPixel);
+	// Match composition: only daytime geometry in an explicit Gothic fog zone
+	// is forced completely into fog at the configured far range.
+	float worldFogGeometryDistance = length(posOriginal - HF_CameraPosition);
+	float worldFogOcclusionStart = lerp(HF_WeightZNear, HF_WeightZFar, 0.72f);
+	float worldFogFarOcclusion = smoothstep(
+		worldFogOcclusionStart,
+		max(HF_WeightZFar, worldFogOcclusionStart + 1.0f),
+		worldFogGeometryDistance) * worldFogDayGeometryWeight;
+	worldFog = max(worldFog, worldFogFarOcclusion);
 	float3 worldFogColorPosition = worldFogDayGeometryWeight > 0.0001f
 		? posOriginal
 		: position;

@@ -688,6 +688,15 @@ float ComputeCascadedShadowValueSoft(float3 wsPosition, float viewSpaceZ, float 
         }
     }
 
+    // PCF/PCSS returns only a small number of discrete visibility levels.
+    // Break up wide CSM bands with a zero-mean, screen-stable sub-step dither;
+    // fully lit and fully shadowed pixels remain untouched.
+    if (selectedCascade >= 0)
+    {
+        float csmPenumbraGate = saturate(4.0f * shadow * (1.0f - shadow));
+        float csmDither = GetShadowBlueNoise(screenPos, selectedCascade, 11) - 0.5f;
+        shadow = saturate(shadow + csmDither * (1.0f / 16.0f) * csmPenumbraGate);
+    }
     return shadow;
 }
 

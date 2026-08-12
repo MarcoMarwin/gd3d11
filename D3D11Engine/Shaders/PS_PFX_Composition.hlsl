@@ -140,6 +140,16 @@ worldFog *= worldFogActivation;
 float worldFogDayGeometryWeight = saturate(HF_FogOverride)
     * smoothstep(0.02f, 0.18f, AC_LightPos.y)
     * (1.0f - skyPixel);
+// A daytime regional Gothic fog zone must fully conceal geometry at its far
+// range instead of leaving a blue atmospheric silhouette behind. This term is
+// deliberately gated away from night fog, rain fog and sky pixels.
+float worldFogGeometryDistance = length(posOriginal - HF_CameraPosition);
+float worldFogOcclusionStart = lerp(HF_WeightZNear, HF_WeightZFar, 0.72f);
+float worldFogFarOcclusion = smoothstep(
+    worldFogOcclusionStart,
+    max(HF_WeightZFar, worldFogOcclusionStart + 1.0f),
+    worldFogGeometryDistance) * worldFogDayGeometryWeight;
+worldFog = max(worldFog, worldFogFarOcclusion);
 float3 worldFogColorPosition = worldFogDayGeometryWeight > 0.0001f
     ? posOriginal
     : position;

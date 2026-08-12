@@ -4,7 +4,9 @@ Dokumentation der gepushten Renderer-Builds.
 
 
 
-## Build 205
+
+## Build 206
+- Korrekturpush: Erster Push für Build 206. Die Wasser-Render-Logik in D3D11GraphicsEngine und PS_Water.hlsl wurde vereinfacht (kein harter Split mehr für die Geometrie, was Flackern an schmalen Übergängen behebt). CSM-Schatten nutzen in ShadowSampling.h nun einen Dither-Schritt in der Penumbra, um PCF-Banding aufzubrechen. Daytime Gothic-Fog verdeckt Geometrie auf Distanz nun vollständig (PS_PFX_Heightfog und Composition). In PS_Simple wurde der alte Sky-Protection-Fallback wieder aktiviert, falls der Compute-Shader-Cache fehlt.## Build 205
 - Korrekturpush: Nachtrag für Build 204. GetGothicTexture() wurde in MyDirectDrawSurface7.h ergänzt, was vom Particle Texture-Swap Mechanismus in GothicAPI zwingend benötigt wird.
 ## Build 204
 - Korrekturpush: Sicherheits-Fix für Constant Buffer Bounds. MAX_SHADER_CB wurde von 6 auf 14 (D3D11_COMMONSHADER_CONSTANT_BUFFER_API_SLOT_COUNT) erhöht, um Out-of-Bounds Zugriffe beim Reflektieren von Shadern (z.B. durch Cutout-Konstanten an b6) zu verhindern.
@@ -1000,3 +1002,4 @@ Dokumentation der gepushten Renderer-Builds.
 
 - Korrekturpush: Feintuning in Build 205. Die Output-Dithering-Kurve in PS_PFX_GammaCorrectInv wurde angepasst (Dithering bleibt nun über einen weiten Luminanzbereich aktiv), was Banding-Artefakte an Wänden und Laub extrem reduziert. In PS_ParticleDistortion und PS_ParticleSimple wurde die Tag/Nacht-Wichtung für Wasserpartikel optimiert. In PS_Simple wurde der alte Screen-Space Connectivity-Test für das untere Bildschirmdrittel der City_Windows verworfen, da Tiefe nahe Null dort dem Gothic-Void/Boden entspricht und nicht dem Himmel.
 - Regulärer Push: Abschließende Optimierungen in Build 205. In PS_Water.hlsl wurde die Shore-Fade-Logik repariert (Wasser verblasst nun nicht mehr fälschlicherweise in die leere Szene, wenn flaches Land dahinter liegt, und schmale Wasserfälle werden nicht mehr weichgezeichnet). In ShadowSampling.h nutzt der Fallback-Pfad ohne Blue-Noise nun ebenfalls Hash-Rotation, um hartes Banding der PCF-Schatten zu verhindern. In WorldObjects.h wurden neue Properties (WaterGeometryClass) für das kommende Water-Refactoring vorbereitet.
+

@@ -90,8 +90,7 @@ float4 PSMain( PS_INPUT Input ) : SV_TARGET
 		// without making it read as a bright opaque sheet.
 		color.a = max(color.a * 0.82f, 0.16f);
 
-		if (cbFFData.windowParams.y > 0.5f
-			&& cbFFData.windowParams.z > 0.5f)
+		if (cbFFData.windowParams.y > 0.5f)
 		{
 			const float halfHeight = cbFFData.windowParams.x;
 			uint targetWidth;
@@ -111,9 +110,17 @@ float4 PSMain( PS_INPUT Input ) : SV_TARGET
 					int3(pixelPosition, 0)).r;
 				if (sceneDepth <= 1e-7f)
 				{
-					const float connectedSky = EvaluateCachedWindowSkyVisibility(
-						pixelPosition, targetSize, featherWidth);
-					const float disconnectedSky = 1.0f - connectedSky;
+					// Never disable the proven lower-sky protection merely because
+					// the optional reduced connectivity shader/resource is missing.
+					// With the cache available, connected upper/lower sky remains
+					// transparent; otherwise retain the conservative old behaviour.
+					float disconnectedSky = 1.0f;
+					if (cbFFData.windowParams.z > 0.5f)
+					{
+						const float connectedSky = EvaluateCachedWindowSkyVisibility(
+							pixelPosition, targetSize, featherWidth);
+						disconnectedSky = 1.0f - connectedSky;
+					}
 					color.a = lerp(color.a, 1.0f,
 						disconnectedSky * saturate(cbFFData.windowParams.w));
 				}

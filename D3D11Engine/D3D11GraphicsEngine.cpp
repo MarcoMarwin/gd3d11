@@ -6825,7 +6825,11 @@ void D3D11GraphicsEngine::DrawWaterSurfaces( ID3D11RenderTargetView* waterMaskRT
 
                 WaterMaterialInfoConstantBuffer wmcb = {};
                 FillWaterMaterialInfo( wmcb, batch.texture );
-                wmcb.WM_RenderMode = waterfallBatches.empty() ? 0.0f : 2.0f;
+                // Redraw the complete water surface in the final pass. The
+                // early steep contributor exists only to feed SSR; splitting
+                // the visible result at an interpolated inclination threshold
+                // made shallow waterfall transitions flicker between passes.
+                wmcb.WM_RenderMode = 0.0f;
                 ActivePS->GetBuffer( "WaterMaterialInfo" ).Update( &wmcb ).Bind();
 
                 DrawMultiIndexedInstancedIndirect( Context.Get(),
@@ -6841,7 +6845,7 @@ void D3D11GraphicsEngine::DrawWaterSurfaces( ID3D11RenderTargetView* waterMaskRT
 
                 WaterMaterialInfoConstantBuffer wmcb = {};
                 FillWaterMaterialInfo( wmcb, batch.texture );
-                wmcb.WM_RenderMode = waterfallBatches.empty() ? 0.0f : 2.0f;
+                wmcb.WM_RenderMode = 0.0f;
                 ActivePS->GetBuffer( "WaterMaterialInfo" ).Update( &wmcb ).Bind();
 
                 for ( unsigned int i = 0; i < batch.drawCount; i++ ) {
