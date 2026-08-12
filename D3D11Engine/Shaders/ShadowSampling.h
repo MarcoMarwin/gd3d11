@@ -30,15 +30,15 @@
 #endif
 
 #ifndef PCSS_BLOCKER_TAPS
-#define PCSS_BLOCKER_TAPS 8
+#define PCSS_BLOCKER_TAPS 12
 #endif
 
 #ifndef PCSS_FILTER_TAPS_NEAR
-#define PCSS_FILTER_TAPS_NEAR 8
+#define PCSS_FILTER_TAPS_NEAR 16
 #endif
 
 #ifndef PCSS_FILTER_TAPS_FAR
-#define PCSS_FILTER_TAPS_FAR 4
+#define PCSS_FILTER_TAPS_FAR 8
 #endif
 
 #ifndef PCF_FILTER_TAPS_NEAR

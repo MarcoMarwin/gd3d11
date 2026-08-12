@@ -375,6 +375,10 @@ struct VobInfo : public BaseVobInfo {
     /** Color the underlaying polygon has */
     DWORD GroundColor;
 
+    /** Cached world-space anchor plane for wind-enabled vegetation. */
+    zCPolygon* WindGroundPolygon = nullptr;
+    XMFLOAT4 WindGroundPlane = {};
+
     /** Stable emission sources for NW_CITY_OILLAMP_01. The cached color is a
         one-time mix and therefore never follows a light's color animation. */
     zCVobLight* OilLampEmissionStaticLight = nullptr;

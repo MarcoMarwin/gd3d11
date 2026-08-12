@@ -35,6 +35,7 @@ struct WindMetaDataEntry
     float minHeight;
     float maxHeight;
     float2 horizontalExtent;
+    float4 groundPlane;
 };
 
 StructuredBuffer<WindMetaDataEntry> WindMetaData;
@@ -221,13 +222,17 @@ VS_OUTPUT VSMain( VS_INPUT Input )
     float localMinHeight = minHeight;
     float localMaxHeight = maxHeight;
     float2 localHorizontalExtent = float2(1.0f, 1.0f);
+    float4 localGroundPlane = 0.0f;
     float interactionWindScale = 1.0f;
+    float3 currentWorldWindOffset = 0.0f;
+    float3 previousWorldWindOffset = 0.0f;
 
 #if WIND_META_SRV
     WindMetaDataEntry meta = WindMetaData[Input.InstanceWindMetaIndex];
     localMinHeight = meta.minHeight;
     localMaxHeight = meta.maxHeight;
     localHorizontalExtent = meta.horizontalExtent;
+    localGroundPlane = meta.groundPlane;
 #endif
 
 #if SHD_INFLUENCE
@@ -250,31 +255,47 @@ VS_OUTPUT VSMain( VS_INPUT Input )
         // WIND SHADER
         // Protect 0 height
         float heightRange = max(localMaxHeight - localMinHeight, 0.001);
-        float vertexHeightNorm = saturate((Input.vPosition.y - localMinHeight) / heightRange);
+        float3 unbentWorldPosition = mul(float4(Input.vPosition, 1.0f), Input.InstanceWorldMatrix).xyz;
+        float worldHeightAboveGround = dot(localGroundPlane.xyz, unbentWorldPosition)
+            + localGroundPlane.w;
+        // Convert the local visual height to world scale without assuming an
+        // unrotated or uniformly scaled Spacer placement.
+        float3 localUpWorld = mul(float3(0.0f, heightRange, 0.0f),
+            (float3x3)Input.InstanceWorldMatrix);
+        float worldHeightRange = max(abs(dot(localGroundPlane.xyz, localUpWorld)), 0.001f);
+        float terrainHeightNorm = saturate(worldHeightAboveGround / worldHeightRange);
+        float legacyHeightNorm = saturate((Input.vPosition.y - localMinHeight) / heightRange);
+        float vertexHeightNorm = lerp(legacyHeightNorm, terrainHeightNorm,
+            step(1.0e-8f, dot(localGroundPlane.xyz, localGroundPlane.xyz)));
         float2 currentObjectWorldXZ = mul(float4(0.0f, 0.0f, 0.0f, 1.0f), Input.InstanceWorldMatrix).xz;
         float2 previousObjectWorldXZ = mul(float4(0.0f, 0.0f, 0.0f, 1.0f), Input.InstancePrevWorldMatrix).xz;
 
         // Apply current and previous wind phases with the same local interaction
         // attenuation so FSR receives consistent vegetation motion vectors.
         float3 windDirection = normalize(windDir);
-        float3 currentWindOffset = ApplyVegetationWind(
+        currentWorldWindOffset = ApplyVegetationWind(
             Input.vPosition, windDirection, vertexHeightNorm, globalTime, currentObjectWorldXZ,
             localMaxHeight, localHorizontalExtent, heightRange, Input.InstanceWind.x
         );
-        float3 previousWindOffset = ApplyVegetationWind(
+        previousWorldWindOffset = ApplyVegetationWind(
             Input.vPosition, windDirection, vertexHeightNorm, prevGlobalTime, previousObjectWorldXZ,
             localMaxHeight, localHorizontalExtent, heightRange, Input.InstanceWind.x
         );
-        position += currentWindOffset * interactionWindScale;
-        prevPosition += previousWindOffset * interactionWindScale;
+        currentWorldWindOffset *= interactionWindScale;
+        previousWorldWindOffset *= interactionWindScale;
     }
 #endif
     
     // Common processing for both cases
-    float3 worldPos = mul(float4(position, 1.0), Input.InstanceWorldMatrix).xyz;
+    // Wind direction is authored in world space. Apply its displacement after
+    // the instance transform so rotating a vegetation VOB in the Spacer does
+    // not rotate the wind along with the mesh.
+    float3 worldPos = mul(float4(position, 1.0), Input.InstanceWorldMatrix).xyz
+        + currentWorldWindOffset;
     
     // Calculate previous world position for motion vectors
-    float3 prevWorldPos = mul(float4(prevPosition, 1.0), Input.InstancePrevWorldMatrix).xyz;
+    float3 prevWorldPos = mul(float4(prevPosition, 1.0), Input.InstancePrevWorldMatrix).xyz
+        + previousWorldWindOffset;
 
     Output.vPosition = mul(float4(worldPos, 1.0), frame.M_ViewProj);
     Output.vTexcoord = Input.vTex1;

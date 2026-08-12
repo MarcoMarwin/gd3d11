@@ -391,12 +391,12 @@ namespace
             && NormalizeVisualStemForMarker( world->WorldName ) == "ADDONWORLD";
         wmcb.WM_OceanClimate = mediterraneanOcean ? 1.0f : 0.0f;
         wmcb.WM_DisableRainEffects = 0.0f;
-        wmcb.WM_OceanWaterTintStrength = mediterraneanOcean ? 0.42f : 0.18f;
+        wmcb.WM_OceanWaterTintStrength = mediterraneanOcean ? 0.48f : 0.18f;
         wmcb.WM_IsOceanWater = IsOceanWaterTexture( texture ) ? 1.0f : 0.0f;
         // Pre-normalized to luminance 1.0 so the pixel shader only changes
         // chroma, not exposure, without a per-pixel dot product and divide.
         wmcb.WM_OceanWaterTint = mediterraneanOcean
-            ? XMFLOAT3( 0.580591f, 1.108402f, 1.161183f )
+            ? XMFLOAT3( 0.426781f, 1.138082f, 1.321880f )
             : XMFLOAT3( 0.894520f, 1.026067f, 1.052377f );
         wmcb.WM_Padding0 = 0.0f;
         // The shader applies this state only to ocean water. Legacy water remains unchanged.
@@ -8072,24 +8072,56 @@ bool D3D11GraphicsEngine::PrepareAndBindWindMetadata( const std::vector<MeshVisu
     }
 
     m_WindMetadataStaging.clear();
-    m_WindMetadataStaging.reserve( activeVisuals.size() );
+    size_t instanceCount = 0;
+    for ( const MeshVisualInfo* visual : activeVisuals ) {
+        instanceCount += visual ? visual->Instances.size() : 0;
+    }
+    m_WindMetadataStaging.reserve( instanceCount );
 
     for ( MeshVisualInfo* visual : activeVisuals ) {
         if ( !visual ) {
             continue;
         }
 
-        const DWORD metadataIndex = static_cast<DWORD>(m_WindMetadataStaging.size());
-        VobWindMetadata metadata = {};
-        metadata.MinHeight = visual->BBox.Min.y;
-        metadata.MaxHeight = visual->BBox.Max.y;
-        metadata.HorizontalExtent = float2(
-            std::max( (visual->BBox.Max.x - visual->BBox.Min.x) * 0.5f, 0.001f ),
-            std::max( (visual->BBox.Max.z - visual->BBox.Min.z) * 0.5f, 0.001f ) );
-        m_WindMetadataStaging.push_back( metadata );
+        for ( size_t i = 0; i < visual->Instances.size(); ++i ) {
+            VobWindMetadata metadata = {};
+            metadata.MinHeight = visual->BBox.Min.y;
+            metadata.MaxHeight = visual->BBox.Max.y;
+            metadata.HorizontalExtent = float2(
+                std::max( (visual->BBox.Max.x - visual->BBox.Min.x) * 0.5f, 0.001f ),
+                std::max( (visual->BBox.Max.z - visual->BBox.Min.z) * 0.5f, 0.001f ) );
 
-        for ( auto& instance : visual->Instances ) {
-            instance.GP_Slot = metadataIndex;
+            // Ground polygon vertices are already in world space. Reusing Gothic's
+            // placement result avoids per-frame terrain traces and also handles slopes.
+            if ( i < visual->InstanceVobs.size() ) {
+                VobInfo* vobInfo = visual->InstanceVobs[i];
+                zCPolygon* ground = vobInfo && vobInfo->Vob ? vobInfo->Vob->GetGroundPoly() : nullptr;
+                if ( vobInfo && vobInfo->WindGroundPolygon != ground ) {
+                    vobInfo->WindGroundPolygon = ground;
+                    vobInfo->WindGroundPlane = {};
+                    zCVertex** vertices = ground ? ground->getVertices() : nullptr;
+                    if ( ground && ground->GetNumPolyVertices() >= 3 && vertices
+                        && vertices[0] && vertices[1] && vertices[2] ) {
+                        const XMVECTOR p0 = XMLoadFloat3( &vertices[0]->Position );
+                        const XMVECTOR p1 = XMLoadFloat3( &vertices[1]->Position );
+                        const XMVECTOR p2 = XMLoadFloat3( &vertices[2]->Position );
+                        XMVECTOR normal = XMVector3Cross( XMVectorSubtract( p1, p0 ), XMVectorSubtract( p2, p0 ) );
+                        const float lengthSq = XMVectorGetX( XMVector3LengthSq( normal ) );
+                        if ( lengthSq > 1.0e-8f ) {
+                            normal = XMVector3Normalize( normal );
+                            if ( XMVectorGetY( normal ) < 0.0f ) normal = XMVectorNegate( normal );
+                            XMFLOAT3 n;
+                            XMStoreFloat3( &n, normal );
+                            vobInfo->WindGroundPlane = XMFLOAT4( n.x, n.y, n.z,
+                                -XMVectorGetX( XMVector3Dot( normal, p0 ) ) );
+                        }
+                    }
+                }
+                if ( vobInfo ) metadata.GroundPlane = vobInfo->WindGroundPlane;
+            }
+
+            visual->Instances[i].GP_Slot = static_cast<DWORD>(m_WindMetadataStaging.size());
+            m_WindMetadataStaging.push_back( metadata );
         }
     }
 
@@ -8836,11 +8868,10 @@ XRESULT D3D11GraphicsEngine::DrawAlphaMeshList(
 
     bool useWindMetadata = false;
     if ( ActiveVS && ActiveVS->GetInputIndex( "WindMetaData" ) != -1 && !alphaMeshes.empty() ) {
-        std::unordered_map<MeshVisualInfo*, DWORD> metadataByVisual;
-        metadataByVisual.reserve( alphaMeshes.size() );
-
         m_WindMetadataStaging.clear();
-        m_WindMetadataStaging.reserve( alphaMeshes.size() );
+        size_t alphaInstanceCount = 0;
+        for ( const auto& alphaData : alphaMeshes ) alphaInstanceCount += alphaData.instances.size();
+        m_WindMetadataStaging.reserve( alphaInstanceCount );
 
         for ( auto& alphaData : alphaMeshes ) {
             MeshVisualInfo* visual = alphaData.vi;
@@ -8848,19 +8879,19 @@ XRESULT D3D11GraphicsEngine::DrawAlphaMeshList(
                 continue;
             }
 
-            auto [it, inserted] = metadataByVisual.try_emplace( visual, static_cast<DWORD>(m_WindMetadataStaging.size()) );
-            if ( inserted ) {
-                VobWindMetadata metadata = {};
-                metadata.MinHeight = visual->BBox.Min.y;
-                metadata.MaxHeight = visual->BBox.Max.y;
-                metadata.HorizontalExtent = float2(
-                    std::max( (visual->BBox.Max.x - visual->BBox.Min.x) * 0.5f, 0.001f ),
-                    std::max( (visual->BBox.Max.z - visual->BBox.Min.z) * 0.5f, 0.001f ) );
-                m_WindMetadataStaging.push_back( metadata );
-            }
-
             for ( auto& instance : alphaData.instances ) {
-                instance.GP_Slot = it->second;
+                VobWindMetadata metadata = {};
+                if ( instance.GP_Slot < m_FrameGeometryCache.vobWindMetadata.size() ) {
+                    metadata = m_FrameGeometryCache.vobWindMetadata[instance.GP_Slot];
+                } else {
+                    metadata.MinHeight = visual->BBox.Min.y;
+                    metadata.MaxHeight = visual->BBox.Max.y;
+                    metadata.HorizontalExtent = float2(
+                        std::max( (visual->BBox.Max.x - visual->BBox.Min.x) * 0.5f, 0.001f ),
+                        std::max( (visual->BBox.Max.z - visual->BBox.Min.z) * 0.5f, 0.001f ) );
+                }
+                instance.GP_Slot = static_cast<DWORD>(m_WindMetadataStaging.size());
+                m_WindMetadataStaging.push_back( metadata );
             }
         }
 

@@ -651,8 +651,6 @@ D3D11TiledDeferredShading::CullResult D3D11TiledDeferredShading::CullLights(
         tl.ShadowStrength = shadowDistanceFade;
         tl.IsIndoor = light->Vob && light->Vob->IsIndoorVob() ? 1.0f : 0.0f;
         tl.IgnoreIndoorOutdoorLimit = light->IgnoreIndoorOutdoorLimit ? 1.0f : 0.0f;
-        // Preserve Build 207's established wide penumbra. Band suppression is
-        // handled in the sampling kernel without reducing the chosen softness.
         tl.ShadowSoftness = std::max( settings.ShadowSoftness * 2.0f, minimumTemporalShadowSoftness );
 
         if ( hasShadow ) {

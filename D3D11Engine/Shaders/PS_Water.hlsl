@@ -666,7 +666,7 @@ float3 skyReflection =
         float3 trans = exp(-absorb * optical);
         float3 oceanClearDayScatter = lerp(
             float3(0.043f, 0.082f, 0.091f),
-            float3(0.035f, 0.120f, 0.150f),
+            float3(0.026f, 0.132f, 0.174f),
             WM_OceanClimate);
 
         float3 oceanDayRainScatter =
@@ -806,8 +806,18 @@ float3 skyReflection =
         // of forcing the clear-day regional tint through them.
         const float weatherTintVisibility = lerp(1.0f, 0.35f, rainAmount);
         const float nightTintVisibility = lerp(1.0f, 0.20f, nightAmount);
+        // The regional ADDONWORLD tint belongs to the open-water volume, not
+        // to the beach contact. Fade it in later than the base volume color so
+        // shallow seabed/refraction retains the same soft shore transition as
+        // standard OceanWater. Other worlds keep their established tint mask.
+        const float addonShoreTintVisibility = shoreColor * shoreColor;
+        const float regionalTintVisibility = lerp(
+            1.0f,
+            addonShoreTintVisibility,
+            saturate(WM_OceanClimate));
         const float adaptiveTintStrength = saturate(WM_OceanWaterTintStrength)
-            * weatherTintVisibility * nightTintVisibility;
+            * weatherTintVisibility * nightTintVisibility
+            * regionalTintVisibility;
         finalColor = lerp(color, color * WM_OceanWaterTint, adaptiveTintStrength);
         maskOut = lerp(.25f * shore, 1, step(.5f, WM_DisableRainEffects));
     }
