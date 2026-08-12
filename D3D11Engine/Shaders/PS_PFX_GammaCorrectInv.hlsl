@@ -50,10 +50,7 @@ float4 PSMain( PS_INPUT Input ) : SV_TARGET
 	[branch] if (G_OutputDitherStrength > 0.0f)
 	{
 		float outputLuminance = dot(corrected, float3(0.2126f, 0.7152f, 0.0722f));
-		// Quantization is visible in bright shallow light gradients as well as in
-		// darkness. Preserve full one-LSB coverage until the signal approaches
-		// clipping, where noise can no longer reveal another output level.
-		float darkGradientWeight = 1.0f - smoothstep(0.92f, 0.995f, outputLuminance);
+		float darkGradientWeight = 1.0f - smoothstep(0.45f, 0.85f, outputLuminance);
 		float outputNoise = FinalOutputDither(uint2(Input.vPosition.xy));
 		corrected += outputNoise * G_OutputDitherStrength * darkGradientWeight;
 	}

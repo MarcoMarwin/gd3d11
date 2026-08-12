@@ -6,7 +6,6 @@ struct DEFERRED_PS_OUTPUT
 	float2 vVelocity : SV_TARGET3;  // Screen-space velocity for motion vectors
 	float vTransparencyAndCompositionMask : SV_TARGET4;
 	float vReactiveMask : SV_TARGET5;
-	float vWorldGeometryMask : SV_TARGET6;
 };
 
 struct DEFERRED_PS_OUTPUT_ALPHA_TO_COVERAGE
@@ -24,7 +23,6 @@ struct FORWARD_PLUS_PS_OUTPUT
 	float2 vVelocity : SV_TARGET3;
 	float vTransparencyAndCompositionMask : SV_TARGET4;
 	float vReactiveMask : SV_TARGET5;
-	float vWorldGeometryMask : SV_TARGET6;
 };
 
 

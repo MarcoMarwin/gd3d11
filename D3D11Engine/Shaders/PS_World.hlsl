@@ -89,7 +89,6 @@ DEFERRED_PS_OUTPUT PSMain( PS_INPUT Input ) : SV_TARGET
 	DoAlphaTest(color.a);
 	
 	DEFERRED_PS_OUTPUT output;
-	output.vWorldGeometryMask = 1.0f;
     float alphaTestMask = 1.0f - smoothstep(0.95f, 1.0f, color.a);
 	output.vTransparencyAndCompositionMask = alphaTestMask * 0.10f;
 	output.vReactiveMask = alphaTestMask * 0.10f;

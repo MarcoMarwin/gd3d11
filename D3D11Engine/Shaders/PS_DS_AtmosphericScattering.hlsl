@@ -164,7 +164,10 @@ float4 PSMain(PS_INPUT Input) : SV_TARGET
         float3 biasedWsPosition = ApplyReceiverNormalBias(wsPosition, wsNormal, wsLightDirection, texelWorldSize, vegetationReceiverMask);
 
         // Use screen position for per-pixel rotation (temporal-friendly)
-        shadow = ComputeCascadedShadowValueSoft(biasedWsPosition, vsPosition.z, vertLighting, 0.0f, Input.vPosition.xy, npcMaterial);
+        shadow = ComputeCascadedShadowValueSoft(
+            biasedWsPosition, vsPosition.z, vertLighting, 0.0f,
+            Input.vPosition.xy, npcMaterial,
+            1.0f - saturate(abs(dot(wsNormal, wsLightDirection))));
 	} else {
         // Night-time sky ambient:
         // saturate(wsNormal.y) restricts the value to [0, 1].

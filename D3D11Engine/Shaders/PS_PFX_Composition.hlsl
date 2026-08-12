@@ -137,8 +137,10 @@ worldFog *= worldFogActivation;
 // vector into a function that expects world space. Correct only their daytime
 // geometry color; dry/night fog, sky pixels and the independent rain veil keep
 // the established path exactly.
+float regionalDayTransition = 1.0f - smoothstep(0.0f, 0.75f, nightTimeBlend);
 float worldFogDayGeometryWeight = saturate(HF_FogOverride)
-    * smoothstep(0.02f, 0.18f, AC_LightPos.y)
+    * regionalDayTransition
+    * (1.0f - activeWeatherFog)
     * (1.0f - skyPixel);
 // A daytime regional Gothic fog zone must fully conceal geometry at its far
 // range instead of leaving a blue atmospheric silhouette behind. This term is
@@ -151,9 +153,8 @@ float worldFogFarOcclusion = smoothstep(
     max(worldFogOcclusionEnd, worldFogOcclusionStart + 1.0f),
     worldFogGeometryDistance) * worldFogDayGeometryWeight;
 worldFog = max(worldFog, worldFogFarOcclusion);
-float3 worldFogColorPosition = worldFogDayGeometryWeight > 0.0001f
-    ? posOriginal
-    : position;
+float3 worldFogColorPosition = lerp(
+    position, posOriginal, worldFogDayGeometryWeight);
 float3 color = ApplyAtmosphericScatteringGround(
     worldFogColorPosition,
     HF_FogColorMod,

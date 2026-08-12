@@ -4,7 +4,6 @@
 
 #include "AlignedAllocator.h"
 #include "D3D11Effect.h"
-#include "D3D11CShader.h"
 #include "D3D11GShader.h"
 #include "D3D11LineRenderer.h"
 #include "D3D11PShader.h"
@@ -664,123 +663,6 @@ ID3D11ShaderResourceView* D3D11GraphicsEngine::GetWindowGlassReplacementSRV() {
     WindowGlassReplacementTexture = std::move( replacement );
     LogInfo() << "Loaded VOB-scoped window glass replacement: " << replacementPath.string();
     return WindowGlassReplacementTexture->GetShaderResourceView().Get();
-}
-
-bool D3D11GraphicsEngine::EnsureWindowWorldGeometryMask() {
-    if ( !IsCityWindowFeatureReady() || !GetDevice().Get() ) {
-        return false;
-    }
-
-    const INT2 maskSize = GetResolution();
-    if ( maskSize.x <= 0 || maskSize.y <= 0 ) {
-        return false;
-    }
-
-    if ( WindowWorldGeometryMask
-        && WindowWorldGeometryMask->GetSizeX() == static_cast<UINT>(maskSize.x)
-        && WindowWorldGeometryMask->GetSizeY() == static_cast<UINT>(maskSize.y)
-        && WindowWorldGeometryMask->GetTexture()
-        && WindowWorldGeometryMask->GetShaderResView()
-        && WindowWorldGeometryMask->GetRenderTargetView() ) {
-        return true;
-    }
-
-    HRESULT result = E_FAIL;
-    auto mask = std::make_unique<RenderToTextureBuffer>(
-        GetDevice().Get(), static_cast<UINT>(maskSize.x), static_cast<UINT>(maskSize.y),
-        DXGI_FORMAT_R8_UNORM, &result, DXGI_FORMAT_UNKNOWN, DXGI_FORMAT_UNKNOWN,
-        1, 1, D3D11_BIND_RENDER_TARGET | D3D11_BIND_SHADER_RESOURCE );
-    if ( FAILED( result ) || !mask->GetTexture() || !mask->GetShaderResView()
-        || !mask->GetRenderTargetView() ) {
-        WindowWorldGeometryMask.reset();
-        LogWarn() << "Failed to create the gameplay-only window geometry mask";
-        return false;
-    }
-
-    SetDebugName( mask->GetTexture().Get(), "Window World Geometry Mask" );
-    SetDebugName( mask->GetShaderResView().Get(), "Window World Geometry Mask SRV" );
-    SetDebugName( mask->GetRenderTargetView().Get(), "Window World Geometry Mask RTV" );
-    WindowWorldGeometryMask = std::move( mask );
-    return true;
-}
-
-bool D3D11GraphicsEngine::BuildWindowSkyVisibilityMask() {
-    WindowSkyVisibilityMaskValidThisFrame = false;
-    if ( FeatureLevel10Compatibility
-        || GetDevice()->GetFeatureLevel() < D3D_FEATURE_LEVEL_11_0
-        || !WindowWorldGeometryMaskValidThisFrame
-        || !DepthStencilBufferCopy || !WindowWorldGeometryMask ) {
-        return false;
-    }
-
-    const INT2 resolution = GetResolution();
-    if ( resolution.x <= 0 || resolution.y <= 0 ) {
-        return false;
-    }
-    constexpr UINT Reduction = 4;
-    const UINT maskWidth = (static_cast<UINT>(resolution.x) + Reduction - 1) / Reduction;
-    const UINT maskHeight = (static_cast<UINT>(resolution.y) + Reduction - 1) / Reduction;
-    if ( maskWidth == 0 || maskHeight == 0 ) {
-        return false;
-    }
-
-    if ( !WindowSkyVisibilityMask
-        || WindowSkyVisibilityMask->GetSizeX() != maskWidth
-        || WindowSkyVisibilityMask->GetSizeY() != maskHeight
-        || !WindowSkyVisibilityMask->GetTexture()
-        || !WindowSkyVisibilityMask->GetShaderResView()
-        || !WindowSkyVisibilityMask->GetUnorderedAccessView() ) {
-        HRESULT result = E_FAIL;
-        auto mask = std::make_unique<RenderToTextureBuffer>(
-            GetDevice().Get(), maskWidth, maskHeight, DXGI_FORMAT_R32_FLOAT,
-            &result, DXGI_FORMAT_UNKNOWN, DXGI_FORMAT_UNKNOWN, 1, 1,
-            D3D11_BIND_UNORDERED_ACCESS | D3D11_BIND_SHADER_RESOURCE );
-        if ( FAILED( result ) || !mask->GetTexture() || !mask->GetShaderResView()
-            || !mask->GetUnorderedAccessView() ) {
-            WindowSkyVisibilityMask.reset();
-            LogWarn() << "Failed to create the reduced window sky-visibility mask";
-            return false;
-        }
-
-        SetDebugName( mask->GetTexture().Get(), "Window Sky Visibility Mask" );
-        SetDebugName( mask->GetShaderResView().Get(), "Window Sky Visibility Mask SRV" );
-        SetDebugName( mask->GetUnorderedAccessView().Get(), "Window Sky Visibility Mask UAV" );
-        WindowSkyVisibilityMask = std::move( mask );
-    }
-
-    const auto shader = GetShaderManager().GetCShader(
-        CShaderID::CS_WindowSkyVisibility );
-    if ( !shader ) {
-        return false;
-    }
-
-    TracyD3D11ZoneCGX( "BuildWindowSkyVisibilityMask" );
-    auto _scopeWindowSkyVisibility = RecordGraphicsEvent(
-        GE_NAME( "BuildWindowSkyVisibilityMask" ) );
-    // The previous frame may still expose this texture to the pixel stage.
-    // D3D11 forbids binding the same subresource as SRV and UAV at once.
-    ID3D11ShaderResourceView* nullOutputSRV = nullptr;
-    GetContext()->PSSetShaderResources( 16, 1, &nullOutputSRV );
-
-    shader->Apply();
-    ID3D11ShaderResourceView* inputs[2] = {
-        DepthStencilBufferCopy->GetShaderResView().Get(),
-        WindowWorldGeometryMask->GetShaderResView().Get()
-    };
-    GetContext()->CSSetShaderResources( 0, 2, inputs );
-    ID3D11UnorderedAccessView* output =
-        WindowSkyVisibilityMask->GetUnorderedAccessView().Get();
-    GetContext()->CSSetUnorderedAccessViews( 0, 1, &output, nullptr );
-    // One 64-thread group cooperatively scans one reduced screen column.
-    GetContext()->Dispatch( maskWidth, 1, 1 );
-
-    ID3D11UnorderedAccessView* nullUAV = nullptr;
-    GetContext()->CSSetUnorderedAccessViews( 0, 1, &nullUAV, nullptr );
-    ID3D11ShaderResourceView* nullSRVs[2] = {};
-    GetContext()->CSSetShaderResources( 0, 2, nullSRVs );
-    GetContext()->CSSetShader( nullptr, nullptr, 0 );
-    WindowSkyVisibilityMaskValidThisFrame = true;
-    return true;
 }
 
 void D3D11GraphicsEngine::EnsureFrameVobVisibilityCollected() {
@@ -1891,14 +1773,6 @@ XRESULT D3D11GraphicsEngine::RecreateBuffers() {
     DepthStencilBufferCopy = std::make_unique<RenderToTextureBuffer>(
         GetDevice().Get(), roundedTextureResolution.x, roundedTextureResolution.y, DXGI_FORMAT_R32_TYPELESS, nullptr,
         DXGI_FORMAT_R32_FLOAT, DXGI_FORMAT_R32_FLOAT );
-
-    // Window-only resources are created lazily after Gothic has completed its
-    // gameplay-world BSP cache. Display-mode setup and menu/loading frames must
-    // remain entirely independent from the window feature.
-    WindowWorldGeometryMask.reset();
-    WindowWorldGeometryMaskValidThisFrame = false;
-    WindowSkyVisibilityMask.reset();
-    WindowSkyVisibilityMaskValidThisFrame = false;
 
     // Create PFX-Renderer
     if ( !PfxRenderer ) PfxRenderer = std::make_unique<D3D11PfxRenderer>();
@@ -6146,7 +6020,6 @@ XRESULT D3D11GraphicsEngine::DrawMeshInfoListAlphablended( const std::vector<std
 
 
 XRESULT D3D11GraphicsEngine::DrawWorldMesh( bool noTextures ) {
-    WindowWorldGeometryMaskValidThisFrame = false;
     if ( !Engine::GAPI->GetRendererState().RendererSettings.DrawWorldMesh )
         return XR_SUCCESS;
 
@@ -6158,34 +6031,12 @@ XRESULT D3D11GraphicsEngine::DrawWorldMesh( bool noTextures ) {
         noTextures = true;
     }
 
-    // Resolve visible window cutouts before allocating/binding the auxiliary
-    // world mask. Worlds and camera views without a relevant window must pay
-    // none of the full-resolution R8 MRT cost.
+    // Resolve visible window cutouts before drawing the world.
     SetDefaultStates();
     XMMATRIX view = Engine::GAPI->GetViewMatrixXM();
     Engine::GAPI->SetViewTransformXM( view );
     Engine::GAPI->ResetWorldTransform();
     const unsigned int windowCutoutCount = UpdateAndBindWindowCutouts();
-
-    ID3D11RenderTargetView* previousWorldRTVs[D3D11_SIMULTANEOUS_RENDER_TARGET_COUNT] = {};
-    ID3D11DepthStencilView* previousWorldDSV = nullptr;
-    const bool captureWorldGeometryMask = !isZPrepass && windowCutoutCount != 0
-        && EnsureWindowWorldGeometryMask();
-    WindowWorldGeometryMaskValidThisFrame = captureWorldGeometryMask;
-    if ( captureWorldGeometryMask ) {
-        constexpr float clearMask[4] = { 0.0f, 0.0f, 0.0f, 0.0f };
-        GetContext()->ClearRenderTargetView(
-            WindowWorldGeometryMask->GetRenderTargetView().Get(), clearMask );
-
-        GetContext()->OMGetRenderTargets( D3D11_SIMULTANEOUS_RENDER_TARGET_COUNT,
-            previousWorldRTVs, &previousWorldDSV );
-        ID3D11RenderTargetView* worldRTVs[D3D11_SIMULTANEOUS_RENDER_TARGET_COUNT] = {};
-        for ( UINT i = 0; i < D3D11_SIMULTANEOUS_RENDER_TARGET_COUNT; ++i ) {
-            worldRTVs[i] = previousWorldRTVs[i];
-        }
-        worldRTVs[6] = WindowWorldGeometryMask->GetRenderTargetView().Get();
-        GetContext()->OMSetRenderTargets( 7, worldRTVs, previousWorldDSV );
-    }
 
     SetActivePixelShader( PShaderID::PS_Diffuse );
     SetActiveVertexShader( VShaderID::VS_Ex );
@@ -6279,8 +6130,8 @@ XRESULT D3D11GraphicsEngine::DrawWorldMesh( bool noTextures ) {
                     const float distanceSq = ComputeWorldMeshDistanceSqFromCamera( renderItem, worldMesh.second, cameraPosition );
                     const std::pair<MeshKey, MeshInfo*> transparencyMesh = { worldMesh.first, worldMesh.second };
 
-                    // Waterfalls stay in the water batch. DrawWaterSurfaces
-                    // separates its steep contributor from horizontal water.
+                    // All legacy water, including steep waterfall geometry,
+                    // remains in one batch and is classified in PS_Water.
 
                     if ( worldMesh.first.Info->MaterialType == MaterialInfo::MT_Water ) {
                         if ( !isZPrepass ) {
@@ -6507,18 +6358,6 @@ XRESULT D3D11GraphicsEngine::DrawWorldMesh( bool noTextures ) {
 
     UnbindWindowCutouts();
 
-    if ( captureWorldGeometryMask ) {
-        GetContext()->OMSetRenderTargets( D3D11_SIMULTANEOUS_RENDER_TARGET_COUNT,
-            previousWorldRTVs, previousWorldDSV );
-        for ( ID3D11RenderTargetView* rtv : previousWorldRTVs ) {
-            if ( rtv ) {
-                rtv->Release();
-            }
-        }
-        if ( previousWorldDSV ) {
-            previousWorldDSV->Release();
-        }
-    }
     return XR_SUCCESS;
 }
 
@@ -8946,49 +8785,19 @@ XRESULT D3D11GraphicsEngine::DrawAlphaMeshList(
     SetupVS_ExMeshDrawCall();
     SetupVS_ExConstantBuffer();
 
-    float windowSkyGuardDistanceWeight = 0.0f;
-    if ( windowGlassOnly ) {
-        constexpr float FullSkyGuardDistance = 1000.0f;
-        constexpr float SkyGuardFadeEndDistance = 1500.0f;
-        float nearestDistanceSq = FLT_MAX;
-        const XMVECTOR cameraPosition = Engine::GAPI->GetCameraPositionXM();
-        for ( const VobInfo* window : m_FrameGeometryCache.visibleWindowVobs ) {
-            if ( !window || !window->Vob
-                || (window->CityWindowValidationInitialized
-                    && !window->CityWindowTransparencyValid) ) {
-                continue;
-            }
-            const float distanceSq = XMVectorGetX( XMVector3LengthSq(
-                window->Vob->GetPositionWorldXM() - cameraPosition ) );
-            nearestDistanceSq = std::min( nearestDistanceSq, distanceSq );
-        }
-
-        if ( nearestDistanceSq < SkyGuardFadeEndDistance * SkyGuardFadeEndDistance ) {
-            const float nearestDistance = std::sqrt( nearestDistanceSq );
-            const float fade = std::clamp(
-                (nearestDistance - FullSkyGuardDistance)
-                    / (SkyGuardFadeEndDistance - FullSkyGuardDistance),
-                0.0f, 1.0f );
-            const float smoothFade = fade * fade * (3.0f - 2.0f * fade);
-            windowSkyGuardDistanceWeight = 1.0f - smoothFade;
-        }
-    }
-
-    bool windowSkyVisibilityAvailable = false;
-    if ( windowSkyGuardDistanceWeight > 0.0f
-        && DepthStencilBuffer && DepthStencilBufferCopy ) {
+    // This pass already contains only validated, visible City_Window glass.
+    // A VOB's origin can be far away from its visible pane, so it must not be
+    // used as a second feature gate.
+    const bool windowSkyGuardEnabled = windowGlassOnly
+        && DepthStencilBuffer && DepthStencilBufferCopy;
+    if ( windowSkyGuardEnabled ) {
         // The regular end-of-frame depth copy happens after the final window
         // replay. Refresh it here while the current depth buffer is detached,
-        // otherwise the sky guard compares this frame's world mask against the
-        // previous frame's depth. That mismatch makes enclosed lower-screen sky
-        // holes leak whenever the camera or an occluder moved.
+        // otherwise the window would classify sky from the previous frame when
+        // the camera moved.
         GetContext()->OMSetRenderTargets(
             1, HDRBackBuffer->GetRenderTargetView().GetAddressOf(), nullptr );
         CopyDepthStencil();
-        // Resolve the lower-screen sky connectivity once at quarter
-        // resolution. Static world geometry closes the path; VOBs and NPCs
-        // never enter the dedicated world mask and therefore cannot close it.
-        windowSkyVisibilityAvailable = BuildWindowSkyVisibilityMask();
     }
 
     GetContext()->OMSetRenderTargets( 1, HDRBackBuffer->GetRenderTargetView().GetAddressOf(),
@@ -9076,7 +8885,7 @@ XRESULT D3D11GraphicsEngine::DrawAlphaMeshList(
             ? DepthStencilBufferCopy->GetShaderResView().Get()
             : nullptr;
         const bool windowSkyGuardAvailable = windowGlassOnly
-            && windowSkyGuardDistanceWeight > 0.0f
+            && windowSkyGuardEnabled
             && IsCityWindowFeatureReady() && windowSceneDepthSRV
             && Engine::GAPI->GetRendererState().RendererSettings.DrawWorldMesh;
         bool windowSkyGuardBound = false;
@@ -9112,14 +8921,8 @@ XRESULT D3D11GraphicsEngine::DrawAlphaMeshList(
             // state must be bound per window draw, not only on a shader change.
             if ( isWindowGlass ) {
                 if ( windowSkyGuardAvailable && !windowSkyGuardBound ) {
-                    ID3D11ShaderResourceView* skyVisibilitySRV =
-                        windowSkyVisibilityAvailable
-                        ? WindowSkyVisibilityMask->GetShaderResView().Get()
-                        : nullptr;
                     GetContext()->PSSetShaderResources(
                         14, 1, &windowSceneDepthSRV );
-                    GetContext()->PSSetShaderResources(
-                        16, 1, &skyVisibilitySRV );
                     windowSkyGuardBound = true;
                 }
 
@@ -9129,11 +8932,9 @@ XRESULT D3D11GraphicsEngine::DrawAlphaMeshList(
                     windowGlassTint.y,
                     windowGlassTint.z,
                     -1.0f );
-                windowGlassData.windowParams = float4(
-                    static_cast<float>(GetResolution().y) * 0.5f,
-                    windowSkyGuardAvailable ? 1.0f : 0.0f,
-                    windowSkyVisibilityAvailable ? 1.0f : 0.0f,
-                    windowSkyGuardDistanceWeight );
+                windowGlassData.windowSkyParams = float2(
+                    static_cast<float>(GetResolution().y) * (2.0f / 3.0f),
+                    windowSkyGuardAvailable ? 1.0f : 0.0f );
                 ActivePS->GetBuffer( "cbFFData" )
                     .Update( &windowGlassData )
                     .Bind();
@@ -9220,7 +9021,6 @@ XRESULT D3D11GraphicsEngine::DrawAlphaMeshList(
         if ( windowSkyGuardBound ) {
             ID3D11ShaderResourceView* nullSRV = nullptr;
             GetContext()->PSSetShaderResources( 14, 1, &nullSRV );
-            GetContext()->PSSetShaderResources( 16, 1, &nullSRV );
         }
     }
 

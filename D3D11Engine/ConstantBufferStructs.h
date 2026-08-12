@@ -576,7 +576,8 @@ struct ForwardPlusTileConstantBuffer {
 
 struct PsSimpleFFdata {
     float4 textureFactor;
-    float4 windowParams;
+    float2 windowSkyParams;
+    float2 padding;
 };
 
 #pragma pack (pop)

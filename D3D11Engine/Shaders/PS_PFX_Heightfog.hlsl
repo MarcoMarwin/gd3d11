@@ -105,8 +105,10 @@ float4 PSMain( PS_INPUT Input ) : SV_TARGET
 	// Match the composition path: only daytime geometry inside a Gothic fog
 	// zone receives the corrected world-space scattering input. Rain fog and
 	// all non-override rendering remain unchanged.
+	float regionalDayTransition = 1.0f - smoothstep(0.0f, 0.75f, nightTimeBlend);
 	float worldFogDayGeometryWeight = saturate(HF_FogOverride)
-		* smoothstep(0.02f, 0.18f, AC_LightPos.y)
+		* regionalDayTransition
+		* (1.0f - activeWeatherFog)
 		* (1.0f - skyPixel);
 	// Match composition: only daytime geometry in an explicit Gothic fog zone
 	// is forced completely into fog at the configured far range.
@@ -118,9 +120,8 @@ float4 PSMain( PS_INPUT Input ) : SV_TARGET
 		max(worldFogOcclusionEnd, worldFogOcclusionStart + 1.0f),
 		worldFogGeometryDistance) * worldFogDayGeometryWeight;
 	worldFog = max(worldFog, worldFogFarOcclusion);
-	float3 worldFogColorPosition = worldFogDayGeometryWeight > 0.0001f
-		? posOriginal
-		: position;
+	float3 worldFogColorPosition = lerp(
+		position, posOriginal, worldFogDayGeometryWeight);
 	float3 worldFogColor = ApplyAtmosphericScatteringGround(
 		worldFogColorPosition,
 		HF_FogColorMod,

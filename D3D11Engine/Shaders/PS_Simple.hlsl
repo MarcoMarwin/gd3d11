@@ -8,16 +8,37 @@
 SamplerState SS_Linear : register( s0 );
 Texture2D	TX_Texture0 : register( t0 );
 Texture2D	TX_WindowSceneDepth : register( t14 );
-Texture2D	TX_WindowSkyVisibility : register( t16 );
 
 struct FFData {
 	float4 textureFactor;
-	float4 windowParams;
+	float2 windowSkyParams;
+	float2 padding;
 };
 
 cbuffer cbFFData : register( b0 ) {
 	FFData cbFFData;
 };
+
+float IsBlockedWindowSky(int2 pixelPosition, int2 targetSize, float skyCutoff)
+{
+	pixelPosition = clamp(pixelPosition, int2(0, 0), targetSize - 1);
+	if (pixelPosition.y < skyCutoff)
+		return 0.0f;
+
+	return TX_WindowSceneDepth.Load(int3(pixelPosition, 0)).r <= 1e-7f
+		? 1.0f : 0.0f;
+}
+
+float2 WindowUvDeltaToScreenDelta(float2 uvDelta, float2 uvDx, float2 uvDy)
+{
+	const float determinant = uvDx.x * uvDy.y - uvDy.x * uvDx.y;
+	if (abs(determinant) <= 1e-8f)
+		return float2(0.0f, 0.0f);
+
+	return float2(
+		(uvDelta.x * uvDy.y - uvDelta.y * uvDy.x) / determinant,
+		(uvDelta.y * uvDx.x - uvDelta.x * uvDx.y) / determinant);
+}
 
 //--------------------------------------------------------------------------------------
 // Input / Output structures
@@ -34,41 +55,6 @@ struct PS_INPUT
 	float4 vPosition		: SV_POSITION;
 };
 
-#ifdef USE_FFDATA
-float EvaluateCachedWindowSkyVisibility(
-	int2 pixelPosition, int2 targetSize, float featherWidth)
-{
-	uint maskWidth;
-	uint maskHeight;
-	TX_WindowSkyVisibility.GetDimensions(maskWidth, maskHeight);
-	if (maskWidth == 0u || maskHeight == 0u)
-		return 0.0f;
-
-	const float2 uv = (float2(pixelPosition) + 0.5f) / float2(targetSize);
-	const float2 featherOffset = featherWidth / float2(targetSize);
-	const float2 halfTexel = 0.5f / float2(maskWidth, maskHeight);
-	const float2 centerUV = clamp(uv, halfTexel, 1.0f - halfTexel);
-	const float center = TX_WindowSkyVisibility.SampleLevel(
-		SS_Linear, centerUV, 0.0f).r;
-	const float left = TX_WindowSkyVisibility.SampleLevel(
-		SS_Linear, clamp(centerUV - float2(featherOffset.x, 0.0f),
-			halfTexel, 1.0f - halfTexel), 0.0f).r;
-	const float right = TX_WindowSkyVisibility.SampleLevel(
-		SS_Linear, clamp(centerUV + float2(featherOffset.x, 0.0f),
-			halfTexel, 1.0f - halfTexel), 0.0f).r;
-	const float up = TX_WindowSkyVisibility.SampleLevel(
-		SS_Linear, clamp(centerUV - float2(0.0f, featherOffset.y),
-			halfTexel, 1.0f - halfTexel), 0.0f).r;
-	const float down = TX_WindowSkyVisibility.SampleLevel(
-		SS_Linear, clamp(centerUV + float2(0.0f, featherOffset.y),
-			halfTexel, 1.0f - halfTexel), 0.0f).r;
-	// A compact five-tap cross softens and slightly expands the protected
-	// disconnected region without returning to the old per-pixel path walk.
-	return saturate((left + right + up + down + center * 2.0f) * (1.0f / 6.0f));
-}
-#endif
-
-
 //--------------------------------------------------------------------------------------
 // Pixel Shader
 //--------------------------------------------------------------------------------------
@@ -81,6 +67,11 @@ float4 PSMain( PS_INPUT Input ) : SV_TARGET
 	// City_Window replacement. Its solid texels already ran through the lit pass.
 	if (cbFFData.textureFactor.a < 0.0f)
 	{
+		// Derivatives must be evaluated before the alpha discard so the opaque
+		// lattice cannot invalidate neighboring pane-row projections.
+		const float2 uvDx = ddx(Input.vTexcoord);
+		const float2 uvDy = ddy(Input.vTexcoord);
+
 		if (color.a > (170.0f / 255.0f))
 			discard;
 
@@ -89,33 +80,47 @@ float4 PSMain( PS_INPUT Input ) : SV_TARGET
 		// without making it read as a bright opaque sheet.
 		color.a = max(color.a * 0.82f, 0.16f);
 
-		if (cbFFData.windowParams.y > 0.5f && cbFFData.windowParams.z > 0.5f)
+		if (cbFFData.windowSkyParams.y > 0.5f)
 		{
-			const float halfHeight = cbFFData.windowParams.x;
+			const float skyCutoff = cbFFData.windowSkyParams.x;
 			uint targetWidth;
 			uint targetHeight;
 			TX_WindowSceneDepth.GetDimensions(targetWidth, targetHeight);
-			// Feather only the cached connected/disconnected boundary. The fixed
-			// screen centre remains the classification boundary, but clear sky just
-			// below it stays transparent when it is connected to upper-screen sky.
-			const float featherWidth = clamp(
-				float(min(targetWidth, targetHeight)) * 0.04f, 32.0f, 72.0f);
-			if (Input.vPosition.y >= halfHeight)
+			const int2 targetSize = int2(targetWidth, targetHeight);
+
+			// City_Window.dds has five pane rows separated by an opaque lattice.
+			// If a row sees sky in the lower screen third, that complete row and
+			// every row below it become opaque. Three samples cover its three panes.
+			const int currentRow = clamp((int)(saturate(Input.vTexcoord.y) * 5.0f), 0, 4);
+			const float paneColumnCenters[3] = {
+				1.0f / 6.0f, 3.0f / 6.0f, 5.0f / 6.0f
+			};
+			const float paneRowOffsets[2] = { 0.3f, 0.7f };
+			float rowSkyVisible = 0.0f;
+			for (int row = 0; row < 5; ++row)
 			{
-				const int2 targetSize = int2(targetWidth, targetHeight);
-				const int2 pixelPosition = clamp(int2(Input.vPosition.xy),
-					int2(0, 0), targetSize - 1);
-				const float sceneDepth = TX_WindowSceneDepth.Load(
-					int3(pixelPosition, 0)).r;
-				if (sceneDepth <= 1e-7f)
+				if (row > currentRow || rowSkyVisible > 0.5f)
+					break;
+
+				for (int column = 0; column < 3; ++column)
 				{
-					const float connectedSky = EvaluateCachedWindowSkyVisibility(
-						pixelPosition, targetSize, featherWidth);
-					const float disconnectedSky = 1.0f - connectedSky;
-					color.a = lerp(color.a, 1.0f,
-						disconnectedSky * saturate(cbFFData.windowParams.w));
+					for (int rowSample = 0; rowSample < 2; ++rowSample)
+					{
+						const float sampleRow = (row + paneRowOffsets[rowSample]) / 5.0f;
+						const float2 sampleUv = float2(paneColumnCenters[column], sampleRow);
+						const float2 samplePosition = Input.vPosition.xy
+							+ WindowUvDeltaToScreenDelta(sampleUv - Input.vTexcoord, uvDx, uvDy);
+						rowSkyVisible = max(rowSkyVisible, IsBlockedWindowSky(
+							int2(samplePosition), targetSize, skyCutoff));
+						if (rowSkyVisible > 0.5f)
+							break;
+					}
+					if (rowSkyVisible > 0.5f)
+						break;
 				}
 			}
+			if (rowSkyVisible > 0.5f)
+				color.a = 1.0f;
 		}
 
 		// The IN and OUT meshes carry unrelated vertex lighting; IN variants can

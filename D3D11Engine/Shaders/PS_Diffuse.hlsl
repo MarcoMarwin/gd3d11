@@ -172,7 +172,6 @@ FORWARD_PLUS_PS_OUTPUT PSMain( PS_INPUT Input )
 	// Match Kirides Nightly temporal masks for opaque world geometry.
 	output.vTransparencyAndCompositionMask = 0.0f;
 	output.vReactiveMask = GetFsr3DialogReactiveMask();
-	output.vWorldGeometryMask = 1.0f;
 
 	float2 materialUV = Input.vTexcoord;
 #if NORMALMAPPING == 1
@@ -249,7 +248,9 @@ FORWARD_PLUS_PS_OUTPUT PSMain( PS_INPUT Input )
 				float3 biasedWsPosition = ApplyReceiverNormalBias(
 					wsPosition, wsNormal, wsLightDirection, texelWorldSize, vegetationReceiverMask);
 				shadow = ComputeCascadedShadowValueSoft(
-					biasedWsPosition, vsPosition.z, vertLighting, 0.0f, Input.vPosition.xy, npcMaterial);
+					biasedWsPosition, vsPosition.z, vertLighting, 0.0f,
+					Input.vPosition.xy, npcMaterial,
+					1.0f - saturate(abs(dot(wsNormal, wsLightDirection))));
 			}
 		#else
 			float3 wsNormal = normalize(mul(float4(nrm, 0.0f), SQ_InvView).xyz);
@@ -260,7 +261,10 @@ FORWARD_PLUS_PS_OUTPUT PSMain( PS_INPUT Input )
 
 			float3 biasedWsPosition = ApplyReceiverNormalBias(wsPosition, wsNormal, wsLightDirection, texelWorldSize, vegetationReceiverMask);
 
-			shadow = ComputeCascadedShadowValueSoft(biasedWsPosition, vsPosition.z, vertLighting, 0.0f, Input.vPosition.xy, npcMaterial);
+			shadow = ComputeCascadedShadowValueSoft(
+				biasedWsPosition, vsPosition.z, vertLighting, 0.0f,
+				Input.vPosition.xy, npcMaterial,
+				1.0f - saturate(abs(dot(wsNormal, wsLightDirection))));
 		#endif
 	} else {
 		float3 wsNormal = normalize(mul(float4(nrm, 0.0f), SQ_InvView).xyz);
@@ -337,7 +341,6 @@ DEFERRED_PS_OUTPUT PSMain( PS_INPUT Input ) : SV_TARGET
 	// Match Kirides Nightly temporal masks for opaque world geometry.
 	output.vTransparencyAndCompositionMask = 0.0f;
 	output.vReactiveMask = GetFsr3DialogReactiveMask();
-	output.vWorldGeometryMask = 1.0f;
 
 	float3 wsPosition = mul(float4(Input.vViewPosition, 1.0f), WindowCutoutInvView).xyz;
 	ClipWindowCutouts(wsPosition, Input.vPosition.xy);
