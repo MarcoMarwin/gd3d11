@@ -308,6 +308,7 @@ XRESULT D3D11ShaderManager::Init() {
     // Shadow macro builder shared by both atmospheric scattering shader variants
     ShaderInfo::MacroBuilder shadowMacroBuilder = [](std::vector<D3D_SHADER_MACRO>& list) {
         const auto& s = Engine::GAPI->GetRendererState().RendererSettings;
+        const bool temporalShadowReconstruction = s.GetUsesTemporalReconstruction();
 
         const bool useSimpleShadowFallback =
             FeatureLevel10Compatibility || s.DebugSettings.FeatureSet.UseShadowAtlas;
@@ -319,14 +320,15 @@ XRESULT D3D11ShaderManager::Init() {
         list.push_back( {"CSM_PCF_LIMIT",        sNums[std::clamp<size_t>(s.ShadowCascadePCFLimit, 0, MAX_CSM_CASCADES)]} );
         list.push_back( {"SHADOW_ATLAS",         (FeatureLevel10Compatibility || s.DebugSettings.FeatureSet.UseShadowAtlas) ? "1" : "0"} );
         list.push_back( {"FP_USE_SHADOW_MASK",   s.DebugSettings.FeatureSet.UseScreenSpaceShadowMask ? "1" : "0"} );
-        // Stable full-quality kernels avoid visible stippling on animated characters.
-        // Do not rely on temporal AA to reconstruct deliberately undersampled shadows.
-        list.push_back( {"SHD_BLUE_NOISE",        "0"} );
-        list.push_back( {"PCSS_BLOCKER_TAPS",     "16"} );
-        list.push_back( {"PCSS_FILTER_TAPS_NEAR", "32"} );
-        list.push_back( {"PCSS_FILTER_TAPS_FAR",  "16"} );
-        list.push_back( {"PCF_FILTER_TAPS_NEAR",  "16"} );
-        list.push_back( {"PCF_FILTER_TAPS_FAR",   "8"} );
+        // Decorrelate static-world PCSS/PCF only when TAA/FSR can reconstruct
+        // it. Character receivers explicitly take the stable symmetric path
+        // in ShadowSampling.h and therefore never inherit temporal stippling.
+        list.push_back( {"SHD_BLUE_NOISE",        temporalShadowReconstruction ? "1" : "0"} );
+        list.push_back( {"PCSS_BLOCKER_TAPS",     temporalShadowReconstruction ? "8" : "16"} );
+        list.push_back( {"PCSS_FILTER_TAPS_NEAR", temporalShadowReconstruction ? "8" : "32"} );
+        list.push_back( {"PCSS_FILTER_TAPS_FAR",  temporalShadowReconstruction ? "4" : "16"} );
+        list.push_back( {"PCF_FILTER_TAPS_NEAR",  temporalShadowReconstruction ? "8" : "16"} );
+        list.push_back( {"PCF_FILTER_TAPS_FAR",   temporalShadowReconstruction ? "4" : "8"} );
     };
 
     Shaders.push_back( ShaderInfo::make<PShaderID::PS_DS_AtmosphericScattering>( "PS_DS_AtmosphericScattering.hlsl" )

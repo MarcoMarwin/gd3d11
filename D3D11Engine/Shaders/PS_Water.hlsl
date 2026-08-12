@@ -24,7 +24,7 @@ cbuffer RefractionInfo : register(b2)
 
 cbuffer WaterMaterialInfo : register(b3)
 {
-    float WM_PaddingLegacy0;
+    float WM_OceanClimate;
     float WM_DisableRainEffects;
     float WM_OceanWaterTintStrength;
     float WM_IsOceanWater;
@@ -655,12 +655,19 @@ float3 skyReflection =
         float shoreColor = SmootherStep01(saturate(
             (thick - 1.0f)
             / max(shoreColorEnd - 1.0f, 1.0f)));
-        float3 absDay = float3(.0024, .00115, .00062);
+        // ADDONWORLD keeps the clearer turquoise profile; every other world
+        // gets denser, less saturated northern coastal water.
+        float3 absDay = lerp(
+            float3(.0031f, .00165f, .00108f),
+            float3(.0024f, .00115f, .00062f),
+            WM_OceanClimate);
         float3 absRain = float3(.003, .00155, .00088);
         float3 absorb = lerp(absDay, absRain, rainAmount) * lerp(1, .58f, cameraBelowSurface);
         float3 trans = exp(-absorb * optical);
-        float3 oceanClearDayScatter =
-            float3(0.035f, 0.120f, 0.150f);
+        float3 oceanClearDayScatter = lerp(
+            float3(0.043f, 0.082f, 0.091f),
+            float3(0.035f, 0.120f, 0.150f),
+            WM_OceanClimate);
 
         float3 oceanDayRainScatter =
             float3(0.070f, 0.066f, 0.064f);
@@ -718,7 +725,7 @@ float3 skyReflection =
         float3 oceanPreparedCube = lerp(
             oceanLimitedCubeLuma.xxx,
             oceanLimitedCube,
-            .58f);
+            lerp(.38f, .58f, WM_OceanClimate));
         oceanPreparedCube *= ssrNightCubeFallbackDim;
         reflectionColor +=
             oceanPreparedCube * oceanCubeFallbackAvailable;
@@ -746,6 +753,7 @@ float3 skyReflection =
             backupDayAmount,
             currentNightAmount,
             nightAmount) * shore * hemi;
+        amount *= lerp(.82f, 1.0f, WM_OceanClimate);
         amount *= lerp(
             1.0f,
             0.62f,
@@ -786,11 +794,21 @@ float3 skyReflection =
             0.25f,
             saturate((1.0f - oceanGeometrySourceAvailable) * grazingFallbackAmount));
         float glintControl = max(cubeStrength, ssrStrength) * shore * oceanFallbackGlintDim;
-        color += lerp(float3(1.2, .6, .2), float3(5, 5, 5), AC_LightPos.y) * sunSpot * glintControl;
+        color += lerp(float3(1.2, .6, .2), float3(5, 5, 5), AC_LightPos.y)
+            * sunSpot * glintControl * lerp(.82f, 1.0f, WM_OceanClimate);
         float3 moonDir = normalize(-AC_MoonPos.xyz);
         float moonSpot = pow(saturate(dot(smallRefl, moonDir)), 420) * .15f * smoothstep(-.04f, .08f, AC_MoonPos.y) * smoothstep(0.0f, 0.08f, saturate(AC_MoonVisibility)) * weather * moonCloudTransmission * (1 - glintBlock);
         color += float3(.60f, .70f, 1.00f) * moonSpot * glintControl;
-        finalColor = color;
+        // Apply the automatic world tint without changing luminance. This
+        // changes water character, not exposure, and costs no texture sample.
+        // Rain has its own neutral scatter/absorption and night has dedicated
+        // blue-black volume colors. Let those physical states dominate instead
+        // of forcing the clear-day regional tint through them.
+        const float weatherTintVisibility = lerp(1.0f, 0.35f, rainAmount);
+        const float nightTintVisibility = lerp(1.0f, 0.20f, nightAmount);
+        const float adaptiveTintStrength = saturate(WM_OceanWaterTintStrength)
+            * weatherTintVisibility * nightTintVisibility;
+        finalColor = lerp(color, color * WM_OceanWaterTint, adaptiveTintStrength);
         maskOut = lerp(.25f * shore, 1, step(.5f, WM_DisableRainEffects));
     }
     else

@@ -197,7 +197,7 @@ namespace
     static ID3D11ShaderResourceView* s_nullSRVs[16] = { nullptr };
 
     struct WaterMaterialInfoConstantBuffer {
-        float WM_PaddingLegacy0;
+        float WM_OceanClimate;
         float WM_DisableRainEffects;
         float WM_OceanWaterTintStrength;
         float WM_IsOceanWater;
@@ -386,12 +386,17 @@ namespace
     }
 
     void FillWaterMaterialInfo( WaterMaterialInfoConstantBuffer& wmcb, zCTexture* texture ) {
-        const auto& settings = Engine::GAPI->GetRendererState().RendererSettings;
-        wmcb.WM_PaddingLegacy0 = 0.0f;
+        const WorldInfo* world = Engine::GAPI->GetLoadedWorldInfo();
+        const bool mediterraneanOcean = world && world->WorldName == "ADDONWORLD";
+        wmcb.WM_OceanClimate = mediterraneanOcean ? 1.0f : 0.0f;
         wmcb.WM_DisableRainEffects = 0.0f;
-        wmcb.WM_OceanWaterTintStrength = settings.OceanWaterColorStrength;
+        wmcb.WM_OceanWaterTintStrength = mediterraneanOcean ? 0.18f : 0.38f;
         wmcb.WM_IsOceanWater = IsOceanWaterTexture( texture ) ? 1.0f : 0.0f;
-        wmcb.WM_OceanWaterTint = settings.OceanWaterColor;
+        // Pre-normalized to luminance 1.0 so the pixel shader only changes
+        // chroma, not exposure, without a per-pixel dot product and divide.
+        wmcb.WM_OceanWaterTint = mediterraneanOcean
+            ? XMFLOAT3( 0.846026f, 1.034031f, 1.116284f )
+            : XMFLOAT3( 0.894520f, 1.026067f, 1.052377f );
         wmcb.WM_Padding0 = 0.0f;
         // The shader applies this state only to ocean water. Legacy water remains unchanged.
         wmcb.WM_CameraUnderwater = Engine::GAPI->IsUnderWater() ? 1.0f : 0.0f;
