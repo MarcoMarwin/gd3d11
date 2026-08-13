@@ -32,6 +32,7 @@ cbuffer TiledShadingConstantBuffer : register( b0 ) {
     matrix InvView; // For world-space reconstruction (shadow sampling)
 };
 
+SamplerState SS_Linear : register( s0 );
 SamplerComparisonState SS_Comp : register( s2 );
 Texture2D TX_Diffuse : register( t0 );
 Texture2D TX_Nrm : register( t1 );
@@ -120,12 +121,12 @@ void CSMain( uint3 groupID : SV_GroupID, uint3 threadID : SV_GroupThreadID, uint
             const bool lowStatic = (light.ShadowCubeIndex & 0x20000000) != 0;
             float shadow;
             if ( lowStatic )
-                shadow = PLS_SampleShadowCubeArray( TX_StaticLowShadowCubeArray, SS_Comp, wsPosition, wsNormal, light.PositionWorld, light.Range, shadowSlot, max(light.ShadowSoftness, 1.25f) );
+                shadow = PLS_SampleShadowCubeArray( TX_StaticLowShadowCubeArray, SS_Linear, wsPosition, wsNormal, light.PositionWorld, light.Range, shadowSlot, max(light.ShadowSoftness, 1.25f) );
             else
-                shadow = PLS_SampleShadowCubeArray( TX_ShadowCubeArray, SS_Comp, wsPosition, wsNormal, light.PositionWorld, light.Range, shadowSlot, light.ShadowSoftness );
+                shadow = PLS_SampleShadowCubeArray( TX_ShadowCubeArray, SS_Linear, wsPosition, wsNormal, light.PositionWorld, light.Range, shadowSlot, light.ShadowSoftness );
             if ( shadow > 0.001f && (light.ShadowCubeIndex & 0x40000000) != 0 )
             {
-                shadow *= PLS_SampleShadowCubeArray( TX_DynamicShadowCubeArray, SS_Comp, wsPosition, wsNormal, light.PositionWorld, light.Range, shadowSlot, light.ShadowSoftness );
+                shadow *= PLS_SampleShadowCubeArray( TX_DynamicShadowCubeArray, SS_Linear, wsPosition, wsNormal, light.PositionWorld, light.Range, shadowSlot, light.ShadowSoftness );
             }
             lighting *= lerp(1.0f, shadow, saturate(light.ShadowStrength));
         }

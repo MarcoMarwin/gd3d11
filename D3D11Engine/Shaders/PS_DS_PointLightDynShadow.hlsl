@@ -103,7 +103,7 @@ float4 PSMain( PS_INPUT Input ) : SV_TARGET
 	float ndl = PLS_ComputePointLightNdlBacklit(lightDir, normal, Pl_PositionWorld, wsPosition, wsNormal, twoSidedBacklitMaterial, AC_EnableSSS);
 	
 	// Apply dynamic shadow
-	float shadow = PLS_SampleShadowCube(TX_ShadowCube, SS_Comp, wsPosition, wsNormal, Pl_PositionWorld, PL_Range, PL_ShadowSoftness);
+	float shadow = PLS_SampleShadowCube(TX_ShadowCube, SS_Linear, wsPosition, wsNormal, Pl_PositionWorld, PL_Range, PL_ShadowSoftness);
 	//return float4(ndl.rrr,1);
 	
 	// Get rid of lighting on the backfaces of normalmapped surfaces

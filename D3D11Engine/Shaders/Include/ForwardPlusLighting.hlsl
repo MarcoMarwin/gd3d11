@@ -183,12 +183,12 @@ float3 FP_ComputePointLighting(
             const bool lowStatic = (light.ShadowCubeIndex & 0x20000000) != 0;
             float shadow;
             if ( lowStatic )
-                shadow = PLS_SampleShadowCubeArray( FP_StaticLowShadowCubeArray, SS_Comp, wsPosition, wsNormal, light.PositionWorld, light.Range, shadowSlot, max(light.ShadowSoftness, 1.25f) );
+                shadow = PLS_SampleShadowCubeArray( FP_StaticLowShadowCubeArray, FP_SS_Linear, wsPosition, wsNormal, light.PositionWorld, light.Range, shadowSlot, max(light.ShadowSoftness, 1.25f) );
             else
-                shadow = PLS_SampleShadowCubeArray( FP_ShadowCubeArray, SS_Comp, wsPosition, wsNormal, light.PositionWorld, light.Range, shadowSlot, light.ShadowSoftness );
+                shadow = PLS_SampleShadowCubeArray( FP_ShadowCubeArray, FP_SS_Linear, wsPosition, wsNormal, light.PositionWorld, light.Range, shadowSlot, light.ShadowSoftness );
             if ( shadow > 0.001f && (light.ShadowCubeIndex & 0x40000000) != 0 )
             {
-                shadow *= PLS_SampleShadowCubeArray( FP_DynamicShadowCubeArray, SS_Comp, wsPosition, wsNormal, light.PositionWorld, light.Range, shadowSlot, light.ShadowSoftness );
+                shadow *= PLS_SampleShadowCubeArray( FP_DynamicShadowCubeArray, FP_SS_Linear, wsPosition, wsNormal, light.PositionWorld, light.Range, shadowSlot, light.ShadowSoftness );
             }
             lighting *= lerp(1.0f, shadow, saturate(light.ShadowStrength));
         }

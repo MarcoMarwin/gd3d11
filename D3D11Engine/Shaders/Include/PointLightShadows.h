@@ -214,7 +214,7 @@ void PLS_PrepareShadowSampling(
 
 float PLS_SampleShadowCube(
     TextureCube shadowCube,
-    SamplerComparisonState samplerState,
+    SamplerState linearSampler,
     float3 wsPosition,
     float3 N, 
     float3 lightPosWorld,
@@ -242,8 +242,14 @@ float PLS_SampleShadowCube(
         float2 rotatedKernel = float2( kernel.x * cosA - kernel.y * sinA, kernel.x * sinA + kernel.y * cosA );
         float3 perturbedDir = normalize( dir + (right * rotatedKernel.x + up * rotatedKernel.y) * fixedBlurScale );
 
-        shd += shadowCube.SampleCmpLevelZero(
-            samplerState, perturbedDir, compareDistance - fixedBias );
+        float storedDepth = shadowCube.SampleLevel( linearSampler, perturbedDir, 0.0f ).r;
+        float receiverDepth = compareDistance - fixedBias;
+        // The cubemap stores linear radial depth. A narrow continuous comparison
+        // prevents a wide soft kernel from exposing the binary PCF coverage levels.
+        float comparisonWidth = lerp( 0.00020f, 0.00100f,
+            saturate( (shadowSoftness - 0.5f) / 3.5f ) );
+        shd += smoothstep( receiverDepth - comparisonWidth,
+            receiverDepth + comparisonWidth, storedDepth );
     }
 
     float finalShadow = shd / PLS_SHADOW_BLUR_COUNT;
@@ -258,7 +264,7 @@ float PLS_SampleShadowCube(
 
 float PLS_SampleShadowCubeArray(
     TextureCubeArray shadowCubeArray,
-    SamplerComparisonState samplerState,
+    SamplerState linearSampler,
     float3 wsPosition,
     float3 N, 
     float3 lightPosWorld,
@@ -288,8 +294,12 @@ float PLS_SampleShadowCubeArray(
         float3 perturbedDir = normalize( dir + (right * rotatedKernel.x + up * rotatedKernel.y) * fixedBlurScale );
         float4 sampleCoord = float4( perturbedDir, (float)cubeIndex );
 
-        shd += shadowCubeArray.SampleCmpLevelZero(
-            samplerState, sampleCoord, compareDistance - fixedBias );
+        float storedDepth = shadowCubeArray.SampleLevel( linearSampler, sampleCoord, 0.0f ).r;
+        float receiverDepth = compareDistance - fixedBias;
+        float comparisonWidth = lerp( 0.00020f, 0.00100f,
+            saturate( (shadowSoftness - 0.5f) / 3.5f ) );
+        shd += smoothstep( receiverDepth - comparisonWidth,
+            receiverDepth + comparisonWidth, storedDepth );
     }
 
     float finalShadow = shd / PLS_SHADOW_BLUR_COUNT;
