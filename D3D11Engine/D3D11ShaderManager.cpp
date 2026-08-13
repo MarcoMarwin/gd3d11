@@ -303,9 +303,6 @@ XRESULT D3D11ShaderManager::Init() {
         .with_category( ShaderCategory::LightsAndShadows ) );
 
     Shaders.push_back( ShaderInfo::make<PShaderID::PS_DS_PointLightDynShadow>( "PS_DS_PointLightDynShadow.hlsl" )
-        .with_macros( [](std::vector<D3D_SHADER_MACRO>& list) {
-            list.push_back( { "POINT_SHADOW_GATHER", FeatureLevel10Compatibility ? "0" : "1" } );
-        } )
         .with_category( ShaderCategory::LightsAndShadows ) );
 
     // Shadow macro builder shared by both atmospheric scattering shader variants
@@ -323,7 +320,6 @@ XRESULT D3D11ShaderManager::Init() {
         list.push_back( {"CSM_PCF_LIMIT",        sNums[std::clamp<size_t>(s.ShadowCascadePCFLimit, 0, MAX_CSM_CASCADES)]} );
         list.push_back( {"SHADOW_ATLAS",         (FeatureLevel10Compatibility || s.DebugSettings.FeatureSet.UseShadowAtlas) ? "1" : "0"} );
         list.push_back( {"FP_USE_SHADOW_MASK",   s.DebugSettings.FeatureSet.UseScreenSpaceShadowMask ? "1" : "0"} );
-        list.push_back( {"POINT_SHADOW_GATHER",  FeatureLevel10Compatibility ? "0" : "1"} );
         // Decorrelate static-world PCSS/PCF only when TAA/FSR can reconstruct
         // it. Character receivers explicitly take the stable symmetric path
         // in ShadowSampling.h and therefore never inherit temporal stippling.
@@ -487,8 +483,7 @@ XRESULT D3D11ShaderManager::Init() {
             { "MAX_LIGHTS_PER_TILE", TO_LITERAL( MAX_LIGHTS_PER_TILE ) },
         }));
 
-        Shaders.push_back( ShaderInfo::make<CShaderID::CS_TiledShading>( "CS_TiledShading.hlsl" )
-            .with_macros( { { "POINT_SHADOW_GATHER", "1" } } ) );
+        Shaders.push_back( ShaderInfo::make<CShaderID::CS_TiledShading>( "CS_TiledShading.hlsl" ));
 
         Shaders.push_back( ShaderInfo::make<CShaderID::CS_PFX_GodRayMask>( "CS_PFX_GodRayMask.hlsl" ));
 

@@ -35,6 +35,7 @@ namespace {
 
     FfxResource WrapView(
         ID3D11View* view,
+        Microsoft::WRL::ComPtr<ID3D11Resource>& keepAlive,
         const wchar_t* name,
         FfxResourceStates state = FFX_RESOURCE_STATE_COMPUTE_READ )
     {
@@ -42,11 +43,11 @@ namespace {
             return {};
         }
 
-        // GetResource adds one COM reference. Keep it alive while the FFX
-        // descriptor is built and release it automatically before returning.
-        Microsoft::WRL::ComPtr<ID3D11Resource> resource;
-        view->GetResource( resource.GetAddressOf() );
-        return WrapResource( resource.Get(), name, state );
+        // GetResource adds one COM reference. The returned FfxResource only
+        // stores a raw pointer, so the owner must survive through dispatch.
+        keepAlive.Reset();
+        view->GetResource( keepAlive.GetAddressOf() );
+        return WrapResource( keepAlive.Get(), name, state );
     }
 
     void UnbindComputeResources( ID3D11DeviceContext* context ) {
@@ -242,17 +243,28 @@ XRESULT D3D11PFX_FSR3::Apply(
         D3D11_BIND_UNORDERED_ACCESS | D3D11_BIND_RENDER_TARGET | D3D11_BIND_SHADER_RESOURCE
     } );
 
+    // FfxResource is non-owning. Keep every resource obtained from a view
+    // referenced until ffxFsr3UpscalerContextDispatch has completed.
+    Microsoft::WRL::ComPtr<ID3D11Resource> colorResource;
+    Microsoft::WRL::ComPtr<ID3D11Resource> depthResource;
+    Microsoft::WRL::ComPtr<ID3D11Resource> motionVectorsResource;
+    Microsoft::WRL::ComPtr<ID3D11Resource> outputResource;
+    Microsoft::WRL::ComPtr<ID3D11Resource> reactiveResource;
+    Microsoft::WRL::ComPtr<ID3D11Resource> compositionResource;
+
     FfxFsr3UpscalerDispatchDescription dispatch = {};
     dispatch.commandList = ffxGetCommandListDX11( context );
-    dispatch.color = WrapView( color, L"FSR3 Input Color" );
-    dispatch.depth = WrapView( depth, L"FSR3 Input Depth" );
-    dispatch.motionVectors = WrapView( motionVectors, L"FSR3 Input Motion Vectors" );
-    dispatch.output = WrapView( output, L"FSR3 Upscale Output", FFX_RESOURCE_STATE_UNORDERED_ACCESS );
+    dispatch.color = WrapView( color, colorResource, L"FSR3 Input Color" );
+    dispatch.depth = WrapView( depth, depthResource, L"FSR3 Input Depth" );
+    dispatch.motionVectors = WrapView( motionVectors, motionVectorsResource, L"FSR3 Input Motion Vectors" );
+    dispatch.output = WrapView( output, outputResource, L"FSR3 Upscale Output", FFX_RESOURCE_STATE_UNORDERED_ACCESS );
     if ( reactiveMask ) {
-        dispatch.reactive = WrapView( reactiveMask, L"FSR3 Reactive Mask" );
+        dispatch.reactive = WrapView( reactiveMask, reactiveResource, L"FSR3 Reactive Mask" );
     }
     if ( transparencyAndCompositionMask ) {
-        dispatch.transparencyAndComposition = WrapView( transparencyAndCompositionMask, L"FSR3 Transparency and Composition" );
+        dispatch.transparencyAndComposition = WrapView(
+            transparencyAndCompositionMask, compositionResource,
+            L"FSR3 Transparency and Composition" );
     }
     dispatch.dilatedMotionVectors = WrapResource(
         dilatedMotionVectors->GetTexture().Get(),

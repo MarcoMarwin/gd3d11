@@ -6,10 +6,6 @@
 
 #if !defined(__cplusplus)
 
-#ifndef POINT_SHADOW_GATHER
-#define POINT_SHADOW_GATHER 0
-#endif
-
 static const int PLS_SHADOW_BLUR_COUNT = 8;
 static const float2 PLS_SHADOW_BLUR_OFFSETS[PLS_SHADOW_BLUR_COUNT] = {
     float2( 0.076849f, -0.078216f),
@@ -185,7 +181,8 @@ void PLS_PrepareShadowSampling(
 {
     float3 toPixelOriginal = wsPosition - lightPosWorld;
     float distOriginal = length( toPixelOriginal );
-    float3 L = toPixelOriginal / distOriginal; 
+    float safeDistOriginal = max( distOriginal, 1.0e-4f );
+    float3 L = toPixelOriginal / safeDistOriginal;
 
     // Slope-Scaled Normal Bias
     float nDotL = saturate( dot( N, -L ) );
@@ -195,18 +192,20 @@ void PLS_PrepareShadowSampling(
 
     // Recalculate vectors
     float3 toPixel = biasedWsPosition - lightPosWorld;
-    dir = normalize( toPixel );
-
     float distance = length( toPixel );
-    float zFar = lightRange * 2.0f; 
+    dir = distance > 1.0e-4f ? toPixel / distance : float3( 0.0f, 1.0f, 0.0f );
+
+    float zFar = max( lightRange * 2.0f, 1.0e-4f );
     compareDistance = distance / zFar;
     float distance01 = saturate( compareDistance );
     float depthCurve = distance01 * distance01;
 
     fixedBias = lerp( 0.002f, 0.008f, depthCurve );
 
-    float baseBlur = lerp( 0.02f, 0.08f, depthCurve );
-    fixedBlurScale = baseBlur * clamp(shadowSoftness, 0.2f, 8.0f);
+    // ShadowSoftness represents the angular radius of the point-light source.
+    // The actual filter radius is derived from blocker/receiver separation below.
+    float sourceAngularRadius = lerp( 0.006f, 0.018f, distance01 );
+    fixedBlurScale = sourceAngularRadius * clamp( shadowSoftness, 0.0f, 4.0f );
 
     up = abs( dir.y ) < 0.999f ? float3( 0, 1, 0 ) : float3( 1, 0, 0 );
     right = normalize( cross( up, dir ) );
@@ -218,6 +217,7 @@ void PLS_PrepareShadowSampling(
 
 float PLS_SampleShadowCube(
     TextureCube shadowCube,
+    SamplerState linearSampler,
     SamplerComparisonState samplerState,
     float3 wsPosition,
     float3 N, 
@@ -239,48 +239,57 @@ float PLS_SampleShadowCube(
         dir, compareDistance, fixedBias, fixedBlurScale,
         right, up, sinA, cosA );
 
+    if ( shadowSoftness <= 0.01f )
+    {
+        float hardShadow = shadowCube.SampleCmpLevelZero(
+            samplerState, dir, compareDistance - fixedBias );
+        float normalizedDist = saturate( length( wsPosition - lightPosWorld ) / lightRange );
+        return PLS_ApplyShadowDistanceFade( hardShadow, normalizedDist );
+    }
+
+    float receiverDepth = compareDistance - fixedBias;
+    float blockerDepthSum = 0.0f;
+    float blockerCount = 0.0f;
+    float centerBlockerDepth = shadowCube.SampleLevel( linearSampler, dir, 0.0f ).r;
+    if ( centerBlockerDepth < receiverDepth )
+    {
+        blockerDepthSum = centerBlockerDepth;
+        blockerCount = 1.0f;
+    }
+    float searchRadius = max( fixedBlurScale * 0.35f, 0.001f );
+    [unroll] for ( int blockerIndex = 0; blockerIndex < 4; blockerIndex++ )
+    {
+        float2 kernel = PLS_SHADOW_BLUR_OFFSETS[blockerIndex * 2];
+        float3 searchDir = normalize( dir + (right * kernel.x + up * kernel.y) * searchRadius );
+        float blockerDepth = shadowCube.SampleLevel( linearSampler, searchDir, 0.0f ).r;
+        if ( blockerDepth < receiverDepth )
+        {
+            blockerDepthSum += blockerDepth;
+            blockerCount += 1.0f;
+        }
+    }
+
+    // No occluder in the source footprint: preserve the unshadowed light exactly.
+    if ( blockerCount < 0.5f )
+        return 1.0f;
+
+    float averageBlockerDepth = blockerDepthSum / blockerCount;
+    float separation = max( receiverDepth - averageBlockerDepth, 0.0f );
+    float penumbraRatio = separation / max( averageBlockerDepth, 0.02f );
+    float filterRadius = clamp( fixedBlurScale * penumbraRatio, 0.001f, fixedBlurScale );
+
     float shd = 0;
-    float finalShadow;
-#if POINT_SHADOW_GATHER
-    // Four well-spaced anchors, each gathering the four neighbouring hardware
-    // comparisons. This yields 16 coherent comparison values with four fetches.
-    if ( shadowSoftness > 0.75f )
-    {
-        [unroll] for ( int i = 0; i < 4; i++ )
-        {
-            float2 kernel = PLS_SHADOW_BLUR_OFFSETS[i * 2];
-            float2 rotatedKernel = float2( kernel.x * cosA - kernel.y * sinA, kernel.x * sinA + kernel.y * cosA );
-            float3 perturbedDir = normalize( dir + (right * rotatedKernel.x + up * rotatedKernel.y) * fixedBlurScale );
-            float4 gathered = shadowCube.GatherCmp(
-                samplerState, perturbedDir, compareDistance - fixedBias );
-            shd += dot( gathered, 0.25f.xxxx );
-        }
-        finalShadow = shd * 0.25f;
-    }
-    else
-    {
-        [unroll] for ( int i = 0; i < PLS_SHADOW_BLUR_COUNT; i++ )
-        {
-            float2 kernel = PLS_SHADOW_BLUR_OFFSETS[i];
-            float3 perturbedDir = normalize( dir + (right * kernel.x + up * kernel.y) * fixedBlurScale );
-            shd += shadowCube.SampleCmpLevelZero(
-                samplerState, perturbedDir, compareDistance - fixedBias );
-        }
-        finalShadow = shd / PLS_SHADOW_BLUR_COUNT;
-    }
-#else
     [unroll] for ( int i = 0; i < PLS_SHADOW_BLUR_COUNT; i++ )
     {
         float2 kernel = PLS_SHADOW_BLUR_OFFSETS[i];
         float2 rotatedKernel = float2( kernel.x * cosA - kernel.y * sinA, kernel.x * sinA + kernel.y * cosA );
-        float3 perturbedDir = normalize( dir + (right * rotatedKernel.x + up * rotatedKernel.y) * fixedBlurScale );
+        float3 perturbedDir = normalize( dir + (right * rotatedKernel.x + up * rotatedKernel.y) * filterRadius );
 
         shd += shadowCube.SampleCmpLevelZero(
             samplerState, perturbedDir, compareDistance - fixedBias );
     }
 
-    finalShadow = shd / PLS_SHADOW_BLUR_COUNT;
-#endif
+    float finalShadow = shd / PLS_SHADOW_BLUR_COUNT;
 
     // Shadow Distance Fading
     // Calculate how far we are through the light's actual range (0.0 to 1.0)
@@ -292,6 +301,7 @@ float PLS_SampleShadowCube(
 
 float PLS_SampleShadowCubeArray(
     TextureCubeArray shadowCubeArray,
+    SamplerState linearSampler,
     SamplerComparisonState samplerState,
     float3 wsPosition,
     float3 N, 
@@ -314,49 +324,60 @@ float PLS_SampleShadowCubeArray(
         dir, compareDistance, fixedBias, fixedBlurScale,
         right, up, sinA, cosA );
 
+    if ( shadowSoftness <= 0.01f )
+    {
+        float4 sampleCoord = float4( dir, (float)cubeIndex );
+        float hardShadow = shadowCubeArray.SampleCmpLevelZero(
+            samplerState, sampleCoord, compareDistance - fixedBias );
+        float normalizedDist = saturate( length( wsPosition - lightPosWorld ) / lightRange );
+        return PLS_ApplyShadowDistanceFade( hardShadow, normalizedDist );
+    }
+
+    float receiverDepth = compareDistance - fixedBias;
+    float blockerDepthSum = 0.0f;
+    float blockerCount = 0.0f;
+    float4 centerCoord = float4( dir, (float)cubeIndex );
+    float centerBlockerDepth = shadowCubeArray.SampleLevel( linearSampler, centerCoord, 0.0f ).r;
+    if ( centerBlockerDepth < receiverDepth )
+    {
+        blockerDepthSum = centerBlockerDepth;
+        blockerCount = 1.0f;
+    }
+    float searchRadius = max( fixedBlurScale * 0.35f, 0.001f );
+    [unroll] for ( int blockerIndex = 0; blockerIndex < 4; blockerIndex++ )
+    {
+        float2 kernel = PLS_SHADOW_BLUR_OFFSETS[blockerIndex * 2];
+        float3 searchDir = normalize( dir + (right * kernel.x + up * kernel.y) * searchRadius );
+        float4 searchCoord = float4( searchDir, (float)cubeIndex );
+        float blockerDepth = shadowCubeArray.SampleLevel( linearSampler, searchCoord, 0.0f ).r;
+        if ( blockerDepth < receiverDepth )
+        {
+            blockerDepthSum += blockerDepth;
+            blockerCount += 1.0f;
+        }
+    }
+
+    if ( blockerCount < 0.5f )
+        return 1.0f;
+
+    float averageBlockerDepth = blockerDepthSum / blockerCount;
+    float separation = max( receiverDepth - averageBlockerDepth, 0.0f );
+    float penumbraRatio = separation / max( averageBlockerDepth, 0.02f );
+    float filterRadius = clamp( fixedBlurScale * penumbraRatio, 0.001f, fixedBlurScale );
+
     float shd = 0;
-    float finalShadow;
-#if POINT_SHADOW_GATHER
-    if ( shadowSoftness > 0.75f )
-    {
-        [unroll] for ( int i = 0; i < 4; i++ )
-        {
-            float2 kernel = PLS_SHADOW_BLUR_OFFSETS[i * 2];
-            float2 rotatedKernel = float2( kernel.x * cosA - kernel.y * sinA, kernel.x * sinA + kernel.y * cosA );
-            float3 perturbedDir = normalize( dir + (right * rotatedKernel.x + up * rotatedKernel.y) * fixedBlurScale );
-            float4 sampleCoord = float4( perturbedDir, (float)cubeIndex );
-            float4 gathered = shadowCubeArray.GatherCmp(
-                samplerState, sampleCoord, compareDistance - fixedBias );
-            shd += dot( gathered, 0.25f.xxxx );
-        }
-        finalShadow = shd * 0.25f;
-    }
-    else
-    {
-        [unroll] for ( int i = 0; i < PLS_SHADOW_BLUR_COUNT; i++ )
-        {
-            float2 kernel = PLS_SHADOW_BLUR_OFFSETS[i];
-            float3 perturbedDir = normalize( dir + (right * kernel.x + up * kernel.y) * fixedBlurScale );
-            float4 sampleCoord = float4( perturbedDir, (float)cubeIndex );
-            shd += shadowCubeArray.SampleCmpLevelZero(
-                samplerState, sampleCoord, compareDistance - fixedBias );
-        }
-        finalShadow = shd / PLS_SHADOW_BLUR_COUNT;
-    }
-#else
     [unroll] for ( int i = 0; i < PLS_SHADOW_BLUR_COUNT; i++ )
     {
         float2 kernel = PLS_SHADOW_BLUR_OFFSETS[i];
         float2 rotatedKernel = float2( kernel.x * cosA - kernel.y * sinA, kernel.x * sinA + kernel.y * cosA );
-        float3 perturbedDir = normalize( dir + (right * rotatedKernel.x + up * rotatedKernel.y) * fixedBlurScale );
+        float3 perturbedDir = normalize( dir + (right * rotatedKernel.x + up * rotatedKernel.y) * filterRadius );
         float4 sampleCoord = float4( perturbedDir, (float)cubeIndex );
 
         shd += shadowCubeArray.SampleCmpLevelZero(
             samplerState, sampleCoord, compareDistance - fixedBias );
     }
 
-    finalShadow = shd / PLS_SHADOW_BLUR_COUNT;
-#endif
+    float finalShadow = shd / PLS_SHADOW_BLUR_COUNT;
 
     // Shadow Distance Fading
     float distanceToLight = length(wsPosition - lightPosWorld);

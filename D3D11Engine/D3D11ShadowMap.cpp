@@ -321,7 +321,14 @@ D3D11ShadowMap::D3D11ShadowMap() {
     
 }
 
-D3D11ShadowMap::~D3D11ShadowMap() {}
+D3D11ShadowMap::~D3D11ShadowMap() {
+    // Jobs capture this object and its render queues. Complete them before any
+    // member starts destruction, then sever the non-owning point-light links.
+    WaitShadowCullingComplete();
+    if ( m_TiledDeferred ) {
+        m_TiledDeferred->DetachAllOwners();
+    }
+}
 
 bool D3D11ShadowMap::ShouldUseAtlas() const {
     const auto& settings = Engine::GAPI->GetRendererState().RendererSettings;

@@ -326,6 +326,20 @@ void D3D11TiledDeferredShading::FreeSlot( int slot ) {
     }
 }
 
+void D3D11TiledDeferredShading::DetachAllOwners() {
+    for ( D3D11PointLight*& owner : m_SlotOwners ) {
+        if ( owner ) owner->OnTiledSlotEvicted();
+        owner = nullptr;
+    }
+    for ( D3D11PointLight*& owner : m_StaticLowSlotOwners ) {
+        if ( owner ) owner->OnTiledSlotEvicted();
+        owner = nullptr;
+    }
+    m_SlotInUse.reset();
+    m_StaticLowSlotInUse.reset();
+    m_SlotPriorities.fill( FLT_MAX );
+}
+
 void D3D11TiledDeferredShading::TouchSlotPriority( int slot, float priority ) {
     if ( slot >= 0 && static_cast<uint32_t>(slot) < MAX_SHADOW_CUBEMAPS ) {
         m_SlotPriorities[slot] = priority;

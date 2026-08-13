@@ -612,6 +612,10 @@ D3D11GraphicsEngine::D3D11GraphicsEngine() :
 D3D11GraphicsEngine::~D3D11GraphicsEngine() {
     // Release post-processing and its vendor contexts before D3D device teardown.
     PfxRenderer.reset();
+    // ShadowMaps owns the tiled cube arrays and keeps device/context references.
+    // Destroy it while the D3D device is still valid, especially before the AMD
+    // path detaches and explicitly destroys that device below.
+    ShadowMaps.reset();
     GothicDepthBufferStateInfo::DeleteCachedObjects();
     GothicBlendStateInfo::DeleteCachedObjects();
     GothicRasterizerStateInfo::DeleteCachedObjects();

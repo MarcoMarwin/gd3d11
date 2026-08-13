@@ -74,6 +74,7 @@ public:
     int AllocateSlot( uint32_t shadowCubeSize, bool staticLowRes, D3D11PointLight* owner, float priority );
     void FreeSlot( int slot );
     void TouchSlotPriority( int slot, float priority );
+    void DetachAllOwners();
     RenderToDepthStencilBuffer* GetSlotTarget( int slot );
     RenderToDepthStencilBuffer* GetDynamicSlotTarget( int slot );
 
