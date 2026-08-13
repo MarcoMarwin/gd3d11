@@ -6,35 +6,17 @@
 
 #if !defined(__cplusplus)
 
-static const int PLS_SHADOW_BLUR_COUNT = 12;
+static const int PLS_SHADOW_BLUR_COUNT = 8;
 static const float2 PLS_SHADOW_BLUR_OFFSETS[PLS_SHADOW_BLUR_COUNT] = {
-    float2( 0.000000f,  0.000000f),
-    float2( 0.350000f,  0.000000f),
-    float2(-0.270000f,  0.250000f),
-    float2( 0.040000f, -0.460000f),
-    float2( 0.420000f,  0.410000f),
-    float2(-0.550000f, -0.100000f),
-    float2( 0.300000f, -0.580000f),
-    float2(-0.340000f,  0.620000f),
-    float2( 0.720000f,  0.050000f),
-    float2(-0.680000f,  0.400000f),
-    float2( 0.080000f,  0.820000f),
-    float2(-0.180000f, -0.880000f)
+    float2( 0.076849f, -0.078216f),
+    float2(-0.165415f,  0.370808f),
+    float2(-0.551062f, -0.407284f),
+    float2( 0.449733f, -0.518174f),
+    float2( 0.347526f,  0.730303f),
+    float2(-0.840654f,  0.134261f),
+    float2( 0.896791f,  0.038446f),
+    float2(-0.258169f, -0.912648f)
 };
-
-float PLS_AggressiveNoise(float3 p)
-{
-    float3 p3  = frac(p * 0.1031f);
-    p3 += dot(p3, p3.zyx + 31.32f);
-    return frac((p3.x + p3.y) * p3.z);
-}
-
-float PLS_Hash3D( float3 p )
-{
-    float3 p3  = frac( p * 0.1031f );
-    p3 += dot( p3, p3.zyx + 31.32f );
-    return frac( (p3.x + p3.y) * p3.z );
-}
 
 float PLS_CalcBlinnPhongLighting( float3 N, float3 H )
 {
@@ -120,6 +102,15 @@ float PLS_ApplyShadowDistanceFade( float finalShadow, float normalizedDist )
     float shadowFade = smoothstep( 0.65f, 0.95f, normalizedDist );
     float fadeWeight = shadowFade * smoothstep( 0.45f, 0.90f, finalShadow );
     return lerp( finalShadow, 1.0f, fadeWeight );
+}
+
+float PLS_StableWorldNoise( float3 wsPosition, float3 lightPosWorld )
+{
+    // Camera-independent interleaved noise. Light-relative world space keeps
+    // the pattern attached to the receiver and separates overlapping lights.
+    float3 receiver = wsPosition - lightPosWorld;
+    return frac( 52.9829189f * frac( dot(
+        receiver, float3( 0.06711056f, 0.00583715f, 0.03127194f ) ) ) );
 }
 
 float PLS_ComputePointLightNdlBacklit(
@@ -215,22 +206,23 @@ void PLS_PrepareShadowSampling(
     float zFar = lightRange * 2.0f; 
     compareDistance = distance / zFar;
     float distance01 = saturate( compareDistance );
-    
-    float depthCurve = distance01 * distance01; 
-    
+    float depthCurve = distance01 * distance01;
+
     fixedBias = lerp( 0.002f, 0.008f, depthCurve );
 
     float baseBlur = lerp( 0.02f, 0.08f, depthCurve );
-
-    // A fixed Poisson kernel is stable under temporal reconstruction.
     fixedBlurScale = baseBlur * clamp(shadowSoftness, 0.2f, 8.0f);
 
     up = abs( dir.y ) < 0.999f ? float3( 0, 1, 0 ) : float3( 1, 0, 0 );
     right = normalize( cross( up, dir ) );
     up = cross( dir, right );
 
-    sinA = 0.0f;
-    cosA = 1.0f;
+    // Rotate the existing eight samples instead of adding more. The stable
+    // world-space phase breaks up visible 1/8 coverage bands without temporal
+    // shimmer under camera motion.
+    float kernelAngle = PLS_StableWorldNoise( wsPosition, lightPosWorld )
+        * 6.28318530718f;
+    sincos( kernelAngle, sinA, cosA );
 }
 
 float PLS_SampleShadowCube(
@@ -263,7 +255,8 @@ float PLS_SampleShadowCube(
         float2 rotatedKernel = float2( kernel.x * cosA - kernel.y * sinA, kernel.x * sinA + kernel.y * cosA );
         float3 perturbedDir = normalize( dir + (right * rotatedKernel.x + up * rotatedKernel.y) * fixedBlurScale );
 
-        shd += shadowCube.SampleCmpLevelZero( samplerState, perturbedDir, compareDistance - fixedBias );
+        shd += shadowCube.SampleCmpLevelZero(
+            samplerState, perturbedDir, compareDistance - fixedBias );
     }
 
     float finalShadow = shd / PLS_SHADOW_BLUR_COUNT;
@@ -308,7 +301,8 @@ float PLS_SampleShadowCubeArray(
         float3 perturbedDir = normalize( dir + (right * rotatedKernel.x + up * rotatedKernel.y) * fixedBlurScale );
         float4 sampleCoord = float4( perturbedDir, (float)cubeIndex );
 
-        shd += shadowCubeArray.SampleCmpLevelZero( samplerState, sampleCoord, compareDistance - fixedBias );
+        shd += shadowCubeArray.SampleCmpLevelZero(
+            samplerState, sampleCoord, compareDistance - fixedBias );
     }
 
     float finalShadow = shd / PLS_SHADOW_BLUR_COUNT;

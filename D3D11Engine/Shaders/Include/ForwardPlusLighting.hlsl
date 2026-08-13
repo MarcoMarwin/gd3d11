@@ -127,16 +127,8 @@ StructuredBuffer<TiledPointLight> FP_Lights : register( t8 );
 StructuredBuffer<LightGrid> FP_LightGrid : register( t9 );
 StructuredBuffer<uint> FP_LightIndexList : register( t10 );
 TextureCubeArray FP_ShadowCubeArray : register( t11 );
-float ComputeIndoorDoorFloorBleed(float indoorPixel, float3 wsPosition, float3 wsNormal, float3 lightPosWorld, float lightRange)
-{
-	float outdoorPixel = 1.0f - indoorPixel;
-	float floorMask = smoothstep(0.40f, 0.70f, wsNormal.y);
-	float belowLight = smoothstep(-80.0f, 160.0f, lightPosWorld.y - wsPosition.y);
-	float horizontalDistance = length(lightPosWorld.xz - wsPosition.xz);
-	float doorwayRange = 1.0f - smoothstep(0.0f, 30.0f, horizontalDistance);
-	return outdoorPixel * floorMask * belowLight * doorwayRange;
-}
-
+TextureCubeArray FP_DynamicShadowCubeArray : register( t13 );
+TextureCubeArray FP_StaticLowShadowCubeArray : register( t20 );
 // ============================================
 // Point Light Accumulation (matches CS_TiledShading.hlsl)
 // ============================================
@@ -187,16 +179,24 @@ float3 FP_ComputePointLighting(
         // Don't fetch shadows if the light contribution is effectively zero.
         if ( light.ShadowCubeIndex >= 0 && any(lighting > 0.001f) )
         {
-            float shadow = PLS_SampleShadowCubeArray( FP_ShadowCubeArray, SS_Comp, wsPosition, wsNormal, light.PositionWorld, light.Range, light.ShadowCubeIndex, light.ShadowSoftness );
+            const int shadowSlot = light.ShadowCubeIndex & 0x1fffffff;
+            const bool lowStatic = (light.ShadowCubeIndex & 0x20000000) != 0;
+            float shadow;
+            if ( lowStatic )
+                shadow = PLS_SampleShadowCubeArray( FP_StaticLowShadowCubeArray, SS_Comp, wsPosition, wsNormal, light.PositionWorld, light.Range, shadowSlot, max(light.ShadowSoftness, 1.25f) );
+            else
+                shadow = PLS_SampleShadowCubeArray( FP_ShadowCubeArray, SS_Comp, wsPosition, wsNormal, light.PositionWorld, light.Range, shadowSlot, light.ShadowSoftness );
+            if ( shadow > 0.001f && (light.ShadowCubeIndex & 0x40000000) != 0 )
+            {
+                shadow *= PLS_SampleShadowCubeArray( FP_DynamicShadowCubeArray, SS_Comp, wsPosition, wsNormal, light.PositionWorld, light.Range, shadowSlot, light.ShadowSoftness );
+            }
             lighting *= lerp(1.0f, shadow, saturate(light.ShadowStrength));
         }
 
+        // Keep indoor lights off outdoor geometry without the former discrete
+        // multi-ring doorway search that produced contour bands.
         float indoorPixel = diffuseColor.a < 0.5f ? 1.0f : 0.0f;
-        float doorFloorBleed = 0.0f;
-        if ( light.IsIndoor > 0.5f && light.IgnoreIndoorOutdoorLimit < 0.5f ) {
-            doorFloorBleed = ComputeIndoorDoorFloorBleed(indoorPixel, wsPosition, wsNormal, light.PositionWorld, light.Range);
-        }
-        float indoorBoundary = saturate( (1.0f - light.IsIndoor) + light.IsIndoor * max(indoorPixel, doorFloorBleed) );
+        float indoorBoundary = saturate((1.0f - light.IsIndoor) + light.IsIndoor * indoorPixel);
         lighting *= lerp(indoorBoundary, 1.0f, saturate(light.IgnoreIndoorOutdoorLimit));
 
         lighting = saturate( lighting );
