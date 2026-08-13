@@ -183,7 +183,7 @@ float3 FP_ComputePointLighting(
             const bool lowStatic = (light.ShadowCubeIndex & 0x20000000) != 0;
             float shadow;
             if ( lowStatic )
-                shadow = PLS_SampleShadowCubeArray( FP_StaticLowShadowCubeArray, FP_SS_Linear, SS_Comp, wsPosition, wsNormal, light.PositionWorld, light.Range, shadowSlot, max(light.ShadowSoftness, 1.25f) );
+                shadow = PLS_SampleShadowCubeArray( FP_StaticLowShadowCubeArray, FP_SS_Linear, SS_Comp, wsPosition, wsNormal, light.PositionWorld, light.Range, shadowSlot, light.ShadowSoftness < 0.0f ? min(light.ShadowSoftness, -1.25f) : max(light.ShadowSoftness, 1.25f) );
             else
                 shadow = PLS_SampleShadowCubeArray( FP_ShadowCubeArray, FP_SS_Linear, SS_Comp, wsPosition, wsNormal, light.PositionWorld, light.Range, shadowSlot, light.ShadowSoftness );
             if ( shadow > 0.001f && (light.ShadowCubeIndex & 0x40000000) != 0 )
@@ -244,6 +244,11 @@ float3 FP_ComputeSunLighting(
     {
         // Preserve the old night base and add only a tiny shadowed moon term.
         litPixel = diffuseColor * SQ_ShadowStrength * sunStrength * shadowAO;
+
+        // Match deferred rendering: preserve a small indirect night floor
+        // independently of direct-light shadow visibility.
+        const float3 nightAmbientColor = float3( 0.34f, 0.40f, 0.52f );
+        litPixel += diffuseColor * nightAmbientColor * 0.035f * worldAO;
 
         const float moonLightStrength = 0.14f;
         float moonDirect = sun;

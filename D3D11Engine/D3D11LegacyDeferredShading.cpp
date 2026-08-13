@@ -75,6 +75,13 @@ XRESULT D3D11LegacyDeferredShading::DrawPointlightLights(
 
     DS_PointLightConstantBuffer plcb = {};
 
+    XMVECTOR heroPosition = XMVectorZero();
+    zCVob* hero = Engine::GAPI->GetPlayerVob();
+    if ( hero ) {
+        const XMFLOAT3 heroPositionWorld = hero->GetPositionWorld();
+        heroPosition = XMLoadFloat3( &heroPositionWorld );
+    }
+
     {
         auto& proj = Engine::GAPI->GetProjectionMatrix();
         plcb.PL_ProjParams = float4( 1.0f / proj._11, 1.0f / proj._22, proj._43, proj._33 );
@@ -122,6 +129,19 @@ XRESULT D3D11LegacyDeferredShading::DrawPointlightLights(
 
         plcb.PL_ShadowSoftness = std::max(
             settings.ShadowSoftness * 2.0f, minimumTemporalShadowSoftness );
+
+        // Preserve PCSS around the camera and hero. Distant lights use a stable
+        // four-tap PCF path; the sign is an internal shader quality marker.
+        float heroDistance = FLT_MAX;
+        if ( hero ) {
+            XMStoreFloat( &heroDistance, XMVector3Length(
+                XMLoadFloat3( plcb.Pl_PositionWorld.toXMFLOAT3() ) - heroPosition ) );
+        }
+        const float fullQualityRadius = plcb.PL_Range + 1200.0f;
+        if ( plcb.PL_ShadowSoftness > 0.01f
+            && dist > fullQualityRadius && heroDistance > fullQualityRadius ) {
+            plcb.PL_ShadowSoftness = -plcb.PL_ShadowSoftness;
+        }
 
         const float lightRange = plcb.PL_Range;
         const float shadowFadeEnd = std::max( settings.GetEffectiveVisualFXDrawRadius() - lightRange, 1.0f );

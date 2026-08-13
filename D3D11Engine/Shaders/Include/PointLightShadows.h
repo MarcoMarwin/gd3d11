@@ -18,6 +18,14 @@ static const float2 PLS_SHADOW_BLUR_OFFSETS[PLS_SHADOW_BLUR_COUNT] = {
     float2(-0.258169f, -0.912648f)
 };
 
+static const int PLS_FAR_PCF_COUNT = 4;
+static const float2 PLS_FAR_PCF_OFFSETS[PLS_FAR_PCF_COUNT] = {
+    float2(-0.5f, -0.5f),
+    float2( 0.5f, -0.5f),
+    float2(-0.5f,  0.5f),
+    float2( 0.5f,  0.5f)
+};
+
 float PLS_CalcBlinnPhongLighting( float3 N, float3 H )
 {
     return saturate( dot( N, H ) );
@@ -187,7 +195,12 @@ void PLS_PrepareShadowSampling(
     // Slope-Scaled Normal Bias
     float nDotL = saturate( dot( N, -L ) );
     float slopeScale = 1.0f - nDotL; 
-    float normalOffsetScale = distOriginal * 0.02f * (slopeScale + 0.1f); 
+    // Keep the receiver offset below the size at which interpolated skeletal
+    // normals move the projected shadow independently on adjacent triangles.
+    // A smaller slope term plus a range-relative cap still prevents acne on
+    // static walls without producing polygon-shaped patches on characters.
+    float normalOffsetScale = distOriginal * 0.006f * (slopeScale + 0.15f);
+    normalOffsetScale = min( normalOffsetScale, max( lightRange, 0.0f ) * 0.002f );
     float3 biasedWsPosition = wsPosition + N * normalOffsetScale;
 
     // Recalculate vectors
@@ -204,8 +217,13 @@ void PLS_PrepareShadowSampling(
 
     // ShadowSoftness represents the angular radius of the point-light source.
     // The actual filter radius is derived from blocker/receiver separation below.
-    float sourceAngularRadius = lerp( 0.006f, 0.018f, distance01 );
-    fixedBlurScale = sourceAngularRadius * clamp( shadowSoftness, 0.0f, 4.0f );
+    // Keep the near-light radius large enough to span the 128px Medium cube
+    // footprint; otherwise all eight taps collapse into the same comparison.
+    float sourceAngularRadius = lerp( 0.010f, 0.022f, distance01 );
+    // A negative value is an internal quality marker for distant lights. Its
+    // magnitude remains the user-selected softness; only the sampling method
+    // changes from PCSS to the cheaper stable PCF path below.
+    fixedBlurScale = sourceAngularRadius * clamp( abs( shadowSoftness ), 0.0f, 4.0f );
 
     up = abs( dir.y ) < 0.999f ? float3( 0, 1, 0 ) : float3( 1, 0, 0 );
     right = normalize( cross( up, dir ) );
@@ -241,6 +259,23 @@ float PLS_SampleShadowCube(
 
     if ( shadowSoftness <= 0.01f )
     {
+        if ( shadowSoftness < -0.01f )
+        {
+            float farShadow = 0.0f;
+            float filterRadius = fixedBlurScale * 0.70f;
+            [unroll] for ( int i = 0; i < PLS_FAR_PCF_COUNT; ++i )
+            {
+                float2 kernel = PLS_FAR_PCF_OFFSETS[i];
+                float3 sampleDir = normalize(
+                    dir + (right * kernel.x + up * kernel.y) * filterRadius );
+                farShadow += shadowCube.SampleCmpLevelZero(
+                    samplerState, sampleDir, compareDistance - fixedBias );
+            }
+            float normalizedDist = saturate( length( wsPosition - lightPosWorld ) / lightRange );
+            return PLS_ApplyShadowDistanceFade(
+                farShadow / PLS_FAR_PCF_COUNT, normalizedDist );
+        }
+
         float hardShadow = shadowCube.SampleCmpLevelZero(
             samplerState, dir, compareDistance - fixedBias );
         float normalizedDist = saturate( length( wsPosition - lightPosWorld ) / lightRange );
@@ -256,10 +291,10 @@ float PLS_SampleShadowCube(
         blockerDepthSum = centerBlockerDepth;
         blockerCount = 1.0f;
     }
-    float searchRadius = max( fixedBlurScale * 0.35f, 0.001f );
+    float searchRadius = fixedBlurScale * 0.40f;
     [unroll] for ( int blockerIndex = 0; blockerIndex < 4; blockerIndex++ )
     {
-        float2 kernel = PLS_SHADOW_BLUR_OFFSETS[blockerIndex * 2];
+        float2 kernel = PLS_SHADOW_BLUR_OFFSETS[blockerIndex];
         float3 searchDir = normalize( dir + (right * kernel.x + up * kernel.y) * searchRadius );
         float blockerDepth = shadowCube.SampleLevel( linearSampler, searchDir, 0.0f ).r;
         if ( blockerDepth < receiverDepth )
@@ -270,13 +305,21 @@ float PLS_SampleShadowCube(
     }
 
     // No occluder in the source footprint: preserve the unshadowed light exactly.
-    if ( blockerCount < 0.5f )
+    if ( blockerCount <= 0.0f )
         return 1.0f;
 
     float averageBlockerDepth = blockerDepthSum / blockerCount;
     float separation = max( receiverDepth - averageBlockerDepth, 0.0f );
     float penumbraRatio = separation / max( averageBlockerDepth, 0.02f );
-    float filterRadius = clamp( fixedBlurScale * penumbraRatio, 0.001f, fixedBlurScale );
+    // A purely geometric PCSS radius collapses below one cubemap texel at
+    // contact, particularly with the 128px Medium shadow tier. Retain a small
+    // source-size-dependent contact footprint so Shadow Softness still affects
+    // nearby edges without modifying light attenuation or depth comparison.
+    // Sparse blocker counts must not switch the full kernel radius abruptly.
+    // Keep PCSS contact hardening, but confine it to a smooth, stable range;
+    // the user-controlled source radius still determines the overall softness.
+    float penumbraWeight = smoothstep( 0.0f, 0.75f, penumbraRatio );
+    float filterRadius = fixedBlurScale * lerp( 0.55f, 0.85f, penumbraWeight );
 
     float shd = 0;
     [unroll] for ( int i = 0; i < PLS_SHADOW_BLUR_COUNT; i++ )
@@ -326,6 +369,24 @@ float PLS_SampleShadowCubeArray(
 
     if ( shadowSoftness <= 0.01f )
     {
+        if ( shadowSoftness < -0.01f )
+        {
+            float farShadow = 0.0f;
+            float filterRadius = fixedBlurScale * 0.70f;
+            [unroll] for ( int i = 0; i < PLS_FAR_PCF_COUNT; ++i )
+            {
+                float2 kernel = PLS_FAR_PCF_OFFSETS[i];
+                float3 sampleDir = normalize(
+                    dir + (right * kernel.x + up * kernel.y) * filterRadius );
+                float4 sampleCoord = float4( sampleDir, (float)cubeIndex );
+                farShadow += shadowCubeArray.SampleCmpLevelZero(
+                    samplerState, sampleCoord, compareDistance - fixedBias );
+            }
+            float normalizedDist = saturate( length( wsPosition - lightPosWorld ) / lightRange );
+            return PLS_ApplyShadowDistanceFade(
+                farShadow / PLS_FAR_PCF_COUNT, normalizedDist );
+        }
+
         float4 sampleCoord = float4( dir, (float)cubeIndex );
         float hardShadow = shadowCubeArray.SampleCmpLevelZero(
             samplerState, sampleCoord, compareDistance - fixedBias );
@@ -343,10 +404,10 @@ float PLS_SampleShadowCubeArray(
         blockerDepthSum = centerBlockerDepth;
         blockerCount = 1.0f;
     }
-    float searchRadius = max( fixedBlurScale * 0.35f, 0.001f );
+    float searchRadius = fixedBlurScale * 0.40f;
     [unroll] for ( int blockerIndex = 0; blockerIndex < 4; blockerIndex++ )
     {
-        float2 kernel = PLS_SHADOW_BLUR_OFFSETS[blockerIndex * 2];
+        float2 kernel = PLS_SHADOW_BLUR_OFFSETS[blockerIndex];
         float3 searchDir = normalize( dir + (right * kernel.x + up * kernel.y) * searchRadius );
         float4 searchCoord = float4( searchDir, (float)cubeIndex );
         float blockerDepth = shadowCubeArray.SampleLevel( linearSampler, searchCoord, 0.0f ).r;
@@ -357,13 +418,14 @@ float PLS_SampleShadowCubeArray(
         }
     }
 
-    if ( blockerCount < 0.5f )
+    if ( blockerCount <= 0.0f )
         return 1.0f;
 
     float averageBlockerDepth = blockerDepthSum / blockerCount;
     float separation = max( receiverDepth - averageBlockerDepth, 0.0f );
     float penumbraRatio = separation / max( averageBlockerDepth, 0.02f );
-    float filterRadius = clamp( fixedBlurScale * penumbraRatio, 0.001f, fixedBlurScale );
+    float penumbraWeight = smoothstep( 0.0f, 0.75f, penumbraRatio );
+    float filterRadius = fixedBlurScale * lerp( 0.55f, 0.85f, penumbraWeight );
 
     float shd = 0;
     [unroll] for ( int i = 0; i < PLS_SHADOW_BLUR_COUNT; i++ )

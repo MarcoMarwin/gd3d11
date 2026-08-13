@@ -121,7 +121,7 @@ void CSMain( uint3 groupID : SV_GroupID, uint3 threadID : SV_GroupThreadID, uint
             const bool lowStatic = (light.ShadowCubeIndex & 0x20000000) != 0;
             float shadow;
             if ( lowStatic )
-                shadow = PLS_SampleShadowCubeArray( TX_StaticLowShadowCubeArray, SS_Linear, SS_Comp, wsPosition, wsNormal, light.PositionWorld, light.Range, shadowSlot, max(light.ShadowSoftness, 1.25f) );
+                shadow = PLS_SampleShadowCubeArray( TX_StaticLowShadowCubeArray, SS_Linear, SS_Comp, wsPosition, wsNormal, light.PositionWorld, light.Range, shadowSlot, light.ShadowSoftness < 0.0f ? min(light.ShadowSoftness, -1.25f) : max(light.ShadowSoftness, 1.25f) );
             else
                 shadow = PLS_SampleShadowCubeArray( TX_ShadowCubeArray, SS_Linear, SS_Comp, wsPosition, wsNormal, light.PositionWorld, light.Range, shadowSlot, light.ShadowSoftness );
             if ( shadow > 0.001f && (light.ShadowCubeIndex & 0x40000000) != 0 )

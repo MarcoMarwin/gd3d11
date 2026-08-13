@@ -591,6 +591,12 @@ D3D11TiledDeferredShading::CullResult D3D11TiledDeferredShading::CullLights(
     TiledPointLight* lightData = reinterpret_cast<TiledPointLight*>(mapped.pData);
 
     const auto camPos = Engine::GAPI->GetCameraPositionXM();
+    XMVECTOR heroPos = XMVectorZero();
+    zCVob* hero = Engine::GAPI->GetPlayerVob();
+    if ( hero ) {
+        const XMFLOAT3 heroPositionWorld = hero->GetPositionWorld();
+        heroPos = XMLoadFloat3( &heroPositionWorld );
+    }
 
     for ( auto const& light : lights ) {
         zCVobLight* vob = light->Vob;
@@ -667,6 +673,16 @@ D3D11TiledDeferredShading::CullResult D3D11TiledDeferredShading::CullLights(
         tl.IgnoreIndoorOutdoorLimit = light->IgnoreIndoorOutdoorLimit ? 1.0f : 0.0f;
         tl.ShadowSoftness = std::max(
             settings.ShadowSoftness * 2.0f, minimumTemporalShadowSoftness );
+        float heroDistance = FLT_MAX;
+        if ( hero ) {
+            XMStoreFloat( &heroDistance, XMVector3Length(
+                XMLoadFloat3( posWorld.toXMFLOAT3() ) - heroPos ) );
+        }
+        const float fullQualityRadius = lightRange + 1200.0f;
+        if ( tl.ShadowSoftness > 0.01f
+            && dist > fullQualityRadius && heroDistance > fullQualityRadius ) {
+            tl.ShadowSoftness = -tl.ShadowSoftness;
+        }
 
         if ( hasShadow ) {
             constexpr int kShadowHasDynamic = 0x40000000;

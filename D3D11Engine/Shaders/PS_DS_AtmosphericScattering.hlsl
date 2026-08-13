@@ -210,6 +210,12 @@ float4 PSMain(PS_INPUT Input) : SV_TARGET
         // its shadow can remove that tiny contribution but never darken the night.
         litPixel = diffuse.rgb * SQ_ShadowStrength * sunStrength * shadowAO;
 
+        // Indirect night illumination is not removed by a direct moon or
+        // point-light shadow. Keep a restrained floor so indoor materials and
+        // downward-facing geometry do not collapse to black.
+        const float3 nightAmbientColor = float3(0.34f, 0.40f, 0.52f);
+        litPixel += diffuse.rgb * nightAmbientColor * 0.035f * worldAO;
+
         const float moonLightStrength = 0.14f;
         float moonDirect = sun;
         float3 moonColor = float3(0.42f, 0.56f, 1.0f);
