@@ -28,8 +28,10 @@ struct VobWindMetadata {
     // World-space plane of Gothic's actual ground polygon (normal.xyz, distance).
     // A zero normal selects the legacy local-bounds fallback.
     float4 GroundPlane;
+    float GrassShear;
+    float3 Padding;
 };
-static_assert( sizeof( VobWindMetadata ) == 32 );
+static_assert( sizeof( VobWindMetadata ) == 48 );
 
 /** Oriented local volume cut from the Gothic world mesh by an actual window VOB. */
 struct WindowCutoutVolume {

@@ -30,15 +30,15 @@
 #endif
 
 #ifndef PCSS_BLOCKER_TAPS
-#define PCSS_BLOCKER_TAPS 12
+#define PCSS_BLOCKER_TAPS 8
 #endif
 
 #ifndef PCSS_FILTER_TAPS_NEAR
-#define PCSS_FILTER_TAPS_NEAR 16
+#define PCSS_FILTER_TAPS_NEAR 8
 #endif
 
 #ifndef PCSS_FILTER_TAPS_FAR
-#define PCSS_FILTER_TAPS_FAR 8
+#define PCSS_FILTER_TAPS_FAR 4
 #endif
 
 #ifndef PCF_FILTER_TAPS_NEAR
@@ -542,7 +542,10 @@ float SampleCascadeShadowSoft(float4 vShadowSamplingPos, float2 projectedTexCoor
             float sum = 0.0f;
             if (cascadeIndex < CSM_PCF_LIMIT)
             {
-                float finalRadius = pcssRadius * lerp(0.85f, 1.15f, noiseVal);
+                // Rotate the kernel for decorrelation, but never modulate its
+                // magnitude per pixel. Spatial radius changes form visible
+                // bands when Shadow Softness expands the PCSS penumbra.
+                float finalRadius = pcssRadius;
                 int startIdx = GetBlueNoiseStartIndex(screenPos, cascadeIndex, 32, 11);
                 [unroll]
                 for (int i = 0; i < PCSS_FILTER_TAPS_NEAR; i++)
@@ -555,7 +558,7 @@ float SampleCascadeShadowSoft(float4 vShadowSamplingPos, float2 projectedTexCoor
             }
             else
             {
-                float finalRadius = pcssRadius * lerp(0.95f, 1.05f, noiseVal);
+                float finalRadius = pcssRadius;
                 int startIdx = GetBlueNoiseStartIndex(screenPos, cascadeIndex, 16, 17);
                 [unroll]
                 for (int i = 0; i < PCSS_FILTER_TAPS_FAR; i++)

@@ -36,6 +36,8 @@ struct WindMetaDataEntry
     float maxHeight;
     float2 horizontalExtent;
     float4 groundPlane;
+    float grassShear;
+    float3 padding;
 };
 
 StructuredBuffer<WindMetaDataEntry> WindMetaData;
@@ -97,18 +99,25 @@ float3 ApplyVegetationWind(
     float maxHeightValue,
     float2 horizontalExtent,
     float objectHeight,
-    float windStrength)
+    float windStrength,
+    float grassShearProfile)
 {
     float maxHorizontalExtent = max(max(horizontalExtent.x, horizontalExtent.y), 0.001f);
     float slenderness = objectHeight / (maxHorizontalExtent * 2.0f);
-    float treeProfile = smoothstep(1.8f, 4.5f, slenderness);
+    float treeProfile = lerp(
+        smoothstep(1.8f, 4.5f, slenderness),
+        0.0f,
+        grassShearProfile);
 
     // Small plants may bend close to the soil; tree-like objects retain a
     // firmer trunk. The smooth cubic ramp prevents a visible hinge line.
     float anchorHeight = lerp(0.045f, 0.11f, treeProfile);
-    float bend = saturate((heightNorm - anchorHeight) / max(1.0f - anchorHeight, 0.001f));
-    bend = bend * bend * (3.0f - 2.0f * bend);
-    bend *= lerp(1.0f, heightNorm, treeProfile);
+    float treeBend = saturate((heightNorm - anchorHeight) / max(1.0f - anchorHeight, 0.001f));
+    treeBend = treeBend * treeBend * (3.0f - 2.0f * treeBend);
+    treeBend *= heightNorm;
+    // Grass root weighting is applied exactly once outside this function as
+    // an affine terrain shear. Trees retain their authored nonlinear bend.
+    float bend = lerp(1.0f, treeBend, treeProfile);
 
     float3 horizontalDirection = float3(direction.x, 0.0f, direction.z);
     horizontalDirection *= rsqrt(max(dot(horizontalDirection, horizontalDirection), 0.0001f));
@@ -121,16 +130,19 @@ float3 ApplyVegetationWind(
 
     // Broad downwind bending plus restrained crosswind inertia. Keeping the
     // main response predominantly downwind avoids the old metronome motion.
-    float mainWave = sin(timeSec * 0.88f + instancePhase + heightNorm * 1.35f);
+    float mainWave = sin(timeSec * 0.88f + instancePhase
+        + heightNorm * 1.35f * treeProfile);
     float downwind = (0.52f + 0.48f * mainWave) * gust;
-    float crosswind = sin(timeSec * 1.31f + instancePhase * 1.71f + heightNorm * 2.4f)
+    float crosswind = sin(timeSec * 1.31f + instancePhase * 1.71f
+        + heightNorm * 2.4f * treeProfile)
         * 0.16f * gust;
 
     // Approximate branch/leaf freedom from distance to the local centre. This
     // uses existing bounds and avoids vertex textures or authored weight data.
     float2 radialPosition = vertexPos.xz / max(horizontalExtent, float2(0.001f, 0.001f));
     float edgeWeight = smoothstep(0.25f, 0.85f, saturate(length(radialPosition)));
-    float detailWeight = edgeWeight * smoothstep(0.42f, 0.82f, heightNorm);
+    float detailWeight = edgeWeight * smoothstep(0.42f, 0.82f, heightNorm)
+        * treeProfile;
     float detailWave = sin(timeSec * 3.15f + instancePhase * 2.13f
         + dot(vertexPos.xz, float2(0.071f, 0.053f))) * 0.055f * detailWeight;
 
@@ -226,6 +238,10 @@ VS_OUTPUT VSMain( VS_INPUT Input )
     float interactionWindScale = 1.0f;
     float3 currentWorldWindOffset = 0.0f;
     float3 previousWorldWindOffset = 0.0f;
+    float terrainRootWeight = 1.0f;
+    float signedTerrainShear = 1.0f;
+    float terrainTreeProfile = 1.0f;
+    float grassShearProfile = 0.0f;
 
 #if WIND_META_SRV
     WindMetaDataEntry meta = WindMetaData[Input.InstanceWindMetaIndex];
@@ -233,6 +249,35 @@ VS_OUTPUT VSMain( VS_INPUT Input )
     localMaxHeight = meta.maxHeight;
     localHorizontalExtent = meta.horizontalExtent;
     localGroundPlane = meta.groundPlane;
+    grassShearProfile = saturate(meta.grassShear);
+
+    const float validGroundPlane = step(
+        1.0e-8f, dot(localGroundPlane.xyz, localGroundPlane.xyz));
+    if (validGroundPlane > 0.5f)
+    {
+        float3 rootTestWorldPosition = mul(
+            float4(Input.vPosition, 1.0f), Input.InstanceWorldMatrix).xyz;
+        float rootHeightAboveGround = dot(
+            localGroundPlane.xyz, rootTestWorldPosition) + localGroundPlane.w;
+        float3 rootColumnTopWorldPosition = mul(
+            float4(Input.vPosition.x, localMaxHeight, Input.vPosition.z, 1.0f),
+            Input.InstanceWorldMatrix).xyz;
+        float rootVisibleHeight = max(
+            dot(localGroundPlane.xyz, rootColumnTopWorldPosition)
+                + localGroundPlane.w,
+            0.001f);
+        terrainTreeProfile = 1.0f - grassShearProfile;
+        float rigidRootCollar = min(5.0f, rootVisibleHeight * 0.08f);
+        terrainRootWeight = saturate(
+            (rootHeightAboveGround - rigidRootCollar)
+            / max(rootVisibleHeight - rigidRootCollar, 0.001f));
+        // A bounded signed factor makes a coarse two-triangle grass card an
+        // affine shear around the terrain plane. Its interpolated soil crossing
+        // is therefore stationary. The bound prevents malformed placements
+        // from recreating the former large inverse-deformation artifacts.
+        signedTerrainShear = clamp(
+            rootHeightAboveGround / rootVisibleHeight, -0.35f, 1.25f);
+    }
 #endif
 
 #if SHD_INFLUENCE
@@ -240,6 +285,7 @@ VS_OUTPUT VSMain( VS_INPUT Input )
         // CHARACTER INTERACTION MOVING BUSHES SHADER
         float3 interactionOffset = CalculateActorInteractionInfluence(
             position, localMinHeight, localMaxHeight, Input.InstanceWorldMatrix);
+        interactionOffset *= terrainRootWeight;
         float maxInteractionDisplacement = max(
             heroAffectStrength * characterInteractionStrength, 0.0001f);
         float interactionInfluence = saturate(
@@ -255,15 +301,7 @@ VS_OUTPUT VSMain( VS_INPUT Input )
         // WIND SHADER
         // Protect 0 height
         float heightRange = max(localMaxHeight - localMinHeight, 0.001);
-        float3 unbentWorldPosition = mul(float4(Input.vPosition, 1.0f), Input.InstanceWorldMatrix).xyz;
-        float worldHeightAboveGround = dot(localGroundPlane.xyz, unbentWorldPosition)
-            + localGroundPlane.w;
-        // Convert the local visual height to world scale without assuming an
-        // unrotated or uniformly scaled Spacer placement.
-        float3 localUpWorld = mul(float3(0.0f, heightRange, 0.0f),
-            (float3x3)Input.InstanceWorldMatrix);
-        float worldHeightRange = max(abs(dot(localGroundPlane.xyz, localUpWorld)), 0.001f);
-        float terrainHeightNorm = saturate(worldHeightAboveGround / worldHeightRange);
+        float terrainHeightNorm = terrainRootWeight;
         float legacyHeightNorm = saturate((Input.vPosition.y - localMinHeight) / heightRange);
         float vertexHeightNorm = lerp(legacyHeightNorm, terrainHeightNorm,
             step(1.0e-8f, dot(localGroundPlane.xyz, localGroundPlane.xyz)));
@@ -275,14 +313,22 @@ VS_OUTPUT VSMain( VS_INPUT Input )
         float3 windDirection = normalize(windDir);
         currentWorldWindOffset = ApplyVegetationWind(
             Input.vPosition, windDirection, vertexHeightNorm, globalTime, currentObjectWorldXZ,
-            localMaxHeight, localHorizontalExtent, heightRange, Input.InstanceWind.x
+            localMaxHeight, localHorizontalExtent, heightRange, Input.InstanceWind.x,
+            grassShearProfile
         );
         previousWorldWindOffset = ApplyVegetationWind(
             Input.vPosition, windDirection, vertexHeightNorm, prevGlobalTime, previousObjectWorldXZ,
-            localMaxHeight, localHorizontalExtent, heightRange, Input.InstanceWind.x
+            localMaxHeight, localHorizontalExtent, heightRange, Input.InstanceWind.x,
+            grassShearProfile
         );
         currentWorldWindOffset *= interactionWindScale;
         previousWorldWindOffset *= interactionWindScale;
+        const float rootFactor = lerp(
+            signedTerrainShear,
+            1.0f,
+            terrainTreeProfile);
+        currentWorldWindOffset *= rootFactor;
+        previousWorldWindOffset *= rootFactor;
     }
 #endif
     

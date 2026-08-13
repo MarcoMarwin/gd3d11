@@ -385,6 +385,12 @@ namespace
         return stem.rfind( "NW_WATER_LAKE", 0 ) == 0;
     }
 
+    bool IsGrassWindVisual( const std::string& visualName ) {
+        const std::string stem = NormalizeVisualStemForMarker( visualName );
+        return stem.find( "GRASS" ) != std::string::npos
+            || stem.find( "KORN" ) != std::string::npos;
+    }
+
     void FillWaterMaterialInfo( WaterMaterialInfoConstantBuffer& wmcb, zCTexture* texture ) {
         const WorldInfo* world = Engine::GAPI->GetLoadedWorldInfo();
         const bool mediterraneanOcean = world
@@ -8090,6 +8096,7 @@ bool D3D11GraphicsEngine::PrepareAndBindWindMetadata( const std::vector<MeshVisu
             metadata.HorizontalExtent = float2(
                 std::max( (visual->BBox.Max.x - visual->BBox.Min.x) * 0.5f, 0.001f ),
                 std::max( (visual->BBox.Max.z - visual->BBox.Min.z) * 0.5f, 0.001f ) );
+            metadata.GrassShear = IsGrassWindVisual( visual->VisualName ) ? 1.0f : 0.0f;
 
             // Ground polygon vertices are already in world space. Reusing Gothic's
             // placement result avoids per-frame terrain traces and also handles slopes.
@@ -8115,8 +8122,12 @@ bool D3D11GraphicsEngine::PrepareAndBindWindMetadata( const std::vector<MeshVisu
                             if ( XMVectorGetY( normal ) < 0.0f ) normal = XMVectorNegate( normal );
                             XMFLOAT3 n;
                             XMStoreFloat3( &n, normal );
-                            vobInfo->WindGroundPlane = XMFLOAT4( n.x, n.y, n.z,
-                                -XMVectorGetX( XMVector3Dot( normal, p0 ) ) );
+                            // GetGroundPoly can briefly reference steep contact
+                            // geometry. Only terrain-like planes are safe wind anchors.
+                            if ( n.y >= 0.45f ) {
+                                vobInfo->WindGroundPlane = XMFLOAT4( n.x, n.y, n.z,
+                                    -XMVectorGetX( XMVector3Dot( normal, p0 ) ) );
+                            }
                         }
                     }
                 }
@@ -8892,6 +8903,7 @@ XRESULT D3D11GraphicsEngine::DrawAlphaMeshList(
                     metadata.HorizontalExtent = float2(
                         std::max( (visual->BBox.Max.x - visual->BBox.Min.x) * 0.5f, 0.001f ),
                         std::max( (visual->BBox.Max.z - visual->BBox.Min.z) * 0.5f, 0.001f ) );
+                    metadata.GrassShear = IsGrassWindVisual( visual->VisualName ) ? 1.0f : 0.0f;
                 }
                 instance.GP_Slot = static_cast<DWORD>(m_WindMetadataStaging.size());
                 m_WindMetadataStaging.push_back( metadata );

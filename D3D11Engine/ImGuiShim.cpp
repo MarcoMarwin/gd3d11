@@ -988,6 +988,8 @@ void ApplyGraphicsPresets( GothicRendererSettings& s, bool applyRuntimeUpdates =
     if ( IsWindEffectsControlVisible() && s.WindQuality == GothicRendererSettings::EWindQuality::WIND_QUALITY_NONE ) s.GlobalWindStrength = 0.0f;
 
     s.ShadowMapSize = NormalizeShadowMapSize( s.ShadowMapSize );
+    s.PointlightShadowMapSize = PointlightShadowSizeForWorldShadowSize(
+        s.ShadowMapSize );
 
     if ( FeatureLevel10Compatibility ) {
         // Preset dependency stays inside the visible AO control; display/AA settings
@@ -1052,7 +1054,10 @@ namespace
             : GothicRendererSettings::E_ShadowFilterMode::SHADOW_FILTER_PCSS;
         s.EnablePointlightShadows = GothicRendererSettings::EPointLightShadowMode::PLS_UPDATE_DYNAMIC;
         s.ShadowMapSize = NormalizeShadowMapSize( s.ShadowMapSize );
-        s.PointlightShadowMapSize = NormalizePointlightShadowMapSize( s.PointlightShadowMapSize );
+        // Pointlight resolution is intentionally derived from the single
+        // visible Shadow Quality control: Low/Medium=128, High/Extreme=256.
+        s.PointlightShadowMapSize = PointlightShadowSizeForWorldShadowSize(
+            s.ShadowMapSize );
         s.EnableWaterAnimation = true;
         s.EnableSSS = true;
         s.SSSIntensity = 1.0f;
