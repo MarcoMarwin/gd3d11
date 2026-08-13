@@ -88,7 +88,6 @@ void CSMain( uint3 groupID : SV_GroupID, uint3 threadID : SV_GroupThreadID, uint
     // Hoist per-pixel constants outside the light loop
     float3 V = normalize( -vsPosition );
     float specMod = PLS_ComputeSpecMod( diffuse.rgb );
-    float receiverCameraDistance = length( vsPosition );
 
     float3 totalLighting = float3( 0, 0, 0 );
     float3 maxLighting = float3( 0, 0, 0 );
@@ -121,12 +120,12 @@ void CSMain( uint3 groupID : SV_GroupID, uint3 threadID : SV_GroupThreadID, uint
             const bool lowStatic = (light.ShadowCubeIndex & 0x20000000) != 0;
             float shadow;
             if ( lowStatic )
-                shadow = PLS_SampleShadowCubeArray( TX_StaticLowShadowCubeArray, SS_Comp, wsPosition, wsNormal, light.PositionWorld, light.Range, shadowSlot, max(light.ShadowSoftness, 1.25f), receiverCameraDistance );
+                shadow = PLS_SampleShadowCubeArray( TX_StaticLowShadowCubeArray, SS_Comp, wsPosition, wsNormal, light.PositionWorld, light.Range, shadowSlot, max(light.ShadowSoftness, 1.25f) );
             else
-                shadow = PLS_SampleShadowCubeArray( TX_ShadowCubeArray, SS_Comp, wsPosition, wsNormal, light.PositionWorld, light.Range, shadowSlot, light.ShadowSoftness, receiverCameraDistance );
+                shadow = PLS_SampleShadowCubeArray( TX_ShadowCubeArray, SS_Comp, wsPosition, wsNormal, light.PositionWorld, light.Range, shadowSlot, light.ShadowSoftness );
             if ( shadow > 0.001f && (light.ShadowCubeIndex & 0x40000000) != 0 )
             {
-                shadow *= PLS_SampleShadowCubeArray( TX_DynamicShadowCubeArray, SS_Comp, wsPosition, wsNormal, light.PositionWorld, light.Range, shadowSlot, light.ShadowSoftness, receiverCameraDistance );
+                shadow *= PLS_SampleShadowCubeArray( TX_DynamicShadowCubeArray, SS_Comp, wsPosition, wsNormal, light.PositionWorld, light.Range, shadowSlot, light.ShadowSoftness );
             }
             lighting *= lerp(1.0f, shadow, saturate(light.ShadowStrength));
         }

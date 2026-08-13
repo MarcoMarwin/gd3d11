@@ -6,6 +6,10 @@
 
 #if !defined(__cplusplus)
 
+#ifndef POINT_SHADOW_GATHER
+#define POINT_SHADOW_GATHER 0
+#endif
+
 static const int PLS_SHADOW_BLUR_COUNT = 8;
 static const float2 PLS_SHADOW_BLUR_OFFSETS[PLS_SHADOW_BLUR_COUNT] = {
     float2( 0.076849f, -0.078216f),
@@ -17,13 +21,6 @@ static const float2 PLS_SHADOW_BLUR_OFFSETS[PLS_SHADOW_BLUR_COUNT] = {
     float2( 0.896791f,  0.038446f),
     float2(-0.258169f, -0.912648f)
 };
-
-// A second, interleaved ring for soft point-light shadows. It is deliberately
-// rotated and slightly contracted so it increases coverage density without
-// increasing the requested penumbra radius or introducing temporal noise.
-static const float PLS_DENSE_RING_SIN = 0.9335804265f; // sin(69 degrees)
-static const float PLS_DENSE_RING_COS = 0.3583679495f; // cos(69 degrees)
-static const float PLS_DENSE_RING_SCALE = 0.82f;
 
 float PLS_CalcBlinnPhongLighting( float3 N, float3 H )
 {
@@ -226,8 +223,7 @@ float PLS_SampleShadowCube(
     float3 N, 
     float3 lightPosWorld,
     float lightRange,
-    float shadowSoftness,
-    float receiverCameraDistance )
+    float shadowSoftness )
 {
     float3 dir;
     float compareDistance;
@@ -244,6 +240,35 @@ float PLS_SampleShadowCube(
         right, up, sinA, cosA );
 
     float shd = 0;
+    float finalShadow;
+#if POINT_SHADOW_GATHER
+    // Four well-spaced anchors, each gathering the four neighbouring hardware
+    // comparisons. This yields 16 coherent comparison values with four fetches.
+    if ( shadowSoftness > 0.75f )
+    {
+        [unroll] for ( int i = 0; i < 4; i++ )
+        {
+            float2 kernel = PLS_SHADOW_BLUR_OFFSETS[i * 2];
+            float2 rotatedKernel = float2( kernel.x * cosA - kernel.y * sinA, kernel.x * sinA + kernel.y * cosA );
+            float3 perturbedDir = normalize( dir + (right * rotatedKernel.x + up * rotatedKernel.y) * fixedBlurScale );
+            float4 gathered = shadowCube.GatherCmp(
+                samplerState, perturbedDir, compareDistance - fixedBias );
+            shd += dot( gathered, 0.25f.xxxx );
+        }
+        finalShadow = shd * 0.25f;
+    }
+    else
+    {
+        [unroll] for ( int i = 0; i < PLS_SHADOW_BLUR_COUNT; i++ )
+        {
+            float2 kernel = PLS_SHADOW_BLUR_OFFSETS[i];
+            float3 perturbedDir = normalize( dir + (right * kernel.x + up * kernel.y) * fixedBlurScale );
+            shd += shadowCube.SampleCmpLevelZero(
+                samplerState, perturbedDir, compareDistance - fixedBias );
+        }
+        finalShadow = shd / PLS_SHADOW_BLUR_COUNT;
+    }
+#else
     [unroll] for ( int i = 0; i < PLS_SHADOW_BLUR_COUNT; i++ )
     {
         float2 kernel = PLS_SHADOW_BLUR_OFFSETS[i];
@@ -254,45 +279,8 @@ float PLS_SampleShadowCube(
             samplerState, perturbedDir, compareDistance - fixedBias );
     }
 
-    // Gothic world units are centimetres. Add four samples below five metres
-    // and another four below two metres, with one-metre transition bands.
-    float softnessWeight = saturate( (shadowSoftness - 0.75f) / 0.75f );
-    float midRingWeight = softnessWeight * (1.0f - smoothstep( 450.0f, 550.0f, receiverCameraDistance ));
-    float nearRingWeight = softnessWeight * (1.0f - smoothstep( 150.0f, 250.0f, receiverCameraDistance ));
-    if ( midRingWeight > 0.0f )
-    {
-        float midShd = 0.0f;
-        [unroll] for ( int denseIndex = 0; denseIndex < 4; denseIndex++ )
-        {
-            float2 kernel = PLS_SHADOW_BLUR_OFFSETS[denseIndex];
-            float2 denseKernel = float2(
-                kernel.x * PLS_DENSE_RING_COS - kernel.y * PLS_DENSE_RING_SIN,
-                kernel.x * PLS_DENSE_RING_SIN + kernel.y * PLS_DENSE_RING_COS ) * PLS_DENSE_RING_SCALE;
-            float3 perturbedDir = normalize(
-                dir + (right * denseKernel.x + up * denseKernel.y) * fixedBlurScale );
-            midShd += shadowCube.SampleCmpLevelZero(
-                samplerState, perturbedDir, compareDistance - fixedBias );
-        }
-        shd += midShd * midRingWeight;
-    }
-    if ( nearRingWeight > 0.0f )
-    {
-        float nearShd = 0.0f;
-        [unroll] for ( int denseIndex = 4; denseIndex < PLS_SHADOW_BLUR_COUNT; denseIndex++ )
-        {
-            float2 kernel = PLS_SHADOW_BLUR_OFFSETS[denseIndex];
-            float2 denseKernel = float2(
-                kernel.x * PLS_DENSE_RING_COS - kernel.y * PLS_DENSE_RING_SIN,
-                kernel.x * PLS_DENSE_RING_SIN + kernel.y * PLS_DENSE_RING_COS ) * PLS_DENSE_RING_SCALE;
-            float3 perturbedDir = normalize(
-                dir + (right * denseKernel.x + up * denseKernel.y) * fixedBlurScale );
-            nearShd += shadowCube.SampleCmpLevelZero(
-                samplerState, perturbedDir, compareDistance - fixedBias );
-        }
-        shd += nearShd * nearRingWeight;
-    }
-
-    float finalShadow = shd / (PLS_SHADOW_BLUR_COUNT + 4.0f * midRingWeight + 4.0f * nearRingWeight);
+    finalShadow = shd / PLS_SHADOW_BLUR_COUNT;
+#endif
 
     // Shadow Distance Fading
     // Calculate how far we are through the light's actual range (0.0 to 1.0)
@@ -310,8 +298,7 @@ float PLS_SampleShadowCubeArray(
     float3 lightPosWorld,
     float lightRange,
     int cubeIndex,
-    float shadowSoftness,
-    float receiverCameraDistance )
+    float shadowSoftness )
 {
     float3 dir;
     float compareDistance;
@@ -328,6 +315,35 @@ float PLS_SampleShadowCubeArray(
         right, up, sinA, cosA );
 
     float shd = 0;
+    float finalShadow;
+#if POINT_SHADOW_GATHER
+    if ( shadowSoftness > 0.75f )
+    {
+        [unroll] for ( int i = 0; i < 4; i++ )
+        {
+            float2 kernel = PLS_SHADOW_BLUR_OFFSETS[i * 2];
+            float2 rotatedKernel = float2( kernel.x * cosA - kernel.y * sinA, kernel.x * sinA + kernel.y * cosA );
+            float3 perturbedDir = normalize( dir + (right * rotatedKernel.x + up * rotatedKernel.y) * fixedBlurScale );
+            float4 sampleCoord = float4( perturbedDir, (float)cubeIndex );
+            float4 gathered = shadowCubeArray.GatherCmp(
+                samplerState, sampleCoord, compareDistance - fixedBias );
+            shd += dot( gathered, 0.25f.xxxx );
+        }
+        finalShadow = shd * 0.25f;
+    }
+    else
+    {
+        [unroll] for ( int i = 0; i < PLS_SHADOW_BLUR_COUNT; i++ )
+        {
+            float2 kernel = PLS_SHADOW_BLUR_OFFSETS[i];
+            float3 perturbedDir = normalize( dir + (right * kernel.x + up * kernel.y) * fixedBlurScale );
+            float4 sampleCoord = float4( perturbedDir, (float)cubeIndex );
+            shd += shadowCubeArray.SampleCmpLevelZero(
+                samplerState, sampleCoord, compareDistance - fixedBias );
+        }
+        finalShadow = shd / PLS_SHADOW_BLUR_COUNT;
+    }
+#else
     [unroll] for ( int i = 0; i < PLS_SHADOW_BLUR_COUNT; i++ )
     {
         float2 kernel = PLS_SHADOW_BLUR_OFFSETS[i];
@@ -339,45 +355,8 @@ float PLS_SampleShadowCubeArray(
             samplerState, sampleCoord, compareDistance - fixedBias );
     }
 
-    float softnessWeight = saturate( (shadowSoftness - 0.75f) / 0.75f );
-    float midRingWeight = softnessWeight * (1.0f - smoothstep( 450.0f, 550.0f, receiverCameraDistance ));
-    float nearRingWeight = softnessWeight * (1.0f - smoothstep( 150.0f, 250.0f, receiverCameraDistance ));
-    if ( midRingWeight > 0.0f )
-    {
-        float midShd = 0.0f;
-        [unroll] for ( int denseIndex = 0; denseIndex < 4; denseIndex++ )
-        {
-            float2 kernel = PLS_SHADOW_BLUR_OFFSETS[denseIndex];
-            float2 denseKernel = float2(
-                kernel.x * PLS_DENSE_RING_COS - kernel.y * PLS_DENSE_RING_SIN,
-                kernel.x * PLS_DENSE_RING_SIN + kernel.y * PLS_DENSE_RING_COS ) * PLS_DENSE_RING_SCALE;
-            float3 perturbedDir = normalize(
-                dir + (right * denseKernel.x + up * denseKernel.y) * fixedBlurScale );
-            float4 sampleCoord = float4( perturbedDir, (float)cubeIndex );
-            midShd += shadowCubeArray.SampleCmpLevelZero(
-                samplerState, sampleCoord, compareDistance - fixedBias );
-        }
-        shd += midShd * midRingWeight;
-    }
-    if ( nearRingWeight > 0.0f )
-    {
-        float nearShd = 0.0f;
-        [unroll] for ( int denseIndex = 4; denseIndex < PLS_SHADOW_BLUR_COUNT; denseIndex++ )
-        {
-            float2 kernel = PLS_SHADOW_BLUR_OFFSETS[denseIndex];
-            float2 denseKernel = float2(
-                kernel.x * PLS_DENSE_RING_COS - kernel.y * PLS_DENSE_RING_SIN,
-                kernel.x * PLS_DENSE_RING_SIN + kernel.y * PLS_DENSE_RING_COS ) * PLS_DENSE_RING_SCALE;
-            float3 perturbedDir = normalize(
-                dir + (right * denseKernel.x + up * denseKernel.y) * fixedBlurScale );
-            float4 sampleCoord = float4( perturbedDir, (float)cubeIndex );
-            nearShd += shadowCubeArray.SampleCmpLevelZero(
-                samplerState, sampleCoord, compareDistance - fixedBias );
-        }
-        shd += nearShd * nearRingWeight;
-    }
-
-    float finalShadow = shd / (PLS_SHADOW_BLUR_COUNT + 4.0f * midRingWeight + 4.0f * nearRingWeight);
+    finalShadow = shd / PLS_SHADOW_BLUR_COUNT;
+#endif
 
     // Shadow Distance Fading
     float distanceToLight = length(wsPosition - lightPosWorld);
