@@ -150,6 +150,7 @@ float3 FP_ComputePointLighting(
     float3 V = normalize( -vsPosition );
     float specMod = PLS_ComputeSpecMod( diffuseColor.rgb );
     float3 wsNormal = normalize( mul( float4( normal, 0 ), SQ_InvView ).xyz );
+    float receiverCameraDistance = length( vsPosition );
     
     for ( uint i = 0; i < grid.Count; i++ )
     {
@@ -183,12 +184,12 @@ float3 FP_ComputePointLighting(
             const bool lowStatic = (light.ShadowCubeIndex & 0x20000000) != 0;
             float shadow;
             if ( lowStatic )
-                shadow = PLS_SampleShadowCubeArray( FP_StaticLowShadowCubeArray, FP_SS_Linear, wsPosition, wsNormal, light.PositionWorld, light.Range, shadowSlot, max(light.ShadowSoftness, 1.25f) );
+                shadow = PLS_SampleShadowCubeArray( FP_StaticLowShadowCubeArray, SS_Comp, wsPosition, wsNormal, light.PositionWorld, light.Range, shadowSlot, max(light.ShadowSoftness, 1.25f), receiverCameraDistance );
             else
-                shadow = PLS_SampleShadowCubeArray( FP_ShadowCubeArray, FP_SS_Linear, wsPosition, wsNormal, light.PositionWorld, light.Range, shadowSlot, light.ShadowSoftness );
+                shadow = PLS_SampleShadowCubeArray( FP_ShadowCubeArray, SS_Comp, wsPosition, wsNormal, light.PositionWorld, light.Range, shadowSlot, light.ShadowSoftness, receiverCameraDistance );
             if ( shadow > 0.001f && (light.ShadowCubeIndex & 0x40000000) != 0 )
             {
-                shadow *= PLS_SampleShadowCubeArray( FP_DynamicShadowCubeArray, FP_SS_Linear, wsPosition, wsNormal, light.PositionWorld, light.Range, shadowSlot, light.ShadowSoftness );
+                shadow *= PLS_SampleShadowCubeArray( FP_DynamicShadowCubeArray, SS_Comp, wsPosition, wsNormal, light.PositionWorld, light.Range, shadowSlot, light.ShadowSoftness, receiverCameraDistance );
             }
             lighting *= lerp(1.0f, shadow, saturate(light.ShadowStrength));
         }
