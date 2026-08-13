@@ -376,6 +376,7 @@ struct VobInfo : public BaseVobInfo {
     DWORD GroundColor;
 
     /** Cached world-space anchor plane for wind-enabled vegetation. */
+    bool WindGroundPlaneInitialized = false;
     zCPolygon* WindGroundPolygon = nullptr;
     XMFLOAT4 WindGroundPlane = {};
 

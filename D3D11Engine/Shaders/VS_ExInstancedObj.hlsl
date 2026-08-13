@@ -19,7 +19,8 @@ cbuffer WindParams : register(b1)
      float minHeight;
      float maxHeight;
      float prevGlobalTime;
-     float padding0;
+     float accurateWindVelocity;
+     float4 cameraWorldPosition;
      float4 interactionPositions[MAX_CHARACTER_INTERACTION_INFLUENCERS];
      float characterInteractionStrength;
      float3 padding1;
@@ -79,6 +80,7 @@ struct VS_OUTPUT
 
 //less then trunkStiffness (%) will be absolutely stay, like tree trunk
 static const float windStrengMult = 16.0f; // Preserve the established Spacer wind-strength scale.
+static const float trunkStiffness = 0.12f;
 static const float PI_2 = 6.283185; // 2 * PI
 
 float GetInstancePhaseOffset(float2 objectWorldXZ, float maxHeightValue)
@@ -100,8 +102,39 @@ float3 ApplyVegetationWind(
     float2 horizontalExtent,
     float objectHeight,
     float windStrength,
-    float grassShearProfile)
+    float grassShearProfile,
+    float detailLod)
 {
+    if (grassShearProfile < 0.5f)
+    {
+        // Preserve the established tree path. In particular, the lower twelve
+        // percent remain completely rigid; terrain-derived grass anchoring
+        // must never translate a trunk at its base.
+        float shouldAffect = saturate(sign(heightNorm - trunkStiffness + 0.0001f));
+        float adjustedHeight = saturate(
+            (heightNorm - trunkStiffness) / (1.0f - trunkStiffness)) * shouldAffect;
+        float heightFactor = pow(adjustedHeight, 2.6f);
+        float instancePhase = GetInstancePhaseOffset(objectWorldXZ, maxHeightValue);
+        float mainWave = sin(timeSec + heightNorm * 3.0f + instancePhase) * 0.8f;
+        float topSmoothing = smoothstep(0.7f, 0.9f, adjustedHeight);
+        float combinedWave = mainWave * (1.0f - topSmoothing * 0.3f);
+        float leafTurbulence = 0.0f;
+        if (detailLod > 0.0f)
+        {
+            float secondaryWave = cos(timeSec * 0.7f + heightNorm * 5.0f
+                + instancePhase * 1.5f) * 0.8f;
+            float inertiaEffect = sin(timeSec * 0.3f + heightNorm * 8.0f) * 0.1f;
+            combinedWave += (secondaryWave * 0.5f
+                * (1.0f - topSmoothing * 0.3f) + inertiaEffect * topSmoothing)
+                * detailLod;
+            leafTurbulence = (sin(timeSec * 4.0f + vertexPos.x * 15.0f)
+                + cos(timeSec * 3.7f + vertexPos.z * 12.0f))
+                * (0.05f * detailLod) * topSmoothing;
+        }
+        return direction * windStrength * windStrengMult
+            * (combinedWave + leafTurbulence) * heightFactor;
+    }
+
     float maxHorizontalExtent = max(max(horizontalExtent.x, horizontalExtent.y), 0.001f);
     float slenderness = objectHeight / (maxHorizontalExtent * 2.0f);
     float treeProfile = lerp(
@@ -135,7 +168,7 @@ float3 ApplyVegetationWind(
     float downwind = (0.52f + 0.48f * mainWave) * gust;
     float crosswind = sin(timeSec * 1.31f + instancePhase * 1.71f
         + heightNorm * 2.4f * treeProfile)
-        * 0.16f * gust;
+        * (0.16f * detailLod) * gust;
 
     // Approximate branch/leaf freedom from distance to the local centre. This
     // uses existing bounds and avoids vertex textures or authored weight data.
@@ -144,7 +177,8 @@ float3 ApplyVegetationWind(
     float detailWeight = edgeWeight * smoothstep(0.42f, 0.82f, heightNorm)
         * treeProfile;
     float detailWave = sin(timeSec * 3.15f + instancePhase * 2.13f
-        + dot(vertexPos.xz, float2(0.071f, 0.053f))) * 0.055f * detailWeight;
+        + dot(vertexPos.xz, float2(0.071f, 0.053f)))
+        * (0.055f * detailLod) * detailWeight;
 
     float amplitude = windStrength * windStrengMult * bend;
     return (horizontalDirection * (downwind + detailWave)
@@ -253,7 +287,7 @@ VS_OUTPUT VSMain( VS_INPUT Input )
 
     const float validGroundPlane = step(
         1.0e-8f, dot(localGroundPlane.xyz, localGroundPlane.xyz));
-    if (validGroundPlane > 0.5f)
+    if (grassShearProfile > 0.5f && validGroundPlane > 0.5f)
     {
         float3 rootTestWorldPosition = mul(
             float4(Input.vPosition, 1.0f), Input.InstanceWorldMatrix).xyz;
@@ -285,7 +319,7 @@ VS_OUTPUT VSMain( VS_INPUT Input )
         // CHARACTER INTERACTION MOVING BUSHES SHADER
         float3 interactionOffset = CalculateActorInteractionInfluence(
             position, localMinHeight, localMaxHeight, Input.InstanceWorldMatrix);
-        interactionOffset *= terrainRootWeight;
+        interactionOffset *= lerp(terrainRootWeight, 1.0f, terrainTreeProfile);
         float maxInteractionDisplacement = max(
             heroAffectStrength * characterInteractionStrength, 0.0001f);
         float interactionInfluence = saturate(
@@ -303,24 +337,49 @@ VS_OUTPUT VSMain( VS_INPUT Input )
         float heightRange = max(localMaxHeight - localMinHeight, 0.001);
         float terrainHeightNorm = terrainRootWeight;
         float legacyHeightNorm = saturate((Input.vPosition.y - localMinHeight) / heightRange);
+        float validTerrainAnchor = step(
+            1.0e-8f, dot(localGroundPlane.xyz, localGroundPlane.xyz));
+        // Terrain-relative height is exclusively a grass-card solution. Trees
+        // retain their authored local bounding-box height and rigid trunk.
         float vertexHeightNorm = lerp(legacyHeightNorm, terrainHeightNorm,
-            step(1.0e-8f, dot(localGroundPlane.xyz, localGroundPlane.xyz)));
+            validTerrainAnchor * grassShearProfile);
         float2 currentObjectWorldXZ = mul(float4(0.0f, 0.0f, 0.0f, 1.0f), Input.InstanceWorldMatrix).xz;
         float2 previousObjectWorldXZ = mul(float4(0.0f, 0.0f, 0.0f, 1.0f), Input.InstancePrevWorldMatrix).xz;
 
+        float3 objectWorldPosition = mul(
+            float4(0.0f, 0.0f, 0.0f, 1.0f), Input.InstanceWorldMatrix).xyz;
+        float3 cameraDelta = objectWorldPosition - cameraWorldPosition.xyz;
+        float windDistanceSq = dot(cameraDelta, cameraDelta);
+        float grassWindFade = 1.0f - smoothstep(9000000.0f, 25000000.0f, windDistanceSq);
+        float treeWindFade = 1.0f - smoothstep(144000000.0f, 196000000.0f, windDistanceSq);
+        float windDistanceFade = lerp(treeWindFade, grassWindFade, grassShearProfile);
+        float treeDetailLod = 1.0f - smoothstep(64000000.0f, 100000000.0f, windDistanceSq);
+        float windDetailLod = lerp(treeDetailLod, 1.0f, grassShearProfile);
+
         // Apply current and previous wind phases with the same local interaction
         // attenuation so FSR receives consistent vegetation motion vectors.
-        float3 windDirection = normalize(windDir);
-        currentWorldWindOffset = ApplyVegetationWind(
-            Input.vPosition, windDirection, vertexHeightNorm, globalTime, currentObjectWorldXZ,
-            localMaxHeight, localHorizontalExtent, heightRange, Input.InstanceWind.x,
-            grassShearProfile
-        );
-        previousWorldWindOffset = ApplyVegetationWind(
-            Input.vPosition, windDirection, vertexHeightNorm, prevGlobalTime, previousObjectWorldXZ,
-            localMaxHeight, localHorizontalExtent, heightRange, Input.InstanceWind.x,
-            grassShearProfile
-        );
+        if (windDistanceFade > 0.0f)
+        {
+            currentWorldWindOffset = ApplyVegetationWind(
+                Input.vPosition, windDir, vertexHeightNorm, globalTime, currentObjectWorldXZ,
+                localMaxHeight, localHorizontalExtent, heightRange, Input.InstanceWind.x,
+                grassShearProfile, windDetailLod
+            );
+            if (accurateWindVelocity > 0.5f)
+            {
+                previousWorldWindOffset = ApplyVegetationWind(
+                    Input.vPosition, windDir, vertexHeightNorm, prevGlobalTime, previousObjectWorldXZ,
+                    localMaxHeight, localHorizontalExtent, heightRange, Input.InstanceWind.x,
+                    grassShearProfile, windDetailLod
+                );
+            }
+            else
+            {
+                previousWorldWindOffset = currentWorldWindOffset;
+            }
+            currentWorldWindOffset *= windDistanceFade;
+            previousWorldWindOffset *= windDistanceFade;
+        }
         currentWorldWindOffset *= interactionWindScale;
         previousWorldWindOffset *= interactionWindScale;
         const float rootFactor = lerp(

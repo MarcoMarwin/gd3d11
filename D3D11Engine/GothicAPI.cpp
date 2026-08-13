@@ -4823,7 +4823,9 @@ void GothicAPI::CollectVisibleVobs(
                 || !window->CityWindowFacingInitialized )
                 return false;
 
-            // Keep the VOB visible for fifteen degrees beyond its geometric edge.
+            // Keep the visible window pane for fifteen degrees beyond its geometric
+            // edge. The associated world cutout has its own strict 0-degree
+            // back-face gate in UpdateAndBindWindowCutouts().
             // Comparing squared values avoids a normalize/square-root per window.
             constexpr float BackfaceToleranceSinSq = 0.0669872981f; // sin(15 deg)^2
             const XMVECTOR toCamera = cameraPosition

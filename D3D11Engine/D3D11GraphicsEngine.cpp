@@ -864,6 +864,21 @@ unsigned int D3D11GraphicsEngine::UpdateAndBindWindowCutouts( bool daylightPass 
             continue;
         }
 
+        // The pane itself deliberately remains visible up to ten degrees into
+        // its back side. Its world cutout must not share that tolerance: as
+        // soon as the camera crosses the pane plane, stop removing world
+        // geometry behind it. The unnormalised dot product is sufficient for
+        // this exact 0-degree test and adds no square root per window.
+        if ( vobInfo->CityWindowFacingInitialized ) {
+            const XMVECTOR toCamera = cameraPosition
+                - XMLoadFloat3( &vobInfo->CityWindowCenter );
+            const float cutoutFacing = XMVectorGetX( XMVector3Dot(
+                toCamera, XMLoadFloat3( &vobInfo->CityWindowFrontNormal ) ) );
+            if ( cutoutFacing < 0.0f ) {
+                continue;
+            }
+        }
+
         const XMVECTOR worldPosition = vobInfo->Vob->GetPositionWorldXM();
         const float distanceSq = XMVectorGetX( XMVector3LengthSq( worldPosition - cameraPosition ) );
         if ( distanceSq > MaxWindowDistance * MaxWindowDistance ) {
@@ -8088,6 +8103,7 @@ bool D3D11GraphicsEngine::PrepareAndBindWindMetadata( const std::vector<MeshVisu
         if ( !visual ) {
             continue;
         }
+        const float grassShear = IsGrassWindVisual( visual->VisualName ) ? 1.0f : 0.0f;
 
         for ( size_t i = 0; i < visual->Instances.size(); ++i ) {
             VobWindMetadata metadata = {};
@@ -8096,14 +8112,15 @@ bool D3D11GraphicsEngine::PrepareAndBindWindMetadata( const std::vector<MeshVisu
             metadata.HorizontalExtent = float2(
                 std::max( (visual->BBox.Max.x - visual->BBox.Min.x) * 0.5f, 0.001f ),
                 std::max( (visual->BBox.Max.z - visual->BBox.Min.z) * 0.5f, 0.001f ) );
-            metadata.GrassShear = IsGrassWindVisual( visual->VisualName ) ? 1.0f : 0.0f;
+            metadata.GrassShear = grassShear;
 
             // Ground polygon vertices are already in world space. Reusing Gothic's
             // placement result avoids per-frame terrain traces and also handles slopes.
-            if ( i < visual->InstanceVobs.size() ) {
+            if ( metadata.GrassShear > 0.5f && i < visual->InstanceVobs.size() ) {
                 VobInfo* vobInfo = visual->InstanceVobs[i];
-                zCPolygon* ground = vobInfo && vobInfo->Vob ? vobInfo->Vob->GetGroundPoly() : nullptr;
-                if ( vobInfo && vobInfo->WindGroundPolygon != ground ) {
+                if ( vobInfo && !vobInfo->WindGroundPlaneInitialized ) {
+                    zCPolygon* ground = vobInfo->Vob ? vobInfo->Vob->GetGroundPoly() : nullptr;
+                    vobInfo->WindGroundPlaneInitialized = true;
                     vobInfo->WindGroundPolygon = ground;
                     vobInfo->WindGroundPlane = {};
                     zCVertex** vertices = ground ? ground->getVertices() : nullptr;
@@ -8219,6 +8236,10 @@ void D3D11GraphicsEngine::ApplyWindProps( VS_ExConstantBuffer_Wind& windBuff ) {
     XMStoreFloat3( reinterpret_cast<XMFLOAT3*>(&windBuff.windDir), currentDir );
 
     const auto& settings = Engine::GAPI->GetRendererState().RendererSettings;
+    windBuff.accurateWindVelocity = settings.Upscaler
+        == GothicRendererSettings::UPSCALER_FSR_3 ? 1.0f : 0.0f;
+    XMStoreFloat4( reinterpret_cast<XMFLOAT4*>(&windBuff.cameraWorldPosition),
+        XMVectorSetW( Engine::GAPI->GetCameraPositionXM(), 1.0f ) );
     windBuff.characterInteractionStrength =
         settings.HeroAffectsObjects ? 1.0f : 0.0f;
 

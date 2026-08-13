@@ -339,7 +339,8 @@ struct VS_ExConstantBuffer_Wind {
     float minHeight;
     float maxHeight;
     float prevGlobalTime;
-    float padding0;
+    float accurateWindVelocity;
+    float4 cameraWorldPosition;
 
     // xyz = actor world position, w = active flag. Slot 0 is the hero, following slots are nearby NPCs.
     float4 interactionPositions[MAX_CHARACTER_INTERACTION_INFLUENCERS];
