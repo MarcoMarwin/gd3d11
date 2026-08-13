@@ -652,7 +652,7 @@ D3D11TiledDeferredShading::CullResult D3D11TiledDeferredShading::CullLights(
         tl.IsIndoor = light->Vob && light->Vob->IsIndoorVob() ? 1.0f : 0.0f;
         tl.IgnoreIndoorOutdoorLimit = light->IgnoreIndoorOutdoorLimit ? 1.0f : 0.0f;
         tl.ShadowSoftness = std::max(
-            settings.ShadowSoftness * 2.0f, minimumTemporalShadowSoftness );
+            settings.ShadowSoftness, minimumTemporalShadowSoftness );
 
         if ( hasShadow ) {
             constexpr int kShadowHasDynamic = 0x40000000;

@@ -104,15 +104,6 @@ float PLS_ApplyShadowDistanceFade( float finalShadow, float normalizedDist )
     return lerp( finalShadow, 1.0f, fadeWeight );
 }
 
-float PLS_StableWorldNoise( float3 wsPosition, float3 lightPosWorld )
-{
-    // Camera-independent interleaved noise. Light-relative world space keeps
-    // the pattern attached to the receiver and separates overlapping lights.
-    float3 receiver = wsPosition - lightPosWorld;
-    return frac( 52.9829189f * frac( dot(
-        receiver, float3( 0.06711056f, 0.00583715f, 0.03127194f ) ) ) );
-}
-
 float PLS_ComputePointLightNdlBacklit(
     float3 lightDirVS,
     float3 normalVS,
@@ -217,12 +208,8 @@ void PLS_PrepareShadowSampling(
     right = normalize( cross( up, dir ) );
     up = cross( dir, right );
 
-    // Rotate the existing eight samples instead of adding more. The stable
-    // world-space phase breaks up visible 1/8 coverage bands without temporal
-    // shimmer under camera motion.
-    float kernelAngle = PLS_StableWorldNoise( wsPosition, lightPosWorld )
-        * 6.28318530718f;
-    sincos( kernelAngle, sinA, cosA );
+    sinA = 0.0f;
+    cosA = 1.0f;
 }
 
 float PLS_SampleShadowCube(

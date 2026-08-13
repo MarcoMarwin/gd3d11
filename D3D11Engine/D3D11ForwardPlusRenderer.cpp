@@ -297,7 +297,7 @@ void D3D11ForwardPlusRenderer::AddGeometryPasses(
                 context->PSSetShaderResources( 8, 4, lightSRVs );
                 ID3D11ShaderResourceView* dynamicShadowArray = tiledDeferred->IsShadowArrayCreated()
                     ? tiledDeferred->GetDynamicShadowCubeArraySRV() : nullptr;
-                context->PSSetShaderResources( 13, 1, &dynamicShadowArray );
+                context->PSSetShaderResources( 21, 1, &dynamicShadowArray );
                 ID3D11ShaderResourceView* staticLowShadowArray = tiledDeferred->IsShadowArrayCreated()
                     ? tiledDeferred->GetStaticLowShadowCubeArraySRV() : nullptr;
                 context->PSSetShaderResources( 20, 1, &staticLowShadowArray );
@@ -322,6 +322,7 @@ void D3D11ForwardPlusRenderer::AddGeometryPasses(
             context->PSSetShaderResources( 12, 2, s_nullSRVs );
             context->PSSetShaderResources( 14, MAX_CSM_CASCADES, s_nullSRVs );
             context->PSSetShaderResources( 20, 1, s_nullSRVs );
+            context->PSSetShaderResources( 21, 1, s_nullSRVs );
 
             // Restore default depth comparison
             depthState.SetDefault();

@@ -127,7 +127,7 @@ StructuredBuffer<TiledPointLight> FP_Lights : register( t8 );
 StructuredBuffer<LightGrid> FP_LightGrid : register( t9 );
 StructuredBuffer<uint> FP_LightIndexList : register( t10 );
 TextureCubeArray FP_ShadowCubeArray : register( t11 );
-TextureCubeArray FP_DynamicShadowCubeArray : register( t13 );
+TextureCubeArray FP_DynamicShadowCubeArray : register( t21 );
 TextureCubeArray FP_StaticLowShadowCubeArray : register( t20 );
 // ============================================
 // Point Light Accumulation (matches CS_TiledShading.hlsl)
