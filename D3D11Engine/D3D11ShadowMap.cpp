@@ -1539,6 +1539,16 @@ DS_ScreenQuadConstantBuffer D3D11ShadowMap::FillSunCSMConstantBuffer() const {
         XMStoreFloat4x4( &scb.SQ_ShadowViewProj[cascadeIdx],
             XMLoadFloat4x4( &m_CascadeCRs[cascadeIdx].ProjectionReplacement ) *
                 XMLoadFloat4x4( &m_CascadeCRs[cascadeIdx].ViewReplacement ) );
+
+        const XMVECTOR cascadePosition = XMLoadFloat3( &m_CascadeCRs[cascadeIdx].PositionReplacement );
+        const XMVECTOR cascadeLookAt = XMLoadFloat3( &m_CascadeCRs[cascadeIdx].LookAtReplacement );
+        const XMVECTOR cascadeDirectionDelta = XMVectorSubtract( cascadePosition, cascadeLookAt );
+        const XMVECTOR cascadeLightDirection =
+            XMVectorGetX( XMVector3LengthSq( cascadeDirectionDelta ) ) > 1.0e-8f
+                ? XMVector3Normalize( cascadeDirectionDelta )
+                : XMVector3Normalize( XMLoadFloat3( &directionalLight.Direction ) );
+        XMStoreFloat4( scb.SQ_CascadeLightDirectionWS[cascadeIdx].toXMFLOAT4(),
+            XMVectorSetW( cascadeLightDirection, 0.0f ) );
     }
 
     scb.SQ_ShadowmapSize = static_cast<float>( this->GetSizeX() );
@@ -1649,6 +1659,16 @@ XRESULT D3D11ShadowMap::DrawWorldLights()
             XMLoadFloat4x4( &m_CascadeCRs[cascadeIdx].ProjectionReplacement ) *
                 XMLoadFloat4x4( &m_CascadeCRs[cascadeIdx].ViewReplacement )
         );
+
+        const XMVECTOR cascadePosition = XMLoadFloat3( &m_CascadeCRs[cascadeIdx].PositionReplacement );
+        const XMVECTOR cascadeLookAt = XMLoadFloat3( &m_CascadeCRs[cascadeIdx].LookAtReplacement );
+        const XMVECTOR cascadeDirectionDelta = XMVectorSubtract( cascadePosition, cascadeLookAt );
+        const XMVECTOR cascadeLightDirection =
+            XMVectorGetX( XMVector3LengthSq( cascadeDirectionDelta ) ) > 1.0e-8f
+                ? XMVector3Normalize( cascadeDirectionDelta )
+                : XMVector3Normalize( XMLoadFloat3( &directionalLight.Direction ) );
+        XMStoreFloat4( scb.SQ_CascadeLightDirectionWS[cascadeIdx].toXMFLOAT4(),
+            XMVectorSetW( cascadeLightDirection, 0.0f ) );
     }
 
     scb.SQ_ShadowmapSize = static_cast<float>( this->GetSizeX() );

@@ -61,6 +61,7 @@ cbuffer DS_ScreenQuadConstantBuffer : register(b0)
 
     // Cascade atlas UV rect (xy = offset, zw = scale); unused for texture arrays.
     float4 SQ_CascadeAtlasRect[MAX_CSM_CASCADES];
+    float4 SQ_CascadeLightDirectionWS[MAX_CSM_CASCADES];
 };
 
 //--------------------------------------------------------------------------------------
@@ -156,15 +157,23 @@ float4 PSMain(PS_INPUT Input) : SV_TARGET
 
     if (AC_SunVisibility > 0.001f || AC_MoonVisibility > 0.001f) // sample the single active sun or moon shadow map
 	{
-        float3 wsLightDirection = normalize(mul(float4(SQ_LightDirectionVS, 0.0f), SQ_InvView).xyz);
+        if (npcMaterial > 0.5f)
+        {
+            shadow = ComputeCascadedShadowValueCharacter(
+                wsPosition, wsNormal, vsPosition.z, vertLighting, Input.vPosition.xy);
+        }
+        else
+        {
+            float3 wsLightDirection = normalize(mul(float4(SQ_LightDirectionVS, 0.0f), SQ_InvView).xyz);
+            int cascadeIndex = GetPrimaryCascadeIndex(wsPosition);
+            float texelWorldSize = GetCascadeWorldTexelSize(cascadeIndex);
+            float3 biasedWsPosition = ApplyReceiverNormalBias(
+                wsPosition, wsNormal, wsLightDirection, texelWorldSize, vegetationReceiverMask);
 
-        int cascadeIndex = GetPrimaryCascadeIndex(wsPosition);
-        float texelWorldSize = GetCascadeWorldTexelSize(cascadeIndex);
-
-        float3 biasedWsPosition = ApplyReceiverNormalBias(wsPosition, wsNormal, wsLightDirection, texelWorldSize, vegetationReceiverMask);
-
-        // Use screen position for per-pixel rotation (temporal-friendly)
-        shadow = ComputeCascadedShadowValueSoft(biasedWsPosition, vsPosition.z, vertLighting, 0.0f, Input.vPosition.xy, npcMaterial);
+            // Use screen position for per-pixel rotation (temporal-friendly)
+            shadow = ComputeCascadedShadowValueSoft(
+                biasedWsPosition, vsPosition.z, vertLighting, 0.0f, Input.vPosition.xy, 0.0f);
+        }
 	} else {
         // Night-time sky ambient:
         // saturate(wsNormal.y) restricts the value to [0, 1].

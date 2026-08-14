@@ -296,6 +296,11 @@ struct DS_ScreenQuadConstantBuffer {
 
     // Cascade atlas UV rect (xy = offset, zw = scale); unused for texture arrays.
     float4 SQ_CascadeAtlasRect[MAX_CSM_CASCADES];
+
+    // Exact world-space light direction used to build each stabilized cascade.
+    // NPC receivers use this to keep their normal bias synchronized with the
+    // shadow projection instead of the continuously moving sky direction.
+    float4 SQ_CascadeLightDirectionWS[MAX_CSM_CASCADES];
 };
 
 struct CloudConstantBuffer {

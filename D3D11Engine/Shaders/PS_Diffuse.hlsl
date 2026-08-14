@@ -242,24 +242,26 @@ FORWARD_PLUS_PS_OUTPUT PSMain( PS_INPUT Input )
 			else
 			{
 				float3 wsNormal = normalize(mul(float4(nrm, 0.0f), SQ_InvView).xyz);
+				shadow = ComputeCascadedShadowValueCharacter(
+					wsPosition, wsNormal, vsPosition.z, vertLighting, Input.vPosition.xy);
+			}
+		#else
+			float3 wsNormal = normalize(mul(float4(nrm, 0.0f), SQ_InvView).xyz);
+			if (npcMaterial > 0.5f)
+			{
+				shadow = ComputeCascadedShadowValueCharacter(
+					wsPosition, wsNormal, vsPosition.z, vertLighting, Input.vPosition.xy);
+			}
+			else
+			{
 				float3 wsLightDirection = normalize(mul(float4(SQ_LightDirectionVS, 0.0f), SQ_InvView).xyz);
 				int cascadeIndex = GetPrimaryCascadeIndex(wsPosition);
 				float texelWorldSize = GetCascadeWorldTexelSize(cascadeIndex);
 				float3 biasedWsPosition = ApplyReceiverNormalBias(
 					wsPosition, wsNormal, wsLightDirection, texelWorldSize, vegetationReceiverMask);
 				shadow = ComputeCascadedShadowValueSoft(
-					biasedWsPosition, vsPosition.z, vertLighting, 0.0f, Input.vPosition.xy, npcMaterial);
+					biasedWsPosition, vsPosition.z, vertLighting, 0.0f, Input.vPosition.xy, 0.0f);
 			}
-		#else
-			float3 wsNormal = normalize(mul(float4(nrm, 0.0f), SQ_InvView).xyz);
-			float3 wsLightDirection = normalize(mul(float4(SQ_LightDirectionVS, 0.0f), SQ_InvView).xyz);
-
-			int cascadeIndex = GetPrimaryCascadeIndex(wsPosition);
-			float texelWorldSize = GetCascadeWorldTexelSize(cascadeIndex);
-
-			float3 biasedWsPosition = ApplyReceiverNormalBias(wsPosition, wsNormal, wsLightDirection, texelWorldSize, vegetationReceiverMask);
-
-			shadow = ComputeCascadedShadowValueSoft(biasedWsPosition, vsPosition.z, vertLighting, 0.0f, Input.vPosition.xy, npcMaterial);
 		#endif
 	} else {
 		float3 wsNormal = normalize(mul(float4(nrm, 0.0f), SQ_InvView).xyz);
