@@ -134,6 +134,10 @@ XRESULT D3D11LegacyDeferredShading::DrawPointlightLights(
 
         plcb.PL_ShadowSoftness = std::max(
             settings.ShadowSoftness * 2.0f, minimumTemporalShadowSoftness );
+        plcb.PL_ShadowFilterMode = static_cast<uint32_t>( settings.GetShadowKernelQuality() );
+        plcb.PL_ShadowFilterPad[0] = 0;
+        plcb.PL_ShadowFilterPad[1] = 0;
+        plcb.PL_ShadowFilterPad[2] = 0;
 
         // Preserve PCSS around the camera and hero. Distant lights use a stable
         // four-tap PCF path; the sign is an internal shader quality marker.
@@ -143,7 +147,8 @@ XRESULT D3D11LegacyDeferredShading::DrawPointlightLights(
                 XMLoadFloat3( plcb.Pl_PositionWorld.toXMFLOAT3() ) - heroPosition ) );
         }
         const float fullQualityRadius = plcb.PL_Range + 1200.0f;
-        if ( plcb.PL_ShadowSoftness > 0.01f
+        if ( plcb.PL_ShadowFilterMode == static_cast<uint32_t>( GothicRendererSettings::SHADOW_KERNEL_PCSS )
+            && plcb.PL_ShadowSoftness > 0.01f
             && dist > fullQualityRadius && heroDistance > fullQualityRadius ) {
             plcb.PL_ShadowSoftness = -plcb.PL_ShadowSoftness;
         }

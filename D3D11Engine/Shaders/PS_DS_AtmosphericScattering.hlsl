@@ -173,7 +173,7 @@ float4 PSMain(PS_INPUT Input) : SV_TARGET
 
             // Use screen position for per-pixel rotation (temporal-friendly)
             shadow = ComputeCascadedShadowValueSoft(
-                biasedWsPosition, vsPosition.z, vertLighting, 0.0f, Input.vPosition.xy, 0.0f);
+                biasedWsPosition, vsPosition.z, vertLighting, 0.0f, Input.vPosition.xy, 0.0f, cascadeIndex);
         }
 	} else {
         // Night-time sky ambient:

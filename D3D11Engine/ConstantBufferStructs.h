@@ -237,6 +237,11 @@ struct DS_PointLightConstantBuffer {
 
     float3 PL_LightScreenPos;
     float PL_ShadowStrength;
+
+    // Runtime pointlight filter selection. Kept in a separate 16-byte block
+    // so all existing fields retain their shader offsets.
+    uint32_t PL_ShadowFilterMode;
+    uint32_t PL_ShadowFilterPad[3];
 };
 
 constexpr int MAX_CSM_CASCADES = 4;
@@ -302,7 +307,8 @@ struct DS_ScreenQuadConstantBuffer {
     // shadow projection instead of the continuously moving sky direction.
     float4 SQ_CascadeLightDirectionWS[MAX_CSM_CASCADES];
 
-    // Runtime shadow kernel selection. x = temporal reconstruction enabled.
+    // Runtime shadow kernel selection. x = temporal reconstruction enabled,
+    // y = PCF-low / PCF-medium / PCSS quality (0 / 1 / 2).
     // This must stay runtime-controlled so AA changes never require shader reloads.
     float4 SQ_ShadowRuntimeParams;
 };
@@ -566,32 +572,40 @@ struct VelocityDebugConstantBuffer {
 };
 
 #define TILE_SIZE 16
-// 64 Tiles seemed enough to fix issues in G1 old camp
-#define MAX_LIGHTS_PER_TILE 64
 
 struct LightCullingConstantBuffer {
-    XMFLOAT4X4 Proj;
+    float ProjScaleX;
+    float ProjScaleY;
     uint32_t ScreenWidth;
     uint32_t ScreenHeight;
     uint32_t TotalLights;
-    uint32_t MaxBufferIndices;
+    uint32_t NumTilesX;
+    float NearZ;
+    float FarZ;
 };
+static_assert( sizeof(LightCullingConstantBuffer) == 32, "LightCullingConstantBuffer must match CS_LightCulling" );
 
 struct TiledShadingConstantBuffer {
     float2 ViewportSize;
-    float2 Pad0;
+    float2 JitterOffset;
     float4 ProjParams; // x = 1/P._11, y = 1/P._22, z = P._43, w = P._33
     uint32_t LimitLightIntensity;
     uint32_t NumTilesX;
-    float2 Pad1;
+    float ClusterNearZ;
+    float ClusterFarZ;
     XMFLOAT4X4 InvView; // For world-space reconstruction (shadow sampling)
 };
+static_assert( sizeof(TiledShadingConstantBuffer) == 112, "TiledShadingConstantBuffer must match CS_TiledShading" );
 
 struct ForwardPlusTileConstantBuffer {
     float2 ViewportSize;
     uint32_t NumTilesX;
     uint32_t LimitLightIntensity;
+    float ClusterNearZ;
+    float ClusterFarZ;
+    float TilePad[2];
 };
+static_assert( sizeof(ForwardPlusTileConstantBuffer) == 32, "ForwardPlusTileConstantBuffer must match Forward+" );
 
 struct PsSimpleFFdata {
     float4 textureFactor;

@@ -237,7 +237,8 @@ float PLS_SampleShadowCube(
     float3 N, 
     float3 lightPosWorld,
     float lightRange,
-    float shadowSoftness )
+    float shadowSoftness,
+    int shadowFilterMode )
 {
     float3 dir;
     float compareDistance;
@@ -253,25 +254,50 @@ float PLS_SampleShadowCube(
         dir, compareDistance, fixedBias, fixedBlurScale,
         right, up, sinA, cosA );
 
+    // Low and medium quality deliberately skip the blocker search. A negative
+    // softness remains the existing distant-light marker and always selects
+    // the cheapest four-tap fallback, even on the High PCSS tier.
+    int effectiveFilterMode = shadowFilterMode;
+    if ( shadowSoftness < -0.01f )
+        effectiveFilterMode = 0;
+
+    if ( effectiveFilterMode <= 0 )
+    {
+        float farShadow = 0.0f;
+        float filterRadius = min(
+            fixedBlurScale * 0.70f, PLS_MAX_FAR_PCF_RADIUS );
+        [unroll] for ( int i = 0; i < PLS_FAR_PCF_COUNT; ++i )
+        {
+            float2 kernel = PLS_FAR_PCF_OFFSETS[i];
+            float3 sampleDir = normalize(
+                dir + (right * kernel.x + up * kernel.y) * filterRadius );
+            farShadow += shadowCube.SampleCmpLevelZero(
+                samplerState, sampleDir, compareDistance - fixedBias );
+        }
+        float normalizedDist = saturate( length( wsPosition - lightPosWorld ) / lightRange );
+        return PLS_ApplyShadowDistanceFade(
+            farShadow / PLS_FAR_PCF_COUNT, normalizedDist );
+    }
+
+    if ( effectiveFilterMode == 1 )
+    {
+        float mediumShadow = 0.0f;
+        float filterRadius = min( fixedBlurScale, PLS_MAX_FAR_PCF_RADIUS );
+        [unroll] for ( int i = 0; i < PLS_SHADOW_BLUR_COUNT; ++i )
+        {
+            float2 kernel = PLS_SHADOW_BLUR_OFFSETS[i];
+            float3 sampleDir = normalize(
+                dir + (right * kernel.x + up * kernel.y) * filterRadius );
+            mediumShadow += shadowCube.SampleCmpLevelZero(
+                samplerState, sampleDir, compareDistance - fixedBias );
+        }
+        float normalizedDist = saturate( length( wsPosition - lightPosWorld ) / lightRange );
+        return PLS_ApplyShadowDistanceFade(
+            mediumShadow / PLS_SHADOW_BLUR_COUNT, normalizedDist );
+    }
+
     if ( shadowSoftness <= 0.01f )
     {
-        if ( shadowSoftness < -0.01f )
-        {
-            float farShadow = 0.0f;
-            float filterRadius = min(
-                fixedBlurScale * 0.70f, PLS_MAX_FAR_PCF_RADIUS );
-            [unroll] for ( int i = 0; i < PLS_FAR_PCF_COUNT; ++i )
-            {
-                float2 kernel = PLS_FAR_PCF_OFFSETS[i];
-                float3 sampleDir = normalize(
-                    dir + (right * kernel.x + up * kernel.y) * filterRadius );
-                farShadow += shadowCube.SampleCmpLevelZero(
-                    samplerState, sampleDir, compareDistance - fixedBias );
-            }
-            float normalizedDist = saturate( length( wsPosition - lightPosWorld ) / lightRange );
-            return PLS_ApplyShadowDistanceFade(
-                farShadow / PLS_FAR_PCF_COUNT, normalizedDist );
-        }
 
         float hardShadow = shadowCube.SampleCmpLevelZero(
             samplerState, dir, compareDistance - fixedBias );
@@ -348,7 +374,8 @@ float PLS_SampleShadowCubeArray(
     float3 lightPosWorld,
     float lightRange,
     int cubeIndex,
-    float shadowSoftness )
+    float shadowSoftness,
+    int shadowFilterMode )
 {
     float3 dir;
     float compareDistance;
@@ -364,26 +391,49 @@ float PLS_SampleShadowCubeArray(
         dir, compareDistance, fixedBias, fixedBlurScale,
         right, up, sinA, cosA );
 
+    int effectiveFilterMode = shadowFilterMode;
+    if ( shadowSoftness < -0.01f )
+        effectiveFilterMode = 0;
+
+    if ( effectiveFilterMode <= 0 )
+    {
+        float farShadow = 0.0f;
+        float filterRadius = min(
+            fixedBlurScale * 0.70f, PLS_MAX_FAR_PCF_RADIUS );
+        [unroll] for ( int i = 0; i < PLS_FAR_PCF_COUNT; ++i )
+        {
+            float2 kernel = PLS_FAR_PCF_OFFSETS[i];
+            float3 sampleDir = normalize(
+                dir + (right * kernel.x + up * kernel.y) * filterRadius );
+            float4 sampleCoord = float4( sampleDir, (float)cubeIndex );
+            farShadow += shadowCubeArray.SampleCmpLevelZero(
+                samplerState, sampleCoord, compareDistance - fixedBias );
+        }
+        float normalizedDist = saturate( length( wsPosition - lightPosWorld ) / lightRange );
+        return PLS_ApplyShadowDistanceFade(
+            farShadow / PLS_FAR_PCF_COUNT, normalizedDist );
+    }
+
+    if ( effectiveFilterMode == 1 )
+    {
+        float mediumShadow = 0.0f;
+        float filterRadius = min( fixedBlurScale, PLS_MAX_FAR_PCF_RADIUS );
+        [unroll] for ( int i = 0; i < PLS_SHADOW_BLUR_COUNT; ++i )
+        {
+            float2 kernel = PLS_SHADOW_BLUR_OFFSETS[i];
+            float3 sampleDir = normalize(
+                dir + (right * kernel.x + up * kernel.y) * filterRadius );
+            float4 sampleCoord = float4( sampleDir, (float)cubeIndex );
+            mediumShadow += shadowCubeArray.SampleCmpLevelZero(
+                samplerState, sampleCoord, compareDistance - fixedBias );
+        }
+        float normalizedDist = saturate( length( wsPosition - lightPosWorld ) / lightRange );
+        return PLS_ApplyShadowDistanceFade(
+            mediumShadow / PLS_SHADOW_BLUR_COUNT, normalizedDist );
+    }
+
     if ( shadowSoftness <= 0.01f )
     {
-        if ( shadowSoftness < -0.01f )
-        {
-            float farShadow = 0.0f;
-            float filterRadius = min(
-                fixedBlurScale * 0.70f, PLS_MAX_FAR_PCF_RADIUS );
-            [unroll] for ( int i = 0; i < PLS_FAR_PCF_COUNT; ++i )
-            {
-                float2 kernel = PLS_FAR_PCF_OFFSETS[i];
-                float3 sampleDir = normalize(
-                    dir + (right * kernel.x + up * kernel.y) * filterRadius );
-                float4 sampleCoord = float4( sampleDir, (float)cubeIndex );
-                farShadow += shadowCubeArray.SampleCmpLevelZero(
-                    samplerState, sampleCoord, compareDistance - fixedBias );
-            }
-            float normalizedDist = saturate( length( wsPosition - lightPosWorld ) / lightRange );
-            return PLS_ApplyShadowDistanceFade(
-                farShadow / PLS_FAR_PCF_COUNT, normalizedDist );
-        }
 
         float4 sampleCoord = float4( dir, (float)cubeIndex );
         float hardShadow = shadowCubeArray.SampleCmpLevelZero(

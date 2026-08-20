@@ -25,6 +25,8 @@ cbuffer DS_PointLightConstantBuffer : register( b0 )
 	
 	float3 PL_LightScreenPos;
 	float PL_ShadowStrength;
+	uint PL_ShadowFilterMode;
+	uint3 PL_ShadowFilterPad;
 };
 
 //--------------------------------------------------------------------------------------

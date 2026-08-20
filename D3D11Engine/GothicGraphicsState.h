@@ -562,6 +562,15 @@ struct GothicRendererSettings {
         SHADOW_FILTER_PCSS = 2,
     };
 
+    // Runtime shadow kernel quality. The shader contains both PCF and PCSS;
+    // this value selects the cheaper approximation without recompiling when
+    // AA/FSR3 changes.
+    enum E_ShadowKernelQuality {
+        SHADOW_KERNEL_PCF_LOW = 0,
+        SHADOW_KERNEL_PCF_MEDIUM = 1,
+        SHADOW_KERNEL_PCSS = 2,
+    };
+
     enum E_RendererMode {
         RM_Deferred = 0,
         RM_ForwardPlus = 1,
@@ -879,6 +888,12 @@ struct GothicRendererSettings {
     void DisableEverything() {}
 
     bool IsShadowFrustumCullingEnabled() { return ShadowFrustumCullingMode != SHD_FRUSTUM_CULLING_DISABLED && NumShadowCascades > 1; }
+
+    E_ShadowKernelQuality GetShadowKernelQuality() const {
+        if ( ShadowMapSize <= 1024 ) return E_ShadowKernelQuality::SHADOW_KERNEL_PCF_LOW;
+        if ( ShadowMapSize <= 2048 ) return E_ShadowKernelQuality::SHADOW_KERNEL_PCF_MEDIUM;
+        return E_ShadowKernelQuality::SHADOW_KERNEL_PCSS;
+    }
 
     /** Rendering options */
     int FpsLimit;

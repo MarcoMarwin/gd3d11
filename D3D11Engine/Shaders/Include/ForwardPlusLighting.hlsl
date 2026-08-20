@@ -70,6 +70,9 @@ cbuffer FP_TileConstantBuffer : register( b5 )
     float2 FP_ViewportSize;
     uint FP_NumTilesX;
     uint FP_LimitLightIntensity;
+    float FP_ClusterNearZ;
+    float FP_ClusterFarZ;
+    float2 FP_TilePad;
 };
 
 // ============================================
@@ -105,6 +108,8 @@ SamplerComparisonState SS_Comp : register( s2 );
 #else
 #define FP_TILE_SIZE 16
 #endif
+#define FP_NUM_Z_SLICES 16u
+#define FP_MASK_WORDS 32u
 
 struct TiledPointLight
 {
@@ -117,17 +122,18 @@ struct TiledPointLight
     float IsIndoor;
     float IgnoreIndoorOutdoorLimit;
     float ShadowSoftness;
+    uint ShadowFilterMode;
+    uint3 ShadowFilterPad;
 };
 
 struct LightGrid
 {
-    uint Offset;
-    uint Count;
+    uint WordOccupancy;
+    uint Mask[FP_MASK_WORDS];
 };
 
 StructuredBuffer<TiledPointLight> FP_Lights : register( t8 );
 StructuredBuffer<LightGrid> FP_LightGrid : register( t9 );
-StructuredBuffer<uint> FP_LightIndexList : register( t10 );
 TextureCubeArray FP_ShadowCubeArray : register( t11 );
 TextureCubeArray FP_DynamicShadowCubeArray : register( t21 );
 TextureCubeArray FP_StaticLowShadowCubeArray : register( t20 );
@@ -143,8 +149,11 @@ float3 FP_ComputePointLighting(
     uint tileX = (uint)screenPos.x / FP_TILE_SIZE;
     uint tileY = (uint)screenPos.y / FP_TILE_SIZE;
     uint tileIndex = tileY * FP_NumTilesX + tileX;
-
-    LightGrid grid = FP_LightGrid[tileIndex];
+    float zView = abs( vsPosition.z );
+    float zSliceT = log2( max( zView, FP_ClusterNearZ ) / FP_ClusterNearZ )
+        / log2( FP_ClusterFarZ / FP_ClusterNearZ );
+    uint slice = (uint)clamp( floor( zSliceT * (float)FP_NUM_Z_SLICES ), 0.0f, (float)( FP_NUM_Z_SLICES - 1u ) );
+    uint cluster = tileIndex * FP_NUM_Z_SLICES + slice;
     float3 totalLighting = float3( 0, 0, 0 );
     float3 maxLighting = float3( 0, 0, 0 );
 
@@ -153,10 +162,18 @@ float3 FP_ComputePointLighting(
     float specMod = PLS_ComputeSpecMod( diffuseColor.rgb );
     float3 wsNormal = normalize( mul( float4( normal, 0 ), SQ_InvView ).xyz );
     
-    for ( uint i = 0; i < grid.Count; i++ )
+    uint wordMask = FP_LightGrid[cluster].WordOccupancy;
+    while ( wordMask != 0 )
     {
-        uint lightIdx = FP_LightIndexList[grid.Offset + i];
-        TiledPointLight light = FP_Lights[lightIdx];
+        uint word = firstbitlow( wordMask );
+        wordMask &= wordMask - 1;
+        uint lightMask = FP_LightGrid[cluster].Mask[word];
+        while ( lightMask != 0 )
+        {
+            uint bit = firstbitlow( lightMask );
+            lightMask &= lightMask - 1;
+            uint lightIdx = word * 32u + bit;
+            TiledPointLight light = FP_Lights[lightIdx];
 
         float3 lightDir = light.PositionView - vsPosition;
         float distance = length( lightDir );
@@ -185,12 +202,12 @@ float3 FP_ComputePointLighting(
             const bool lowStatic = (light.ShadowCubeIndex & 0x20000000) != 0;
             float shadow;
             if ( lowStatic )
-                shadow = PLS_SampleShadowCubeArray( FP_StaticLowShadowCubeArray, FP_SS_Linear, SS_Comp, wsPosition, wsNormal, light.PositionWorld, light.Range, shadowSlot, light.ShadowSoftness );
+                shadow = PLS_SampleShadowCubeArray( FP_StaticLowShadowCubeArray, FP_SS_Linear, SS_Comp, wsPosition, wsNormal, light.PositionWorld, light.Range, shadowSlot, light.ShadowSoftness, light.ShadowFilterMode );
             else
-                shadow = PLS_SampleShadowCubeArray( FP_ShadowCubeArray, FP_SS_Linear, SS_Comp, wsPosition, wsNormal, light.PositionWorld, light.Range, shadowSlot, light.ShadowSoftness );
+                shadow = PLS_SampleShadowCubeArray( FP_ShadowCubeArray, FP_SS_Linear, SS_Comp, wsPosition, wsNormal, light.PositionWorld, light.Range, shadowSlot, light.ShadowSoftness, light.ShadowFilterMode );
             if ( shadow > 0.001f && (light.ShadowCubeIndex & 0x40000000) != 0 )
             {
-                shadow *= PLS_SampleShadowCubeArray( FP_DynamicShadowCubeArray, FP_SS_Linear, SS_Comp, wsPosition, wsNormal, light.PositionWorld, light.Range, shadowSlot, light.ShadowSoftness );
+                shadow *= PLS_SampleShadowCubeArray( FP_DynamicShadowCubeArray, FP_SS_Linear, SS_Comp, wsPosition, wsNormal, light.PositionWorld, light.Range, shadowSlot, light.ShadowSoftness, light.ShadowFilterMode );
             }
             lighting *= lerp(1.0f, shadow, saturate(light.ShadowStrength));
         }
@@ -204,6 +221,7 @@ float3 FP_ComputePointLighting(
         lighting = saturate( lighting );
         totalLighting += lighting;
         maxLighting = max( maxLighting, lighting );
+        }
     }
 
     return FP_LimitLightIntensity ? maxLighting : totalLighting;

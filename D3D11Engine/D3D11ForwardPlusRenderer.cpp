@@ -260,6 +260,9 @@ void D3D11ForwardPlusRenderer::AddGeometryPasses(
             tileCB.ViewportSize = float2( static_cast<float>( res.x ), static_cast<float>( res.y ) );
             tileCB.NumTilesX = ( static_cast<uint32_t>( res.x ) + 15 ) / 16;
             tileCB.LimitLightIntensity = Engine::GAPI->GetRendererState().RendererSettings.LimitLightIntesity ? 1u : 0u;
+            tileCB.ClusterNearZ = Engine::GAPI->GetNearPlane();
+            tileCB.ClusterFarZ = std::max( CLUSTER_MIN_FAR_Z,
+                Engine::GAPI->GetRendererState().RendererSettings.GetEffectiveVisualFXDrawRadius() );
             if ( !m_TileConstantBuffer ) {
                 m_TileConstantBuffer = std::make_unique<D3D11ConstantBuffer>(
                     sizeof( ForwardPlusTileConstantBuffer ), &tileCB );
@@ -291,7 +294,7 @@ void D3D11ForwardPlusRenderer::AddGeometryPasses(
                 ID3D11ShaderResourceView* lightSRVs[4] = {
                     tiledDeferred->GetLightBufferSRV(),
                     tiledDeferred->GetLightGridSRV(),
-                    tiledDeferred->GetLightIndexListSRV(),
+                    nullptr,
                     tiledDeferred->IsShadowArrayCreated() ? tiledDeferred->GetShadowCubeArraySRV() : nullptr,
                 };
                 context->PSSetShaderResources( 8, 4, lightSRVs );

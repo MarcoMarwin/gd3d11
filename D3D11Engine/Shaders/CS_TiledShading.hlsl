@@ -4,6 +4,8 @@
 #include "include/PointLightShadows.h"
 
 #define TILE_SIZE 16
+#define NUM_Z_SLICES 16u
+#define MASK_WORDS 32u
 
 struct TiledPointLight {
     float3 PositionView;
@@ -15,20 +17,23 @@ struct TiledPointLight {
     float IsIndoor;
     float IgnoreIndoorOutdoorLimit;
     float ShadowSoftness;
+    uint ShadowFilterMode;
+    uint3 ShadowFilterPad;
 };
 
 struct LightGrid {
-    uint Offset;
-    uint Count;
+    uint WordOccupancy;
+    uint Mask[MASK_WORDS];
 };
 
 cbuffer TiledShadingConstantBuffer : register( b0 ) {
     float2 ViewportSize;
-    float2 Pad0;
+    float2 JitterOffset;
     float4 ProjParams; // x = 1/P._11, y = 1/P._22, z = P._43, w = P._33
     uint LimitLightIntensity;
     uint NumTilesX;
-    float2 Pad1;
+    float ClusterNearZ;
+    float ClusterFarZ;
     matrix InvView; // For world-space reconstruction (shadow sampling)
 };
 
@@ -41,7 +46,6 @@ Texture2D TX_SI_SP : register( t7 );
 
 StructuredBuffer<TiledPointLight> SB_Lights : register( t8 );
 StructuredBuffer<LightGrid> SB_LightGrid : register( t9 );
-StructuredBuffer<uint> SB_LightIndexList : register( t10 );
 
 TextureCubeArray TX_ShadowCubeArray : register( t11 );
 TextureCubeArray TX_DynamicShadowCubeArray : register( t12 );
@@ -83,8 +87,11 @@ void CSMain( uint3 groupID : SV_GroupID, uint3 threadID : SV_GroupThreadID, uint
     uint tileX = pixelCoord.x / TILE_SIZE;
     uint tileY = pixelCoord.y / TILE_SIZE;
     uint tileIndex = tileY * NumTilesX + tileX;
-
-    LightGrid grid = SB_LightGrid[tileIndex];
+    float zView = abs( vsPosition.z );
+    float zSliceT = log2( max( zView, ClusterNearZ ) / ClusterNearZ )
+        / log2( ClusterFarZ / ClusterNearZ );
+    uint slice = (uint)clamp( floor( zSliceT * (float)NUM_Z_SLICES ), 0.0f, (float)( NUM_Z_SLICES - 1 ) );
+    uint cluster = tileIndex * NUM_Z_SLICES + slice;
 
     // Hoist per-pixel constants outside the light loop
     float3 V = normalize( -vsPosition );
@@ -93,54 +100,62 @@ void CSMain( uint3 groupID : SV_GroupID, uint3 threadID : SV_GroupThreadID, uint
     float3 totalLighting = float3( 0, 0, 0 );
     float3 maxLighting = float3( 0, 0, 0 );
 
-    for ( uint i = 0; i < grid.Count; i++ ) {
-        uint lightIdx = SB_LightIndexList[grid.Offset + i];
-        TiledPointLight light = SB_Lights[lightIdx];
+    uint wordMask = SB_LightGrid[cluster].WordOccupancy;
+    while ( wordMask != 0 ) {
+        uint word = firstbitlow( wordMask );
+        wordMask &= wordMask - 1;
+        uint lightMask = SB_LightGrid[cluster].Mask[word];
+        while ( lightMask != 0 ) {
+            uint bit = firstbitlow( lightMask );
+            lightMask &= lightMask - 1;
+            uint lightIdx = word * 32u + bit;
+            TiledPointLight light = SB_Lights[lightIdx];
 
-        float3 lightDir = light.PositionView - vsPosition;
-        float distance = length( lightDir );
+            float3 lightDir = light.PositionView - vsPosition;
+            float distance = length( lightDir );
 
-        if ( distance >= light.Range )
-            continue;
+            if ( distance >= light.Range )
+                continue;
 
-        lightDir /= distance;
+            lightDir /= distance;
 
-        float ndl = PLS_ComputePointLightNdlBacklit( lightDir, normal, light.PositionWorld, wsPosition, wsNormal, twoSidedBacklitMaterial, AC_EnableSSS );
-        float falloff = PLS_ComputeRangeFalloff( distance, light.Range );
+            float ndl = PLS_ComputePointLightNdlBacklit( lightDir, normal, light.PositionWorld, wsPosition, wsNormal, twoSidedBacklitMaterial, AC_EnableSSS );
+            float falloff = PLS_ComputeRangeFalloff( distance, light.Range );
 
-        float3 H = normalize( lightDir + V );
-        float spec = PLS_CalcBlinnPhongLighting( normal, H );
-        float3 lighting = PLS_ComputePointLightLightingBacklit(
-            diffuse.rgb, light.Color.rgb, ndl, falloff, spec, specIntensity, specPower, specMod,
-            lightDir, normal, V, vegetationBacklitMask, twoSidedBacklitMaterial,
-            AC_EnableSSS, AC_SSSIntensity, 0.42f );
+            float3 H = normalize( lightDir + V );
+            float spec = PLS_CalcBlinnPhongLighting( normal, H );
+            float3 lighting = PLS_ComputePointLightLightingBacklit(
+                diffuse.rgb, light.Color.rgb, ndl, falloff, spec, specIntensity, specPower, specMod,
+                lightDir, normal, V, vegetationBacklitMask, twoSidedBacklitMaterial,
+                AC_EnableSSS, AC_SSSIntensity, 0.42f );
 
-        // Apply shadow if this light has a shadow cubemap and contribution is non-negligible
-        if ( light.ShadowCubeIndex >= 0 && any( lighting > 0.001f ) ) {
-            const int shadowSlot = light.ShadowCubeIndex & 0x1fffffff;
-            const bool lowStatic = (light.ShadowCubeIndex & 0x20000000) != 0;
-            float shadow;
-            if ( lowStatic )
-                shadow = PLS_SampleShadowCubeArray( TX_StaticLowShadowCubeArray, SS_Linear, SS_Comp, wsPosition, wsNormal, light.PositionWorld, light.Range, shadowSlot, light.ShadowSoftness );
-            else
-                shadow = PLS_SampleShadowCubeArray( TX_ShadowCubeArray, SS_Linear, SS_Comp, wsPosition, wsNormal, light.PositionWorld, light.Range, shadowSlot, light.ShadowSoftness );
-            if ( shadow > 0.001f && (light.ShadowCubeIndex & 0x40000000) != 0 )
-            {
-                shadow *= PLS_SampleShadowCubeArray( TX_DynamicShadowCubeArray, SS_Linear, SS_Comp, wsPosition, wsNormal, light.PositionWorld, light.Range, shadowSlot, light.ShadowSoftness );
+            // Apply shadow if this light has a shadow cubemap and contribution is non-negligible
+            if ( light.ShadowCubeIndex >= 0 && any( lighting > 0.001f ) ) {
+                const int shadowSlot = light.ShadowCubeIndex & 0x1fffffff;
+                const bool lowStatic = (light.ShadowCubeIndex & 0x20000000) != 0;
+                float shadow;
+                if ( lowStatic )
+                    shadow = PLS_SampleShadowCubeArray( TX_StaticLowShadowCubeArray, SS_Linear, SS_Comp, wsPosition, wsNormal, light.PositionWorld, light.Range, shadowSlot, light.ShadowSoftness, light.ShadowFilterMode );
+                else
+                    shadow = PLS_SampleShadowCubeArray( TX_ShadowCubeArray, SS_Linear, SS_Comp, wsPosition, wsNormal, light.PositionWorld, light.Range, shadowSlot, light.ShadowSoftness, light.ShadowFilterMode );
+                if ( shadow > 0.001f && (light.ShadowCubeIndex & 0x40000000) != 0 )
+                {
+                    shadow *= PLS_SampleShadowCubeArray( TX_DynamicShadowCubeArray, SS_Linear, SS_Comp, wsPosition, wsNormal, light.PositionWorld, light.Range, shadowSlot, light.ShadowSoftness, light.ShadowFilterMode );
+                }
+                lighting *= lerp(1.0f, shadow, saturate(light.ShadowStrength));
             }
-            lighting *= lerp(1.0f, shadow, saturate(light.ShadowStrength));
+
+            // Retain the exact indoor/outdoor leak barrier. Avoid neighborhood probes:
+            // their integer sample radii created visible lighting bands.
+            float indoorPixel = diffuse.a < 0.5f ? 1.0f : 0.0f;
+            float indoorBoundary = saturate((1.0f - light.IsIndoor) + light.IsIndoor * indoorPixel);
+            lighting *= lerp(indoorBoundary, 1.0f, saturate(light.IgnoreIndoorOutdoorLimit));
+
+            lighting = saturate( lighting );
+
+            totalLighting += lighting;
+            maxLighting = max( maxLighting, lighting );
         }
-
-        // Retain the exact indoor/outdoor leak barrier. Avoid neighborhood probes:
-        // their integer sample radii created visible lighting bands.
-        float indoorPixel = diffuse.a < 0.5f ? 1.0f : 0.0f;
-        float indoorBoundary = saturate((1.0f - light.IsIndoor) + light.IsIndoor * indoorPixel);
-        lighting *= lerp(indoorBoundary, 1.0f, saturate(light.IgnoreIndoorOutdoorLimit));
-
-        lighting = saturate( lighting );
-
-        totalLighting += lighting;
-        maxLighting = max( maxLighting, lighting );
     }
 
     float3 activeLighting = LimitLightIntensity ? maxLighting : totalLighting;

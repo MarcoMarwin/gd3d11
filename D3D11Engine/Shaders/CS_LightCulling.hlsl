@@ -1,11 +1,22 @@
+// Clustered Forward+ light culling for D3D11.
+//
+// The old implementation built one depth-derived AABB and a flat index list per screen tile. That made the
+// result unusable for geometry in front of the opaque depth and paid an extra global counter/list write. This
+// path builds a frustum-only grid of logarithmic view-Z clusters, so deferred and Forward+ consumers share the
+// same light membership data.
+//
+// D3D11/SM5 has no wave intrinsics. Each of the 64 lanes tests its assigned light and ORs the result directly
+// into the shared mask. This keeps the DX12 cluster layout and removes the old global index-list allocation.
 #ifndef TILE_SIZE
-#define TILE_SIZE 16
+#define TILE_SIZE 16u
 #endif
+#define MAX_ACTIVE_LIGHTS 1024u
+#define MASK_WORDS (MAX_ACTIVE_LIGHTS / 32u)
+#define NUM_Z_SLICES 16u
+#define CULL_GROUP_SIZE 64u
 
-#ifndef MAX_LIGHTS_PER_TILE
-#define MAX_LIGHTS_PER_TILE 32
-#endif
-
+// This must remain layout-identical to the C++ TiledPointLight and the lighting shader copies. The cull only
+// reads PositionView/Range; the remaining members keep the StructuredBuffer stride at 80 bytes.
 struct TiledPointLight {
     float3 PositionView;
     float Range;
@@ -15,158 +26,107 @@ struct TiledPointLight {
     float ShadowStrength;
     float IsIndoor;
     float IgnoreIndoorOutdoorLimit;
-    float Padding;
+    float ShadowSoftness;
+    uint ShadowFilterMode;
+    uint3 ShadowFilterPad;
 };
 
 struct LightGrid {
-    uint Offset;
-    uint Count;
+    uint WordOccupancy;
+    uint Mask[MASK_WORDS];
 };
 
-Texture2D<float> TX_Depth : register( t0 );
 StructuredBuffer<TiledPointLight> SB_Lights : register( t1 );
+RWStructuredBuffer<LightGrid> RW_LightGrid : register( u0 );
 
 cbuffer LightCullingConstantBuffer : register( b0 ) {
-    matrix Proj;
+    float2 ProjScale;    // (Proj._11, Proj._22): view -> clip x/y scale
     uint2 ScreenDimensions;
     uint TotalLights;
-    uint MaxBufferIndices;
+    uint NumTilesX;
+    float NearZ;
+    float FarZ;
 };
 
-RWStructuredBuffer<LightGrid> RW_LightGrid : register( u0 );
-RWStructuredBuffer<uint> RW_LightIndexList : register( u1 );
-RWStructuredBuffer<uint> RW_IndexCounter : register( u2 );
+groupshared uint gs_Mask[NUM_Z_SLICES * MASK_WORDS];
+groupshared uint gs_Occ[NUM_Z_SLICES];
 
-groupshared uint gs_MinDepthInt;
-groupshared uint gs_MaxDepthInt;
-groupshared uint gs_TileLightCount;
-groupshared uint gs_TileLightIndices[MAX_LIGHTS_PER_TILE];
-
-float3 ScreenToView( float2 screenCoord, float depth ) {
-    float2 ndc;
-    ndc.x = screenCoord.x / (float)ScreenDimensions.x * 2.0f - 1.0f;
-    ndc.y = -(screenCoord.y / (float)ScreenDimensions.y * 2.0f - 1.0f);
-
-    float4 clipPos = float4( ndc, depth, 1.0f );
-
-    // Invert projection: viewPos = invProj * clipPos
-    // For a standard perspective projection we can do this analytically:
-    //   x_view = ndc.x / Proj[0][0]  *  z_view
-    //   y_view = ndc.y / Proj[1][1]  *  z_view
-    //   z_view = Proj[3][2] / (depth - Proj[2][2])
-    float z_view = Proj[3][2] / (depth - Proj[2][2]);
-    float x_view = ndc.x / Proj[0][0] * z_view;
-    float y_view = ndc.y / Proj[1][1] * z_view;
-
-    return float3( x_view, y_view, z_view );
+uint SliceOfViewZ( float zView, float invLogRatio ) {
+    float t = log2( max( zView, NearZ ) / NearZ ) * invLogRatio;
+    return (uint)clamp( floor( t * (float)NUM_Z_SLICES ), 0.0f, (float)( NUM_Z_SLICES - 1 ) );
 }
 
-bool SphereInsideAABB( float3 center, float radius, float3 aabbMin, float3 aabbMax ) {
-    float3 closest = clamp( center, aabbMin, aabbMax );
-    float3 delta = closest - center;
-    float distSq = dot( delta, delta );
-    return distSq <= (radius * radius);
-}
-
-[numthreads( TILE_SIZE, TILE_SIZE, 1 )]
-void CSMain( uint3 groupID : SV_GroupID, uint3 threadID : SV_GroupThreadID, uint3 dispatchThreadID : SV_DispatchThreadID ) {
-    uint threadIndex = threadID.y * TILE_SIZE + threadID.x;
-
-    // Initialize shared memory
-    if ( threadIndex == 0 ) {
-        gs_MinDepthInt = 0x7F7FFFFF;
-        gs_MaxDepthInt = 0;
-        gs_TileLightCount = 0;
-    }
-    GroupMemoryBarrierWithGroupSync();
-
-    // Calculate min/max depth for this tile
-    if ( dispatchThreadID.x < ScreenDimensions.x && dispatchThreadID.y < ScreenDimensions.y ) {
-        float depth = TX_Depth.Load( uint3( dispatchThreadID.xy, 0 ) ).r;
-        uint depthInt = asuint( depth );
-
-        if ( depth > 0.0f && depth < 1.0f ) {
-            InterlockedMin( gs_MinDepthInt, depthInt );
-            InterlockedMax( gs_MaxDepthInt, depthInt );
-        }
-    }
-    GroupMemoryBarrierWithGroupSync();
-
-    // Build tile AABB in view space
-    float minDepth = asfloat( gs_MinDepthInt );
-    float maxDepth = asfloat( gs_MaxDepthInt );
-
-    // Handle empty tiles (no geometry)
-    if ( gs_MinDepthInt == 0x7F7FFFFF ) {
-        minDepth = 1.0f;
-        maxDepth = 1.0f;
-    }
-
-    float2 tileMin = float2( groupID.xy ) * TILE_SIZE;
-    float2 tileMax = float2( groupID.xy + 1 ) * TILE_SIZE;
-
-    // Reconstruct all 8 view-space corners of the tile frustum
-    float3 corners[8];
-    corners[0] = ScreenToView( float2( tileMin.x, tileMin.y ), minDepth );
-    corners[1] = ScreenToView( float2( tileMax.x, tileMin.y ), minDepth );
-    corners[2] = ScreenToView( float2( tileMin.x, tileMax.y ), minDepth );
-    corners[3] = ScreenToView( float2( tileMax.x, tileMax.y ), minDepth );
-    corners[4] = ScreenToView( float2( tileMin.x, tileMin.y ), maxDepth );
-    corners[5] = ScreenToView( float2( tileMax.x, tileMin.y ), maxDepth );
-    corners[6] = ScreenToView( float2( tileMin.x, tileMax.y ), maxDepth );
-    corners[7] = ScreenToView( float2( tileMax.x, tileMax.y ), maxDepth );
-
-    float3 aabbMin = corners[0];
-    float3 aabbMax = corners[0];
+[numthreads( CULL_GROUP_SIZE, 1, 1 )]
+void CSMain( uint3 groupID : SV_GroupID, uint ti : SV_GroupIndex ) {
+    // There are 512 mask words and 64 lanes, so each lane clears eight words.
     [unroll]
-    for ( uint c = 1; c < 8; c++ ) {
-        aabbMin = min( aabbMin, corners[c] );
-        aabbMax = max( aabbMax, corners[c] );
-    }
+    for ( uint c = 0; c < ( NUM_Z_SLICES * MASK_WORDS ) / CULL_GROUP_SIZE; ++c )
+        gs_Mask[c * CULL_GROUP_SIZE + ti] = 0;
+    if ( ti < NUM_Z_SLICES )
+        gs_Occ[ti] = 0;
 
-    // Cull lights: distribute across threads in the group
-    uint numThreads = TILE_SIZE * TILE_SIZE;
-    for ( uint i = threadIndex; i < TotalLights; i += numThreads ) {
-        TiledPointLight light = SB_Lights[i];
+    const float2 tileMin = float2( groupID.xy ) * TILE_SIZE;
+    const float2 tileMax = float2( groupID.xy + uint2( 1, 1 ) ) * TILE_SIZE;
+    const float tx0 = ( tileMin.x / (float)ScreenDimensions.x * 2.0f - 1.0f ) / ProjScale.x;
+    const float tx1 = ( tileMax.x / (float)ScreenDimensions.x * 2.0f - 1.0f ) / ProjScale.x;
+    // NDC Y is flipped relative to pixel Y, so tileMin.y is the larger view-space Y edge.
+    const float ty1 = -( tileMin.y / (float)ScreenDimensions.y * 2.0f - 1.0f ) / ProjScale.y;
+    const float ty0 = -( tileMax.y / (float)ScreenDimensions.y * 2.0f - 1.0f ) / ProjScale.y;
 
-        // The depth-derived tile AABB is only a coarse approximation of the
-        // tile frustum. At grazing receiver angles its hard sphere test could
-        // reject an entire 16x16 tile although edge pixels were still inside
-        // the light. Admit one half tile diagonal as a conservative guard;
-        // the lighting pass still applies the exact per-pixel range test.
-        float cullingGuard = min(
-            0.5f * length(aabbMax - aabbMin), light.Range * 0.15f);
-        if ( SphereInsideAABB( light.PositionView, light.Range + cullingGuard,
-            aabbMin, aabbMax ) ) {
-            uint index;
-            InterlockedAdd( gs_TileLightCount, 1, index );
-            if ( index < MAX_LIGHTS_PER_TILE ) {
-                gs_TileLightIndices[index] = i;
+    const float3 pL = float3( 1, 0, -tx0 ) * rsqrt( 1.0f + tx0 * tx0 );
+    const float3 pR = float3( -1, 0, tx1 ) * rsqrt( 1.0f + tx1 * tx1 );
+    const float3 pB = float3( 0, 1, -ty0 ) * rsqrt( 1.0f + ty0 * ty0 );
+    const float3 pT = float3( 0, -1, ty1 ) * rsqrt( 1.0f + ty1 * ty1 );
+
+    const float invLogRatio = 1.0f / log2( FarZ / NearZ );
+    const uint lightCount = min( TotalLights, MAX_ACTIVE_LIGHTS );
+
+    GroupMemoryBarrierWithGroupSync();
+
+    // Test each light once against the tile's infinite frustum column, then set its bit only in the Z slices
+    // touched by the light sphere. A 1.05 guard keeps the cull conservative at the tile boundaries.
+    for ( uint base = 0; base < lightCount; base += CULL_GROUP_SIZE ) {
+        const uint lightIndex = base + ti;
+        if ( lightIndex < lightCount ) {
+            const TiledPointLight light = SB_Lights[lightIndex];
+            const float3 center = light.PositionView;
+            const float radius = light.Range * 1.05f;
+            const float zLo = center.z - radius;
+            const float zHi = center.z + radius;
+
+            if ( zHi >= NearZ && zLo <= FarZ &&
+                 dot( pL, center ) >= -radius && dot( pR, center ) >= -radius &&
+                 dot( pB, center ) >= -radius && dot( pT, center ) >= -radius ) {
+                const uint firstSlice = SliceOfViewZ( max( zLo, NearZ ), invLogRatio );
+                const uint lastSlice = SliceOfViewZ( min( zHi, FarZ ), invLogRatio );
+                const uint word = lightIndex >> 5u;
+                const uint bit = 1u << ( lightIndex & 31u );
+
+                for ( uint slice = firstSlice; slice <= lastSlice; ++slice )
+                    InterlockedOr( gs_Mask[slice * MASK_WORDS + word], bit );
             }
         }
     }
+
     GroupMemoryBarrierWithGroupSync();
 
-    // Write results to global memory (thread 0 only)
-    if ( threadIndex == 0 ) {
-        uint count = min( gs_TileLightCount, MAX_LIGHTS_PER_TILE );
-        uint offset;
-        InterlockedAdd( RW_IndexCounter[0], count, offset );
-
-        uint numTilesX = (ScreenDimensions.x + TILE_SIZE - 1) / TILE_SIZE;
-        uint tileIndex = groupID.y * numTilesX + groupID.x;
-		
-		if (offset >= MaxBufferIndices) {
-			count = 0; // Completely full
-		} else if (offset + count > MaxBufferIndices) {
-			count = MaxBufferIndices - offset; // Write remaining
-		}
-		
-        RW_LightGrid[tileIndex].Offset = offset;
-        RW_LightGrid[tileIndex].Count = count;
-
-        for ( uint j = 0; j < count; j++ ) {
-            RW_LightIndexList[offset + j] = gs_TileLightIndices[j];
-        }
+    // Build one occupancy word per slice so consumers can skip empty mask words.
+    [unroll]
+    for ( uint u = 0; u < ( NUM_Z_SLICES * MASK_WORDS ) / CULL_GROUP_SIZE; ++u ) {
+        const uint i = u * CULL_GROUP_SIZE + ti;
+        if ( gs_Mask[i] != 0 )
+            InterlockedOr( gs_Occ[i >> 5u], 1u << ( i & 31u ) );
     }
+
+    GroupMemoryBarrierWithGroupSync();
+
+    // Flush all clusters of this tile column. The layout is tileIndex * NUM_Z_SLICES + slice.
+    const uint clusterBase = ( groupID.y * NumTilesX + groupID.x ) * NUM_Z_SLICES;
+    [unroll]
+    for ( uint o = 0; o < ( NUM_Z_SLICES * MASK_WORDS ) / CULL_GROUP_SIZE; ++o ) {
+        const uint i = o * CULL_GROUP_SIZE + ti;
+        RW_LightGrid[clusterBase + ( i >> 5u )].Mask[i & 31u] = gs_Mask[i];
+    }
+    if ( ti < NUM_Z_SLICES )
+        RW_LightGrid[clusterBase + ti].WordOccupancy = gs_Occ[ti];
 }

@@ -14,6 +14,12 @@ class D3D11PointLight;
 
 constexpr uint32_t MAX_TILED_LIGHTS = 1024;
 
+// One 16x16 screen tile is split into logarithmic view-Z clusters. The mask has one bit per packed light.
+// These values must stay identical to the HLSL copies in CS_LightCulling, CS_TiledShading and Forward+.
+constexpr uint32_t CLUSTER_Z_SLICES = 16;
+constexpr uint32_t CLUSTER_MASK_WORDS = MAX_TILED_LIGHTS / 32;
+constexpr float CLUSTER_MIN_FAR_Z = 4096.0f;
+
 constexpr uint32_t MAX_SHADOW_CUBEMAPS = 128;
 constexpr uint32_t MAX_STATIC_SHADOW_CUBEMAPS = 340; // 2040 array slices, below D3D11's 2048 limit
 
@@ -27,14 +33,18 @@ struct TiledPointLight {
     float IsIndoor;
     float IgnoreIndoorOutdoorLimit;
     float ShadowSoftness;
+    uint32_t ShadowFilterMode;
+    uint32_t ShadowFilterPad[3];
 };
 
-static_assert( sizeof(TiledPointLight) == 64, "TiledPointLight must match the HLSL StructuredBuffer layout" );
+static_assert( sizeof(TiledPointLight) == 80, "TiledPointLight must match the HLSL StructuredBuffer layout" );
 
 struct LightGrid {
-    uint32_t Offset;
-    uint32_t Count;
+    uint32_t WordOccupancy;
+    uint32_t Mask[CLUSTER_MASK_WORDS];
 };
+static_assert( sizeof(LightGrid) == (1 + CLUSTER_MASK_WORDS) * sizeof(uint32_t),
+    "LightGrid must match the clustered HLSL StructuredBuffer layout" );
 
 class D3D11TiledDeferredShading {
 public:
@@ -48,7 +58,7 @@ public:
         RenderToTextureBuffer& depthCopy );
 
     /** Packs lights into the structured buffer and dispatches CS_LightCulling.
-        After this call, GetLightBufferSRV/GetLightGridSRV/GetLightIndexListSRV
+        After this call, GetLightBufferSRV/GetLightGridSRV
         are valid for the current frame. Returns the number of tiled lights and
         any lights that must fall back to the legacy path.
         Does NOT run CS_TiledShading — the caller decides how to consume the culled data. */
@@ -64,7 +74,6 @@ public:
     /** SRVs for reading culled light data in pixel shaders (valid after CullLights). */
     ID3D11ShaderResourceView* GetLightBufferSRV() const { return m_LightBufferSRV.Get(); }
     ID3D11ShaderResourceView* GetLightGridSRV() const { return m_LightGridSRV.Get(); }
-    ID3D11ShaderResourceView* GetLightIndexListSRV() const { return m_LightIndexListSRV.Get(); }
     ID3D11ShaderResourceView* GetShadowCubeArraySRV() const { return m_ShadowCubeArraySRV.Get(); }
     ID3D11ShaderResourceView* GetDynamicShadowCubeArraySRV() const { return m_DynamicShadowCubeArraySRV.Get(); }
     ID3D11ShaderResourceView* GetStaticLowShadowCubeArraySRV() const { return m_StaticLowShadowCubeArraySRV.Get(); }
@@ -89,19 +98,10 @@ private:
     Microsoft::WRL::ComPtr<ID3D11Buffer> m_LightBuffer;
     Microsoft::WRL::ComPtr<ID3D11ShaderResourceView> m_LightBufferSRV;
 
-    // Per-tile light grid (offset + count)
+    // Clustered light grid: one membership mask for every tile/Z-slice cluster.
     Microsoft::WRL::ComPtr<ID3D11Buffer> m_LightGrid;
     Microsoft::WRL::ComPtr<ID3D11ShaderResourceView> m_LightGridSRV;
     Microsoft::WRL::ComPtr<ID3D11UnorderedAccessView> m_LightGridUAV;
-
-    // Global light index list
-    Microsoft::WRL::ComPtr<ID3D11Buffer> m_LightIndexList;
-    Microsoft::WRL::ComPtr<ID3D11ShaderResourceView> m_LightIndexListSRV;
-    Microsoft::WRL::ComPtr<ID3D11UnorderedAccessView> m_LightIndexListUAV;
-
-    // Atomic counter for index list allocation
-    Microsoft::WRL::ComPtr<ID3D11Buffer> m_IndexCounter;
-    Microsoft::WRL::ComPtr<ID3D11UnorderedAccessView> m_IndexCounterUAV;
 
     // Shadow cubemap array for tiled shadowed lights (lazy-created)
     Microsoft::WRL::ComPtr<ID3D11Texture2D> m_ShadowCubeArray;

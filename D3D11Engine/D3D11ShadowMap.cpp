@@ -1579,7 +1579,7 @@ DS_ScreenQuadConstantBuffer D3D11ShadowMap::FillSunCSMConstantBuffer() const {
     scb.SQ_LightSize = std::clamp( settings.PCSSLightSize, 0.005f, 0.5f );
     scb.SQ_ShadowRuntimeParams = float4(
         settings.GetUsesTemporalReconstruction() ? 1.0f : 0.0f,
-        0.0f, 0.0f, 0.0f );
+        static_cast<float>( settings.GetShadowKernelQuality() ), 0.0f, 0.0f );
     if ( auto bspTree = Engine::GAPI->GetLoadedWorldInfo()->BspTree )
         if ( bspTree->GetBspTreeMode() == zBSP_MODE_INDOOR ) {
 #if BUILD_GOTHIC_1_08k
@@ -1706,7 +1706,7 @@ XRESULT D3D11ShadowMap::DrawWorldLights()
     scb.SQ_LightSize = std::clamp( settings.PCSSLightSize, 0.005f, 0.5f );
     scb.SQ_ShadowRuntimeParams = float4(
         settings.GetUsesTemporalReconstruction() ? 1.0f : 0.0f,
-        0.0f, 0.0f, 0.0f );
+        static_cast<float>( settings.GetShadowKernelQuality() ), 0.0f, 0.0f );
     // Modify lightsettings when indoor
     if ( auto bspTree = Engine::GAPI->GetLoadedWorldInfo()->BspTree )
         if ( bspTree->GetBspTreeMode() == zBSP_MODE_INDOOR ) {

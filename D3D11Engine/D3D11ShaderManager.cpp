@@ -312,20 +312,22 @@ XRESULT D3D11ShaderManager::Init() {
         const bool useSimpleShadowFallback =
             FeatureLevel10Compatibility || s.DebugSettings.FeatureSet.UseShadowAtlas;
         list.push_back( {"SHD_ENABLE",           s.EnableShadows ? "1" : "0"} );
-        list.push_back( {"SHD_FILTER_16TAP_PCF", useSimpleShadowFallback ? "1" : "0"} );
+        // Compile both kernels once. Runtime shadow quality selects PCF or
+        // PCSS from the constant buffer, so AA/FSR3 changes never need a
+        // shader reload and the low/medium presets can avoid blocker search.
+        list.push_back( {"SHD_FILTER_16TAP_PCF", "1"} );
         list.push_back( {"SHD_FILTER_PCSS",      useSimpleShadowFallback ? "0" : "1"} );
         list.push_back( {"MAX_CSM_CASCADES",     TO_LITERAL(MAX_CSM_CASCADES)} );
         list.push_back( {"NUM_CSM_CASCADES",     sNums[std::clamp<size_t>(s.NumShadowCascades, 1, MAX_CSM_CASCADES)]} );
         list.push_back( {"CSM_PCF_LIMIT",        sNums[std::clamp<size_t>(s.ShadowCascadePCFLimit, 0, MAX_CSM_CASCADES)]} );
         list.push_back( {"SHADOW_ATLAS",         (FeatureLevel10Compatibility || s.DebugSettings.FeatureSet.UseShadowAtlas) ? "1" : "0"} );
         list.push_back( {"FP_USE_SHADOW_MASK",   s.DebugSettings.FeatureSet.UseScreenSpaceShadowMask ? "1" : "0"} );
-        // Compile one superset kernel. Runtime selection in ShadowSampling.h
-        // keeps the FSR3 path cheap while allowing an immediate stable fallback
-        // when AA changes; no shader reload is needed for that transition.
+        // Tap counts are quality-controlled at runtime. The temporal flag only
+        // changes the sample rotation/noise, never PCF/PCSS selection.
         list.push_back( {"SHD_BLUE_NOISE",        "1"} );
-        list.push_back( {"PCSS_BLOCKER_TAPS",     "16"} );
-        list.push_back( {"PCSS_FILTER_TAPS_NEAR", "32"} );
-        list.push_back( {"PCSS_FILTER_TAPS_FAR",  "16"} );
+        list.push_back( {"PCSS_BLOCKER_TAPS",     "8"} );
+        list.push_back( {"PCSS_FILTER_TAPS_NEAR", "16"} );
+        list.push_back( {"PCSS_FILTER_TAPS_FAR",  "8"} );
         list.push_back( {"PCF_FILTER_TAPS_NEAR",  "16"} );
         list.push_back( {"PCF_FILTER_TAPS_FAR",   "8"} );
     };
@@ -479,7 +481,6 @@ XRESULT D3D11ShaderManager::Init() {
         Shaders.push_back( ShaderInfo::make<CShaderID::CS_LightCulling>( "CS_LightCulling.hlsl" )
         .with_macros( {
             { "TILE_SIZE", TO_LITERAL( TILE_SIZE ) },
-            { "MAX_LIGHTS_PER_TILE", TO_LITERAL( MAX_LIGHTS_PER_TILE ) },
         }));
 
         Shaders.push_back( ShaderInfo::make<CShaderID::CS_TiledShading>( "CS_TiledShading.hlsl" ));

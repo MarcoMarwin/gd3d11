@@ -55,36 +55,6 @@ void D3D11TiledDeferredShading::Init(
         SetDebugName( m_LightBufferSRV.Get(), "TiledDeferred_LightBuffer_SRV" );
     }
 
-    // Index counter: single uint for atomic allocation
-    {
-        D3D11_BUFFER_DESC desc = {};
-        desc.ByteWidth = sizeof( uint32_t ) * 4; // Pad to 16 bytes
-        desc.Usage = D3D11_USAGE_DEFAULT;
-        desc.BindFlags = D3D11_BIND_UNORDERED_ACCESS;
-        desc.MiscFlags = D3D11_RESOURCE_MISC_BUFFER_STRUCTURED;
-        desc.StructureByteStride = sizeof( uint32_t );
-
-        HRESULT hr = m_device->CreateBuffer( &desc, nullptr, m_IndexCounter.ReleaseAndGetAddressOf() );
-        if ( FAILED( hr ) || m_IndexCounter.Get() == nullptr ) {
-            LogError() << "Failed to create tiled deferred index counter. HRESULT: " << std::hex << hr;
-            return;
-        }
-        SetDebugName( m_IndexCounter.Get(), "TiledDeferred_IndexCounter" );
-
-        D3D11_UNORDERED_ACCESS_VIEW_DESC uavDesc = {};
-        uavDesc.Format = DXGI_FORMAT_UNKNOWN;
-        uavDesc.ViewDimension = D3D11_UAV_DIMENSION_BUFFER;
-        uavDesc.Buffer.NumElements = 4;
-
-        hr = m_device->CreateUnorderedAccessView( m_IndexCounter.Get(), &uavDesc, m_IndexCounterUAV.ReleaseAndGetAddressOf() );
-        if ( FAILED( hr ) || m_IndexCounterUAV.Get() == nullptr ) {
-            LogError() << "Failed to create tiled deferred index counter UAV. HRESULT: " << std::hex << hr;
-            m_IndexCounter.Reset();
-            return;
-        }
-        SetDebugName( m_IndexCounterUAV.Get(), "TiledDeferred_IndexCounter_UAV" );
-    }
-
     // Shadow cube array is lazy-created on first AllocateSlot() to save memory when shadows are off
 }
 
@@ -372,40 +342,11 @@ void D3D11TiledDeferredShading::EnsureBuffers( uint32_t numTilesX, uint32_t numT
     m_lastNumTilesY = numTilesY;
 
 
-    // Light index list: global flat array of light indices
-    {
-        const uint32_t MAX_LIGHT_INDEX_ENTRIES = MAX_LIGHTS_PER_TILE * totalTiles;
-
-        D3D11_BUFFER_DESC desc = {};
-        desc.ByteWidth = MAX_LIGHT_INDEX_ENTRIES * sizeof( uint32_t );
-        desc.Usage = D3D11_USAGE_DEFAULT;
-        desc.BindFlags = D3D11_BIND_SHADER_RESOURCE | D3D11_BIND_UNORDERED_ACCESS;
-        desc.MiscFlags = D3D11_RESOURCE_MISC_BUFFER_STRUCTURED;
-        desc.StructureByteStride = sizeof( uint32_t );
-
-        m_device->CreateBuffer( &desc, nullptr, m_LightIndexList.ReleaseAndGetAddressOf() );
-        SetDebugName( m_LightIndexList.Get(), "TiledDeferred_LightIndexList" );
-
-        D3D11_SHADER_RESOURCE_VIEW_DESC srvDesc = {};
-        srvDesc.Format = DXGI_FORMAT_UNKNOWN;
-        srvDesc.ViewDimension = D3D11_SRV_DIMENSION_BUFFER;
-        srvDesc.Buffer.ElementWidth = MAX_LIGHT_INDEX_ENTRIES;
-
-        m_device->CreateShaderResourceView( m_LightIndexList.Get(), &srvDesc, m_LightIndexListSRV.ReleaseAndGetAddressOf() );
-        SetDebugName( m_LightIndexListSRV.Get(), "TiledDeferred_LightIndexList_SRV" );
-
-        D3D11_UNORDERED_ACCESS_VIEW_DESC uavDesc = {};
-        uavDesc.Format = DXGI_FORMAT_UNKNOWN;
-        uavDesc.ViewDimension = D3D11_UAV_DIMENSION_BUFFER;
-        uavDesc.Buffer.NumElements = MAX_LIGHT_INDEX_ENTRIES;
-
-        m_device->CreateUnorderedAccessView( m_LightIndexList.Get(), &uavDesc, m_LightIndexListUAV.ReleaseAndGetAddressOf() );
-        SetDebugName( m_LightIndexListUAV.Get(), "TiledDeferred_LightIndexList_UAV" );
-    }
-
-    // Recreate light grid buffer for new tile count
+    // One membership mask per tile/Z-slice cluster. The cull shader clears and fills every entry each frame,
+    // so no separate flat index list or atomic allocation counter is needed.
+    const uint32_t totalClusters = totalTiles * CLUSTER_Z_SLICES;
     D3D11_BUFFER_DESC desc = {};
-    desc.ByteWidth = totalTiles * sizeof( LightGrid );
+    desc.ByteWidth = totalClusters * sizeof( LightGrid );
     desc.Usage = D3D11_USAGE_DEFAULT;
     desc.BindFlags = D3D11_BIND_SHADER_RESOURCE | D3D11_BIND_UNORDERED_ACCESS;
     desc.MiscFlags = D3D11_RESOURCE_MISC_BUFFER_STRUCTURED;
@@ -417,7 +358,7 @@ void D3D11TiledDeferredShading::EnsureBuffers( uint32_t numTilesX, uint32_t numT
     D3D11_SHADER_RESOURCE_VIEW_DESC srvDesc = {};
     srvDesc.Format = DXGI_FORMAT_UNKNOWN;
     srvDesc.ViewDimension = D3D11_SRV_DIMENSION_BUFFER;
-    srvDesc.Buffer.ElementWidth = totalTiles;
+    srvDesc.Buffer.ElementWidth = totalClusters;
 
     m_device->CreateShaderResourceView( m_LightGrid.Get(), &srvDesc, m_LightGridSRV.ReleaseAndGetAddressOf() );
     SetDebugName( m_LightGridSRV.Get(), "TiledDeferred_LightGrid_SRV" );
@@ -425,7 +366,7 @@ void D3D11TiledDeferredShading::EnsureBuffers( uint32_t numTilesX, uint32_t numT
     D3D11_UNORDERED_ACCESS_VIEW_DESC uavDesc = {};
     uavDesc.Format = DXGI_FORMAT_UNKNOWN;
     uavDesc.ViewDimension = D3D11_UAV_DIMENSION_BUFFER;
-    uavDesc.Buffer.NumElements = totalTiles;
+    uavDesc.Buffer.NumElements = totalClusters;
 
     m_device->CreateUnorderedAccessView( m_LightGrid.Get(), &uavDesc, m_LightGridUAV.ReleaseAndGetAddressOf() );
     SetDebugName( m_LightGridUAV.Get(), "TiledDeferred_LightGrid_UAV" );
@@ -470,6 +411,8 @@ XRESULT D3D11TiledDeferredShading::DrawPointlightLights(
         }
         shadeCB.LimitLightIntensity = settings.LimitLightIntesity ? 1 : 0;
         shadeCB.NumTilesX = numTilesX;
+        shadeCB.ClusterNearZ = Engine::GAPI->GetNearPlane();
+        shadeCB.ClusterFarZ = std::max( CLUSTER_MIN_FAR_Z, settings.GetEffectiveVisualFXDrawRadius() );
         XMStoreFloat4x4( &shadeCB.InvView, XMMatrixInverse( nullptr, viewRaw ) );
 
         csTiledShading->GetBuffer( "TiledShadingConstantBuffer" ).Update( &shadeCB ).Bind();
@@ -491,7 +434,6 @@ XRESULT D3D11TiledDeferredShading::DrawPointlightLights(
         // Bind tiled data SRVs
         context->CSSetShaderResources( 8, 1, m_LightBufferSRV.GetAddressOf() );
         context->CSSetShaderResources( 9, 1, m_LightGridSRV.GetAddressOf() );
-        context->CSSetShaderResources( 10, 1, m_LightIndexListSRV.GetAddressOf() );
 
         // Bind comparison sampler unconditionally — the runtime validates at Dispatch
         // even if the shader branches around SampleCmpLevelZero
@@ -539,6 +481,10 @@ D3D11TiledDeferredShading::CullResult D3D11TiledDeferredShading::CullLights(
     std::vector<VobLightInfo*>& lights,
     RenderToTextureBuffer& depthCopy ) {
 
+    // Kept in the public signature because the render-graph caller already provides the depth copy. Cluster
+    // membership is frustum/Z based now, so the cull itself intentionally does not read it.
+    (void)depthCopy;
+
     auto graphicsEngine = reinterpret_cast<D3D11GraphicsEngine*>(Engine::GraphicsEngine);
     auto _ = graphicsEngine->RecordGraphicsEvent( GE_NAME( "CullLights" ) );
     auto& settings = Engine::GAPI->GetRendererState().RendererSettings;
@@ -569,13 +515,16 @@ D3D11TiledDeferredShading::CullResult D3D11TiledDeferredShading::CullLights(
 
     CullResult result = {};
 
-    if ( m_LightBuffer.Get() == nullptr || m_LightBufferSRV.Get() == nullptr
-        || m_IndexCounter.Get() == nullptr || m_IndexCounterUAV.Get() == nullptr ) {
+    if ( m_LightBuffer.Get() == nullptr || m_LightBufferSRV.Get() == nullptr ) {
         LogError() << "Tiled deferred resources are missing; skipping tiled light culling.";
         return result;
     }
 
     EnsureBuffers( numTilesX, numTilesY );
+    if ( m_LightGrid.Get() == nullptr || m_LightGridUAV.Get() == nullptr ) {
+        LogError() << "Tiled deferred cluster grid is missing; skipping tiled light culling.";
+        return result;
+    }
 
     // Partition lights: all lights go tiled where possible.
     // Shadowed lights with a tiled slot render directly into the shared array (no copies).
@@ -678,13 +627,18 @@ D3D11TiledDeferredShading::CullResult D3D11TiledDeferredShading::CullLights(
         tl.IgnoreIndoorOutdoorLimit = light->IgnoreIndoorOutdoorLimit ? 1.0f : 0.0f;
         tl.ShadowSoftness = std::max(
             settings.ShadowSoftness * 2.0f, minimumTemporalShadowSoftness );
+        tl.ShadowFilterMode = static_cast<uint32_t>( settings.GetShadowKernelQuality() );
+        tl.ShadowFilterPad[0] = 0;
+        tl.ShadowFilterPad[1] = 0;
+        tl.ShadowFilterPad[2] = 0;
         float heroDistance = FLT_MAX;
         if ( hero ) {
             XMStoreFloat( &heroDistance, XMVector3Length(
                 XMLoadFloat3( posWorld.toXMFLOAT3() ) - heroPos ) );
         }
         const float fullQualityRadius = lightRange + 1200.0f;
-        if ( tl.ShadowSoftness > 0.01f
+        if ( tl.ShadowFilterMode == static_cast<uint32_t>( GothicRendererSettings::SHADOW_KERNEL_PCSS )
+            && tl.ShadowSoftness > 0.01f
             && dist > fullQualityRadius && heroDistance > fullQualityRadius ) {
             tl.ShadowSoftness = -tl.ShadowSoftness;
         }
@@ -715,28 +669,27 @@ D3D11TiledDeferredShading::CullResult D3D11TiledDeferredShading::CullLights(
         csLightCull->Apply();
 
         LightCullingConstantBuffer cullCB = {};
-        cullCB.Proj = Engine::GAPI->GetProjectionMatrix();
+        const XMFLOAT4X4& proj = Engine::GAPI->GetProjectionMatrix();
+        cullCB.ProjScaleX = proj._11;
+        cullCB.ProjScaleY = proj._22;
         cullCB.ScreenWidth = static_cast<uint32_t>(resolution.x);
         cullCB.ScreenHeight = static_cast<uint32_t>(resolution.y);
         cullCB.TotalLights = result.TiledLightCount;
-        cullCB.MaxBufferIndices = (numTilesX * numTilesY) * MAX_LIGHTS_PER_TILE;
+        cullCB.NumTilesX = numTilesX;
+        cullCB.NearZ = Engine::GAPI->GetNearPlane();
+        cullCB.FarZ = std::max( CLUSTER_MIN_FAR_Z, settings.GetEffectiveVisualFXDrawRadius() );
 
         csLightCull->GetBuffer( "LightCullingConstantBuffer" ).Update( &cullCB ).Bind();
 
-        context->CSSetShaderResources( 0, 1, depthCopy.GetShaderResView().GetAddressOf() );
         context->CSSetShaderResources( 1, 1, m_LightBufferSRV.GetAddressOf() );
-
-        UINT clearVal[4] = { 0, 0, 0, 0 };
-        context->ClearUnorderedAccessViewUint( m_IndexCounterUAV.Get(), clearVal );
-
-        ID3D11UnorderedAccessView* uavs[3] = { m_LightGridUAV.Get(), m_LightIndexListUAV.Get(), m_IndexCounterUAV.Get() };
-        context->CSSetUnorderedAccessViews( 0, 3, uavs, nullptr );
+        ID3D11UnorderedAccessView* uavs[1] = { m_LightGridUAV.Get() };
+        context->CSSetUnorderedAccessViews( 0, 1, uavs, nullptr );
 
         context->Dispatch( numTilesX, numTilesY, 1 );
 
         // Unbind
-        ID3D11UnorderedAccessView* nullUAVs[3] = { nullptr, nullptr, nullptr };
-        context->CSSetUnorderedAccessViews( 0, 3, nullUAVs, nullptr );
+        ID3D11UnorderedAccessView* nullUAVs[1] = { nullptr };
+        context->CSSetUnorderedAccessViews( 0, 1, nullUAVs, nullptr );
         ID3D11ShaderResourceView* nullSRVs[2] = { nullptr, nullptr };
         context->CSSetShaderResources( 0, 2, nullSRVs );
         context->CSSetShader( nullptr, nullptr, 0 );
