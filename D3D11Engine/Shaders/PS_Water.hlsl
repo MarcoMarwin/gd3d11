@@ -1169,21 +1169,21 @@ float3 skyReflection =
             legacyShoreColor,
             1.0f,
             legacyShoreException);
-        // Keep the broad Legacy visibility fade for reflections, glints and the
-        // water boundary, but restore the selected day or night water color over
-        // the softer color interval.
+        // Keep the broad Legacy visibility fade for reflections and glints, but
+        // use the clean scene as the shoreline endpoint, just like Ocean water.
+        // The selected day or night water color is restored smoothly over the
+        // deeper part of the color interval.
         float3 legacyNightRelativeColor = lerp(
             legacyColor,
             legacyColor * saturate(sceneClean * 1.10f + 0.34f),
             nightAmount);
         // The world mesh already defines where the water surface ends. Depth
         // behind that mesh may control volume and the shallow-water transition,
-        // but it must never replace the surface with the unmodified scene: a
-        // leaf just below the plane would otherwise punch a moving hole into
-        // the water. Keep the computed surface layer everywhere inside the mesh
-        // and use the shallow factor only to blend its night-relative color.
+        // while the shore color factor restores the clean scene smoothly at the
+        // shoreline. Keep the computed surface layer in deeper water and use
+        // the selected night-relative color there.
         legacyColor = lerp(
-            legacyColor,
+            legacySceneClean,
             legacyNightRelativeColor,
             legacyShoreColor);
         float3 legacyReflectVectorSmall = reflect(-viewDirection, legacyWavesSmall);
