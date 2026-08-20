@@ -585,7 +585,7 @@ public:
     void ConfigurePointlightShadowSource( VobLightInfo* lightInfo ) const;
 
     /** Resolves world flame and parent-vob pointlight associations globally. */
-    void ConfigureAllPointlightShadowSources() const;
+    void ConfigureAllPointlightShadowSources();
     void ConfigureCityWindows();
 
     /** Returns the new node from tha base node */
@@ -893,9 +893,14 @@ private:
 
     /** Map of vobs and VobIndfos */
     gtl::flat_hash_map<zCVob*, VobInfo*> VobMap;
+    /** Renderer-owned pointlight replacements for single flames and oil lamps. */
+    std::vector<std::unique_ptr<VobLightInfo>> RendererPointLights;
 public:
     // temporarily, to allow CollectVisibleVobsHelper to be templated for inlining optimizations
     gtl::flat_hash_map<zCVobLight*, VobLightInfo*> VobLightMap;
+    const std::vector<std::unique_ptr<VobLightInfo>>& GetRendererPointLights() const {
+        return RendererPointLights;
+    }
     // Exposed for CollectLeafVobs/CollectVisibleVobsWithLeafCache (file-static helpers)
     BspLeafLinearCache LeafLinearCache;
 private:

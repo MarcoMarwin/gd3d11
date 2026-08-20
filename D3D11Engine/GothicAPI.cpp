@@ -25,6 +25,7 @@
 
 #define DIRECTINPUT_VERSION 0x0700
 #include <charconv>
+#include <cstdint>
 #include <numeric>
 #include <cmath>
 #include <dinput.h>
@@ -1505,6 +1506,8 @@ void GothicAPI::ResetVobs() {
         graphicsEngine->DebugPointlight = nullptr;
     }
 
+    RendererPointLights.clear();
+
     // Renderer caches must stop trusting world-owned VOB pointers before the
     // objects below are destroyed, even if loading aborts before reconfiguration.
     ++CityWindowConfigurationGeneration;
@@ -2718,6 +2721,14 @@ void GothicAPI::OnRemovedVob( zCVob* vob, zCWorld* world ) {
         if ( svi && vlit.second->LightShadowBuffers )
             vlit.second->LightShadowBuffers->OnVobRemovedFromWorld( svi );
     }
+    for ( const auto& rendererLight : RendererPointLights ) {
+        if ( !rendererLight || !rendererLight->LightShadowBuffers )
+            continue;
+        if ( vi )
+            rendererLight->LightShadowBuffers->OnVobRemovedFromWorld( vi );
+        if ( svi )
+            rendererLight->LightShadowBuffers->OnVobRemovedFromWorld( svi );
+    }
 
     VobLightInfo* li = VobLightMap[static_cast<zCVobLight*>(vob)];
 
@@ -2740,6 +2751,26 @@ void GothicAPI::OnRemovedVob( zCVob* vob, zCWorld* world ) {
                 // which was derived from a light that no longer exists.
                 mappedInfo->OilLampEmissionColor = 0u;
             }
+        }
+
+        for ( const auto& rendererLight : RendererPointLights ) {
+            if ( !rendererLight )
+                continue;
+            if ( rendererLight->RendererLightSourceA == removedLight )
+                rendererLight->RendererLightSourceA = nullptr;
+            if ( rendererLight->RendererLightSourceB == removedLight )
+                rendererLight->RendererLightSourceB = nullptr;
+            if ( rendererLight->Vob == removedLight )
+                rendererLight->Vob = rendererLight->RendererLightSourceA
+                    ? rendererLight->RendererLightSourceA
+                    : rendererLight->RendererLightSourceB;
+        }
+    }
+
+    for ( const auto& rendererLight : RendererPointLights ) {
+        if ( rendererLight && rendererLight->RendererLightAnchorVob == vob ) {
+            rendererLight->RendererLightAnchorVob = nullptr;
+            rendererLight->RendererLightEnabled = false;
         }
     }
 
@@ -4870,8 +4901,8 @@ void GothicAPI::CollectVisibleVobs(
                 && (linkedEmissionLightIsEnabled( it->OilLampEmissionStaticLight )
                     || linkedEmissionLightIsEnabled( it->OilLampEmissionDynamicLight )) ) {
                 // The color was captured once while the world cache was built.
-                // Light animation may still illuminate the scene normally, but
-                // it can no longer animate the visible lamp material.
+                // The renderer-side oil-lamp light is fixed, so the visible lamp
+                // material and its light contribution use the same stable color.
                 vii.emissiveColor = it->OilLampEmissionColor;
             }
             vii.windStrenth = 0.0f;
@@ -4899,12 +4930,12 @@ void GothicAPI::CollectVisibleVobs(
         }
     
         for ( auto vi : renderQueue.lights ) {
-            if ( vi->Vob->IsEnabled() /*&& vob->GetShowVisual()*/ ) {
+            if ( vi->IsEffectivelyEnabled() /*&& vob->GetShowVisual()*/ ) {
                 vi->VisibleInFrame = true;
 
                 // Dynamic mode updates every visible, eligible point-light shadow in the active radius.
                 // Ineligible ambience lights stay excluded by AllowsPointlightShadows.
-                if ( vi->AllowsPointlightShadows
+                if ( !vi->IsRendererLight && vi->AllowsPointlightShadows
                     && RendererState.RendererSettings.EnablePointlightShadows >= GothicRendererSettings::PLS_UPDATE_DYNAMIC ) {
                     vi->UpdateShadows = true;
                 }
@@ -5368,10 +5399,27 @@ void GothicAPI::ConfigurePointlightShadowSource( VobLightInfo* lightInfo ) const
     lightInfo->HasFlameAnchor = false;
     lightInfo->FlameAnchorOffset = {};
     lightInfo->IsVisualFXLight = false;
+    lightInfo->IsRendererLight = false;
+    lightInfo->IsRendererLightSuppressed = false;
+    lightInfo->RendererLightEnabled = true;
+    lightInfo->RendererLightStatic = false;
+    lightInfo->RendererLightFlicker = false;
+    lightInfo->RendererLightIntensity = 1.0f;
+    lightInfo->RendererLightFlickerPhase = 0.0f;
+    lightInfo->RendererLightRange = 0.0f;
+    lightInfo->RendererLightBaseColor = 0u;
+    lightInfo->RendererLightPosition = {};
+    lightInfo->RendererLightPositionOffset = {};
+    lightInfo->RendererLightAnchorVob = nullptr;
+    lightInfo->RendererLightSourceA = nullptr;
+    lightInfo->RendererLightSourceB = nullptr;
 
     zCVobLight* light = lightInfo->Vob;
     if ( !light )
         return;
+
+    if ( lightInfo->StableLightColor == 0u )
+        lightInfo->StableLightColor = light->GetLightColor();
 
     auto isLightVob = []( zCVob* vob ) {
         if ( !vob )
@@ -5446,11 +5494,13 @@ void GothicAPI::ConfigureCityWindows() {
         << fallbackCount << " opaque fallback";
 }
 
-void GothicAPI::ConfigureAllPointlightShadowSources() const {
+void GothicAPI::ConfigureAllPointlightShadowSources() {
     constexpr float LINK_RADIUS = 150.0f;
     constexpr float LINK_RADIUS_SQ = LINK_RADIUS * LINK_RADIUS;
     constexpr float PARTICLE_FLAME_HEIGHT_OFFSET = 25.0f;
     const size_t INVALID_INDEX = static_cast<size_t>(-1);
+
+    RendererPointLights.clear();
 
     auto isLightVob = []( zCVob* vob ) {
         if ( !vob )
@@ -5508,6 +5558,7 @@ void GothicAPI::ConfigureAllPointlightShadowSources() const {
         info->AllowsPointlightShadows = false;
         info->HasFlameAnchor = false;
         info->FlameAnchorOffset = {};
+        info->IsRendererLightSuppressed = false;
 
         zCVob* parent = getPersistentParent( info->Vob );
         if ( parent && parent->As<oCNPC>() )
@@ -5523,6 +5574,7 @@ void GothicAPI::ConfigureAllPointlightShadowSources() const {
     struct FlameVisual {
         zCVob* Vob = nullptr;
         XMFLOAT3 Position = {};
+        float Size = 1.0f;
         bool IsParticle = false;
     };
     struct FlameGroup {
@@ -5555,6 +5607,12 @@ void GothicAPI::ConfigureAllPointlightShadowSources() const {
         flame.Vob = flameVob;
         flame.IsParticle = isParticle;
         XMStoreFloat3( &flame.Position, flameVob->GetPositionWorldXM() );
+        const zTBBox3D bbox = flameVob->GetBBox();
+        const XMFLOAT3 extents(
+            std::abs( bbox.Max.x - bbox.Min.x ),
+            std::abs( bbox.Max.y - bbox.Min.y ),
+            std::abs( bbox.Max.z - bbox.Min.z ) );
+        flame.Size = std::max( 1.0f, std::max( extents.x, std::max( extents.y, extents.z ) ) );
         (isParticle ? groupIt->Particles : groupIt->Decals).push_back( flame );
     };
 
@@ -5607,6 +5665,7 @@ void GothicAPI::ConfigureAllPointlightShadowSources() const {
         bool IsMultiFlame = false;
         bool RaiseAnchorAboveCenter = false;
         XMFLOAT3 Anchor = {};
+        float Size = 1.0f;
         std::vector<XMFLOAT3> Positions;
         std::vector<zCVob*> Vobs;
     };
@@ -5632,9 +5691,11 @@ void GothicAPI::ConfigureAllPointlightShadowSources() const {
         if ( !resolved.IsMultiFlame ) {
             if ( group.Particles.size() == 1 ) {
                 resolved.Anchor = group.Particles.front().Position;
+                resolved.Size = group.Particles.front().Size;
                 resolved.RaiseAnchorAboveCenter = true;
             } else if ( group.Decals.size() == 1 ) {
                 resolved.Anchor = group.Decals.front().Position;
+                resolved.Size = group.Decals.front().Size;
             } else {
                 continue;
             }
@@ -5647,8 +5708,8 @@ void GothicAPI::ConfigureAllPointlightShadowSources() const {
         VobInfo* Info = nullptr;
         XMFLOAT3 Position = {};
         XMFLOAT3 ShadowAnchor = {};
-        size_t NearestStaticLight = 0;
-        size_t NearestDynamicLight = 0;
+        size_t NearestStaticLight = static_cast<size_t>(-1);
+        size_t NearestDynamicLight = static_cast<size_t>(-1);
         float NearestStaticDistanceSq = FLT_MAX;
         float NearestDynamicDistanceSq = FLT_MAX;
     };
@@ -5787,8 +5848,158 @@ void GothicAPI::ConfigureAllPointlightShadowSources() const {
             || isAncestorOrSame( anchor.Vob, light.Info->Vob );
     };
 
+    auto suppressRendererSource = []( VobLightInfo* info ) {
+        if ( !info )
+            return;
+        info->IsRendererLightSuppressed = true;
+        info->AllowsPointlightShadows = false;
+        info->HasFlameAnchor = false;
+        info->FlameAnchorOffset = {};
+        info->UpdateShadows = false;
+    };
+
+    auto createRendererLight = [&]( zCVob* anchorVob, const XMFLOAT3& position,
+        DWORD baseColor, float intensity, float range, bool flicker,
+        zCVobLight* sourceA, zCVobLight* sourceB ) {
+        auto rendererLight = std::make_unique<VobLightInfo>();
+        rendererLight->IsRendererLight = true;
+        rendererLight->AllowsPointlightShadows = true;
+        rendererLight->RendererLightEnabled = true;
+        rendererLight->RendererLightStatic = true;
+        rendererLight->RendererLightFlicker = flicker;
+        rendererLight->RendererLightIntensity = std::max( intensity, 0.0f );
+        rendererLight->RendererLightRange = std::max( range, 1.0f );
+        rendererLight->RendererLightBaseColor = baseColor;
+        rendererLight->RendererLightPosition = position;
+        rendererLight->RendererLightAnchorVob = anchorVob;
+        rendererLight->RendererLightSourceA = sourceA;
+        rendererLight->RendererLightSourceB = sourceB;
+        rendererLight->IgnoreIndoorOutdoorLimit = true;
+        rendererLight->IsIndoorVob = anchorVob && anchorVob->IsIndoorVob();
+        rendererLight->Vob = sourceA;
+        rendererLight->RendererLightFlickerPhase = static_cast<float>(
+            (reinterpret_cast<uintptr_t>(anchorVob) >> 4u) & 0xFFu ) * 0.071f;
+
+        if ( anchorVob ) {
+            XMStoreFloat3( &rendererLight->RendererLightPositionOffset,
+                XMLoadFloat3( &position ) - anchorVob->GetPositionWorldXM() );
+        }
+
+        VobLightInfo* result = rendererLight.get();
+        RendererPointLights.push_back( std::move( rendererLight ) );
+        return result;
+    };
+
+    const DWORD FLAME_LIGHT_COLOR = zColor( 48, 142, 255, 255 ).dword;
+    auto flameLightRange = []( float size ) {
+        return std::clamp( size * 6.0f, 180.0f, 600.0f );
+    };
+    auto flameLightIntensity = []( float size ) {
+        return std::clamp( 0.70f + size * 0.0035f, 0.70f, 1.15f );
+    };
+
+    // Oil lamps own their nearby light sources before generic flame linking is
+    // evaluated. This prevents one authored light from becoming both an oil
+    // lamp replacement and a separate flame replacement.
+    for ( OilLampAnchor& oilLamp : oilLampAnchors ) {
+        const size_t staticIndex = oilLamp.NearestStaticLight;
+        const size_t dynamicIndex = oilLamp.NearestDynamicLight;
+        const bool hasStatic = staticIndex != INVALID_INDEX;
+        const bool hasDynamic = dynamicIndex != INVALID_INDEX;
+        const bool needsFixedReplacement = hasStatic && hasDynamic
+            || (hasDynamic && !hasStatic);
+        if ( !needsFixedReplacement )
+            continue;
+
+        zCVobLight* staticLight = hasStatic ? lights[staticIndex].Info->Vob : nullptr;
+        zCVobLight* dynamicLight = hasDynamic ? lights[dynamicIndex].Info->Vob : nullptr;
+        zCVobLight* sourceA = staticLight ? staticLight : dynamicLight;
+        zCVobLight* sourceB = staticLight ? dynamicLight : nullptr;
+        const DWORD staticColor = staticLight
+            ? lights[staticIndex].Info->StableLightColor : 0u;
+        const DWORD dynamicColor = dynamicLight
+            ? lights[dynamicIndex].Info->StableLightColor : 0u;
+        DWORD stableColor = staticLight && dynamicLight
+            ? MixOilLampEmissionColors( staticColor, dynamicColor )
+            : (sourceA == staticLight ? staticColor : dynamicColor);
+        const float staticRange = staticLight ? staticLight->GetLightRange() : 0.0f;
+        const float dynamicRange = dynamicLight ? dynamicLight->GetLightRange() : 0.0f;
+        const float stableRange = std::max( staticRange, dynamicRange );
+
+        if ( hasStatic )
+            suppressRendererSource( lights[staticIndex].Info );
+        if ( hasDynamic )
+            suppressRendererSource( lights[dynamicIndex].Info );
+
+        createRendererLight( oilLamp.Vob, oilLamp.ShadowAnchor,
+            stableColor, 1.0f, stableRange, false, sourceA, sourceB );
+    }
+
+    // A single visible PFX, a single visible TGA, and a matching PFX/TGA pair
+    // each become one renderer light. PFX position/size wins in the pair. Any
+    // authored light related to that visual is removed from the renderer light
+    // list so it cannot create a duplicate lighting or shadow contribution.
+    for ( size_t flameIndex = 0; flameIndex < resolvedFlames.size(); ++flameIndex ) {
+        const ResolvedFlameGroup& flame = resolvedFlames[flameIndex];
+        if ( flame.IsMultiFlame || flame.Vobs.empty() )
+            continue;
+
+        bool belongsToOilLamp = false;
+        for ( const OilLampAnchor& oilLamp : oilLampAnchors ) {
+            if ( flame.Parent == oilLamp.Vob || flame.Vobs.front() == oilLamp.Vob ) {
+                belongsToOilLamp = true;
+                break;
+            }
+        }
+        if ( belongsToOilLamp )
+            continue;
+
+        const VisualAnchorCandidate flameAnchor = {
+            VisualAnchorKind::SingleFlame, flameIndex, flame.Parent,
+            flame.Vobs.front(), flame.Anchor };
+
+        size_t nearestSource = INVALID_INDEX;
+        float nearestDistanceSq = LINK_RADIUS_SQ;
+        for ( size_t lightIndex = 0; lightIndex < lights.size(); ++lightIndex ) {
+            if ( lights[lightIndex].Info->IsRendererLightSuppressed )
+                continue;
+            const float candidateDistanceSq = distanceSq(
+                lights[lightIndex].Position, flame.Anchor );
+            if ( candidateDistanceSq > LINK_RADIUS_SQ
+                || !lightIsRelatedToAnchor( lights[lightIndex], flameAnchor ) ) {
+                continue;
+            }
+            if ( candidateDistanceSq < nearestDistanceSq ) {
+                nearestDistanceSq = candidateDistanceSq;
+                nearestSource = lightIndex;
+            }
+        }
+
+        for ( size_t lightIndex = 0; lightIndex < lights.size(); ++lightIndex ) {
+            if ( lights[lightIndex].Info->IsRendererLightSuppressed )
+                continue;
+            const float candidateDistanceSq = distanceSq(
+                lights[lightIndex].Position, flame.Anchor );
+            if ( candidateDistanceSq <= LINK_RADIUS_SQ
+                && lightIsRelatedToAnchor( lights[lightIndex], flameAnchor ) ) {
+                suppressRendererSource( lights[lightIndex].Info );
+            }
+        }
+
+        zCVobLight* source = nearestSource != INVALID_INDEX
+            ? lights[nearestSource].Info->Vob : nullptr;
+        XMFLOAT3 shadowAnchor = flame.Anchor;
+        if ( flame.RaiseAnchorAboveCenter )
+            shadowAnchor.y += PARTICLE_FLAME_HEIGHT_OFFSET;
+        createRendererLight( flame.Vobs.front(), shadowAnchor,
+            FLAME_LIGHT_COLOR, flameLightIntensity( flame.Size ),
+            flameLightRange( flame.Size ), true, source, nullptr );
+    }
+
     std::vector<bool> resolvedByVisualAnchor( lights.size(), false );
     for ( size_t lightIndex = 0; lightIndex < lights.size(); ++lightIndex ) {
+        if ( lights[lightIndex].Info->IsRendererLightSuppressed )
+            continue;
         size_t bestAnchor = INVALID_INDEX;
         float bestDistanceSq = LINK_RADIUS_SQ;
         bool bestIsRelated = false;
@@ -5848,11 +6059,12 @@ void GothicAPI::ConfigureAllPointlightShadowSources() const {
         DWORD mixedColor = 0u;
         if ( staticLight && dynamicLight ) {
             mixedColor = MixOilLampEmissionColors(
-                staticLight->GetLightColor(), dynamicLight->GetLightColor() );
+                lights[oilLamp.NearestStaticLight].Info->StableLightColor,
+                lights[oilLamp.NearestDynamicLight].Info->StableLightColor );
         } else if ( staticLight ) {
-            mixedColor = staticLight->GetLightColor();
+            mixedColor = lights[oilLamp.NearestStaticLight].Info->StableLightColor;
         } else if ( dynamicLight ) {
-            mixedColor = dynamicLight->GetLightColor();
+            mixedColor = lights[oilLamp.NearestDynamicLight].Info->StableLightColor;
         }
         if ( mixedColor != 0u )
             oilLamp.Info->OilLampEmissionColor =
@@ -5872,7 +6084,10 @@ void GothicAPI::ConfigureAllPointlightShadowSources() const {
     };
 
     for ( size_t lightIndex = 0; lightIndex < lights.size(); ++lightIndex ) {
-        if ( resolvedByVisualAnchor[lightIndex] || !lights[lightIndex].Parent || parentContainsFlame( lights[lightIndex].Parent ) )
+        if ( lights[lightIndex].Info->IsRendererLightSuppressed
+            || resolvedByVisualAnchor[lightIndex]
+            || !lights[lightIndex].Parent
+            || parentContainsFlame( lights[lightIndex].Parent ) )
             continue;
 
         auto anchorIt = std::find_if( parentAnchors.begin(), parentAnchors.end(), [&]( const ParentAnchor& anchor ) {
@@ -5903,7 +6118,8 @@ void GothicAPI::ConfigureAllPointlightShadowSources() const {
             size_t bestLight = INVALID_INDEX;
             float bestDistanceSq = LINK_RADIUS_SQ;
             for ( size_t lightIndex = 0; lightIndex < lights.size(); ++lightIndex ) {
-                if ( resolvedByVisualAnchor[lightIndex] )
+                if ( lights[lightIndex].Info->IsRendererLightSuppressed
+                    || resolvedByVisualAnchor[lightIndex] )
                     continue;
                 if ( static_cast<int>(lights[lightIndex].Info->Vob->IsStatic()) != staticKind )
                     continue;
@@ -6332,6 +6548,10 @@ zCTexture* GothicAPI::GetTextureBySurface( MyDirectDrawSurface7* surface ) {
 void GothicAPI::ResetVobFrameStats( ) {
     for ( auto&& it : VobLightMap ) {
         it.second->VisibleInFrame = false;
+    }
+    for ( const auto& rendererLight : RendererPointLights ) {
+        if ( rendererLight )
+            rendererLight->VisibleInFrame = false;
     }
 }
 
@@ -7526,6 +7746,8 @@ static void CollectLeafVobs(
                     vi->AllowsPointlightShadows = true;
                     vi->UpdateShadows = true;
                 }
+                if ( vi->IsRendererLightSuppressed )
+                    continue;
                 vi->IgnoreIndoorOutdoorLimit = vi->IsDynamicVobLight || vi->IsVisualFXLight || parentActorLight;
                 vi->IsIndoorVob = vob->IsIndoorVob();
                 if ( !visitor->Visit( vi ) ) continue;
@@ -7533,6 +7755,7 @@ static void CollectLeafVobs(
             }
         }
     }
+
 }
 
 static void CollectVisibleVobsHelper( BspInfo* base,
@@ -7772,6 +7995,37 @@ void GothicAPI::CollectVisibleVobs( const RndCullContext& ctx ) {
         singlePassCtx.drawFlags.CollectSmallVobs = true;
     }
     collectTree( singlePassCtx );
+
+    // Renderer-owned flame/oil-lamp lights have no BSP light-vob entry. Add
+    // them once after BSP traversal instead of scanning the full replacement
+    // list once per leaf.
+    if ( ctx.drawFlags.CollectLights && ctx.drawFlags.EnableDynamicLighting ) {
+        const FXMVECTOR cameraPosition = XMLoadFloat3( &ctx.cameraPosition );
+        for ( const auto& rendererLightStorage : RendererPointLights ) {
+            VobLightInfo* rendererLight = rendererLightStorage.get();
+            if ( !rendererLight || !rendererLight->IsEffectivelyEnabled() )
+                continue;
+
+            const XMVECTOR lightPosition = rendererLight->GetEffectivePositionWorldXM();
+            const float lightRange = rendererLight->GetEffectiveLightRange();
+            const float lightCameraDist = XMVectorGetX(
+                XMVector3Length( cameraPosition - lightPosition ) );
+            if ( lightCameraDist + lightRange >= ctx.drawDistances.VisualFX )
+                continue;
+
+            BoundingSphere lightSphere;
+            XMStoreFloat3( &lightSphere.Center, lightPosition );
+            lightSphere.Radius = lightRange;
+            if ( !ctx.frustum.Intersects( lightSphere ) )
+                continue;
+
+            if ( !bspVobVisitor.Visit( rendererLight ) )
+                continue;
+            rendererLight->IsIndoorVob = rendererLight->RendererLightAnchorVob
+                && rendererLight->RendererLightAnchorVob->IsIndoorVob();
+            ctx.queue->PushLightVob( rendererLight );
+        }
+    }
 
     ZoneText( "vobs", std::size( "vobs" ) - 1 );
     ZoneValue( bspVobVisitor.GetSeenVobs() );

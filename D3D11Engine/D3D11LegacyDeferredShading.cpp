@@ -98,7 +98,7 @@ XRESULT D3D11LegacyDeferredShading::DrawPointlightLights(
     for ( auto const& light : lights ) {
         zCVobLight* vob = light->Vob;
 
-        if ( !vob->IsEnabled() ) continue;
+        if ( !light->IsEffectivelyEnabled() ) continue;
 
         if ( settings.EnablePointlightShadows > 0 ) {
             D3D11PointLight* pl = light->LightShadowBuffers ? static_cast<D3D11PointLight*>(light->LightShadowBuffers.get()) : nullptr;
@@ -112,15 +112,20 @@ XRESULT D3D11LegacyDeferredShading::DrawPointlightLights(
             }
         }
 
-        vob->DoAnimation();
+        if ( vob && !light->IsRendererLight )
+            vob->DoAnimation();
 
-        plcb.PL_Color = float4( vob->GetLightColor() );
+        plcb.PL_Color = float4( light->GetEffectiveLightColor() );
+        const float rendererLightIntensity = light->GetEffectiveLightIntensity();
+        plcb.PL_Color.x *= rendererLightIntensity;
+        plcb.PL_Color.y *= rendererLightIntensity;
+        plcb.PL_Color.z *= rendererLightIntensity;
         if ( !light->AllowsPointlightShadows && !light->IsDynamicVobLight && !light->IsVisualFXLight ) {
             plcb.PL_Color.x *= 0.35f;
             plcb.PL_Color.y *= 0.35f;
             plcb.PL_Color.z *= 0.35f;
         }
-        plcb.PL_Range = vob->GetLightRange();
+        plcb.PL_Range = light->GetEffectiveLightRange();
         plcb.Pl_PositionWorld = light->GetEffectivePositionWorld();
         plcb.PL_Outdoor = light->IsIndoorVob ? 0.0f : 1.0f;
         plcb.PL_IgnoreIndoorOutdoorLimit = light->IgnoreIndoorOutdoorLimit ? 1.0f : 0.0f;

@@ -19,10 +19,11 @@ D3D11PointLight::D3D11PointLight( VobLightInfo* info, bool dynamicLight ) {
     
     // Ensure this light is actually in the VobLightMap
     // some lights don't seem to be in here!
-    Engine::GAPI->VobLightMap[info->Vob] = info;
+    if ( !info->IsRendererLight && info->Vob )
+        Engine::GAPI->VobLightMap[info->Vob] = info;
 
     XMStoreFloat3( &LastUpdatePosition, LightInfo->GetEffectivePositionWorldXM() );
-    LastUpdateRange = LightInfo->Vob->GetLightRange();
+    LastUpdateRange = LightInfo->GetEffectiveLightRange();
 
     m_DepthCubemap = nullptr;
     m_StaticDepthCubemap = nullptr;
@@ -229,7 +230,7 @@ void D3D11PointLight::CopyStaticAsideToActiveTarget() const {
 
 void D3D11PointLight::RenderStaticShadowPass( RenderToDepthStencilBuffer& target, bool clearDepth ) {
     D3D11GraphicsEngine* engine = reinterpret_cast<D3D11GraphicsEngine*>(Engine::GraphicsEngine);
-    const float range = LightInfo->Vob->GetLightRange();
+    const float range = LightInfo->GetEffectiveLightRange();
 
     auto wc = &WorldMeshCache;
     if ( WorldCacheInvalid ) {
@@ -243,7 +244,7 @@ void D3D11PointLight::RenderStaticShadowPass( RenderToDepthStencilBuffer& target
 
 void D3D11PointLight::RenderAnimatedShadowPass( RenderToDepthStencilBuffer& target, bool clearDepth ) {
     D3D11GraphicsEngine* engine = reinterpret_cast<D3D11GraphicsEngine*>(Engine::GraphicsEngine);
-    const float range = LightInfo->Vob->GetLightRange();
+    const float range = LightInfo->GetEffectiveLightRange();
 
     const unsigned int animatedCasterMask = SHADOW_CASTER_ANIMATED;
     engine->RenderShadowCube( LightInfo->GetEffectivePositionWorldXM(), range, target, nullptr, nullptr, false, LightInfo->IsIndoorVob, false,
@@ -258,7 +259,7 @@ bool D3D11PointLight::NotYetDrawn() {
 /** Initializes the resources of this light */
 void D3D11PointLight::InitResources() {
     InitDone = false;
-    if (!LightInfo || !LightInfo->Vob) {
+    if ( !LightInfo ) {
         // Light got removed before we could init, just return
         InitDone = true;
         return;
@@ -271,7 +272,7 @@ void D3D11PointLight::InitResources() {
 
     // Generate worldmesh cache if we aren't a dynamically added light
     if ( !DynamicLight ) {
-        WorldConverter::WorldMeshCollectPolyRange( LightInfo->GetEffectivePositionWorld(), LightInfo->Vob->GetLightRange(), Engine::GAPI->GetWorldSections(), WorldMeshCache );
+        WorldConverter::WorldMeshCollectPolyRange( LightInfo->GetEffectivePositionWorld(), LightInfo->GetEffectiveLightRange(), Engine::GAPI->GetWorldSections(), WorldMeshCache );
         std::ranges::sort(WorldMeshCache, []( const auto& a, const auto& b ) {
             return std::tie(a.first.Material, a.first.Texture) < std::tie(b.first.Material, b.first.Texture);
         });
@@ -300,7 +301,7 @@ bool D3D11PointLight::NeedsUpdate() {
 
     FXMVECTOR lastPos = XMLoadFloat3( &LastUpdatePosition );
     const bool moved = !XMVector3Equal( LightInfo->GetEffectivePositionWorldXM(), lastPos );
-    const bool rangeChanged = std::abs( LightInfo->Vob->GetLightRange() - LastUpdateRange ) > 1.0f;
+    const bool rangeChanged = std::abs( LightInfo->GetEffectiveLightRange() - LastUpdateRange ) > 1.0f;
 
     if ( shadowMode == GothicRendererSettings::PLS_STATIC_ONLY ) {
         return moved || rangeChanged || !m_StaticShadowReady || NotYetDrawn();
@@ -325,8 +326,9 @@ bool D3D11PointLight::WantsUpdate() {
 
     // If dynamic, update colorchanging lights too, because they are mostly lamps and campfires
     // They wouldn't need an update just because of the colorchange, but most of them are dominant lights so it looks better
-    if ( shadowMode >= GothicRendererSettings::PLS_UPDATE_DYNAMIC )
-        if ( LightInfo->Vob->GetLightColor() != LastUpdateColor )
+    if ( shadowMode >= GothicRendererSettings::PLS_UPDATE_DYNAMIC
+        && !LightInfo->IsRendererLight )
+        if ( LightInfo->GetEffectiveLightColor() != LastUpdateColor )
             return true;
 
     return false;
@@ -348,7 +350,7 @@ void D3D11PointLight::RenderCubemap( bool forceUpdate, D3D11ConstantBuffer* View
 
     FXMVECTOR xmlastPos = XMLoadFloat3( &LastUpdatePosition );
     const bool moved = !XMVector3Equal( LightInfo->GetEffectivePositionWorldXM(), xmlastPos );
-    const bool rangeChanged = std::abs( LightInfo->Vob->GetLightRange() - LastUpdateRange ) > 1.0f;
+    const bool rangeChanged = std::abs( LightInfo->GetEffectiveLightRange() - LastUpdateRange ) > 1.0f;
 
     if ( moved || rangeChanged ) {
         // Position or influence volume changed, refresh all spatial caches.
@@ -382,7 +384,8 @@ void D3D11PointLight::RenderCubemap( bool forceUpdate, D3D11ConstantBuffer* View
     const XMVECTOR c_XM_Backward = XMVectorSet( 0.f, 0.f, -1.f, 0.f );
 
     // Update indoor/outdoor-state
-    LightInfo->IsIndoorVob = LightInfo->Vob->IsIndoorVob();
+    if ( LightInfo->RendererLightAnchorVob )
+        LightInfo->IsIndoorVob = LightInfo->RendererLightAnchorVob->IsIndoorVob();
 
     // Generate cubemap view-matrices
     vLookDir = XMVectorAdd( c_XM_Right, vEyePt );
@@ -405,7 +408,7 @@ void D3D11PointLight::RenderCubemap( bool forceUpdate, D3D11ConstantBuffer* View
 
     // Create the projection matrix
     float zNear = 15.0f;
-    float zFar = LightInfo->Vob->GetLightRange()*2.0f;
+    float zFar = LightInfo->GetEffectiveLightRange() * 2.0f;
 
     XMMATRIX proj = XMMatrixPerspectiveFovLH( XM_PIDIV2, 1.0f, zNear, zFar );
     proj = XMMatrixTranspose( proj );
@@ -434,9 +437,9 @@ void D3D11PointLight::RenderCubemap( bool forceUpdate, D3D11ConstantBuffer* View
     Engine::GAPI->GetRendererState().RasterizerState.DepthClipEnable = oldDepthClip;
     Engine::GAPI->GetRendererState().GraphicsState.SetGraphicsSwitch( GSWITCH_LINEAR_DEPTH, false );
 
-    LastUpdateColor = LightInfo->Vob->GetLightColor();
+    LastUpdateColor = LightInfo->GetEffectiveLightColor();
     XMStoreFloat3( &LastUpdatePosition, vEyePt );
-    LastUpdateRange = LightInfo->Vob->GetLightRange();
+    LastUpdateRange = LightInfo->GetEffectiveLightRange();
     DrawnOnce = true;
 }
 
@@ -453,7 +456,8 @@ void D3D11PointLight::RenderFullCubemap() {
     }
 
     const int shadowMode = GetCurrentShadowMode();
-    if ( shadowMode == GothicRendererSettings::PLS_STATIC_ONLY ) {
+    if ( shadowMode == GothicRendererSettings::PLS_STATIC_ONLY
+        || (LightInfo && LightInfo->IsEffectivelyStatic()) ) {
         RenderStaticShadowPass( *activeTarget, true );
         m_StaticShadowReady = true;
         return;
@@ -510,15 +514,14 @@ void D3D11PointLight::RenderFullCubemap() {
         wc = nullptr;
     }
 
-    engine->RenderShadowCube( LightInfo->GetEffectivePositionWorldXM(), LightInfo->Vob->GetLightRange(), *activeTarget,
+    engine->RenderShadowCube( LightInfo->GetEffectivePositionWorldXM(), LightInfo->GetEffectiveLightRange(), *activeTarget,
         nullptr, nullptr, false, LightInfo->IsIndoorVob, false, &VobCache, &SkeletalVobCache, wc, true, SHADOW_CASTER_ALL );
 }
 
 bool D3D11PointLight::IsReady()
 {
     return InitDone
-        && LightInfo
-        && LightInfo->Vob;
+        && LightInfo;
 }
 
 void D3D11PointLight::Invalidate() {
@@ -561,7 +564,7 @@ void D3D11PointLight::RenderCubemapFace( const XMFLOAT4X4& view, const XMFLOAT4X
 
     D3D11GraphicsEngine* engine = reinterpret_cast<D3D11GraphicsEngine*>(Engine::GraphicsEngine); // TODO: Remove and use newer system!
     auto lightPos = LightInfo->GetEffectivePositionWorldXM();
-    float range = LightInfo->Vob->GetLightRange();
+    float range = LightInfo->GetEffectiveLightRange();
     
     CameraReplacement cr;
     XMStoreFloat3( &cr.PositionReplacement, lightPos );
@@ -618,7 +621,8 @@ void D3D11PointLight::OnVobRemovedFromWorld( BaseVobInfo* vob ) {
         m_StaticShadowReady = false;
     }
 
-    if (vob->Vob == LightInfo->Vob) {
+    if (vob->Vob == LightInfo->Vob
+        || (LightInfo->IsRendererLight && LightInfo->RendererLightAnchorVob == vob->Vob)) {
         // Our light got removed, release shadowmap
         ReleaseShadowMap();
         ClearTiledSlot();

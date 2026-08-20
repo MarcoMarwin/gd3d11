@@ -426,8 +426,30 @@ struct VobLightInfo {
     /** True if this light-vob was discovered at runtime instead of during static BSP cache build. */
     bool IsDynamicVobLight = false;
 
+    /** First renderer-visible color of the Gothic light, used as the stable
+        baseline when a dynamic oil-lamp source is frozen. */
+    DWORD StableLightColor = 0u;
+
     /** True when this light is attached to a persistent world vob or belongs to a nearby flame visual. */
     bool AllowsPointlightShadows = false;
+
+    /** Renderer-only light replacement. The Gothic zCVobLight remains untouched;
+        these values are consumed by both deferred lighting paths and pointlight
+        shadow rendering. */
+    bool IsRendererLight = false;
+    bool IsRendererLightSuppressed = false;
+    bool RendererLightEnabled = true;
+    bool RendererLightStatic = false;
+    bool RendererLightFlicker = false;
+    float RendererLightIntensity = 1.0f;
+    float RendererLightFlickerPhase = 0.0f;
+    float RendererLightRange = 0.0f;
+    DWORD RendererLightBaseColor = 0u;
+    XMFLOAT3 RendererLightPosition = {};
+    XMFLOAT3 RendererLightPositionOffset = {};
+    zCVob* RendererLightAnchorVob = nullptr;
+    zCVobLight* RendererLightSourceA = nullptr;
+    zCVobLight* RendererLightSourceB = nullptr;
 
     /** Optional offset to one unambiguous associated flame. Multiple flames keep the original light position. */
     bool HasFlameAnchor = false;
@@ -435,6 +457,12 @@ struct VobLightInfo {
 
     float3 GetEffectivePositionWorld() const;
     XMVECTOR GetEffectivePositionWorldXM() const;
+    DWORD GetEffectiveLightColor() const;
+    float GetEffectiveLightIntensity() const;
+    float GetEffectiveLightRange() const;
+    bool IsEffectivelyEnabled() const;
+    bool IsEffectivelyStatic() const;
+    bool UsesRendererLightAnimation() const { return IsRendererLight && RendererLightFlicker; }
 
     /** True for dynamic/actor/VisualFX lights that should not be clipped at indoor/outdoor transitions. */
     bool IgnoreIndoorOutdoorLimit = false;

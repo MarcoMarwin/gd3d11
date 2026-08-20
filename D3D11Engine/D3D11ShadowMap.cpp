@@ -1014,19 +1014,23 @@ XRESULT D3D11ShadowMap::DrawPointlightShadows( std::vector<VobLightInfo*>& light
 
     auto& settings = Engine::GAPI->GetRendererState().RendererSettings;
     // Shadow resources follow the same frame visibility that is already limited by VisualFXDrawRadius.
-    for ( auto& it : Engine::GAPI->VobLightMap ) {
-        VobLightInfo* info = it.second;
-        if ( !info || !info->LightShadowBuffers || !info->Vob ) {
-            continue;
-        }
+    auto releaseIfInvisible = []( VobLightInfo* info ) {
+        if ( !info || !info->LightShadowBuffers )
+            return;
 
         if ( D3D11PointLight* pl = dynamic_cast<D3D11PointLight*>(info->LightShadowBuffers.get()) ) {
-            const bool visible = info->Vob->IsEnabled() && info->VisibleInFrame;
+            const bool visible = info->IsEffectivelyEnabled() && info->VisibleInFrame;
             if ( pl->ShouldReleaseForVisibility( visible ) ) {
                 pl->ClearTiledSlot();
                 pl->ReleaseShadowMap();
             }
         }
+    };
+    for ( auto& it : Engine::GAPI->VobLightMap ) {
+        releaseIfInvisible( it.second );
+    }
+    for ( const auto& rendererLight : Engine::GAPI->GetRendererPointLights() ) {
+        releaseIfInvisible( rendererLight.get() );
     }
     if ( settings.EnablePointlightShadows <= 0 ) {
 
@@ -1052,7 +1056,7 @@ XRESULT D3D11ShadowMap::DrawPointlightShadows( std::vector<VobLightInfo*>& light
     const bool isTiledShadingEnabled = m_TiledDeferred && settings.EnableTiledLighting;
     const int requiredShadowMapKind = isTiledShadingEnabled ? 1 : 0;
     for ( auto const& light : lights ) {
-        if ( !light || !light->Vob || !light->Vob->IsEnabled() || !light->VisibleInFrame ) {
+        if ( !light || !light->IsEffectivelyEnabled() || !light->VisibleInFrame ) {
             continue;
         }
         const bool visualFxShadowsAllowed = !light->IsVisualFXLight || dynamicMode;
@@ -1068,7 +1072,12 @@ XRESULT D3D11ShadowMap::DrawPointlightShadows( std::vector<VobLightInfo*>& light
         // Create resources only when an eligible light is actually visible.
         if ( !light->LightShadowBuffers ) {
             BaseShadowedPointLight* bpl;
-            graphicsEngine->CreateShadowedPointLight( &bpl, light, dynamicMode );
+            // Renderer-owned flame/oil-lamp lights may flicker in intensity,
+            // but their shadow source is static. Keep world geometry in the
+            // static cache and never allocate an animated shadow overlay for
+            // these lights.
+            const bool shadowLightIsDynamic = dynamicMode && !light->IsRendererLight;
+            graphicsEngine->CreateShadowedPointLight( &bpl, light, shadowLightIsDynamic );
             light->LightShadowBuffers.reset( bpl );
             light->UpdateShadows = true;
         }
@@ -1076,9 +1085,9 @@ XRESULT D3D11ShadowMap::DrawPointlightShadows( std::vector<VobLightInfo*>& light
         if ( D3D11PointLight* pl = dynamic_cast<D3D11PointLight*>(light->LightShadowBuffers.get()) ) {
             // Preset-controlled point-light shadow resolution.
             int desiredResolution = std::clamp( settings.PointlightShadowMapSize, 64, 512 );
-            if ( dynamicMode ) {
+            if ( dynamicMode && !light->IsRendererLight ) {
                 const XMVECTOR lightPosition = light->GetEffectivePositionWorldXM();
-                const float lightRange = std::max( light->Vob->GetLightRange(), 0.0f );
+                const float lightRange = light->GetEffectiveLightRange();
 
                 float cameraDistance = FLT_MAX;
                 XMStoreFloat( &cameraDistance, XMVector3Length(
@@ -1109,14 +1118,14 @@ XRESULT D3D11ShadowMap::DrawPointlightShadows( std::vector<VobLightInfo*>& light
                 XMStoreFloat( &allocationHeroDistance, XMVector3Length(
                     light->GetEffectivePositionWorldXM() - XMLoadFloat3( &heroPosition ) ) );
             }
-            const float allocationRange = std::max( light->Vob->GetLightRange(), 0.0f );
+            const float allocationRange = light->GetEffectiveLightRange();
             const bool heroRelevant = allocationHeroDistance <= allocationRange + 250.0f;
             const float slotPriority = heroRelevant ? 0.0f
                 : std::min( allocationCameraDistance * allocationCameraDistance,
                     allocationHeroDistance * allocationHeroDistance );
-            const bool eligibleForStaticLowRes = light->Vob->IsStatic()
+            const bool eligibleForStaticLowRes = light->IsEffectivelyStatic()
                 && !light->IsDynamicVobLight && !light->IsVisualFXLight;
-            const float lowTierBoundary = light->Vob->GetLightRange()
+            const float lowTierBoundary = light->GetEffectiveLightRange()
                 + (pl->IsTiledStaticLowRes() ? 2000.0f : 3000.0f);
             const bool staticLowRes = eligibleForStaticLowRes && !heroRelevant
                 && allocationCameraDistance > lowTierBoundary;
@@ -1217,7 +1226,7 @@ XRESULT D3D11ShadowMap::DrawPointlightShadows( std::vector<VobLightInfo*>& light
         auto light = graphicsEngine->FrameShadowUpdateLights.front();
         graphicsEngine->FrameShadowUpdateLights.pop_front();
 
-        if ( !light || !light->Vob || !light->Vob->IsEnabled() || !light->VisibleInFrame ) continue;
+        if ( !light || !light->IsEffectivelyEnabled() || !light->VisibleInFrame ) continue;
 
         D3D11PointLight* l = static_cast<D3D11PointLight*>( light->LightShadowBuffers.get() );
         if ( !l ) continue;

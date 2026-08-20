@@ -1,4 +1,5 @@
 #include "pch.h"
+#include <cmath>
 #include "WorldObjects.h"
 #include "GothicAPI.h"
 #include "Engine.h"
@@ -10,6 +11,14 @@
 #include "D3D11_Helpers.h"
 
 XMVECTOR VobLightInfo::GetEffectivePositionWorldXM() const {
+    if ( IsRendererLight ) {
+        if ( RendererLightAnchorVob ) {
+            return RendererLightAnchorVob->GetPositionWorldXM()
+                + XMLoadFloat3( &RendererLightPositionOffset );
+        }
+        return XMLoadFloat3( &RendererLightPosition );
+    }
+
     if ( !Vob )
         return XMVectorZero();
 
@@ -23,6 +32,62 @@ float3 VobLightInfo::GetEffectivePositionWorld() const {
     XMFLOAT3 position;
     XMStoreFloat3( &position, GetEffectivePositionWorldXM() );
     return float3( position );
+}
+
+DWORD VobLightInfo::GetEffectiveLightColor() const {
+    if ( IsRendererLight )
+        return RendererLightBaseColor;
+
+    return Vob ? Vob->GetLightColor() : 0u;
+}
+
+float VobLightInfo::GetEffectiveLightIntensity() const {
+    if ( !IsRendererLight )
+        return 1.0f;
+
+    float flicker = 1.0f;
+    if ( RendererLightFlicker ) {
+        const float time = Engine::GAPI ? Engine::GAPI->GetTimeSeconds() : 0.0f;
+        flicker += 0.055f * std::sin( time * 5.1f + RendererLightFlickerPhase );
+        flicker += 0.025f * std::sin( time * 9.7f + RendererLightFlickerPhase * 1.37f );
+    }
+    return std::max( 0.0f, RendererLightIntensity * flicker );
+}
+
+float VobLightInfo::GetEffectiveLightRange() const {
+    if ( IsRendererLight )
+        return std::max( RendererLightRange, 0.0f );
+
+    return Vob ? std::max( Vob->GetLightRange(), 0.0f ) : 0.0f;
+}
+
+bool VobLightInfo::IsEffectivelyEnabled() const {
+    if ( IsRendererLight ) {
+        if ( IsRendererLightSuppressed || !RendererLightEnabled )
+            return false;
+
+        if ( RendererLightSourceA || RendererLightSourceB ) {
+            const bool sourceAEnabled = RendererLightSourceA && RendererLightSourceA->IsEnabled();
+            const bool sourceBEnabled = RendererLightSourceB && RendererLightSourceB->IsEnabled();
+            if ( !sourceAEnabled && !sourceBEnabled )
+                return false;
+        } else if ( !RendererLightFlicker ) {
+            // Fixed oil-lamp replacements must not survive after all of their
+            // original Gothic light sources have been removed.
+            return false;
+        }
+
+        return !RendererLightAnchorVob || RendererLightAnchorVob->GetShowVisual();
+    }
+
+    return Vob && Vob->IsEnabled() && !IsRendererLightSuppressed;
+}
+
+bool VobLightInfo::IsEffectivelyStatic() const {
+    if ( IsRendererLight )
+        return RendererLightStatic;
+
+    return Vob && Vob->IsStatic();
 }
 
 

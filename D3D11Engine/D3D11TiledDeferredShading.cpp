@@ -601,7 +601,7 @@ D3D11TiledDeferredShading::CullResult D3D11TiledDeferredShading::CullLights(
     for ( auto const& light : lights ) {
         zCVobLight* vob = light->Vob;
 
-        if ( !vob->IsEnabled() ) continue;
+        if ( !light->IsEffectivelyEnabled() ) continue;
 
         // Check if this light has shadows
         D3D11PointLight* pl = nullptr;
@@ -622,15 +622,20 @@ D3D11TiledDeferredShading::CullResult D3D11TiledDeferredShading::CullLights(
         if ( result.TiledLightCount >= MAX_TILED_LIGHTS )
             continue;
 
-        vob->DoAnimation();
+        if ( vob && !light->IsRendererLight )
+            vob->DoAnimation();
 
-        float4 lightColor = float4( vob->GetLightColor() );
+        float4 lightColor = float4( light->GetEffectiveLightColor() );
+        const float rendererLightIntensity = light->GetEffectiveLightIntensity();
+        lightColor.x *= rendererLightIntensity;
+        lightColor.y *= rendererLightIntensity;
+        lightColor.z *= rendererLightIntensity;
         if ( !light->AllowsPointlightShadows && !light->IsDynamicVobLight && !light->IsVisualFXLight ) {
             lightColor.x *= 0.35f;
             lightColor.y *= 0.35f;
             lightColor.z *= 0.35f;
         }
-        float lightRange = vob->GetLightRange();
+        float lightRange = light->GetEffectiveLightRange();
         float3 posWorld = light->GetEffectivePositionWorld();
 
         // Distance fade
@@ -669,7 +674,7 @@ D3D11TiledDeferredShading::CullResult D3D11TiledDeferredShading::CullLights(
         tl.Color = XMFLOAT4( lightColor.x, lightColor.y, lightColor.z, lightColor.w );
         tl.PositionWorld = XMFLOAT3( posWorld.x, posWorld.y, posWorld.z );
         tl.ShadowStrength = shadowDistanceFade;
-        tl.IsIndoor = light->Vob && light->Vob->IsIndoorVob() ? 1.0f : 0.0f;
+        tl.IsIndoor = light->IsIndoorVob ? 1.0f : 0.0f;
         tl.IgnoreIndoorOutdoorLimit = light->IgnoreIndoorOutdoorLimit ? 1.0f : 0.0f;
         tl.ShadowSoftness = std::max(
             settings.ShadowSoftness * 2.0f, minimumTemporalShadowSoftness );
