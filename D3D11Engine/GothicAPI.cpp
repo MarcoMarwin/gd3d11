@@ -5661,6 +5661,10 @@ void GothicAPI::ConfigureAllPointlightShadowSources() {
     struct ResolvedFlameGroup {
         zCVob* Parent = nullptr;
         bool IsMultiFlame = false;
+        // A PFX is the dominant visual for mixed and multi-flame groups.
+        // This keeps a PFX/TGA pair on the torch/campfire profile instead of
+        // accidentally falling back to the candle/decal profile.
+        bool HasPfx = false;
         bool RaiseAnchorAboveCenter = false;
         XMFLOAT3 Anchor = {};
         float Size = 1.0f;
@@ -5675,6 +5679,7 @@ void GothicAPI::ConfigureAllPointlightShadowSources() {
         ResolvedFlameGroup resolved;
         resolved.Parent = group.Parent;
         resolved.IsMultiFlame = group.Particles.size() > 1 || group.Decals.size() > 1;
+        resolved.HasPfx = !group.Particles.empty();
         for ( const FlameVisual& flame : group.Particles ) {
             resolved.Positions.push_back( flame.Position );
             resolved.Vobs.push_back( flame.Vob );
@@ -5917,7 +5922,9 @@ void GothicAPI::ConfigureAllPointlightShadowSources() {
         rendererLight->IsRendererLight = true;
         rendererLight->AllowsPointlightShadows = true;
         rendererLight->RendererLightEnabled = true;
-        rendererLight->RendererLightStatic = true;
+        // Keep the animated pointlight shadow path so NPCs remain valid
+        // animated casters for renderer-owned flame and oil-lamp lights.
+        rendererLight->RendererLightStatic = false;
         rendererLight->RendererLightFlicker = flicker;
         rendererLight->RendererLightIntensity = std::max( intensity, 0.0f );
         rendererLight->RendererLightRange = std::max( range, 1.0f );
@@ -5942,14 +5949,24 @@ void GothicAPI::ConfigureAllPointlightShadowSources() {
         return result;
     };
 
-    const DWORD FLAME_LIGHT_COLOR = zColor( 48, 142, 255, 255 ).dword;
+    // zColor takes BGRA order. TGA candle flames use a lighter, yellow-warm
+    // profile; PFX torches and campfires use a more saturated orange-gold
+    // profile. A PFX wins whenever both visual types share one group.
+    const DWORD TGA_FLAME_LIGHT_COLOR = zColor( 90, 190, 255, 255 ).dword;
+    const DWORD PFX_FLAME_LIGHT_COLOR = zColor( 32, 128, 255, 255 ).dword;
+    auto flameLightColor = [&]( bool hasPfx ) {
+        return hasPfx ? PFX_FLAME_LIGHT_COLOR : TGA_FLAME_LIGHT_COLOR;
+    };
     auto flameLightRange = []( float size ) {
         return std::clamp( size * 6.0f, 180.0f, 600.0f );
     };
-    auto flameLightIntensity = []( float size, size_t flameCount = 1 ) {
+    auto flameLightIntensity = []( float size, size_t flameCount = 1, bool hasPfx = false ) {
         const float countScale = std::sqrt( static_cast<float>(
             std::max<size_t>( flameCount, 1u ) ) );
-        return std::clamp( 0.70f + size * 0.0035f * countScale, 0.70f, 1.15f );
+        const float typeScale = hasPfx ? 1.08f : 1.04f;
+        return std::clamp(
+            (0.70f + size * 0.0035f * countScale) * typeScale,
+            0.70f, 1.15f );
     };
 
     // Oil lamps own their nearby light sources before generic flame linking is
@@ -6047,7 +6064,8 @@ void GothicAPI::ConfigureAllPointlightShadowSources() {
         }
 
         createRendererLight( lightAnchor, lightPosition,
-            FLAME_LIGHT_COLOR, flameLightIntensity( flame.Size, flame.FlameCount ),
+            flameLightColor( flame.HasPfx ),
+            flameLightIntensity( flame.Size, flame.FlameCount, flame.HasPfx ),
             flameLightRange( flame.Size ), true, nullptr, nullptr );
     }
 
@@ -6090,7 +6108,8 @@ void GothicAPI::ConfigureAllPointlightShadowSources() {
         if ( flame.RaiseAnchorAboveCenter )
             shadowAnchor.y += PARTICLE_FLAME_HEIGHT_OFFSET;
         createRendererLight( flame.Vobs.front(), shadowAnchor,
-            FLAME_LIGHT_COLOR, flameLightIntensity( flame.Size ),
+            flameLightColor( flame.HasPfx ),
+            flameLightIntensity( flame.Size, 1, flame.HasPfx ),
             flameLightRange( flame.Size ), true, source, nullptr );
     }
 

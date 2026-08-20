@@ -1,0 +1,6 @@
+# pack-refs with: peeled fully-peeled sorted 
+7556a6a6faa9ba752cbbaa59fedfdf26e70466bf refs/remotes/origin/codex/nightly-ssr-sss-features
+cc2f05fc8614eb924510d67cd5061303b0f986ac refs/remotes/origin/codex/ssr-sss-from-17.9.7
+2b0d0c1e9dcf24c5a0757ec1118ab924b02239b0 refs/remotes/origin/master
+2b0d0c1e9dcf24c5a0757ec1118ab924b02239b0 refs/tags/nightly
+e57dee60aa778eaa3c32e113321fd0024594243c refs/tags/v18.0

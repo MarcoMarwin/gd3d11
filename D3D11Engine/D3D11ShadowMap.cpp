@@ -1072,11 +1072,9 @@ XRESULT D3D11ShadowMap::DrawPointlightShadows( std::vector<VobLightInfo*>& light
         // Create resources only when an eligible light is actually visible.
         if ( !light->LightShadowBuffers ) {
             BaseShadowedPointLight* bpl;
-            // Renderer-owned flame/oil-lamp lights may flicker in intensity,
-            // but their shadow source is static. Keep world geometry in the
-            // static cache and never allocate an animated shadow overlay for
-            // these lights.
-            const bool shadowLightIsDynamic = dynamicMode && !light->IsRendererLight;
+            // Renderer-owned replacement lights must use the same animated
+            // pointlight shadow path as regular lights so NPCs remain casters.
+            const bool shadowLightIsDynamic = dynamicMode;
             graphicsEngine->CreateShadowedPointLight( &bpl, light, shadowLightIsDynamic );
             light->LightShadowBuffers.reset( bpl );
             light->UpdateShadows = true;
@@ -1085,7 +1083,7 @@ XRESULT D3D11ShadowMap::DrawPointlightShadows( std::vector<VobLightInfo*>& light
         if ( D3D11PointLight* pl = dynamic_cast<D3D11PointLight*>(light->LightShadowBuffers.get()) ) {
             // Preset-controlled point-light shadow resolution.
             int desiredResolution = std::clamp( settings.PointlightShadowMapSize, 64, 512 );
-            if ( dynamicMode && !light->IsRendererLight ) {
+            if ( dynamicMode ) {
                 const XMVECTOR lightPosition = light->GetEffectivePositionWorldXM();
                 const float lightRange = light->GetEffectiveLightRange();
 

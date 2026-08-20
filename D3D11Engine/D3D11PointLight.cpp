@@ -237,7 +237,14 @@ void D3D11PointLight::RenderStaticShadowPass( RenderToDepthStencilBuffer& target
         wc = nullptr;
     }
 
-    const unsigned int staticCasterMask = SHADOW_CASTER_WORLD | SHADOW_CASTER_VOBS | SHADOW_CASTER_MOBS;
+    unsigned int staticCasterMask = SHADOW_CASTER_WORLD | SHADOW_CASTER_VOBS | SHADOW_CASTER_MOBS;
+    // Static-only pointlight shadows have no later animated overlay. Keep
+    // NPCs visible as initial casters for renderer-owned flame/oil-lamp lights
+    // without duplicating them in the normal dynamic static base pass.
+    if ( LightInfo->IsRendererLight
+        && GetCurrentShadowMode() == GothicRendererSettings::PLS_STATIC_ONLY ) {
+        staticCasterMask |= SHADOW_CASTER_ANIMATED;
+    }
     engine->RenderShadowCube( LightInfo->GetEffectivePositionWorldXM(), range, target, nullptr, nullptr, false, LightInfo->IsIndoorVob, false,
         &VobCache, &SkeletalVobCache, wc, clearDepth, staticCasterMask );
 }
