@@ -50,6 +50,7 @@
 
 // TODO: REMOVE THIS!
 #include "D3D11GraphicsEngine.h"
+#include "D3D11PointLight.h"
 #include "D3D11PfxRenderer.h"
 #include "MeshManager.h"
 #include "ThreadPool.h"
@@ -5558,7 +5559,6 @@ void GothicAPI::ConfigureAllPointlightShadowSources() {
         info->AllowsPointlightShadows = false;
         info->HasFlameAnchor = false;
         info->FlameAnchorOffset = {};
-        info->IsRendererLightSuppressed = false;
 
         zCVob* parent = getPersistentParent( info->Vob );
         if ( parent && parent->As<oCNPC>() )
@@ -5575,7 +5575,6 @@ void GothicAPI::ConfigureAllPointlightShadowSources() {
         zCVob* Vob = nullptr;
         XMFLOAT3 Position = {};
         float Size = 1.0f;
-        bool IsParticle = false;
     };
     struct FlameGroup {
         zCVob* Parent = nullptr;
@@ -5605,7 +5604,6 @@ void GothicAPI::ConfigureAllPointlightShadowSources() {
 
         FlameVisual flame;
         flame.Vob = flameVob;
-        flame.IsParticle = isParticle;
         XMStoreFloat3( &flame.Position, flameVob->GetPositionWorldXM() );
         const zTBBox3D bbox = flameVob->GetBBox();
         const XMFLOAT3 extents(
@@ -5710,8 +5708,6 @@ void GothicAPI::ConfigureAllPointlightShadowSources() {
         XMFLOAT3 ShadowAnchor = {};
         size_t NearestStaticLight = static_cast<size_t>(-1);
         size_t NearestDynamicLight = static_cast<size_t>(-1);
-        float NearestStaticDistanceSq = FLT_MAX;
-        float NearestDynamicDistanceSq = FLT_MAX;
     };
     std::vector<OilLampAnchor> oilLampAnchors;
 
@@ -5776,10 +5772,8 @@ void GothicAPI::ConfigureAllPointlightShadowSources() {
             if ( bestLight != INVALID_INDEX ) {
                 if ( staticKind != 0 ) {
                     oilLamp.NearestStaticLight = bestLight;
-                    oilLamp.NearestStaticDistanceSq = bestDistanceSq;
                 } else {
                     oilLamp.NearestDynamicLight = bestLight;
-                    oilLamp.NearestDynamicDistanceSq = bestDistanceSq;
                 }
             }
         }
@@ -5848,7 +5842,38 @@ void GothicAPI::ConfigureAllPointlightShadowSources() {
             || isAncestorOrSame( anchor.Vob, light.Info->Vob );
     };
 
-    auto suppressRendererSource = []( VobLightInfo* info ) {
+    // This is the same winner-selection rule that the original anchor pass
+    // uses below. A light is considered attracted to the candle when the
+    // candle wins among all visible flame/oil-lamp anchors in LINK_RADIUS;
+    // hierarchy relation wins over distance, otherwise the nearest anchor
+    // wins. Using the exact winner here prevents an unrelated nearby light
+    // from being suppressed while also catching lights with no shared VOB
+    // parent (the previous suppression loop missed those).
+    auto findBestVisualAnchor = [&]( size_t lightIndex ) {
+        size_t bestAnchor = INVALID_INDEX;
+        float bestDistanceSq = LINK_RADIUS_SQ;
+        bool bestIsRelated = false;
+        for ( size_t anchorIndex = 0; anchorIndex < visualAnchors.size(); ++anchorIndex ) {
+            const VisualAnchorCandidate& candidate = visualAnchors[anchorIndex];
+            const float candidateDistanceSq = distanceSq(
+                lights[lightIndex].Position, candidate.Position );
+            if ( candidateDistanceSq > LINK_RADIUS_SQ )
+                continue;
+            const bool candidateIsRelated = lightIsRelatedToAnchor(
+                lights[lightIndex], candidate );
+            if ( bestAnchor == INVALID_INDEX
+                || (candidateIsRelated && !bestIsRelated)
+                || (candidateIsRelated == bestIsRelated
+                    && candidateDistanceSq < bestDistanceSq) ) {
+                bestAnchor = anchorIndex;
+                bestDistanceSq = candidateDistanceSq;
+                bestIsRelated = candidateIsRelated;
+            }
+        }
+        return bestAnchor;
+    };
+
+    auto suppressRendererSource = [this]( VobLightInfo* info ) {
         if ( !info )
             return;
         info->IsRendererLightSuppressed = true;
@@ -5856,6 +5881,20 @@ void GothicAPI::ConfigureAllPointlightShadowSources() {
         info->HasFlameAnchor = false;
         info->FlameAnchorOffset = {};
         info->UpdateShadows = false;
+
+        // A source can already own a shadow object when this configuration is
+        // rebuilt. Remove every deferred queue reference before releasing it;
+        // otherwise the old pointlight would still consume shadow resources
+        // or leave a dangling entry for the next shadow pass.
+        if ( auto* graphicsEngine = dynamic_cast<D3D11GraphicsEngine*>( Engine::GraphicsEngine ) ) {
+            graphicsEngine->FrameShadowUpdateLights.remove( info );
+            if ( info->LightShadowBuffers
+                && graphicsEngine->DebugPointlight
+                    == dynamic_cast<D3D11PointLight*>( info->LightShadowBuffers.get() ) ) {
+                graphicsEngine->DebugPointlight = nullptr;
+            }
+        }
+        info->LightShadowBuffers.reset();
     };
 
     auto createRendererLight = [&]( zCVob* anchorVob, const XMFLOAT3& position,
@@ -5906,9 +5945,9 @@ void GothicAPI::ConfigureAllPointlightShadowSources() {
         const size_t dynamicIndex = oilLamp.NearestDynamicLight;
         const bool hasStatic = staticIndex != INVALID_INDEX;
         const bool hasDynamic = dynamicIndex != INVALID_INDEX;
-        const bool needsFixedReplacement = hasStatic && hasDynamic
-            || (hasDynamic && !hasStatic);
-        if ( !needsFixedReplacement )
+        // Static-only lamps keep their authored light; every lamp with a
+        // dynamic source gets one fixed renderer replacement.
+        if ( !hasDynamic )
             continue;
 
         zCVobLight* staticLight = hasStatic ? lights[staticIndex].Info->Vob : nullptr;
@@ -5954,36 +5993,26 @@ void GothicAPI::ConfigureAllPointlightShadowSources() {
         if ( belongsToOilLamp )
             continue;
 
-        const VisualAnchorCandidate flameAnchor = {
-            VisualAnchorKind::SingleFlame, flameIndex, flame.Parent,
-            flame.Vobs.front(), flame.Anchor };
-
         size_t nearestSource = INVALID_INDEX;
         float nearestDistanceSq = LINK_RADIUS_SQ;
         for ( size_t lightIndex = 0; lightIndex < lights.size(); ++lightIndex ) {
             if ( lights[lightIndex].Info->IsRendererLightSuppressed )
                 continue;
+            const size_t bestAnchor = findBestVisualAnchor( lightIndex );
+            if ( bestAnchor == INVALID_INDEX )
+                continue;
+            const VisualAnchorCandidate& winner = visualAnchors[bestAnchor];
+            if ( winner.Kind != VisualAnchorKind::SingleFlame
+                || winner.SourceIndex != flameIndex )
+                continue;
+
             const float candidateDistanceSq = distanceSq(
                 lights[lightIndex].Position, flame.Anchor );
-            if ( candidateDistanceSq > LINK_RADIUS_SQ
-                || !lightIsRelatedToAnchor( lights[lightIndex], flameAnchor ) ) {
-                continue;
-            }
             if ( candidateDistanceSq < nearestDistanceSq ) {
                 nearestDistanceSq = candidateDistanceSq;
                 nearestSource = lightIndex;
             }
-        }
-
-        for ( size_t lightIndex = 0; lightIndex < lights.size(); ++lightIndex ) {
-            if ( lights[lightIndex].Info->IsRendererLightSuppressed )
-                continue;
-            const float candidateDistanceSq = distanceSq(
-                lights[lightIndex].Position, flame.Anchor );
-            if ( candidateDistanceSq <= LINK_RADIUS_SQ
-                && lightIsRelatedToAnchor( lights[lightIndex], flameAnchor ) ) {
-                suppressRendererSource( lights[lightIndex].Info );
-            }
+            suppressRendererSource( lights[lightIndex].Info );
         }
 
         zCVobLight* source = nearestSource != INVALID_INDEX
@@ -6000,26 +6029,7 @@ void GothicAPI::ConfigureAllPointlightShadowSources() {
     for ( size_t lightIndex = 0; lightIndex < lights.size(); ++lightIndex ) {
         if ( lights[lightIndex].Info->IsRendererLightSuppressed )
             continue;
-        size_t bestAnchor = INVALID_INDEX;
-        float bestDistanceSq = LINK_RADIUS_SQ;
-        bool bestIsRelated = false;
-        for ( size_t anchorIndex = 0; anchorIndex < visualAnchors.size(); ++anchorIndex ) {
-            const VisualAnchorCandidate& candidate = visualAnchors[anchorIndex];
-            const float candidateDistanceSq = distanceSq(
-                lights[lightIndex].Position, candidate.Position );
-            if ( candidateDistanceSq > LINK_RADIUS_SQ )
-                continue;
-            const bool candidateIsRelated = lightIsRelatedToAnchor(
-                lights[lightIndex], candidate );
-            if ( bestAnchor == INVALID_INDEX
-                || (candidateIsRelated && !bestIsRelated)
-                || (candidateIsRelated == bestIsRelated
-                    && candidateDistanceSq < bestDistanceSq) ) {
-                bestAnchor = anchorIndex;
-                bestDistanceSq = candidateDistanceSq;
-                bestIsRelated = candidateIsRelated;
-            }
-        }
+        const size_t bestAnchor = findBestVisualAnchor( lightIndex );
         if ( bestAnchor == INVALID_INDEX )
             continue;
 

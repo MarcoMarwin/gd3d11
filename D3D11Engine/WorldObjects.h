@@ -462,7 +462,6 @@ struct VobLightInfo {
     float GetEffectiveLightRange() const;
     bool IsEffectivelyEnabled() const;
     bool IsEffectivelyStatic() const;
-    bool UsesRendererLightAnimation() const { return IsRendererLight && RendererLightFlicker; }
 
     /** True for dynamic/actor/VisualFX lights that should not be clipped at indoor/outdoor transitions. */
     bool IgnoreIndoorOutdoorLimit = false;
