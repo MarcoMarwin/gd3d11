@@ -1,6 +1,7 @@
 #include "pch.h"
 #include <cmath>
 #include "WorldObjects.h"
+#include <cstdint>
 #include "GothicAPI.h"
 #include "Engine.h"
 #include "BaseGraphicsEngine.h"
@@ -9,6 +10,38 @@
 #include "zCMaterial.h"
 #include "zCTexture.h"
 #include "D3D11_Helpers.h"
+
+namespace {
+    std::uint32_t FlickerHash( std::uint32_t value ) {
+        value ^= value >> 16;
+        value *= 0x7feb352du;
+        value ^= value >> 15;
+        value *= 0x846ca68bu;
+        value ^= value >> 16;
+        return value;
+    }
+
+    float SampleFlickerNoise( float time, float frequency, float phase,
+        std::uint32_t salt ) {
+        const float coordinate = std::max( 0.0f, time ) * frequency + phase;
+        const float cellPosition = std::floor( coordinate );
+        const float cellFraction = coordinate - cellPosition;
+        const float smoothFraction = cellFraction * cellFraction
+            * ( 3.0f - 2.0f * cellFraction );
+        const auto cell = static_cast<std::uint32_t>( cellPosition );
+        const auto phaseSeed = static_cast<std::uint32_t>(
+            std::max( 0.0f, phase ) * 1000.0f );
+        const auto hashAt = [&]( std::uint32_t sampleCell ) {
+            return static_cast<float>( FlickerHash(
+                phaseSeed ^ (sampleCell * 0x9e3779b9u) ^ salt ) )
+                / 4294967295.0f;
+        };
+
+        const float lower = hashAt( cell );
+        const float upper = hashAt( cell + 1u );
+        return (lower + (upper - lower) * smoothFraction) * 2.0f - 1.0f;
+    }
+}
 
 XMVECTOR VobLightInfo::GetEffectivePositionWorldXM() const {
     if ( IsRendererLight ) {
@@ -48,8 +81,17 @@ float VobLightInfo::GetEffectiveLightIntensity() const {
     float flicker = 1.0f;
     if ( RendererLightFlicker ) {
         const float time = Engine::GAPI ? Engine::GAPI->GetTimeSeconds() : 0.0f;
-        flicker += 0.055f * std::sin( time * 5.1f + RendererLightFlickerPhase );
-        flicker += 0.025f * std::sin( time * 9.7f + RendererLightFlickerPhase * 1.37f );
+        // Smooth value noise avoids the clearly visible repetition of fixed
+        // sine waves while keeping the flame motion continuous. The three
+        // bands provide slow body movement, faster flame variation, and a
+        // very small high-frequency shimmer.
+        const float slow = SampleFlickerNoise(
+            time, 1.45f, RendererLightFlickerPhase, 0xA341316Cu );
+        const float fast = SampleFlickerNoise(
+            time, 5.20f, RendererLightFlickerPhase * 1.73f, 0xC8013EA4u );
+        const float shimmer = SampleFlickerNoise(
+            time, 11.50f, RendererLightFlickerPhase * 2.41f, 0xAD90777Du );
+        flicker += 0.055f * slow + 0.020f * fast + 0.008f * shimmer;
     }
     return std::max( 0.0f, RendererLightIntensity * flicker );
 }

@@ -582,17 +582,10 @@ void D3D11PointLight::RenderCubemapFace( const XMFLOAT4X4& view, const XMFLOAT4X
         engine->GetContext()->ClearRenderTargetView( engine->GetDummyCubeRT()->GetRTVCubemapFace( faceIdx ).Get(), clearColor );
     }
 
-    // Disable shadows for NPCs
-    // TODO: Only for the player himself, because his shadows look ugly when using a torch
-    //bool oldDrawSkel = Engine::GAPI->GetRendererState().RendererSettings.DrawSkeletalMeshes;
-    //Engine::GAPI->GetRendererState().RendererSettings.DrawSkeletalMeshes = false;
-
     // Draw cubemap face
     Microsoft::WRL::ComPtr<ID3D11RenderTargetView> debugRTV = engine->GetDummyCubeRT() != nullptr ? engine->GetDummyCubeRT()->GetRTVCubemapFace( faceIdx ) : nullptr;
     auto _ = engine->RecordGraphicsEvent( GE_NAME( "RenderFullCubemap->RenderCubemapFace" ) );
     engine->RenderShadowCube( LightInfo->GetEffectivePositionWorldXM(), range, *m_DepthCubemap, m_DepthCubemap->GetDSVCubemapFace( faceIdx ).Get(), debugRTV.Get(), false );
-
-    //Engine::GAPI->GetRendererState().RendererSettings.DrawSkeletalMeshes = oldDrawSkel;
 
     // Reset settings
     Engine::GAPI->SetCameraReplacementPtr( nullptr );

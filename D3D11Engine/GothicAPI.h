@@ -893,7 +893,7 @@ private:
 
     /** Map of vobs and VobIndfos */
     gtl::flat_hash_map<zCVob*, VobInfo*> VobMap;
-    /** Renderer-owned pointlight replacements for single flames and oil lamps. */
+    /** Renderer-owned pointlight replacements for flame systems and oil lamps. */
     std::vector<std::unique_ptr<VobLightInfo>> RendererPointLights;
 public:
     // temporarily, to allow CollectVisibleVobsHelper to be templated for inlining optimizations

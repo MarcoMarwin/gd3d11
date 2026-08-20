@@ -633,7 +633,7 @@ namespace {
 
             if ( hueSector != 1 && saturation >= requiredSaturation ) {
                 static constexpr float palette[6][3] = {
-                    { 255.0f,  64.0f,  32.0f }, // red
+                    { 255.0f,  96.0f,  32.0f }, // slightly orange red
                     { 237.0f, 211.0f, 165.0f }, // warm-white fallback
                     {  64.0f, 255.0f,  80.0f }, // green
                     {  48.0f, 220.0f, 255.0f }, // cyan
@@ -5664,6 +5664,7 @@ void GothicAPI::ConfigureAllPointlightShadowSources() {
         bool RaiseAnchorAboveCenter = false;
         XMFLOAT3 Anchor = {};
         float Size = 1.0f;
+        size_t FlameCount = 0;
         std::vector<XMFLOAT3> Positions;
         std::vector<zCVob*> Vobs;
     };
@@ -5681,6 +5682,18 @@ void GothicAPI::ConfigureAllPointlightShadowSources() {
         for ( const FlameVisual& flame : group.Decals ) {
             resolved.Positions.push_back( flame.Position );
             resolved.Vobs.push_back( flame.Vob );
+        }
+
+        resolved.FlameCount = resolved.Vobs.size();
+        if ( resolved.FlameCount > 0 ) {
+            float totalSize = 0.0f;
+            for ( const FlameVisual& flame : group.Particles )
+                totalSize += flame.Size;
+            for ( const FlameVisual& flame : group.Decals )
+                totalSize += flame.Size;
+            // For a multi-flame system, the average visual size prevents one
+            // unusually large TGA/PFX member from dominating the replacement.
+            resolved.Size = totalSize / static_cast<float>( resolved.FlameCount );
         }
 
         // One TGA and one PFX represent the same visible flame. The particle
@@ -5933,8 +5946,10 @@ void GothicAPI::ConfigureAllPointlightShadowSources() {
     auto flameLightRange = []( float size ) {
         return std::clamp( size * 6.0f, 180.0f, 600.0f );
     };
-    auto flameLightIntensity = []( float size ) {
-        return std::clamp( 0.70f + size * 0.0035f, 0.70f, 1.15f );
+    auto flameLightIntensity = []( float size, size_t flameCount = 1 ) {
+        const float countScale = std::sqrt( static_cast<float>(
+            std::max<size_t>( flameCount, 1u ) ) );
+        return std::clamp( 0.70f + size * 0.0035f * countScale, 0.70f, 1.15f );
     };
 
     // Oil lamps own their nearby light sources before generic flame linking is
@@ -5974,6 +5989,68 @@ void GothicAPI::ConfigureAllPointlightShadowSources() {
             stableColor, 1.0f, stableRange, false, sourceA, sourceB );
     }
 
+    auto flameBelongsToOilLamp = [&]( const ResolvedFlameGroup& flame ) {
+        return std::any_of( oilLampAnchors.begin(), oilLampAnchors.end(),
+            [&]( const OilLampAnchor& oilLamp ) {
+                return flame.Parent == oilLamp.Vob
+                    || std::any_of( flame.Vobs.begin(), flame.Vobs.end(),
+                        [&]( zCVob* flameVob ) { return flameVob == oilLamp.Vob; } );
+            } );
+    };
+
+    // A multi-flame system becomes one renderer light at the original authored
+    // light position. The source lights are removed from the render list, but
+    // no flame-center anchor offset is applied to the replacement. Oil lamps
+    // remain owned by their existing replacement-light path.
+    for ( size_t flameIndex = 0; flameIndex < resolvedFlames.size(); ++flameIndex ) {
+        const ResolvedFlameGroup& flame = resolvedFlames[flameIndex];
+        if ( !flame.IsMultiFlame || flame.Vobs.empty() )
+            continue;
+        if ( flameBelongsToOilLamp( flame ) )
+            continue;
+
+        size_t nearestSource = INVALID_INDEX;
+        float nearestDistanceSq = LINK_RADIUS_SQ;
+        for ( size_t lightIndex = 0; lightIndex < lights.size(); ++lightIndex ) {
+            if ( lights[lightIndex].Info->IsRendererLightSuppressed )
+                continue;
+
+            const size_t bestAnchor = findBestVisualAnchor( lightIndex );
+            if ( bestAnchor == INVALID_INDEX )
+                continue;
+
+            const VisualAnchorCandidate& winner = visualAnchors[bestAnchor];
+            if ( winner.Kind != VisualAnchorKind::MultiFlame
+                || winner.SourceIndex != flameIndex )
+                continue;
+
+            const float candidateDistanceSq = distanceSq(
+                lights[lightIndex].Position, winner.Position );
+            if ( candidateDistanceSq < nearestDistanceSq ) {
+                nearestDistanceSq = candidateDistanceSq;
+                nearestSource = lightIndex;
+            }
+            suppressRendererSource( lights[lightIndex].Info );
+        }
+
+        // Preserve the original authored light position whenever a source was
+        // linked. Without a source, the persistent system parent is the only
+        // stable, non-flame-centered fallback position available.
+        zCVob* lightAnchor = flame.Parent ? flame.Parent : flame.Vobs.front();
+        XMFLOAT3 lightPosition = lightAnchor->GetPositionWorld();
+        if ( nearestSource != INVALID_INDEX ) {
+            lightPosition = lights[nearestSource].Position;
+        } else {
+            // Keep a source-free replacement above the system object instead
+            // of burying the light origin inside its parent geometry.
+            lightPosition.y += PARTICLE_FLAME_HEIGHT_OFFSET;
+        }
+
+        createRendererLight( lightAnchor, lightPosition,
+            FLAME_LIGHT_COLOR, flameLightIntensity( flame.Size, flame.FlameCount ),
+            flameLightRange( flame.Size ), true, nullptr, nullptr );
+    }
+
     // A single visible PFX, a single visible TGA, and a matching PFX/TGA pair
     // each become one renderer light. PFX position/size wins in the pair. Any
     // authored light related to that visual is removed from the renderer light
@@ -5982,15 +6059,7 @@ void GothicAPI::ConfigureAllPointlightShadowSources() {
         const ResolvedFlameGroup& flame = resolvedFlames[flameIndex];
         if ( flame.IsMultiFlame || flame.Vobs.empty() )
             continue;
-
-        bool belongsToOilLamp = false;
-        for ( const OilLampAnchor& oilLamp : oilLampAnchors ) {
-            if ( flame.Parent == oilLamp.Vob || flame.Vobs.front() == oilLamp.Vob ) {
-                belongsToOilLamp = true;
-                break;
-            }
-        }
-        if ( belongsToOilLamp )
+        if ( flameBelongsToOilLamp( flame ) )
             continue;
 
         size_t nearestSource = INVALID_INDEX;

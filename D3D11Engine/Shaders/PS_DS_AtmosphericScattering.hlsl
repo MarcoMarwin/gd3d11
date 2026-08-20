@@ -158,23 +158,15 @@ float4 PSMain(PS_INPUT Input) : SV_TARGET
 
     if (AC_SunVisibility > 0.001f || AC_MoonVisibility > 0.001f) // sample the single active sun or moon shadow map
 	{
-        if (npcMaterial > 0.5f)
-        {
-            shadow = ComputeCascadedShadowValueCharacter(
-                wsPosition, wsNormal, vsPosition.z, vertLighting, Input.vPosition.xy);
-        }
-        else
-        {
-            float3 wsLightDirection = normalize(mul(float4(SQ_LightDirectionVS, 0.0f), SQ_InvView).xyz);
-            int cascadeIndex = GetPrimaryCascadeIndex(wsPosition);
-            float texelWorldSize = GetCascadeWorldTexelSize(cascadeIndex);
-            float3 biasedWsPosition = ApplyReceiverNormalBias(
-                wsPosition, wsNormal, wsLightDirection, texelWorldSize, vegetationReceiverMask);
+		float3 wsLightDirection = normalize(mul(float4(SQ_LightDirectionVS, 0.0f), SQ_InvView).xyz);
+		int cascadeIndex = GetPrimaryCascadeIndex(wsPosition);
+		float texelWorldSize = GetCascadeWorldTexelSize(cascadeIndex);
+		float3 biasedWsPosition = ApplyReceiverNormalBias(
+			wsPosition, wsNormal, wsLightDirection, texelWorldSize, vegetationReceiverMask);
 
-            // Use screen position for per-pixel rotation (temporal-friendly)
-            shadow = ComputeCascadedShadowValueSoft(
-                biasedWsPosition, vsPosition.z, vertLighting, 0.0f, Input.vPosition.xy, 0.0f, cascadeIndex);
-        }
+		// Use screen position for per-pixel rotation (temporal-friendly).
+		shadow = ComputeCascadedShadowValueSoft(
+			biasedWsPosition, vsPosition.z, vertLighting, 0.0f, Input.vPosition.xy, cascadeIndex);
 	} else {
         // Night-time sky ambient:
         // saturate(wsNormal.y) restricts the value to [0, 1].

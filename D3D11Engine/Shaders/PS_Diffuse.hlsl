@@ -238,34 +238,17 @@ FORWARD_PLUS_PS_OUTPUT PSMain( PS_INPUT Input )
 	if (AC_SunVisibility > 0.001f || AC_MoonVisibility > 0.001f)
 	{
 		#if FP_USE_SHADOW_MASK && ALPHATEST != 1
-			if (npcMaterial < 0.5f)
-			{
-				float2 screenUV = Input.vPosition.xy / FP_ViewportSize;
-				shadow = FP_ShadowMask.SampleLevel( SS_Linear, screenUV, 0 ).r;
-			}
-			else
-			{
-				float3 wsNormal = normalize(mul(float4(nrm, 0.0f), SQ_InvView).xyz);
-				shadow = ComputeCascadedShadowValueCharacter(
-					wsPosition, wsNormal, vsPosition.z, vertLighting, Input.vPosition.xy);
-			}
+			float2 screenUV = Input.vPosition.xy / FP_ViewportSize;
+			shadow = FP_ShadowMask.SampleLevel( SS_Linear, screenUV, 0 ).r;
 		#else
 			float3 wsNormal = normalize(mul(float4(nrm, 0.0f), SQ_InvView).xyz);
-			if (npcMaterial > 0.5f)
-			{
-				shadow = ComputeCascadedShadowValueCharacter(
-					wsPosition, wsNormal, vsPosition.z, vertLighting, Input.vPosition.xy);
-			}
-			else
-			{
-				float3 wsLightDirection = normalize(mul(float4(SQ_LightDirectionVS, 0.0f), SQ_InvView).xyz);
-				int cascadeIndex = GetPrimaryCascadeIndex(wsPosition);
-				float texelWorldSize = GetCascadeWorldTexelSize(cascadeIndex);
-				float3 biasedWsPosition = ApplyReceiverNormalBias(
-					wsPosition, wsNormal, wsLightDirection, texelWorldSize, vegetationReceiverMask);
-				shadow = ComputeCascadedShadowValueSoft(
-					biasedWsPosition, vsPosition.z, vertLighting, 0.0f, Input.vPosition.xy, 0.0f, cascadeIndex);
-			}
+			float3 wsLightDirection = normalize(mul(float4(SQ_LightDirectionVS, 0.0f), SQ_InvView).xyz);
+			int cascadeIndex = GetPrimaryCascadeIndex(wsPosition);
+			float texelWorldSize = GetCascadeWorldTexelSize(cascadeIndex);
+			float3 biasedWsPosition = ApplyReceiverNormalBias(
+				wsPosition, wsNormal, wsLightDirection, texelWorldSize, vegetationReceiverMask);
+			shadow = ComputeCascadedShadowValueSoft(
+				biasedWsPosition, vsPosition.z, vertLighting, 0.0f, Input.vPosition.xy, cascadeIndex);
 		#endif
 	} else {
 		float3 wsNormal = normalize(mul(float4(nrm, 0.0f), SQ_InvView).xyz);
