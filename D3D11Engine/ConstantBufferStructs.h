@@ -301,6 +301,10 @@ struct DS_ScreenQuadConstantBuffer {
     // NPC receivers use this to keep their normal bias synchronized with the
     // shadow projection instead of the continuously moving sky direction.
     float4 SQ_CascadeLightDirectionWS[MAX_CSM_CASCADES];
+
+    // Runtime shadow kernel selection. x = temporal reconstruction enabled.
+    // This must stay runtime-controlled so AA changes never require shader reloads.
+    float4 SQ_ShadowRuntimeParams;
 };
 
 struct CloudConstantBuffer {
@@ -430,7 +434,9 @@ struct RefractionInfoConstantBuffer {
     float RI_Pad2;
 
     XMFLOAT4X4 RI_ViewProj;
+    XMFLOAT4X4 RI_InvViewProj; // world-space water-depth reconstruction
 };
+static_assert( sizeof( RefractionInfoConstantBuffer ) == 224 );
 
 struct WetGroundSSRConstantBuffer {
     float4 WG_ProjParams;

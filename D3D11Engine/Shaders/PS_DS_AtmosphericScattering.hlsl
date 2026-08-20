@@ -62,6 +62,7 @@ cbuffer DS_ScreenQuadConstantBuffer : register(b0)
     // Cascade atlas UV rect (xy = offset, zw = scale); unused for texture arrays.
     float4 SQ_CascadeAtlasRect[MAX_CSM_CASCADES];
     float4 SQ_CascadeLightDirectionWS[MAX_CSM_CASCADES];
+    float4 SQ_ShadowRuntimeParams;
 };
 
 //--------------------------------------------------------------------------------------
@@ -274,12 +275,15 @@ float4 PSMain(PS_INPUT Input) : SV_TARGET
 	litPixel = ApplyAtmosphericScatteringGround(wsPosition, litPixel.rgb);
 
 	// NW_MISC_OILLAMP_02 restores the linked point-light palette ID from gb3.w.
+	// VOB/NPC pixels use -(1 + palette) so the water pass can exclude them;
+	// decode that transient sign encoding back to the original palette here.
 	// A VOB without an unambiguous enabled light writes zero and stays non-emissive.
 	// Oil-lamp pixels are sparse, so skip palette decoding and mask evaluation
 	// for the rest of this full-screen deferred pass.
+	float oilLampPaletteCode = gb3.w > 0.0f ? gb3.w : max(-gb3.w - 1.0f, 0.0f);
 	[branch]
-	if (gb3.w > 0.0f)
-		litPixel += ComputeOilLampEmission(diffuse.rgb, DecodeOilLampLightColor(gb3.w));
+	if (oilLampPaletteCode > 0.0f)
+		litPixel += ComputeOilLampEmission(diffuse.rgb, DecodeOilLampLightColor(oilLampPaletteCode));
 
 
     // Fix indoor stuff

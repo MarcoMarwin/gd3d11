@@ -215,6 +215,10 @@ FORWARD_PLUS_PS_OUTPUT PSMain( PS_INPUT Input )
 	float vertLighting = Input.vDiffuse.y;
 	float twoSidedBacklitMaterial = MI_Color.a < -1.5f ? 1.0f : 0.0f;
 	float npcMaterial = (MI_Color.a < -0.5f && MI_Color.a > -2.0f) ? 1.0f : 0.0f;
+	// MI_Color.a is also used as a private draw-class marker. Values below
+	// -0.1 identify all VOB/NPC pixels for water shoreline handling without
+	// changing the existing NPC and two-sided vegetation lighting classes.
+	float waterObjectMaterial = MI_Color.a < -0.1f ? 1.0f : 0.0f;
 	float alphaTestedMaterial = 0.0f;
 #if ALPHATEST == 1
 	alphaTestedMaterial = 1.0f;
@@ -294,8 +298,13 @@ FORWARD_PLUS_PS_OUTPUT PSMain( PS_INPUT Input )
 	output.vNrm = EncodeNormalGBuffer(nrm);
 	float encodedSpecIntensity = MI_Color.a < -1.5f ? -(specIntensity + 3.0f)
 		: (MI_Color.a < -0.5f ? -(specIntensity + 1.0f) : specIntensity);
+	// Preserve the oil-lamp palette while adding a sign-coded water object
+	// marker. World geometry keeps the original non-negative palette encoding;
+	// VOB/NPC pixels use -(1 + palette), so zero still means no lamp.
+	float encodedWaterMaterial = waterObjectMaterial > 0.5f
+		? -(1.0f + oilLampPaletteCode) : oilLampPaletteCode;
 	output.vSI_SP = float4(encodedSpecIntensity, specPower, saturate(MI_WetGroundSSRStrength),
-		oilLampPaletteCode);
+		encodedWaterMaterial);
 	output.vVelocity = CalculateVelocity(Input.vCurrClipPos, Input.vPrevClipPos);
 
 	return output;
@@ -400,7 +409,11 @@ DEFERRED_PS_OUTPUT PSMain( PS_INPUT Input ) : SV_TARGET
 	output.vSI_SP.y = deferredSpecPower;
 #endif
 	output.vSI_SP.z = saturate(MI_WetGroundSSRStrength);
-	output.vSI_SP.w = oilLampPaletteCode;
+	float waterObjectMaterial = MI_Color.a < -0.1f ? 1.0f : 0.0f;
+	// Keep the linked oil-lamp palette available to deferred lighting while
+	// reserving the negative range for direct VOB/NPC exclusion in water.
+	output.vSI_SP.w = waterObjectMaterial > 0.5f
+		? -(1.0f + oilLampPaletteCode) : oilLampPaletteCode;
 
 	// Calculate velocity for motion vectors
 	// For instanced objects (VOBs, skeletal meshes), vCurrClipPos/vPrevClipPos come from VS

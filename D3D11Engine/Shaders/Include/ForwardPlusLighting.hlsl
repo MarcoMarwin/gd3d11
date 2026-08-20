@@ -61,6 +61,7 @@ cbuffer FP_ScreenQuadConstantBuffer : register( b4 )
     float SQ_LightSize;
     float4 SQ_CascadeAtlasRect[MAX_CSM_CASCADES];
     float4 SQ_CascadeLightDirectionWS[MAX_CSM_CASCADES];
+    float4 SQ_ShadowRuntimeParams;
 };
 
 // Forward+ tile data

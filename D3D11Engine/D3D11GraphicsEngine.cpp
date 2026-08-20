@@ -71,6 +71,10 @@ static const GUID IID_IDXGIVkInteropAdapter = { 0x3A6D8F2C, 0xB0E8, 0x4AB4, { 0x
 static const GUID IID_IDXGIDeviceRenderDoc = { 0xa7aa6116, 0x9c8d, 0x4bba, { 0x90, 0x83, 0xb4, 0xd8, 0x16, 0xb7, 0x1b, 0x78 } };
 
 constexpr float inv255f = (1.f / 255.f);
+// Negative material-alpha values are renderer-private draw-class markers. Keep
+// the normal VOB marker above -0.5 so the existing NPC/vegetation lighting
+// classes remain unchanged while the water pass can identify every VOB.
+constexpr float WATER_VOB_MATERIAL_CLASS_MARKER = -0.25f;
 float vobAnimation_WindStrength = 1.0f;
 
 constexpr DXGI_FORMAT VERTEX_INDEX_DXGI_FORMAT = sizeof( VERTEX_INDEX ) == sizeof( unsigned short ) ? DXGI_FORMAT_R16_UINT : DXGI_FORMAT_R32_UINT;
@@ -174,7 +178,9 @@ static MaterialInfo::Buffer GetEffectiveMaterialBuffer(
 static void UpdateRefractionViewProjection( RefractionInfoConstantBuffer& buffer ) {
     XMMATRIX view = Engine::GAPI->GetViewMatrixXM();
     XMMATRIX proj = XMLoadFloat4x4( &Engine::GAPI->GetProjectionMatrix() );
-    XMStoreFloat4x4( &buffer.RI_ViewProj, XMMatrixMultiply( proj, view ) );
+    const XMMATRIX viewProj = XMMatrixMultiply( proj, view );
+    XMStoreFloat4x4( &buffer.RI_ViewProj, viewProj );
+    XMStoreFloat4x4( &buffer.RI_InvViewProj, XMMatrixInverse( nullptr, viewProj ) );
 }
 
 typedef void( __cdecl* PFN_DRAWMULTIINDEXEDINSTANCEDINDIRECT )(ID3D11DeviceContext* context, unsigned int drawCount,
@@ -3332,7 +3338,11 @@ XRESULT D3D11GraphicsEngine::DrawSkeletalMesh( SkeletalVobInfo* vi,
         if ( zCMaterial* mat = itm.first ) {
             zCTexture* tex;
             if ( ActivePS && (tex = mat->GetAniTexture()) != nullptr ) {
-                if ( !BindTextureNRFX( tex, (RenderingStage != DES_GHOST), true, (vi && vi->Vob && vi->Vob->GetVobType() == zVOB_TYPE_NSC) ? -1.0f : 0.0f ) ) {
+                const float materialClassMarker = (vi && vi->Vob)
+                    ? (vi->Vob->GetVobType() == zVOB_TYPE_NSC
+                        ? -1.0f : WATER_VOB_MATERIAL_CLASS_MARKER)
+                    : 0.0f;
+                if ( !BindTextureNRFX( tex, (RenderingStage != DES_GHOST), true, materialClassMarker ) ) {
                     continue;
                 }
             }
@@ -3802,7 +3812,8 @@ void D3D11GraphicsEngine::DrawSkeletalMeshVobs(
             if ( !vi->Vob->GetShowVisual() )
                 continue;
 
-            const float materialClassMarker = vi->Vob->GetVobType() == zVOB_TYPE_NSC ? -1.0f : 0.0f;
+            const float materialClassMarker = vi->Vob->GetVobType() == zVOB_TYPE_NSC
+                ? -1.0f : WATER_VOB_MATERIAL_CLASS_MARKER;
             float4 modelColor;
             if ( enableShadows ) {
                 // Let shadows do the work
@@ -4011,7 +4022,10 @@ void D3D11GraphicsEngine::DrawSkeletalMeshVobs(
 
         for ( auto& data : tempVobList ) {
             auto vi = data.VobInfo;
-            const float materialClassMarker = (vi && vi->Vob && vi->Vob->GetVobType() == zVOB_TYPE_NSC) ? -1.0f : 0.0f;
+            const float materialClassMarker = (vi && vi->Vob)
+                ? (vi->Vob->GetVobType() == zVOB_TYPE_NSC
+                    ? -1.0f : WATER_VOB_MATERIAL_CLASS_MARKER)
+                : 0.0f;
             auto model = data.Model;
             auto modelColor = data.ModelColor;
             modelColor.w = (vi && vi->Vob && vi->Vob->IsIndoorVob()) ? 0.05f : 1.0f;
@@ -4963,11 +4977,25 @@ XRESULT D3D11GraphicsEngine::OnStartWorldRendering() {
         }
         waterMaskResource = graph.ImportResource( L"RainExclusionMask", RainExclusionMaskBuffer.get() );
     }
+    const auto waterCoverageSize = GetResolution();
+    if ( !WaterCoverageBuffer
+        || WaterCoverageBuffer->GetSizeX() != waterCoverageSize.x
+        || WaterCoverageBuffer->GetSizeY() != waterCoverageSize.y ) {
+        WaterCoverageBuffer = std::make_unique<RenderToTextureBuffer>(
+            GetDevice().Get(), waterCoverageSize.x, waterCoverageSize.y, DXGI_FORMAT_R8_UNORM,
+            nullptr, DXGI_FORMAT_UNKNOWN, DXGI_FORMAT_UNKNOWN, 1, 1,
+            D3D11_BIND_RENDER_TARGET | D3D11_BIND_SHADER_RESOURCE );
+        SetDebugName( WaterCoverageBuffer->GetTexture().Get(), "Water Coverage" );
+    }
+    const RGResourceHandle waterCoverageResource = graph.ImportResource(
+        L"WaterCoverage", WaterCoverageBuffer.get() );
     const bool fsr3ActiveForReactiveMask = fsr3UpscalingActive;
 
     graph.AddPass( RG_PASS_NAME("DrawWaterSurfaces"), [&]( RGBuilder& builder, RenderPass& pass ) {
         builder.Read( backBufferHandle );
+        builder.Read( specularResource );
         builder.Write( backBufferHandle );
+        builder.Write( waterCoverageResource );
         if ( renderWaterMask ) {
             builder.Write( waterMaskResource );
         }
@@ -4979,7 +5007,7 @@ XRESULT D3D11GraphicsEngine::OnStartWorldRendering() {
             builder.Read( lowCloudLayerResource );
         }
 
-        pass.m_executeCallback = [this, renderWaterMask, waterMaskResource, fsr3ActiveForReactiveMask, reactiveMaskResource, compositionLowClouds, lowCloudLayerResource](const RenderGraph& graph) {
+        pass.m_executeCallback = [this, renderWaterMask, waterMaskResource, waterCoverageResource, specularResource, fsr3ActiveForReactiveMask, reactiveMaskResource, compositionLowClouds, lowCloudLayerResource](const RenderGraph& graph) {
             SetViewport( ViewportInfo( 0, 0, GetResolution() ) );
             ID3D11RenderTargetView* waterMaskRTV = nullptr;
             if ( renderWaterMask ) {
@@ -4998,7 +5026,23 @@ XRESULT D3D11GraphicsEngine::OnStartWorldRendering() {
                 auto* lowCloudLayer = graph.GetPhysicalTexture( lowCloudLayerResource );
                 lowCloudLayerSRV = lowCloudLayer && lowCloudLayer->GetShaderResView().Get() ? lowCloudLayer->GetShaderResView().Get() : nullptr;
             }
-            DrawWaterSurfaces( waterMaskRTV, fsr3ReactiveMaskRTV, lowCloudLayerSRV );
+            ID3D11RenderTargetView* waterCoverageRTV = nullptr;
+            if ( auto* waterCoverage = graph.GetPhysicalTexture( waterCoverageResource ) ) {
+                waterCoverageRTV = waterCoverage->GetRenderTargetView().Get();
+                if ( waterCoverageRTV ) {
+                    const float clearCoverage[4] = {};
+                    GetContext()->ClearRenderTargetView( waterCoverageRTV, clearCoverage );
+                }
+            }
+            auto* materialClassTexture = graph.GetPhysicalTexture( specularResource );
+            ID3D11ShaderResourceView* materialClassSRV = materialClassTexture
+                ? materialClassTexture->GetShaderResView().Get() : nullptr;
+            DrawWaterSurfaces(
+                waterMaskRTV,
+                fsr3ReactiveMaskRTV,
+                lowCloudLayerSRV,
+                waterCoverageRTV,
+                materialClassSRV );
         };
     });
 
@@ -6401,10 +6445,15 @@ XRESULT D3D11GraphicsEngine::DrawWorldMesh( bool noTextures ) {
 
 /** Draws the given mesh infos as water */
 void D3D11GraphicsEngine::DrawWaterSurfaces() {
-    DrawWaterSurfaces( nullptr, nullptr, nullptr );
+    DrawWaterSurfaces( nullptr, nullptr, nullptr, nullptr, nullptr );
 }
 
-void D3D11GraphicsEngine::DrawWaterSurfaces( ID3D11RenderTargetView* waterMaskRTV, ID3D11RenderTargetView* fsr3ReactiveMaskRTV, ID3D11ShaderResourceView* lowCloudLayerSRV ) {
+void D3D11GraphicsEngine::DrawWaterSurfaces(
+    ID3D11RenderTargetView* waterMaskRTV,
+    ID3D11RenderTargetView* fsr3ReactiveMaskRTV,
+    ID3D11ShaderResourceView* lowCloudLayerSRV,
+    ID3D11RenderTargetView* waterCoverageRTV,
+    ID3D11ShaderResourceView* materialClassSRV ) {
     if ( FrameWaterSurfaces.empty() ) {
         return;
     }
@@ -6508,19 +6557,38 @@ void D3D11GraphicsEngine::DrawWaterSurfaces( ID3D11RenderTargetView* waterMaskRT
     {
         ZoneScopedN( "DrawWaterSurfaces::ZPrepass" );
         auto _scopeWaterZPrepass = RecordGraphicsEvent( GE_NAME( "DrawWaterSurfaces::ZPrepass" ) );
-        // Disable color writes for depth-only rendering
-        Engine::GAPI->GetRendererState().BlendState.ColorWritesEnabled = false;
+        const bool writeWaterCoverage = waterCoverageRTV != nullptr;
+        // The coverage pass reuses the existing water Z-prepass draw. It
+        // writes a binary R8 mask and still updates the water depth buffer;
+        // without a coverage target we retain the old depth-only fallback.
+        Engine::GAPI->GetRendererState().BlendState.ColorWritesEnabled = writeWaterCoverage;
         Engine::GAPI->GetRendererState().BlendState.SetDirty();
+        Engine::GAPI->GetRendererState().DepthState.DepthWriteEnabled = true;
+        Engine::GAPI->GetRendererState().DepthState.SetDirty();
         UpdateRenderStates();
 
-        GetContext()->PSSetShader( nullptr, nullptr, 0 );
+        if ( writeWaterCoverage ) {
+            GetContext()->OMSetRenderTargets( 1, &waterCoverageRTV,
+                DepthStencilBuffer->GetDepthStencilView().Get() );
+            SetActivePixelShader( PShaderID::PS_Water );
+            if ( ActivePS ) {
+                ActivePS->Apply();
+                WaterMaterialInfoConstantBuffer coverageCB = {};
+                // WM_Padding1.x is a runtime-only coverage-pass flag. The
+                // pixel shader returns before reading scene resources.
+                coverageCB.WM_Padding1.x = 1.0f;
+                ActivePS->GetBuffer( "WaterMaterialInfo" ).Update( &coverageCB ).Bind();
+            }
+        } else {
+            GetContext()->PSSetShader( nullptr, nullptr, 0 );
+        }
 
-        if ( !FeatureLevel10Compatibility ) {
+        if ( regularWaterDrawCount > 0 && !FeatureLevel10Compatibility ) {
             DrawMultiIndexedInstancedIndirect( Context.Get(),
                 regularWaterDrawCount,
                 WaterIndirectBuffer->GetIndirectBuffer().Get(),
                 0, argStride );
-        } else {
+        } else if ( regularWaterDrawCount > 0 ) {
             // FL10 fallback: direct DrawIndexed per mesh
             for ( unsigned int i = 0; i < regularWaterDrawCount; ++i ) {
                 const auto& args = waterDrawArgs[i];
@@ -6540,6 +6608,8 @@ void D3D11GraphicsEngine::DrawWaterSurfaces( ID3D11RenderTargetView* waterMaskRT
         Engine::GAPI->GetRendererState().DepthState.DepthWriteEnabled = false;
         Engine::GAPI->GetRendererState().DepthState.SetDirty();
         UpdateRenderStates();
+        GetContext()->OMSetRenderTargets( waterTargetCount, waterTargets,
+            DepthStencilBuffer->GetDepthStencilView().Get() );
 
         // Bind pixel water shader
         SetActivePixelShader( PShaderID::PS_Water );
@@ -6556,6 +6626,10 @@ void D3D11GraphicsEngine::DrawWaterSurfaces( ID3D11RenderTargetView* waterMaskRT
 
         // Bind depth to the shader
         DepthStencilBufferCopy->BindToPixelShader( GetContext().Get(), 2 );
+        GetContext()->PSSetShaderResources( 7, 1, &materialClassSRV );
+        ID3D11ShaderResourceView* waterCoverageSRV = WaterCoverageBuffer
+            ? WaterCoverageBuffer->GetShaderResView().Get() : nullptr;
+        GetContext()->PSSetShaderResources( 8, 1, &waterCoverageSRV );
 
         auto Resolution = GetResolution();
 
@@ -6609,7 +6683,7 @@ void D3D11GraphicsEngine::DrawWaterSurfaces( ID3D11RenderTargetView* waterMaskRT
         }
     }
 
-    GetContext()->PSSetShaderResources( 0, 7, s_nullSRVs );
+    GetContext()->PSSetShaderResources( 0, 9, s_nullSRVs );
 
     GetContext()->OMSetRenderTargets( 1, HDRBackBuffer->GetRenderTargetView().GetAddressOf(),
         DepthStencilBuffer->GetDepthStencilView().Get() );
@@ -8607,7 +8681,7 @@ XRESULT D3D11GraphicsEngine::DrawVOBsInstanced() {
                     const MeshKey& meshKey = drawItem.Mesh;
                     MeshInfo* meshInfo = drawItem.MeshEntry;
                     const float materialClassMarker = IsTwoSidedBacklitVegetationVisual(
-                        cachedVisual->Visual->VisualName ) ? -2.0f : 0.0f;
+                        cachedVisual->Visual->VisualName ) ? -2.0f : WATER_VOB_MATERIAL_CLASS_MARKER;
                     zCTexture* tx = meshKey.Material ? meshKey.Material->GetAniTexture() : nullptr;
                     const bool isScopedWindowMaterial = IsCityWindowFeatureReady()
                         && IsWindowGlassMaterial( cachedVisual->Visual, tx );
@@ -10261,7 +10335,7 @@ void D3D11GraphicsEngine::DrawUnderwaterEffects() {
     UpdateRenderStates();
 
     auto Resolution = GetResolution();
-    RefractionInfoConstantBuffer ricb;
+    RefractionInfoConstantBuffer ricb = {};
     ricb.RI_Projection = Engine::GAPI->GetProjectionMatrix();
     ricb.RI_ViewportSize = float2( Resolution.x, Resolution.y );
     ricb.RI_Time = Engine::GAPI->GetTimeSeconds();

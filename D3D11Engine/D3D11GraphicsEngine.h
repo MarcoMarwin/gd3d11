@@ -358,7 +358,9 @@ public:
     void DrawWaterSurfaces() override;
     void DrawWaterSurfaces( ID3D11RenderTargetView* waterMaskRTV,
                             ID3D11RenderTargetView* fsr3ReactiveMaskRTV = nullptr,
-                            ID3D11ShaderResourceView* lowCloudLayerSRV = nullptr );
+                            ID3D11ShaderResourceView* lowCloudLayerSRV = nullptr,
+                            ID3D11RenderTargetView* waterCoverageRTV = nullptr,
+                            ID3D11ShaderResourceView* materialClassSRV = nullptr );
 
     /** Handles an UI-Event */
     void OnUIEvent( EUIEvent uiEvent ) override;
@@ -731,6 +733,7 @@ private:
     std::unique_ptr<RenderToTextureBuffer> VelocityBuffer;
     std::unique_ptr<D3D11TemporalState> TemporalState;
     std::unique_ptr<RenderToTextureBuffer> RainExclusionMaskBuffer;
+    std::unique_ptr<RenderToTextureBuffer> WaterCoverageBuffer;
     XMFLOAT4X4 m_PrevViewProjMatrix;
     
     INT2 NewResolution;

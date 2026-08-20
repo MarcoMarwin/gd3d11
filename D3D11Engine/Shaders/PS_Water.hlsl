@@ -20,6 +20,7 @@ cbuffer RefractionInfo : register(b2)
     float3 RI_CameraPosition;
     float RI_Pad2;
     float4x4 RI_ViewProj;
+    float4x4 RI_InvViewProj;
 };
 
 cbuffer WaterMaterialInfo : register(b3)
@@ -49,6 +50,126 @@ TextureCube TX_ReflectionCube : register(t3);
 Texture2D TX_Distortion : register(t4);
 Texture2D TX_Scene : register(t5);
 Texture2D TX_LowClouds : register(t6);
+Texture2D TX_MaterialClass : register(t7);
+Texture2D TX_WaterCoverage : register(t8);
+
+static const float WATER_DEEP_WATER_DEPTH = 100.0f;
+static const float WATER_SHORE_RING_RADIUS = 75.0f;
+
+float SampleWaterObjectMask(float2 uv)
+{
+    // GBuffer alpha uses -(1 + oilLampPalette) for VOB/NPC pixels and keeps
+    // world geometry at the original non-negative oil-lamp encoding.
+    float marker = TX_MaterialClass.SampleLevel(SS_Linear, saturate(uv), 0).w;
+    return step(0.5f, -marker);
+}
+
+float SampleWaterCoverage(float2 uv)
+{
+    return TX_WaterCoverage.SampleLevel(SS_Linear, saturate(uv), 0).r;
+}
+
+float3 ReconstructWaterSceneWorldPosition(
+    float2 uv,
+    float rawDepth,
+    out float valid)
+{
+    valid = step(0.000001f, rawDepth);
+    float4 clipPosition = float4(
+        uv.x * 2.0f - 1.0f,
+        1.0f - uv.y * 2.0f,
+        rawDepth,
+        1.0f);
+    float4 worldPosition = mul(clipPosition, RI_InvViewProj);
+    valid *= step(0.0001f, abs(worldPosition.w));
+    return worldPosition.xyz / max(worldPosition.w, 0.0001f);
+}
+
+float ComputeWorldWaterDepth(
+    float2 uv,
+    float rawDepth,
+    float3 waterWorldPosition)
+{
+    float valid;
+    float3 sceneWorldPosition = ReconstructWaterSceneWorldPosition(
+        uv,
+        rawDepth,
+        valid);
+    float worldDepth = max(waterWorldPosition.y - sceneWorldPosition.y, 0.0f);
+    // No scene depth means open water/sky. It must not be treated as a false
+    // shallow shoreline candidate.
+    return lerp(1000000.0f, worldDepth, valid);
+}
+
+float2 ProjectWaterWorldPoint(float3 worldPoint, out float valid)
+{
+    float4 clip = mul(float4(worldPoint, 1.0f), RI_ViewProj);
+    valid = step(0.001f, clip.w);
+    float2 uv = clip.xy / max(clip.w, 0.001f);
+    uv = uv * float2(0.5f, -0.5f) + 0.5f;
+    valid *= step(0.0f, uv.x) * step(uv.x, 1.0f)
+        * step(0.0f, uv.y) * step(uv.y, 1.0f);
+    return saturate(uv);
+}
+
+float EvaluateSmallWorldGeometryWaterException(
+    float3 waterWorldPosition,
+    float currentWorldWaterDepth,
+    float centerObjectMask)
+{
+    // currentWorldWaterDepth is the vertical world-space distance from the
+    // water surface to the reconstructed scene-depth hit, not view-ray depth.
+    // A shallow world-geometry hit is ignored as a shoreline only when the
+    // complete 150-unit-diameter neighbourhood is water and every probe is
+    // either open/deep water or another directly excluded object.
+    const float shallowCandidate = 1.0f - step(
+        WATER_DEEP_WATER_DEPTH,
+        currentWorldWaterDepth);
+    const float2 ringDirections[8] = {
+        float2( 1.0f,  0.0f),
+        float2(-1.0f,  0.0f),
+        float2( 0.0f,  1.0f),
+        float2( 0.0f, -1.0f),
+        float2( 0.70710678f,  0.70710678f),
+        float2(-0.70710678f,  0.70710678f),
+        float2( 0.70710678f, -0.70710678f),
+        float2(-0.70710678f, -0.70710678f)
+    };
+
+    float waterProbeCount = 0.0f;
+    float deepProbeCount = 0.0f;
+    [unroll]
+    for (int i = 0; i < 8; ++i)
+    {
+        float probeValid;
+        float3 probeSurfaceWorldPosition = waterWorldPosition + float3(
+            ringDirections[i].x * WATER_SHORE_RING_RADIUS,
+            0.0f,
+            ringDirections[i].y * WATER_SHORE_RING_RADIUS);
+        float2 probeUV = ProjectWaterWorldPoint(
+            probeSurfaceWorldPosition,
+            probeValid);
+        float probeWater = probeValid * step(0.5f, SampleWaterCoverage(probeUV));
+        float probeRawDepth = TX_Depth.SampleLevel(SS_Linear, probeUV, 0).r;
+        float probeWorldWaterDepth = ComputeWorldWaterDepth(
+            probeUV,
+            probeRawDepth,
+            probeSurfaceWorldPosition);
+        float probeObject = SampleWaterObjectMask(probeUV);
+        float probeDeep = step(
+            WATER_DEEP_WATER_DEPTH,
+            probeWorldWaterDepth);
+        probeDeep = max(probeDeep, probeObject);
+
+        waterProbeCount += probeWater;
+        deepProbeCount += probeWater * probeDeep;
+    }
+
+    float completeWaterRing = step(7.5f, waterProbeCount);
+    float completeDeepRing = step(7.5f, deepProbeCount);
+    return (1.0f - centerObjectMask) * shallowCandidate
+        * completeWaterRing * completeDeepRing;
+}
 
 void AccumulateSkyBackgroundSample(float2 uv, inout float3 sum, inout float w)
 {
@@ -276,9 +397,28 @@ struct PS_OUTPUT
 PS_OUTPUT PSMain(PS_INPUT Input)
 {
     PS_OUTPUT o;
+
+    // The existing water Z-prepass reuses this shader to write a binary
+    // coverage mask. It returns before sampling any scene resources.
+    if (WM_Padding1.x > 0.5f)
+    {
+        o.color = 1.0f;
+        o.waterMask = 1.0f;
+        o.fsr3ReactiveMask = 1.0f;
+        return o;
+    }
+
     float2 screenUV = Input.vPosition.xy / RI_ViewportSize;
+    // The direct VOB/NPC exclusion is shared by Ocean and Legacy water.  It
+    // is intentionally read from the already available GBuffer, so Legacy
+    // receives the same shoreline exception without another geometry pass.
+    float centerObjectMask = SampleWaterObjectMask(screenUV);
     float surfaceViewZ = Input.vTexcoord2.x;
     float rawCenterDepth = TX_Depth.Sample(SS_Linear, screenUV).r;
+    float centerWorldWaterDepth = ComputeWorldWaterDepth(
+        screenUV,
+        rawCenterDepth,
+        Input.vWorldPosition);
     float sceneViewZ = LinearizeWaterDepth(rawCenterDepth);
     float viewRayScale = clamp(abs(Input.vTexcoord2.y) / max(abs(surfaceViewZ), 1), 1, 8);
     float waterThickness = clamp(max(sceneViewZ - surfaceViewZ, 0) * viewRayScale, 0, 6000);
@@ -375,6 +515,8 @@ PS_OUTPUT PSMain(PS_INPUT Input)
             ds.y * waveScale + waterRainNormalDistortion.y));
     float3 sceneClean = TX_Scene.Sample(SS_Linear, screenUV).rgb;
     float3 sceneRefr = TX_Scene.Sample(SS_Linear, distUV).rgb;
+    float refractedObjectMask = SampleWaterObjectMask(distUV);
+    float waterObjectMask = max(centerObjectMask, refractedObjectMask);
     float ndv = saturate(dot(-viewDirection, wf));
     float fresnel = 0.02f + 0.98f * pow(1 - ndv, 5);
     float reflectFresnel = pow(1.0f - ndv, 3.0f);
@@ -655,6 +797,30 @@ float3 skyReflection =
         float shoreColor = SmootherStep01(saturate(
             (thick - 1.0f)
             / max(shoreColorEnd - 1.0f, 1.0f)));
+        float smallWorldGeometryException = 0.0f;
+        // The eight-probe ring is only needed for shallow world-geometry
+        // candidates. Deep water and direct object hits take the cheap path.
+        [branch]
+        if (centerWorldWaterDepth < WATER_DEEP_WATER_DEPTH
+            && centerObjectMask < 0.5f)
+        {
+            smallWorldGeometryException =
+                EvaluateSmallWorldGeometryWaterException(
+                    Input.vWorldPosition,
+                    centerWorldWaterDepth,
+                    centerObjectMask);
+        }
+        float deepWaterException = step(
+            WATER_DEEP_WATER_DEPTH,
+            centerWorldWaterDepth);
+        // Object hits must never become a shoreline. The local depth test is
+        // restricted to world geometry and only removes false contours from
+        // small isolated surfaces surrounded by the same deep water.
+        float shoreException = max(
+            max(waterObjectMask, smallWorldGeometryException),
+            deepWaterException);
+        shore = lerp(shore, 1.0f, shoreException);
+        shoreColor = lerp(shoreColor, 1.0f, shoreException);
         // ADDONWORLD keeps the clearer turquoise profile; every other world
         // gets denser, less saturated northern coastal water.
         float3 absDay = lerp(
@@ -975,6 +1141,34 @@ float3 skyReflection =
             legacyShoreColor,
             1.0f,
             waterfallSurfaceMask);
+        // Apply the same shoreline exceptions as Ocean water: direct NPC/VOB
+        // hits are never shore, deep water is never shore, and the 150-unit
+        // ring test is evaluated only for shallow world geometry.
+        float legacySmallWorldGeometryException = 0.0f;
+        [branch]
+        if (centerWorldWaterDepth < WATER_DEEP_WATER_DEPTH
+            && centerObjectMask < 0.5f)
+        {
+            legacySmallWorldGeometryException =
+                EvaluateSmallWorldGeometryWaterException(
+                    Input.vWorldPosition,
+                    centerWorldWaterDepth,
+                    centerObjectMask);
+        }
+        float legacyDeepWaterException = step(
+            WATER_DEEP_WATER_DEPTH,
+            centerWorldWaterDepth);
+        float legacyShoreException = max(
+            max(waterObjectMask, legacySmallWorldGeometryException),
+            legacyDeepWaterException);
+        legacyShoreVisibility = lerp(
+            legacyShoreVisibility,
+            1.0f,
+            legacyShoreException);
+        legacyShoreColor = lerp(
+            legacyShoreColor,
+            1.0f,
+            legacyShoreException);
         // Keep the broad Legacy visibility fade for reflections, glints and the
         // water boundary, but restore the selected day or night water color over
         // the softer color interval.

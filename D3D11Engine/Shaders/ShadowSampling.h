@@ -30,24 +30,29 @@
 #endif
 
 #ifndef PCSS_BLOCKER_TAPS
-#define PCSS_BLOCKER_TAPS 8
+#define PCSS_BLOCKER_TAPS 16
 #endif
 
 #ifndef PCSS_FILTER_TAPS_NEAR
-#define PCSS_FILTER_TAPS_NEAR 8
+#define PCSS_FILTER_TAPS_NEAR 32
 #endif
 
 #ifndef PCSS_FILTER_TAPS_FAR
-#define PCSS_FILTER_TAPS_FAR 4
+#define PCSS_FILTER_TAPS_FAR 16
 #endif
 
 #ifndef PCF_FILTER_TAPS_NEAR
-#define PCF_FILTER_TAPS_NEAR 8
+#define PCF_FILTER_TAPS_NEAR 16
 #endif
 
 #ifndef PCF_FILTER_TAPS_FAR
-#define PCF_FILTER_TAPS_FAR 4
+#define PCF_FILTER_TAPS_FAR 8
 #endif
+
+bool UseTemporalShadowReconstruction()
+{
+    return SQ_ShadowRuntimeParams.x > 0.5f;
+}
 
 //--------------------------------------------------------------------------------------
 // Shadow map sampling helpers
@@ -160,37 +165,36 @@ static const float2 g_PoissonDisk8[8] = {
 
 float GetShadowBlueNoise(float2 screenPos, int cascadeIndex, int sampleOffset)
 {
-#if SHD_BLUE_NOISE
-    uint2 pixel = uint2(screenPos);
-    uint framePhase = SQ_FrameIndex & 63u;
-    uint cascadePhase = (cascadeIndex >= 0) ? (uint)cascadeIndex : 0u;
-    uint samplePhase = (sampleOffset >= 0) ? (uint)sampleOffset : 0u;
+    if (UseTemporalShadowReconstruction())
+    {
+        uint2 pixel = uint2(screenPos);
+        uint framePhase = SQ_FrameIndex & 63u;
+        uint cascadePhase = (cascadeIndex >= 0) ? (uint)cascadeIndex : 0u;
+        uint samplePhase = (sampleOffset >= 0) ? (uint)sampleOffset : 0u;
 
-    uint2 noiseCoord;
-    noiseCoord.x = (pixel.x + framePhase * 17u + cascadePhase * 37u + samplePhase * 23u) & 511u;
-    noiseCoord.y = (pixel.y + framePhase * 29u + cascadePhase * 19u + samplePhase * 31u) & 511u;
+        uint2 noiseCoord;
+        noiseCoord.x = (pixel.x + framePhase * 17u + cascadePhase * 37u + samplePhase * 23u) & 511u;
+        noiseCoord.y = (pixel.y + framePhase * 29u + cascadePhase * 19u + samplePhase * 31u) & 511u;
 
-    float4 noise = TX_ShadowBlueNoise.Load(int3(noiseCoord, 0));
-    uint channel = samplePhase & 3u;
-    float value = (channel == 0u) ? noise.x :
-                  (channel == 1u) ? noise.y :
-                  (channel == 2u) ? noise.z : noise.w;
-    return frac(value + (float)((framePhase + samplePhase * 3u) & 63u) * 0.6180339887f);
-#else
-    // Deterministic fallback: never animate an undersampled shadow kernel.
+        float4 noise = TX_ShadowBlueNoise.Load(int3(noiseCoord, 0));
+        uint channel = samplePhase & 3u;
+        float value = (channel == 0u) ? noise.x :
+                      (channel == 1u) ? noise.y :
+                      (channel == 2u) ? noise.z : noise.w;
+        return frac(value + (float)((framePhase + samplePhase * 3u) & 63u) * 0.6180339887f);
+    }
+
+    // Deterministic fallback: never animate a non-temporal shadow kernel.
     float2 seed = screenPos + float2((float)sampleOffset * 13.17f, (float)cascadeIndex * 7.31f);
     return frac(52.9829189f * frac(dot(seed, float2(0.06711056f, 0.00583715f))));
-#endif
 }
 
 int GetBlueNoiseStartIndex(float2 screenPos, int cascadeIndex, int patternSize, int sampleOffset)
 {
     int size = max(patternSize, 1);
-#if SHD_BLUE_NOISE
-    return (int)(GetShadowBlueNoise(screenPos, cascadeIndex, sampleOffset) * (float)size) % size;
-#else
-    return sampleOffset % size;
-#endif
+    return UseTemporalShadowReconstruction()
+        ? (int)(GetShadowBlueNoise(screenPos, cascadeIndex, sampleOffset) * (float)size) % size
+        : sampleOffset % size;
 }
 
 float2x2 RotationMatrixFromNoise(float rawNoise)
@@ -204,11 +208,9 @@ float2x2 RotationMatrixFromNoise(float rawNoise)
 
 float2x2 GetPoissonRotationMatrixForCascade(float2 screenPos, int cascadeIndex)
 {
-#if SHD_BLUE_NOISE
-    return RotationMatrixFromNoise(GetShadowBlueNoise(screenPos, cascadeIndex, 0));
-#else
-    return float2x2(1.0f, 0.0f, 0.0f, 1.0f);
-#endif
+    return UseTemporalShadowReconstruction()
+        ? RotationMatrixFromNoise(GetShadowBlueNoise(screenPos, cascadeIndex, 0))
+        : float2x2(1.0f, 0.0f, 0.0f, 1.0f);
 }
 
 float2x2 GetPoissonRotationMatrix(float2 screenPos)
@@ -218,13 +220,14 @@ float2x2 GetPoissonRotationMatrix(float2 screenPos)
 
 float2x2 GetPoissonRotationMatrixRForCascade(float2 screenPos, int cascadeIndex, out float rawNoise)
 {
-#if SHD_BLUE_NOISE
-    rawNoise = GetShadowBlueNoise(screenPos, cascadeIndex, 0);
-    return RotationMatrixFromNoise(rawNoise);
-#else
+    if (UseTemporalShadowReconstruction())
+    {
+        rawNoise = GetShadowBlueNoise(screenPos, cascadeIndex, 0);
+        return RotationMatrixFromNoise(rawNoise);
+    }
+
     rawNoise = 0.5f;
     return float2x2(1.0f, 0.0f, 0.0f, 1.0f);
-#endif
 }
 
 float2x2 GetPoissonRotationMatrixR(float2 screenPos, out float rawNoise)
@@ -245,17 +248,48 @@ void FindBlockers(out float avgBlockerDepth, out float numBlockers,
     numBlockers = 0.0f;
     int startIdx = GetBlueNoiseStartIndex(screenPos, cascadeIndex, 16, 5);
 
-    [unroll]
-    for (int i = 0; i < PCSS_BLOCKER_TAPS; ++i)
+    // Always test the receiver center. Thin animated casters can occupy only
+    // a fraction of the blocker footprint at Low/Medium CSM resolutions; a
+    // pure Poisson search can then miss the caster and falsely report light.
+    float centerDepth = SampleShadowMapLevel(uv, cascadeIndex);
+    if (centerDepth < zReceiver)
     {
-        int sampleIdx = (startIdx + i * 5) & 15;
-        float2 offset = mul(rotMat, g_PoissonDisk16[sampleIdx]) * searchRadius;
-        float shadowMapDepth = SampleShadowMapLevel(uv + offset, cascadeIndex);
+        blockerSum += centerDepth;
+        numBlockers += 1.0f;
+    }
 
-        if (shadowMapDepth < zReceiver)
+    if (UseTemporalShadowReconstruction())
+    {
+        // FSR3 reconstructs the missing spatial samples over time. Keep this
+        // branch statically unrolled so the temporal path really costs 8 taps.
+        [unroll]
+        for (int i = 0; i < 8; ++i)
         {
-            blockerSum += shadowMapDepth;
-            numBlockers += 1.0f;
+            int sampleIdx = (startIdx + i * 5) & 15;
+            float2 offset = mul(rotMat, g_PoissonDisk16[sampleIdx]) * searchRadius;
+            float shadowMapDepth = SampleShadowMapLevel(uv + offset, cascadeIndex);
+
+            if (shadowMapDepth < zReceiver)
+            {
+                blockerSum += shadowMapDepth;
+                numBlockers += 1.0f;
+            }
+        }
+    }
+    else
+    {
+        [unroll]
+        for (int i = 0; i < PCSS_BLOCKER_TAPS; ++i)
+        {
+            int sampleIdx = (startIdx + i * 5) & 15;
+            float2 offset = mul(rotMat, g_PoissonDisk16[sampleIdx]) * searchRadius;
+            float shadowMapDepth = SampleShadowMapLevel(uv + offset, cascadeIndex);
+
+            if (shadowMapDepth < zReceiver)
+            {
+                blockerSum += shadowMapDepth;
+                numBlockers += 1.0f;
+            }
         }
     }
     avgBlockerDepth = blockerSum / max(numBlockers, 1.0f);
@@ -423,6 +457,19 @@ float SampleCascadeShadowStablePCF(float4 vShadowSamplingPos, float2 projectedTe
 #if NUM_CSM_CASCADES <= 1
     float2x2 rotMat = GetPoissonRotationMatrixForCascade(screenPos, cascadeIndex);
     int startIdx = GetBlueNoiseStartIndex(screenPos, cascadeIndex, 16, 23);
+    if (UseTemporalShadowReconstruction())
+    {
+        [unroll]
+        for (int i = 0; i < 8; i++)
+        {
+            int sampleIdx = (startIdx + i * 5) & 15;
+            float2 offset = mul(rotMat, g_PoissonDisk16[sampleIdx]) * filterRadius;
+            sum += SampleShadowMapCmp(projectedTexCoords.xy + offset, cascadeIndex,
+                vShadowSamplingPos.z - bias);
+        }
+        return sum * (1.0f / 8.0f);
+    }
+
     [unroll]
     for (int i = 0; i < PCF_FILTER_TAPS_NEAR; i++)
     {
@@ -431,12 +478,25 @@ float SampleCascadeShadowStablePCF(float4 vShadowSamplingPos, float2 projectedTe
         sum += SampleShadowMapCmp(projectedTexCoords.xy + offset, cascadeIndex,
             vShadowSamplingPos.z - bias);
     }
-    return sum / (float)max(PCF_FILTER_TAPS_NEAR, 1);
+    return sum * (1.0f / (float)PCF_FILTER_TAPS_NEAR);
 #else
     if (cascadeIndex < CSM_PCF_LIMIT)
     {
         float2x2 rotMat = GetPoissonRotationMatrixForCascade(screenPos, cascadeIndex);
         int startIdx = GetBlueNoiseStartIndex(screenPos, cascadeIndex, 16, 29);
+        if (UseTemporalShadowReconstruction())
+        {
+            [unroll]
+            for (int i = 0; i < 8; i++)
+            {
+                int sampleIdx = (startIdx + i * 5) & 15;
+                float2 offset = mul(rotMat, g_PoissonDisk16[sampleIdx]) * filterRadius;
+                sum += SampleShadowMapCmp(projectedTexCoords.xy + offset, cascadeIndex,
+                    vShadowSamplingPos.z - bias);
+            }
+            return sum * (1.0f / 8.0f);
+        }
+
         [unroll]
         for (int i = 0; i < PCF_FILTER_TAPS_NEAR; i++)
         {
@@ -445,11 +505,24 @@ float SampleCascadeShadowStablePCF(float4 vShadowSamplingPos, float2 projectedTe
             sum += SampleShadowMapCmp(projectedTexCoords.xy + offset, cascadeIndex,
                 vShadowSamplingPos.z - bias);
         }
-        return sum / (float)max(PCF_FILTER_TAPS_NEAR, 1);
+        return sum * (1.0f / (float)PCF_FILTER_TAPS_NEAR);
     }
 
     float2x2 rotMat = GetPoissonRotationMatrixForCascade(screenPos, cascadeIndex);
     int startIdx = GetBlueNoiseStartIndex(screenPos, cascadeIndex, 8, 31);
+    if (UseTemporalShadowReconstruction())
+    {
+        [unroll]
+        for (int i = 0; i < 4; i++)
+        {
+            int sampleIdx = (startIdx + i * 3) & 7;
+            float2 offset = mul(rotMat, g_PoissonDisk8[sampleIdx]) * filterRadius;
+            sum += SampleShadowMapCmp(projectedTexCoords.xy + offset, cascadeIndex,
+                vShadowSamplingPos.z - bias);
+        }
+        return sum * 0.25f;
+    }
+
     [unroll]
     for (int i = 0; i < PCF_FILTER_TAPS_FAR; i++)
     {
@@ -458,7 +531,7 @@ float SampleCascadeShadowStablePCF(float4 vShadowSamplingPos, float2 projectedTe
         sum += SampleShadowMapCmp(projectedTexCoords.xy + offset, cascadeIndex,
             vShadowSamplingPos.z - bias);
     }
-    return sum / (float)max(PCF_FILTER_TAPS_FAR, 1);
+    return sum * (1.0f / (float)PCF_FILTER_TAPS_FAR);
 #endif
 }
 
@@ -511,19 +584,13 @@ float SampleCascadeShadowSoft(float4 vShadowSamplingPos, float2 projectedTexCoor
     float texelSize = 1.0f / GetCascadeShadowResolution(cascadeIndex);
     float filterRadius = texelSize * softness;
 
-    if (forceStablePCF > 0.5f && cascadeIndex < CSM_PCF_LIMIT)
+    if (forceStablePCF > 0.5f)
     {
         return saturate(SampleCascadeShadowCharacterPCF(
             vShadowSamplingPos, projectedTexCoords, cascadeIndex, bias, texelSize, softness));
     }
 
 #if SHD_FILTER_PCSS
-    if (forceStablePCF > 0.5f)
-    {
-        shadow = SampleCascadeShadowStablePCF(
-            vShadowSamplingPos, projectedTexCoords, cascadeIndex, bias, screenPos, filterRadius);
-    }
-    else
     {
         float noiseVal;
         float2x2 rotMat = GetPoissonRotationMatrixRForCascade(screenPos, cascadeIndex, noiseVal);
@@ -535,36 +602,72 @@ float SampleCascadeShadowSoft(float4 vShadowSamplingPos, float2 projectedTexCoor
 
         if (pcssRadius < 0.0f)
         {
-            shadow = 1.0f;
+            // The blocker search may legitimately miss a sub-texel caster,
+            // but the receiver comparison must not turn that into a bright
+            // firefly inside an otherwise shadowed NPC projection.
+            shadow = SampleShadowMapCmp(projectedTexCoords.xy, cascadeIndex, zReceiver);
         }
         else
         {
-            float sum = 0.0f;
+            // Keep one deterministic center comparison in the filter. It is
+            // the low-cost guard against all temporal taps landing outside a
+            // thin NPC shadow at Low/Medium CSM resolution.
+            float centerShadow = SampleShadowMapCmp(
+                projectedTexCoords.xy, cascadeIndex, zReceiver);
+            float sum = centerShadow;
             if (cascadeIndex < CSM_PCF_LIMIT)
             {
                 float finalRadius = pcssRadius * lerp(0.85f, 1.15f, noiseVal);
                 int startIdx = GetBlueNoiseStartIndex(screenPos, cascadeIndex, 32, 11);
-                [unroll]
-                for (int i = 0; i < PCSS_FILTER_TAPS_NEAR; i++)
+                if (UseTemporalShadowReconstruction())
                 {
-                    int sampleIdx = (startIdx + i * 9) & 31;
-                    float2 offset = mul(rotMat, g_PoissonDisk32[sampleIdx]) * finalRadius;
-                    sum += SampleShadowMapCmp(projectedTexCoords.xy + offset, cascadeIndex, zReceiver);
+                    [unroll]
+                    for (int i = 0; i < 8; i++)
+                    {
+                        int sampleIdx = (startIdx + i * 9) & 31;
+                        float2 offset = mul(rotMat, g_PoissonDisk32[sampleIdx]) * finalRadius;
+                        sum += SampleShadowMapCmp(projectedTexCoords.xy + offset, cascadeIndex, zReceiver);
+                    }
+                    shadow = sum * (1.0f / 9.0f);
                 }
-                shadow = sum / (float)max(PCSS_FILTER_TAPS_NEAR, 1);
+                else
+                {
+                    [unroll]
+                    for (int i = 0; i < PCSS_FILTER_TAPS_NEAR; i++)
+                    {
+                        int sampleIdx = (startIdx + i * 9) & 31;
+                        float2 offset = mul(rotMat, g_PoissonDisk32[sampleIdx]) * finalRadius;
+                        sum += SampleShadowMapCmp(projectedTexCoords.xy + offset, cascadeIndex, zReceiver);
+                    }
+                    shadow = sum * (1.0f / (float)(PCSS_FILTER_TAPS_NEAR + 1));
+                }
             }
             else
             {
                 float finalRadius = pcssRadius * lerp(0.95f, 1.05f, noiseVal);
                 int startIdx = GetBlueNoiseStartIndex(screenPos, cascadeIndex, 16, 17);
-                [unroll]
-                for (int i = 0; i < PCSS_FILTER_TAPS_FAR; i++)
+                if (UseTemporalShadowReconstruction())
                 {
-                    int sampleIdx = (startIdx + i * 5) & 15;
-                    float2 offset = mul(rotMat, g_PoissonDisk16[sampleIdx]) * finalRadius;
-                    sum += SampleShadowMapCmp(projectedTexCoords.xy + offset, cascadeIndex, zReceiver);
+                    [unroll]
+                    for (int i = 0; i < 4; i++)
+                    {
+                        int sampleIdx = (startIdx + i * 5) & 15;
+                        float2 offset = mul(rotMat, g_PoissonDisk16[sampleIdx]) * finalRadius;
+                        sum += SampleShadowMapCmp(projectedTexCoords.xy + offset, cascadeIndex, zReceiver);
+                    }
+                    shadow = sum * (1.0f / 5.0f);
                 }
-                shadow = sum / (float)max(PCSS_FILTER_TAPS_FAR, 1);
+                else
+                {
+                    [unroll]
+                    for (int i = 0; i < PCSS_FILTER_TAPS_FAR; i++)
+                    {
+                        int sampleIdx = (startIdx + i * 5) & 15;
+                        float2 offset = mul(rotMat, g_PoissonDisk16[sampleIdx]) * finalRadius;
+                        sum += SampleShadowMapCmp(projectedTexCoords.xy + offset, cascadeIndex, zReceiver);
+                    }
+                    shadow = sum * (1.0f / (float)(PCSS_FILTER_TAPS_FAR + 1));
+                }
             }
         }
     }

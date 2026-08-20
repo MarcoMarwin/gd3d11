@@ -42,6 +42,7 @@ cbuffer DS_ScreenQuadConstantBuffer : register( b0 )
     // Cascade atlas UV rect (xy = offset, zw = scale); unused for texture arrays.
     float4 SQ_CascadeAtlasRect[MAX_CSM_CASCADES];
     float4 SQ_CascadeLightDirectionWS[MAX_CSM_CASCADES];
+    float4 SQ_ShadowRuntimeParams;
 };
 
 //--------------------------------------------------------------------------------------
