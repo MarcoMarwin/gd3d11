@@ -50,7 +50,8 @@ namespace {
     bool GetSettingsUiGeometry( HWND window, float& clientWidth, float& clientHeight, float& uiScale, POINT* cursorPos = nullptr )
     {
         RECT clientRect = {};
-        if ( !window || !GetClientRect( window, &clientRect ) ) {
+        if ( !window || !Engine::GraphicsEngine || !Engine::GAPI
+            || !GetClientRect( window, &clientRect ) ) {
             return false;
         }
 
@@ -485,6 +486,10 @@ ImGuiShim::~ImGuiShim()
 
 void ImGuiShim::RenderLoop()
 {
+    if ( !Initiated || !Engine::GraphicsEngine || !Engine::GAPI ) {
+        return;
+    }
+
     ImGui_ImplDX11_NewFrame();
     ImGui_ImplWin32_NewFrame();
 
@@ -616,6 +621,10 @@ LRESULT ImGuiShim::OnWindowMessage( HWND hWnd, UINT msg, WPARAM wParam, LPARAM l
 
 void ImGuiShim::OnResize( INT2 newSize )
 {
+    if ( !Engine::GraphicsEngine ) {
+        return;
+    }
+
     CurrentResolution = newSize;
     if ( SettingsVisible ) {
         m_centerSettingsWindowFrames = 3;
@@ -1082,7 +1091,7 @@ namespace
 }
 
 void ImGuiShim::BeginSettingsEdit() {
-    if ( m_settingsEditActive ) {
+    if ( m_settingsEditActive || !Engine::GAPI ) {
         return;
     }
 
@@ -1099,7 +1108,7 @@ void ImGuiShim::CommitSettingsEdit() {
 }
 
 void ImGuiShim::CancelSettingsEdit() {
-    if ( !m_settingsEditActive ) {
+    if ( !m_settingsEditActive || !Engine::GAPI || !Engine::GraphicsEngine ) {
         return;
     }
 
@@ -1667,12 +1676,18 @@ void ImGuiShim::RenderSettingsWindow()
         if ( cancelled ) {
             CancelSettingsEdit();
             shadersToReload = ShaderCategory::None;
-            Engine::GraphicsEngine->OnUIEvent( BaseGraphicsEngine::UI_ClosedSettings );
+            if ( Engine::GraphicsEngine ) {
+                Engine::GraphicsEngine->OnUIEvent( BaseGraphicsEngine::UI_ClosedSettings );
+            }
         } else if ( saved ) {
             CommitSettingsEdit();
-            Engine::GraphicsEngine->OnUIEvent( BaseGraphicsEngine::UI_ClosedSettings );
-            Engine::GAPI->SaveRendererGlobalSettings( settings, MENU_SETTINGS_FILE );
-            Engine::GAPI->SaveMenuSettings( MENU_SETTINGS_FILE );
+            if ( Engine::GraphicsEngine ) {
+                Engine::GraphicsEngine->OnUIEvent( BaseGraphicsEngine::UI_ClosedSettings );
+            }
+            if ( Engine::GAPI ) {
+                Engine::GAPI->SaveRendererGlobalSettings( settings, MENU_SETTINGS_FILE );
+                Engine::GAPI->SaveMenuSettings( MENU_SETTINGS_FILE );
+            }
         }
     }
     ImGui::End();
@@ -1682,6 +1697,8 @@ void ImGuiShim::RenderSettingsWindow()
     }
 
     if ( shadersToReload != ShaderCategory::None ) {
-        Engine::GraphicsEngine->ReloadShaders( shadersToReload );
+        if ( Engine::GraphicsEngine ) {
+            Engine::GraphicsEngine->ReloadShaders( shadersToReload );
+        }
     }
 }

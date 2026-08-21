@@ -1005,7 +1005,8 @@ XRESULT D3D11ShadowMap::DrawPointlightShadows( std::vector<VobLightInfo*>& light
     ZoneScopedN( "DrawPointlightShadows" );
 
     auto* graphicsEngine = reinterpret_cast<D3D11GraphicsEngine*>( Engine::GraphicsEngine );
-    if ( !Engine::GAPI || !Engine::GAPI->IsWorldRenderCacheReady() ) {
+    if ( !graphicsEngine || !graphicsEngine->GetPfxRenderer()
+        || !Engine::GAPI || !Engine::GAPI->IsWorldRenderCacheReady() ) {
         // Loading screens can still execute renderer callbacks while the old
         // world is being destroyed. Do not touch any raw world pointers here;
         // ResetVobs clears the deferred queue after flushing renderer workers.

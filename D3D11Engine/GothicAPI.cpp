@@ -1444,7 +1444,7 @@ void GothicAPI::SetEnableGothicInput( bool value ) {
 
 /** Called when the window got set */
 void GothicAPI::OnSetWindow( HWND hWnd ) {
-    if ( OriginalGothicWndProc || !hWnd )
+    if ( OriginalGothicWndProc || !hWnd || !Engine::GraphicsEngine )
         return; // Dont do that twice
 
     OutputWindow = hWnd;
@@ -1484,13 +1484,10 @@ void GothicAPI::ReloadPlayerVob() {
     OnRemovedVob( player, playerHomeworld );
     OnAddVob( player, playerHomeworld );
 }
-/** Resets only the vobs */
-void GothicAPI::ResetVobs() {
-    // Revoke access before waiting for workers or touching any world-owned
-    // object. Loading-screen/render callbacks may still occur during teardown.
-    WorldRenderCacheReady.store( false, std::memory_order_release );
 
-    // Complete all active renderer work before deleting world-owned resources.
+void GothicAPI::ReleasePointlightShadowResources() {
+    // Pointlights may have worker-created world caches and render-thread queue
+    // entries. Complete both kinds of work before releasing their D3D handles.
     if ( Engine::RenderingThreadPool ) {
         Engine::RenderingThreadPool->clearAndFlush();
     }
@@ -1498,16 +1495,38 @@ void GothicAPI::ResetVobs() {
         Engine::WorkerThreadPool->clearAndFlush();
     }
 
-    // This queue owns no lights; it only caches raw VobLightInfo pointers for
-    // deferred shadow updates. Revoke them before deleting the world lights.
-    // A loading-screen render callback must never observe entries from the
-    // world that is currently being torn down.
     if ( auto* graphicsEngine = dynamic_cast<D3D11GraphicsEngine*>( Engine::GraphicsEngine ) ) {
         graphicsEngine->FrameShadowUpdateLights.clear();
         graphicsEngine->DebugPointlight = nullptr;
     }
 
+    // D3D11PointLight owns RAII handles whose deleters refer to the active
+    // PFX depth-stencil pool. Release them before that pool or the tiled shadow
+    // arrays are resized/destroyed.
+    for ( auto& [vob, lightInfo] : VobLightMap ) {
+        (void)vob;
+        if ( lightInfo ) {
+            lightInfo->LightShadowBuffers.reset();
+        }
+    }
+    for ( auto& rendererLight : RendererPointLights ) {
+        if ( rendererLight ) {
+            rendererLight->LightShadowBuffers.reset();
+        }
+    }
+}
+
+void GothicAPI::ReleasePointlightResources() {
+    WorldRenderCacheReady.store( false, std::memory_order_release );
+    ReleasePointlightShadowResources();
     RendererPointLights.clear();
+}
+
+/** Resets only the vobs */
+void GothicAPI::ResetVobs() {
+    // Revoke access and release all pointlight shadow handles before any
+    // world-owned light/VOB is destroyed.
+    ReleasePointlightResources();
 
     // Renderer caches must stop trusting world-owned VOB pointers before the
     // objects below are destroyed, even if loading aborts before reconfiguration.
@@ -1515,7 +1534,7 @@ void GothicAPI::ResetVobs() {
     
 
     // Stability: deferred queues store raw D3D pointers to textures that can be destroyed below.
-    Engine::GAPI->EnterResourceCriticalSection();
+    EnterResourceCriticalSection();
     for ( auto& [res, texture] : FrameStagingTextures ) {
         if ( res.second ) {
             res.second->Release();
@@ -1523,17 +1542,19 @@ void GothicAPI::ResetVobs() {
     }
     FrameStagingTextures.clear();
     FrameMipMapGenerations.clear();
-    Engine::GAPI->LeaveResourceCriticalSection();
+    LeaveResourceCriticalSection();
     // Delete light vobs, those depend on world sections and load stuff in the background.
     // by deleting them first we block the thread until the destructor finished
     for ( auto const& it : VobLightMap ) {
-        Engine::GraphicsEngine->OnVobRemovedFromWorld( it.first );
+        if ( Engine::GraphicsEngine ) {
+            Engine::GraphicsEngine->OnVobRemovedFromWorld( it.first );
+        }
         delete it.second;
     }
     VobLightMap.clear();
     
     // Clear sections
-    for ( auto&& itx : Engine::GAPI->GetWorldSections() ) {
+    for ( auto&& itx : GetWorldSections() ) {
         for ( auto&& ity : itx.second ) {
             ity.second.Vobs.clear();
         }
@@ -1627,12 +1648,11 @@ void GothicAPI::OnGeometryLoaded( zCBspTree* tree ) {
 
 /** Called when the game is about to load a new level */
 void GothicAPI::OnLoadWorld( const std::string& levelName, int loadMode ) {
-    if ( Engine::RenderingThreadPool ) {
-        Engine::RenderingThreadPool->clearAndFlush();
-    }
-    if ( Engine::WorkerThreadPool ) {
-        Engine::WorkerThreadPool->clearAndFlush();
-    }
+    // The old world may still be present in Gothic while its VOB tree is
+    // already being replaced. Renderer hooks must use the original path until
+    // the new world caches have been published by OnWorldLoaded().
+    WorldRenderCacheReady.store( false, std::memory_order_release );
+    ReleasePointlightResources();
     if ( !LoadedWorldInfo ) {
         LogError() << "World load skipped because renderer world state is unavailable.";
         return;
@@ -2669,7 +2689,12 @@ void GothicAPI::LeaveResourceCriticalSection() {
 /** Called when a VOB got removed from the world */
 void GothicAPI::OnRemovedVob( zCVob* vob, zCWorld* world ) {
     //LogInfo() << "Removing vob: " << vob;
-    Engine::GraphicsEngine->OnVobRemovedFromWorld( vob );
+    if ( !vob )
+        return;
+
+    if ( Engine::GraphicsEngine ) {
+        Engine::GraphicsEngine->OnVobRemovedFromWorld( vob );
+    }
 
     auto it = RegisteredVobs.find( vob );
     if ( it == RegisteredVobs.end() ) {
@@ -2682,40 +2707,50 @@ void GothicAPI::OnRemovedVob( zCVob* vob, zCWorld* world ) {
     zCVisual* visual = vob->GetVisual();
     if ( visual ) {
         zCClassDef* classDef = reinterpret_cast<zCObject*>(visual)->_GetClassDef();
-        const char* className = classDef->className.ToChar();
-        if ( strcmp( className, "zCPolyStrip" ) == 0 ) {
-            PolyStripVisuals.erase( reinterpret_cast<zCPolyStrip*>(visual) ); //remove it if it exists in polystrips array
+        if ( classDef ) {
+            const char* className = classDef->className.ToChar();
+            if ( className && strcmp( className, "zCPolyStrip" ) == 0 ) {
+                PolyStripVisuals.erase( reinterpret_cast<zCPolyStrip*>(visual) ); //remove it if it exists in polystrips array
+            }
         }
     }
 
     // Erase the vob from visual-vob map
-    auto& vec = VobsByVisual[vob->GetVisual()];
-    for ( size_t i = 0; i < vec.size(); ++i ) {
-        if ( vec[i]->Vob == vob ) {
-            // Overwrite the deleted item with the last item, then shrink by 1
-            vec[i] = vec.back();
-            vec.pop_back();
-            break; // Can (should!) only be in here once
+    auto visualVobs = VobsByVisual.find( vob->GetVisual() );
+    if ( visualVobs != VobsByVisual.end() ) {
+        auto& vec = visualVobs->second;
+        for ( size_t i = 0; i < vec.size(); ++i ) {
+            if ( vec[i] && vec[i]->Vob == vob ) {
+                // Overwrite the deleted item with the last item, then shrink by 1
+                vec[i] = vec.back();
+                vec.pop_back();
+                break; // Can (should!) only be in here once
+            }
         }
     }
 
     // TODO: This is sometimes NULL
     if ( world ) {
         // Check if this was in some inventory
-        if ( Inventory->OnRemovedVob( vob, world ) )
+        if ( Inventory && Inventory->OnRemovedVob( vob, world ) )
             return; // Don't search in the other lists since it wont be in it anyways
 
-        if ( world != LoadedWorldInfo->MainWorld )
+        if ( LoadedWorldInfo && world != LoadedWorldInfo->MainWorld )
             return; // *should* be already deleted from the inventory here. But watch out for dem leaks, dragons be here!
     }
 
-    VobInfo* vi = VobMap[vob];
-    SkeletalVobInfo* svi = SkeletalVobMap[vob];
+    auto vobInfoIt = VobMap.find( vob );
+    VobInfo* vi = vobInfoIt != VobMap.end() ? vobInfoIt->second : nullptr;
+    auto skeletalVobInfoIt = SkeletalVobMap.find( vob );
+    SkeletalVobInfo* svi = skeletalVobInfoIt != SkeletalVobMap.end() ? skeletalVobInfoIt->second : nullptr;
     const bool reconfigureCityWindows = vi && vi->VisualInfo
         && IsSupportedCityWindowVisual( vi->VisualInfo->VisualName );
 
     // Tell all dynamic lights that we removed a vob they could have cached
     for ( auto& vlit : VobLightMap ) {
+        if ( !vlit.second )
+            continue;
+
         if ( vi && vlit.second->LightShadowBuffers )
             vlit.second->LightShadowBuffers->OnVobRemovedFromWorld( vi );
 
@@ -2731,7 +2766,23 @@ void GothicAPI::OnRemovedVob( zCVob* vob, zCWorld* world ) {
             rendererLight->LightShadowBuffers->OnVobRemovedFromWorld( svi );
     }
 
-    VobLightInfo* li = VobLightMap[static_cast<zCVobLight*>(vob)];
+    auto isLightVob = []( zCVob* candidate ) {
+        if ( !candidate )
+            return false;
+        for ( zCClassDef* classDef = reinterpret_cast<zCObject*>(candidate)->_GetClassDef();
+              classDef; classDef = classDef->baseClassDef ) {
+            const char* className = classDef->className.ToChar();
+            if ( className && strcmp( className, "zCVobLight" ) == 0 )
+                return true;
+        }
+        return false;
+    };
+
+    auto lightInfoIt = VobLightMap.end();
+    if ( isLightVob( vob ) ) {
+        lightInfoIt = VobLightMap.find( static_cast<zCVobLight*>(vob) );
+    }
+    VobLightInfo* li = lightInfoIt != VobLightMap.end() ? lightInfoIt->second : nullptr;
 
     // Oil-lamp emission links are non-owning world pointers. Revoke every
     // reference before Gothic destroys or recycles the linked light VOB;
@@ -2788,8 +2839,12 @@ void GothicAPI::OnRemovedVob( zCVob* vob, zCWorld* world ) {
         DecalVobs.pop_back();
     }
 
-    // Erase it from the list of lights
-    VobLightMap.erase( static_cast<zCVobLight*>(vob) );
+    // Erase it from the list of lights. Do not use operator[] here: doing so
+    // inserts a null light entry for every ordinary VOB and the next removal
+    // would dereference that entry while walking VobLightMap.
+    if ( lightInfoIt != VobLightMap.end() ) {
+        VobLightMap.erase( lightInfoIt );
+    }
 
     // Remove from BSP-Cache
     std::vector<BspInfo*>* nodes = nullptr;
@@ -2803,6 +2858,8 @@ void GothicAPI::OnRemovedVob( zCVob* vob, zCWorld* world ) {
     if ( nodes ) {
         for ( unsigned int i = 0; i < nodes->size(); i++ ) {
             BspInfo* node = (*nodes)[i];
+            if ( !node )
+                continue;
             if ( vi ) {
                 for ( auto bit = node->IndoorVobs.begin(); bit != node->IndoorVobs.end(); ++bit ) {
                     if ( (*bit) == vi ) {
@@ -2831,7 +2888,7 @@ void GothicAPI::OnRemovedVob( zCVob* vob, zCWorld* world ) {
 
             if ( li && nodes ) {
                 for ( auto bit = node->Lights.begin(); bit != node->Lights.end(); ++bit ) {
-                    if ( (*bit)->Vob == static_cast<zCVobLight*>(vob) ) {
+                    if ( *bit && (*bit)->Vob == static_cast<zCVobLight*>(vob) ) {
                         (*bit) = node->Lights.back();
                         node->Lights.pop_back();
                         break;
@@ -2839,7 +2896,7 @@ void GothicAPI::OnRemovedVob( zCVob* vob, zCWorld* world ) {
                 }
 
                 for ( auto bit = node->IndoorLights.begin(); bit != node->IndoorLights.end(); ++bit ) {
-                    if ( (*bit)->Vob == static_cast<zCVobLight*>(vob) ) {
+                    if ( *bit && (*bit)->Vob == static_cast<zCVobLight*>(vob) ) {
                         (*bit) = node->IndoorLights.back();
                         node->IndoorLights.pop_back();
                         break;
@@ -4585,7 +4642,11 @@ LRESULT CALLBACK GothicAPI::GothicWndProc(
     WPARAM wParam,
     LPARAM lParam
 ) {
-    return Engine::GAPI->OnWindowMessage( hWnd, msg, wParam, lParam );
+    if ( Engine::GAPI ) {
+        return Engine::GAPI->OnWindowMessage( hWnd, msg, wParam, lParam );
+    }
+
+    return DefWindowProc( hWnd, msg, wParam, lParam );
 }
 
 /** Sends a message to the original gothic-window */
@@ -4597,6 +4658,13 @@ void GothicAPI::SendMessageToGameWindow( UINT msg, WPARAM wParam, LPARAM lParam 
 
 /** Message-Callback for the main window */
 LRESULT GothicAPI::OnWindowMessage( HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam ) {
+    if ( !Engine::GraphicsEngine || !Engine::ImGuiHandle ) {
+        if ( OriginalGothicWndProc ) {
+            return CallWindowProc( (WNDPROC)OriginalGothicWndProc, hWnd, msg, wParam, lParam );
+        }
+        return DefWindowProc( hWnd, msg, wParam, lParam );
+    }
+
     switch ( msg ) {
     case WM_KEYDOWN:
         Engine::GraphicsEngine->OnKeyDown( wParam );
@@ -5499,9 +5567,13 @@ void GothicAPI::ConfigureAllPointlightShadowSources() {
     constexpr float LINK_RADIUS = 150.0f;
     constexpr float LINK_RADIUS_SQ = LINK_RADIUS * LINK_RADIUS;
     constexpr float PARTICLE_FLAME_HEIGHT_OFFSET = 25.0f;
+    constexpr float FIRE_PFX_HEIGHT_OFFSET = 50.0f;
     const size_t INVALID_INDEX = static_cast<size_t>(-1);
 
-    RendererPointLights.clear();
+    // Reconfiguration can happen after a partial world reload. Release old
+    // renderer-owned lights and all pointlight pool handles before rebuilding
+    // the source associations.
+    ReleasePointlightResources();
 
     auto isLightVob = []( zCVob* vob ) {
         if ( !vob )
@@ -5573,7 +5645,10 @@ void GothicAPI::ConfigureAllPointlightShadowSources() {
 
     struct FlameVisual {
         zCVob* Vob = nullptr;
-        XMFLOAT3 Position = {};
+        XMFLOAT3 BoundsMin = {};
+        XMFLOAT3 BoundsMax = {};
+        XMFLOAT3 Center = {};
+        bool IsExactFirePfx = false;
         float Size = 1.0f;
     };
     struct FlameGroup {
@@ -5604,8 +5679,20 @@ void GothicAPI::ConfigureAllPointlightShadowSources() {
 
         FlameVisual flame;
         flame.Vob = flameVob;
-        XMStoreFloat3( &flame.Position, flameVob->GetPositionWorldXM() );
         const zTBBox3D bbox = flameVob->GetBBox();
+        flame.BoundsMin = bbox.Min;
+        flame.BoundsMax = bbox.Max;
+        flame.Center = XMFLOAT3(
+            (bbox.Min.x + bbox.Max.x) * 0.5f,
+            (bbox.Min.y + bbox.Max.y) * 0.5f,
+            (bbox.Min.z + bbox.Max.z) * 0.5f );
+        if ( isParticle ) {
+            if ( zCVisual* visual = flameVob->GetVisual() ) {
+                if ( const char* objectName = visual->GetObjectName() ) {
+                    flame.IsExactFirePfx = ToLowerMaterialName( objectName ) == "fire.pfx";
+                }
+            }
+        }
         const XMFLOAT3 extents(
             std::abs( bbox.Max.x - bbox.Min.x ),
             std::abs( bbox.Max.y - bbox.Min.y ),
@@ -5665,11 +5752,11 @@ void GothicAPI::ConfigureAllPointlightShadowSources() {
         // This keeps a PFX/TGA pair on the torch/campfire profile instead of
         // accidentally falling back to the candle/decal profile.
         bool HasPfx = false;
-        bool RaiseAnchorAboveCenter = false;
+        bool HasExactFirePfx = false;
         XMFLOAT3 Anchor = {};
         float Size = 1.0f;
         size_t FlameCount = 0;
-        std::vector<XMFLOAT3> Positions;
+        std::vector<XMFLOAT3> Centers;
         std::vector<zCVob*> Vobs;
     };
     std::vector<ResolvedFlameGroup> resolvedFlames;
@@ -5680,17 +5767,32 @@ void GothicAPI::ConfigureAllPointlightShadowSources() {
         resolved.Parent = group.Parent;
         resolved.IsMultiFlame = group.Particles.size() > 1 || group.Decals.size() > 1;
         resolved.HasPfx = !group.Particles.empty();
-        for ( const FlameVisual& flame : group.Particles ) {
-            resolved.Positions.push_back( flame.Position );
+        XMFLOAT3 boundsMin( FLT_MAX, FLT_MAX, FLT_MAX );
+        XMFLOAT3 boundsMax( -FLT_MAX, -FLT_MAX, -FLT_MAX );
+        auto includeFlame = [&]( const FlameVisual& flame ) {
+            resolved.Centers.push_back( flame.Center );
             resolved.Vobs.push_back( flame.Vob );
+            resolved.HasExactFirePfx = resolved.HasExactFirePfx || flame.IsExactFirePfx;
+            boundsMin.x = std::min( boundsMin.x, flame.BoundsMin.x );
+            boundsMin.y = std::min( boundsMin.y, flame.BoundsMin.y );
+            boundsMin.z = std::min( boundsMin.z, flame.BoundsMin.z );
+            boundsMax.x = std::max( boundsMax.x, flame.BoundsMax.x );
+            boundsMax.y = std::max( boundsMax.y, flame.BoundsMax.y );
+            boundsMax.z = std::max( boundsMax.z, flame.BoundsMax.z );
+        };
+        for ( const FlameVisual& flame : group.Particles ) {
+            includeFlame( flame );
         }
         for ( const FlameVisual& flame : group.Decals ) {
-            resolved.Positions.push_back( flame.Position );
-            resolved.Vobs.push_back( flame.Vob );
+            includeFlame( flame );
         }
 
         resolved.FlameCount = resolved.Vobs.size();
         if ( resolved.FlameCount > 0 ) {
+            resolved.Anchor = XMFLOAT3(
+                (boundsMin.x + boundsMax.x) * 0.5f,
+                (boundsMin.y + boundsMax.y) * 0.5f,
+                (boundsMin.z + boundsMax.z) * 0.5f );
             float totalSize = 0.0f;
             for ( const FlameVisual& flame : group.Particles )
                 totalSize += flame.Size;
@@ -5702,15 +5804,12 @@ void GothicAPI::ConfigureAllPointlightShadowSources() {
         }
 
         // One TGA and one PFX represent the same visible flame. The particle
-        // position is the actual flame center and therefore takes precedence;
-        // a decal-only flame remains centered on the decal without an offset.
+        // center is the actual geometric center of the PFX/TGA group and the
+        // PFX remains the dominant type for the vertical profile.
         if ( !resolved.IsMultiFlame ) {
             if ( group.Particles.size() == 1 ) {
-                resolved.Anchor = group.Particles.front().Position;
                 resolved.Size = group.Particles.front().Size;
-                resolved.RaiseAnchorAboveCenter = true;
             } else if ( group.Decals.size() == 1 ) {
-                resolved.Anchor = group.Decals.front().Position;
                 resolved.Size = group.Decals.front().Size;
             } else {
                 continue;
@@ -5718,6 +5817,12 @@ void GothicAPI::ConfigureAllPointlightShadowSources() {
         }
         resolvedFlames.push_back( std::move( resolved ) );
     }
+
+    auto flameHeightOffset = [&]( const ResolvedFlameGroup& flame ) {
+        if ( flame.HasExactFirePfx )
+            return FIRE_PFX_HEIGHT_OFFSET;
+        return flame.HasPfx ? PARTICLE_FLAME_HEIGHT_OFFSET : 0.0f;
+    };
 
     struct OilLampAnchor {
         zCVob* Vob = nullptr;
@@ -5821,13 +5926,13 @@ void GothicAPI::ConfigureAllPointlightShadowSources() {
     for ( size_t flameIndex = 0; flameIndex < resolvedFlames.size(); ++flameIndex ) {
         const ResolvedFlameGroup& flame = resolvedFlames[flameIndex];
         if ( flame.IsMultiFlame ) {
-            // A multi-flame group participates in nearest-owner selection, but
-            // has no single safe target position. Use its nearest member only
-            // for scoring; winning this candidate preserves the authored light.
-            for ( const XMFLOAT3& position : flame.Positions ) {
+            // A multi-flame group participates in nearest-owner selection.
+            // Member centers are used only for source ownership scoring; the
+            // generated replacement itself uses the union-box center below.
+            for ( const XMFLOAT3& center : flame.Centers ) {
                 visualAnchors.push_back( {
                     VisualAnchorKind::MultiFlame, flameIndex,
-                    flame.Parent, nullptr, position } );
+                    flame.Parent, nullptr, center } );
             }
         } else {
             visualAnchors.push_back( {
@@ -5933,7 +6038,10 @@ void GothicAPI::ConfigureAllPointlightShadowSources() {
         rendererLight->RendererLightAnchorVob = anchorVob;
         rendererLight->RendererLightSourceA = sourceA;
         rendererLight->RendererLightSourceB = sourceB;
-        rendererLight->IgnoreIndoorOutdoorLimit = true;
+        // Generated flame lights must obey the same indoor/outdoor boundary
+        // as authored interior lights. The anchor classification is supplied
+        // through IsIndoorVob below and is also used by the shadow cubemap.
+        rendererLight->IgnoreIndoorOutdoorLimit = false;
         rendererLight->IsIndoorVob = anchorVob && anchorVob->IsIndoorVob();
         rendererLight->Vob = sourceA;
         rendererLight->RendererLightFlickerPhase = static_cast<float>(
@@ -6015,9 +6123,9 @@ void GothicAPI::ConfigureAllPointlightShadowSources() {
             } );
     };
 
-    // A multi-flame system becomes one renderer light at the original authored
-    // light position. The source lights are removed from the render list, but
-    // no flame-center anchor offset is applied to the replacement. Oil lamps
+    // A multi-flame system becomes one renderer light at the geometric center
+    // of the complete PFX/TGA group. Any linked source lights are removed from
+    // the render list, but never provide the replacement position. Oil lamps
     // remain owned by their existing replacement-light path.
     for ( size_t flameIndex = 0; flameIndex < resolvedFlames.size(); ++flameIndex ) {
         const ResolvedFlameGroup& flame = resolvedFlames[flameIndex];
@@ -6026,8 +6134,6 @@ void GothicAPI::ConfigureAllPointlightShadowSources() {
         if ( flameBelongsToOilLamp( flame ) )
             continue;
 
-        size_t nearestSource = INVALID_INDEX;
-        float nearestDistanceSq = LINK_RADIUS_SQ;
         for ( size_t lightIndex = 0; lightIndex < lights.size(); ++lightIndex ) {
             if ( lights[lightIndex].Info->IsRendererLightSuppressed )
                 continue;
@@ -6041,27 +6147,14 @@ void GothicAPI::ConfigureAllPointlightShadowSources() {
                 || winner.SourceIndex != flameIndex )
                 continue;
 
-            const float candidateDistanceSq = distanceSq(
-                lights[lightIndex].Position, winner.Position );
-            if ( candidateDistanceSq < nearestDistanceSq ) {
-                nearestDistanceSq = candidateDistanceSq;
-                nearestSource = lightIndex;
-            }
             suppressRendererSource( lights[lightIndex].Info );
         }
 
-        // Preserve the original authored light position whenever a source was
-        // linked. Without a source, the persistent system parent is the only
-        // stable, non-flame-centered fallback position available.
+        // Always use the visual geometry center. The type-specific offset is
+        // applied in world Y, never along the PFX/TGA object's local axis.
         zCVob* lightAnchor = flame.Parent ? flame.Parent : flame.Vobs.front();
-        XMFLOAT3 lightPosition = lightAnchor->GetPositionWorld();
-        if ( nearestSource != INVALID_INDEX ) {
-            lightPosition = lights[nearestSource].Position;
-        } else {
-            // Keep a source-free replacement above the system object instead
-            // of burying the light origin inside its parent geometry.
-            lightPosition.y += PARTICLE_FLAME_HEIGHT_OFFSET;
-        }
+        XMFLOAT3 lightPosition = flame.Anchor;
+        lightPosition.y += flameHeightOffset( flame );
 
         createRendererLight( lightAnchor, lightPosition,
             flameLightColor( flame.HasPfx ),
@@ -6070,9 +6163,10 @@ void GothicAPI::ConfigureAllPointlightShadowSources() {
     }
 
     // A single visible PFX, a single visible TGA, and a matching PFX/TGA pair
-    // each become one renderer light. PFX position/size wins in the pair. Any
-    // authored light related to that visual is removed from the renderer light
-    // list so it cannot create a duplicate lighting or shadow contribution.
+    // each become one renderer light centered on the visual geometry. In a
+    // pair, the PFX still dominates the type-specific profile. Any authored
+    // light related to that visual is removed from the renderer light list so
+    // it cannot create a duplicate lighting or shadow contribution.
     for ( size_t flameIndex = 0; flameIndex < resolvedFlames.size(); ++flameIndex ) {
         const ResolvedFlameGroup& flame = resolvedFlames[flameIndex];
         if ( flame.IsMultiFlame || flame.Vobs.empty() )
@@ -6105,8 +6199,7 @@ void GothicAPI::ConfigureAllPointlightShadowSources() {
         zCVobLight* source = nearestSource != INVALID_INDEX
             ? lights[nearestSource].Info->Vob : nullptr;
         XMFLOAT3 shadowAnchor = flame.Anchor;
-        if ( flame.RaiseAnchorAboveCenter )
-            shadowAnchor.y += PARTICLE_FLAME_HEIGHT_OFFSET;
+        shadowAnchor.y += flameHeightOffset( flame );
         createRendererLight( flame.Vobs.front(), shadowAnchor,
             flameLightColor( flame.HasPfx ),
             flameLightIntensity( flame.Size, 1, flame.HasPfx ),
@@ -6127,15 +6220,14 @@ void GothicAPI::ConfigureAllPointlightShadowSources() {
         if ( winner.Kind == VisualAnchorKind::SingleFlame ) {
             const ResolvedFlameGroup& flame = resolvedFlames[winner.SourceIndex];
             XMFLOAT3 shadowAnchor = flame.Anchor;
-            if ( flame.RaiseAnchorAboveCenter )
-                shadowAnchor.y += PARTICLE_FLAME_HEIGHT_OFFSET;
+            shadowAnchor.y += flameHeightOffset( flame );
             assignAnchor( lights[lightIndex], shadowAnchor );
         } else if ( winner.Kind == VisualAnchorKind::OilLamp ) {
             assignAnchor( lights[lightIndex],
                 oilLampAnchors[winner.SourceIndex].ShadowAnchor );
         }
-        // A nearest multi-flame group enables shadows but deliberately keeps
-        // the authored position because no unique visible flame exists.
+        // Multi-flame source lights retain their authored shadow ownership;
+        // the generated replacement itself is centered on the visual group.
     }
 
     // Emission-color linking is independent of shadow-anchor ownership. One

@@ -620,6 +620,12 @@ public:
     /** Resets only the vobs */
     void ResetVobs();
 
+    /** Releases pointlight-owned shadow resources while D3D/PFX pools are alive. */
+    void ReleasePointlightShadowResources();
+
+    /** Releases all renderer-owned pointlights and their shadow resources. */
+    void ReleasePointlightResources();
+
     /** Get material by texture name */
     zCMaterial* GetMaterialByTextureName( const std::string& name );
     void GetMaterialListByTextureName( const std::string& name, std::list<zCMaterial*>& list );

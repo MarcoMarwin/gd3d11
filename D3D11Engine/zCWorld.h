@@ -55,6 +55,12 @@ public:
         ZoneScoped;
         isDrawingContainers = true;
 
+        if ( !Engine::GraphicsEngine ) {
+            HookedFunctions::OriginalFunctions.original_ContainerDraw();
+            isDrawingContainers = false;
+            return;
+        }
+
         auto _ = Engine::GraphicsEngine->RecordGraphicsEvent( GE_NAME( "Draw Inventory World" ) );
 
         HookedFunctions::OriginalFunctions.original_ContainerDraw();
@@ -68,7 +74,8 @@ public:
         hook_infunc
 
             // Re-Add it
-            Engine::GAPI->OnAddVob( vob, thisptr );
+            if ( Engine::GAPI && vob )
+                Engine::GAPI->OnAddVob( vob, thisptr );
 
         hook_outfunc
     }
@@ -77,7 +84,8 @@ public:
         hook_infunc
 
             // Remove it
-            Engine::GAPI->OnRemovedVob( vob, thisptr );
+            if ( Engine::GAPI && vob )
+                Engine::GAPI->OnRemovedVob( vob, thisptr );
 
         hook_outfunc
             
@@ -94,7 +102,8 @@ public:
         hook_infunc
 
             // Remove it
-            Engine::GAPI->OnRemovedVob( vob, thisptr );
+            if ( Engine::GAPI && vob )
+                Engine::GAPI->OnRemovedVob( vob, thisptr );
 
         hook_outfunc
             
@@ -123,7 +132,8 @@ public:
         hook_infunc
 
             // Remove it first, before it becomes invalid
-            Engine::GAPI->OnRemovedVob( vob, thisptr );
+            if ( Engine::GAPI && vob )
+                Engine::GAPI->OnRemovedVob( vob, thisptr );
 
         hook_outfunc
             
@@ -150,7 +160,7 @@ public:
 
         hook_infunc
 
-            if ( vob->GetVisual() ) {
+            if ( Engine::GAPI && vob && vob->GetVisual() ) {
                 //LogInfo() << vob->GetVisual()->GetFileExtension(0);
                 Engine::GAPI->OnAddVob( vob, thisptr );
             }
@@ -162,41 +172,67 @@ public:
     static void __fastcall hooked_zCWorldCompileWorld( zCWorld* thisptr, void* unknwn, int& a2, float a3, int a4, int a5, void* a6 ) {
         HookedFunctions::OriginalFunctions.original_zCWorldCompileWorld( thisptr, a2, a3, a4, a5, a6 );
 
+        GothicAPI* gapi = Engine::GAPI;
+        if ( !gapi || !gapi->GetLoadedWorldInfo() || !thisptr )
+            return;
+
         // Make sure worker thread don't work on any point light
         Engine::RefreshWorkerThreadpool();
 
         LogInfo() << "Loading world!";
-        Engine::GAPI->GetLoadedWorldInfo()->MainWorld = thisptr;
-        Engine::GAPI->OnGeometryLoaded( thisptr->GetBspTree() );
+        gapi->GetLoadedWorldInfo()->MainWorld = thisptr;
+        gapi->OnGeometryLoaded( thisptr->GetBspTree() );
     }
 
     static void __fastcall hooked_zCWorldGenerateStaticWorldLighting( zCWorld* thisptr, void* unknwn, int& a2, void* a3 ) {
         HookedFunctions::OriginalFunctions.original_zCWorldGenerateStaticWorldLighting( thisptr, a2, a3 );
 
+        GothicAPI* gapi = Engine::GAPI;
+        if ( !gapi || !gapi->GetLoadedWorldInfo() || !thisptr )
+            return;
+
         // Make sure worker thread don't work on any point light
         Engine::RefreshWorkerThreadpool();
 
         LogInfo() << "Loading world!";
-        Engine::GAPI->GetLoadedWorldInfo()->MainWorld = thisptr;
-        Engine::GAPI->OnGeometryLoaded( thisptr->GetBspTree() );
+        gapi->GetLoadedWorldInfo()->MainWorld = thisptr;
+        gapi->OnGeometryLoaded( thisptr->GetBspTree() );
     }
 #endif
 
     // Get around C2712
     static void Do_hooked_Render( zCWorld* thisptr, zCCamera& camera ) {
-        Engine::GAPI->SetTextureTestBindMode( false, "" );
+        GothicAPI* gapi = Engine::GAPI;
+        WorldInfo* worldInfo = gapi ? gapi->GetLoadedWorldInfo() : nullptr;
+        if ( !gapi || !worldInfo || !worldInfo->MainWorld ) {
+            return;
+        }
+
+        gapi->SetTextureTestBindMode( false, "" );
 
         //HookedFunctions::OriginalFunctions.original_zCWorldRender(thisptr, camera);
-        if ( thisptr == Engine::GAPI->GetLoadedWorldInfo()->MainWorld ) {
-            Engine::GAPI->OnWorldUpdate();
+        if ( thisptr == worldInfo->MainWorld ) {
+            gapi->OnWorldUpdate();
         } else {
             // Inventory
-            Engine::GAPI->DrawInventory( thisptr, camera );
+            gapi->DrawInventory( thisptr, camera );
         }
     }
 
     static void __fastcall hooked_Render( zCWorld* thisptr, void* unknwn, zCCamera& camera ) {
-        if ( thisptr != Engine::GAPI->GetLoadedWorldInfo()->MainWorld ) {
+        GothicAPI* gapi = Engine::GAPI;
+        WorldInfo* worldInfo = gapi ? gapi->GetLoadedWorldInfo() : nullptr;
+
+        // During world disposal/loading the old MainWorld pointer and the
+        // renderer-side VOB caches are not a valid pair. Let Gothic render its
+        // own loading/inventory frame until the new cache is published.
+        if ( !gapi || !worldInfo || !worldInfo->MainWorld
+            || !gapi->IsWorldRenderCacheReady() ) {
+            HookedFunctions::OriginalFunctions.original_zCWorldRender( thisptr, camera );
+            return;
+        }
+
+        if ( thisptr != worldInfo->MainWorld ) {
             // This needs to be called to init the camera and everything for the inventory vobs
             // The PresentPending-Guard will stop the renderer from rendering the world into one of the cells here
             // TODO: This can be implemented better.
@@ -207,9 +243,9 @@ public:
             Do_hooked_Render( thisptr, camera );
         hook_outfunc
 
-        if ( thisptr == Engine::GAPI->GetLoadedWorldInfo()->MainWorld ) {
-            Engine::GAPI->GetRendererState().RendererInfo.RenderStage = STAGE_DRAW_UNKNOWN;
-            if ( Engine::GAPI->GetRendererState().RendererSettings.AtmosphericScattering ) {
+        if ( thisptr == worldInfo->MainWorld ) {
+            gapi->GetRendererState().RendererInfo.RenderStage = STAGE_DRAW_UNKNOWN;
+            if ( gapi->GetRendererState().RendererSettings.AtmosphericScattering ) {
                 HookedFunctions::OriginalFunctions.original_zCWorldRender( thisptr, camera );
             } else {
                 camera.SetFarPlane( 25000.0f );

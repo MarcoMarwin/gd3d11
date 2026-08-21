@@ -616,6 +616,13 @@ D3D11GraphicsEngine::D3D11GraphicsEngine() :
 }
 
 D3D11GraphicsEngine::~D3D11GraphicsEngine() {
+    // Pointlights own custom-deleter handles into the PFX depth-stencil pool
+    // and non-owning links into the tiled shadow arrays. Release them before
+    // either owner is destroyed.
+    if ( Engine::GAPI ) {
+        Engine::GAPI->ReleasePointlightResources();
+    }
+
     // Release post-processing and its vendor contexts before D3D device teardown.
     PfxRenderer.reset();
     // ShadowMaps owns the tiled cube arrays and keeps device/context references.
@@ -648,6 +655,12 @@ D3D11GraphicsEngine::~D3D11GraphicsEngine() {
         // Amd likes to be special :)
         agsDevice->DestroyD3D11Device( Device.Detach(), Context.Detach() );
         agsDevice.reset();
+    }
+
+    // Do not leave hooks with a pointer to an already destructed graphics
+    // engine. GothicAPI remains alive during the normal process lifetime.
+    if ( Engine::GraphicsEngine == this ) {
+        Engine::GraphicsEngine = nullptr;
     }
 
     // MemTrackerFinalReport();
@@ -1770,6 +1783,10 @@ void D3D11GraphicsEngine::SyncGothicResolutionState( bool refreshCamera ) {
     }
 }
 XRESULT D3D11GraphicsEngine::RecreateBuffers() {
+    if ( !Engine::GAPI || !Device || !Context ) {
+        return XR_FAILED;
+    }
+
     INT2 bbres = GetBackbufferResolution();
 
     static INT2 lastRoundedTextureResolution{};
@@ -1791,6 +1808,11 @@ XRESULT D3D11GraphicsEngine::RecreateBuffers() {
 
 
     auto roundedTextureResolution = GetResolution( );
+    if ( roundedTextureResolution.x <= 0 || roundedTextureResolution.y <= 0
+        || Resolution.x <= 0 || Resolution.y <= 0 ) {
+        return XR_FAILED;
+    }
+
     const bool renderBuffersAlive = DepthStencilBuffer && DepthStencilBufferCopy
         && VelocityBuffer && Backbuffer && m_SwapchainDepthStencilBuffer;
     if ( lastRoundedTextureResolution == roundedTextureResolution && renderBuffersAlive ) {
@@ -1798,6 +1820,13 @@ XRESULT D3D11GraphicsEngine::RecreateBuffers() {
         return XR_SUCCESS;
     }
     lastRoundedTextureResolution = roundedTextureResolution;
+
+    // PfxRenderer::OnResize prunes/recreates pooled resources. Pointlights
+    // must release their pool handles first; otherwise their custom deleters
+    // can target entries removed during the resize.
+    if ( Engine::GAPI ) {
+        Engine::GAPI->ReleasePointlightShadowResources();
+    }
 
     // Adjust DefaultSampler with negative LOD bias for upscaling
     CreateAndBindDefaultSampler();
@@ -1852,6 +1881,16 @@ XRESULT D3D11GraphicsEngine::RecreateBuffers() {
 
 /** Called on window resize/resolution change */
 XRESULT D3D11GraphicsEngine::OnResize( INT2 newSize ) {
+    // WM_SIZE can report zero while a window is minimized. Do not tear down
+    // valid D3D resources for that transient state.
+    if ( newSize.x <= 0 || newSize.y <= 0 ) {
+        return XR_SUCCESS;
+    }
+
+    if ( !Engine::GAPI || !Device || !Context || !DXGIFactory2 || !OutputWindow ) {
+        return XR_FAILED;
+    }
+
     static bool resizeInProgress = false;
     if ( resizeInProgress )
     {
@@ -9648,6 +9687,10 @@ void D3D11GraphicsEngine::DrawVobSingle( VobInfo* vob, zCCamera& camera ) {
 /** Update focus window state */
 void D3D11GraphicsEngine::UpdateFocus( HWND hWnd, bool focus_state )
 {
+    if ( !hWnd ) {
+        return;
+    }
+
     if ( m_isWindowActive == focus_state ) {
         return;
     }
@@ -9660,6 +9703,11 @@ void D3D11GraphicsEngine::UpdateFocus( HWND hWnd, bool focus_state )
 void D3D11GraphicsEngine::UpdateClipCursor( HWND hWnd )
 {
 #ifndef BUILD_SPACER_NET
+    if ( !hWnd ) {
+        ClipCursor( nullptr );
+        return;
+    }
+
     RECT rect;
     static RECT last_clipped_rect;
 
@@ -9695,7 +9743,7 @@ LRESULT D3D11GraphicsEngine::OnWindowMessage( HWND hWnd, UINT msg, WPARAM wParam
 }
 
 void D3D11GraphicsEngine::UpdateShouldBlockGameInput( ) {
-    if ( auto hImgui = Engine::ImGuiHandle ) {
+    if ( auto hImgui = Engine::ImGuiHandle; hImgui && Engine::GAPI ) {
         auto oldIsActive = hImgui->IsActive;
         hImgui->IsActive = hImgui->SettingsVisible || hImgui->LibShowBlockingThisFrame;
         hImgui->UpdateBlockGameInput();
@@ -9708,6 +9756,10 @@ void D3D11GraphicsEngine::UpdateShouldBlockGameInput( ) {
 
 /** Handles an UI-Event */
 void D3D11GraphicsEngine::OnUIEvent( EUIEvent uiEvent ) {
+
+    if ( !Engine::GAPI || !OutputWindow ) {
+        return;
+    }
 
     if ( uiEvent == UI_OpenSettings || uiEvent == UI_OpenSettingsFromGothicVideoSettings ) {
         if ( auto hImgui = Engine::ImGuiHandle ) {
@@ -9725,7 +9777,7 @@ void D3D11GraphicsEngine::OnUIEvent( EUIEvent uiEvent ) {
         UpdateClipCursor( OutputWindow );
     } else if ( uiEvent == UI_ClosedSettings ) {
         // Settings can be closed in multiple ways
-        if ( auto hImgui = Engine::ImGuiHandle; hImgui->GetIsActive() ) {
+        if ( auto hImgui = Engine::ImGuiHandle; hImgui && hImgui->GetIsActive() ) {
             // ESC and other generic close paths retain current session values.
             hImgui->CommitSettingsEdit();
             hImgui->SettingsVisible = false;

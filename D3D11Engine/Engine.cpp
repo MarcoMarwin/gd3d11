@@ -12,7 +12,14 @@ namespace Engine {
 
     /** Refresh worker threadpool */
     void RefreshWorkerThreadpool() {
-        delete WorkerThreadPool;
+        // A pool destructor waits for workers, but it does not cancel queued
+        // jobs. Clear them first so a world-compile refresh cannot execute a
+        // queued job against VOB/pointlight data that is being replaced.
+        if ( WorkerThreadPool ) {
+            WorkerThreadPool->clearAndFlush();
+            delete WorkerThreadPool;
+            WorkerThreadPool = nullptr;
+        }
         WorkerThreadPool = new ThreadPool(L"GD3D11-Worker");
     }
 
@@ -66,8 +73,12 @@ namespace Engine {
         if ( Engine::WorkerThreadPool ) {
             Engine::WorkerThreadPool->clearAndFlush();
         }
-        // Preserve the established hard shutdown. The destructor path below is
-        // intentionally not activated because full renderer teardown is not safe yet.
+        // Release pointlight handles while the D3D/PFX pools are still alive.
+        // The process still uses the established hard shutdown below, but no
+        // renderer-owned resource is left to race the final Gothic teardown.
+        if ( Engine::GAPI ) {
+            Engine::GAPI->ReleasePointlightResources();
+        }
         exit( 0 );
     }
 

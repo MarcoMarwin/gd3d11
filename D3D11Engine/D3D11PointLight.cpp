@@ -16,23 +16,28 @@ const float LIGHT_COLORCHANGE_POS_MOD = 0.1f;
 D3D11PointLight::D3D11PointLight( VobLightInfo* info, bool dynamicLight ) {
     LightInfo = info;
     DynamicLight = dynamicLight;
+    InitDone = false;
+    DrawnOnce = false;
+    LastUpdateColor = 0;
+    WorldCacheInvalid = true;
+    m_DepthCubemap = nullptr;
+    m_StaticDepthCubemap = nullptr;
+    m_PendingInit = {};
+
+    if ( !info ) {
+        InitDone = true;
+        return;
+    }
     
     // Ensure this light is actually in the VobLightMap
     // some lights don't seem to be in here!
-    if ( !info->IsRendererLight && info->Vob )
+    if ( !info->IsRendererLight && info->Vob && Engine::GAPI )
         Engine::GAPI->VobLightMap[info->Vob] = info;
 
     XMStoreFloat3( &LastUpdatePosition, LightInfo->GetEffectivePositionWorldXM() );
     LastUpdateRange = LightInfo->GetEffectiveLightRange();
 
-    m_DepthCubemap = nullptr;
-    m_StaticDepthCubemap = nullptr;
-    WorldCacheInvalid = true;
-    m_PendingInit = {};
-
     StartReInit();
-
-    DrawnOnce = false;
 }
 
 D3D11PointLight::~D3D11PointLight() {
@@ -142,6 +147,10 @@ void D3D11PointLight::OnTiledSlotEvicted() {
 }
 
 int D3D11PointLight::GetCurrentShadowMode() const {
+    if ( !Engine::GAPI ) {
+        return GothicRendererSettings::PLS_DISABLED;
+    }
+
     int mode = static_cast<int>(Engine::GAPI->GetRendererState().RendererSettings.EnablePointlightShadows);
     if ( mode > GothicRendererSettings::PLS_UPDATE_DYNAMIC )
         return GothicRendererSettings::PLS_UPDATE_DYNAMIC;
@@ -266,7 +275,7 @@ bool D3D11PointLight::NotYetDrawn() {
 /** Initializes the resources of this light */
 void D3D11PointLight::InitResources() {
     InitDone = false;
-    if ( !LightInfo ) {
+    if ( !LightInfo || !Engine::GAPI ) {
         // Light got removed before we could init, just return
         InitDone = true;
         return;
@@ -541,7 +550,10 @@ void D3D11PointLight::Invalidate() {
 }
 
 void D3D11PointLight::StartReInit() {
-    if ( !WorldCacheInvalid ) {
+    if ( !WorldCacheInvalid || !LightInfo || !Engine::GAPI ) {
+        if ( !LightInfo || !Engine::GAPI ) {
+            InitDone = true;
+        }
         return;
     }
 
@@ -550,6 +562,11 @@ void D3D11PointLight::StartReInit() {
 
         // Add to queue
         m_PendingInit.cancel( ); // Cancel any pending init first, we only care about the latest one
+        if ( !Engine::WorkerThreadPool ) {
+            InitResources();
+            return;
+        }
+
         m_PendingInit = Engine::WorkerThreadPool->enqueue( [this] (const CancellationToken& token)
         {
             if (token.isCancelled()) {
@@ -608,6 +625,9 @@ void D3D11PointLight::OnRenderLight() {
 
 /** Called when a vob got removed from the world */
 void D3D11PointLight::OnVobRemovedFromWorld( BaseVobInfo* vob ) {
+    if ( !vob || !LightInfo )
+        return;
+
     // Wait for cache initialization to finish first
     //Engine::GAPI->EnterResourceCriticalSection();
 
