@@ -156,34 +156,9 @@ struct HeightfogConstantBuffer {
 static_assert( sizeof(HeightfogConstantBuffer) == 176, "HeightfogConstantBuffer must be exactly 176 bytes" );
 
 
-struct ScreenSpaceLightingConstantBuffer {
-    float4 SSL_ProjParams;
-    XMFLOAT4X4 SSL_Projection;
-    XMFLOAT4X4 SSL_View;
-    XMFLOAT4X4 SSL_InvView;
-
-    float2 SSL_InvResolution;
-    float SSL_ContactStrength;
-    float SSL_GIStrength;
-
-    XMFLOAT3 SSL_LightDirectionVS;
-    float SSL_FrameIndex;
-
-    float SSL_EnableContact;
-    float SSL_EnableGI;
-    float SSL_HistoryValid;
-    float SSL_FSR3Active;
-};
 struct CompositionControlConstantBuffer {
     float CC_HeightFogEnabled;
-    float CC_ContactShadowScale;
-    float2 CC_InvResolution;
-
-    float4 CC_ProjParams;
-    XMFLOAT4X4 CC_Projection;
-
-    XMFLOAT3 CC_LightDirectionVS;
-    float CC_Pad;
+    XMFLOAT3 CC_Pad;
 };
 
 struct LumAdaptConstantBuffer {
@@ -518,12 +493,7 @@ struct AtmosphereConstantBuffer {
     float AC_SunVisibility;
 
     float3 AC_WorldCameraPos;
-    float AC_EnableContactShadows;
-
-    float AC_EnableScreenSpaceGI;
     float AC_SkyEffectsEnabled;
-    float AC_ContactShadowStrength;
-    float AC_ScreenSpaceGIStrength;
 
     float AC_EnableParticleLighting;
     float AC_ParticleLightingStrength;

@@ -20,6 +20,10 @@ public:
 private:
     /** Compute shader path for FL11+ */
     XRESULT RenderCS( ID3D11ShaderResourceView* backbuffer, ID3D11ShaderResourceView* waterMaskSRV, ID3D11ShaderResourceView* specularSRV );
+    /** D3D11 near/far split path; returns failure before changing state if unavailable. */
+    XRESULT RenderFidelityFXStyleCS( ID3D11ShaderResourceView* backbuffer, ID3D11ShaderResourceView* waterMaskSRV, ID3D11ShaderResourceView* specularSRV );
+    /** Existing compute path retained as a fallback for older/unsupported devices. */
+    XRESULT RenderLegacyCS( ID3D11ShaderResourceView* backbuffer, ID3D11ShaderResourceView* waterMaskSRV, ID3D11ShaderResourceView* specularSRV );
     void UpdateAdaptiveFocus( float configuredNearDistance );
 
     // Ping-pong 1x1 R32_FLOAT textures for temporal focus smoothing

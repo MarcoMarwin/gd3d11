@@ -1114,10 +1114,6 @@
     <None Include="Shaders\PS_PFX_LowCloudComposite.hlsl">
       <Filter>Engine\Shaders</Filter>
     </None>
-    <None Include="Shaders\PS_PFX_FSR3TransparencyMask.hlsl">
-      <Filter>Engine\Shaders</Filter>
-    </None>
-
     <None Include="Shaders\VS_DecalInstanced.hlsl">
       <Filter>Engine\Shaders</Filter>
     </None>

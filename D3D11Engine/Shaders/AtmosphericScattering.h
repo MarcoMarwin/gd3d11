@@ -52,12 +52,7 @@ cbuffer Atmosphere : register( b1 )
 	float AC_SunVisibility;
 
 	float3 AC_WorldCameraPos;
-	float AC_EnableContactShadows;
-
-	float AC_EnableScreenSpaceGI;
 	float AC_SkyEffectsEnabled;
-	float AC_ContactShadowStrength;
-	float AC_ScreenSpaceGIStrength;
 
 	float AC_EnableParticleLighting;
 	float AC_ParticleLightingStrength;

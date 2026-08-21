@@ -82,18 +82,6 @@ public:
                                             ID3D11ShaderResourceView* lowClouds,
                                             ID3D11ShaderResourceView** outGodRaysSRV );
 
-    XRESULT RenderScreenSpaceLighting( ID3D11ShaderResourceView* sceneSRV,
-                                        ID3D11ShaderResourceView* albedoSRV,
-                                        ID3D11ShaderResourceView* depthSRV,
-                                        ID3D11ShaderResourceView* normalsSRV,
-                                        ID3D11ShaderResourceView* waterMaskSRV,
-                                        ID3D11ShaderResourceView* materialSRV,
-                                        ID3D11ShaderResourceView* velocitySRV,
-                                        ID3D11ShaderResourceView** outLightingSRV );
-    void UpdateContactShadowTransition( bool targetActive, float currentTime );
-    bool IsContactShadowTransitionActive() const { return ContactShadowTransitionWeight > 0.0001f; }
-    void ResetScreenSpaceLightingHistory();
-
     XRESULT RenderLowCloudLayer( ID3D11RenderTargetView* cloudLayerRTV,
                                  ID3D11RenderTargetView* cloudDepthRTV,
                                  ID3D11RenderTargetView* skyCloudLayerRTV,
@@ -117,11 +105,7 @@ public:
                                      ID3D11ShaderResourceView* backbufferSRV,
                                      ID3D11ShaderResourceView* godraysSRV,
                                      ID3D11ShaderResourceView* depthSRV,
-                                     ID3D11ShaderResourceView* normalsSRV,
-                                     ID3D11ShaderResourceView* waterMaskSRV,
-                                     ID3D11ShaderResourceView* screenSpaceLightingSRV,
-                                     bool compositionHeightFog,
-                                     bool fsr3UpscalingActive );
+                                     bool compositionHeightFog );
 
     XRESULT RenderXeGTAO( ID3D11ShaderResourceView* depthSRV,
                             ID3D11ShaderResourceView* normalsSRV,
@@ -162,15 +146,8 @@ private:
     std::unique_ptr<D3D11PFX_FSR3> PFX_FSR3;
     std::unique_ptr<D3D11PFX_XeGTAO> PFX_XeGTAO;
 std::unique_ptr<TexturePool> m_texturePool;
-std::unique_ptr<RenderToTextureBuffer> ScreenSpaceLightingHistory[2];
-std::unique_ptr<RenderToTextureBuffer> ScreenSpaceLightingDepthHistory[2];
-bool ScreenSpaceLightingHistoryValid = false;
-float ContactShadowTransitionWeight = 0.0f;
-float LastContactShadowTransitionTime = 0.0f;
 float NightFogRainFade = 0.0f;
 float LastNightFogRainFadeTime = 0.0f;
 bool NightFogRainFadeInitialized = false;
-uint32_t ScreenSpaceLightingHistoryIndex = 0;
-uint32_t ScreenSpaceLightingFrameIndex = 0;
 std::unique_ptr<DepthStencilPool> m_depthStencilPool;
 };

@@ -272,18 +272,12 @@ XRESULT D3D11ShaderManager::Init() {
     Shaders.push_back( ShaderInfo::make<PShaderID::PS_PFX_GodRayZoom>( "PS_PFX_GodRayZoom.hlsl" ) );
 
     // PostFX Composition uber shader
-    Shaders.push_back( ShaderInfo::make<PShaderID::PS_PFX_ScreenSpaceLightingTrace>( "PS_PFX_ScreenSpaceLightingTrace.hlsl" ) );
-    Shaders.push_back( ShaderInfo::make<PShaderID::PS_PFX_ScreenSpaceLightingTemporal>( "PS_PFX_ScreenSpaceLightingTemporal.hlsl" ) );
-    Shaders.push_back( ShaderInfo::make<PShaderID::PS_PFX_FSR3TransparencyMask>( "PS_PFX_FSR3TransparencyMask.hlsl" ) );
-
     Shaders.push_back( ShaderInfo::make<PShaderID::PS_PFX_Composition>( "PS_PFX_Composition.hlsl" )
         .with_category( ShaderCategory::Other )
         .with_macros( [](std::vector<D3D_SHADER_MACRO>& list) {
             const auto& s = Engine::GAPI->GetRendererState().RendererSettings;
             list.push_back( { "COMPOSE_GODRAYS", s.AreGodRaysEnabled() ? "1" : "0" } );
             list.push_back( { "COMPOSE_HEIGHTFOG", s.DrawFog ? "1" : "0" } );
-            list.push_back( { "COMPOSE_CONTACT_SHADOWS", s.EnableContactShadows ? "1" : "0" } );
-            list.push_back( { "COMPOSE_SSGI", (s.EnableScreenSpaceGI && s.ScreenSpaceGIStrength > 0.0f) ? "1" : "0" } );
         } ) );
 
     Shaders.push_back( ShaderInfo::make<PShaderID::PS_PFX_Tonemap>( "PS_PFX_Tonemap.hlsl" )
@@ -499,6 +493,11 @@ XRESULT D3D11ShaderManager::Init() {
         Shaders.push_back( ShaderInfo::make<CShaderID::CS_PFX_DoF_Gauss>( "CS_PFX_DoF.hlsl" )
             .with_macros( {{ "DOF_GAUSS_BLUR", "1" }} ) );
         Shaders.push_back( ShaderInfo::make<CShaderID::CS_PFX_DoF_Composite>( "CS_PFX_DoF_Composite.hlsl" ));
+        Shaders.push_back( ShaderInfo::make<CShaderID::CS_PFX_DoF_SplitDownsample>( "CS_PFX_DoF_SplitDownsample.hlsl" ));
+        Shaders.push_back( ShaderInfo::make<CShaderID::CS_PFX_DoF_SplitBlur>( "CS_PFX_DoF_SplitBlur.hlsl" ));
+        Shaders.push_back( ShaderInfo::make<CShaderID::CS_PFX_DoF_SplitBlur_Gauss>( "CS_PFX_DoF_SplitBlur.hlsl" )
+            .with_macros( {{ "DOF_GAUSS_BLUR", "1" }} ) );
+        Shaders.push_back( ShaderInfo::make<CShaderID::CS_PFX_DoF_SplitComposite>( "CS_PFX_DoF_SplitComposite.hlsl" ));
 
         Shaders.push_back( ShaderInfo::make<CShaderID::CS_PFX_XeGTAO_Prefilter>( "CS_PFX_XeGTAO.hlsl" ).with_entrypoint( "CSPrefilterDepths16x16" ) );
         Shaders.push_back( ShaderInfo::make<CShaderID::CS_PFX_XeGTAO_Low>( "CS_PFX_XeGTAO.hlsl" ).with_entrypoint( "CSGTAOLow" ) );

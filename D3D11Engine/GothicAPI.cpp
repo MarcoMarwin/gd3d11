@@ -7147,8 +7147,6 @@ XRESULT GothicAPI::SaveMenuSettings( const std::string& file ) {
     WritePrivateProfileStringA( "General", "EnableParallaxOcclusionMapping", std::to_string( s.EnableParallaxOcclusionMapping ? TRUE : FALSE ).c_str(), ini.c_str() );
     WritePrivateProfileStringA( "General", "EnableSSR", std::to_string( s.EnableSSR ? TRUE : FALSE ).c_str(), ini.c_str() );
     WritePrivateProfileStringA( "General", "SSRStrength", std::to_string( s.SSRStrength ).c_str(), ini.c_str() );
-    WritePrivateProfileStringA( "General", "EnableContactShadows", std::to_string( s.EnableContactShadows ? TRUE : FALSE ).c_str(), ini.c_str() );
-    WritePrivateProfileStringA( "General", "EnableScreenSpaceGI", std::to_string( s.EnableScreenSpaceGI ? TRUE : FALSE ).c_str(), ini.c_str() );
 
     /*
     * F11 draw-distance settings are saved globally in UserSettings.ini
@@ -7263,8 +7261,6 @@ XRESULT GothicAPI::LoadMenuSettings( const std::string& file ) {
         s.SSRStrength = std::clamp( GetPrivateProfileFloatA( "General", "SSRStrength", ds.SSRStrength, ini ), 0.0f, 2.0f );
         s.EnableSSR = GetPrivateProfileBoolA( "General", "EnableSSR", s.SSRStrength > 0.0f, ini );
         s.WaterCubemapStrength = ds.WaterCubemapStrength;
-        s.EnableContactShadows = GetPrivateProfileBoolA( "General", "EnableContactShadows", ds.EnableContactShadows, ini );
-        s.EnableScreenSpaceGI = GetPrivateProfileBoolA( "General", "EnableScreenSpaceGI", ds.EnableScreenSpaceGI, ini );
         s.EnableParticleLighting = ds.EnableParticleLighting;
         s.ParticleLightingStrength = ds.ParticleLightingStrength;
         s.EnableSSS = true;
@@ -7394,7 +7390,6 @@ XRESULT GothicAPI::LoadMenuSettings( const std::string& file ) {
         if ( !s.AreGodRaysEnabled() ) s.GodRayStrength = 0.0f;
         if ( !s.EnableDoF ) s.DoFBokehRadius = 0.0f;
         if ( !s.EnableSSR ) s.SSRStrength = 0.0f;
-        s.ScreenSpaceGIStrength = s.EnableScreenSpaceGI ? 1.0f : 0.0f;
         s.SSSIntensity = 1.0f;
         if ( s.WindQuality == GothicRendererSettings::EWindQuality::WIND_QUALITY_NONE ) {
             s.GlobalWindStrength = 0.0f;

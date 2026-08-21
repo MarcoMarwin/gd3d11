@@ -811,8 +811,6 @@ struct GraphicsPresetComparable {
     int ShadowMapSize;
     float ShadowSoftness;
     int AoMode;
-    bool EnableContactShadows;
-    bool EnableScreenSpaceGI;
     bool EnableDoF;
     bool EnableDynamicClouds;
     int WindQuality;
@@ -836,8 +834,6 @@ GraphicsPresetComparable MakeGraphicsPresetComparable(
         NormalizeShadowMapSize( s.ShadowMapSize ),
         s.ShadowSoftness,
         static_cast<int>(s.AoMode),
-        s.EnableContactShadows,
-        s.EnableScreenSpaceGI,
         s.EnableDoF,
         s.EnableDynamicClouds,
         IsWindEffectsControlVisible() ? s.WindQuality : 0,
@@ -863,8 +859,6 @@ bool GraphicsPresetComparableEqual(
         && a.ShadowMapSize == b.ShadowMapSize
         && a.ShadowSoftness == b.ShadowSoftness
         && a.AoMode == b.AoMode
-        && a.EnableContactShadows == b.EnableContactShadows
-        && a.EnableScreenSpaceGI == b.EnableScreenSpaceGI
         && a.EnableDoF == b.EnableDoF
         && a.EnableDynamicClouds == b.EnableDynamicClouds
         && a.WindQuality == b.WindQuality
@@ -897,7 +891,6 @@ void ApplyGraphicsPresets( GothicRendererSettings& s, bool applyRuntimeUpdates =
 
     // Reset all visible effect strengths to their normalized UI defaults.
     s.AOStrength = 1.0f;
-    s.ScreenSpaceGIStrength = 1.0f;
     s.GodRayStrength = 1.0f;
     s.DoFBokehRadius = 3.5f;
     if ( IsWindEffectsControlVisible() ) s.GlobalWindStrength = 1.0f;
@@ -907,8 +900,6 @@ void ApplyGraphicsPresets( GothicRendererSettings& s, bool applyRuntimeUpdates =
     case GothicRendererSettings::GRAPHICS_LOW:
         s.ShadowMapSize = 1024;
         s.AoMode = AOMode::AO_XEGTAO;
-        s.EnableContactShadows = false;
-        s.EnableScreenSpaceGI = false;
         s.EnableDoF = false;
         s.EnableDynamicClouds = false;
         if ( IsWindEffectsControlVisible() ) s.WindQuality = GothicRendererSettings::EWindQuality::WIND_QUALITY_ADVANCED;
@@ -924,8 +915,6 @@ void ApplyGraphicsPresets( GothicRendererSettings& s, bool applyRuntimeUpdates =
     case GothicRendererSettings::GRAPHICS_MEDIUM:
         s.ShadowMapSize = 2048;
         s.AoMode = AOMode::AO_XEGTAO;
-        s.EnableContactShadows = false;
-        s.EnableScreenSpaceGI = false;
         s.EnableDoF = true;
         s.EnableDynamicClouds = false;
         if ( IsWindEffectsControlVisible() ) s.WindQuality = GothicRendererSettings::EWindQuality::WIND_QUALITY_ADVANCED;
@@ -940,8 +929,6 @@ void ApplyGraphicsPresets( GothicRendererSettings& s, bool applyRuntimeUpdates =
     case GothicRendererSettings::GRAPHICS_HIGH:
         s.ShadowMapSize = 4096;
         s.AoMode = AOMode::AO_XEGTAO;
-        s.EnableContactShadows = true;
-        s.EnableScreenSpaceGI = false;
         s.EnableDoF = true;
         s.EnableDynamicClouds = true;
         if ( IsWindEffectsControlVisible() ) s.WindQuality = GothicRendererSettings::EWindQuality::WIND_QUALITY_ADVANCED;
@@ -956,8 +943,6 @@ void ApplyGraphicsPresets( GothicRendererSettings& s, bool applyRuntimeUpdates =
     case GothicRendererSettings::GRAPHICS_VERY_HIGH:
         s.ShadowMapSize = 8192;
         s.AoMode = AOMode::AO_XEGTAO;
-        s.EnableContactShadows = true;
-        s.EnableScreenSpaceGI = true;
         s.EnableDoF = true;
         s.EnableDynamicClouds = true;
         if ( IsWindEffectsControlVisible() ) s.WindQuality = GothicRendererSettings::EWindQuality::WIND_QUALITY_ADVANCED;
@@ -975,7 +960,6 @@ void ApplyGraphicsPresets( GothicRendererSettings& s, bool applyRuntimeUpdates =
     s.NormalizeGodRayMode( FeatureLevel10Compatibility );
     if ( !s.EnableSSR ) s.SSRStrength = 0.0f;
     if ( s.AoMode == AOMode::AO_NONE ) s.AOStrength = 0.0f;
-    if ( !s.EnableScreenSpaceGI ) s.ScreenSpaceGIStrength = 0.0f;
     if ( !s.EnableGodRays ) s.GodRayStrength = 0.0f;
     if ( !s.EnableDoF ) s.DoFBokehRadius = 0.0f;
     if ( IsWindEffectsControlVisible() && s.WindQuality == GothicRendererSettings::EWindQuality::WIND_QUALITY_NONE ) s.GlobalWindStrength = 0.0f;
@@ -1059,8 +1043,6 @@ namespace
         // Disabled coupled controls must always display their true zero effect state.
         if ( !s.EnableHDR ) s.HDRToneMapStrength = 0.0f;
         if ( s.AoMode == AOMode::AO_NONE ) s.AOStrength = 0.0f;
-        s.ScreenSpaceGIStrength =
-            s.EnableScreenSpaceGI ? 1.0f : 0.0f;
         s.NormalizeGodRayMode( FeatureLevel10Compatibility );
         if ( !s.EnableGodRays ) s.GodRayStrength = 0.0f;
         if ( !s.EnableSSR ) s.SSRStrength = 0.0f;
@@ -1524,26 +1506,6 @@ void ImGuiShim::RenderSettingsWindow()
             ImGui::EndDisabled();
             ImGui::SetItemTooltip( "%s", Tr( "Makes contact shading lighter or darker.", u8"Macht diese Abdunklung heller oder dunkler." ) );
 
-            bool waterReflections = settings.EnableSSR;
-            ImText( Tr( "Water Reflections", u8"Wasserreflektionen" ), { buttonWidth.x - ImGui::GetFrameHeight() - style.ItemSpacing.x, buttonWidth.y } ); ImGui::SameLine();
-            if ( CoupledStrengthCheckbox( "##Enable Water Reflections", "WaterReflectionsStrength",
-                    &waterReflections, &settings.SSRStrength, 1.0f ) ) {
-                settings.EnableSSR = waterReflections;
-                shadersToReload |= ShaderCategory::Water;
-            }
-            ImGui::SetItemTooltip( "%s", Tr( "Enables reflections on water surfaces.", u8"Aktiviert Reflexionen auf Wasseroberfl\u00E4chen." ) );
-            ImGui::SameLine();
-            ImGui::SetNextItemWidth( standardComboWidth );
-            const bool waterReflectionsBeforeSlider = waterReflections;
-            if ( CoupledStrengthSlider( "##WaterReflectionsStrength", "WaterReflectionsStrength",
-                    &waterReflections, &settings.SSRStrength ) ) {
-                settings.EnableSSR = waterReflections;
-                if ( waterReflectionsBeforeSlider != waterReflections ) {
-                    shadersToReload |= ShaderCategory::Water;
-                }
-            }
-            ImGui::SetItemTooltip( "%s", Tr( "Makes water reflections weaker or stronger.", u8"Macht Wasserreflexionen schw\u00E4cher oder st\u00E4rker." ) );
-
             bool godRaysEnabled = settings.EnableGodRays;
             ImText( Tr( "Light Shafts", u8"Lichtstrahlen" ), { buttonWidth.x - ImGui::GetFrameHeight() - style.ItemSpacing.x, buttonWidth.y } ); ImGui::SameLine();
             if ( CoupledStrengthCheckbox( "##Enable Godrays", "GodRayStrength",
@@ -1573,6 +1535,26 @@ void ImGuiShim::RenderSettingsWindow()
 
         {
             ImGui::BeginGroup();
+            bool waterReflections = settings.EnableSSR;
+            ImText( Tr( "Water Reflections", u8"Wasserreflektionen" ), { buttonWidth.x - ImGui::GetFrameHeight() - style.ItemSpacing.x, buttonWidth.y } ); ImGui::SameLine();
+            if ( CoupledStrengthCheckbox( "##Enable Water Reflections", "WaterReflectionsStrength",
+                    &waterReflections, &settings.SSRStrength, 1.0f ) ) {
+                settings.EnableSSR = waterReflections;
+                shadersToReload |= ShaderCategory::Water;
+            }
+            ImGui::SetItemTooltip( "%s", Tr( "Enables reflections on water surfaces.", u8"Aktiviert Reflexionen auf Wasseroberfl\u00E4chen." ) );
+            ImGui::SameLine();
+            ImGui::SetNextItemWidth( standardComboWidth );
+            const bool waterReflectionsBeforeSlider = waterReflections;
+            if ( CoupledStrengthSlider( "##WaterReflectionsStrength", "WaterReflectionsStrength",
+                    &waterReflections, &settings.SSRStrength ) ) {
+                settings.EnableSSR = waterReflections;
+                if ( waterReflectionsBeforeSlider != waterReflections ) {
+                    shadersToReload |= ShaderCategory::Water;
+                }
+            }
+            ImGui::SetItemTooltip( "%s", Tr( "Makes water reflections weaker or stronger.", u8"Macht Wasserreflexionen schw\u00E4cher oder st\u00E4rker." ) );
+
             float depthOfFieldStrength = settings.DoFBokehRadius / 3.5f;
             ImText( Tr( "Depth of Field", u8"Tiefenunsch\u00E4rfe" ), { buttonWidth.x - ImGui::GetFrameHeight() - style.ItemSpacing.x, buttonWidth.y } ); ImGui::SameLine();
             CoupledStrengthCheckbox( "##Enable Depth of Field", "DepthOfFieldBlurStrength",
@@ -1635,18 +1617,6 @@ void ImGuiShim::RenderSettingsWindow()
             }
             ImGui::SetItemTooltip( "%s", Tr( "Enables available normal and parallax surface details.", u8"Aktiviert vorhandene Normalmap- und Parallax-Oberfl\u00E4chendetails." ) );
 
-            ImText( Tr( "Contact Shadows", u8"Kontaktschatten" ), { buttonWidth.x - ImGui::GetFrameHeight() - style.ItemSpacing.x, buttonWidth.y } ); ImGui::SameLine();
-            if ( ImGui::Checkbox( "##Enable Contact Shadows", &settings.EnableContactShadows ) ) {
-                shadersToReload |= ShaderCategory::Other;
-            }
-            ImGui::SetItemTooltip( "%s", Tr( "Adds small shadows at nearby contact points. With FSR 3, the effect is limited to indoor areas.", u8"F\u00FCgt kleine Schatten an nahen Kontaktstellen hinzu. Mit FSR 3 ist der Effekt auf Innenr\u00E4ume begrenzt." ) );
-
-            ImText( "Screen-Space GI", { buttonWidth.x - ImGui::GetFrameHeight() - style.ItemSpacing.x, buttonWidth.y } ); ImGui::SameLine();
-            if ( ImGui::Checkbox( "##Enable Screen-Space GI", &settings.EnableScreenSpaceGI ) ) {
-                settings.ScreenSpaceGIStrength = settings.EnableScreenSpaceGI ? 1.0f : 0.0f;
-                shadersToReload |= ShaderCategory::Other;
-            }
-            ImGui::SetItemTooltip( "%s", Tr( "Enables soft indirect lighting from nearby surfaces.", u8"Aktiviert weiches indirektes Licht von nahen Oberfl\u00E4chen." ) );
             ImGui::EndGroup();
         }
 

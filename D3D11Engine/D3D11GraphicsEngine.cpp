@@ -4865,7 +4865,6 @@ XRESULT D3D11GraphicsEngine::OnStartWorldRendering() {
 
     // Shared state for the PostFX composition pass
     ID3D11ShaderResourceView* compositionGodRaysSRV = nullptr;
-    ID3D11ShaderResourceView* compositionScreenSpaceLightingSRV = nullptr;
     bool isOutdoor = loadedWorldInfo->BspTree->GetBspTreeMode() == zBSP_MODE_OUTDOOR;
     const bool isDragonIsland = NormalizeVisualStemForMarker( loadedWorldInfo->WorldName ) == "DRAGONISLAND";
     bool compositionGodRays = (rendererState.RendererSettings.AreGodRaysEnabled() && isOutdoor);
@@ -4883,19 +4882,7 @@ XRESULT D3D11GraphicsEngine::OnStartWorldRendering() {
         && rendererState.RendererSettings.ResolutionScalePercent <= 100
         && rendererState.RendererSettings.AntiAliasingMode == GothicRendererSettings::AA_FSR3
         && PfxRenderer && PfxRenderer->GetFSR3() && TemporalState;
-    const bool cameraIndoor = oCGame::IsSessionCameraIndoor();
-    const bool contactShadowTargetActive = rendererState.RendererSettings.EnableContactShadows
-        && (!fsr3UpscalingActive || cameraIndoor);
-    PfxRenderer->UpdateContactShadowTransition(
-        contactShadowTargetActive,
-        Engine::GAPI->GetTimeSeconds() );
-    bool compositionContactShadows = PfxRenderer->IsContactShadowTransitionActive();
-    bool compositionSSGI = rendererState.RendererSettings.EnableScreenSpaceGI && rendererState.RendererSettings.ScreenSpaceGIStrength > 0.0f;
-    bool compositionNeedsGeometry = compositionContactShadows || compositionSSGI;
-    if ( !compositionNeedsGeometry ) {
-        PfxRenderer->ResetScreenSpaceLightingHistory();
-    }
-    bool compositionNeedsDepth = compositionHeightFog || compositionNeedsGeometry;
+    bool compositionNeedsDepth = compositionHeightFog;
     bool compositionActive = compositionGodRays || compositionNeedsDepth;
 
     const bool renderTemporalSkyVelocity = rendererState.RendererSettings.DrawSky
@@ -5049,7 +5036,6 @@ XRESULT D3D11GraphicsEngine::OnStartWorldRendering() {
         && Engine::GAPI->GetSceneWetness() > 1e-6f && isOutdoor;
     const bool renderWaterMask =
         renderRainExclusionMask
-        || compositionNeedsGeometry
         || rendererState.RendererSettings.EnableDoF;
     const bool renderWetGroundSSR = renderRainExclusionMask;
     RGResourceHandle waterMaskResource = RG_INVALID_HANDLE;
@@ -5401,138 +5387,14 @@ XRESULT D3D11GraphicsEngine::OnStartWorldRendering() {
             });
         }
     }
-    if ( compositionNeedsGeometry ) {
-        graph.AddPass( RG_PASS_NAME("Screen-Space Lighting"), [&]( RGBuilder& builder, RenderPass& pass ) {
-            builder.Read( backBufferHandle );
-            builder.Read( colorResource );
-            builder.Read( normalsResource );
-            builder.Read( specularResource );
-            builder.Read( waterMaskResource );
-            builder.Read( velocityBufferHandle );
-
-            pass.m_executeCallback = [this, backBufferHandle, colorResource, normalsResource, specularResource, waterMaskResource, velocityBufferHandle,
-                                      &compositionScreenSpaceLightingSRV]( const RenderGraph& graph ) {
-                TracyD3D11ZoneCGX( "D3D11GraphicsEngine::Screen-Space Lighting" );
-
-                auto backBuffer = graph.GetPhysicalTexture( backBufferHandle );
-                auto albedoTexture = graph.GetPhysicalTexture( colorResource );
-                auto normalsTexture = graph.GetPhysicalTexture( normalsResource );
-                auto specularTexture = graph.GetPhysicalTexture( specularResource );
-                auto waterMaskTexture = graph.GetPhysicalTexture( waterMaskResource );
-                auto velocityTexture = graph.GetPhysicalTexture( velocityBufferHandle );
-                if ( !backBuffer || !albedoTexture || !normalsTexture || !specularTexture || !waterMaskTexture ) {
-                    compositionScreenSpaceLightingSRV = nullptr;
-                    return;
-                }
-
-                auto tempBuffer = PfxRenderer->GetTempBuffer();
-                GetContext()->CopyResource( tempBuffer->GetTexture().Get(), backBuffer->GetTexture().Get() );
-
-                PfxRenderer->RenderScreenSpaceLighting(
-                    tempBuffer->GetShaderResView().Get(),
-                    albedoTexture->GetShaderResView().Get(),
-                    GetDepthBuffer()->GetShaderResView().Get(),
-                    normalsTexture->GetShaderResView().Get(),
-                    waterMaskTexture->GetShaderResView().Get(),
-                    specularTexture->GetShaderResView().Get(),
-                    velocityTexture ? velocityTexture->GetShaderResView().Get() : nullptr,
-                    &compositionScreenSpaceLightingSRV );
-                GetContext()->PSSetSamplers( 0, 1, DefaultSamplerState.GetAddressOf() );
-            };
-        } );
-    }
-    if ( fsr3ActiveForReactiveMask && compositionContactShadows ) {
-        graph.AddPass( RG_PASS_NAME("FSR3 Contact Shadow Mask"), [&]( RGBuilder& builder, RenderPass& pass ) {
-            builder.Read( transparencyAndCompositionMaskResource );
-            builder.Read( backBufferHandle );
-            builder.Write( transparencyAndCompositionMaskResource );
-
-            pass.m_executeCallback = [this, transparencyAndCompositionMaskResource, &compositionScreenSpaceLightingSRV]( const RenderGraph& graph ) {
-                TracyD3D11ZoneCGX( "D3D11GraphicsEngine::FSR3 Contact Shadow Mask" );
-
-                if ( !compositionScreenSpaceLightingSRV ) {
-                    return;
-                }
-
-                auto maskTexture = graph.GetPhysicalTexture( transparencyAndCompositionMaskResource );
-                if ( !maskTexture ) {
-                    return;
-                }
-
-                auto vs = ShaderManager->GetVShader( VShaderID::VS_PFX );
-                auto ps = ShaderManager->GetPShader( PShaderID::PS_PFX_FSR3TransparencyMask );
-                if ( !vs || !ps ) {
-                    return;
-                }
-
-                Microsoft::WRL::ComPtr<ID3D11RenderTargetView> oldRTV;
-                Microsoft::WRL::ComPtr<ID3D11DepthStencilView> oldDSV;
-                GetContext()->OMGetRenderTargets( 1, oldRTV.GetAddressOf(), oldDSV.GetAddressOf() );
-
-                Microsoft::WRL::ComPtr<ID3D11BlendState> oldBlendState;
-                FLOAT oldBlendFactor[4] = {};
-                UINT oldSampleMask = 0xffffffff;
-                GetContext()->OMGetBlendState( oldBlendState.GetAddressOf(), oldBlendFactor, &oldSampleMask );
-
-                static Microsoft::WRL::ComPtr<ID3D11BlendState> s_fsr3ContactMaskBlendState;
-                if ( !s_fsr3ContactMaskBlendState ) {
-                    D3D11_BLEND_DESC blendDesc = {};
-                    blendDesc.RenderTarget[0].BlendEnable = TRUE;
-                    blendDesc.RenderTarget[0].SrcBlend = D3D11_BLEND_ONE;
-                    blendDesc.RenderTarget[0].DestBlend = D3D11_BLEND_ONE;
-                    blendDesc.RenderTarget[0].BlendOp = D3D11_BLEND_OP_MAX;
-                    blendDesc.RenderTarget[0].SrcBlendAlpha = D3D11_BLEND_ONE;
-                    blendDesc.RenderTarget[0].DestBlendAlpha = D3D11_BLEND_ONE;
-                    blendDesc.RenderTarget[0].BlendOpAlpha = D3D11_BLEND_OP_MAX;
-                    blendDesc.RenderTarget[0].RenderTargetWriteMask = D3D11_COLOR_WRITE_ENABLE_RED;
-                    GetDevice()->CreateBlendState( &blendDesc, s_fsr3ContactMaskBlendState.GetAddressOf() );
-                }
-
-                SetDefaultStates();
-                Engine::GAPI->GetRendererState().DepthState.DepthBufferCompareFunc = GothicDepthBufferStateInfo::CF_COMPARISON_ALWAYS;
-                Engine::GAPI->GetRendererState().DepthState.DepthWriteEnabled = false;
-                Engine::GAPI->GetRendererState().DepthState.SetDirty();
-
-                SetViewport( ViewportInfo( 0, 0, GetResolution() ) );
-                ID3D11RenderTargetView* rtv = maskTexture->GetRenderTargetView().Get();
-                GetContext()->OMSetRenderTargets( 1, &rtv, nullptr );
-
-                if ( s_fsr3ContactMaskBlendState ) {
-                    const FLOAT blendFactor[4] = {};
-                    GetContext()->OMSetBlendState( s_fsr3ContactMaskBlendState.Get(), blendFactor, 0xffffffff );
-                }
-
-                vs->Apply();
-                ps->Apply();
-                ID3D11ShaderResourceView* srv = compositionScreenSpaceLightingSRV;
-                GetContext()->PSSetShaderResources( 0, 1, &srv );
-                GetContext()->PSSetSamplers( 0, 1, DefaultSamplerState.GetAddressOf() );
-
-                PfxRenderer->DrawFullScreenQuad();
-
-                ID3D11ShaderResourceView* nullSRV = nullptr;
-                GetContext()->PSSetShaderResources( 0, 1, &nullSRV );
-                GetContext()->OMSetBlendState( oldBlendState.Get(), oldBlendFactor, oldSampleMask );
-                GetContext()->OMSetRenderTargets( 1, oldRTV.GetAddressOf(), oldDSV.Get() );
-
-                Engine::GAPI->GetRendererState().DepthState.DepthBufferCompareFunc = GothicDepthBufferStateInfo::DEFAULT_DEPTH_COMP_STATE;
-                Engine::GAPI->GetRendererState().DepthState.DepthWriteEnabled = true;
-                Engine::GAPI->GetRendererState().DepthState.SetDirty();
-            };
-        } );
-    }
-    // PostFX Composition pass merges enabled atmospheric and lighting effects in one full-screen blit.
+    // PostFX Composition pass merges the enabled atmospheric effects in one full-screen blit.
     if ( compositionActive ) {
         graph.AddPass( RG_PASS_NAME("PostFX Composition"), [&]( RGBuilder& builder, RenderPass& pass ) {
             builder.Read( backBufferHandle );
-            if ( compositionNeedsGeometry ) {
-                builder.Read( normalsResource );
-                builder.Read( waterMaskResource );
-            }
             builder.Write( backBufferHandle );
 
-            pass.m_executeCallback = [this, backBufferHandle, normalsResource, compositionNeedsDepth, compositionNeedsGeometry,
-                                      compositionHeightFog, fsr3UpscalingActive, waterMaskResource, &compositionGodRaysSRV, &compositionScreenSpaceLightingSRV](const RenderGraph& graph) {
+            pass.m_executeCallback = [this, backBufferHandle, compositionNeedsDepth,
+                                      compositionHeightFog, &compositionGodRaysSRV](const RenderGraph& graph) {
                 TracyD3D11ZoneCGX( "D3D11GraphicsEngine::PostFX Composition" );
 
                 auto backBuffer = graph.GetPhysicalTexture(backBufferHandle);
@@ -5542,21 +5404,13 @@ XRESULT D3D11GraphicsEngine::OnStartWorldRendering() {
 
                 // Gather SRVs for composition
                 ID3D11ShaderResourceView* depthSRV = compositionNeedsDepth ? GetDepthBuffer()->GetShaderResView().Get() : nullptr;
-                auto normalsTexture = compositionNeedsGeometry ? graph.GetPhysicalTexture(normalsResource) : nullptr;
-                ID3D11ShaderResourceView* normalsSRV = normalsTexture ? normalsTexture->GetShaderResView().Get() : nullptr;
-                auto waterMaskTexture = compositionNeedsGeometry ? graph.GetPhysicalTexture(waterMaskResource) : nullptr;
-                ID3D11ShaderResourceView* waterMaskSRV = waterMaskTexture ? waterMaskTexture->GetShaderResView().Get() : nullptr;
 
                 PfxRenderer->RenderPostFXComposition(
                     backBuffer->GetRenderTargetView().Get(),
                     tempBuffer->GetShaderResView().Get(),
                     compositionGodRaysSRV,
                     depthSRV,
-                    normalsSRV,
-                    waterMaskSRV,
-                    compositionScreenSpaceLightingSRV,
-                    compositionHeightFog,
-                    fsr3UpscalingActive );
+                    compositionHeightFog );
 
                 GetContext()->PSSetSamplers( 0, 1, DefaultSamplerState.GetAddressOf() );
             };

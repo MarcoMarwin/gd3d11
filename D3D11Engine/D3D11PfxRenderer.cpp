@@ -23,7 +23,6 @@
 #include "ConstantBufferStructs.h"
 #include "GothicAPI.h"
 #include "GSky.h"
-#include "oCGame.h"
 
 D3D11PfxRenderer::D3D11PfxRenderer() {
 
@@ -61,14 +60,7 @@ D3D11PfxRenderer::~D3D11PfxRenderer()
     PFX_FSR3.reset();
     PFX_XeGTAO.reset();
 
-    ScreenSpaceLightingHistory[0].reset();
-    ScreenSpaceLightingHistory[1].reset();
-    ScreenSpaceLightingDepthHistory[0].reset();
-    ScreenSpaceLightingDepthHistory[1].reset();
-ScreenSpaceLightingHistoryValid = false;
-ScreenSpaceLightingHistoryIndex = 0;
-ScreenSpaceLightingFrameIndex = 0;
-NightFogRainFade = 0.0f;
+    NightFogRainFade = 0.0f;
 LastNightFogRainFadeTime = 0.0f;
 NightFogRainFadeInitialized = false;
 m_texturePool.reset();
@@ -333,12 +325,6 @@ XRESULT D3D11PfxRenderer::OnResize( const INT2& newResolution ) {
 
 
     if ( PFX_FSR3 ) PFX_FSR3->Destroy();
-    ScreenSpaceLightingHistory[0].reset();
-    ScreenSpaceLightingHistory[1].reset();
-    ScreenSpaceLightingDepthHistory[0].reset();
-    ScreenSpaceLightingDepthHistory[1].reset();
-    ScreenSpaceLightingHistoryValid = false;
-    ScreenSpaceLightingHistoryIndex = 0;
     m_texturePool->Clear(); // textures will be created on demand
     if ( !FeatureLevel10Compatibility ) {
         FX_SMAA->OnResize( newResolution );
@@ -368,170 +354,12 @@ XRESULT D3D11PfxRenderer::RenderCombinedGodRaysToTexture(
     return FX_GodRays->RenderCombinedToTexture( backbuffer, depthCopy, lowClouds, outGodRaysSRV );
 }
 
-void D3D11PfxRenderer::UpdateContactShadowTransition( bool targetActive, float currentTime ) {
-    float deltaTime = 0.0f;
-    if ( LastContactShadowTransitionTime > 0.0f && currentTime >= LastContactShadowTransitionTime ) {
-        deltaTime = std::min( currentTime - LastContactShadowTransitionTime, 0.1f );
-    }
-    LastContactShadowTransitionTime = currentTime;
-
-    const float targetWeight = targetActive ? 1.0f : 0.0f;
-    const float transitionStep = deltaTime * 4.0f;
-    if ( ContactShadowTransitionWeight < targetWeight ) {
-        ContactShadowTransitionWeight = std::min(
-            ContactShadowTransitionWeight + transitionStep,
-            targetWeight );
-    } else if ( ContactShadowTransitionWeight > targetWeight ) {
-        ContactShadowTransitionWeight = std::max(
-            ContactShadowTransitionWeight - transitionStep,
-            targetWeight );
-    }
-}
-void D3D11PfxRenderer::ResetScreenSpaceLightingHistory() {
-    ScreenSpaceLightingHistoryValid = false;
-}
-XRESULT D3D11PfxRenderer::RenderScreenSpaceLighting(
-    ID3D11ShaderResourceView* sceneSRV,
-    ID3D11ShaderResourceView* albedoSRV,
-    ID3D11ShaderResourceView* depthSRV,
-    ID3D11ShaderResourceView* normalsSRV,
-    ID3D11ShaderResourceView* waterMaskSRV,
-    ID3D11ShaderResourceView* materialSRV,
-    ID3D11ShaderResourceView* velocitySRV,
-    ID3D11ShaderResourceView** outLightingSRV ) {
-
-    if ( outLightingSRV ) {
-        *outLightingSRV = nullptr;
-    }
-
-    auto& settings = Engine::GAPI->GetRendererState().RendererSettings;
-    const bool contactActive = IsContactShadowTransitionActive();
-    const bool giActive = settings.EnableScreenSpaceGI && settings.ScreenSpaceGIStrength > 0.0f;
-    if ( !sceneSRV || !albedoSRV || !depthSRV || !normalsSRV || !waterMaskSRV || !materialSRV || (!contactActive && !giActive) ) {
-        ScreenSpaceLightingHistoryValid = false;
-        return XR_SUCCESS;
-    }
-
-    auto* engine = reinterpret_cast<D3D11GraphicsEngine*>(Engine::GraphicsEngine);
-    auto& context = engine->GetContext();
-    const INT2 res = engine->GetResolution();
-    if ( res.x <= 0 || res.y <= 0 ) {
-        ScreenSpaceLightingHistoryValid = false;
-        return XR_FAILED;
-    }
-
-    for ( int i = 0; i < 2; ++i ) {
-        if ( !ScreenSpaceLightingHistory[i]
-            || ScreenSpaceLightingHistory[i]->GetSizeX() != static_cast<UINT>(res.x)
-            || ScreenSpaceLightingHistory[i]->GetSizeY() != static_cast<UINT>(res.y) ) {
-            ScreenSpaceLightingHistory[i] = std::make_unique<RenderToTextureBuffer>(
-                engine->GetDevice().Get(), res.x, res.y, DXGI_FORMAT_R16G16B16A16_FLOAT );
-            ScreenSpaceLightingDepthHistory[i] = std::make_unique<RenderToTextureBuffer>(
-                engine->GetDevice().Get(), res.x, res.y, DXGI_FORMAT_R32_FLOAT );
-            ScreenSpaceLightingHistoryValid = false;
-        }
-    }
-
-    auto raw = m_texturePool->Acquire( TexturePool::Description{ res.x, res.y, DXGI_FORMAT_R16G16B16A16_FLOAT } );
-
-    Microsoft::WRL::ComPtr<ID3D11RenderTargetView> previousRTV;
-    Microsoft::WRL::ComPtr<ID3D11DepthStencilView> previousDSV;
-    context->OMGetRenderTargets( 1, previousRTV.GetAddressOf(), previousDSV.GetAddressOf() );
-
-    ScreenSpaceLightingConstantBuffer cb = {};
-    GSky* sky = Engine::GAPI->GetSky();
-    const XMFLOAT4X4& projection = Engine::GAPI->GetProjectionMatrix();
-    cb.SSL_ProjParams = float4( 1.0f / projection._11, 1.0f / projection._22, projection._43, projection._33 );
-    cb.SSL_Projection = projection;
-    const XMMATRIX view = Engine::GAPI->GetViewMatrixXM();
-    XMStoreFloat4x4( &cb.SSL_View, view );
-    XMStoreFloat4x4( &cb.SSL_InvView, XMMatrixInverse( nullptr, view ) );
-    cb.SSL_InvResolution = float2( 1.0f / std::max( 1, res.x ), 1.0f / std::max( 1, res.y ) );
-    cb.SSL_ContactStrength = contactActive ? settings.GetContactShadowFixedStrength() : 0.0f;
-    cb.SSL_GIStrength = settings.ScreenSpaceGIStrength;
-    cb.SSL_EnableContact = contactActive ? ContactShadowTransitionWeight : 0.0f;
-    cb.SSL_EnableGI = giActive ? 1.0f : 0.0f;
-    cb.SSL_HistoryValid = ScreenSpaceLightingHistoryValid ? 1.0f : 0.0f;
-    cb.SSL_FSR3Active = (settings.Upscaler == GothicRendererSettings::UPSCALER_FSR_3
-        && settings.AntiAliasingMode == GothicRendererSettings::AA_FSR3) ? 1.0f : 0.0f;
-    cb.SSL_FrameIndex = static_cast<float>(ScreenSpaceLightingFrameIndex++ & 1023u);
-    if ( sky ) {
-        const XMFLOAT3 mainLightDirection = sky->GetMainLightDirection();
-        const XMVECTOR directionToLightVS = XMVector3Normalize( XMVector3TransformNormal(
-            XMLoadFloat3( &mainLightDirection ), view ) );
-        XMStoreFloat3( &cb.SSL_LightDirectionVS, directionToLightVS );
-    } else {
-        cb.SSL_LightDirectionVS = XMFLOAT3( 0.0f, 1.0f, 0.0f );
-    }
-
-    engine->GetShaderManager().GetVShader( VShaderID::VS_PFX )->Apply();
-    auto tracePS = engine->GetShaderManager().GetPShader( PShaderID::PS_PFX_ScreenSpaceLightingTrace );
-    tracePS->Apply();
-    tracePS->GetBuffer( "ScreenSpaceLightingConstantBuffer" ).Update( &cb ).Bind();
-
-    ID3D11RenderTargetView* rawRTV = raw->GetRenderTargetView().Get();
-    context->OMSetRenderTargets( 1, &rawRTV, nullptr );
-    ID3D11ShaderResourceView* traceSRVs[6] = { sceneSRV, depthSRV, normalsSRV, waterMaskSRV, materialSRV, albedoSRV };
-    context->PSSetShaderResources( 0, 6, traceSRVs );
-    ID3D11SamplerState* sampler = engine->GetClampSamplerState();
-    context->PSSetSamplers( 0, 1, &sampler );
-    engine->SetDefaultStates();
-    Engine::GAPI->GetRendererState().BlendState.SetDefault();
-    Engine::GAPI->GetRendererState().BlendState.SetDirty();
-    Engine::GAPI->GetRendererState().DepthState.DepthBufferCompareFunc = GothicDepthBufferStateInfo::CF_COMPARISON_ALWAYS;
-    Engine::GAPI->GetRendererState().DepthState.DepthWriteEnabled = false;
-    Engine::GAPI->GetRendererState().DepthState.SetDirty();
-    engine->SetViewport( ViewportInfo( 0, 0, res ) );
-    DrawFullScreenQuad();
-
-    const uint32_t readIndex = ScreenSpaceLightingHistoryIndex;
-    const uint32_t writeIndex = 1u - readIndex;
-    auto temporalPS = engine->GetShaderManager().GetPShader( PShaderID::PS_PFX_ScreenSpaceLightingTemporal );
-    temporalPS->Apply();
-    cb.SSL_HistoryValid = ScreenSpaceLightingHistoryValid ? 1.0f : 0.0f;
-    cb.SSL_FSR3Active = (settings.Upscaler == GothicRendererSettings::UPSCALER_FSR_3
-        && settings.AntiAliasingMode == GothicRendererSettings::AA_FSR3) ? 1.0f : 0.0f;
-    temporalPS->GetBuffer( "ScreenSpaceLightingConstantBuffer" ).Update( &cb ).Bind();
-
-    ID3D11RenderTargetView* temporalRTVs[2] = {
-        ScreenSpaceLightingHistory[writeIndex]->GetRenderTargetView().Get(),
-        ScreenSpaceLightingDepthHistory[writeIndex]->GetRenderTargetView().Get()
-    };
-    context->OMSetRenderTargets( 2, temporalRTVs, nullptr );
-    ID3D11ShaderResourceView* temporalSRVs[8] = {
-        raw->GetShaderResView().Get(),
-        ScreenSpaceLightingHistoryValid ? ScreenSpaceLightingHistory[readIndex]->GetShaderResView().Get() : raw->GetShaderResView().Get(),
-        depthSRV,
-        normalsSRV,
-        velocitySRV,
-        ScreenSpaceLightingHistoryValid ? ScreenSpaceLightingDepthHistory[readIndex]->GetShaderResView().Get() : depthSRV,
-        materialSRV,
-        albedoSRV
-    };
-    context->PSSetShaderResources( 0, 8, temporalSRVs );
-    DrawFullScreenQuad();
-
-    ID3D11ShaderResourceView* nullSRVs[8] = {};
-    context->PSSetShaderResources( 0, 8, nullSRVs );
-    context->OMSetRenderTargets( 1, previousRTV.GetAddressOf(), previousDSV.Get() );
-
-    ScreenSpaceLightingHistoryIndex = writeIndex;
-    ScreenSpaceLightingHistoryValid = true;
-    if ( outLightingSRV ) {
-        *outLightingSRV = ScreenSpaceLightingHistory[writeIndex]->GetShaderResView().Get();
-    }
-    return XR_SUCCESS;
-}
 XRESULT D3D11PfxRenderer::RenderPostFXComposition(
     ID3D11RenderTargetView* outputRTV,
     ID3D11ShaderResourceView* backbufferSRV,
     ID3D11ShaderResourceView* godraysSRV,
     ID3D11ShaderResourceView* depthSRV,
-    ID3D11ShaderResourceView* normalsSRV,
-    ID3D11ShaderResourceView* waterMaskSRV,
-    ID3D11ShaderResourceView* screenSpaceLightingSRV,
-    bool compositionHeightFog,
-    bool fsr3UpscalingActive ) {
+    bool compositionHeightFog ) {
 
     D3D11GraphicsEngine* engine = reinterpret_cast<D3D11GraphicsEngine*>(Engine::GraphicsEngine);
     auto& context = engine->GetContext();
@@ -542,28 +370,12 @@ XRESULT D3D11PfxRenderer::RenderPostFXComposition(
     auto compositionPS = engine->GetShaderManager().GetPShader( PShaderID::PS_PFX_Composition );
     compositionPS->Apply();
 
-    // Update constants shared by height fog and the view-space ray tracing effects.
+    // Update constants used by the height-fog composition permutation.
     auto& settings = Engine::GAPI->GetRendererState().RendererSettings;
     GSky* sky = Engine::GAPI->GetSky();
-    const bool contactShadowsActive = IsContactShadowTransitionActive();
-    const bool screenSpaceGIActive = settings.EnableScreenSpaceGI && settings.ScreenSpaceGIStrength > 0.0f;
-    const bool needsAtmosphere = compositionHeightFog || contactShadowsActive || screenSpaceGIActive;
     CompositionControlConstantBuffer control = {};
     control.CC_HeightFogEnabled = compositionHeightFog ? 1.0f : 0.0f;
-    control.CC_ContactShadowScale = contactShadowsActive ? 1.0f : 0.0f;
-    control.CC_InvResolution = float2( 1.0f / std::max( 1, res.x ), 1.0f / std::max( 1, res.y ) );
-    const XMFLOAT4X4& projection = Engine::GAPI->GetProjectionMatrix();
-    control.CC_ProjParams = float4( 1.0f / projection._11, 1.0f / projection._22, projection._43, projection._33 );
-    control.CC_Projection = projection;
-    if ( sky ) {
-        const XMFLOAT3 mainLightDirection = sky->GetMainLightDirection();
-        const XMVECTOR directionToLightVS = XMVector3Normalize( XMVector3TransformNormal(
-            XMLoadFloat3( &mainLightDirection ), Engine::GAPI->GetViewMatrixXM() ) );
-        XMStoreFloat3( &control.CC_LightDirectionVS, directionToLightVS );
-    } else {
-        control.CC_LightDirectionVS = XMFLOAT3( 0.0f, 1.0f, 0.0f );
-    }
-    if ( needsAtmosphere )
+    if ( compositionHeightFog )
         compositionPS->GetBuffer( "CompositionControl" ).Update( &control ).Bind();
     if ( compositionHeightFog ) {
         HeightfogConstantBuffer cb = {};
@@ -640,7 +452,7 @@ cb.HF_FogColorMod = FogColorMod;
 cb.HF_RainFogColor = settings.RainFogColor;
 compositionPS->GetBuffer( "PFXBuffer" ).Update( &cb ).Bind();
     }
-    if ( needsAtmosphere && sky ) {
+    if ( compositionHeightFog && sky ) {
         compositionPS->GetBuffer( "Atmosphere" ).Update( &sky->GetAtmosphereCB() ).Bind();
     }
 
@@ -655,11 +467,11 @@ compositionPS->GetBuffer( "PFXBuffer" ).Update( &cb ).Bind();
     // Bind output RTV (no depth)
     context->OMSetRenderTargets( 1, &outputRTV, nullptr );
 
-    // Bind SRVs: t0=backbuffer, t1=GodRays, t2=Depth, t3=Normals, t4=WaterMask, t5=ScreenSpaceLighting
-    ID3D11ShaderResourceView* srvs[6] = {
-        backbufferSRV, godraysSRV, depthSRV, normalsSRV, waterMaskSRV, screenSpaceLightingSRV
+    // Bind SRVs: t0=backbuffer, t1=GodRays, t2=Depth
+    ID3D11ShaderResourceView* srvs[3] = {
+        backbufferSRV, godraysSRV, depthSRV
     };
-    context->PSSetShaderResources( 0, 6, srvs );
+    context->PSSetShaderResources( 0, 3, srvs );
 
     // No blending - direct overwrite
     Engine::GAPI->GetRendererState().BlendState.SetDefault();
@@ -672,8 +484,8 @@ compositionPS->GetBuffer( "PFXBuffer" ).Update( &cb ).Bind();
     DrawFullScreenQuad();
 
     // Unbind SRVs
-    ID3D11ShaderResourceView* nullSRVs[6] = {};
-    context->PSSetShaderResources( 0, 6, nullSRVs );
+    ID3D11ShaderResourceView* nullSRVs[3] = {};
+    context->PSSetShaderResources( 0, 3, nullSRVs );
 
     // Restore default states
     Engine::GAPI->GetRendererState().DepthState.DepthBufferCompareFunc =

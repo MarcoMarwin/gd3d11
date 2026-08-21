@@ -583,10 +583,6 @@ struct GothicRendererSettings {
         return VISUAL_FX_DRAW_RADIUS_FIXED;
     }
 
-    float GetContactShadowFixedStrength() const {
-        return 0.50f;
-    }
-
     /** Sets the default values for this struct */
     void SetDefault() {
         SectionDrawRadius = 5;
@@ -690,9 +686,6 @@ struct GothicRendererSettings {
         WaterCubemapStrength = 1.0f;
         EnableSSS = true;
         SSSIntensity = 1.0f; // Default Backlit Vegetation intensity.
-        EnableContactShadows = false;
-        EnableScreenSpaceGI = false;
-        ScreenSpaceGIStrength = 1.0f;
         EnableParticleLighting = true;
         ParticleLightingStrength = 1.0f;
         EnableDoF = true;
@@ -935,9 +928,6 @@ struct GothicRendererSettings {
     float WaterCubemapStrength;
     bool EnableSSS;
     float SSSIntensity;
-    bool EnableContactShadows;
-    bool EnableScreenSpaceGI;
-    float ScreenSpaceGIStrength;
     bool EnableParticleLighting;
     float ParticleLightingStrength;
     bool EnableDoF;
