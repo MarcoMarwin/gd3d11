@@ -5665,17 +5665,32 @@ void GothicAPI::ConfigureAllPointlightShadowSources() {
         lights.push_back( record );
     }
 
-    std::vector<XMFLOAT3> fireplaceCenters;
+    auto getOriginalLightRange = []( const LightRecord& light ) {
+        if ( !light.Info || !light.Info->Vob )
+            return 0.0f;
+
+        const float range = light.Info->Vob->GetLightRange();
+        return std::isfinite( range ) && range > 0.0f ? range : 0.0f;
+    };
+
+    struct FireplaceVisual {
+        zCVob* Vob = nullptr;
+        XMFLOAT3 Center = {};
+    };
+    std::vector<FireplaceVisual> fireplaceVisuals;
     for ( const auto& vobEntry : VobMap ) {
         VobInfo* vobInfo = vobEntry.second;
         if ( !isFireplaceVob( vobInfo ) )
             continue;
 
         const zTBBox3D bbox = vobInfo->Vob->GetBBox();
-        fireplaceCenters.push_back( XMFLOAT3(
-            (bbox.Min.x + bbox.Max.x) * 0.5f,
-            (bbox.Min.y + bbox.Max.y) * 0.5f,
-            (bbox.Min.z + bbox.Max.z) * 0.5f ) );
+        fireplaceVisuals.push_back( {
+            vobInfo->Vob,
+            XMFLOAT3(
+                (bbox.Min.x + bbox.Max.x) * 0.5f,
+                (bbox.Min.y + bbox.Max.y) * 0.5f,
+                (bbox.Min.z + bbox.Max.z) * 0.5f )
+        } );
     }
 
     struct FlameVisual {
@@ -5722,9 +5737,9 @@ void GothicAPI::ConfigureAllPointlightShadowSources() {
             (bbox.Min.y + bbox.Max.y) * 0.5f,
             (bbox.Min.z + bbox.Max.z) * 0.5f );
         if ( isParticle ) {
-            flame.HasNearbyFireplace = std::any_of( fireplaceCenters.begin(), fireplaceCenters.end(),
-                [&]( const XMFLOAT3& fireplaceCenter ) {
-                    return distanceSq( flame.Center, fireplaceCenter ) <= LINK_RADIUS_SQ;
+            flame.HasNearbyFireplace = std::any_of( fireplaceVisuals.begin(), fireplaceVisuals.end(),
+                [&]( const FireplaceVisual& fireplace ) {
+                    return distanceSq( flame.Center, fireplace.Center ) <= LINK_RADIUS_SQ;
                 } );
         }
         const XMFLOAT3 extents(
@@ -5787,6 +5802,7 @@ void GothicAPI::ConfigureAllPointlightShadowSources() {
         bool HasNearbyFireplace = false;
         XMFLOAT3 Anchor = {};
         float Size = 1.0f;
+        float HeightOffset = 0.0f;
         size_t FlameCount = 0;
         std::vector<XMFLOAT3> Centers;
         std::vector<zCVob*> Vobs;
@@ -5847,12 +5863,110 @@ void GothicAPI::ConfigureAllPointlightShadowSources() {
         resolvedFlames.push_back( std::move( resolved ) );
     }
 
-    auto flameHeightOffset = [&]( const ResolvedFlameGroup& flame ) {
+    gtl::flat_hash_set<zCVob*> flameVisualVobs;
+    for ( const ResolvedFlameGroup& flame : resolvedFlames ) {
+        for ( zCVob* vob : flame.Vobs ) {
+            if ( vob )
+                flameVisualVobs.insert( vob );
+        }
+    }
+
+    auto isFireplaceVisualVob = [&]( zCVob* vob ) {
+        return std::any_of( fireplaceVisuals.begin(), fireplaceVisuals.end(),
+            [vob]( const FireplaceVisual& fireplace ) {
+                return fireplace.Vob == vob;
+            } );
+    };
+
+    auto traceFireplaceFlameObstacle = [&]( const ResolvedFlameGroup& flame ) {
+        constexpr float TRACE_CLEARANCE = 3.0f;
+        const XMFLOAT3 origin = flame.Anchor;
+        const XMFLOAT3 direction( 0.0f, 1.0f, 0.0f );
+        float closestHit = FIREPLACE_FLAME_HEIGHT_OFFSET;
+
+        XMFLOAT3 worldHit;
+        if ( TraceWorldMesh( origin, direction, worldHit ) ) {
+            const float hitDistance = worldHit.y - origin.y;
+            if ( std::isfinite( hitDistance ) && hitDistance > 0.0f
+                && hitDistance < closestHit ) {
+                closestHit = hitDistance;
+            }
+        }
+
+        // Use world AABBs only as a cheap broad phase. The final hit comes
+        // from the transformed visual triangles, so rotated objects remain exact.
+        for ( const auto& [vob, vobInfo] : VobMap ) {
+            if ( !vob || !vobInfo || !vobInfo->VisualInfo
+                || vobInfo->VisualInfo->Meshes.empty()
+                || !vob->GetShowVisual()
+                || flameVisualVobs.find( vob ) != flameVisualVobs.end()
+                || isFireplaceVisualVob( vob ) ) {
+                continue;
+            }
+
+            const zTBBox3D bounds = vob->GetBBox();
+            const float minX = std::min( bounds.Min.x, bounds.Max.x );
+            const float maxX = std::max( bounds.Min.x, bounds.Max.x );
+            const float minY = std::min( bounds.Min.y, bounds.Max.y );
+            const float maxY = std::max( bounds.Min.y, bounds.Max.y );
+            const float minZ = std::min( bounds.Min.z, bounds.Max.z );
+            const float maxZ = std::max( bounds.Min.z, bounds.Max.z );
+
+            if ( !std::isfinite( minX ) || !std::isfinite( maxX )
+                || !std::isfinite( minY ) || !std::isfinite( maxY )
+                || !std::isfinite( minZ ) || !std::isfinite( maxZ )
+                || origin.x < minX || origin.x > maxX
+                || origin.z < minZ || origin.z > maxZ
+                || maxY <= origin.y ) {
+                continue;
+            }
+
+            const float boxHitDistance = std::max( minY - origin.y, 0.0f );
+            if ( boxHitDistance >= closestHit )
+                continue;
+
+            const XMMATRIX world = XMMatrixTranspose(
+                XMLoadFloat4x4( vob->GetWorldMatrixPtr() ) );
+            XMVECTOR determinant;
+            const XMMATRIX inverseWorld = XMMatrixInverse( &determinant, world );
+            const float determinantValue = XMVectorGetX( determinant );
+            if ( !std::isfinite( determinantValue )
+                || std::abs( determinantValue ) <= 0.000001f ) {
+                continue;
+            }
+
+            XMFLOAT3 localOrigin;
+            XMFLOAT3 localDirection;
+            XMStoreFloat3( &localOrigin,
+                XMVector3TransformCoord( XMLoadFloat3( &origin ), inverseWorld ) );
+            XMStoreFloat3( &localDirection,
+                XMVector3TransformNormal( XMLoadFloat3( &direction ), inverseWorld ) );
+
+            const float hitDistance = TraceVisualInfo(
+                localOrigin, localDirection, vobInfo->VisualInfo );
+            if ( std::isfinite( hitDistance ) && hitDistance > 0.0f
+                && hitDistance < closestHit ) {
+                closestHit = hitDistance;
+            }
+        }
+
+        if ( closestHit < FIREPLACE_FLAME_HEIGHT_OFFSET ) {
+            return std::clamp( closestHit - TRACE_CLEARANCE, 0.0f,
+                FIREPLACE_FLAME_HEIGHT_OFFSET );
+        }
+        return FIREPLACE_FLAME_HEIGHT_OFFSET;
+    };
+
+    for ( ResolvedFlameGroup& flame : resolvedFlames ) {
         if ( !flame.HasPfx )
-            return 0.0f;
-        return flame.HasNearbyFireplace
-            ? FIREPLACE_FLAME_HEIGHT_OFFSET
+            continue;
+        flame.HeightOffset = flame.HasNearbyFireplace
+            ? traceFireplaceFlameObstacle( flame )
             : PARTICLE_FLAME_HEIGHT_OFFSET;
+    }
+
+    auto flameHeightOffset = []( const ResolvedFlameGroup& flame ) {
+        return flame.HeightOffset;
     };
 
     struct OilLampAnchor {
@@ -6114,8 +6228,10 @@ void GothicAPI::ConfigureAllPointlightShadowSources() {
         DWORD stableColor = staticLight && dynamicLight
             ? MixOilLampEmissionColors( staticColor, dynamicColor )
             : (sourceA == staticLight ? staticColor : dynamicColor);
-        const float staticRange = staticLight ? staticLight->GetLightRange() : 0.0f;
-        const float dynamicRange = dynamicLight ? dynamicLight->GetLightRange() : 0.0f;
+        const float staticRange = hasStatic
+            ? getOriginalLightRange( lights[staticIndex] ) : 0.0f;
+        const float dynamicRange = hasDynamic
+            ? getOriginalLightRange( lights[dynamicIndex] ) : 0.0f;
         const float stableRange = std::max( staticRange, dynamicRange );
 
         if ( hasStatic )
@@ -6144,6 +6260,7 @@ void GothicAPI::ConfigureAllPointlightShadowSources() {
         if ( flameBelongsToOilLamp( flame ) )
             continue;
 
+        float originalSourceRange = 0.0f;
         for ( size_t lightIndex = 0; lightIndex < lights.size(); ++lightIndex ) {
             if ( lights[lightIndex].Info->IsRendererLightSuppressed )
                 continue;
@@ -6157,6 +6274,8 @@ void GothicAPI::ConfigureAllPointlightShadowSources() {
                 || winner.SourceIndex != flameIndex )
                 continue;
 
+            originalSourceRange = std::max(
+                originalSourceRange, getOriginalLightRange( lights[lightIndex] ) );
             suppressRendererSource( lights[lightIndex].Info );
         }
 
@@ -6164,11 +6283,13 @@ void GothicAPI::ConfigureAllPointlightShadowSources() {
         zCVob* lightAnchor = flame.Parent ? flame.Parent : flame.Vobs.front();
         XMFLOAT3 lightPosition = flame.Anchor;
         lightPosition.y += flameHeightOffset( flame );
+        const float lightRange = originalSourceRange > 0.0f
+            ? originalSourceRange : flameLightRange( flame.Size );
 
         createRendererLight( lightAnchor, lightPosition,
             flameLightColor( flame.HasPfx ),
             flameLightIntensity( flame.Size, flame.FlameCount, flame.HasPfx ),
-            flameLightRange( flame.Size ), true, nullptr, nullptr );
+            lightRange, true, nullptr, nullptr );
     }
 
     // A single visual or matching PFX/TGA pair becomes one renderer light.
@@ -6181,6 +6302,7 @@ void GothicAPI::ConfigureAllPointlightShadowSources() {
 
         size_t nearestSource = INVALID_INDEX;
         float nearestDistanceSq = LINK_RADIUS_SQ;
+        float originalSourceRange = 0.0f;
         for ( size_t lightIndex = 0; lightIndex < lights.size(); ++lightIndex ) {
             if ( lights[lightIndex].Info->IsRendererLightSuppressed )
                 continue;
@@ -6198,6 +6320,8 @@ void GothicAPI::ConfigureAllPointlightShadowSources() {
                 nearestDistanceSq = candidateDistanceSq;
                 nearestSource = lightIndex;
             }
+            originalSourceRange = std::max(
+                originalSourceRange, getOriginalLightRange( lights[lightIndex] ) );
             suppressRendererSource( lights[lightIndex].Info );
         }
 
@@ -6205,10 +6329,12 @@ void GothicAPI::ConfigureAllPointlightShadowSources() {
             ? lights[nearestSource].Info->Vob : nullptr;
         XMFLOAT3 shadowAnchor = flame.Anchor;
         shadowAnchor.y += flameHeightOffset( flame );
+        const float lightRange = originalSourceRange > 0.0f
+            ? originalSourceRange : flameLightRange( flame.Size );
         createRendererLight( flame.Vobs.front(), shadowAnchor,
             flameLightColor( flame.HasPfx ),
             flameLightIntensity( flame.Size, 1, flame.HasPfx ),
-            flameLightRange( flame.Size ), true, source, nullptr );
+            lightRange, true, source, nullptr );
     }
 
     std::vector<bool> resolvedByVisualAnchor( lights.size(), false );
