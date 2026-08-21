@@ -63,9 +63,7 @@ void D3D11TiledDeferredShading::EnsureShadowArray( uint32_t shadowCubeSize ) {
     if ( m_ShadowArrayCreated && m_ShadowCubeSize == shadowCubeSize ) return;
 
     if ( m_ShadowArrayCreated && m_ShadowCubeSize != shadowCubeSize ) {
-        // Detach every light before reusing the same numerical slots for the
-        // replacement textures. Otherwise a later ClearTiledSlot() from an old
-        // owner could free a slot that already belongs to another light.
+        // Detach owners before reusing slots.
         for ( D3D11PointLight* owner : m_SlotOwners ) {
             if ( owner ) owner->OnTiledSlotEvicted();
         }
@@ -342,8 +340,7 @@ void D3D11TiledDeferredShading::EnsureBuffers( uint32_t numTilesX, uint32_t numT
     m_lastNumTilesY = numTilesY;
 
 
-    // One membership mask per tile/Z-slice cluster. The cull shader clears and fills every entry each frame,
-    // so no separate flat index list or atomic allocation counter is needed.
+    // One membership mask per tile/Z-slice cluster; the cull shader rebuilds it each frame.
     const uint32_t totalClusters = totalTiles * CLUSTER_Z_SLICES;
     D3D11_BUFFER_DESC desc = {};
     desc.ByteWidth = totalClusters * sizeof( LightGrid );
@@ -435,8 +432,7 @@ XRESULT D3D11TiledDeferredShading::DrawPointlightLights(
         context->CSSetShaderResources( 8, 1, m_LightBufferSRV.GetAddressOf() );
         context->CSSetShaderResources( 9, 1, m_LightGridSRV.GetAddressOf() );
 
-        // Bind comparison sampler unconditionally — the runtime validates at Dispatch
-        // even if the shader branches around SampleCmpLevelZero
+        // The comparison sampler must be bound when the shader is dispatched.
         graphicsEngine->GetShadowMaps()->BindSamplerToCS( context.Get(), 2 );
 
         // Bind shadow cubemap array SRV
@@ -479,11 +475,7 @@ XRESULT D3D11TiledDeferredShading::DrawPointlightLights(
 
 D3D11TiledDeferredShading::CullResult D3D11TiledDeferredShading::CullLights(
     std::vector<VobLightInfo*>& lights,
-    RenderToTextureBuffer& depthCopy ) {
-
-    // Kept in the public signature because the render-graph caller already provides the depth copy. Cluster
-    // membership is frustum/Z based now, so the cull itself intentionally does not read it.
-    (void)depthCopy;
+    RenderToTextureBuffer& ) {
 
     auto graphicsEngine = reinterpret_cast<D3D11GraphicsEngine*>(Engine::GraphicsEngine);
     auto _ = graphicsEngine->RecordGraphicsEvent( GE_NAME( "CullLights" ) );
@@ -526,9 +518,7 @@ D3D11TiledDeferredShading::CullResult D3D11TiledDeferredShading::CullLights(
         return result;
     }
 
-    // Partition lights: all lights go tiled where possible.
-    // Shadowed lights with a tiled slot render directly into the shared array (no copies).
-    // Shadowed lights without a tiled slot (256x256 or overflow) fall back to legacy.
+    // Use tiled shading where possible; fall back for overflow or incompatible shadows.
     bool hasShadowedTiledLights = false;
 
     // Map light buffer

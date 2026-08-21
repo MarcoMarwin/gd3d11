@@ -22,7 +22,6 @@ GSky::GSky() {
     Atmosphere.Samples = 3;
     Atmosphere.RayleightScaleDepth = 0.18f;
     Atmosphere.G = -0.995f;
-    //Atmosphere.WaveLengths = float3(0.65f, 0.57f, 0.475f);
     Atmosphere.WaveLengths = float3( 0.63f, 0.57f, 0.50f );
     Atmosphere.SpherePosition = XMFLOAT3( 0, 0, 0 );
     Atmosphere.SphereOffsetY = -820000;
@@ -311,11 +310,9 @@ XRESULT GSky::RenderSky() {
     } else {
         XMStoreFloat3( &MoonDir, XMVector3Normalize( XMLoadFloat3( &MoonDir ) ) );
     }
-    //Atmosphere.SpherePosition.y = -Atmosphere.InnerRadius;
-
-    Atmosphere.SpherePosition.x = 0;//Engine::GAPI->GetLoadedWorldInfo()->MidPoint.x;
-    Atmosphere.SpherePosition.z = 0;//Engine::GAPI->GetLoadedWorldInfo()->MidPoint.y;
-    Atmosphere.SpherePosition.y = 0;//Engine::GAPI->GetLoadedWorldInfo()->LowestVertex - Atmosphere.InnerRadius;
+    Atmosphere.SpherePosition.x = 0;
+    Atmosphere.SpherePosition.z = 0;
+    Atmosphere.SpherePosition.y = 0;
 
     XMFLOAT3 sp = camPos;
     sp.y += Atmosphere.SphereOffsetY;
@@ -567,7 +564,6 @@ float AC_getMiePhase( float fCos, float fCos2, float g, float g2 ) {
 
 // Calculates the Rayleigh phase function
 float AC_getRayleighPhase( float fCos2 ) {
-    //return 1.0;
     return 0.75f + 0.75f * fCos2;
 }
 // Returns the near intersection point of a line and a sphere

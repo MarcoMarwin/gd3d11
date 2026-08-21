@@ -6,7 +6,7 @@
 #include "HookExceptionFilter.h"
 #include <cstring>
 
-/** This file stores the original versions of the hooked functions and the function declerations */
+/** Original hook targets and function declarations. */
 
 class zCFileBIN;
 class zCCamera;

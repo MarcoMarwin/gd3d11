@@ -13,7 +13,7 @@ public:
     /** Loads shader */
     XRESULT LoadShader( const ShaderInfo& si, const std::vector<D3D_SHADER_MACRO>& macros, const char* filePath );
 
-    /** Applys the shader */
+    /** Applies the shader */
     XRESULT Apply() override;
 
     /** Returns the shader */

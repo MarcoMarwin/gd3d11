@@ -45,9 +45,6 @@ XRESULT D3D11PFX_Blur::RenderBlur( RenderToTextureBuffer* fxbuffer, bool leaveRe
     bcb.B_ColorMod = colorMod;
     gaussPS->GetBuffer( "B_BlurSettings" ).Update( &bcb ).Bind();
 
-    // Bind depthbuffer
-    //engine->GetDepthBuffer()->BindToPixelShader(engine->GetContext().Get(), 1);
-
     // Copy
     FxRenderer->CopyTextureToRTV( fxbuffer->GetShaderResView(), tempBuffer->GetRenderTargetView(), dsRes, true );
 

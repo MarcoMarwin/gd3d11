@@ -1,4 +1,4 @@
-/** Input declerations */
+/** Input declarations */
 
 /** Fat Pixel-Shader input */
 struct PS_INPUT_FAT

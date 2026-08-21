@@ -76,11 +76,10 @@ float2 parallax_occlusion_mapping( float3 N, float3 viewPosition, Texture2D heig
     return lerp( currentUV, previousUV, interpolation );
 }
 
-/** Magic TBN-Calculation function */
+/** Perturbs a normal with a tangent-space normal map. */
 float3 perturb_normal( float3 N, float3 V, Texture2D normalmap, float2 texcoord, SamplerState samplerState, float normalmapDepth = 1.0f)
 {
-    // assume N, the interpolated vertex normal and 
-    // V, the view vector (vertex to eye)
+    // N is the interpolated vertex normal; V points from the vertex to the eye.
     float3 nrmmap = normalmap.Sample(samplerState, texcoord).xyz * 2 - 1;
 	nrmmap.xy *= -1.0f;
 	nrmmap.xy *= normalmapDepth;

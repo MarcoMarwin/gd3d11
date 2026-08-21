@@ -164,7 +164,7 @@ float4 PSMain(PS_INPUT Input) : SV_TARGET
 		float3 biasedWsPosition = ApplyReceiverNormalBias(
 			wsPosition, wsNormal, wsLightDirection, texelWorldSize, vegetationReceiverMask);
 
-		// Use screen position for per-pixel rotation (temporal-friendly).
+		// Rotate the taps from the screen position.
 		shadow = ComputeCascadedShadowValueSoft(
 			biasedWsPosition, vsPosition.z, vertLighting, 0.0f, Input.vPosition.xy, cascadeIndex);
 	} else {
@@ -180,8 +180,6 @@ float4 PSMain(PS_INPUT Input) : SV_TARGET
     float3 H = normalize(SQ_LightDirectionVS + V);
     float spec = CalcBlinnPhongLighting(normal, H);
     float specMod = pow(dot(float3(0.333f, 0.333f, 0.333f), diffuse.rgb), 2);
-
-    //return float4(diffuse.rgb, 1);
 
     float4 lightColor = SQ_LightColor;
 
@@ -278,19 +276,6 @@ float4 PSMain(PS_INPUT Input) : SV_TARGET
 		litPixel += ComputeOilLampEmission(diffuse.rgb, DecodeOilLampLightColor(oilLampPaletteCode));
 
 
-    // Fix indoor stuff
-	//litPixel = lerp(diffuse * vertLighting, litPixel, vertLighting < 0.9f ? 0 : 1);
-	//diffuse.rgb = lerp(diffuse.rgb, 1.0f, clamp(shaft, 0.0f, 0.4f));
-
-	// float4 cascadeDebug = GetCascadeUVAndBounds(wsPosition, 1); // Check Cascade 0
-	// if (cascadeDebug.z > 0.5f) {
-		// // cascadeDebug.w is the blend factor (0 = Pure Cascade 0, 1 = Pure Cascade 1)
-		// return float4(lerp(float3(0,1,0), float3(1,0,0), cascadeDebug.w), 1.0f);
-	// }
-
-	//return float4(sun.rgb, 1);
-	//return float4(vertLighting.rrr, 1);
     return float4(litPixel.rgb, 1);
-	//return float4(pow(spec, specPower) * specIntensity.xxx * diffuse.rgb * SQ_LightColor.rgb,1);
 
 }

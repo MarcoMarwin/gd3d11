@@ -29,7 +29,7 @@ float4 PSMain(PS_INPUT Input) : SV_TARGET
 {
 	float4 colour = TX_Texture0.Sample(SS_Linear, Input.vTexcoord);
 
-	// Waterfall foam is not emissive: keep it readable, but let night and rain darken it with the scene.
+	// Keep foam readable while night and rain darken it with the scene.
 	float night = saturate((-AC_LightPos.y + 0.08f) * 2.5f);
 	float rain = max(saturate(AC_RainFXWeight), saturate(AC_SceneWettness));
 	float daylight = saturate(AC_LightPos.y * 1.25f + 0.25f);

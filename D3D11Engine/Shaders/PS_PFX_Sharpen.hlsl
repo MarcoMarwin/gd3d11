@@ -29,10 +29,9 @@ struct PS_INPUT
 
 float4 SharpenSample(Texture2D tx, float2 uv, float strength = 0.8f)
 {
-	/** it's a rather easy effect. what you basicly do is blur the image, subtract the blurred from the original to get the difference and then add it to the original again.
-		(Source: http://www.polycount.com/forum/archive/index.php/t-78153.html) **/
+	// Unsharp mask: subtract a 3x3 blur and add the difference back.
 	
-	// run linear blur
+	// Build a linear 3x3 blur.
 	float3 mask = 0.0f;
 	float4 sample = tx.Sample(SS_Linear, uv);
 	

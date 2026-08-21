@@ -41,7 +41,9 @@ public:
     static void __fastcall hooked_EnterWorld( void* thisptr, void* unknwn, oCNPC* playerVob, int changePlayerPos, const zSTRING& startpoint ) {
         HookedFunctions::OriginalFunctions.original_oCGameEnterWorld( thisptr, playerVob, changePlayerPos, startpoint );
 
-        Engine::GAPI->OnWorldLoaded();
+        if ( Engine::GAPI && !Engine::IsShuttingDown() ) {
+            Engine::GAPI->OnWorldLoaded();
+        }
     }
 
 #if defined(BUILD_GOTHIC_2_6_fix) || (defined(BUILD_GOTHIC_1_08k) && !defined(BUILD_1_12F))

@@ -58,8 +58,7 @@ static const float WATER_SHORE_RING_RADIUS = 75.0f;
 
 float SampleWaterObjectMask(float2 uv)
 {
-    // GBuffer alpha uses -(1 + oilLampPalette) for VOB/NPC pixels and keeps
-    // world geometry at the original non-negative oil-lamp encoding.
+    // GBuffer alpha is negative for VOB/NPC pixels and non-negative for world geometry.
     float marker = TX_MaterialClass.SampleLevel(SS_Linear, saturate(uv), 0).w;
     return step(0.5f, -marker);
 }
@@ -96,8 +95,7 @@ float ComputeWorldWaterDepth(
         rawDepth,
         valid);
     float worldDepth = max(waterWorldPosition.y - sceneWorldPosition.y, 0.0f);
-    // No scene depth means open water/sky. It must not be treated as a false
-    // shallow shoreline candidate.
+    // No scene depth means open water or sky, not a shallow shoreline.
     return lerp(1000000.0f, worldDepth, valid);
 }
 
@@ -117,11 +115,7 @@ float EvaluateSmallWorldGeometryWaterException(
     float currentWorldWaterDepth,
     float centerObjectMask)
 {
-    // currentWorldWaterDepth is the vertical world-space distance from the
-    // water surface to the reconstructed scene-depth hit, not view-ray depth.
-    // A shallow world-geometry hit is ignored as a shoreline only when the
-    // complete 150-unit-diameter neighbourhood is water and every probe is
-    // either open/deep water or another directly excluded object.
+    // Use the world-space depth gap and the full probe ring to reject false shores.
     const float shallowCandidate = 1.0f - step(
         WATER_DEEP_WATER_DEPTH,
         currentWorldWaterDepth);
@@ -183,9 +177,7 @@ float3 SampleSkyWithoutCelestialBodies(float2 uv, float3 ray, float3 fallback)
 {
     float3 cur = TX_Scene.SampleLevel(SS_Linear, uv, 0).rgb;
     float3 r = normalize(ray);
-    // Remove the celestial discs continuously as their engine visibility rises.
-    // A binary step caused the reflected sky contribution to switch abruptly at
-    // sunrise/moonrise while the separate water glints were still active.
+    // Fade celestial discs with engine visibility to avoid sunrise/moonrise pops.
     float sunDiscVisibility = smoothstep(0.0f, 0.08f, saturate(AC_SunVisibility));
     float moonDiscVisibility = smoothstep(0.0f, 0.08f, saturate(AC_MoonVisibility));
     float sm = smoothstep(0.9962f, 0.9988f, dot(r, normalize(AC_LightPos))) * sunDiscVisibility;
@@ -219,8 +211,7 @@ float3 ProjectCelestial(float3 direction)
     p.xyz /= max(p.w, 0.001f);
     float2 uv = p.xy * float2(0.5f, -0.5f) + 0.5f;
 
-    // Fade cloud sampling in across a small viewport border instead of changing
-    // from completely unoccluded to fully cloud-occluded in a single frame.
+    // Fade cloud samples near the viewport border.
     float2 viewportEdgeDistance = min(uv, 1.0f - uv);
     float viewportValid = smoothstep(
         -0.025f,
@@ -398,8 +389,7 @@ PS_OUTPUT PSMain(PS_INPUT Input)
 {
     PS_OUTPUT o;
 
-    // The existing water Z-prepass reuses this shader to write a binary
-    // coverage mask. It returns before sampling any scene resources.
+    // The Z-prepass writes coverage and returns before sampling scene resources.
     if (WM_Padding1.x > 0.5f)
     {
         o.color = 1.0f;
@@ -409,9 +399,7 @@ PS_OUTPUT PSMain(PS_INPUT Input)
     }
 
     float2 screenUV = Input.vPosition.xy / RI_ViewportSize;
-    // The direct VOB/NPC exclusion is shared by Ocean and Legacy water.  It
-    // is intentionally read from the already available GBuffer, so Legacy
-    // receives the same shoreline exception without another geometry pass.
+    // Reuse the GBuffer object exclusion for both water paths.
     float centerObjectMask = SampleWaterObjectMask(screenUV);
     float surfaceViewZ = Input.vTexcoord2.x;
     float rawCenterDepth = TX_Depth.Sample(SS_Linear, screenUV).r;
@@ -440,10 +428,7 @@ PS_OUTPUT PSMain(PS_INPUT Input)
 
     float waterGeometryUp = abs(normalize(Input.vNormalWS).y);
 
-    // Surface inclination relative to the horizontal plane:
-    // 0-39 degrees: full reflections.
-    // 39-50 degrees: smooth fade.
-    // 50-90 degrees: no reflections.
+    // Reflections fade from 39 to 50 degrees.
     const float waterfallSsrOffCos = 0.64278761f;  // cos(50 degrees)
     const float waterfallSsrFullCos = 0.77714596f; // cos(39 degrees)
 
@@ -474,9 +459,7 @@ PS_OUTPUT PSMain(PS_INPUT Input)
 
     float2 wtBase = Input.vWorldPosition.xz / 1000.0f;
     const float oceanMask = step(0.5f, WM_IsOceanWater);
-    // Ocean water uses a stable world-space orientation and an opposing phase
-    // direction so its visible drift runs towards the harbour shore. Other
-    // water types retain their original coordinates and animation direction.
+    // Ocean water uses a stable world-space orientation; other types keep their mapping.
     float2 oceanCoordinates = float2(wtBase.y, -wtBase.x);
     float2 distortionCoordinates = lerp(wtBase, oceanCoordinates, oceanMask);
     float distortionTime = RI_Time * lerp(1.0f, -1.0f, oceanMask);
@@ -524,16 +507,11 @@ PS_OUTPUT PSMain(PS_INPUT Input)
     float3 reflVec = -reflRay;
     float hemi = smoothstep(0, 0.06f, reflRay.y) * waterTopSide;
 
-    // Keep reflections stable while allowing more of the existing water-wave
-    // normal to shape the ray.  This softens the mirror-like appearance for
-    // both Ocean and Legacy water without additional texture samples.
+    // Blend wave normals into the reflection ray without extra samples.
     float normalSmooth = 0.34f + 0.18f * SmootherStep01(saturate((waterViewDistance - 1500) / 12000));
     float3 geoDir = reflect(viewDirection, normalize(lerp(wf, float3(0, 1, 0), normalSmooth)));
     float3 cube = max(TX_ReflectionCube.Sample(SS_Linear, reflVec).rgb, 0);
-    // When SSR is enabled but a grazing-angle ray has no stable scene/sky hit,
-    // the static cubemap becomes the fallback source. At night that cubemap can
-    // look too bright compared to real SSR, so dim only this fallback path while
-    // leaving daytime, SSR-off and valid SSR hits unchanged.
+    // Use the cubemap for unstable grazing rays and dim it at night.
     float lowLightReflectionAmount = saturate(max(
         nightAmount,
         saturate((0.28f - AC_LightPos.y) * 2.8f)));
@@ -655,25 +633,20 @@ float3 skyReflection =
         rainVis = (1.0f - fog) * (1.0f - fog);
     }
 
-    // Preserve the proven color response of the old water shader while using
-    // the new shared SSR tracer only for hit position and confidence.
+    // Keep the legacy color response; use shared SSR for hit position and confidence.
     float3 reflectionLumaWeights = float3(.2126f, .7152f, .0722f);
     float processedLuma = dot(processedReflection, reflectionLumaWeights);
     processedReflection *= rcp(1.0f + max(0.0f, processedLuma - 6.0f) * .12f);
     processedLuma = dot(processedReflection, reflectionLumaWeights);
 
-    // Improve reflected geometry definition without increasing its luminance.
-    // Daylight receives the stronger contrast lift; night keeps a restrained
-    // lift inside the already dark, scene-derived reflection range.
+    // Increase reflected geometry contrast while keeping night restrained.
     float reflectionContrast = lerp(1.10f, 1.05f, nightAmount);
     processedReflection = max(
         lerp(processedLuma.xxx, processedReflection, reflectionContrast),
         0.0f);
     processedLuma = dot(processedReflection, reflectionLumaWeights);
 
-    // Apply a soft shoulder only to bright daytime geometry reflections.  This
-    // keeps the stronger dark structure while preventing pale rock and wall
-    // highlights from becoming as dominant as the directly visible geometry.
+    // Limit bright daytime highlights without lifting darker structure.
     float daylightReflectionControl = 1.0f - nightAmount;
     float daylightHighlightStart = 0.62f;
     float daylightHighlightExcess = max(
@@ -695,7 +668,7 @@ float3 skyReflection =
     float geometryHit = saturate(ssrConfidence);
     float skyConf = saturate(skyWeight * lerp(.90f, .80f, rainAmount));
     float3 skyBack = lerp(fallback, skyReflection, skyConf);
-    // The no-hit SSR fallback must stay darker at night than real scene-space hits.
+    // Keep the no-hit fallback darker at night.
     skyBack *= lerp(1.0f, ssrNightCubeFallbackDim, 1.0f - geometryHit);
     float skyBackLuma = max(dot(skyBack, reflectionLumaWeights), .0001f);
     float nightEdgeFloor = lerp(
@@ -710,8 +683,7 @@ float3 skyReflection =
         1.0f,
         matchedLuma / skyBackLuma);
 
-    // A valid hit keeps the old shader's dark, scene-colored reflection.
-    // Confidence controls coverage only; it no longer recolors the hit white.
+    // Confidence affects coverage, not hit color.
     float3 hitReflection = lerp(
         matchedReflection,
         processedReflection,
@@ -722,9 +694,7 @@ float3 skyReflection =
         geometryHit);
     ssrColor = lerp(fallback, ssrColor, ssrEnabled);
 
-    // Use one continuous confidence weight for Ocean geometry availability and
-    // color.  Weak or distant hits retain the complementary live-sky/cubemap
-    // fallback instead of replacing it with a sky-colored geometry surrogate.
+    // Use one confidence weight for ocean geometry availability and color.
     float geometrySourceAvailable = saturate(
         geometryHit * waterReflectionSuppress * ssrEnabled);
     float skySourceAvailable =
@@ -754,8 +724,7 @@ float3 skyReflection =
 
     if (WM_IsOceanWater > .5f)
     {
-        // Reject weak, rapidly changing Ocean hits with the same proven smooth
-        // confidence interval already used by the stable Legacy reflection path.
+        // Reject weak, unstable ocean hits with the legacy confidence range.
         float oceanStableGeometryConfidence = smoothstep(
             0.22f,
             0.72f,
@@ -786,9 +755,7 @@ float3 skyReflection =
         float optical = lerp(thick, underThick, cameraBelowSurface);
         float sd = max(fwidth(thick), 1);
         float se = clamp(max(65, sd * 1.25f), 65, 160);
-        // Keep the broad visibility fade for reflections, glints and the water
-        // mask, but restore the Ocean volume color over a shorter shallow-water
-        // interval so the seabed remains visible without washing out the water.
+        // Keep the broad fade for reflections, glints and mask; use a shorter volume-color fade.
         float shoreEnd = max(240.0f, se * 2.60f);
         float shore = SmootherStep01(saturate(
             (thick - 1.0f)
@@ -798,8 +765,7 @@ float3 skyReflection =
             (thick - 1.0f)
             / max(shoreColorEnd - 1.0f, 1.0f)));
         float smallWorldGeometryException = 0.0f;
-        // The eight-probe ring is only needed for shallow world-geometry
-        // candidates. Deep water and direct object hits take the cheap path.
+        // Probe shallow world geometry only; deep water uses the cheap path.
         [branch]
         if (centerWorldWaterDepth < WATER_DEEP_WATER_DEPTH
             && centerObjectMask < 0.5f)
@@ -813,16 +779,13 @@ float3 skyReflection =
         float deepWaterException = step(
             WATER_DEEP_WATER_DEPTH,
             centerWorldWaterDepth);
-        // Object hits must never become a shoreline. The local depth test is
-        // restricted to world geometry and only removes false contours from
-        // small isolated surfaces surrounded by the same deep water.
+        // Direct objects are not shore; use local depth only to reject false contours.
         float shoreException = max(
             max(waterObjectMask, smallWorldGeometryException),
             deepWaterException);
         shore = lerp(shore, 1.0f, shoreException);
         shoreColor = lerp(shoreColor, 1.0f, shoreException);
-        // ADDONWORLD keeps the clearer turquoise profile; every other world
-        // gets denser, less saturated northern coastal water.
+        // ADDONWORLD uses a clearer turquoise tint; other worlds use denser coastal water.
         float3 absDay = lerp(
             float3(.0031f, .00165f, .00108f),
             float3(.0024f, .00115f, .00062f),
@@ -864,9 +827,7 @@ float3 skyReflection =
         scatter *= lerp(.94f, 1.06f, saturate(dot(diffuse, float3(.2126, .7152, .0722)) * 1.4f));
         float3 volume = sceneRefr * trans + scatter * (1 - trans);
         volume = lerp(scatter, volume, sceneValid);
-        // Restore the day- or night-specific Ocean volume color with the shorter
-        // color fade.  The broader shore mask remains responsible for hiding the
-        // actual water boundary and for fading reflections and glints.
+        // Restore the selected ocean volume color with the shorter fade.
         volume = lerp(sceneClean, volume, shoreColor);
         float4 underClouds = ResolveLowCloudLayer(TX_LowClouds.SampleLevel(SS_Linear, distUV, 0), sceneRefr);
         float3 underComposedSky = sceneRefr * (1 - underClouds.a) + underClouds.rgb;
@@ -874,9 +835,7 @@ float3 skyReflection =
         volume = lerp(volume, underComposedSky, underSky);
         float underGeometry = cameraBelowSurface * refrValid;
         volume = lerp(volume, lerp(sceneRefr, volume, .32f), underGeometry);
-        // Prepare the cubemap as an independent reflection source.  The water
-        // volume supplies only the luminance reference for this source and is
-        // blended with the completed reflection later by the existing amount.
+        // Use the cubemap as a separate reflection source and blend it later.
         float3 fallbackLumaWeights = float3(.2126f, .7152f, .0722f);
         float oceanBaseLuma = max(dot(volume, fallbackLumaWeights), .0001f);
         float rawCubeLuma = max(dot(fallback, fallbackLumaWeights), .0001f);
@@ -965,19 +924,10 @@ float3 skyReflection =
         float3 moonDir = normalize(-AC_MoonPos.xyz);
         float moonSpot = pow(saturate(dot(smallRefl, moonDir)), 420) * .15f * smoothstep(-.04f, .08f, AC_MoonPos.y) * smoothstep(0.0f, 0.08f, saturate(AC_MoonVisibility)) * weather * moonCloudTransmission * (1 - glintBlock);
         color += float3(.60f, .70f, 1.00f) * moonSpot * glintControl;
-        // Apply the automatic world tint without changing luminance. This
-        // changes water character, not exposure, and costs no texture sample.
-        // Rain has its own neutral scatter/absorption and night has dedicated
-        // blue-black volume colors. Let those physical states dominate instead
-        // of forcing the clear-day regional tint through them.
+        // Apply the regional tint without changing luminance; rain and night use their own colors.
         const float weatherTintVisibility = lerp(1.0f, 0.35f, rainAmount);
         const float nightTintVisibility = lerp(1.0f, 0.20f, nightAmount);
-        // The Ocean volume has already faded back to sceneClean at the shore.
-        // Mask only this final chroma transform with that same *linear* fade;
-        // otherwise it recolors sceneClean right up to the polygon edge and
-        // exposes a hard water line. This is deliberately identical for every
-        // climate and does not alter alpha, avoiding transparent holes around
-        // rocks and other shallow geometry.
+        // Fade the final tint with the ocean shoreline mask to avoid a hard edge.
         const float adaptiveTintStrength = saturate(WM_OceanWaterTintStrength)
             * weatherTintVisibility * nightTintVisibility
             * shoreColor;
@@ -994,11 +944,7 @@ float3 skyReflection =
         legacyRawDepthRefracted = TX_Depth.Sample(SS_Linear, legacyDistUV).r;
         legacyDepthRefracted = LinearizeWaterDepth(legacyRawDepthRefracted);
 
-        // Floating leaves can be partly above and partly below the surface.  At
-        // their alpha/depth contour the refracted depth may suddenly collapse
-        // to an almost surface-level sample, which was interpreted as a real
-        // shoreline and exposed the pond bottom.  Detect only this local depth
-        // collapse and fall back smoothly to the undistorted center depth.
+        // Reject local depth collapses around partially submerged leaves.
         float legacyRefractedThickness = max(
             legacyDepthRefracted - surfaceViewZ,
             0.0f) * viewRayScale;
@@ -1056,14 +1002,7 @@ float3 skyReflection =
         float3 legacySceneClean = TX_Scene.Sample(SS_Linear, lerp(legacyDistUV, screenUV, pow(1.0f - legacyShallowDepth, 20.0f))).rgb;
         legacyScene = lerp(legacyScene, legacyDiffuse, 0.73f * max(pow(legacyFresnel, 8.0f), 0.5f));
         float legacySsrFresnel = lerp(0.55f, 0.80f, saturate(pow(1.0f - saturate(dot(-viewDirection, legacyWavesFres)), 2.0f)));
-        // Do not add the static reflection cubemap to Legacy water.  The fixed
-        // world-direction texture sector is not scene-faithful and creates a
-        // permanent brown patch plus dark borders at geometry/sky transitions.
-        // Legacy reflections below are reconstructed only from live sky and
-        // stable scene-color geometry hits.
-        // Preserve coherent reflections while suppressing isolated dark tree
-        // pixels caused by weak, rapidly changing geometry hits.  Sky coverage
-        // remains independent; geometry must pass a smooth confidence gate.
+        // Legacy reflections use live sky and stable scene geometry; avoid unstable hits.
         float legacyStableGeometryConfidence = smoothstep(
             0.22f,
             0.72f,
@@ -1084,10 +1023,7 @@ float3 skyReflection =
         float3 legacySceneChroma = legacySceneClean / legacySceneLuma;
         float legacyColorLuma = max(dot(legacyColor, float3(0.2126f, 0.7152f, 0.0722f)), 0.001f);
         float3 legacyColorWithSceneHue = legacySceneChroma * legacyColorLuma;
-        // Preserve Build 200's subtle scene-hue mix, but never let it push an
-        // already correct Legacy base channel far enough to create the confirmed
-        // red/blue artifacts. With the existing 0.42 blend, these bounds limit
-        // the final per-channel deviation to roughly +/-15 percent.
+        // Limit the scene-hue mix to the established per-channel range.
         float3 legacyHueDeviationLimit = max(
             abs(legacyColor) * 0.35f,
             float3(0.005f, 0.005f, 0.005f));
@@ -1096,15 +1032,11 @@ float3 skyReflection =
             legacyColor - legacyHueDeviationLimit,
             legacyColor + legacyHueDeviationLimit);
         float legacySubmergedColorMask = step(0.000001f, legacyRawDepthRefracted);
-        // Horizontal Legacy water receives its scene-hue correction here. On
-        // steep waterfall geometry the final reflection/fallback composition
-        // still follows below, so its equivalent correction is applied to the
-        // completed color instead.
+        // Apply the horizontal correction here; steep water applies it after composition.
         legacyColor = lerp(
             legacyColor,
             legacyColorWithSceneHue,
             legacySubmergedColorMask * steepWaterSsrFactor * 0.42f);
-        // Legacy edge foam removed.
         float cleanLegacyDepthRefracted = LinearizeWaterDepth(TX_Depth.Sample(SS_Linear, legacyDistUV).r);
         float legacyWaterThickness = clamp(
             max(cleanLegacyDepthRefracted - surfaceViewZ, 0.0f) * viewRayScale,
@@ -1117,20 +1049,12 @@ float3 skyReflection =
         float legacyShoreDerivative = max(fwidth(legacyWaterThickness), 1.0f);
         float legacyShoreFadeEnd = clamp(max(65.0f, legacyShoreDerivative * 1.25f), 65.0f, 160.0f);
         float legacyShoreVisibility = SmootherStep01(saturate((legacyWaterThickness - 1.0f) / max(legacyShoreFadeEnd - 1.0f, 1.0f)));
-        // Depth behind a vertical water sheet describes the distance to the
-        // wall, not the depth of a water body.  Do not interpret that small
-        // distance as shoreline shallows or narrow texture-driven waterfalls
-        // are faded into the copied scene.  Horizontal water keeps the exact
-        // depth-based shoreline behaviour; the existing inclination mask gives
-        // us a smooth transition for sloped water geometry.
+        // On vertical sheets, depth measures wall distance; keep it out of shoreline detection.
         legacyShoreVisibility = lerp(
             legacyShoreVisibility,
             1.0f,
             waterfallSurfaceMask);
-        // Legacy distorted refraction can sample deeper water beside the actual
-        // shoreline, which makes the water tint start too abruptly on sloped
-        // banks. Use the more conservative thickness for color only, then make
-        // the color-volume transition wider than the reflection/visibility fade.
+        // Use conservative thickness for color and widen the transition on sloped banks.
         float legacyCenterShoreThickness = clamp(legacyCenterThickness, 0.0f, 6000.0f);
         float legacyShoreColorThickness = min(legacyWaterThickness, legacyCenterShoreThickness);
         float legacyShoreColorDerivative = max(fwidth(legacyShoreColorThickness), 1.0f);
@@ -1141,9 +1065,7 @@ float3 skyReflection =
             legacyShoreColor,
             1.0f,
             waterfallSurfaceMask);
-        // Apply the same shoreline exceptions as Ocean water: direct NPC/VOB
-        // hits are never shore, deep water is never shore, and the 150-unit
-        // ring test is evaluated only for shallow world geometry.
+        // Apply the same shoreline exceptions as Ocean water.
         float legacySmallWorldGeometryException = 0.0f;
         [branch]
         if (centerWorldWaterDepth < WATER_DEEP_WATER_DEPTH
@@ -1169,19 +1091,12 @@ float3 skyReflection =
             legacyShoreColor,
             1.0f,
             legacyShoreException);
-        // Keep the broad Legacy visibility fade for reflections and glints, but
-        // use the clean scene as the shoreline endpoint, just like Ocean water.
-        // The selected day or night water color is restored smoothly over the
-        // deeper part of the color interval.
+        // Fade legacy reflections and glints broadly; restore volume color deeper in the shore interval.
         float3 legacyNightRelativeColor = lerp(
             legacyColor,
             legacyColor * saturate(sceneClean * 1.10f + 0.34f),
             nightAmount);
-        // The world mesh already defines where the water surface ends. Depth
-        // behind that mesh may control volume and the shallow-water transition,
-        // while the shore color factor restores the clean scene smoothly at the
-        // shoreline. Keep the computed surface layer in deeper water and use
-        // the selected night-relative color there.
+        // Use depth for volume and shore transitions, keeping the surface layer in deeper water.
         legacyColor = lerp(
             legacySceneClean,
             legacyNightRelativeColor,
@@ -1194,9 +1109,7 @@ float3 skyReflection =
         float moonSpot = pow(saturate(dot(legacyReflectVectorSmall, normalize(-AC_MoonPos.xyz))), 360.0f) * 0.22f;
         moonSpot *= smoothstep(-0.04f, 0.08f, AC_MoonPos.y) * smoothstep(0.0f, 0.08f, saturate(AC_MoonVisibility)) * weatherLightVisibility * moonCloudTransmission * (1.0f - glintBlock) * legacyShoreVisibility;
         legacyColor += float3(0.667f, 0.759f, 1.15f) * moonSpot;
-        // Increase reflected color separation without lifting its average
-        // luminance.  This makes trees and rocks more readable while avoiding
-        // a brighter, glass-like surface over the visible pond bottom.
+        // Increase reflected color separation without raising average luminance.
         float legacySkyAvailable =
             (1.0f - legacyStableGeometryConfidence)
             * step(0.0001f, skyWeight)
@@ -1279,10 +1192,7 @@ float3 skyReflection =
             legacyCubeOnlyAmount);
         float3 legacyFinalColor = lerp(legacyCubeOnlyColor, legacySsrFinalColor, ssrEnabled);
 
-        // Steep water/waterfalls use the same bounded scene-hue transfer as
-        // horizontal Legacy water, but only after reflection and cubemap
-        // fallback have been composed. This prevents those later sources from
-        // reintroducing the red/blue channel excursions on waterfall surfaces.
+        // Apply the bounded scene-hue transfer after reflection and fallback composition.
         float legacyWaterfallColorLuma = max(dot(
             legacyFinalColor,
             float3(0.2126f, 0.7152f, 0.0722f)), 0.001f);
@@ -1298,9 +1208,7 @@ float3 skyReflection =
         legacyFinalColor = lerp(
             legacyFinalColor,
             legacyWaterfallColorWithSceneHue,
-            // Scene hue changes abruptly when the sampled wall switches sides
-            // of a thin waterfall. Keep only a subtle transfer on steep water;
-            // horizontal Legacy water retains its established 0.42 strength.
+            // Limit steep-water transfer when the sampled wall changes sides.
             legacySubmergedColorMask * waterfallSurfaceMask * 0.14f);
 
         finalColor = legacyFinalColor;

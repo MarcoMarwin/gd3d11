@@ -104,7 +104,6 @@ float AC_getMiePhase(float fCos, float fCos2, float g, float g2)
 // Calculates the Rayleigh phase function
 float AC_getRayleighPhase(float fCos2)
 {
-	//return 1.0;
 	return 0.75 + 0.75*fCos2;
 }
 // Returns the near intersection point of a line and a sphere
@@ -504,9 +503,6 @@ float3 ApplyAtmosphericScatteringGround(float3 worldPosition, float3 in_color, b
 	float fFar = length(v3Ray);
 	v3Ray /= fFar;
 
-	//if(AC_CameraHeight > AC_OuterRadius)
-	//	return in_color;
-	
 	// Calculate the ray's starting position, then calculate its scattering offset
 	float3 v3Start = camPos;
 	float fDepth = exp((innerRadius - AC_CameraHeight) / AC_RayleighScaleDepth);
@@ -545,7 +541,6 @@ float3 ApplyAtmosphericScatteringGround(float3 worldPosition, float3 in_color, b
 	// Fade residual daytime scattering only at night and only toward the far-distance boundary.
 	float nightDistanceFade = GetNightDistanceFade(worldPosition);
 	c0 *= 1.0f - nightDistanceFade;
-	//c0 = lerp(dot(float3(0.333f,0.333f,0.333f), c0), c0, 0.5f);
 	float3 c1 = v3Attenuate;
 	
 	float3 dayColor = c0 + in_color * c1;
@@ -573,11 +568,6 @@ float3 ApplyAtmosphericScatteringSkyInternal(float3 worldPosition, float include
 	float fFar = length(vRay);
 	vRay /= fFar;
 
-	//return float4(abs(AC_SpherePosition), 1);
-	
-	//if(AC_CameraHeight < AC_InnerRadius)
-	//	return float4(1,0,0,1);
-	
 	// Calculate the closest intersection of the ray with the outer atmosphere (which is the near point of the ray passing through the atmosphere)
 	float fNear = AC_getNearIntersection(camPos, vRay, AC_CameraHeight * AC_CameraHeight, AC_OuterRadius * AC_OuterRadius);
 
@@ -596,8 +586,6 @@ float3 ApplyAtmosphericScatteringSkyInternal(float3 worldPosition, float include
 	float3 vSamplePoint = vStart + vSampleRay * 0.5;
 	
 	float3 vInvWavelength = 1.0f / pow(AC_Wavelength, 4.0f);
-	
-	//return retF(AC_InnerRadius - length(vSamplePoint));
 	
 	// Now loop through the sample rays
 	float3 vFrontColor = float3(0.0, 0.0, 0.0);
@@ -659,11 +647,6 @@ float3 ApplyAtmosphericScatteringOuter(float3 worldPosition)
 	float fFar = length(vRay);
 	vRay /= fFar;
 	
-	//return float4(abs(AC_SpherePosition), 1);
-	
-	//if(AC_CameraHeight < AC_InnerRadius)
-	//	return float4(1,0,0,1);
-	
 	// Calculate the closest intersection of the ray with the outer atmosphere (which is the near point of the ray passing through the atmosphere)
 	float fNear = AC_getNearIntersection(camPos, vRay, AC_CameraHeight * AC_CameraHeight, AC_OuterRadius * AC_OuterRadius);
 
@@ -682,8 +665,6 @@ float3 ApplyAtmosphericScatteringOuter(float3 worldPosition)
 	float3 vSamplePoint = vStart + vSampleRay * 0.5;
 	
 	float3 vInvWavelength = 1.0f / pow(AC_Wavelength, 4.0f);
-	
-	//return retF(AC_InnerRadius - length(vSamplePoint));
 	
 	// Now loop through the sample rays
 	float3 vFrontColor = float3(0.0, 0.0, 0.0);

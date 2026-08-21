@@ -7,18 +7,13 @@
 #include "Toolbox.h"
 #include <mutex>
 
-//#include <DxErr.h>
-//#pragma comment(lib, "Dxerr.lib")
 #define USE_LOG
 
-const int MAX_LOG_MESSAGES_TO_CACHE = 200;
 __declspec(selectany) std::string LOGFILE;
 
-//#ifdef BUILD_DESKTOP
 #ifdef BLERGH__
-//#if defined(DEBUG) || defined(_DEBUG)
 /** Checks for errors and logs them, HRESULT hr needs to be declared */
-#define LE(x) { hr = (x); if (FAILED(hr)){LogError() << #x << " failed: " << DXGetErrorDescription(hr); }/*else{ LogInfo() << L#x << L" Succeeded."; }*/ }
+#define LE(x) { hr = (x); if (FAILED(hr)){LogError() << #x << " failed: " << DXGetErrorDescription(hr); } }
 
 /** Returns hr if failed (HRESULT-function, hr needs to be declared)*/
 #define LE_R(x) { hr = (x); if (FAILED(hr)){LogError() << #x << " failed: " << DXGetErrorDescription(hr); return hr;} }
@@ -41,7 +36,7 @@ __declspec(selectany) std::string LOGFILE;
 #define XLE(x) { XRESULT xr = (x); if (xr != XRESULT::XR_SUCCESS){ LogError() << #x << " failed with code: " << std::hex << xr << " (" + Toolbox::MakeErrorString(xr) + ")";}}
 
 /** Checks for errors and logs them, HRESULT hr needs to be declared */
-#define LE(x) { hr = (x); if (FAILED(hr)){LogError() << "failed with code: " << std::hex << hr << "!"; }/*else{ LogInfo() << L#x << L" Succeeded."; }*/ }
+#define LE(x) { hr = (x); if (FAILED(hr)){LogError() << "failed with code: " << std::hex << hr << "!"; } }
 
 /** Returns hr if failed (HRESULT-function, hr needs to be declared)*/
 #define LE_R(x) { hr = (x); if (FAILED(hr)){LogError() << "failed with code: " << std::hex << hr << "!"; return hr;} }
@@ -57,11 +52,6 @@ __declspec(selectany) std::string LOGFILE;
 #define WarnBox(Msg) MessageBoxA(nullptr,Msg,"GD3D11: Warning!",MB_OK|MB_ICONEXCLAMATION|MB_TOPMOST)
 
 #endif
-
-/*#else
-#define LE(x) { hr = (x); }
-#endif
-*/
 
 /** Logging macros
     Usage: LogInfo() << L"Loaded Texture: " << TextureName;
@@ -99,14 +89,10 @@ namespace LogCache {
             FILE* f;
             f = fopen( LOGFILE.c_str(), "a" );
 
-            //if (MAX_LOG_MESSAGES_TO_CACHE > 5)
-            //	fputs(" --- Log-Cache flush! --- \n", f);
-
             // Write down all the data we have
             for ( UINT i = 0; i < Cache.size(); i++ ) {
                 fputs( Cache[i].c_str(), f );
 
-                //OutputDebugStringA(Cache[i].c_str());
             }
 
             fclose( f );
@@ -203,18 +189,6 @@ public:
             fclose( f );
         }
 
-        /*if (strnicmp(Info.str().c_str(), "Error", sizeof("Error")) == 0)
-        {
-            LastErrorMessage = Info.str() + Message.str();
-        }*/
-
-        /*// Place the message into the cache
-        LogCache::Cache.push_back(Info.str() + Message.str() + "\n");
-
-        // Flush data if the cache is full
-        if (LogCache::Cache.size() >= MAX_LOG_MESSAGES_TO_CACHE)
-            LogCache::LogFlush::FlushData();*/
-
         switch ( MessageBoxStyle ) {
         case 1:
             InfoBox( Message.str().c_str() );
@@ -236,7 +210,6 @@ private:
     std::stringstream Message; // Text to write into the logfile
     UINT MessageBoxStyle; // Style of the messagebox if needed
 
-    //static std::string LastErrorMessage; // The last errormessage
 };
 #else
 

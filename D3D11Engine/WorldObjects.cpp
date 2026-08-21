@@ -81,10 +81,7 @@ float VobLightInfo::GetEffectiveLightIntensity() const {
     float flicker = 1.0f;
     if ( RendererLightFlicker ) {
         const float time = Engine::GAPI ? Engine::GAPI->GetTimeSeconds() : 0.0f;
-        // Smooth value noise avoids the clearly visible repetition of fixed
-        // sine waves while keeping the flame motion continuous. The three
-        // bands provide slow body movement, faster flame variation, and a
-        // very small high-frequency shimmer.
+        // Blend slow, fast and shimmer noise.
         const float slow = SampleFlickerNoise(
             time, 1.45f, RendererLightFlickerPhase, 0xA341316Cu );
         const float fast = SampleFlickerNoise(
@@ -114,8 +111,7 @@ bool VobLightInfo::IsEffectivelyEnabled() const {
             if ( !sourceAEnabled && !sourceBEnabled )
                 return false;
         } else if ( !RendererLightFlicker ) {
-            // Fixed oil-lamp replacements must not survive after all of their
-            // original Gothic light sources have been removed.
+            // Keep a fixed replacement while a source light remains enabled.
             return false;
         }
 
@@ -183,17 +179,16 @@ SectionInstanceCache::~SectionInstanceCache() {
 }
 
 MeshInfo::~MeshInfo() {
-    //Engine::GAPI->GetRendererState().RendererInfo.VOBVerticesDataSize -= Indices.size() * sizeof(VERTEX_INDEX);
-    //Engine::GAPI->GetRendererState().RendererInfo.VOBVerticesDataSize -= Vertices.size() * sizeof(ExVertexStruct);
-
     delete MeshVertexBuffer;
     delete MeshIndexBuffer;
     delete MeshShadowIndexBuffer;
 }
 
 SkeletalMeshInfo::~SkeletalMeshInfo() {
-    Engine::GAPI->GetRendererState().RendererInfo.SkeletalVerticesDataSize -= Indices.size() * sizeof( VERTEX_INDEX );
-    Engine::GAPI->GetRendererState().RendererInfo.SkeletalVerticesDataSize -= Vertices.size() * sizeof( ExSkelVertexStruct );
+    if ( Engine::GAPI && !Engine::IsShuttingDown() ) {
+        Engine::GAPI->GetRendererState().RendererInfo.SkeletalVerticesDataSize -= Indices.size() * sizeof( VERTEX_INDEX );
+        Engine::GAPI->GetRendererState().RendererInfo.SkeletalVerticesDataSize -= Vertices.size() * sizeof( ExSkelVertexStruct );
+    }
 
     delete MeshVertexBuffer;
     delete MeshIndexBuffer;

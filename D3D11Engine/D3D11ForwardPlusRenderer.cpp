@@ -364,7 +364,7 @@ bool D3D11ForwardPlusRenderer::BindShaderForTexture(
     PShaderID resolvedDiffuseNormalmappedFxMap,
     PShaderID resolvedDiffuseNormalmappedAlphatest,
     PShaderID resolvedDiffuseNormalmappedAlphatestFxMap,
-    bool allowWetNormalFallback ) {
+    bool ) {
 
     // Special material types fall through to deferred (non-lit) shaders
     bool blendAdd = zMatAlphaFunc == zMAT_ALPHA_FUNC_ADD; 
@@ -386,9 +386,7 @@ bool D3D11ForwardPlusRenderer::BindShaderForTexture(
     auto newShader = activePS;
     const bool normalmapsEnabled = Engine::GAPI->GetRendererState().RendererSettings.AllowNormalmaps;
     const bool hasNormalmap = normalmapsEnabled && texture->GetSurface()->GetNormalmap() != nullptr;
-    static_cast<void>( allowWetNormalFallback );
-    const bool useWetNormalFallback = false;
-    const bool useNormalmapShader = hasNormalmap || useWetNormalFallback;
+    const bool useNormalmapShader = hasNormalmap;
     const bool hasFxMap = hasNormalmap && texture->GetSurface()->GetFxMap();
 
     if ( texture->HasAlphaChannel() || forceAlphaTest ) {
@@ -410,7 +408,7 @@ bool D3D11ForwardPlusRenderer::BindShaderForTexture(
     }
 
     // When normalmaps are disabled, fall back to non-normalmap variants
-    if ( !Engine::GAPI->GetRendererState().RendererSettings.AllowNormalmaps && !useWetNormalFallback ) {
+    if ( !Engine::GAPI->GetRendererState().RendererSettings.AllowNormalmaps ) {
         if ( texture->HasAlphaChannel() || forceAlphaTest ) {
             newShader = shaderManager.GetPShader( PShaderID::PS_FP_DiffuseAlphaTest );
         } else {

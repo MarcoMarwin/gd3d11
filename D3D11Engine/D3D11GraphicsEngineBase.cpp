@@ -30,16 +30,20 @@ D3D11GraphicsEngineBase::~D3D11GraphicsEngineBase() {
 
 /** Called when the game created its window */
 XRESULT D3D11GraphicsEngineBase::SetWindow( HWND hWnd ) {
+    if ( !hWnd || Engine::IsShuttingDown() ) {
+        return XR_FAILED;
+    }
     LogInfo() << "Creating swapchain";
     OutputWindow = hWnd;
 
-    OnResize( Resolution );
-
-    return XR_SUCCESS;
+    return OnResize( Resolution );
 }
 
 /** Called to set the current viewport */
 XRESULT D3D11GraphicsEngineBase::SetViewport( const ViewportInfo& viewportInfo ) {
+    if ( !Context || Engine::IsShuttingDown() ) {
+        return XR_FAILED;
+    }
     // Set the viewport
     D3D11_VIEWPORT viewport = {};
 
@@ -78,6 +82,11 @@ XRESULT D3D11GraphicsEngineBase::CreateConstantBuffer( D3D11ConstantBuffer** out
 
 /** Presents the current frame to the screen */
 XRESULT D3D11GraphicsEngineBase::Present() {
+    if ( Engine::IsShuttingDown() || !Engine::GAPI || !Context || !Device
+        || !SwapChain || !LineRenderer ) {
+        PresentPending = false;
+        return XR_FAILED;
+    }
     // Set default viewport
     SetViewport( ViewportInfo( 0, 0, Resolution.x, Resolution.y ) );
 
@@ -135,6 +144,9 @@ XRESULT D3D11GraphicsEngineBase::Present() {
 
 /** Called when we started to render the world */
 XRESULT D3D11GraphicsEngineBase::OnStartWorldRendering() {
+    if ( Engine::IsShuttingDown() || !Engine::GAPI || !Context || !TransformsCB )
+        return XR_FAILED;
+
     if ( PresentPending )
         return XR_FAILED;
 
@@ -156,6 +168,9 @@ BaseLineRenderer* D3D11GraphicsEngineBase::GetLineRenderer() {
 
 /** Sets up the default rendering state */
 void D3D11GraphicsEngineBase::SetDefaultStates() {
+    if ( Engine::IsShuttingDown() || !Engine::GAPI || !Context ) {
+        return;
+    }
     Engine::GAPI->GetRendererState().RasterizerState.SetDefault();
     Engine::GAPI->GetRendererState().BlendState.SetDefault();
     Engine::GAPI->GetRendererState().DepthState.SetDefault();
@@ -243,11 +258,6 @@ XRESULT D3D11GraphicsEngineBase::SetActiveGShader( GShaderID shader ) {
     ActiveGS = ShaderManager->GetGShader( shader );
     return XR_SUCCESS;
 }
-
-//int D3D11GraphicsEngineBase::MeasureString(std::string str, zFont* zFont)
-//{
-//	return 0;
-//}
 
 /** Updates the transformsCB with new values from the GAPI */
 void D3D11GraphicsEngineBase::UpdateTransformsCB() {

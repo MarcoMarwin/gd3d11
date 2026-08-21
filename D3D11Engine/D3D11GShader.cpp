@@ -13,7 +13,7 @@ D3D11GShader::D3D11GShader() = default;
 
 D3D11GShader::~D3D11GShader() = default;
 
-/** Loads both shaders at the same time */
+/** Loads and compiles the geometry shader. */
 XRESULT D3D11GShader::LoadShader( const char* geometryShader, const std::vector<D3D_SHADER_MACRO>& makros, bool createStreamOutFromVS, int soLayout ) {
     HRESULT hr;
     D3D11GraphicsEngineBase* engine = reinterpret_cast<D3D11GraphicsEngineBase*>(Engine::GraphicsEngine);
@@ -71,7 +71,7 @@ XRESULT D3D11GShader::LoadShader( const char* geometryShader, const std::vector<
     return XR_SUCCESS;
 }
 
-/** Applys the shaders */
+/** Applies the shader. */
 XRESULT D3D11GShader::Apply() {
     reinterpret_cast<D3D11GraphicsEngineBase*>(Engine::GraphicsEngine)->GetContext()->GSSetShader( GeometryShader.Get(), nullptr, 0 );
     return XR_SUCCESS;

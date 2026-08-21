@@ -312,9 +312,7 @@ XRESULT D3D11ShaderManager::Init() {
         const bool useSimpleShadowFallback =
             FeatureLevel10Compatibility || s.DebugSettings.FeatureSet.UseShadowAtlas;
         list.push_back( {"SHD_ENABLE",           s.EnableShadows ? "1" : "0"} );
-        // Compile both kernels once. Runtime shadow quality selects PCF or
-        // PCSS from the constant buffer, so AA/FSR3 changes never need a
-        // shader reload and the low/medium presets can avoid blocker search.
+        // Compile both kernels once; quality is selected at runtime.
         list.push_back( {"SHD_FILTER_16TAP_PCF", "1"} );
         list.push_back( {"SHD_FILTER_PCSS",      useSimpleShadowFallback ? "0" : "1"} );
         list.push_back( {"MAX_CSM_CASCADES",     TO_LITERAL(MAX_CSM_CASCADES)} );
@@ -322,8 +320,7 @@ XRESULT D3D11ShaderManager::Init() {
         list.push_back( {"CSM_PCF_LIMIT",        sNums[std::clamp<size_t>(s.ShadowCascadePCFLimit, 0, MAX_CSM_CASCADES)]} );
         list.push_back( {"SHADOW_ATLAS",         (FeatureLevel10Compatibility || s.DebugSettings.FeatureSet.UseShadowAtlas) ? "1" : "0"} );
         list.push_back( {"FP_USE_SHADOW_MASK",   s.DebugSettings.FeatureSet.UseScreenSpaceShadowMask ? "1" : "0"} );
-        // Tap counts are quality-controlled at runtime. The temporal flag only
-        // changes the sample rotation/noise, never PCF/PCSS selection.
+        // Tap counts and sample rotation are selected at runtime.
         list.push_back( {"SHD_BLUE_NOISE",        "1"} );
         list.push_back( {"PCSS_BLOCKER_TAPS",     "8"} );
         list.push_back( {"PCSS_FILTER_TAPS_NEAR", "16"} );
@@ -773,11 +770,7 @@ XRESULT D3D11ShaderManager::LoadShaders( ShaderCategory categories ) {
         }
 
         CompileShader( si );
-        // compilationTP->enqueue( [this, si]() { CompileShader( si ); } );
     }
-
-    // Join all threads (call Threadpool destructor)
-    // compilationTP.reset();
 
     return XR_SUCCESS;
 }

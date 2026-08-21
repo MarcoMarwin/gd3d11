@@ -84,7 +84,6 @@ VS_OUTPUT VSMain( VS_INPUT Input )
 	
 	float3 positionWorld = mul(float4(position + PI_ModelFatness * normal,1), M_World).xyz;
 	
-	//Output.vPosition = float4(Input.vPosition, 1);
 	Output.vWorldPosition = positionWorld;
 	Output.vTexcoord2 = Input.vTex1;
 	Output.vTexcoord = Input.vTex1;

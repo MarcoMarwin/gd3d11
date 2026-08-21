@@ -20,16 +20,15 @@ float3x3 cotangent_frame( float3 N, float3 p, float2 uv )
 	//T *= -1;
 	//B *= -1;
  
-    // construct a scale-invariant frame 
+    // Build a scale-invariant tangent frame.
     float invmax = rsqrt( max( dot(T,T), dot(B,B) ) );
     return float3x3( T * invmax, B * invmax, N );
 }
 
-/** Magic TBN-Calculation function */
+/** Perturbs a normal with a tangent-space normal map. */
 float3 perturb_normal( float3 N, float3 V, Texture2D tex, float2 texcoord, SamplerState samplerState, float normalmapDepth = 1.0f)
 {
-    // assume N, the interpolated vertex normal and 
-    // V, the view vector (vertex to eye)
+    // N is the interpolated vertex normal; V points from the vertex to the eye.
 	
 #ifdef TRI_SAMPLE_LEVEL
     float3 nrmmap = tex.SampleLevel(samplerState, texcoord, TRI_SAMPLE_LEVEL).xyz * 2 - 1;
@@ -55,7 +54,7 @@ float3 GetTriPlanarNrmMap(Texture2D yzTexture,Texture2D zxTexture,Texture2D xyTe
 	blend_weights = (blend_weights +WEIGHT_BIAS) * WEIGHT_MUL;
 	blend_weights = max(blend_weights, 0);
 
-	// Force weights to sum to 1.0 (very important!)
+	// Normalize the blend weights.
 	blend_weights /= (blend_weights.x + blend_weights.y +
 	blend_weights.z ).xxx;
 
@@ -70,11 +69,6 @@ float3 GetTriPlanarNrmMap(Texture2D yzTexture,Texture2D zxTexture,Texture2D xyTe
 	float2 coord1 = (VertexPos.yz * TexScale).yx;
 	float2 coord2 = (VertexPos.zx * TexScale).yx;
 	float2 coord3 = (VertexPos.xy * TexScale).xy;
-
-	// This is where you would apply conditional displacement mapping.
-	//if (blend_weights.x > 0) coord1 = . . .
-	//if (blend_weights.y > 0) coord2 = . . .
-	//if (blend_weights.z > 0) coord3 = . . .	
 
 	// Sample bump maps too, and generate bump vectors.
 	float3 bump1 = perturb_normal(vsNrm, vsPos, yzTexture, coord1, samplerState, NrmMapDepth);
@@ -98,7 +92,7 @@ float4 GetTriPlanarTexture(Texture2D yzTexture,Texture2D zxTexture,Texture2D xyT
 	blend_weights = (blend_weights +WEIGHT_BIAS) * WEIGHT_MUL;
 	blend_weights = max(blend_weights, 0);
 
-	// Force weights to sum to 1.0 (very important!)
+	// Normalize the blend weights.
 	blend_weights /= (blend_weights.x + blend_weights.y +
 	blend_weights.z ).xxx;
 
@@ -113,11 +107,6 @@ float4 GetTriPlanarTexture(Texture2D yzTexture,Texture2D zxTexture,Texture2D xyT
 	float2 coord1 = (VertexPos.yz * TexScale).yx;
 	float2 coord2 = (VertexPos.zx * TexScale).yx;
 	float2 coord3 = (VertexPos.xy * TexScale).xy;
-
-	// This is where you would apply conditional displacement mapping.
-	//if (blend_weights.x > 0) coord1 = . . .
-	//if (blend_weights.y > 0) coord2 = . . .
-	//if (blend_weights.z > 0) coord3 = . . .
 
 	// Sample color maps for each projection, at those UV coords.
 	

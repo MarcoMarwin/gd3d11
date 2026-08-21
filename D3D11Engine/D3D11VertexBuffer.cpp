@@ -102,7 +102,7 @@ XRESULT D3D11VertexBuffer::Init( void* initData, unsigned int sizeInBytes, EBind
         bufferDesc.MiscFlags |= D3D11_RESOURCE_MISC_BUFFER_ALLOW_RAW_VIEWS;
     }
 
-    // In case we dont have data, allocate some to satisfy D3D11
+    // Allocate a minimal buffer when no initial data is provided.
     char* data = nullptr;
     if ( !initData ) {
         data = new char[bufferDesc.ByteWidth];

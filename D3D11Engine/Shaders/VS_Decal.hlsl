@@ -44,18 +44,15 @@ VS_OUTPUT VSMain( VS_INPUT Input )
 {
 	VS_OUTPUT Output;
 	
-	//Input.vPosition = float3(-Input.vPosition.x, Input.vPosition.y, -Input.vPosition.z);
 	
 	float3 positionView = mul(float4(Input.vPosition,1), M_WorldView).xyz;
 	
-	//Output.vPosition = float4(Input.vPosition, 1);
 	Output.vPosition = mul( float4(positionView,1), frame.M_Proj);
 	Output.vTexcoord2 = Input.vTex2;
 	Output.vTexcoord = Input.vTex1;
 	Output.vDiffuse  = Input.vDiffuse;
 	Output.vNormalVS = mul(Input.vNormal, (float3x3)M_WorldView);
 	Output.vViewPosition = positionView;
-	//Output.vWorldPosition = positionWorld;
 	
 	return Output;
 }

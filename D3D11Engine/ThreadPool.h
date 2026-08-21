@@ -177,6 +177,8 @@ inline ThreadPool::ThreadPool(const wchar_t* poolIdentifier, size_t threads)
 
 inline ThreadPool::~ThreadPool()
 {
+    // Drain queued tasks before joining the workers.
+    clearAndFlush();
     {
         std::unique_lock<std::mutex> lock(queue_mutex);
         stop = true;

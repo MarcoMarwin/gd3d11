@@ -238,8 +238,7 @@ struct DS_PointLightConstantBuffer {
     float3 PL_LightScreenPos;
     float PL_ShadowStrength;
 
-    // Runtime pointlight filter selection. Kept in a separate 16-byte block
-    // so all existing fields retain their shader offsets.
+    // Runtime pointlight filter settings; kept in a separate 16-byte block.
     uint32_t PL_ShadowFilterMode;
     uint32_t PL_ShadowFilterPad[3];
 };
@@ -307,8 +306,7 @@ struct DS_ScreenQuadConstantBuffer {
     // shadow projection instead of the continuously moving sky direction.
     float4 SQ_CascadeLightDirectionWS[MAX_CSM_CASCADES];
 
-    // Runtime shadow kernel selection. x = temporal reconstruction enabled,
-    // y = PCF-low / PCF-medium / PCSS quality (0 / 1 / 2).
+    // x = temporal reconstruction; y = PCF/PCSS quality (0 / 1 / 2).
     // This must stay runtime-controlled so AA changes never require shader reloads.
     float4 SQ_ShadowRuntimeParams;
 };

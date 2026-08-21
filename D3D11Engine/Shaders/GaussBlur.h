@@ -58,20 +58,6 @@ float4 DoBlurPassSingle(float2 pixelSize, float2 texCoord, Texture2D tx, Texture
 {
 	float4 c = 0;
 
-	/*for(int x = 0; x < 13; x+=5) 
-	{
-		for(int y = 0; y < 13; y+=5) 
-		{
-			int2 px = int2(GAUSS_PixelKernel[x], GAUSS_PixelKernel[y]);
-			
-			int idx = (int)sqrt(x*x + y*y);
-			float weight = GAUSS_BlurWeights[idx];
-			
-			float2 uv = texCoord + (px * pixelSize * blurSize);
-			c += tx.Sample(ss, uv) * weight;
-		}
-    }*/
-	
 	float4 center = tx.Sample(ss, texCoord);
 	float4 centerDepth = depth.Sample(ss, texCoord);
 	

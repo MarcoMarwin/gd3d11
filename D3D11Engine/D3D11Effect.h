@@ -12,7 +12,7 @@ public:
     D3D11Effect();
     ~D3D11Effect();
 
-    /** Draws GPU-Based rain */
+    /** Draws GPU-based rain. */
     XRESULT DrawRain( bool outputResolution = false, bool useRainExclusionMask = false );
     XRESULT DrawRain_CS( bool outputResolution = false, bool useRainExclusionMask = false );
 

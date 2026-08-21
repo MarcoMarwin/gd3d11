@@ -2,7 +2,6 @@
 
 XRESULT D3D11RenderQueue::Init()
 {
-    // TODO: Create any necessery resources, like resource managers or other things.
     return XR_SUCCESS;
 }
 
@@ -16,7 +15,6 @@ void D3D11RenderQueue::Reset()
 
 XRESULT D3D11RenderQueue::ProcessQueue()
 {
-    // std::sort() vobs etc.
     return XR_SUCCESS;
 }
 

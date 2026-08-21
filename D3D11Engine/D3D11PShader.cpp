@@ -47,7 +47,7 @@ XRESULT D3D11PShader::LoadShader( const ShaderInfo& si, const std::vector<D3D_SH
     return XR_SUCCESS;
 }
 
-/** Applys the shaders */
+/** Applies the shader. */
 XRESULT D3D11PShader::Apply() {
     reinterpret_cast<D3D11GraphicsEngineBase*>(Engine::GraphicsEngine)->GetContext()->PSSetShader( PixelShader.Get(), nullptr, 0 );
     return XR_SUCCESS;

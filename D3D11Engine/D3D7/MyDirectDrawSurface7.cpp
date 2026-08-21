@@ -25,14 +25,16 @@ MyDirectDrawSurface7::MyDirectDrawSurface7() {
 
     // Check for test-bind mode to figure out what zCTexture-Object we are associated with
     std::string bound;
-    if ( Engine::GAPI->IsInTextureTestBindMode( bound ) ) {
+    if ( Engine::GAPI && Engine::GAPI->IsInTextureTestBindMode( bound ) ) {
         Engine::GAPI->SetTextureTestBindMode( false, "" );
         return;
     }
 }
 
 MyDirectDrawSurface7::~MyDirectDrawSurface7() {
-    Engine::GAPI->RemoveSurface( this );
+    if ( Engine::GAPI && !Engine::IsShuttingDown() ) {
+        Engine::GAPI->RemoveSurface( this );
+    }
 
     // Release mip-map chain first
     for ( LPDIRECTDRAWSURFACE7 mipmap : attachedSurfaces ) {
@@ -433,13 +435,22 @@ HRESULT MyDirectDrawSurface7::Lock( LPRECT lpDestRect, LPDDSURFACEDESC2 lpDDSurf
         extern bool CreatingThumbnail;
 
         // Assume 32-bit
-        byte* data;
-        INT2 buffersize;
-        int pixelSize;
-        reinterpret_cast<D3D11GraphicsEngineBase*>(Engine::GraphicsEngine)->ResetPresentPending();
+        if ( !Engine::GraphicsEngine || Engine::IsShuttingDown() ) {
+            return S_OK;
+        }
+
+        auto* graphicsEngine = reinterpret_cast<D3D11GraphicsEngineBase*>(Engine::GraphicsEngine);
+        byte* data = nullptr;
+        INT2 buffersize = INT2( 0, 0 );
+        int pixelSize = 0;
+        graphicsEngine->ResetPresentPending();
         Engine::GraphicsEngine->OnStartWorldRendering();
         Engine::GraphicsEngine->GetBackbufferData( CreatingThumbnail, &data, buffersize, pixelSize );
-        reinterpret_cast<D3D11GraphicsEngineBase*>(Engine::GraphicsEngine)->ResetPresentPending();
+        graphicsEngine->ResetPresentPending();
+
+        if ( !data || buffersize.x <= 0 || buffersize.y <= 0 || pixelSize <= 0 ) {
+            return S_OK;
+        }
 
         lpDDSurfaceDesc->ddpfPixelFormat.dwRGBBitCount = 32;
         lpDDSurfaceDesc->ddpfPixelFormat.dwRBitMask = 0x00FF0000;
@@ -497,6 +508,12 @@ HRESULT MyDirectDrawSurface7::Unlock( LPRECT lpRect ) {
         delete[] LockedData;
         LockedData = nullptr;
 
+        return S_OK;
+    }
+
+    if ( !Engine::GAPI || Engine::IsShuttingDown() ) {
+        delete[] LockedData;
+        LockedData = nullptr;
         return S_OK;
     }
 

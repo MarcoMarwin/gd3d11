@@ -144,6 +144,5 @@ float4 GetColorFromStates(float4 diffuse, float2 uv, float2 uv2, SamplerState sa
 	if(FF_AlphaTestEnabled())
 		DoAlphaTest(alpha.a);
 	
-	//return textureFactor;
 	return float4(color.rgb, alpha.a);
 }

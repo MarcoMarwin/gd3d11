@@ -18,7 +18,9 @@ public:
 
         hook_infunc
 
-            Engine::GAPI->AddFlash( thisptr, vob );
+            if ( Engine::GAPI && !Engine::IsShuttingDown() ) {
+                Engine::GAPI->AddFlash( thisptr, vob );
+            }
 
         hook_outfunc
     }
@@ -28,7 +30,9 @@ public:
 
         hook_infunc
 
-            Engine::GAPI->RemoveFlash( thisptr );
+            if ( Engine::GAPI && !Engine::IsShuttingDown() ) {
+                Engine::GAPI->RemoveFlash( thisptr );
+            }
 
         hook_outfunc
     }

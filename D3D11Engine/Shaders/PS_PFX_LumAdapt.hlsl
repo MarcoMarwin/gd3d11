@@ -36,7 +36,7 @@ float PSMain( PS_INPUT Input ) : SV_TARGET
 	float fLastLum = TX_LumLast.SampleLevel(SS_Linear, float2(0.5f, 0.5f), 9).r;
 	float fCurrentLum = TX_LumCurrent.SampleLevel(SS_Linear, float2(0.5f, 0.5f), 9).r;
 
-	// Adapt quickly but keep temporal smoothing: bright scenes reduce exposure faster, while dark scenes recover slightly more slowly.
+	// Bright scenes adapt faster than dark scenes.
 	const float fBrightSceneRate = 3.0f;
 	const float fDarkSceneRate = 2.0f;
 	float fTau = fCurrentLum > fLastLum ? fBrightSceneRate : fDarkSceneRate;

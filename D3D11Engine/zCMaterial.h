@@ -33,7 +33,9 @@ public:
         hook_infunc
 
             // Notify the world
-            Engine::GAPI->OnMaterialDeleted( thisptr );
+            if ( Engine::GAPI && !Engine::IsShuttingDown() ) {
+                Engine::GAPI->OnMaterialDeleted( thisptr );
+            }
 
         hook_outfunc
 
@@ -55,7 +57,9 @@ public:
         hook_infunc
 
             // Notify the world
-            Engine::GAPI->OnMaterialCreated( thisptr );
+            if ( Engine::GAPI && !Engine::IsShuttingDown() ) {
+                Engine::GAPI->OnMaterialCreated( thisptr );
+            }
 
         hook_outfunc
 

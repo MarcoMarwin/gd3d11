@@ -61,7 +61,6 @@ PS_OUTPUT PSMain( PS_INPUT Input )
 	DoAlphaTest(color.a);
 
 	PS_OUTPUT o;
-	//o.vColor = color;
 	o.fDepth = length(Input.vViewPosition) / FF_zFar; // Linearize depth
 	
 	return o;

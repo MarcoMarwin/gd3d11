@@ -48,7 +48,6 @@
 #include "zCSoundSystem.h"
 #include "zCView.h"
 
-// TODO: REMOVE THIS!
 #include "D3D11GraphicsEngine.h"
 #include "D3D11PointLight.h"
 #include "D3D11PfxRenderer.h"
@@ -894,7 +893,6 @@ GothicAPI::GothicAPI() {
 }
 
 GothicAPI::~GothicAPI() {
-    //ResetWorld(); // Just let it leak for now. // TODO: Do this properly
     SAFE_DELETE( WrappedWorldMesh );
 }
 
@@ -1207,7 +1205,6 @@ void GothicAPI::UpdateMTResourceManager() {
     // It can lead to dead-lock so it is force-disabled until it is investigated
     if ( zCResourceManager* rsm = zCResourceManager::GetResourceManager() ) {
         rsm->SetThreadingEnabled( false );
-        //rsm->SetThreadingEnabled( RendererState.RendererSettings.MTResoureceManager );
     }
 }
 
@@ -1444,7 +1441,7 @@ void GothicAPI::SetEnableGothicInput( bool value ) {
 
 /** Called when the window got set */
 void GothicAPI::OnSetWindow( HWND hWnd ) {
-    if ( OriginalGothicWndProc || !hWnd || !Engine::GraphicsEngine )
+    if ( OriginalGothicWndProc || !hWnd || !Engine::GraphicsEngine || Engine::IsShuttingDown() )
         return; // Dont do that twice
 
     OutputWindow = hWnd;
@@ -1486,8 +1483,7 @@ void GothicAPI::ReloadPlayerVob() {
 }
 
 void GothicAPI::ReleasePointlightShadowResources() {
-    // Pointlights may have worker-created world caches and render-thread queue
-    // entries. Complete both kinds of work before releasing their D3D handles.
+    // Complete pointlight work before releasing its D3D handles.
     if ( Engine::RenderingThreadPool ) {
         Engine::RenderingThreadPool->clearAndFlush();
     }
@@ -1500,9 +1496,7 @@ void GothicAPI::ReleasePointlightShadowResources() {
         graphicsEngine->DebugPointlight = nullptr;
     }
 
-    // D3D11PointLight owns RAII handles whose deleters refer to the active
-    // PFX depth-stencil pool. Release them before that pool or the tiled shadow
-    // arrays are resized/destroyed.
+    // The custom deleters refer to the active PFX depth-stencil pool.
     for ( auto& [vob, lightInfo] : VobLightMap ) {
         (void)vob;
         if ( lightInfo ) {
@@ -1524,16 +1518,30 @@ void GothicAPI::ReleasePointlightResources() {
 
 /** Resets only the vobs */
 void GothicAPI::ResetVobs() {
-    // Revoke access and release all pointlight shadow handles before any
-    // world-owned light/VOB is destroyed.
+    bool expected = false;
+    if ( !ResettingVobs.compare_exchange_strong(
+            expected, true, std::memory_order_acq_rel, std::memory_order_acquire ) ) {
+        // World disposal may arrive through more than one Gothic path.
+        return;
+    }
+    struct ResetGuard final {
+        std::atomic_bool& flag;
+        ~ResetGuard() { flag.store( false, std::memory_order_release ); }
+    } resetGuard{ ResettingVobs };
+
+    if ( LoadedWorldInfo ) {
+        // Do not publish the world while its renderer data is being dismantled.
+        LoadedWorldInfo->MainWorld = nullptr;
+    }
+
+    // Release pointlight shadow handles before destroying world-owned lights/VOBs.
     ReleasePointlightResources();
 
-    // Renderer caches must stop trusting world-owned VOB pointers before the
-    // objects below are destroyed, even if loading aborts before reconfiguration.
+    // Invalidate world-owned VOB references before destroying the objects below.
     ++CityWindowConfigurationGeneration;
     
 
-    // Stability: deferred queues store raw D3D pointers to textures that can be destroyed below.
+    // Drop deferred references to textures before destruction.
     EnterResourceCriticalSection();
     for ( auto& [res, texture] : FrameStagingTextures ) {
         if ( res.second ) {
@@ -1648,11 +1656,12 @@ void GothicAPI::OnGeometryLoaded( zCBspTree* tree ) {
 
 /** Called when the game is about to load a new level */
 void GothicAPI::OnLoadWorld( const std::string& levelName, int loadMode ) {
-    // The old world may still be present in Gothic while its VOB tree is
-    // already being replaced. Renderer hooks must use the original path until
-    // the new world caches have been published by OnWorldLoaded().
+    // Keep renderer hooks on Gothic's path until the new world cache is ready.
     WorldRenderCacheReady.store( false, std::memory_order_release );
     ReleasePointlightResources();
+    if ( LoadedWorldInfo ) {
+        LoadedWorldInfo->MainWorld = nullptr;
+    }
     if ( !LoadedWorldInfo ) {
         LogError() << "World load skipped because renderer world state is unavailable.";
         return;
@@ -1712,12 +1721,13 @@ void GothicAPI::OnWorldLoaded() {
     static bool s_firstLoad = true;
     if ( s_firstLoad ) {
         // Print information about the mod here.
-        //TODO: Menu would be better, but that view doesn't exist then
+        // The menu view is not available at this point.
         PrintModInfo();
         s_firstLoad = false;
     }
 
     LoadedWorldInfo->BspTree = loadedWorld->GetBspTree();
+    LoadedWorldInfo->MainWorld = loadedWorld;
 
     // Get all VOBs
     zCTree<zCVob>* vobTree = loadedWorld->GetGlobalVobTree();
@@ -2058,7 +2068,7 @@ void GothicAPI::DrawWorldMeshNaive() {
                 g->RegisterFrameVisibleNpcVob( vobInfo );
             }
 
-            // This is important, because gothic only lerps between animation when this distance is set and below ~2000
+            // Gothic blends animation only below roughly 2000 units.
             model->SetDistanceToCamera( dist );
 
             // Schedule for drawing in later stage if this vob is ghost
@@ -2093,8 +2103,6 @@ void GothicAPI::DrawWorldMeshNaive() {
 
     // Draw vobs in view
     Engine::GraphicsEngine->DrawVOBs();
-
-    //DebugDrawBSPTree();
 
     ResetWorldTransform();
 }
@@ -2616,17 +2624,6 @@ void GothicAPI::OnVisualDeleted( zCVisual* visual ) {
         for ( auto const& it : list ) {
             OnRemovedVob( it->Vob, LoadedWorldInfo->MainWorld );
         }
-    } else {
-        // TODO: #8 - Figure out why exactly we don't get notified that a VOB is re-added after being removed.
-        /*oCNPC* npcVob;
-        for (auto const& it : list) {
-            if (npcVob = it->Vob->AsNpc()) {
-                LogInfo() << "Not removing NPC Vob: " << npcVob->GetName().ToChar();
-            }
-            else {
-                OnRemovedVob(it->Vob, LoadedWorldInfo->MainWorld);
-            }
-        }*/
     }
     if ( list.size() > 0 ) {
 #ifndef PUBLIC_RELEASE
@@ -2642,7 +2639,7 @@ void GothicAPI::OnVisualDeleted( zCVisual* visual ) {
 void GothicAPI::DrawMeshInfo( zCMaterial* mat, MeshInfo* msh ) {
     // Check for material and bind the texture if it exists
     if ( mat ) {
-        // Setup alphatest //TODO: This has to be done earlier!
+        // Update the alpha-test state before drawing.
         if ( mat->GetAlphaFunc() == zRND_ALPHA_FUNC_TEST )
             RendererState.GraphicsState.FF_GSwitches |= GSWITCH_ALPHAREF;
         else
@@ -2659,7 +2656,7 @@ void GothicAPI::DrawMeshInfo( zCMaterial* mat, MeshInfo* msh ) {
 void GothicAPI::DrawMeshInfo_Layered( zCMaterial* mat, MeshInfo* msh ) {
     // Check for material and bind the texture if it exists
     if ( mat ) {
-        // Setup alphatest //TODO: This has to be done earlier!
+        // Update the alpha-test state before drawing.
         if ( mat->GetAlphaFunc() == zRND_ALPHA_FUNC_TEST )
             RendererState.GraphicsState.FF_GSwitches |= GSWITCH_ALPHAREF;
         else
@@ -2688,7 +2685,6 @@ void GothicAPI::LeaveResourceCriticalSection() {
 
 /** Called when a VOB got removed from the world */
 void GothicAPI::OnRemovedVob( zCVob* vob, zCWorld* world ) {
-    //LogInfo() << "Removing vob: " << vob;
     if ( !vob )
         return;
 
@@ -3370,7 +3366,7 @@ void GothicAPI::DrawSkeletalMeshVob( SkeletalVobInfo* vi, float distance, bool u
         }
     } else {
         if ( model->GetMeshSoftSkinList()->NumInArray > 0 ) {
-            // Just in case somehow we end up without skeletal meshes and they are available
+            // Nothing to draw.
             WorldConverter::ExtractSkeletalMeshFromVob( model, static_cast<SkeletalMeshVisualInfo*>(vi->VisualInfo) );
         }
     }
@@ -3611,7 +3607,7 @@ void GothicAPI::DrawSkeletalMeshVob_Layered( SkeletalVobInfo * vi, float distanc
         }
     } else {
         if ( model->GetMeshSoftSkinList()->NumInArray > 0 ) {
-            // Just in case somehow we end up without skeletal meshes and they are available
+            // Nothing to draw.
             WorldConverter::ExtractSkeletalMeshFromVob( model, static_cast<SkeletalMeshVisualInfo*>(vi->VisualInfo) );
         }
     }
@@ -4658,6 +4654,17 @@ void GothicAPI::SendMessageToGameWindow( UINT msg, WPARAM wParam, LPARAM lParam 
 
 /** Message-Callback for the main window */
 LRESULT GothicAPI::OnWindowMessage( HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam ) {
+    if ( msg == WM_CLOSE || msg == WM_DESTROY || msg == WM_NCDESTROY ) {
+        Engine::BeginShutdown();
+    }
+
+    if ( Engine::IsShuttingDown() ) {
+        if ( OriginalGothicWndProc ) {
+            return CallWindowProc( (WNDPROC)OriginalGothicWndProc, hWnd, msg, wParam, lParam );
+        }
+        return DefWindowProc( hWnd, msg, wParam, lParam );
+    }
+
     if ( !Engine::GraphicsEngine || !Engine::ImGuiHandle ) {
         if ( OriginalGothicWndProc ) {
             return CallWindowProc( (WNDPROC)OriginalGothicWndProc, hWnd, msg, wParam, lParam );
@@ -4969,9 +4976,7 @@ void GothicAPI::CollectVisibleVobs(
             if ( IsWorldRenderCacheReady() && it->OilLampEmissionColor != 0u
                 && (linkedEmissionLightIsEnabled( it->OilLampEmissionStaticLight )
                     || linkedEmissionLightIsEnabled( it->OilLampEmissionDynamicLight )) ) {
-                // The color was captured once while the world cache was built.
-                // The renderer-side oil-lamp light is fixed, so the visible lamp
-                // material and its light contribution use the same stable color.
+                // The color is captured when the world cache is built.
                 vii.emissiveColor = it->OilLampEmissionColor;
             }
             vii.windStrenth = 0.0f;
@@ -5567,12 +5572,10 @@ void GothicAPI::ConfigureAllPointlightShadowSources() {
     constexpr float LINK_RADIUS = 150.0f;
     constexpr float LINK_RADIUS_SQ = LINK_RADIUS * LINK_RADIUS;
     constexpr float PARTICLE_FLAME_HEIGHT_OFFSET = 25.0f;
-    constexpr float FIRE_PFX_HEIGHT_OFFSET = 50.0f;
+    constexpr float FIREPLACE_FLAME_HEIGHT_OFFSET = 100.0f;
     const size_t INVALID_INDEX = static_cast<size_t>(-1);
 
-    // Reconfiguration can happen after a partial world reload. Release old
-    // renderer-owned lights and all pointlight pool handles before rebuilding
-    // the source associations.
+    // Clear old replacements before rebuilding the source associations.
     ReleasePointlightResources();
 
     auto isLightVob = []( zCVob* vob ) {
@@ -5599,6 +5602,25 @@ void GothicAPI::ConfigureAllPointlightShadowSources() {
     };
     auto distanceSq = []( const XMFLOAT3& left, const XMFLOAT3& right ) {
         return XMVectorGetX( XMVector3LengthSq( XMLoadFloat3( &left ) - XMLoadFloat3( &right ) ) );
+    };
+    auto isFireplaceVisualName = []( std::string name ) {
+        name = ToLowerMaterialName( std::move( name ) );
+        const size_t slash = name.find_last_of( "\\/" );
+        if ( slash != std::string::npos )
+            name.erase( 0, slash + 1 );
+        return name.rfind( "nw_misc_fireplace", 0 ) == 0;
+    };
+    auto isFireplaceVob = [&]( VobInfo* vobInfo ) {
+        if ( !vobInfo || !vobInfo->Vob || !vobInfo->Vob->GetShowVisual() )
+            return false;
+        if ( vobInfo->VisualInfo
+            && isFireplaceVisualName( vobInfo->VisualInfo->VisualName ) )
+            return true;
+        if ( zCVisual* visual = vobInfo->Vob->GetVisual() ) {
+            if ( const char* objectName = visual->GetObjectName() )
+                return isFireplaceVisualName( objectName );
+        }
+        return false;
     };
     auto isAncestorOrSame = []( zCVob* possibleAncestor, zCVob* vob ) {
         if ( !possibleAncestor || !vob )
@@ -5643,12 +5665,25 @@ void GothicAPI::ConfigureAllPointlightShadowSources() {
         lights.push_back( record );
     }
 
+    std::vector<XMFLOAT3> fireplaceCenters;
+    for ( const auto& vobEntry : VobMap ) {
+        VobInfo* vobInfo = vobEntry.second;
+        if ( !isFireplaceVob( vobInfo ) )
+            continue;
+
+        const zTBBox3D bbox = vobInfo->Vob->GetBBox();
+        fireplaceCenters.push_back( XMFLOAT3(
+            (bbox.Min.x + bbox.Max.x) * 0.5f,
+            (bbox.Min.y + bbox.Max.y) * 0.5f,
+            (bbox.Min.z + bbox.Max.z) * 0.5f ) );
+    }
+
     struct FlameVisual {
         zCVob* Vob = nullptr;
         XMFLOAT3 BoundsMin = {};
         XMFLOAT3 BoundsMax = {};
         XMFLOAT3 Center = {};
-        bool IsExactFirePfx = false;
+        bool HasNearbyFireplace = false;
         float Size = 1.0f;
     };
     struct FlameGroup {
@@ -5687,11 +5722,10 @@ void GothicAPI::ConfigureAllPointlightShadowSources() {
             (bbox.Min.y + bbox.Max.y) * 0.5f,
             (bbox.Min.z + bbox.Max.z) * 0.5f );
         if ( isParticle ) {
-            if ( zCVisual* visual = flameVob->GetVisual() ) {
-                if ( const char* objectName = visual->GetObjectName() ) {
-                    flame.IsExactFirePfx = ToLowerMaterialName( objectName ) == "fire.pfx";
-                }
-            }
+            flame.HasNearbyFireplace = std::any_of( fireplaceCenters.begin(), fireplaceCenters.end(),
+                [&]( const XMFLOAT3& fireplaceCenter ) {
+                    return distanceSq( flame.Center, fireplaceCenter ) <= LINK_RADIUS_SQ;
+                } );
         }
         const XMFLOAT3 extents(
             std::abs( bbox.Max.x - bbox.Min.x ),
@@ -5748,11 +5782,9 @@ void GothicAPI::ConfigureAllPointlightShadowSources() {
     struct ResolvedFlameGroup {
         zCVob* Parent = nullptr;
         bool IsMultiFlame = false;
-        // A PFX is the dominant visual for mixed and multi-flame groups.
-        // This keeps a PFX/TGA pair on the torch/campfire profile instead of
-        // accidentally falling back to the candle/decal profile.
+        // Prefer PFX when both visual types are present.
         bool HasPfx = false;
-        bool HasExactFirePfx = false;
+        bool HasNearbyFireplace = false;
         XMFLOAT3 Anchor = {};
         float Size = 1.0f;
         size_t FlameCount = 0;
@@ -5772,7 +5804,7 @@ void GothicAPI::ConfigureAllPointlightShadowSources() {
         auto includeFlame = [&]( const FlameVisual& flame ) {
             resolved.Centers.push_back( flame.Center );
             resolved.Vobs.push_back( flame.Vob );
-            resolved.HasExactFirePfx = resolved.HasExactFirePfx || flame.IsExactFirePfx;
+            resolved.HasNearbyFireplace = resolved.HasNearbyFireplace || flame.HasNearbyFireplace;
             boundsMin.x = std::min( boundsMin.x, flame.BoundsMin.x );
             boundsMin.y = std::min( boundsMin.y, flame.BoundsMin.y );
             boundsMin.z = std::min( boundsMin.z, flame.BoundsMin.z );
@@ -5798,14 +5830,11 @@ void GothicAPI::ConfigureAllPointlightShadowSources() {
                 totalSize += flame.Size;
             for ( const FlameVisual& flame : group.Decals )
                 totalSize += flame.Size;
-            // For a multi-flame system, the average visual size prevents one
-            // unusually large TGA/PFX member from dominating the replacement.
+            // Use the average size for multi-flame groups.
             resolved.Size = totalSize / static_cast<float>( resolved.FlameCount );
         }
 
-        // One TGA and one PFX represent the same visible flame. The particle
-        // center is the actual geometric center of the PFX/TGA group and the
-        // PFX remains the dominant type for the vertical profile.
+        // A single TGA/PFX pair represents one visible flame.
         if ( !resolved.IsMultiFlame ) {
             if ( group.Particles.size() == 1 ) {
                 resolved.Size = group.Particles.front().Size;
@@ -5819,9 +5848,11 @@ void GothicAPI::ConfigureAllPointlightShadowSources() {
     }
 
     auto flameHeightOffset = [&]( const ResolvedFlameGroup& flame ) {
-        if ( flame.HasExactFirePfx )
-            return FIRE_PFX_HEIGHT_OFFSET;
-        return flame.HasPfx ? PARTICLE_FLAME_HEIGHT_OFFSET : 0.0f;
+        if ( !flame.HasPfx )
+            return 0.0f;
+        return flame.HasNearbyFireplace
+            ? FIREPLACE_FLAME_HEIGHT_OFFSET
+            : PARTICLE_FLAME_HEIGHT_OFFSET;
     };
 
     struct OilLampAnchor {
@@ -5926,9 +5957,8 @@ void GothicAPI::ConfigureAllPointlightShadowSources() {
     for ( size_t flameIndex = 0; flameIndex < resolvedFlames.size(); ++flameIndex ) {
         const ResolvedFlameGroup& flame = resolvedFlames[flameIndex];
         if ( flame.IsMultiFlame ) {
-            // A multi-flame group participates in nearest-owner selection.
-            // Member centers are used only for source ownership scoring; the
-            // generated replacement itself uses the union-box center below.
+            // Use member centers for source ownership; the replacement uses
+            // the group's union-box center.
             for ( const XMFLOAT3& center : flame.Centers ) {
                 visualAnchors.push_back( {
                     VisualAnchorKind::MultiFlame, flameIndex,
@@ -5965,13 +5995,7 @@ void GothicAPI::ConfigureAllPointlightShadowSources() {
             || isAncestorOrSame( anchor.Vob, light.Info->Vob );
     };
 
-    // This is the same winner-selection rule that the original anchor pass
-    // uses below. A light is considered attracted to the candle when the
-    // candle wins among all visible flame/oil-lamp anchors in LINK_RADIUS;
-    // hierarchy relation wins over distance, otherwise the nearest anchor
-    // wins. Using the exact winner here prevents an unrelated nearby light
-    // from being suppressed while also catching lights with no shared VOB
-    // parent (the previous suppression loop missed those).
+    // Prefer related anchors, then choose the nearest one.
     auto findBestVisualAnchor = [&]( size_t lightIndex ) {
         size_t bestAnchor = INVALID_INDEX;
         float bestDistanceSq = LINK_RADIUS_SQ;
@@ -6005,10 +6029,7 @@ void GothicAPI::ConfigureAllPointlightShadowSources() {
         info->FlameAnchorOffset = {};
         info->UpdateShadows = false;
 
-        // A source can already own a shadow object when this configuration is
-        // rebuilt. Remove every deferred queue reference before releasing it;
-        // otherwise the old pointlight would still consume shadow resources
-        // or leave a dangling entry for the next shadow pass.
+        // Remove queue references before releasing the source light.
         if ( auto* graphicsEngine = dynamic_cast<D3D11GraphicsEngine*>( Engine::GraphicsEngine ) ) {
             graphicsEngine->FrameShadowUpdateLights.remove( info );
             if ( info->LightShadowBuffers
@@ -6027,8 +6048,7 @@ void GothicAPI::ConfigureAllPointlightShadowSources() {
         rendererLight->IsRendererLight = true;
         rendererLight->AllowsPointlightShadows = true;
         rendererLight->RendererLightEnabled = true;
-        // Keep the animated pointlight shadow path so NPCs remain valid
-        // animated casters for renderer-owned flame and oil-lamp lights.
+        // Renderer-owned lights use the animated pointlight path too.
         rendererLight->RendererLightStatic = false;
         rendererLight->RendererLightFlicker = flicker;
         rendererLight->RendererLightIntensity = std::max( intensity, 0.0f );
@@ -6038,9 +6058,7 @@ void GothicAPI::ConfigureAllPointlightShadowSources() {
         rendererLight->RendererLightAnchorVob = anchorVob;
         rendererLight->RendererLightSourceA = sourceA;
         rendererLight->RendererLightSourceB = sourceB;
-        // Generated flame lights must obey the same indoor/outdoor boundary
-        // as authored interior lights. The anchor classification is supplied
-        // through IsIndoorVob below and is also used by the shadow cubemap.
+        // Match the authored indoor/outdoor classification.
         rendererLight->IgnoreIndoorOutdoorLimit = false;
         rendererLight->IsIndoorVob = anchorVob && anchorVob->IsIndoorVob();
         rendererLight->Vob = sourceA;
@@ -6057,16 +6075,14 @@ void GothicAPI::ConfigureAllPointlightShadowSources() {
         return result;
     };
 
-    // zColor takes BGRA order. TGA candle flames use a lighter, yellow-warm
-    // profile; PFX torches and campfires use a more saturated orange-gold
-    // profile. A PFX wins whenever both visual types share one group.
+    // zColor is BGRA; PFX groups use the warmer torch profile.
     const DWORD TGA_FLAME_LIGHT_COLOR = zColor( 90, 190, 255, 255 ).dword;
     const DWORD PFX_FLAME_LIGHT_COLOR = zColor( 32, 128, 255, 255 ).dword;
     auto flameLightColor = [&]( bool hasPfx ) {
         return hasPfx ? PFX_FLAME_LIGHT_COLOR : TGA_FLAME_LIGHT_COLOR;
     };
     auto flameLightRange = []( float size ) {
-        return std::clamp( size * 6.0f, 180.0f, 600.0f );
+        return std::clamp( size * 6.0f, 300.0f, 600.0f );
     };
     auto flameLightIntensity = []( float size, size_t flameCount = 1, bool hasPfx = false ) {
         const float countScale = std::sqrt( static_cast<float>(
@@ -6077,16 +6093,13 @@ void GothicAPI::ConfigureAllPointlightShadowSources() {
             0.70f, 1.15f );
     };
 
-    // Oil lamps own their nearby light sources before generic flame linking is
-    // evaluated. This prevents one authored light from becoming both an oil
-    // lamp replacement and a separate flame replacement.
+    // Resolve oil-lamp sources before generic flame links.
     for ( OilLampAnchor& oilLamp : oilLampAnchors ) {
         const size_t staticIndex = oilLamp.NearestStaticLight;
         const size_t dynamicIndex = oilLamp.NearestDynamicLight;
         const bool hasStatic = staticIndex != INVALID_INDEX;
         const bool hasDynamic = dynamicIndex != INVALID_INDEX;
-        // Static-only lamps keep their authored light; every lamp with a
-        // dynamic source gets one fixed renderer replacement.
+        // Static-only lamps keep the authored light.
         if ( !hasDynamic )
             continue;
 
@@ -6123,10 +6136,7 @@ void GothicAPI::ConfigureAllPointlightShadowSources() {
             } );
     };
 
-    // A multi-flame system becomes one renderer light at the geometric center
-    // of the complete PFX/TGA group. Any linked source lights are removed from
-    // the render list, but never provide the replacement position. Oil lamps
-    // remain owned by their existing replacement-light path.
+    // One renderer light represents each complete PFX/TGA group.
     for ( size_t flameIndex = 0; flameIndex < resolvedFlames.size(); ++flameIndex ) {
         const ResolvedFlameGroup& flame = resolvedFlames[flameIndex];
         if ( !flame.IsMultiFlame || flame.Vobs.empty() )
@@ -6150,8 +6160,7 @@ void GothicAPI::ConfigureAllPointlightShadowSources() {
             suppressRendererSource( lights[lightIndex].Info );
         }
 
-        // Always use the visual geometry center. The type-specific offset is
-        // applied in world Y, never along the PFX/TGA object's local axis.
+        // Keep the replacement at the visual center and apply the height in Y.
         zCVob* lightAnchor = flame.Parent ? flame.Parent : flame.Vobs.front();
         XMFLOAT3 lightPosition = flame.Anchor;
         lightPosition.y += flameHeightOffset( flame );
@@ -6162,11 +6171,7 @@ void GothicAPI::ConfigureAllPointlightShadowSources() {
             flameLightRange( flame.Size ), true, nullptr, nullptr );
     }
 
-    // A single visible PFX, a single visible TGA, and a matching PFX/TGA pair
-    // each become one renderer light centered on the visual geometry. In a
-    // pair, the PFX still dominates the type-specific profile. Any authored
-    // light related to that visual is removed from the renderer light list so
-    // it cannot create a duplicate lighting or shadow contribution.
+    // A single visual or matching PFX/TGA pair becomes one renderer light.
     for ( size_t flameIndex = 0; flameIndex < resolvedFlames.size(); ++flameIndex ) {
         const ResolvedFlameGroup& flame = resolvedFlames[flameIndex];
         if ( flame.IsMultiFlame || flame.Vobs.empty() )
@@ -6226,8 +6231,7 @@ void GothicAPI::ConfigureAllPointlightShadowSources() {
             assignAnchor( lights[lightIndex],
                 oilLampAnchors[winner.SourceIndex].ShadowAnchor );
         }
-        // Multi-flame source lights retain their authored shadow ownership;
-        // the generated replacement itself is centered on the visual group.
+        // Source lights keep authored shadow ownership.
     }
 
     // Emission-color linking is independent of shadow-anchor ownership. One
@@ -6886,7 +6890,6 @@ XRESULT GothicAPI::SaveMenuSettings( const std::string& file ) {
     WritePrivateProfileStringA( "Shadows", "ShadowMapSize", std::to_string( s.ShadowMapSize ).c_str(), ini.c_str() );
     WritePrivateProfileStringA( "Shadows", "ShadowSoftness", std::to_string( s.ShadowSoftness ).c_str(), ini.c_str() );
 
-    // WritePrivateProfileStringA( "SMAA", "Enabled", std::to_string( s.EnableSMAA ? TRUE : FALSE ).c_str(), ini.c_str() );
     WritePrivateProfileStringA( "General", "AntiAliasing", std::to_string( (int)s.AntiAliasingMode ).c_str(), ini.c_str() );
 
     WritePrivateProfileStringA( "AO", "Mode", std::to_string( static_cast<int>(s.AoMode) ).c_str(), ini.c_str() );
@@ -7315,7 +7318,7 @@ void GothicAPI::DrawMorphMesh( zCMorphMesh* msh, std::map<zCMaterial*, std::vect
     if ( !morphMesh )
         return;
         
-    // Ensure to call `WorldConverter::UpdateMorphMeshVisual( ... );` once per frame for this mesh to update the vertex buffers before drawing.
+    // Update the morph visual once per frame.
 
     D3D11GraphicsEngine* g = reinterpret_cast<D3D11GraphicsEngine*>(Engine::GraphicsEngine);
 
@@ -7553,7 +7556,6 @@ bool GothicAPI::CheckNormalmapFilesOld() {
 /** Returns the gamma value from the ingame menu */
 float GothicAPI::GetGammaValue() {
     return RendererState.RendererSettings.GammaValue;
-    //return zCRndD3D::GetRenderer()->GetGammaValue();
 }
 
 /** Returns the brightness value from the ingame menu */
@@ -8186,9 +8188,7 @@ void GothicAPI::CollectVisibleVobs( const RndCullContext& ctx ) {
     }
     collectTree( singlePassCtx );
 
-    // Renderer-owned flame/oil-lamp lights have no BSP light-vob entry. Add
-    // them once after BSP traversal instead of scanning the full replacement
-    // list once per leaf.
+    // Renderer-owned lights have no BSP entry; add them after traversal.
     if ( ctx.drawFlags.CollectLights && ctx.drawFlags.EnableDynamicLighting ) {
         const FXMVECTOR cameraPosition = XMLoadFloat3( &ctx.cameraPosition );
         for ( const auto& rendererLightStorage : RendererPointLights ) {

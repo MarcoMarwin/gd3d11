@@ -65,7 +65,13 @@ public:
     void Execute();
 
     RenderToTextureBuffer* GetPhysicalTexture(RGResourceHandle handle) const {
+        if ( handle == RG_INVALID_HANDLE ) {
+            return nullptr;
+        }
         uint32_t index = GetHandleIndex(handle);
+        if ( index >= m_nextHandle ) {
+            return nullptr;
+        }
 
         return IsExternalHandle(handle)
             ? m_externalTextures[index]

@@ -41,8 +41,8 @@ D3D11PointLight::D3D11PointLight( VobLightInfo* info, bool dynamicLight ) {
 }
 
 D3D11PointLight::~D3D11PointLight() {
-    // Make sure we are out of the init-queue
-    m_PendingInit.cancel( ); // ensure any pending job is cancelled such that we get to InitDone state
+    // Finish queued initialization before releasing the light.
+    m_PendingInit.cancel( );
 
     if ( m_PendingInit.future.valid() ) {
         
@@ -81,7 +81,6 @@ void D3D11PointLight::AcquireShadowMap( DepthStencilPool* pool, int resolution )
     m_CurrentResolution = resolution;
 
     // don't reset DrawnOnce here, or NPCs won't show up in the first frame a shadow gets a different LOD
-    // DrawnOnce = false;
     StartReInit();
 }
 
@@ -247,9 +246,7 @@ void D3D11PointLight::RenderStaticShadowPass( RenderToDepthStencilBuffer& target
     }
 
     unsigned int staticCasterMask = SHADOW_CASTER_WORLD | SHADOW_CASTER_VOBS | SHADOW_CASTER_MOBS;
-    // Static-only pointlight shadows have no later animated overlay. Keep
-    // NPCs visible as initial casters for renderer-owned flame/oil-lamp lights
-    // without duplicating them in the normal dynamic static base pass.
+    // Keep NPCs as initial casters for static-only flame lights.
     if ( LightInfo->IsRendererLight
         && GetCurrentShadowMode() == GothicRendererSettings::PLS_STATIC_ONLY ) {
         staticCasterMask |= SHADOW_CASTER_ANIMATED;
@@ -330,7 +327,7 @@ bool D3D11PointLight::NeedsUpdate() {
     return moved || rangeChanged || NotYetDrawn();
 }
 
-/** Returns true if the light could need an update, but it's not very important */
+/** Returns true when the light may need an update. */
 bool D3D11PointLight::WantsUpdate() {
     if ( !IsReady() )
         return false;
@@ -360,8 +357,6 @@ void D3D11PointLight::RenderCubemap( bool forceUpdate, D3D11ConstantBuffer* View
     const int shadowMode = GetCurrentShadowMode();
     HandleShadowModeChange( shadowMode );
 
-    //if (!GetAsyncKeyState('X'))
-    //	return;
     D3D11GraphicsEngine* engine = reinterpret_cast<D3D11GraphicsEngine*>(Engine::GraphicsEngine); // TODO: Remove and use newer system!
 
     FXMVECTOR xmlastPos = XMLoadFloat3( &LastUpdatePosition );
@@ -464,6 +459,9 @@ void D3D11PointLight::RenderFullCubemap() {
     if ( !IsReady() )
         return;
     D3D11GraphicsEngine* engine = reinterpret_cast<D3D11GraphicsEngine*>(Engine::GraphicsEngine); // TODO: Remove and use newer system!
+    if ( !engine || !engine->GetContext() || !engine->GetPfxRenderer() || !m_DepthCubemap ) {
+        return;
+    }
     auto _ = engine->RecordGraphicsEvent( GE_NAME("RenderFullCubemap->RenderFullCubemap") );
 
     RenderToDepthStencilBuffer* activeTarget = GetActiveShadowTarget();
@@ -537,7 +535,10 @@ void D3D11PointLight::RenderFullCubemap() {
 bool D3D11PointLight::IsReady()
 {
     return InitDone
-        && LightInfo;
+        && LightInfo
+        && Engine::GAPI
+        && Engine::GraphicsEngine
+        && !Engine::IsShuttingDown();
 }
 
 void D3D11PointLight::Invalidate() {
@@ -560,21 +561,29 @@ void D3D11PointLight::StartReInit() {
     if ( !DynamicLight ) {
         InitDone = false;
 
-        // Add to queue
-        m_PendingInit.cancel( ); // Cancel any pending init first, we only care about the latest one
+        m_PendingInit.cancel( );
+        // Cancellation does not stop a job that is already running.
+        if ( m_PendingInit.future.valid() ) {
+            m_PendingInit.future.wait();
+        }
         if ( !Engine::WorkerThreadPool ) {
             InitResources();
             return;
         }
 
-        m_PendingInit = Engine::WorkerThreadPool->enqueue( [this] (const CancellationToken& token)
-        {
-            if (token.isCancelled()) {
-                InitDone = true;
-                return;
-            }
-            InitResources();
-        } );
+        try {
+            m_PendingInit = Engine::WorkerThreadPool->enqueue( [this] (const CancellationToken& token)
+            {
+                if ( token.isCancelled() || Engine::IsShuttingDown() || !Engine::GAPI ) {
+                    InitDone = true;
+                    return;
+                }
+                InitResources();
+            } );
+        } catch ( const std::runtime_error& ) {
+            // The pool may already be stopping during teardown.
+            InitDone = true;
+        }
 
     } else {
         InitResources();
@@ -587,6 +596,9 @@ void D3D11PointLight::RenderCubemapFace( const XMFLOAT4X4& view, const XMFLOAT4X
         return;
 
     D3D11GraphicsEngine* engine = reinterpret_cast<D3D11GraphicsEngine*>(Engine::GraphicsEngine); // TODO: Remove and use newer system!
+    if ( !engine || !engine->GetContext() || !m_DepthCubemap ) {
+        return;
+    }
     auto lightPos = LightInfo->GetEffectivePositionWorldXM();
     float range = LightInfo->GetEffectiveLightRange();
     
@@ -620,7 +632,11 @@ void D3D11PointLight::OnRenderLight() {
     if ( !IsReady() || !m_DepthCubemap)
         return;
 
-    m_DepthCubemap->BindToPixelShader( reinterpret_cast<D3D11GraphicsEngineBase*>(Engine::GraphicsEngine)->GetContext(), 3 );
+    auto* engine = reinterpret_cast<D3D11GraphicsEngineBase*>(Engine::GraphicsEngine);
+    if ( !engine || !engine->GetContext() ) {
+        return;
+    }
+    m_DepthCubemap->BindToPixelShader( engine->GetContext(), 3 );
 }
 
 /** Called when a vob got removed from the world */
@@ -628,10 +644,7 @@ void D3D11PointLight::OnVobRemovedFromWorld( BaseVobInfo* vob ) {
     if ( !vob || !LightInfo )
         return;
 
-    // Wait for cache initialization to finish first
-    //Engine::GAPI->EnterResourceCriticalSection();
-
-    // See if we have this vob registered
+    // Clear cached VOB lists when this vob is removed.
     if ( std::find( VobCache.begin(), VobCache.end(), vob ) != VobCache.end()
         || std::find( SkeletalVobCache.begin(), SkeletalVobCache.end(), vob ) != SkeletalVobCache.end() ) {
         // Clear cache, if so
@@ -648,5 +661,4 @@ void D3D11PointLight::OnVobRemovedFromWorld( BaseVobInfo* vob ) {
         ClearTiledSlot();
     }
 
-    //Engine::GAPI->LeaveResourceCriticalSection();
 }

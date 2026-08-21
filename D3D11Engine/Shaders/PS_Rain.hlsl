@@ -217,8 +217,6 @@ void rainResponse(PS_INPUT input, float3 lightVector, float lightIntensity, floa
         float col3 = TX_RainTextureArray.Sample(SS_Anisotropic, tex3).r * min(g_rainfactors[texIndicesV2.x], v2MaxFactor);
         float col4 = TX_RainTextureArray.Sample(SS_Anisotropic, tex4).r * min(g_rainfactors[texIndicesV2.y], v2MaxFactor);
 
-		//s = saturate(s) * 0.6f;
-		
         // Compute interpolated opacity using the s and t factors
         float hOpacity1 = min(1.0f, lerp(col1,col2,s) * 1.0f);
         float hOpacity2 = min(1.0f, lerp(col3,col4,s) * 1.0f);
@@ -277,7 +275,6 @@ PS_OUTPUT PSMain( PS_INPUT Input )
 	//float4 color = pow(TX_Texture0.Sample(SS_Linear, Input.vTexcoord), 1.0f);
 	float4 color = float4(1,1,1, 0.2f);
 	
-	//float dirLightIntensity = 0.5f * max(0.5f, pow(AR_LightDirection.y, 1/4.0f));
 	
 	float globalLighting = 1.0f;//lerp(0.2f, 1.0f, saturate(pow(abs(AR_LightDirection.y), 1/1.5f)));
 	

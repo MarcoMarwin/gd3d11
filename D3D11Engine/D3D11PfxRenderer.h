@@ -141,7 +141,7 @@ public:
         FreeResources();
     }
 
-    // Free any unused resources, like SMAA buffers if the player doesnt use it.
+    // Release optional resources, including SMAA buffers.
     void FreeResources();
 
     TexturePool* GetTexturePool() { return m_texturePool.get(); }

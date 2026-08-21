@@ -46,11 +46,9 @@ VS_OUTPUT VSMain( VS_INPUT Input )
 {
 	VS_OUTPUT Output;
 	
-	//Input.vPosition = float3(-Input.vPosition.x, Input.vPosition.y, -Input.vPosition.z);
 	
 	float3 positionWorld = mul(float4(Input.vPosition,1), cbInstance.M_World).xyz;
 	
-	//Output.vPosition = float4(Input.vPosition, 1);
 	Output.vPosition = mul( float4(positionWorld,1), frame.M_ViewProj);
 	Output.vTexcoord2 = Input.vTex2;
 	Output.vTexcoord = Input.vTex1;

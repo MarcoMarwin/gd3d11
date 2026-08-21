@@ -147,8 +147,7 @@ float4 PSMain( PS_INPUT Input ) : SV_TARGET
 		lightDir, normal, V, vegetationBacklitMask, twoSidedBacklitMaterial,
 		AC_EnableSSS, AC_SSSIntensity, 0.42f);
 	
-	// Indoor lights must not leak onto outdoor geometry. Use the exact per-pixel
-	// classification; the former multi-ring doorway probe introduced quantized bands.
+	// Keep indoor light from leaking into outdoor pixels.
 	float indoorPixel = diffuse.a < 0.5f ? 1.0f : 0.0f;
 	float indoorBoundary = saturate(PL_Outdoor + (1.0f - PL_Outdoor) * indoorPixel);
 	lighting *= lerp(indoorBoundary, 1.0f, saturate(PL_IgnoreIndoorOutdoorLimit));

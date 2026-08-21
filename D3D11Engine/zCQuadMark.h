@@ -25,10 +25,14 @@ public:
 
         hook_infunc
 
-            QuadMarkInfo* info = Engine::GAPI->GetQuadMarkInfo( thisptr );
-            WorldConverter::UpdateQuadMarkInfo( info, thisptr, position );
-            if ( !info->Mesh ) {
-                Engine::GAPI->RemoveQuadMark( thisptr );
+            if ( Engine::GAPI && !Engine::IsShuttingDown() ) {
+                QuadMarkInfo* info = Engine::GAPI->GetQuadMarkInfo( thisptr );
+                if ( info ) {
+                    WorldConverter::UpdateQuadMarkInfo( info, thisptr, position );
+                    if ( !info->Mesh ) {
+                        Engine::GAPI->RemoveQuadMark( thisptr );
+                    }
+                }
             }
 
         hook_outfunc
@@ -43,7 +47,9 @@ public:
 
         hook_infunc
 
-            Engine::GAPI->RemoveQuadMark( thisptr );
+            if ( Engine::GAPI && !Engine::IsShuttingDown() ) {
+                Engine::GAPI->RemoveQuadMark( thisptr );
+            }
 
         hook_outfunc
     }

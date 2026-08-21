@@ -1,12 +1,4 @@
 // Clustered Forward+ light culling for D3D11.
-//
-// The old implementation built one depth-derived AABB and a flat index list per screen tile. That made the
-// result unusable for geometry in front of the opaque depth and paid an extra global counter/list write. This
-// path builds a frustum-only grid of logarithmic view-Z clusters, so deferred and Forward+ consumers share the
-// same light membership data.
-//
-// D3D11/SM5 has no wave intrinsics. Each of the 64 lanes tests its assigned light and ORs the result directly
-// into the shared mask. This keeps the DX12 cluster layout and removes the old global index-list allocation.
 #ifndef TILE_SIZE
 #define TILE_SIZE 16u
 #endif
@@ -15,8 +7,7 @@
 #define NUM_Z_SLICES 16u
 #define CULL_GROUP_SIZE 64u
 
-// This must remain layout-identical to the C++ TiledPointLight and the lighting shader copies. The cull only
-// reads PositionView/Range; the remaining members keep the StructuredBuffer stride at 80 bytes.
+// Keep this layout in sync with TiledPointLight in C++ and the lighting shaders.
 struct TiledPointLight {
     float3 PositionView;
     float Range;
@@ -58,7 +49,6 @@ uint SliceOfViewZ( float zView, float invLogRatio ) {
 
 [numthreads( CULL_GROUP_SIZE, 1, 1 )]
 void CSMain( uint3 groupID : SV_GroupID, uint ti : SV_GroupIndex ) {
-    // There are 512 mask words and 64 lanes, so each lane clears eight words.
     [unroll]
     for ( uint c = 0; c < ( NUM_Z_SLICES * MASK_WORDS ) / CULL_GROUP_SIZE; ++c )
         gs_Mask[c * CULL_GROUP_SIZE + ti] = 0;
@@ -83,8 +73,7 @@ void CSMain( uint3 groupID : SV_GroupID, uint ti : SV_GroupIndex ) {
 
     GroupMemoryBarrierWithGroupSync();
 
-    // Test each light once against the tile's infinite frustum column, then set its bit only in the Z slices
-    // touched by the light sphere. A 1.05 guard keeps the cull conservative at the tile boundaries.
+    // Test each light against the tile frustum and mark the covered Z slices.
     for ( uint base = 0; base < lightCount; base += CULL_GROUP_SIZE ) {
         const uint lightIndex = base + ti;
         if ( lightIndex < lightCount ) {
@@ -110,7 +99,6 @@ void CSMain( uint3 groupID : SV_GroupID, uint ti : SV_GroupIndex ) {
 
     GroupMemoryBarrierWithGroupSync();
 
-    // Build one occupancy word per slice so consumers can skip empty mask words.
     [unroll]
     for ( uint u = 0; u < ( NUM_Z_SLICES * MASK_WORDS ) / CULL_GROUP_SIZE; ++u ) {
         const uint i = u * CULL_GROUP_SIZE + ti;
@@ -120,7 +108,6 @@ void CSMain( uint3 groupID : SV_GroupID, uint ti : SV_GroupIndex ) {
 
     GroupMemoryBarrierWithGroupSync();
 
-    // Flush all clusters of this tile column. The layout is tileIndex * NUM_Z_SLICES + slice.
     const uint clusterBase = ( groupID.y * NumTilesX + groupID.x ) * NUM_Z_SLICES;
     [unroll]
     for ( uint o = 0; o < ( NUM_Z_SLICES * MASK_WORDS ) / CULL_GROUP_SIZE; ++o ) {

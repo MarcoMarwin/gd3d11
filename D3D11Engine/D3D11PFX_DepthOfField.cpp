@@ -219,8 +219,7 @@ void D3D11PFX_DepthOfField::UpdateAdaptiveFocus( float configuredNearDistance ) 
         m_AutoFocusSuppressed = suppressNearBlur;
         m_AutoFocusTransitionStart = m_AutoFocusBlend;
         m_AutoFocusTransitionElapsed = 0.0f;
-        // Camera-stationary autofocus reacts quickly; NPC focus and every
-        // return to configured blur retain their deliberately slower timing.
+        // Stationary-camera focus reacts quickly; other transitions use the slower duration.
         const bool cameraOnlySuppression = suppressNearBlur
             && cameraStationaryFocus && !m_NpcFocusSuppressed;
         m_AutoFocusTransitionDuration = cameraOnlySuppression ? 1.0f : 2.0f;

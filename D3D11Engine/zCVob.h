@@ -58,7 +58,7 @@ public:
 
         hook_infunc
 
-            if ( vobHasMoved ) {
+            if ( vobHasMoved && Engine::GAPI && !Engine::IsShuttingDown() ) {
                 Engine::GAPI->OnVobMoved( thisptr );
             }
 
@@ -76,7 +76,7 @@ public:
 
         HookedFunctions::OriginalFunctions.original_zCVobEndMovement( thisptr, transformChanged_hint );
 
-        if ( vobHasMoved && transformChanged_hint )
+        if ( vobHasMoved && transformChanged_hint && Engine::GAPI && !Engine::IsShuttingDown() )
             Engine::GAPI->OnVobMoved( thisptr );
 
         hook_outfunc
@@ -88,7 +88,9 @@ public:
         hook_infunc
 
             // Notify the world. We are doing this here for safety so nothing possibly deleted remains in our world.
-            Engine::GAPI->OnRemovedVob( thisptr, thisptr->GetHomeWorld() );
+            if ( Engine::GAPI && !Engine::IsShuttingDown() ) {
+                Engine::GAPI->OnRemovedVob( thisptr, thisptr->GetHomeWorld() );
+            }
 
         hook_outfunc
 
@@ -98,6 +100,10 @@ public:
     /** Called when this vob is about to change the visual */
     static void __fastcall Hooked_SetVisual( zCVob* thisptr, void* unknwn, zCVisual* visual ) {
         HookedFunctions::OriginalFunctions.original_zCVobSetVisual( thisptr, visual );
+
+        if ( !Engine::GAPI || Engine::IsShuttingDown() ) {
+            return;
+        }
 
         if ( Engine::GAPI->IsSavingGameNow() ) {
             return;
@@ -122,7 +128,8 @@ public:
     zCVisual* GetVisual() {
         zCVisual* visual = GetMainVisual();
 #if BUILD_SPACER_NET
-        if ( !visual && Engine::GAPI->GetRendererState().RendererSettings.RunInSpacerNet )
+        if ( !visual && Engine::GAPI && !Engine::IsShuttingDown()
+            && Engine::GAPI->GetRendererState().RendererSettings.RunInSpacerNet )
 #else
         if ( !visual )
 #endif

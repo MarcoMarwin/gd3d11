@@ -57,12 +57,6 @@
 #include "RenderGraph.h"
 #include "D3D11Upscaling.h"
 
-#ifdef BUILD_SPACER
-#define IS_SPACER_BUILD true
-#else
-#define IS_SPACER_BUILD false
-#endif
-
 namespace wrl = Microsoft::WRL;
 
 const XMFLOAT4 UNDERWATER_COLOR_MOD = XMFLOAT4( 0.5f, 0.7f, 1.0f, 1.0f );
@@ -71,9 +65,8 @@ static const GUID IID_IDXGIVkInteropAdapter = { 0x3A6D8F2C, 0xB0E8, 0x4AB4, { 0x
 static const GUID IID_IDXGIDeviceRenderDoc = { 0xa7aa6116, 0x9c8d, 0x4bba, { 0x90, 0x83, 0xb4, 0xd8, 0x16, 0xb7, 0x1b, 0x78 } };
 
 constexpr float inv255f = (1.f / 255.f);
-// Negative material-alpha values are renderer-private draw-class markers. Keep
-// the normal VOB marker above -0.5 so the existing NPC/vegetation lighting
-// classes remain unchanged while the water pass can identify every VOB.
+// Negative alpha values encode renderer draw classes.
+// Keep ordinary VOBs above -0.5; water uses -0.25.
 constexpr float WATER_VOB_MATERIAL_CLASS_MARKER = -0.25f;
 float vobAnimation_WindStrength = 1.0f;
 
@@ -108,9 +101,7 @@ static void UpdateCharacterInteractionPositions( VS_ExConstantBuffer_Wind& windB
     const XMFLOAT3 playerPosition = player->GetPositionWorld();
     windBuff.interactionPositions[0] = float4( playerPosition.x, playerPosition.y, playerPosition.z, 1.0f );
 
-    // The hero always affects nearby objects, but choose additional NPC
-    // influencers around the camera. That keeps the limited influence slots
-    // focused on what the player can actually see.
+    // Reserve slot 0 for the hero.
     const XMFLOAT3 interactionSelectionCenter = Engine::GAPI->GetCameraPosition();
     const float NpcInteractionSearchRadius = 1200.0f;
     Engine::GAPI->CollectNearbyNpcInteractionPositions(
@@ -306,10 +297,7 @@ namespace
             }
         }
 
-        // The replacement DDS describes the pane, not its illumination. Tint
-        // its replay with a restrained atmosphere approximation so it cannot
-        // remain yellow/bright at night or overcast during rain. Alpha retains
-        // a separate floor in the shader, keeping the glass visibly present.
+        // Tint the static replacement with the current atmosphere.
         const XMFLOAT3 clearDayTint( 0.78f, 0.76f, 0.70f );
         const XMFLOAT3 rainyDayTint( 0.42f, 0.45f, 0.48f );
         const XMFLOAT3 nightTint( 0.18f, 0.24f, 0.38f );
@@ -405,13 +393,12 @@ namespace
         wmcb.WM_DisableRainEffects = 0.0f;
         wmcb.WM_OceanWaterTintStrength = mediterraneanOcean ? 0.48f : 0.18f;
         wmcb.WM_IsOceanWater = IsOceanWaterTexture( texture ) ? 1.0f : 0.0f;
-        // Pre-normalized to luminance 1.0 so the pixel shader only changes
-        // chroma, not exposure, without a per-pixel dot product and divide.
+        // Preserve chroma without changing exposure.
         wmcb.WM_OceanWaterTint = mediterraneanOcean
             ? XMFLOAT3( 0.426781f, 1.138082f, 1.321880f )
             : XMFLOAT3( 0.894520f, 1.026067f, 1.052377f );
         wmcb.WM_Padding0 = 0.0f;
-        // The shader applies this state only to ocean water. Legacy water remains unchanged.
+        // Used by ocean water; legacy water ignores it.
         wmcb.WM_CameraUnderwater = Engine::GAPI->IsUnderWater() ? 1.0f : 0.0f;
         wmcb.WM_Padding1 = XMFLOAT3( 0.0f, 0.0f, 0.0f );
     }
@@ -597,7 +584,9 @@ D3D11GraphicsEngine::D3D11GraphicsEngine() :
     m_HDR(false),
     m_previousFpsLimit(0),
     m_isWindowActive(false),
-    m_FrameNeedsJitter(false)
+    m_FrameNeedsJitter(false),
+    m_previousResolutionScalePercent(-1),
+    m_resizeInProgress(false)
 {
     Effects = std::make_unique<D3D11Effect>();
     TemporalState = std::make_unique<D3D11TemporalState>();
@@ -616,9 +605,7 @@ D3D11GraphicsEngine::D3D11GraphicsEngine() :
 }
 
 D3D11GraphicsEngine::~D3D11GraphicsEngine() {
-    // Pointlights own custom-deleter handles into the PFX depth-stencil pool
-    // and non-owning links into the tiled shadow arrays. Release them before
-    // either owner is destroyed.
+    // Release pointlight handles before their PFX and shadow owners.
     if ( Engine::GAPI ) {
         Engine::GAPI->ReleasePointlightResources();
     }
@@ -636,6 +623,11 @@ D3D11GraphicsEngine::~D3D11GraphicsEngine() {
     SAFE_DELETE( InverseUnitSphereMesh );
 
     SAFE_DELETE( QuadVertexBuffer );
+
+    if ( frameLatencyWaitableObject ) {
+        CloseHandle( frameLatencyWaitableObject );
+        frameLatencyWaitableObject = nullptr;
+    }
     SAFE_DELETE( QuadIndexBuffer );
 
     ID3D11Debug* d3dDebug = nullptr;
@@ -657,19 +649,15 @@ D3D11GraphicsEngine::~D3D11GraphicsEngine() {
         agsDevice.reset();
     }
 
-    // Do not leave hooks with a pointer to an already destructed graphics
-    // engine. GothicAPI remains alive during the normal process lifetime.
+    // Hooks may still run during GothicAPI teardown.
     if ( Engine::GraphicsEngine == this ) {
         Engine::GraphicsEngine = nullptr;
     }
 
-    // MemTrackerFinalReport();
 }
 
 ID3D11ShaderResourceView* D3D11GraphicsEngine::GetWindowGlassReplacementSRV() {
-    // Loading screens and the main menu also pass through regular renderer
-    // draw code. Do not load or expose any window-only resource until Gothic
-    // has finalized the gameplay world and its renderer-side BSP cache.
+    // Loading screens and the main menu can reach this before the world cache exists.
     if ( !IsCityWindowFeatureReady() ) {
         return nullptr;
     }
@@ -713,10 +701,7 @@ void D3D11GraphicsEngine::EnsureFrameVobVisibilityCollected() {
     const WorldInfo* loadedWorld = Engine::GAPI->GetLoadedWorldInfo();
     if ( !loadedWorld || !loadedWorld->BspTree
         || !Engine::GAPI->IsWorldRenderCacheReady() ) {
-        // DrawWorldMesh also runs for startup/loading screens, before Gothic
-        // has finished its BSP/VOB caches. A non-null tree alone is not enough:
-        // during level startup it can already exist while its VOB ownership is
-        // still being mutated. Keep the cache uncollected until finalization.
+        // Wait until the world cache is published.
         return;
     }
 
@@ -724,8 +709,7 @@ void D3D11GraphicsEngine::EnsureFrameVobVisibilityCollected() {
 
     const uint64_t worldGeneration = Engine::GAPI->GetCityWindowConfigurationGeneration();
     if ( m_CollectedVobWorldGeneration != worldGeneration ) {
-        // FixViewFrustum deliberately retains a camera list between frames. A
-        // world/window reconfiguration must never retain its raw VOB pointers.
+        // Camera lists contain raw VOB pointers and must be rebuilt after a reconfiguration.
         m_CollectedCameraVobs.clear();
         m_CollectedCameraMobs.clear();
         m_CollectedVobWorldGeneration = worldGeneration;
@@ -1385,8 +1369,7 @@ XRESULT D3D11GraphicsEngine::Init() {
 
     Context.As( &m_UserDefinedAnnotation );
 
-    // Check for windows 10 - pretend 8 doesn't exist because I can't verify if they actually works on windows 8
-    // and you can't trust Microsoft feature level documentation
+    // Check for Windows 10 support; older feature-level documentation is unreliable.
     NativeSupport16BitTextures = Toolbox::IsWindowsVersionOrGreater( HIBYTE( _WIN32_WINNT_WIN10 ), LOBYTE( _WIN32_WINNT_WIN10 ), 0 );
     FeatureLevel10Compatibility = (maxFeatureLevel < D3D_FEATURE_LEVEL::D3D_FEATURE_LEVEL_11_0);
 
@@ -1513,7 +1496,6 @@ XRESULT D3D11GraphicsEngine::Init() {
 
     samplerDesc.Filter = D3D11_FILTER_COMPARISON_MIN_MAG_MIP_LINEAR;
 
-    // samplerDesc.Filter = D3D11_FILTER_MIN_MAG_MIP_POINT;
     samplerDesc.ComparisonFunc = D3D11_COMPARISON_LESS_EQUAL;
     // Shadow sampler and shadowmap resources moved into D3D11ShadowMap
 
@@ -1821,9 +1803,7 @@ XRESULT D3D11GraphicsEngine::RecreateBuffers() {
     }
     lastRoundedTextureResolution = roundedTextureResolution;
 
-    // PfxRenderer::OnResize prunes/recreates pooled resources. Pointlights
-    // must release their pool handles first; otherwise their custom deleters
-    // can target entries removed during the resize.
+    // Release pointlight pool handles before resizing PFX resources.
     if ( Engine::GAPI ) {
         Engine::GAPI->ReleasePointlightShadowResources();
     }
@@ -1881,18 +1861,17 @@ XRESULT D3D11GraphicsEngine::RecreateBuffers() {
 
 /** Called on window resize/resolution change */
 XRESULT D3D11GraphicsEngine::OnResize( INT2 newSize ) {
-    // WM_SIZE can report zero while a window is minimized. Do not tear down
-    // valid D3D resources for that transient state.
+    // WM_SIZE can report zero while minimized; keep valid resources alive.
     if ( newSize.x <= 0 || newSize.y <= 0 ) {
         return XR_SUCCESS;
     }
 
-    if ( !Engine::GAPI || !Device || !Context || !DXGIFactory2 || !OutputWindow ) {
+    if ( Engine::IsShuttingDown() || !Engine::GAPI || !Device || !Context || !DXGIFactory2
+        || !OutputWindow || !IsWindow( OutputWindow ) ) {
         return XR_FAILED;
     }
 
-    static bool resizeInProgress = false;
-    if ( resizeInProgress )
+    if ( m_resizeInProgress )
     {
         NewResolution = newSize;
         return XR_SUCCESS;
@@ -1916,13 +1895,12 @@ XRESULT D3D11GraphicsEngine::OnResize( INT2 newSize ) {
         && SwapChain.Get() )
         return XR_SUCCESS;  // Don't resize if neither logical nor physical output changed.
 
-    resizeInProgress = true;
+    m_resizeInProgress = true;
     struct ResizeScope final
     {
         bool& Active;
         ~ResizeScope() { Active = false; }
-    };
-    ResizeScope resizeScope{ resizeInProgress };
+    } resizeScope{ m_resizeInProgress };
 
     ID3D11DeviceContext* resizeContext = GetContext().Get();
     if ( resizeContext )
@@ -2102,10 +2080,9 @@ XRESULT D3D11GraphicsEngine::OnResize( INT2 newSize ) {
             }
         }
 
-        // Need to init AntTweakBar now that we have a working swapchain
-        // XLE( Engine::AntTweakBar->Init() );
-
-        Engine::ImGuiHandle->Init( OutputWindow, GetDevice(), GetContext() );
+        if ( Engine::ImGuiHandle ) {
+            Engine::ImGuiHandle->Init( OutputWindow, GetDevice(), GetContext() );
+        }
     } else {
         LogInfo() << "Resizing swapchain  (Format: DXGI_FORMAT_SWAPCHAIN )";
         GetContext()->ClearState();
@@ -2193,7 +2170,9 @@ void D3D11GraphicsEngine::ResetFrameTransientBufferPools() {
     m_ShadowWorldIndirectPool.ResetFrame();
     m_MainVobInstancingPool.ResetFrame();
     m_ShadowVobInstancingPool.ResetFrame();
-    PerObjectMaterialInfoPooledBuffer->BeginFrame();
+    if ( PerObjectMaterialInfoPooledBuffer ) {
+        PerObjectMaterialInfoPooledBuffer->BeginFrame();
+    }
 }
 
 D3D11IndirectBuffer* D3D11GraphicsEngine::AcquireFrameIndirectBuffer( FrameIndirectBufferPool& pool,
@@ -2271,22 +2250,32 @@ static const char* beginFrameEventName = "Frame";
 
 /** Called when the game wants to render a new frame */
 XRESULT D3D11GraphicsEngine::OnBeginFrame() {
+    if ( Engine::IsShuttingDown() || !Engine::GAPI || !Device || !Context
+        || !ShaderManager || !PfxRenderer || !Backbuffer || !Backbuffer->GetRenderTargetView()
+        || !PerObjectMaterialInfoPooledBuffer
+        || !m_FrameLimiter ) {
+        return XR_FAILED;
+    }
     FrameMarkStart( beginFrameEventName );
 
     auto& rendererState = Engine::GAPI->GetRendererState();
 
-    static int s_oldResolutionScalePercent = rendererState.RendererSettings.ResolutionScalePercent;
+    if ( m_previousResolutionScalePercent < 0 ) {
+        m_previousResolutionScalePercent = rendererState.RendererSettings.ResolutionScalePercent;
+    }
 
     rendererState.RendererInfo.RenderStage = STAGE_DRAW_UNKNOWN;
     ResetFrameTransientBufferPools();
 
-    if (NewResolution != Resolution) {
-        OnResize(NewResolution);
-        s_oldResolutionScalePercent = rendererState.RendererSettings.ResolutionScalePercent;
+    if ( NewResolution.x > 0 && NewResolution.y > 0 && NewResolution != Resolution ) {
+        if ( OnResize( NewResolution ) == XR_SUCCESS ) {
+            m_previousResolutionScalePercent = rendererState.RendererSettings.ResolutionScalePercent;
+        }
 
-    } else if ( rendererState.RendererSettings.ResolutionScalePercent != s_oldResolutionScalePercent ) {
-        RecreateBuffers();
-        s_oldResolutionScalePercent = rendererState.RendererSettings.ResolutionScalePercent;
+    } else if ( rendererState.RendererSettings.ResolutionScalePercent != m_previousResolutionScalePercent ) {
+        if ( RecreateBuffers() == XR_SUCCESS ) {
+            m_previousResolutionScalePercent = rendererState.RendererSettings.ResolutionScalePercent;
+        }
     }
 
 #ifdef BUILD_SPACER_NET
@@ -2304,8 +2293,9 @@ XRESULT D3D11GraphicsEngine::OnBeginFrame() {
 
     SteamOverlay::Update();
 #ifdef BUILD_1_12F
-    // Some shitty workaround for weird hidden window bug that happen on d3d11 renderer
-    if ( !(GetWindowLongA( OutputWindow, GWL_STYLE ) & WS_VISIBLE) ) {
+    // Keep hidden windows visible on the 1.12f path.
+    if ( OutputWindow && IsWindow( OutputWindow )
+        && !(GetWindowLongA( OutputWindow, GWL_STYLE ) & WS_VISIBLE) ) {
         ShowWindow( OutputWindow, SW_SHOW );
     }
 #endif
@@ -2339,14 +2329,14 @@ XRESULT D3D11GraphicsEngine::OnBeginFrame() {
     // Notify the shader manager
     ShaderManager->OnFrameStart();
 
-    // Disable culling for ui rendering(Sprite from LeGo needs it since it use CCW instead of CW order)
+    // UI sprites use counter-clockwise winding.
     SetDefaultStates();
     rendererState.RasterizerState.CullMode = GothicRasterizerStateInfo::CM_CULL_NONE;
     rendererState.RasterizerState.SetDirty();
     UpdateRenderStates();
     GetContext()->PSSetSamplers( 0, 1, ClampSamplerState.GetAddressOf() );
 
-    // Bind the backbuffer, as otherwise Gothic can't render its initial menu UI
+    // Bind the backbuffer before the initial menu UI.
 
     SetViewport( ViewportInfo( 0, 0, GetBackbufferResolution() ) );
     GetContext()->OMSetRenderTargets( 1, Backbuffer->GetRenderTargetView().GetAddressOf(), nullptr);
@@ -2374,6 +2364,11 @@ XRESULT D3D11GraphicsEngine::OnBeginFrame() {
 
 /** Called when the game ended it's frame */
 XRESULT D3D11GraphicsEngine::OnEndFrame() {
+    if ( Engine::IsShuttingDown() || !Engine::GAPI || !Device || !Context || !SwapChain || !PfxRenderer
+        || !PerObjectMaterialInfoPooledBuffer || !m_FrameLimiter ) {
+        PresentPending = false;
+        return XR_FAILED;
+    }
     auto& renderInfo = Engine::GAPI->GetRendererState().RendererInfo;
     renderInfo.RenderStage = STAGE_DRAW_PRESENT;
     Present();
@@ -2394,6 +2389,13 @@ XRESULT D3D11GraphicsEngine::OnEndFrame() {
 /** Called when the game wants to clear the bound rendertarget */
 XRESULT D3D11GraphicsEngine::Clear( const float4& color ) {
     const Microsoft::WRL::ComPtr<ID3D11DeviceContext1>& context = GetContext();
+    if ( Engine::IsShuttingDown() || !context || !DepthStencilBuffer
+        || !m_SwapchainDepthStencilBuffer || !HDRBackBuffer || !Backbuffer
+        || !DepthStencilBuffer->GetDepthStencilView()
+        || !m_SwapchainDepthStencilBuffer->GetDepthStencilView()
+        || !HDRBackBuffer->GetRenderTargetView() || !Backbuffer->GetRenderTargetView() ) {
+        return XR_FAILED;
+    }
     context->ClearDepthStencilView( DepthStencilBuffer->GetDepthStencilView().Get(), D3D11_CLEAR_DEPTH, 0, 0 );
     context->ClearDepthStencilView( m_SwapchainDepthStencilBuffer->GetDepthStencilView().Get(), D3D11_CLEAR_DEPTH, 0, 0 );
 
@@ -2551,6 +2553,23 @@ void RenderVelocity(D3D11GraphicsEngine* engine,
 /** Presents the current frame to the screen */
 XRESULT D3D11GraphicsEngine::Present() {
     ZoneScoped;
+    auto failPresent = [this]() {
+        PresentPending = false;
+        TracyD3D11Collect( s_tracyD3D11Ctx );
+        return XR_FAILED;
+    };
+
+    if ( Engine::IsShuttingDown() || !Engine::GAPI || !Device || !Context || !SwapChain
+        || !PfxRenderer || !ShaderManager || !Backbuffer || !BackbufferRTV
+        || !Backbuffer->GetShaderResView() || !Backbuffer->GetRenderTargetView()
+        || !DepthStencilBuffer || !DepthStencilBufferCopy
+        || !DepthStencilBuffer->GetTexture() || !DepthStencilBufferCopy->GetTexture()
+        || !m_FrameLimiter
+        || m_swapchainResolution.x <= 0 || m_swapchainResolution.y <= 0
+        || GetBackbufferResolution().x <= 0 || GetBackbufferResolution().y <= 0 ) {
+        return failPresent();
+    }
+
     const auto& settings = Engine::GAPI->GetRendererState().RendererSettings;
 
     INT2 presentContentSize = m_swapchainResolution;
@@ -2580,7 +2599,14 @@ XRESULT D3D11GraphicsEngine::Present() {
     Microsoft::WRL::ComPtr<ID3D11RenderTargetView> presentationRTV = BackbufferRTV;
     if ( aspectFitPresentation ) {
         fittedPresentation = PfxRenderer->GetBackbufferTempBuffer();
+        if ( !fittedPresentation || !fittedPresentation->GetRenderTargetView() ) {
+            return failPresent();
+        }
         presentationRTV = fittedPresentation->GetRenderTargetView();
+    }
+
+    if ( !presentationRTV ) {
+        return failPresent();
     }
 
     SetViewport( ViewportInfo( 0, 0, GetBackbufferResolution() ) );
@@ -2590,6 +2616,9 @@ XRESULT D3D11GraphicsEngine::Present() {
     {
         auto _ = RecordGraphicsEvent( GE_NAME( "Blit onto Swapchain" ) );
         SetActivePixelShader( PShaderID::PS_PFX_GammaCorrectInv );
+        if ( !ActivePS ) {
+            return failPresent();
+        }
         ActivePS->Apply();
 
         GammaCorrectConstantBuffer gcb = {};
@@ -2707,6 +2736,9 @@ XRESULT D3D11GraphicsEngine::Present() {
 
 /** Called to set the current viewport */
 XRESULT D3D11GraphicsEngine::SetViewport( const ViewportInfo& viewportInfo ) {
+    if ( !Context || Engine::IsShuttingDown() ) {
+        return XR_FAILED;
+    }
     // Set the viewport
     D3D11_VIEWPORT viewport = {};
 
@@ -3033,7 +3065,7 @@ XRESULT D3D11GraphicsEngine::DrawScreenFade( void* c ) {
 
     Continue_ResetState:
     if ( ResetStates ) {
-        // Disable culling for ui rendering(Sprite from LeGo needs it since it use CCW instead of CW order)
+        // UI sprites use counter-clockwise winding.
         SetDefaultStates();
         Engine::GAPI->GetRendererState().RasterizerState.CullMode = GothicRasterizerStateInfo::CM_CULL_NONE;
         Engine::GAPI->GetRendererState().RasterizerState.SetDirty();
@@ -3049,8 +3081,6 @@ XRESULT D3D11GraphicsEngine::DrawVertexArray( ExVertexStruct* vertices,
     unsigned int stride ) {
     UpdateRenderStates();
     auto vShader = ActiveVS;
-    // ShaderManager->GetVShader("VS_TransformedEx");
-
     // Bind the FF-Info to the first PS slot
     ActivePS->GetBuffer( "FFPipelineConstantBuffer" )
         .Update( &Engine::GAPI->GetRendererState().GraphicsState )
@@ -3082,7 +3112,7 @@ XRESULT D3D11GraphicsEngine::DrawIndexedVertexArray( ExVertexStruct* vertices,
     unsigned int stride ) {
 
     UpdateRenderStates();
-    auto vShader = ActiveVS;  // ShaderManager->GetVShader("VS_TransformedEx");
+    auto vShader = ActiveVS;
 
     // Bind the FF-Info to the first PS slot
     ActivePS->GetBuffer( "FFPipelineConstantBuffer" )
@@ -3367,8 +3397,7 @@ XRESULT D3D11GraphicsEngine::DrawSkeletalMesh( SkeletalVobInfo* vi,
             Context->PSSetShader( nullptr, nullptr, 0 );
             ActivePS = nullptr;
         } else {
-            // It is only to indicate that we want pixel shader(to populate gbuffer)
-            // the actual shader will be activated before drawing
+            // Select the G-buffer depth shader.
             ActivePS = ShaderManager->GetPShader( PShaderID::PS_LinDepth );
         }
     }
@@ -3467,8 +3496,7 @@ XRESULT D3D11GraphicsEngine::DrawSkeletalMesh_Layered( SkeletalVobInfo* vi,
             Context->PSSetShader( nullptr, nullptr, 0 );
             ActivePS = nullptr;
         } else {
-            // It is only to indicate that we want pixel shader(to populate gbuffer)
-            // the actual shader will be activated before drawing
+            // Select the G-buffer depth shader.
             ActivePS = ShaderManager->GetPShader( PShaderID::PS_LinDepth );
         }
     }
@@ -3559,11 +3587,6 @@ void D3D11GraphicsEngine::DrawSkeletalMeshVobs(
     bool updateState,
     bool drawAttachments ) {
     ZoneScoped;
-
-    //// Skeletal meshes use bone-driven animation that can change between passes.
-    //// Skip them during the depth prepass to avoid depth mismatch in the lit pass.
-    //if ( GetRenderingStage() == DES_Z_PRE_PASS )
-    //    return;
 
     struct TempVobDrawInfo {
         SkeletalVobInfo* VobInfo;
@@ -3814,7 +3837,7 @@ void D3D11GraphicsEngine::DrawSkeletalMeshVobs(
                 return false;
             }
             if (tex->HasAlphaChannel()) {
-                // we need to ensure alpha tested visuals are properly alpha tested or depth go woooosh
+                // Use the alpha-tested depth path.
                 tex->GetSurface()->GetEngineTexture()->BindToPixelShader( 0 );
                 lastTex = tex;
                 if (!ActivePS) {
@@ -3983,7 +4006,7 @@ void D3D11GraphicsEngine::DrawSkeletalMeshVobs(
                 }
             } else {
                 if ( model->GetMeshSoftSkinList()->NumInArray > 0 ) {
-                    // Just in case somehow we end up without skeletal meshes and they are available
+                    // Nothing to draw.
                     WorldConverter::ExtractSkeletalMeshFromVob( model, static_cast<SkeletalMeshVisualInfo*>(vi->VisualInfo) );
                 }
             }
@@ -4224,10 +4247,10 @@ void D3D11GraphicsEngine::DrawSkeletalMeshVobs(
                         if ( itm.first ) {
                             texture = itm.first->GetAniTexture();
                             if ( !texture
-                                // don't draw certain textures in the shadow pass, like human teeth, those will never be visible anyway.
+                                // Skip textures unused by the shadow pass.
                                 || (isShadowPass && (strncmp(texture->__GetName().ToChar(), "HUM_TEETH_V0.TGA", std::size("HUM_TEETH_V0.TGA") - 1) == 0))
                                 || texture->CacheIn( 0.6f ) != zRES_CACHED_IN ) {
-                                // need to cache in in order to know its alpha/material state
+                                // Cache the texture before reading material state.
                                 continue;
                             }
                             if ( texture->HasAlphaChannel() ) {
@@ -4634,6 +4657,28 @@ namespace {
 XRESULT D3D11GraphicsEngine::OnStartWorldRendering() {
     TracyD3D11ZoneCGX( "D3D11GraphicsEngine::OnStartWorldRendering");
 
+    if ( Engine::IsShuttingDown() || !Engine::GAPI || !Context || !PfxRenderer
+        || !PfxRenderer->GetTexturePool()
+        || !HDRBackBuffer || !Backbuffer || !VelocityBuffer || !DepthStencilBuffer
+        || !m_SwapchainDepthStencilBuffer || !ShadowMaps
+        || !HDRBackBuffer->GetRenderTargetView() || !HDRBackBuffer->GetShaderResView()
+        || !Backbuffer->GetRenderTargetView() || !Backbuffer->GetShaderResView()
+        || !VelocityBuffer->GetRenderTargetView() || !VelocityBuffer->GetShaderResView()
+        || !DepthStencilBuffer->GetDepthStencilView()
+        || !m_SwapchainDepthStencilBuffer->GetDepthStencilView()
+        || !InfiniteRangeConstantBuffer || !OutdoorSmallVobsConstantBuffer
+        || !OutdoorVobsConstantBuffer ) {
+        PresentPending = false;
+        return XR_FAILED;
+    }
+
+    const auto* loadedWorldInfo = Engine::GAPI->GetLoadedWorldInfo();
+    if ( !loadedWorldInfo || !loadedWorldInfo->MainWorld || !loadedWorldInfo->BspTree
+        || !Engine::GAPI->IsWorldRenderCacheReady() ) {
+        PresentPending = false;
+        return XR_FAILED;
+    }
+
     SetDefaultStates();
     m_FrameNeedsJitter = false;
 
@@ -4642,7 +4687,6 @@ XRESULT D3D11GraphicsEngine::OnStartWorldRendering() {
     if ( rendererState.RendererSettings.DisableRendering )
         return XR_SUCCESS;
 
-    // return XR_SUCCESS;
     if ( PresentPending ) return XR_SUCCESS;
 
     RenderGraph graph( GetPfxRenderer()->GetTexturePool() );
@@ -4702,7 +4746,7 @@ XRESULT D3D11GraphicsEngine::OnStartWorldRendering() {
 
     m_FrameGeometryCache.Reset();
 
-    // TODO: TODO: Hack for texture caching!
+    // Reset the per-frame texture-cache counter.
     zCTextureCacheHack::NumNotCachedTexturesInFrame = 0;
 
     // Re-Bind the default sampler-state in case it was overwritten
@@ -4758,6 +4802,10 @@ XRESULT D3D11GraphicsEngine::OnStartWorldRendering() {
     RGResourceHandle transparencyAndCompositionMaskResource;
     // Re-evaluate active renderer each frame (allows runtime switching)
     SelectActiveRenderer();
+    if ( !ActiveSceneRenderer ) {
+        PresentPending = false;
+        return XR_FAILED;
+    }
     ActiveSceneRenderer->AddGeometryPasses( graph, *this,
         colorResource, velocityBufferHandle, backBufferHandle,
         normalsResource, specularResource, reactiveMaskResource,
@@ -4812,7 +4860,6 @@ XRESULT D3D11GraphicsEngine::OnStartWorldRendering() {
     // Shared state for the PostFX composition pass
     ID3D11ShaderResourceView* compositionGodRaysSRV = nullptr;
     ID3D11ShaderResourceView* compositionScreenSpaceLightingSRV = nullptr;
-    const auto* loadedWorldInfo = Engine::GAPI->GetLoadedWorldInfo();
     bool isOutdoor = loadedWorldInfo->BspTree->GetBspTreeMode() == zBSP_MODE_OUTDOOR;
     const bool isDragonIsland = NormalizeVisualStemForMarker( loadedWorldInfo->WorldName ) == "DRAGONISLAND";
     bool compositionGodRays = (rendererState.RendererSettings.AreGodRaysEnabled() && isOutdoor);
@@ -4865,9 +4912,6 @@ XRESULT D3D11GraphicsEngine::OnStartWorldRendering() {
     }
     if ( rendererState.RendererSettings.DrawSky ) {
         graph.AddPass( RG_PASS_NAME( "Draw Sky" ), [&]( RGBuilder& builder, RenderPass& pass ) {
-            //// Setup / Declare
-            //RGTextureDesc albedoDesc{ 1920, 1080, 28 /* DXGI_FORMAT_R8G8B8A8_UNORM */, "Albedo" };
-            //albedoTarget = builder.CreateTexture( albedoDesc );
             builder.Write( backBufferHandle );
 
             pass.m_executeCallback = [this, backBufferHandle]( const RenderGraph& graph )->void {
@@ -5174,8 +5218,7 @@ XRESULT D3D11GraphicsEngine::OnStartWorldRendering() {
             SetRenderingStage( oldStage );
             Engine::GAPI->DrawSkeletalVN();
 
-            // for Post-Processing FX we use the full viewport for now
-            // TODO: introduce UV-scaling to PostFX
+            // Post-processing uses the full viewport.
             SetViewport( ViewportInfo( 0, 0, GetResolution() ) );
         };
     });
@@ -5183,8 +5226,7 @@ XRESULT D3D11GraphicsEngine::OnStartWorldRendering() {
     if (rendererState.RendererSettings.DrawFog &&
                 Engine::GAPI->GetLoadedWorldInfo()->BspTree->GetBspTreeMode() ==
                 zBSP_MODE_OUTDOOR && !compositionActive) {
-        // Standalone heightfog pass is only used when composition is not active.
-        // Kept as fallback for FL10 or edge cases.
+        // Use the standalone pass when composition is unavailable.
         graph.AddPass( RG_PASS_NAME("Draw Heightfog"), [&]( RGBuilder& builder, RenderPass& pass ) {
             builder.Read( backBufferHandle );
             builder.Write( backBufferHandle );
@@ -5759,10 +5801,7 @@ XRESULT D3D11GraphicsEngine::OnStartWorldRendering() {
                     switch ( rendererState.RendererSettings.SharpeningMode ) {
                     case GothicRendererSettings::SHARPEN_SIMPLE:
                         {
-                            // Sharpen reads the scene texture and writes Backbuffer directly
-                            // (compute UAV on FeatureLevel 11+, pixel-shader RTV fallback on
-                            // FeatureLevel 10 - selected inside RenderSimpleSharpen), so no
-                            // pre-copy into Backbuffer is needed.
+                            // The simple path writes the native backbuffer.
                             auto _ = RecordGraphicsEvent( GE_NAME( "ApplySimpleSharpen" ) );
                             PfxRenderer->RenderSimpleSharpen( backbufferTex->GetShaderResView(), GetBackbufferResolution(), Backbuffer.get(), GetBackbufferResolution() );
                         }
@@ -5770,7 +5809,7 @@ XRESULT D3D11GraphicsEngine::OnStartWorldRendering() {
 
                     case GothicRendererSettings::SHARPEN_CAS:
                         {
-                            // CAS sharpens Backbuffer in place, so populate it first.
+                            // CAS operates in place; populate it first.
                             auto _ = RecordGraphicsEvent( GE_NAME( "Copy into native-size backbuffer" ) );
                             PfxRenderer->CopyTextureToRTV( backbufferTex->GetShaderResView(), Backbuffer->GetRenderTargetView(), GetBackbufferResolution() );
                         }
@@ -5839,7 +5878,7 @@ XRESULT D3D11GraphicsEngine::OnStartWorldRendering() {
         GetContext()->OMSetRenderTargets( 1, Backbuffer->GetRenderTargetView().GetAddressOf(), nullptr );
     }
 
-    // Disable culling for ui rendering(Sprite from LeGo needs it since it use CCW instead of CW order)
+    // UI sprites use counter-clockwise winding.
     SetDefaultStates();
     rendererState.RasterizerState.CullMode = GothicRasterizerStateInfo::CM_CULL_NONE;
     rendererState.RasterizerState.SetDirty();
@@ -7039,7 +7078,7 @@ void XM_CALLCONV D3D11GraphicsEngine::DrawWorldAround(
             }
         }
 
-        // At this point eiter renderedMobs or rndVob is filled with something
+        // One of renderedMobs or rndVob is populated.
         std::list<SkeletalVobInfo*>& rl = renderedMobs != nullptr ? *renderedMobs : rndVob;
         for ( auto it : rl ) {
             Engine::GAPI->DrawSkeletalMeshVob( it, FLT_MAX );
@@ -7396,7 +7435,7 @@ void XM_CALLCONV D3D11GraphicsEngine::DrawWorldAround_Layered(
             }
         }
 
-        // At this point eiter renderedMobs or rndVob is filled with something
+        // One of renderedMobs or rndVob is populated.
         std::list<SkeletalVobInfo*>& rl = renderedMobs != nullptr ? *renderedMobs : rndVob;
         auto _ = Engine::GraphicsEngine->RecordGraphicsEvent( GE_NAME( "Draw static skeletal meshes (layered)" ) );
         for ( auto it : rl ) {
@@ -7704,6 +7743,11 @@ void D3D11GraphicsEngine::ShadowPass_DrawWorldMesh( const std::vector<WorldMeshS
 void XM_CALLCONV D3D11GraphicsEngine::DrawWorldAroundForWorldShadow( FXMVECTOR position,
     float sectionRange,
     const RenderShadowmapsParams& params ) {
+
+    if ( Engine::IsShuttingDown() || !Engine::GAPI || !Context || !InfiniteRangeConstantBuffer
+        || !DistortionTexture ) {
+        return;
+    }
 
     // Setup renderstates
     Engine::GAPI->GetRendererState().RasterizerState.SetDefault();
@@ -8360,8 +8404,6 @@ void D3D11GraphicsEngine::ApplyWindProps( VS_ExConstantBuffer_Wind& windBuff ) {
     windBuff.characterInteractionStrength =
         settings.HeroAffectsObjects ? 1.0f : 0.0f;
 
-    //LogInfo() << windBuff.windDir.x << " " << windBuff.windDir.y << " " << windBuff.windDir.z;
-
     static float WindGlobalTime = 0.0f;
 
     // get rain weight
@@ -8825,7 +8867,7 @@ XRESULT D3D11GraphicsEngine::DrawVOBsInstanced() {
                         if ( tx->CacheIn( 0.6f ) == zRES_CACHED_OUT ) {
                             continue;
                         }
-                        // Previously this forced alpha testing, now we need to check material flags as well for that and only enable the shader if absolutely necessery
+                        // Enable alpha testing when required by the material.
                         const bool wantShader = !isZPrepass || isWindowGlass
                             || tx->HasAlphaChannel() || meshKey.Material->HasAlphaTest();
 
@@ -8940,7 +8982,7 @@ XRESULT D3D11GraphicsEngine::DrawVOBsInstanced() {
             TracyD3D11ZoneCGX( "DrawVOBsInstanced->MOBs" );
             auto _1 = Engine::GraphicsEngine->RecordGraphicsEvent( GE_NAME( "DrawVOBsInstanced->DrawMobs" ) );
 
-            // Mobs use zengine functions for binding textures so let's reset zengine texture state
+            // Reset Gothic's texture state before drawing mobs.
             Engine::GAPI->ResetRenderStates();
 
             static std::vector<XMFLOAT4X4> bones = {};
@@ -9306,9 +9348,7 @@ XRESULT D3D11GraphicsEngine::DrawPolyStrips( bool noTextures ) {
 
         if ( !vertices.size() ) continue;
 
-        //Setting world transform matrix/////////////
-
-        //vob->GetWorldMatrix(&id);
+        // Set the world transform matrix.
         const XMMATRIX identityMatrix = XMMatrixIdentity();
         vsBufMPI.Update( &identityMatrix, sizeof( identityMatrix ) ).Bind();
 
@@ -9539,6 +9579,9 @@ XRESULT D3D11GraphicsEngine::DrawSky() {
 
 /** Called when a key got pressed */
 XRESULT D3D11GraphicsEngine::OnKeyDown( unsigned int key ) {
+    if ( !Engine::GAPI || Engine::IsShuttingDown() ) {
+        return XR_FAILED;
+    }
     switch ( key ) {
 #ifndef PUBLIC_RELEASE
     case VK_NUMPAD0:
@@ -9583,6 +9626,9 @@ void XM_CALLCONV D3D11GraphicsEngine::RenderShadowCube(
     bool clearDepth,
     unsigned int casterMask ) {
 
+    if ( Engine::IsShuttingDown() || !Engine::GAPI || !ShadowMaps ) {
+        return;
+    }
     ShadowMaps->RenderShadowCube( position, range, targetCube, face, debugRTV,
         cullFront, indoor, noNPCs, renderedVobs, renderedMobs, worldMeshCache, clearDepth, casterMask );
 }
@@ -9593,6 +9639,10 @@ void XM_CALLCONV D3D11GraphicsEngine::RenderShadowmaps( FXMVECTOR cameraPosition
     bool cullFront, bool dontCull,
     Microsoft::WRL::ComPtr<ID3D11DepthStencilView> dsvOverwrite,
     Microsoft::WRL::ComPtr<ID3D11RenderTargetView> debugRTV ) {
+
+    if ( Engine::IsShuttingDown() || !Engine::GAPI || !ShadowMaps ) {
+        return;
+    }
 
     RenderShadowmapsParams renderParams = {};
     XMStoreFloat3( &renderParams.CameraPosition, cameraPosition );
@@ -9610,6 +9660,9 @@ void XM_CALLCONV D3D11GraphicsEngine::RenderShadowmaps( FXMVECTOR cameraPosition
 
 /** Draws a fullscreenquad, copying the given texture to the viewport */
 void D3D11GraphicsEngine::DrawQuad( INT2 position, INT2 size ) {
+    if ( Engine::IsShuttingDown() || !Context || !PfxRenderer ) {
+        return;
+    }
     wrl::ComPtr<ID3D11ShaderResourceView> srv;
     Context->PSGetShaderResources( 0, 1, srv.GetAddressOf() );
 
@@ -9731,6 +9784,9 @@ void D3D11GraphicsEngine::UpdateClipCursor( HWND hWnd )
 /** Message-Callback for the main window */
 LRESULT D3D11GraphicsEngine::OnWindowMessage( HWND hWnd, UINT msg, WPARAM wParam,
     LPARAM lParam ) {
+    if ( Engine::IsShuttingDown() ) {
+        return 0;
+    }
     switch ( msg ) {
         case WM_NCACTIVATE: UpdateFocus( hWnd, !!wParam ); break;
         case WM_ACTIVATE: UpdateFocus( hWnd, !!LOWORD( wParam ) ); break;
@@ -9757,7 +9813,7 @@ void D3D11GraphicsEngine::UpdateShouldBlockGameInput( ) {
 /** Handles an UI-Event */
 void D3D11GraphicsEngine::OnUIEvent( EUIEvent uiEvent ) {
 
-    if ( !Engine::GAPI || !OutputWindow ) {
+    if ( !Engine::GAPI || Engine::IsShuttingDown() || !OutputWindow ) {
         return;
     }
 
@@ -9782,9 +9838,6 @@ void D3D11GraphicsEngine::OnUIEvent( EUIEvent uiEvent ) {
             hImgui->CommitSettingsEdit();
             hImgui->SettingsVisible = false;
         }
-        // else if ( auto antBar = Engine::AntTweakBar; antBar->GetActive() ) {
-        //     antBar->SetActive( false );
-        // }
         UpdateShouldBlockGameInput();
 
         UpdateClipCursor( OutputWindow );
@@ -9793,17 +9846,35 @@ void D3D11GraphicsEngine::OnUIEvent( EUIEvent uiEvent ) {
 
 /** Returns the data of the backbuffer */
 void D3D11GraphicsEngine::GetBackbufferData( bool thumbnail, byte** data, INT2& buffersize, int& pixelsize ) {
+    if ( data ) {
+        *data = nullptr;
+    }
+    pixelsize = 0;
+    if ( !data || Engine::IsShuttingDown() || !Engine::GAPI || !Device || !Context
+        || !PfxRenderer || !ShaderManager || !HDRBackBuffer
+        || !HDRBackBuffer->GetShaderResView() || !HDRBackBuffer->GetRenderTargetView() ) {
+        buffersize = INT2( 0, 0 );
+        return;
+    }
+
     if ( thumbnail ) {
         buffersize = INT2( 256, 256 );
     } else {
         buffersize = Resolution;
     }
-    byte* d = new byte[buffersize.x * buffersize.y * 4];
+    if ( buffersize.x <= 0 || buffersize.y <= 0 ) {
+        buffersize = INT2( 0, 0 );
+        return;
+    }
 
     // Copy HDR scene to backbuffer
     SetDefaultStates();
 
     SetActivePixelShader( PShaderID::PS_PFX_GammaCorrectInv );
+    if ( !ActivePS ) {
+        buffersize = INT2( 0, 0 );
+        return;
+    }
     ActivePS->Apply();
 
     GammaCorrectConstantBuffer gcb = {};
@@ -9812,11 +9883,17 @@ void D3D11GraphicsEngine::GetBackbufferData( bool thumbnail, byte** data, INT2& 
 
     ActivePS->GetBuffer( "GammaCorrectConstantBuffer" ).Update( &gcb ).Bind();
 
-    HRESULT hr;
     auto rt = std::make_unique<RenderToTextureBuffer>(
         GetDevice().Get(), buffersize.x, buffersize.y, DXGI_FORMAT_ENGINE_SWAPCHAIN  );
+    if ( !rt || !rt->GetTexture() || !rt->GetRenderTargetView() ) {
+        buffersize = INT2( 0, 0 );
+        return;
+    }
     PfxRenderer->CopyTextureToRTV( HDRBackBuffer->GetShaderResView(), rt->GetRenderTargetView(), buffersize, true );
     GetContext()->Flush();
+
+    auto outputData = std::make_unique<byte[]>(
+        static_cast<size_t>( buffersize.x ) * static_cast<size_t>( buffersize.y ) * 4u );
 
     D3D11_TEXTURE2D_DESC texDesc;
     texDesc.ArraySize = 1;
@@ -9848,7 +9925,7 @@ void D3D11GraphicsEngine::GetBackbufferData( bool thumbnail, byte** data, INT2& 
     D3D11_MAPPED_SUBRESOURCE res;
     if ( SUCCEEDED( GetContext()->Map( texture.Get(), 0, D3D11_MAP_READ, 0, &res ) ) ) {
         unsigned char* dstData = reinterpret_cast<unsigned char*>(res.pData);
-        unsigned char* srcData = reinterpret_cast<unsigned char*>(d);
+        unsigned char* srcData = reinterpret_cast<unsigned char*>(outputData.get());
         UINT length = buffersize.x * 4;
         if ( length == res.RowPitch ) {
             memcpy( srcData, dstData, length * buffersize.y );
@@ -9870,10 +9947,12 @@ void D3D11GraphicsEngine::GetBackbufferData( bool thumbnail, byte** data, INT2& 
         } else {
             LogInfo() << "GetBackbufferData failed";
         }
+        buffersize = INT2( 0, 0 );
+        return;
     }
 
     pixelsize = 4;
-    *data = d;
+    *data = outputData.release();
 }
 
 /* Binds the right shader for the given texture */
@@ -10145,8 +10224,7 @@ void D3D11GraphicsEngine::DrawDecalList( const std::vector<zCVob*>& decals, bool
             if ( materialName != firstMaterialName ) {
                 break;
             }
-            // Some materials have identical properties, but are "unique" as in they have no name
-            // we should still be able to batch them if texture, flags and color match - i hope?
+            // Unnamed materials may share a batch when their render state matches.
             if ( material->GetColor() != instances[i].material->GetColor()
                 || material->GetAniTexture() != instances[i].material->GetAniTexture()
                 || material->GetFlags() != instances[i].material->GetFlags()
@@ -10378,11 +10456,19 @@ void D3D11GraphicsEngine::DrawMQuadMarks() {
 
 /** Copies the depth stencil buffer to DepthStencilBufferCopy */
 void D3D11GraphicsEngine::CopyDepthStencil() {
+    if ( Engine::IsShuttingDown() || !Context || !DepthStencilBuffer || !DepthStencilBufferCopy
+        || !DepthStencilBuffer->GetTexture() || !DepthStencilBufferCopy->GetTexture() ) {
+        return;
+    }
     GetContext()->CopyResource( DepthStencilBufferCopy->GetTexture().Get(), DepthStencilBuffer->GetTexture().Get() );
 }
 
 /** Draws underwater effects */
 void D3D11GraphicsEngine::DrawUnderwaterEffects() {
+    if ( Engine::IsShuttingDown() || !Engine::GAPI || !Context || !PfxRenderer
+        || !HDRBackBuffer || !DistortionTexture ) {
+        return;
+    }
     SetDefaultStates();
     UpdateRenderStates();
 

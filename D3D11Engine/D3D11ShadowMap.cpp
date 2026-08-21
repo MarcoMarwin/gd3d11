@@ -358,7 +358,6 @@ void D3D11ShadowMap::RecreateShadowSampler() {
     samplerDesc.MaxLOD = FLT_MAX;
 
     m_shadowmapSampler.Reset();
-    HRESULT hr;
     LE( m_device->CreateSamplerState( &samplerDesc, m_shadowmapSampler.GetAddressOf() ) );
     SetDebugName( m_shadowmapSampler.Get(), "ShadowmapSamplerState" );
 }
@@ -426,7 +425,6 @@ void D3D11ShadowMap::WaitShadowCullingComplete()
 }
 
 void D3D11ShadowMap::Init( Microsoft::WRL::ComPtr<ID3D11Device1>& device, Microsoft::WRL::ComPtr<ID3D11DeviceContext1>& context, int size ) {
-    HRESULT hr;
     m_device = device;
     m_context = context;
 
@@ -462,6 +460,9 @@ void D3D11ShadowMap::Init( Microsoft::WRL::ComPtr<ID3D11Device1>& device, Micros
 void D3D11ShadowMap::Resize( int size ) {
 
     if ( !m_device ) return;
+
+    // Finish culling before reusing cascade queues or data.
+    WaitShadowCullingComplete();
 
     const int maxSize = (FeatureLevel10Compatibility ? 8192 : 16384);
     const int s = std::min<int>( std::max<int>( size, 512 ), maxSize );
@@ -505,6 +506,13 @@ void D3D11ShadowMap::BindSamplerToCS( ID3D11DeviceContext1* context, UINT slot )
 XRESULT D3D11ShadowMap::PrepareRender()
 {
     ZoneScopedN("D3D11ShadowMap::PrepareRender");
+    if ( !m_device || !m_context || !Engine::GAPI || Engine::IsShuttingDown() ) {
+        return XR_FAILED;
+    }
+
+    // Finish pending culling before reuse.
+    WaitShadowCullingComplete();
+
     // Check if shadowmap resources need to be recreated due to setting changes
     {
         auto& settings = Engine::GAPI->GetRendererState().RendererSettings;
@@ -757,7 +765,7 @@ XRESULT D3D11ShadowMap::PrepareRender()
         }
     }
 
-    if ( settings.ThreadedShadowCulling ) {
+    if ( settings.ThreadedShadowCulling && Engine::WorkerThreadPool ) {
         std::lock_guard<LockableBase( std::mutex )> lock( m_CullingJobsMutex );
         m_ShadowCullingJobs.clear();
 
@@ -768,7 +776,7 @@ XRESULT D3D11ShadowMap::PrepareRender()
             }
 
             m_ShadowCullingJobs.push_back( Engine::WorkerThreadPool->enqueue( []( const CancellationToken& token, D3D11ShadowMap* _this, size_t idx ) {
-                if ( token.isCancelled() ) {
+                if ( token.isCancelled() || Engine::IsShuttingDown() || !Engine::GAPI ) {
                     return;
                 }
                 ZoneScoped;
@@ -1006,7 +1014,8 @@ XRESULT D3D11ShadowMap::DrawPointlightShadows( std::vector<VobLightInfo*>& light
 
     auto* graphicsEngine = reinterpret_cast<D3D11GraphicsEngine*>( Engine::GraphicsEngine );
     if ( !graphicsEngine || !graphicsEngine->GetPfxRenderer()
-        || !Engine::GAPI || !Engine::GAPI->IsWorldRenderCacheReady() ) {
+        || !Engine::GAPI || Engine::IsShuttingDown()
+        || !Engine::GAPI->IsWorldRenderCacheReady() ) {
         // Loading screens can still execute renderer callbacks while the old
         // world is being destroyed. Do not touch any raw world pointers here;
         // ResetVobs clears the deferred queue after flushing renderer workers.
@@ -1073,8 +1082,7 @@ XRESULT D3D11ShadowMap::DrawPointlightShadows( std::vector<VobLightInfo*>& light
         // Create resources only when an eligible light is actually visible.
         if ( !light->LightShadowBuffers ) {
             BaseShadowedPointLight* bpl;
-            // Renderer-owned replacement lights must use the same animated
-            // pointlight shadow path as regular lights so NPCs remain casters.
+            // Renderer-owned lights use the animated path too.
             const bool shadowLightIsDynamic = dynamicMode;
             graphicsEngine->CreateShadowedPointLight( &bpl, light, shadowLightIsDynamic );
             light->LightShadowBuffers.reset( bpl );
@@ -1254,6 +1262,12 @@ XRESULT D3D11ShadowMap::DrawPointlightShadows( std::vector<VobLightInfo*>& light
 XRESULT D3D11ShadowMap::DrawWorldShadow( )
 {
     auto graphicsEngine = reinterpret_cast<D3D11GraphicsEngine*>(Engine::GraphicsEngine);
+    if ( !graphicsEngine || !m_context || !Engine::GAPI || Engine::IsShuttingDown()
+        || !Engine::GAPI->IsWorldRenderCacheReady()
+        || !Engine::GAPI->GetLoadedWorldInfo()
+        || !Engine::GAPI->GetLoadedWorldInfo()->BspTree ) {
+        return XR_FAILED;
+    }
     auto _ = graphicsEngine->RecordGraphicsEvent( GE_NAME( "DrawWorldShadow" ) );
     ZoneScopedN( "DrawWorldShadow" );
 
@@ -1315,6 +1329,12 @@ XRESULT D3D11ShadowMap::DrawWorldShadow( )
 }
 
 XRESULT D3D11ShadowMap::DrawRainShadowmap() {
+    auto graphicsEngine = reinterpret_cast<D3D11GraphicsEngine*>(Engine::GraphicsEngine);
+    if ( !graphicsEngine || !graphicsEngine->Effects || !m_context
+        || !Engine::GAPI || Engine::IsShuttingDown() ) {
+        return XR_FAILED;
+    }
+
     constexpr float activeThreshold = 0.00001f;
     constexpr float updateDistance = 1000.0f;
     constexpr float updateDistanceSq = updateDistance * updateDistance;
@@ -1341,7 +1361,6 @@ XRESULT D3D11ShadowMap::DrawRainShadowmap() {
         || currentWorld != lastWorld
         || movementDistanceSq >= updateDistanceSq;
     if ( updateRequired ) {
-        auto graphicsEngine = reinterpret_cast<D3D11GraphicsEngine*>(Engine::GraphicsEngine);
         auto _ = graphicsEngine->RecordGraphicsEvent( GE_NAME( "DrawRainShadowmap" ) );
         ZoneScopedN( "DrawRainShadowmap" );
         graphicsEngine->Effects->DrawRainShadowmap();
@@ -1359,6 +1378,10 @@ XRESULT D3D11ShadowMap::DrawPointlightLights(
     RenderToTextureBuffer& specular,
     RenderToTextureBuffer& depthCopy
     ) {
+    if ( !m_context || !Engine::GAPI || Engine::IsShuttingDown() ) {
+        return XR_FAILED;
+    }
+
     auto& settings = Engine::GAPI->GetRendererState().RendererSettings;
 
     if ( m_TiledDeferred && settings.EnableTiledLighting ) {
@@ -1376,6 +1399,15 @@ XRESULT D3D11ShadowMap::DrawLighting(
     RenderToTextureBuffer* rainExclusionMask,
     RenderToTextureBuffer& depthCopy) {
     auto graphicsEngine = reinterpret_cast<D3D11GraphicsEngine*>(Engine::GraphicsEngine);
+    if ( !graphicsEngine || !m_context || !Engine::GAPI || Engine::IsShuttingDown()
+        || !Engine::GAPI->IsWorldRenderCacheReady()
+        || !graphicsEngine->GetHDRBackBufferPtr()
+        || !graphicsEngine->GetHDRBackBufferPtr()->GetRenderTargetView()
+        || !graphicsEngine->GetDepthBuffer()
+        || !graphicsEngine->GetDepthBuffer()->GetDepthStencilView() ) {
+        return XR_FAILED;
+    }
+
     auto& settings = Engine::GAPI->GetRendererState().RendererSettings;
 
     graphicsEngine->SetDefaultStates();
@@ -1427,6 +1459,12 @@ XRESULT D3D11ShadowMap::DrawLighting(
 /** Renders the shadowmaps for the sun */
 void D3D11ShadowMap::RenderShadowmaps( const RenderShadowmapsParams& params ) {
 
+    auto graphicsEngine = (D3D11GraphicsEngine*)Engine::GraphicsEngine;
+    if ( !graphicsEngine || !m_context || !Engine::GAPI || Engine::IsShuttingDown()
+        || !Engine::GAPI->IsWorldRenderCacheReady() ) {
+        return;
+    }
+
     // We now assume that "target" always is something else than the world shadowmap
     UINT targetSize;
     if ( params.UseViewportOverride ) {
@@ -1438,13 +1476,14 @@ void D3D11ShadowMap::RenderShadowmaps( const RenderShadowmapsParams& params ) {
     } else {
         targetSize = m_cascadedShadowMap ? m_cascadedShadowMap->GetSize() : 0;
     }
+    if ( targetSize == 0 ) {
+        return;
+    }
 
     Microsoft::WRL::ComPtr<ID3D11DepthStencilView> dsvOverwrite = params.DSVOverwrite;
     if ( params.Target && !dsvOverwrite.Get() ) dsvOverwrite = params.Target->GetDepthStencilView().Get();
     const bool isNotWorldShadowMap = params.Target != nullptr;
 
-    // todo: remove this dependency at some point
-    auto graphicsEngine = (D3D11GraphicsEngine*)Engine::GraphicsEngine;
     auto _ = graphicsEngine->RecordGraphicsEvent( GE_NAME( "RenderShadowmaps" ) );
 
     D3D11_VIEWPORT oldVP;
@@ -1496,8 +1535,6 @@ void D3D11ShadowMap::RenderShadowmaps( const RenderShadowmapsParams& params ) {
         // Draw the world mesh without textures        
 
         XMVECTOR cameraPosition = XMLoadFloat3( &params.CameraPosition );
-        int timerLabelIndex = std::clamp(params.CascadeIndex, 0, MAX_CSM_CASCADES-1);
-
         ZoneScopedN( "Shadows::DrawCascade" );
         graphicsEngine->DrawWorldAroundForWorldShadow( cameraPosition, 2, params );
 
@@ -1599,6 +1636,13 @@ DS_ScreenQuadConstantBuffer D3D11ShadowMap::FillSunCSMConstantBuffer() const {
 XRESULT D3D11ShadowMap::DrawWorldLights()
 {
     auto graphicsEngine = reinterpret_cast<D3D11GraphicsEngine*>(Engine::GraphicsEngine);
+    if ( !graphicsEngine || !m_context || !Engine::GAPI || Engine::IsShuttingDown()
+        || !Engine::GAPI->IsWorldRenderCacheReady()
+        || !graphicsEngine->Effects || !graphicsEngine->GetPfxRenderer()
+        || !Engine::GAPI->GetSky() ) {
+        return XR_FAILED;
+    }
+
     auto _ = graphicsEngine->RecordGraphicsEvent( GE_NAME( "DrawWorldLights" ) );
     TracyD3D11ZoneCGX( "D3D11ShadowMap::DrawWorldLights");
     auto& settings = Engine::GAPI->GetRendererState().RendererSettings;
@@ -1635,6 +1679,9 @@ XRESULT D3D11ShadowMap::DrawWorldLights()
 
     auto psAtmo = graphicsEngine->GetActivePS();
     auto vsPfx = graphicsEngine->GetActiveVS();
+    if ( !psAtmo || !vsPfx ) {
+        return XR_FAILED;
+    }
 
     graphicsEngine->SetupVS_ExMeshDrawCall();
 
@@ -1764,6 +1811,10 @@ void XM_CALLCONV D3D11ShadowMap::RenderShadowCube(
     unsigned int casterMask ) {
 
     auto graphicsEngine = reinterpret_cast<D3D11GraphicsEngine*>(Engine::GraphicsEngine);
+    if ( !graphicsEngine || !m_context || !Engine::GAPI || Engine::IsShuttingDown()
+        || !Engine::GAPI->IsWorldRenderCacheReady() ) {
+        return;
+    }
 
     D3D11_VIEWPORT oldVP;
     UINT n = 1;

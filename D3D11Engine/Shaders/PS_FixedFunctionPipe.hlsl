@@ -31,13 +31,5 @@ float4 PSMain( PS_INPUT Input ) : SV_TARGET
 {
 	float4 color = GetColorFromStates(Input.vDiffuse.bgra, Input.vTexcoord, Input.vTexcoord2, SS_Linear);
 	
-	//clip(color.a - 0.5f);
-	
-	// Do alpha test
-	//DoAlphaTest(color.a);
-	
-	// Apply fog
-	//color.rgb = ComputeFog(Input.vViewPosition, color.rgb);
-	
 	return color;
 }

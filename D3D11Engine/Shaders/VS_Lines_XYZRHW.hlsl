@@ -26,15 +26,13 @@ struct VS_OUTPUT
 /** Transforms a pre-transformed xyzrhw-coordinate into d3d11-space */
 float4 TransformXYZRHW(float4 xyzrhw)
 {
-	// MAGIC (:
-	
 	// Convert from viewport-coordinates to normalized device coordinates
 	float3 ndc;
 	ndc.x = ((2 * (xyzrhw.x - V_ViewportPos.x)) / V_ViewportSize.x) - 1;
 	ndc.y = 1 - ((2 * (xyzrhw.y - V_ViewportPos.y)) / V_ViewportSize.y);
 	ndc.z = xyzrhw.z;
 	
-	// Convert to clip-space. rhw is actually 1/w ("reciprocal"). So to undo the devide by w, devide by the given 1/w.
+	// Convert to clip space. RHW is the reciprocal of W.
 	float actualW = 1.0f / xyzrhw.w;
 	float3 clipSpace = ndc.xyz * actualW;
 	

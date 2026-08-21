@@ -86,16 +86,6 @@ float4 PSMain( PS_INPUT Input ) : SV_TARGET
 	float3 wsPosition = mul(float4(vsPosition, 1), PL_InvView).xyz;
 	float3 wsNormal = normalize(mul(float4(normal, 0), PL_InvView).xyz);
 	
-	//return float4(normalize(wsPosition - Pl_PositionWorld), 1.0f);
-	
-	// Compute flat normal
-	//float3 flatNormal = normalize(cross(ddx(vsPosition),ddy(vsPosition)));
-	
-	//if(Input.vPosition.z > expDepth)
-	//	discard;
-	
-	//return float4(Pl_PositionView, 1);
-	
 	// Get direction and distance from the light to that position
 	float3 lightDir = Pl_PositionView - vsPosition;
 	float distance = length(lightDir);
@@ -106,11 +96,6 @@ float4 PSMain( PS_INPUT Input ) : SV_TARGET
 	
 	// Apply dynamic shadow
 	float shadow = PLS_SampleShadowCube(TX_ShadowCube, SS_Linear, SS_Comp, wsPosition, wsNormal, Pl_PositionWorld, PL_Range, PL_ShadowSoftness, PL_ShadowFilterMode);
-	//return float4(ndl.rrr,1);
-	
-	// Get rid of lighting on the backfaces of normalmapped surfaces
-	//ndl *= saturate(dot(lightDir, flatNormal)  / 0.00001f);
-	
 	// Compute range falloff
 	float falloff = PLS_ComputeRangeFalloff(distance, PL_Range);
 	
@@ -126,14 +111,10 @@ float4 PSMain( PS_INPUT Input ) : SV_TARGET
 	
 	lighting *= lerp(1.0f, shadow, saturate(PL_ShadowStrength));
 	
-	//lighting = GetShadow(uv);
-	
 	// Preserve the indoor/outdoor leak barrier without the old discrete doorway probe.
 	float indoorPixel = diffuse.a < 0.5f ? 1.0f : 0.0f;
 	float indoorBoundary = saturate(PL_Outdoor + (1.0f - PL_Outdoor) * indoorPixel);
 	lighting *= lerp(indoorBoundary, 1.0f, saturate(PL_IgnoreIndoorOutdoorLimit));
 
-	//return float4(0.2f,0.2f,0.2f,1);
-	//return float4(ndl.rrr,1);
 	return float4(saturate(lighting),1);
 }

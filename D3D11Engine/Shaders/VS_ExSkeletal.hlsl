@@ -138,7 +138,6 @@ VS_OUTPUT VSMain( VS_INPUT Input )
     float3 positionWorld = mul(float4(position + PI_ModelFatness * normal, 1), M_World).xyz;
     float3 prevPositionWorld = mul(float4(prevPosition + PI_ModelFatness * prevNormal, 1), M_PrevWorld).xyz;
 	
-	//Output.vPosition = float4(Input.vPosition, 1);
 	Output.vPosition = mul(float4(positionWorld,1), frame.M_ViewProj);
 	Output.vTexcoord2 = Input.vTex1;
 	Output.vTexcoord = Input.vTex1;
@@ -150,7 +149,6 @@ VS_OUTPUT VSMain( VS_INPUT Input )
 	Output.vCurrClipPos = mul(float4(positionWorld, 1.0), frame.M_UnjitteredViewProj);
 	Output.vPrevClipPos = mul(float4(prevPositionWorld, 1.0), frame.M_PrevViewProj);
 	
-	//Output.vWorldPosition = positionWorld;
 	
 	return Output;
 }

@@ -59,8 +59,7 @@ bool FF_AlphaTestEnabled()
 
 void DoAlphaTest(float alpha)
 {
-	//if(FF_AlphaTestEnabled())
-		clip(alpha - FF_AlphaRef);
+	clip(alpha - FF_AlphaRef);
 }
 
 #endif

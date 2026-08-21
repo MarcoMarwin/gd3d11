@@ -274,7 +274,7 @@ struct MeshVisualInfo : public BaseVisualInfo {
     /** Full mesh of this */
     MeshInfo* FullMesh;
 
-    /** This is true if we can't actually render something on this. TODO: Try to fix this! */
+    /** True when conversion produced no drawable mesh. */
     bool UnloadedSomething;
     void* MorphMeshVisual;
 
@@ -380,8 +380,7 @@ struct VobInfo : public BaseVobInfo {
     zCPolygon* WindGroundPolygon = nullptr;
     XMFLOAT4 WindGroundPlane = {};
 
-    /** Stable emission sources for NW_CITY_OILLAMP_01. The cached color is a
-        one-time mix and therefore never follows a light's color animation. */
+    /** Cached emission sources for NW_CITY_OILLAMP_01. */
     zCVobLight* OilLampEmissionStaticLight = nullptr;
     zCVobLight* OilLampEmissionDynamicLight = nullptr;
     DWORD OilLampEmissionColor = 0u;
@@ -423,19 +422,16 @@ struct VobLightInfo {
     /** True when this zCVobLight is produced by an oCVisualFX spell/effect. */
     bool IsVisualFXLight = false;
 
-    /** True if this light-vob was discovered at runtime instead of during static BSP cache build. */
+    /** True if discovered after static BSP caching. */
     bool IsDynamicVobLight = false;
 
-    /** First renderer-visible color of the Gothic light, used as the stable
-        baseline when a dynamic oil-lamp source is frozen. */
+    /** Initial renderer-visible light color. */
     DWORD StableLightColor = 0u;
 
-    /** True when this light is attached to a persistent world vob or belongs to a nearby flame visual. */
+    /** True for persistent lights or flame visuals. */
     bool AllowsPointlightShadows = false;
 
-    /** Renderer-only light replacement. The Gothic zCVobLight remains untouched;
-        these values are consumed by both deferred lighting paths and pointlight
-        shadow rendering. */
+    /** Renderer-only light replacement; the Gothic light remains untouched. */
     bool IsRendererLight = false;
     bool IsRendererLightSuppressed = false;
     bool RendererLightEnabled = true;
@@ -527,7 +523,6 @@ struct SkeletalVobInfo : public BaseVobInfo {
     
     void StorePreviousTransforms( const std::vector<XMFLOAT4X4>& currentTransforms ) {
         PrevBoneTransforms = currentTransforms;
-        // PrevWorldMatrix = WorldMatrix; // can't be trusted yet, as Instanced drawing doesn't set it.
         HasValidPrevTransforms = true;
     }
 

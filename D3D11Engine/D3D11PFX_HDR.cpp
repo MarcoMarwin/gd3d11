@@ -160,9 +160,6 @@ XRESULT D3D11PFX_HDR::Render( ID3D11RenderTargetView* output, ID3D11ShaderResour
 
     FxRenderer->CopyTextureToRTV( tempBuffer->GetShaderResView(), output, engine->GetResolution(), true );
 
-	// Show lumBuffer
-	//FxRenderer->CopyTextureToRTV(currentLum->GetShaderResView(), oldRTV, INT2(LUM_SIZE,LUM_SIZE), false);
-
 	// Restore rendertargets
 	Microsoft::WRL::ComPtr<ID3D11ShaderResourceView> srv;
 	engine->GetContext()->PSSetShaderResources( 1, 1, srv.GetAddressOf() );

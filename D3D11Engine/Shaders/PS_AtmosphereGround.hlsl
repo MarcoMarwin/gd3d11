@@ -19,12 +19,6 @@ cbuffer MI_MaterialInfo : register( b2 )
 }
 
 
-/*cbuffer POS_MaterialInfo : register( b3 )
-{
-	float3 OS_AmbientColor;
-	float OS_Pad;
-}*/
-
 cbuffer DIST_Distance : register( b3 )
 {
 	float DIST_DrawDistance;
@@ -57,11 +51,6 @@ struct PS_INPUT
 
 
 
-float4 retF(float f)
-{
-	return float4(f,f,f,1);
-}
-
 //--------------------------------------------------------------------------------------
 // Pixel Shader
 //--------------------------------------------------------------------------------------
@@ -69,20 +58,7 @@ DEFERRED_PS_OUTPUT PSMain( PS_INPUT Input ) : SV_TARGET
 {
 	float4 color = TX_Texture0.Sample(SS_Linear, Input.vTexcoord);
 	
-	//ClipDistanceEffect(length(Input.vViewPosition), DIST_DrawDistance, color.r * 2 - 1, 500.0f);
-	
-	//float3 nrm = perturb_normal(Input.vNormalVS, Input.vViewPosition, Input.vTexcoord, SS_Linear, MI_NormalmapStrength);
 	float3 nrm = 1.0f;
-	
-	//float specIntens = TX_Texture1.Sample(SS_Linear, Input.vTexcoord).a;
-	
-	// Apply static lighting
-	//color *= ;
-	
-	// WorldMesh can always do the alphatest
-	//DoAlphaTest(color.a);
-
-	//color.rgb = ApplyAtmosphericScatteringGround(Input.vWorldPosition, color.rgb);
 	
 	DEFERRED_PS_OUTPUT output;
 	output.vTransparencyAndCompositionMask = 0.0f;

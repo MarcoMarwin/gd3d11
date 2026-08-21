@@ -14,34 +14,13 @@ void zCObject_Release( void* o ) {
 }
 
 void DebugWrite_i( LPCSTR lpDebugMessage, void* thisptr ) {
-	//LogInfo() << "D3D7-CALL (" << thisptr << "): " << lpDebugMessage;
-
-	/*if (Settings::LogD3D7FunctionCalls)
-	{
-		switch(Settings::RenderingStage)
-		{
-		case ERenderingStage::RS_WORLD:
-			LogInfo() << "[WORLD] D3D7-CALL (" << thisptr << "): " << lpDebugMessage;
-			break;
-
-		case ERenderingStage::RS_VOBS:
-			LogInfo() << "[VOBS] D3D7-CALL (" << thisptr << "): " << lpDebugMessage;
-			break;
-
-		case ERenderingStage::RS_HUD:
-			LogInfo() << "[HUD] D3D7-CALL (" << thisptr << "): " << lpDebugMessage;
-			break;
-		}
-
-	}*/
 };
 
 int ComputeFVFSize( DWORD fvf ) {
-	//Those -inc s are the offset for the vertexptr to get to the data you want..
-	//i.e. :if you want the normal data you can do vertexptr+nromalinc and you have a pointer to it
+	// FVF flags determine the size of each vertex.
 	int size = 0;
 	DWORD test = fvf;
-	//test which fvf-code are included in fvf:
+	// Check the FVF flags.
 
 	if ( (fvf & D3DFVF_XYZ) == D3DFVF_XYZ ) {
 		size += 3 * sizeof( float );

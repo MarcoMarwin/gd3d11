@@ -26,8 +26,7 @@ static const float2 PLS_FAR_PCF_OFFSETS[PLS_FAR_PCF_COUNT] = {
     float2( 0.5f,  0.5f)
 };
 
-// Only the deliberately cheaper distant-light PCF path needs a fixed cap.
-// Nearby point lights retain the original geometric PCSS penumbra.
+// Distant lights use a fixed PCF radius; nearby lights keep geometric PCSS.
 static const float PLS_MAX_FAR_PCF_RADIUS = 0.040f;
 
 float PLS_CalcBlinnPhongLighting( float3 N, float3 H )
@@ -99,9 +98,7 @@ float PLS_ComputePointLightNdl(
 {
     float ndl = saturate( dot( lightDirVS, normalVS ) );
 
-    // A torch lying almost on the floor is physically above the visible flame,
-    // but Gothic's light vob can sit close to the ground plane. Give upward
-    // surfaces a small local wrap so they still receive warm light.
+    // Give upward-facing surfaces a small wrap when the light is near the floor.
     float floorMask = smoothstep( 0.58f, 0.86f, wsNormal.y );
     float nearFloorLight = 1.0f - smoothstep( 18.0f, 120.0f, abs( lightPosWorld.y - wsPosition.y ) );
     float floorWrap = floorMask * nearFloorLight * 0.34f;
@@ -110,7 +107,7 @@ float PLS_ComputePointLightNdl(
 
 float PLS_ApplyShadowDistanceFade( float finalShadow, float normalizedDist )
 {
-    // Keep fade-out for mostly lit samples, but preserve strong occlusion to avoid wall bleed.
+    // Fade mostly lit samples while preserving strong occlusion.
     float shadowFade = smoothstep( 0.65f, 0.95f, normalizedDist );
     float fadeWeight = shadowFade * smoothstep( 0.45f, 0.90f, finalShadow );
     return lerp( finalShadow, 1.0f, fadeWeight );
@@ -254,9 +251,7 @@ float PLS_SampleShadowCube(
         dir, compareDistance, fixedBias, fixedBlurScale,
         right, up, sinA, cosA );
 
-    // Low and medium quality deliberately skip the blocker search. A negative
-    // softness remains the existing distant-light marker and always selects
-    // the cheapest four-tap fallback, even on the High PCSS tier.
+    // Negative softness selects the cheap distant-light fallback.
     int effectiveFilterMode = shadowFilterMode;
     if ( shadowSoftness < -0.01f )
         effectiveFilterMode = 0;

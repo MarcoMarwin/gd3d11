@@ -6,21 +6,16 @@
 #include "ThreadPool.h"
 #include "ImGuiShim.h"
 
-//#define TESTING
-
 namespace Engine {
 
     /** Refresh worker threadpool */
     void RefreshWorkerThreadpool() {
-        // A pool destructor waits for workers, but it does not cancel queued
-        // jobs. Clear them first so a world-compile refresh cannot execute a
-        // queued job against VOB/pointlight data that is being replaced.
-        if ( WorkerThreadPool ) {
-            WorkerThreadPool->clearAndFlush();
-            delete WorkerThreadPool;
-            WorkerThreadPool = nullptr;
+        // Keep the pool instance and drain its queue before reusing it.
+        if ( !WorkerThreadPool ) {
+            WorkerThreadPool = new ThreadPool(L"GD3D11-Worker");
+            return;
         }
-        WorkerThreadPool = new ThreadPool(L"GD3D11-Worker");
+        WorkerThreadPool->clearAndFlush();
     }
 
     /** Creates main graphics engine */
@@ -61,11 +56,10 @@ namespace Engine {
 
     /** Called when the game is about to close */
     void OnShutDown() {
-        static bool shutdownStarted = false;
-        if ( shutdownStarted ) {
+        if ( ShutdownCleanupStarted.exchange( true, std::memory_order_acq_rel ) ) {
             return;
         }
-        shutdownStarted = true;
+        ShuttingDown.store( true, std::memory_order_release );
         LogInfo() << "Shutting down...";
         if ( Engine::RenderingThreadPool ) {
             Engine::RenderingThreadPool->clearAndFlush();
@@ -73,9 +67,7 @@ namespace Engine {
         if ( Engine::WorkerThreadPool ) {
             Engine::WorkerThreadPool->clearAndFlush();
         }
-        // Release pointlight handles while the D3D/PFX pools are still alive.
-        // The process still uses the established hard shutdown below, but no
-        // renderer-owned resource is left to race the final Gothic teardown.
+        // Release pointlight handles while their D3D/PFX owners are alive.
         if ( Engine::GAPI ) {
             Engine::GAPI->ReleasePointlightResources();
         }

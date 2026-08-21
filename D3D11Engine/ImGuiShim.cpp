@@ -438,7 +438,6 @@ void ImGuiShim::Init(
     ImGuiIO& io = ImGui::GetIO();
     io.IniFilename = NULL;
     io.LogFilename = NULL;
-    //io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard; //Not needed and it's annoying.
     OutputWindow = Window;
     ImGui_ImplWin32_Init( OutputWindow );
     ImGui_ImplDX11_Init( device.Get(), context.Get() );
@@ -454,20 +453,8 @@ void ImGuiShim::Init(
         Resolutions.emplace_back( std::make_pair(INT2((*it).Width, (*it).Height), s) );
     }
 
-    //static const ImWchar euroGlyphRanges[] = {
-    //    0x0020, 0x007E, // Basic Latin
-    //    0x00A0, 0x00FF, // Latin-1 Supplement
-    //    0x0100, 0x017F, // Latin Extended-A
-    //    0x0180, 0x018F, // Latin Extended-B
-    //    0x0400, 0x04FF, // Cyrillic
-    //    0x2010, 0x2015, // Various dashes
-    //    0x201E, 0x201E, // low-9 quotation mark
-    //    0x201C, 0x201D, // high-9 quotation marks
-    //    0,              // End of ranges
-    //};
     ImFontConfig config = { };
     config.MergeMode = false;
-    //config.GlyphRanges = euroGlyphRanges;
     const auto path = std::filesystem::current_path();
     const auto fontpath = path / "system" / "GD3D11" / "Fonts" / "Lato-Semibold.ttf";
 
@@ -553,9 +540,6 @@ void ImGuiShim::RenderLoop()
             ApplyFeatureLevel10Downgrades( currentSettings );
         }
     }
-    //if ( DemoVisible )
-    //    ImGui::ShowDemoWindow();
-
     if ( GetBlockGameInput() != m_lastFrameBlockGameInput ) {
         m_lastFrameBlockGameInput = GetBlockGameInput();
         D3D11GraphicsEngine::UpdateShouldBlockGameInput();

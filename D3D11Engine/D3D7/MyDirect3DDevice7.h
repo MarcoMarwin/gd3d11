@@ -506,7 +506,6 @@ public:
 
 		switch ( dwVertexTypeDesc ) {
         case GOTHIC_FVF_XYZRHW_DIF_T1: {
-			//return S_OK; 
 			for ( unsigned int i = 0; i < dwVertexCount; i++ ) {
 				Gothic_XYZRHW_DIF_T1_Vertex* rhw = reinterpret_cast<Gothic_XYZRHW_DIF_T1_Vertex*>(lpvVertices);
 

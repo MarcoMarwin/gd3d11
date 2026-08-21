@@ -83,8 +83,6 @@ float4 PSMain( PS_INPUT Input ) : SV_TARGET
 #ifdef USE_FFDATA
 	color *= cbFFData.textureFactor;
 #endif
-	//return float4(1,0,0,1);
-	
 	return color;
 }
 

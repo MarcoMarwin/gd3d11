@@ -36,7 +36,7 @@ XRESULT D3D11IndirectBuffer::Init( void* initData, unsigned int sizeInBytes, EBi
         bufferDesc.StructureByteStride = 4;
     }
 
-    // In case we dont have data, allocate some to satisfy D3D11
+    // Allocate a minimal buffer when no initial data is provided.
     char* data = nullptr;
     if ( !initData ) {
         data = new char[bufferDesc.ByteWidth];

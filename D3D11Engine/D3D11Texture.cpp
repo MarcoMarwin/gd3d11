@@ -85,7 +85,6 @@ XRESULT D3D11Texture::Init( const std::string& file ) {
     HRESULT hr;
     D3D11GraphicsEngineBase* engine = reinterpret_cast<D3D11GraphicsEngineBase*>(Engine::GraphicsEngine);
 
-    //LogInfo() << "Loading Engine-Texture: " << file;
     Microsoft::WRL::ComPtr<ID3D11Texture2D> res;
     if ( std::filesystem::path( file ).is_absolute() ) {
         LE( CreateDDSTextureFromFileEx(
@@ -151,8 +150,6 @@ XRESULT D3D11Texture::Init( const std::string& file ) {
 XRESULT D3D11Texture::Init( const uint8_t* data, size_t size, const std::string& debugFileName ) {
     HRESULT hr;
     D3D11GraphicsEngineBase* engine = reinterpret_cast<D3D11GraphicsEngineBase*>(Engine::GraphicsEngine);
-
-    //LogInfo() << "Loading Engine-Texture: " << debugFileName;
 
     Microsoft::WRL::ComPtr<ID3D11Texture2D> res;
     LE( CreateDDSTextureFromMemory( engine->GetDevice().Get(), data, size,

@@ -55,7 +55,7 @@ public:
         ZoneScoped;
         isDrawingContainers = true;
 
-        if ( !Engine::GraphicsEngine ) {
+        if ( !Engine::GraphicsEngine || Engine::IsShuttingDown() ) {
             HookedFunctions::OriginalFunctions.original_ContainerDraw();
             isDrawingContainers = false;
             return;
@@ -74,7 +74,7 @@ public:
         hook_infunc
 
             // Re-Add it
-            if ( Engine::GAPI && vob )
+            if ( Engine::GAPI && !Engine::IsShuttingDown() && vob )
                 Engine::GAPI->OnAddVob( vob, thisptr );
 
         hook_outfunc
@@ -84,7 +84,7 @@ public:
         hook_infunc
 
             // Remove it
-            if ( Engine::GAPI && vob )
+            if ( Engine::GAPI && !Engine::IsShuttingDown() && vob )
                 Engine::GAPI->OnRemovedVob( vob, thisptr );
 
         hook_outfunc
@@ -102,7 +102,7 @@ public:
         hook_infunc
 
             // Remove it
-            if ( Engine::GAPI && vob )
+            if ( Engine::GAPI && !Engine::IsShuttingDown() && vob )
                 Engine::GAPI->OnRemovedVob( vob, thisptr );
 
         hook_outfunc
@@ -122,7 +122,7 @@ public:
         GothicAPI* gapi = Engine::GAPI;
         auto* worldInfo = gapi ? gapi->GetLoadedWorldInfo() : nullptr;
         // Reset only if this is the main world; inventory worlds are handled differently.
-        if ( worldInfo && thisptr == worldInfo->MainWorld ) {
+        if ( !Engine::IsShuttingDown() && worldInfo && thisptr == worldInfo->MainWorld ) {
             gapi->ResetVobs();
         }
         HookedFunctions::OriginalFunctions.original_zCWorldDisposeVobs( thisptr, tree );
@@ -132,7 +132,7 @@ public:
         hook_infunc
 
             // Remove it first, before it becomes invalid
-            if ( Engine::GAPI && vob )
+            if ( Engine::GAPI && !Engine::IsShuttingDown() && vob )
                 Engine::GAPI->OnRemovedVob( vob, thisptr );
 
         hook_outfunc
@@ -143,11 +143,11 @@ public:
     static void __fastcall hooked_LoadWorld( zCWorld* thisptr, void* unknwn, const zSTRING& fileName, const int loadMode ) {
         ZoneScoped;
         GothicAPI* gapi = Engine::GAPI;
-        if ( gapi ) {
+        if ( gapi && !Engine::IsShuttingDown() ) {
             gapi->OnLoadWorld( fileName.ToChar(), loadMode );
         }
         HookedFunctions::OriginalFunctions.original_zCWorldLoadWorld( thisptr, fileName, loadMode );
-        if ( gapi ) {
+        if ( gapi && !Engine::IsShuttingDown() ) {
             auto* worldInfo = gapi->GetLoadedWorldInfo();
             if ( worldInfo ) {
                 worldInfo->MainWorld = thisptr;
@@ -160,7 +160,7 @@ public:
 
         hook_infunc
 
-            if ( Engine::GAPI && vob && vob->GetVisual() ) {
+            if ( Engine::GAPI && !Engine::IsShuttingDown() && vob && vob->GetVisual() ) {
                 //LogInfo() << vob->GetVisual()->GetFileExtension(0);
                 Engine::GAPI->OnAddVob( vob, thisptr );
             }
@@ -173,7 +173,7 @@ public:
         HookedFunctions::OriginalFunctions.original_zCWorldCompileWorld( thisptr, a2, a3, a4, a5, a6 );
 
         GothicAPI* gapi = Engine::GAPI;
-        if ( !gapi || !gapi->GetLoadedWorldInfo() || !thisptr )
+        if ( Engine::IsShuttingDown() || !gapi || !gapi->GetLoadedWorldInfo() || !thisptr )
             return;
 
         // Make sure worker thread don't work on any point light
@@ -188,7 +188,7 @@ public:
         HookedFunctions::OriginalFunctions.original_zCWorldGenerateStaticWorldLighting( thisptr, a2, a3 );
 
         GothicAPI* gapi = Engine::GAPI;
-        if ( !gapi || !gapi->GetLoadedWorldInfo() || !thisptr )
+        if ( Engine::IsShuttingDown() || !gapi || !gapi->GetLoadedWorldInfo() || !thisptr )
             return;
 
         // Make sure worker thread don't work on any point light
@@ -204,7 +204,7 @@ public:
     static void Do_hooked_Render( zCWorld* thisptr, zCCamera& camera ) {
         GothicAPI* gapi = Engine::GAPI;
         WorldInfo* worldInfo = gapi ? gapi->GetLoadedWorldInfo() : nullptr;
-        if ( !gapi || !worldInfo || !worldInfo->MainWorld ) {
+        if ( Engine::IsShuttingDown() || !gapi || !worldInfo || !worldInfo->MainWorld ) {
             return;
         }
 
@@ -223,10 +223,8 @@ public:
         GothicAPI* gapi = Engine::GAPI;
         WorldInfo* worldInfo = gapi ? gapi->GetLoadedWorldInfo() : nullptr;
 
-        // During world disposal/loading the old MainWorld pointer and the
-        // renderer-side VOB caches are not a valid pair. Let Gothic render its
-        // own loading/inventory frame until the new cache is published.
-        if ( !gapi || !worldInfo || !worldInfo->MainWorld
+        // Ignore stale renderer caches while the world is loading or disposing.
+        if ( Engine::IsShuttingDown() || !gapi || !worldInfo || !worldInfo->MainWorld
             || !gapi->IsWorldRenderCacheReady() ) {
             HookedFunctions::OriginalFunctions.original_zCWorldRender( thisptr, camera );
             return;

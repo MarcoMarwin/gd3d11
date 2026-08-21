@@ -119,7 +119,6 @@ public:
     XRESULT SetActivePixelShader( PShaderID shader ) override;
     XRESULT SetActiveVertexShader( VShaderID shader ) override;
     virtual XRESULT SetActiveGShader( GShaderID shader );
-    //virtual int MeasureString(std::string str, zFont* zFont);
 
     void ResetPresentPending() { PresentPending = false; }
 

@@ -240,8 +240,6 @@ XRESULT WorldConverter::LoadWorldMeshFromFile( const std::string& file, std::map
             }
         }
 
-        //key.Lightmap = poly->GetLightmap();
-
         for ( unsigned int i = 0; i < meshes[m]->Vertices.size(); i++ ) {
             // Mesh needs to be rotated differently
             meshes[m]->Vertices[i].Position = float3( meshes[m]->Vertices[i].Position.x,
@@ -965,7 +963,6 @@ void WorldConverter::ExtractSkeletalMeshFromVob( zCModel* model, SkeletalMeshVis
             stream += 4;
 
             ExSkelVertexStruct vx;
-            //vx.Position = s->GetPositionList()->Array[i];
             vx.Normal = float3( 0, 0, 0 );
             ZeroMemory( vx.weights, sizeof( vx.weights ) );
             ZeroMemory( vx.Position, sizeof( vx.Position ) );
@@ -975,9 +972,6 @@ void WorldConverter::ExtractSkeletalMeshFromVob( zCModel* model, SkeletalMeshVis
                 // Get entry
                 zTWeightEntry weightEntry = *reinterpret_cast<zTWeightEntry*>(stream);
                 stream += sizeof( zTWeightEntry );
-
-                //if (s->GetNormalsList() && i < s->GetNormalsList()->NumInArray)
-                //	(*vx.Normal.toMFLOAT3()) += weightEntry.Weight * (*s->GetNormalsList()->Array[i].toXMFLOAT3());
 
                 // Get index and weight
                 if ( n < 4 ) {
@@ -1493,9 +1487,6 @@ void WorldConverter::Extract3DSMeshFromVisual2( zCProgMeshProto* visual, MeshVis
             vx.Normal = wedge.normal;
             vx.TexCoord = wedge.texUV;
             vx.Color = 0xFFFFFFFF;
-            //if (visual->GetSubmeshes()[i].Material)
-            //	vx.Color = visual->GetSubmeshes()[i].Material->GetColor(); // Bake materialcolor into the mesh. This is ok for the most meshes.
-
             // Check bounding box
             bbmin.x = bbmin.x > vx.Position.x ? vx.Position.x : bbmin.x;
             bbmin.y = bbmin.y > vx.Position.y ? vx.Position.y : bbmin.y;

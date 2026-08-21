@@ -15,7 +15,7 @@ D3D11CShader::D3D11CShader() = default;
 
 D3D11CShader::~D3D11CShader() = default;
 
-/** Loads both shaders at the same time */
+/** Loads and compiles the compute shader. */
 XRESULT D3D11CShader::LoadShader( const char* file, const char* entryPoint, const std::vector<D3D_SHADER_MACRO>& makros ) {
     HRESULT hr;
 
@@ -41,7 +41,7 @@ XRESULT D3D11CShader::LoadShader( const char* file, const char* entryPoint, cons
     return XR_SUCCESS;
 }
 
-/** Applys the shaders */
+/** Applies the shader. */
 XRESULT D3D11CShader::Apply() {
     reinterpret_cast<D3D11GraphicsEngineBase*>(Engine::GraphicsEngine)->GetContext()->CSSetShader( ComputeShader.Get(), nullptr, 0 );
     return XR_SUCCESS;

@@ -375,8 +375,6 @@ DEFERRED_PS_OUTPUT PSMain( PS_INPUT Input ) : SV_TARGET
 #endif
 	
 	output.vDiffuse = float4(color.rgb, Input.vDiffuse.a);
-	//output.vDiffuse = float4(Input.vTexcoord2, 0, 1);
-	//output.vDiffuse = float4(Input.vNormalVS, 1);
 	
 	output.vNrm = EncodeNormalGBuffer(nrm);
 	

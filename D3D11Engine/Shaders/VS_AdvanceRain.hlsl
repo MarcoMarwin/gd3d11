@@ -58,7 +58,6 @@ struct VS_OUTPUT
 VS_OUTPUT VSMain( VS_INPUT Input )
 {
     //move forward
-    //Input.vPosition.xyz += Input.vVelocity.xyz/AR_FPS + AR_GlobalVelocity.xyz;
 	Input.vVelocity = Input.vVelocity.xyz/max(AR_FPS, 1) + AR_GlobalVelocity.xyz / max(AR_FPS, 1);
 	Input.vPosition.xyz += Input.vVelocity;
 		

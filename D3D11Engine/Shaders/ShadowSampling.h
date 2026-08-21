@@ -78,10 +78,7 @@ int GetRuntimePCFTapCount(int cascadeIndex)
     return nearCascade ? PCF_FILTER_TAPS_NEAR : PCF_FILTER_TAPS_FAR;
 }
 
-//--------------------------------------------------------------------------------------
-// Shadow map sampling helpers
-// Abstracts Texture2DArray (FL11+) vs Texture2D atlas (FL10) sampling
-//--------------------------------------------------------------------------------------
+// Shadow-map sampling for the atlas and array backends.
 #if SHADOW_ATLAS
 float2 CascadeToAtlasUV(float2 cascadeUV, int cascadeIndex)
 {
@@ -116,10 +113,7 @@ float GetCascadeShadowResolution(int cascadeIndex)
 {
     return max(SQ_ShadowmapSize, 1.0f);
 }
-//--------------------------------------------------------------------------------------
-// High-quality Poisson disk for shadow sampling
-// Rotated per-pixel for better temporal integration and reduced banding
-//--------------------------------------------------------------------------------------
+// Poisson patterns used by the shadow filters.
 static const float2 g_PoissonDisk16[16] = {
     float2(-0.94201624f, -0.39906216f),
     float2( 0.94558609f, -0.76890725f),
@@ -139,7 +133,7 @@ static const float2 g_PoissonDisk16[16] = {
     float2( 0.14383161f, -0.14100790f)
 };
 
-// 32-tap Poisson disk for high quality PCSS
+// 32-tap pattern for high-quality PCSS.
 static const float2 g_PoissonDisk32[32] = {
     float2(-0.94201624f, -0.39906216f),
     float2( 0.94558609f, -0.76890725f),
@@ -175,7 +169,7 @@ static const float2 g_PoissonDisk32[32] = {
     float2(-0.04244530f,  0.71893100f)
 };
 
-// 8-tap Poisson disk for medium quality / distant cascades
+// Smaller pattern for medium quality and distant cascades.
 static const float2 g_PoissonDisk8[8] = {
     float2(-0.7071f,  0.7071f),
     float2(-0.0000f, -0.8750f),
@@ -208,7 +202,7 @@ float GetShadowBlueNoise(float2 screenPos, int cascadeIndex, int sampleOffset)
         return frac(value + (float)((framePhase + samplePhase * 3u) & 63u) * 0.6180339887f);
     }
 
-    // Deterministic fallback: never animate a non-temporal shadow kernel.
+    // Keep non-temporal sampling deterministic.
     float2 seed = screenPos + float2((float)sampleOffset * 13.17f, (float)cascadeIndex * 7.31f);
     return frac(52.9829189f * frac(dot(seed, float2(0.06711056f, 0.00583715f))));
 }
@@ -272,9 +266,7 @@ void FindBlockers(out float avgBlockerDepth, out float numBlockers,
     numBlockers = 0.0f;
     int startIdx = GetBlueNoiseStartIndex(screenPos, cascadeIndex, 16, 5);
 
-    // Always test the receiver center. Thin animated casters can occupy only
-    // a fraction of the blocker footprint at Low/Medium CSM resolutions; a
-    // pure Poisson search can then miss the caster and falsely report light.
+    // The center sample catches thin casters that do not cover a full tap.
     float centerDepth = SampleShadowMapLevel(uv, cascadeIndex);
     if (centerDepth < zReceiver)
     {
@@ -298,11 +290,11 @@ void FindBlockers(out float avgBlockerDepth, out float numBlockers,
     avgBlockerDepth = blockerSum / max(numBlockers, 1.0f);
 }
 
-// PCSS: Estimate penumbra width and return filter radius
+// Estimate the PCSS penumbra and return its filter radius.
 float EstimatePCSSFilterRadius(float2 uv, float zReceiver, int cascadeIndex,
                                float lightSize, float2x2 rotMat, float texelSize, float2 screenPos)
 {
-    // Cap search radius in texel units to keep blocker search cost predictable.
+    // Limit the blocker search in texel units.
     float searchRadius = min(lightSize, texelSize * PCSS_BLOCKER_SEARCH_TEXEL_CAP);
 
     float avgBlockerDepth = 0.0f;
@@ -322,7 +314,6 @@ float EstimatePCSSFilterRadius(float2 uv, float zReceiver, int cascadeIndex,
 float IsInShadow(float3 wsPosition, Texture2D shadowmapAtlas, SamplerComparisonState samplerState)
 {
     float4 vShadowSamplingPos = mul(float4(wsPosition, 1), SQ_ShadowViewProj[0]);
-    // vShadowSamplingPos.xyz /= vShadowSamplingPos.www; // no need for perspective divide, as this is an orthographic sun light
 
     float2 projectedTexCoords = vShadowSamplingPos.xy * float2(0.5f, -0.5f) + float2(0.5f, 0.5f);
     return SampleShadowMapCmp(projectedTexCoords.xy, 0, vShadowSamplingPos.z);
@@ -331,7 +322,6 @@ float IsInShadow(float3 wsPosition, Texture2D shadowmapAtlas, SamplerComparisonS
 float IsInShadow(float3 wsPosition, Texture2DArray shadowmapArray, SamplerComparisonState samplerState)
 {
     float4 vShadowSamplingPos = mul(float4(wsPosition, 1), SQ_ShadowViewProj[0]);
-    // vShadowSamplingPos.xyz /= vShadowSamplingPos.www; // no need for perspective divide, as this is an orthographic sun light
 
     float2 projectedTexCoords = vShadowSamplingPos.xy * float2(0.5f, -0.5f) + float2(0.5f, 0.5f);
     return shadowmapArray.SampleCmpLevelZero(samplerState, float3(projectedTexCoords.xy, 0), vShadowSamplingPos.z);
@@ -348,40 +338,31 @@ float IsWet(float3 wsPosition, Texture2D shadowmap, SamplerComparisonState sampl
     return shadowmap.SampleCmpLevelZero(samplerState, projectedTexCoords.xy, vShadowSamplingPos.z - bias);
 }
 
-//--------------------------------------------------------------------------------------
-// Helper: Get shadow map UV and check if position is within cascade bounds
-// Returns: projectedTexCoords in xy, isInBounds as 0 or 1 in z, blend factor in w
-//--------------------------------------------------------------------------------------
+// Project into a cascade and return its bounds and blend factor.
 void GetCascadeUVAndBounds(float3 wsPosition, int cascadeIndex,
                            out float4 vShadowSamplingPos, out float2 projectedTexCoords,
                            out float inBounds, out float blendFactor)
 {
     matrix viewProj = SQ_ShadowViewProj[cascadeIndex];
 
-    // Calculate once and pass out
     vShadowSamplingPos = mul(float4(wsPosition, 1), viewProj);
     projectedTexCoords = vShadowSamplingPos.xy * float2(0.5f, -0.5f) + float2(0.5f, 0.5f);
 
-    // Keep a small filter-safe XY inset. Z must also lie inside this cascade;
-    // otherwise selection falls through to a farther cascade instead of producing a dark band.
+    // Leave a small inset for the filter taps and check the projected depth.
     const float margin = 1.5f / GetCascadeShadowResolution(cascadeIndex);
     bool isInBounds = projectedTexCoords.x > margin && projectedTexCoords.x < (1.0f - margin) &&
                       projectedTexCoords.y > margin && projectedTexCoords.y < (1.0f - margin) &&
                       vShadowSamplingPos.z >= 0.0f && vShadowSamplingPos.z <= 1.0f;
     inBounds = isInBounds ? 1.0f : 0.0f;
 
-    // Calculate blend factor based on distance to edge
-    // Wide blend zone (30%) with smoothstep for gradual cascade transitions
+    // Blend near the cascade edge.
     const float blendZoneStart = 0.30f;
     float distToEdge = min(min(projectedTexCoords.x, 1.0f - projectedTexCoords.x),
                            min(projectedTexCoords.y, 1.0f - projectedTexCoords.y));
     blendFactor = 1.0f - smoothstep(margin, blendZoneStart, distToEdge);
 }
 
-//--------------------------------------------------------------------------------------
-// Returns the first cascade that contains wsPosition. If no cascade contains the
-// position, returns -1.
-//--------------------------------------------------------------------------------------
+// Return the first cascade containing the position, or -1.
 int GetPrimaryCascadeIndex(float3 wsPosition)
 {
     float4 vShadowPos;
@@ -399,9 +380,7 @@ int GetPrimaryCascadeIndex(float3 wsPosition)
     return -1;
 }
 
-//--------------------------------------------------------------------------------------
-// Estimates current-cascade world-space texel size from the orthographic shadow matrix.
-//--------------------------------------------------------------------------------------
+// Estimate the world-space texel size of a cascade.
 float GetCascadeWorldTexelSize(int cascadeIndex)
 {
     if (cascadeIndex < 0)
@@ -449,10 +428,7 @@ float3 ApplyReceiverNormalBias(float3 wsPosition, float3 wsNormal, float3 wsLigh
 }
 
 
-//--------------------------------------------------------------------------------------
-// High-quality shadow sampling with configurable softness
-// Uses rotated Poisson disk for temporal-friendly results
-//--------------------------------------------------------------------------------------
+// Sample a cascade with configurable softness.
 float SampleCascadeShadowStablePCF(float4 vShadowSamplingPos, float2 projectedTexCoords,
                                    int cascadeIndex, float bias, float2 screenPos, float filterRadius)
 {
@@ -515,15 +491,12 @@ float SampleCascadeShadowSoft(float4 vShadowSamplingPos, float2 projectedTexCoor
 
         if (pcssRadius < 0.0f)
         {
-            // The blocker search may legitimately miss a sub-texel caster,
-            // but the receiver comparison must not turn that into a bright
-            // firefly inside an otherwise shadowed NPC projection.
+            // Fall back to a receiver comparison when no blocker was found.
             shadow = SampleShadowMapCmp(projectedTexCoords.xy, cascadeIndex, zReceiver);
         }
         else
         {
-            // Keep one deterministic center comparison in the filter. It is
-            // the low-cost guard against all taps missing a thin caster.
+            // Include the receiver center in the filter.
             float centerShadow = SampleShadowMapCmp(
                 projectedTexCoords.xy, cascadeIndex, zReceiver);
             float sum = centerShadow;
@@ -581,12 +554,11 @@ float ComputeShadowValueDirect(float3 wsPosition, Texture2D shadowmap, SamplerCo
 {
 	// Reconstruct VS World ShadowViewPosition from depth
     float4 vShadowSamplingPos = mul(float4(wsPosition, 1), viewProj);
-    // vShadowSamplingPos.xyz /= vShadowSamplingPos.www; // no need for perspective divide, as this is an orthographic sun light
 
     float2 projectedTexCoords = vShadowSamplingPos.xy * float2(0.5f, -0.5f) + float2(0.5f, 0.5f);
     float shadow = 1.0f;
 
-    // Sample shadow map if within valid bounds
+    // Sample only inside the projected shadow-map bounds.
     if (projectedTexCoords.x >= 0.0f && projectedTexCoords.x <= 1.0f &&
         projectedTexCoords.y >= 0.0f && projectedTexCoords.y <= 1.0f)
     {
@@ -621,15 +593,11 @@ float ComputeShadowValue(float2 uv, float3 wsPosition, Texture2D shadowmap, Samp
     return ComputeShadowValueDirect(wsPosition, shadowmap, samplerState, vertLighting, viewProj, bias, softnessScale);
 }
 
-//--------------------------------------------------------------------------------------
-// CSM: Shadow-Sampling with soft shadows and cascade blending
-// Uses SQ_ShadowSoftness for configurable shadow edge softness
-//--------------------------------------------------------------------------------------
+// Sample the cascades with soft edges and blending.
 float ComputeCascadedShadowValueSoft(float3 wsPosition, float viewSpaceZ, float vertLighting, float bias, float2 screenPos, int preferredCascade)
 {
     float shadow = vertLighting;
-    // Apply distance-based softness scaling
-    // Shadows get slightly softer with distance (simulating penumbra growth)
+    // Increase softness gradually with distance.
     float distanceFactor = saturate(abs(viewSpaceZ) / 5000.0f);
     float softness = SQ_ShadowSoftness * (1.0f + distanceFactor * 0.5f);
 
@@ -638,9 +606,7 @@ float ComputeCascadedShadowValueSoft(float3 wsPosition, float viewSpaceZ, float 
     float2 projCoords;
     float blendFactor = 0.0f;
 
-    // Callers that already selected a cascade for receiver bias can provide it
-    // here. Normally this removes a second full cascade projection loop. If the
-    // bias moved the sample out of that cascade, fall back to the old search.
+    // Reuse a cascade selected during receiver-bias calculation when possible.
     if (preferredCascade >= 0 && preferredCascade < NUM_CSM_CASCADES)
     {
         float inBounds;
@@ -664,12 +630,10 @@ float ComputeCascadedShadowValueSoft(float3 wsPosition, float viewSpaceZ, float 
         }
     }
 
-    // 2. Only sample textures if a valid cascade was found
     if (selectedCascade >= 0)
     {
         shadow = SampleCascadeShadowSoft(vShadowPos, projCoords, selectedCascade, bias, screenPos, softness);
 
-        // 3. Check if we need to blend with the next cascade
         if (selectedCascade < NUM_CSM_CASCADES - 1 && blendFactor > 0.0f)
         {
             float4 nextShadowPos;

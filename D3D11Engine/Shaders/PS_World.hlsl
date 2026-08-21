@@ -17,12 +17,6 @@ cbuffer MI_MaterialInfo : register( b2 )
 	float MI_MaterialPadding2;
 }
 
-/*cbuffer POS_MaterialInfo : register( b3 )
-{
-	float3 OS_AmbientColor;
-	float OS_Pad;
-}*/
-
 cbuffer DIST_Distance : register( b3 )
 {
 	float DIST_DrawDistance;

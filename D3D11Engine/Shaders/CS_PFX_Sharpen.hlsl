@@ -4,8 +4,7 @@
 // and adds it back scaled by the sharpen strength. Writes the result directly to a UAV,
 // removing the two plumbing copies of the pixel-shader path.
 //
-// Compute equivalent of PS_PFX_Sharpen.hlsl. Used on FeatureLevel 11+; the pixel-shader
-// path remains as the FeatureLevel 10 fallback.
+// Compute equivalent of PS_PFX_Sharpen.hlsl for Feature Level 11+.
 //--------------------------------------------------------------------------------------
 
 SamplerState SS_Linear : register( s0 );

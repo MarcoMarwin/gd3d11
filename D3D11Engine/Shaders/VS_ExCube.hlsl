@@ -45,7 +45,6 @@ VS_OUTPUT VSMain( VS_INPUT Input )
 	
 	float3 positionWorld = mul(float4(Input.vPosition,1), M_World).xyz;
 	
-	//Output.vPosition = float4(Input.vPosition, 1);
 	Output.vTexcoord2 = Input.vTex2;
 	Output.vTexcoord = Input.vTex1;
 	Output.vDiffuse  = Input.vDiffuse;

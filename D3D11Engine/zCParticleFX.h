@@ -192,7 +192,9 @@ public:
         hook_infunc
 
             // Notify the world
-            Engine::GAPI->OnParticleFXDeleted( thisptr );
+            if ( Engine::GAPI && !Engine::IsShuttingDown() ) {
+                Engine::GAPI->OnParticleFXDeleted( thisptr );
+            }
 
         hook_outfunc
 

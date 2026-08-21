@@ -36,7 +36,7 @@ public:
     /** Returns if this light needs an update */
     bool NeedsUpdate();
 
-    /** Returns true if the light could need an update, but it's not very important */
+    /** Returns true when the light may need an update. */
     bool WantsUpdate();
 
     /** Returns true if this is the first time that light is being rendered */

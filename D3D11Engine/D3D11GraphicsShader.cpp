@@ -22,9 +22,6 @@ int32_t D3D11GraphicsShader::GetInputIndex( StringID name )
     if (kvp != InputSemanticToIndex.end()) {
         return kvp->second;
     }
-#ifdef DEBUG_D3D11
-    // LogError() << "Tried to find input index for semantic '" << name << "' but it was not found in the shader!";
-#endif
     return -1;
 }
 
@@ -33,9 +30,6 @@ GraphicsShaderConstantBuffer D3D11GraphicsShader::GetBuffer(StringID name) {
     if (kvp != ConstantBuffersByName.end()) {
         return GraphicsShaderConstantBuffer(kvp->second.first, kvp->second.second, this);
     }
-#ifdef DEBUG_D3D11
-    // LogError() << "Tried to find constant buffer for semantic '" << name << "' but it was not registered!";
-#endif
     return GraphicsShaderConstantBuffer(nullptr, INVALID_SHADER_CB_SLOT, nullptr);
 }
 

@@ -1,6 +1,4 @@
-//--------------------------------------------------------------------------------------
-// Screen-space reflections for rain-wet ground surfaces
-//--------------------------------------------------------------------------------------
+// Screen-space reflections for rain-wet ground.
 
 #include "DepthReconstruction.h"
 #include "DS_Defines.h"

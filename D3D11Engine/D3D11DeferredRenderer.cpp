@@ -148,7 +148,7 @@ bool D3D11DeferredRenderer::BindShaderForTexture( D3D11ShaderManager& shaderMana
     PShaderID resolvedDiffuseNormalmappedFxMap,
     PShaderID resolvedDiffuseNormalmappedAlphatest,
     PShaderID resolvedDiffuseNormalmappedAlphatestFxMap,
-    bool allowWetNormalFallback ) {
+    bool ) {
 
     auto active = activePS;
     auto newShader = activePS;
@@ -159,9 +159,7 @@ bool D3D11DeferredRenderer::BindShaderForTexture( D3D11ShaderManager& shaderMana
     bool linZ = (Engine::GAPI->GetRendererState().GraphicsState.FF_GSwitches & GSWITCH_LINEAR_DEPTH) != 0;
     const bool normalmapsEnabled = Engine::GAPI->GetRendererState().RendererSettings.AllowNormalmaps;
     const bool hasNormalmap = normalmapsEnabled && texture->GetSurface()->GetNormalmap() != nullptr;
-    static_cast<void>( allowWetNormalFallback );
-    const bool useWetNormalFallback = false;
-    const bool useNormalmapShader = hasNormalmap || useWetNormalFallback;
+    const bool useNormalmapShader = hasNormalmap;
     const bool hasFxMap = hasNormalmap && texture->GetSurface()->GetFxMap();
 
     if ( materialType == MaterialInfo::MT_Portal ) {
@@ -177,9 +175,7 @@ bool D3D11DeferredRenderer::BindShaderForTexture( D3D11ShaderManager& shaderMana
         if ( hasFxMap ) {
             newShader = shaderManager.GetPShader( resolvedDiffuseNormalmappedAlphatestFxMap );
         } else if ( useNormalmapShader ) {
-            newShader = shaderManager.GetPShader( useWetNormalFallback
-                ? PShaderID::PS_DiffuseNormalmappedAlphaTest
-                : resolvedDiffuseNormalmappedAlphatest );
+            newShader = shaderManager.GetPShader( resolvedDiffuseNormalmappedAlphatest );
         } else {
             newShader = shaderManager.GetPShader( PShaderID::PS_DiffuseAlphaTest );
         }
@@ -187,9 +183,7 @@ bool D3D11DeferredRenderer::BindShaderForTexture( D3D11ShaderManager& shaderMana
         if ( hasFxMap ) {
             newShader = shaderManager.GetPShader( resolvedDiffuseNormalmappedFxMap );
         } else if ( useNormalmapShader ) {
-            newShader = shaderManager.GetPShader( useWetNormalFallback
-                ? PShaderID::PS_DiffuseNormalmapped
-                : resolvedDiffuseNormalmapped );
+            newShader = shaderManager.GetPShader( resolvedDiffuseNormalmapped );
         } else {
             newShader = shaderManager.GetPShader( PShaderID::PS_Diffuse );
         }

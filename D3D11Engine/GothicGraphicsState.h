@@ -562,9 +562,7 @@ struct GothicRendererSettings {
         SHADOW_FILTER_PCSS = 2,
     };
 
-    // Runtime shadow kernel quality. The shader contains both PCF and PCSS;
-    // this value selects the cheaper approximation without recompiling when
-    // AA/FSR3 changes.
+    // Runtime PCF/PCSS quality; avoids shader recompilation when AA/FSR3 changes.
     enum E_ShadowKernelQuality {
         SHADOW_KERNEL_PCF_LOW = 0,
         SHADOW_KERNEL_PCF_MEDIUM = 1,
@@ -789,8 +787,6 @@ struct GothicRendererSettings {
         Upscaler = E_Upscaler::UPSCALER_FSR_3;
 
         GothicUIScale = 1.0f;
-        //DisableEverything();
-
         LimitLightIntesity = true;
         AllowNormalmaps = false;
         EnableParallaxOcclusionMapping = true; // Preset selection for Surface Detail; inactive while AllowNormalmaps is false.

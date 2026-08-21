@@ -107,7 +107,6 @@ public:
             return GetMeshSoftSkinList()->Array[0]->GetObjectName();
 
         return "";
-        //return __GetVisualName().ToChar();
     }
 
 private:
@@ -344,7 +343,6 @@ public:
             return GetMeshSoftSkinList()->Array[0]->GetObjectName();
 
         return "";
-        //return __GetVisualName().ToChar();
     }
 
     zSTRING GetModelName() {

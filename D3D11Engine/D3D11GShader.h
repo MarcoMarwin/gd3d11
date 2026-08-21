@@ -14,7 +14,7 @@ public:
     /** Loads shader */
     XRESULT LoadShader( const char* geometryShader, const std::vector<D3D_SHADER_MACRO>& makros = std::vector<D3D_SHADER_MACRO>(), bool createStreamOutFromVS = false, int soLayout = 0 );
 
-    /** Applys the shader */
+    /** Applies the shader */
     XRESULT Apply() override;
 
     /** Returns the shader */

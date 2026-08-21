@@ -47,14 +47,12 @@ VS_OUTPUT VSMain( VS_INPUT Input )
 	float4 localPosition = float4(Input.vPosition * float3(Input.vInstanceScale, 1) * 2.0f, 1.0f);
 	float4 viewPosition = mul(localPosition, Input.InstanceWorldViewMatrix);
 
-	//Output.vPosition = float4(Input.vPosition, 1);
 	Output.vPosition = mul(viewPosition, frame.M_Proj);
 	Output.vTexcoord2 = Input.vTex1;
 	Output.vTexcoord = Input.vTex1;
 	Output.vDiffuse  = float4(Input.vInstanceColor.gba, pow(Input.vInstanceColor.r, 2.2f));
 	Output.vNormalVS = float3(0,0,0);//mul(Input.vNormal, (float3x3)mul(Input.InstanceWorldViewMatrix, frame.M_View));
 	Output.vViewPosition = float3(0,0,0);//mul(float4(Input.vPosition,1), mul(Input.InstanceWorldViewMatrix, frame.M_View));
-	//Output.vWorldPosition = mul(float4(Input.vPosition,1), Input.InstanceWorldViewMatrix).rgb;
 	
 	// These instances have no previous object transform, but they are static in
 	// world space. Recover that position from the supplied world-view matrix so

@@ -65,7 +65,7 @@ void CSMain( uint3 groupID : SV_GroupID, uint3 threadID : SV_GroupThreadID, uint
     if ( pixelCoord.x >= (uint)ViewportSize.x || pixelCoord.y >= (uint)ViewportSize.y )
         return;
 
-    // Read GBuffer via integer Load - exact pixel, no sampler filtering
+    // Integer loads keep the G-buffer lookup exact.
     float4 diffuse = TX_Diffuse.Load( int3( pixelCoord, 0 ) );
     float3 normal = DecodeNormalGBuffer( TX_Nrm.Load( int3( pixelCoord, 0 ) ).xy );
     float4 gb3 = TX_SI_SP.Load( int3( pixelCoord, 0 ) );
@@ -79,11 +79,11 @@ void CSMain( uint3 groupID : SV_GroupID, uint3 threadID : SV_GroupThreadID, uint
     float expDepth = TX_Depth.Load( int3( pixelCoord, 0 ) ).r;
     float3 vsPosition = VSPositionFromDepth( expDepth, pixelCoord );
 
-    // World-space position for shadow sampling (computed once, shared by all shadowed lights)
+    // Reconstruct world space once for shadow sampling.
     float3 wsPosition = mul( float4( vsPosition, 1 ), InvView ).xyz;
     float3 wsNormal = normalize( mul( float4( normal, 0 ), InvView ).xyz );
 
-    // Compute tile index
+    // Find the cluster for this pixel.
     uint tileX = pixelCoord.x / TILE_SIZE;
     uint tileY = pixelCoord.y / TILE_SIZE;
     uint tileIndex = tileY * NumTilesX + tileX;
@@ -93,7 +93,7 @@ void CSMain( uint3 groupID : SV_GroupID, uint3 threadID : SV_GroupThreadID, uint
     uint slice = (uint)clamp( floor( zSliceT * (float)NUM_Z_SLICES ), 0.0f, (float)( NUM_Z_SLICES - 1 ) );
     uint cluster = tileIndex * NUM_Z_SLICES + slice;
 
-    // Hoist per-pixel constants outside the light loop
+    // Values shared by all lights.
     float3 V = normalize( -vsPosition );
     float specMod = PLS_ComputeSpecMod( diffuse.rgb );
 
@@ -129,7 +129,7 @@ void CSMain( uint3 groupID : SV_GroupID, uint3 threadID : SV_GroupThreadID, uint
                 lightDir, normal, V, vegetationBacklitMask, twoSidedBacklitMaterial,
                 AC_EnableSSS, AC_SSSIntensity, 0.42f );
 
-            // Apply shadow if this light has a shadow cubemap and contribution is non-negligible
+            // Sample shadows only for lights that have a visible contribution.
             if ( light.ShadowCubeIndex >= 0 && any( lighting > 0.001f ) ) {
                 const int shadowSlot = light.ShadowCubeIndex & 0x1fffffff;
                 const bool lowStatic = (light.ShadowCubeIndex & 0x20000000) != 0;
@@ -145,8 +145,7 @@ void CSMain( uint3 groupID : SV_GroupID, uint3 threadID : SV_GroupThreadID, uint
                 lighting *= lerp(1.0f, shadow, saturate(light.ShadowStrength));
             }
 
-            // Retain the exact indoor/outdoor leak barrier. Avoid neighborhood probes:
-            // their integer sample radii created visible lighting bands.
+            // Keep indoor lights from leaking into outdoor pixels.
             float indoorPixel = diffuse.a < 0.5f ? 1.0f : 0.0f;
             float indoorBoundary = saturate((1.0f - light.IsIndoor) + light.IsIndoor * indoorPixel);
             lighting *= lerp(indoorBoundary, 1.0f, saturate(light.IgnoreIndoorOutdoorLimit));

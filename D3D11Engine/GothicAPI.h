@@ -581,10 +581,10 @@ public:
     /** Builds our BspTreeVobMap */
     void BuildBspVobMapCache();
 
-    /** Resolves basic runtime pointlight-shadow eligibility. */
+    /** Resolves pointlight-shadow eligibility. */
     void ConfigurePointlightShadowSource( VobLightInfo* lightInfo ) const;
 
-    /** Resolves world flame and parent-vob pointlight associations globally. */
+    /** Resolves flame and parent-VOB pointlight associations. */
     void ConfigureAllPointlightShadowSources();
     void ConfigureCityWindows();
 
@@ -620,10 +620,10 @@ public:
     /** Resets only the vobs */
     void ResetVobs();
 
-    /** Releases pointlight-owned shadow resources while D3D/PFX pools are alive. */
+    /** Releases pointlight shadow resources. */
     void ReleasePointlightShadowResources();
 
-    /** Releases all renderer-owned pointlights and their shadow resources. */
+    /** Releases renderer-owned pointlights and shadows. */
     void ReleasePointlightResources();
 
     /** Get material by texture name */
@@ -899,7 +899,7 @@ private:
 
     /** Map of vobs and VobIndfos */
     gtl::flat_hash_map<zCVob*, VobInfo*> VobMap;
-    /** Renderer-owned pointlight replacements for flame systems and oil lamps. */
+    /** Renderer-owned pointlights for flame systems and oil lamps. */
     std::vector<std::unique_ptr<VobLightInfo>> RendererPointLights;
 public:
     // temporarily, to allow CollectVisibleVobsHelper to be templated for inlining optimizations
@@ -914,6 +914,7 @@ private:
     // during ResetVobs it can remain non-zero while world-owned objects are
     // already being dismantled.
     std::atomic_bool WorldRenderCacheReady{ false };
+    std::atomic_bool ResettingVobs{ false };
     gtl::flat_hash_map<zCVob*, SkeletalVobInfo*> SkeletalVobMap;
 
     /** Map of VobInfo-Lists for zCBspLeafs */

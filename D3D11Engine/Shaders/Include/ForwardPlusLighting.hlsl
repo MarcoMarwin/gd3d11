@@ -1,17 +1,4 @@
-//--------------------------------------------------------------------------------------
-// ForwardPlusLighting.hlsl - Reusable Forward+ lighting include
-// 
-// Provides tiled point light accumulation and sun/CSM lighting for
-// forward-rendered geometry. Include this from Forward+ pixel shaders.
-//
-// Expected defines (set by ConstructShaderMakroList):
-//   MAX_CSM_CASCADES, NUM_CSM_CASCADES, CSM_PCF_LIMIT
-//   SHD_ENABLE, SHD_FILTER_16TAP_PCF, SHD_FILTER_PCSS, SHADOW_ATLAS
-//   FP_USE_SHADOW_MASK
-//
-// Expected resources already declared by the including shader:
-//   (FP_SS_Linear is declared internally at register(s0))
-//--------------------------------------------------------------------------------------
+// Shared Forward+ lighting helpers.
 #ifndef FORWARD_PLUS_LIGHTING_H
 #define FORWARD_PLUS_LIGHTING_H
 

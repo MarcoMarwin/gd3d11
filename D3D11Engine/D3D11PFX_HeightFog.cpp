@@ -88,11 +88,8 @@ XRESULT D3D11PFX_HeightFog::Render( RenderToTextureBuffer* fxbuffer ) {
 #endif
 	}
 
-	//Engine::GAPI->GetRendererState().RendererSettings.FogColorMod;
-
 	cb.HF_FogHeight = height;
 
-	//cb.HF_FogColorMod = Engine::GAPI->GetRendererState().GraphicsState.FF_FogColor;
 	cb.HF_ProjAB = float2( Engine::GAPI->GetProjectionMatrix()._33, Engine::GAPI->GetProjectionMatrix()._34 );
 
 

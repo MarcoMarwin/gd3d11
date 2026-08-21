@@ -561,6 +561,9 @@ BOOL WINAPI DllMain( HINSTANCE hInst, DWORD reason, LPVOID lpvReserved ) {
         ddraw.RegisterSpecialCase = GetProcAddress( ddraw.dll, "RegisterSpecialCase" );
         ddraw.ReleaseDDThreadLock = GetProcAddress( ddraw.dll, "ReleaseDDThreadLock" );
     } else if ( reason == DLL_PROCESS_DETACH ) {
+        // Mark shutdown here; renderer teardown must stay outside the loader lock.
+        Engine::BeginShutdown();
+
         // During normal process termination DllMain runs under the loader lock,
         // after other threads may already be gone. Do not flush thread pools,
         // call exit(), uninitialize COM, or unload ddraw.dll from this path.

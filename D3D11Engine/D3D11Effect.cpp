@@ -14,7 +14,7 @@
 #include "RenderToTextureBuffer.h"
 #include "D3D11_Helpers.h"
 
-// TODO: Remove this!
+// Required by the rain-shadowmap path.
 #include "D3D11GraphicsEngine.h"
 #include "oCGame.h"
 #include "zFILE_VDFS.h"
@@ -80,12 +80,12 @@ ID3D11BlendState* D3D11Effect::GetRainReactiveBlendState() {
     return m_RainReactiveBlendState.Get();
 }
 
-/** Loads a texturearray. Use like the following: Put path and prefix as parameter. The files must then be called name_xxxx.dds */
+/** Loads a texture array from numbered DDS files. */
 HRESULT LoadTextureArray( Microsoft::WRL::ComPtr<ID3D11Device1> pd3dDevice, Microsoft::WRL::ComPtr<ID3D11DeviceContext1> context, const char* sTexturePrefix, int iNumTextures, ID3D11Texture2D** ppTex2D, ID3D11ShaderResourceView** ppSRV );
 
-/** Fills vectors of random raindrop data, split into mutable and immutable parts */
+/** Fills the mutable and immutable raindrop data. */
 void D3D11Effect::FillRandomRaindropData( std::vector<RainParticleDynamic>& dynamicData, std::vector<RainParticleStatic>& staticData ) {
-    /** Base taken from Nvidias Rain-Sample **/
+    // Based on NVIDIA's rain sample.
 
     float radius = Engine::GAPI->GetRendererState().RendererSettings.RainRadiusRange;
     float height = Engine::GAPI->GetRendererState().RendererSettings.RainHeightRange;
@@ -123,7 +123,7 @@ void D3D11Effect::FillRandomRaindropData( std::vector<RainParticleDynamic>& dyna
     }
 }
 
-/** Draws GPU-Based rain */
+/** Draws GPU-based rain. */
 XRESULT D3D11Effect::DrawRain( bool outputResolution, bool useRainExclusionMask ) {
     D3D11GraphicsEngineBase* e = reinterpret_cast<D3D11GraphicsEngineBase*>(Engine::GraphicsEngine);
     GothicRendererState& state = Engine::GAPI->GetRendererState();
@@ -578,8 +578,6 @@ XRESULT D3D11Effect::LoadRainResources()
 /** Renders the rain-shadowmap */
 XRESULT D3D11Effect::DrawRainShadowmap() {
     D3D11GraphicsEngine* e = reinterpret_cast<D3D11GraphicsEngine*>(Engine::GraphicsEngine); // TODO: This has to be a cast to D3D11GraphicsEngineBase!
-    //D3D11GraphicsEngineBase* e = (D3D11GraphicsEngineBase*)Engine::GraphicsEngine; //RenderShadowmaps to be moved then to D3D11GraphicsEngineBase
-
     if ( !RainShadowmap ) {
         const int s = 2048;
         RainShadowmap = std::make_unique<RenderToDepthStencilBuffer>( e->GetDevice().Get(), s, s,

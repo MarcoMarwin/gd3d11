@@ -130,7 +130,6 @@ struct RenderToTextureBuffer {
             hr = oldHR;
         }
 
-        //LogInfo() << "Successfully created ID3D11Texture2D, ID3D11ShaderResourceView, and ID3D11RenderTargetView.";
         if ( Result )*Result = hr;
     }
 
@@ -277,7 +276,6 @@ struct RenderToDepthStencilBuffer {
         }
 
 
-        //LogInfo() << "RenderToDepthStencilStruct: Successfully created ID3D11Texture2D, ID3D11ShaderResourceView, and ID3D11DepthStencilView.";
         if ( Result )*Result = hr;
     }
 

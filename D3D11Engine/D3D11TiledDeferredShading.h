@@ -14,8 +14,7 @@ class D3D11PointLight;
 
 constexpr uint32_t MAX_TILED_LIGHTS = 1024;
 
-// One 16x16 screen tile is split into logarithmic view-Z clusters. The mask has one bit per packed light.
-// These values must stay identical to the HLSL copies in CS_LightCulling, CS_TiledShading and Forward+.
+// A 16x16 tile is split into logarithmic view-Z clusters.
 constexpr uint32_t CLUSTER_Z_SLICES = 16;
 constexpr uint32_t CLUSTER_MASK_WORDS = MAX_TILED_LIGHTS / 32;
 constexpr float CLUSTER_MIN_FAR_Z = 4096.0f;
@@ -57,11 +56,7 @@ public:
         RenderToTextureBuffer& specular,
         RenderToTextureBuffer& depthCopy );
 
-    /** Packs lights into the structured buffer and dispatches CS_LightCulling.
-        After this call, GetLightBufferSRV/GetLightGridSRV
-        are valid for the current frame. Returns the number of tiled lights and
-        any lights that must fall back to the legacy path.
-        Does NOT run CS_TiledShading — the caller decides how to consume the culled data. */
+    /** Packs lights and dispatches CS_LightCulling. */
     struct CullResult {
         uint32_t TiledLightCount = 0;
         bool HasShadowedTiledLights = false;
@@ -71,7 +66,7 @@ public:
         std::vector<VobLightInfo*>& lights,
         RenderToTextureBuffer& depthCopy );
 
-    /** SRVs for reading culled light data in pixel shaders (valid after CullLights). */
+    /** SRVs produced by CullLights. */
     ID3D11ShaderResourceView* GetLightBufferSRV() const { return m_LightBufferSRV.Get(); }
     ID3D11ShaderResourceView* GetLightGridSRV() const { return m_LightGridSRV.Get(); }
     ID3D11ShaderResourceView* GetShadowCubeArraySRV() const { return m_ShadowCubeArraySRV.Get(); }

@@ -117,7 +117,6 @@ VS_OUTPUT VSMain( VS_INPUT Input )
 {
 	VS_OUTPUT Output;
 	
-	//Input.vPosition = float3(-Input.vPosition.x, Input.vPosition.y, -Input.vPosition.z);
 	
 	float3 positionWorld = Input.vPosition;
 	float2 texAniMap = Input.vTex2 * M_TotalTime;
@@ -131,7 +130,6 @@ VS_OUTPUT VSMain( VS_INPUT Input )
         positionWorld += w.offset;
     }
 #endif
-	//Output.vPosition = float4(Input.vPosition, 1);
 	Output.vPosition = mul( float4(positionWorld,1), frame.M_ViewProj);
 	Output.vTexcoord = Input.vTex1 + texAniMap;
 	Output.vDiffuse  = Input.vDiffuse;
@@ -139,7 +137,6 @@ VS_OUTPUT VSMain( VS_INPUT Input )
 	Output.vWorldPosition = positionWorld;
 	Output.vTexcoord2.x = mul(float4(positionWorld,1), frame.M_View).z;
 	Output.vTexcoord2.y = length(mul(float4(positionWorld,1), frame.M_View));
-	//Output.vWorldPosition = positionWorld;
 	
 	return Output;
 }

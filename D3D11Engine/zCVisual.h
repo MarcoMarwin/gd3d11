@@ -24,7 +24,9 @@ public:
         hook_infunc
 
             // Notify the world
-            Engine::GAPI->OnVisualDeleted( thisptr );
+            if ( Engine::GAPI && !Engine::IsShuttingDown() ) {
+                Engine::GAPI->OnVisualDeleted( thisptr );
+            }
 
         hook_outfunc
 

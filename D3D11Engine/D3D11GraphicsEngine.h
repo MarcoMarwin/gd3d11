@@ -167,7 +167,6 @@ public:
 
     void DrawString( const std::string& str, float x, float y, const zFont* font, zColor& fontColor ) override;
 
-    //virtual int MeasureString(std::string str, zFont* zFont) override;
 
     /** Draws a vertexbuffer, non-indexed */
     XRESULT DrawVertexBuffer( D3D11VertexBuffer* vb, unsigned int numVertices, unsigned int stride = sizeof( ExVertexStruct ) ) override;
@@ -235,6 +234,7 @@ public:
     /** Gets the depthbuffer */
     RenderToDepthStencilBuffer* GetDepthBuffer() const { return DepthStencilBuffer.get(); }
     RenderToTextureBuffer* GetDepthBufferCopy() const { return DepthStencilBufferCopy.get(); }
+    RenderToTextureBuffer* GetHDRBackBufferPtr() const { return HDRBackBuffer.get(); }
 
     /** Returns the HDRBackbuffer for regular geometry and effects */
     RenderToTextureBuffer& GetHDRBackBuffer() const { return *HDRBackBuffer; }
@@ -737,6 +737,8 @@ private:
     XMFLOAT4X4 m_PrevViewProjMatrix;
     
     INT2 NewResolution;
+    int m_previousResolutionScalePercent;
+    bool m_resizeInProgress;
     
     void CreateAndBindDefaultSampler();
 };
