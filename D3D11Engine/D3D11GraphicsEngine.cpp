@@ -9883,6 +9883,7 @@ void D3D11GraphicsEngine::GetBackbufferData( bool thumbnail, byte** data, INT2& 
 
     ActivePS->GetBuffer( "GammaCorrectConstantBuffer" ).Update( &gcb ).Bind();
 
+    HRESULT hr;
     auto rt = std::make_unique<RenderToTextureBuffer>(
         GetDevice().Get(), buffersize.x, buffersize.y, DXGI_FORMAT_ENGINE_SWAPCHAIN  );
     if ( !rt || !rt->GetTexture() || !rt->GetRenderTargetView() ) {

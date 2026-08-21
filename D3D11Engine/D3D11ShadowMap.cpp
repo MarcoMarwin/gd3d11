@@ -358,6 +358,7 @@ void D3D11ShadowMap::RecreateShadowSampler() {
     samplerDesc.MaxLOD = FLT_MAX;
 
     m_shadowmapSampler.Reset();
+    HRESULT hr;
     LE( m_device->CreateSamplerState( &samplerDesc, m_shadowmapSampler.GetAddressOf() ) );
     SetDebugName( m_shadowmapSampler.Get(), "ShadowmapSamplerState" );
 }
@@ -425,6 +426,7 @@ void D3D11ShadowMap::WaitShadowCullingComplete()
 }
 
 void D3D11ShadowMap::Init( Microsoft::WRL::ComPtr<ID3D11Device1>& device, Microsoft::WRL::ComPtr<ID3D11DeviceContext1>& context, int size ) {
+    HRESULT hr;
     m_device = device;
     m_context = context;
 

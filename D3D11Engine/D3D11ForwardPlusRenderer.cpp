@@ -364,7 +364,7 @@ bool D3D11ForwardPlusRenderer::BindShaderForTexture(
     PShaderID resolvedDiffuseNormalmappedFxMap,
     PShaderID resolvedDiffuseNormalmappedAlphatest,
     PShaderID resolvedDiffuseNormalmappedAlphatestFxMap,
-    bool ) {
+    bool allowWetNormalFallback ) {
 
     // Special material types fall through to deferred (non-lit) shaders
     bool blendAdd = zMatAlphaFunc == zMAT_ALPHA_FUNC_ADD; 
