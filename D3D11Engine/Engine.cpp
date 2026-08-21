@@ -61,17 +61,18 @@ namespace Engine {
         }
         ShuttingDown.store( true, std::memory_order_release );
         LogInfo() << "Shutting down...";
+        if ( Engine::GAPI ) {
+            Engine::GAPI->PrepareForShutdown();
+            return;
+        }
+
+        // A partially initialized renderer can still have worker threads.
         if ( Engine::RenderingThreadPool ) {
             Engine::RenderingThreadPool->clearAndFlush();
         }
         if ( Engine::WorkerThreadPool ) {
             Engine::WorkerThreadPool->clearAndFlush();
         }
-        // Release pointlight handles while their D3D/PFX owners are alive.
-        if ( Engine::GAPI ) {
-            Engine::GAPI->ReleasePointlightResources();
-        }
-        exit( 0 );
     }
 
 };

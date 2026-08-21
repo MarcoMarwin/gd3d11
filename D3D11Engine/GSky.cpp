@@ -275,6 +275,10 @@ void GSky::GetTextureOfDaytime( float time, D3D11Texture** t1, D3D11Texture** t2
 
 /** Renders the sky */
 XRESULT GSky::RenderSky() {
+    if ( Engine::IsShuttingDown() || !Engine::GAPI || !Engine::GraphicsEngine ) {
+        return XR_FAILED;
+    }
+
     if ( !SkyDome ) {
         XLE( LoadSkyResources() );
     }
@@ -296,12 +300,17 @@ XRESULT GSky::RenderSky() {
         LightDir = Atmosphere.LightDirection;
         XMStoreFloat3( &MoonDir, XMVectorNegate( XMLoadFloat3( &LightDir ) ) );
     } else {
-        zCSkyController_Outdoor* sc = oCGame::GetGame()->_zCSession_world->GetSkyControllerOutdoor();
+        oCGame* game = oCGame::GetGame();
+        zCWorld* world = game ? game->_zCSession_world : nullptr;
+        zCSkyController_Outdoor* sc = world ? world->GetSkyControllerOutdoor() : nullptr;
         if ( sc ) {
             masterTime = sc->GetMasterTime();
             LightDir = sc->GetSunWorldPosition( Atmosphere.SkyTimeScale );
             MoonDir = sc->GetMoonWorldPosition( Atmosphere.SkyTimeScale );
             Atmosphere.LightDirection = LightDir;
+        } else {
+            LightDir = Atmosphere.LightDirection;
+            XMStoreFloat3( &MoonDir, XMVectorNegate( XMLoadFloat3( &LightDir ) ) );
         }
     }
     XMStoreFloat3( &LightDir, XMVector3Normalize( XMLoadFloat3( &LightDir ) ) );
@@ -499,7 +508,6 @@ GMesh* GSky::GetSkyDome() {
 
 /** Returns the current sky-light color */
 float4 GSky::GetSkylightColor() {
-    zCSkyController_Outdoor* sc = oCGame::GetGame()->_zCSession_world->GetSkyControllerOutdoor();
     return float4( 1, 1, 1, 1 );
 }
 

@@ -10,29 +10,23 @@
 #include "zFILE_VDFS.h"
 
 extern bool NativeSupport16BitTextures;
-static unsigned char* ConvertedData = nullptr;
-static size_t ConvertedDataSize = 0;
+static thread_local std::vector<unsigned char> ConvertedData;
 
 unsigned char* ConvertTextureData( UINT TextureWidth, UINT TextureHeight, DXGI_FORMAT TextureFormat, unsigned char* data ) {
-    UINT realDataSize = TextureWidth * TextureHeight * 4;
-    if ( ConvertedDataSize < realDataSize ) {
-        if (ConvertedData) {
-            free( ConvertedData );
-        }
-        ConvertedData = reinterpret_cast<unsigned char*>( malloc( realDataSize ) );
-        ConvertedDataSize = realDataSize;
-    }
+    const UINT realDataSize = TextureWidth * TextureHeight * 4u;
+    ConvertedData.resize( realDataSize );
     if ( TextureFormat == DXGI_FORMAT_B5G6R5_UNORM ) {
-        Convert565to8888( ConvertedData, data, realDataSize );
+        Convert565to8888( ConvertedData.data(), data, realDataSize );
     } else if ( TextureFormat == DXGI_FORMAT_B5G5R5A1_UNORM ) {
-        Convert1555to8888( ConvertedData, data, realDataSize );
+        Convert1555to8888( ConvertedData.data(), data, realDataSize );
     } else {
-        Convert4444to8888( ConvertedData, data, realDataSize );
+        Convert4444to8888( ConvertedData.data(), data, realDataSize );
     }
-    return ConvertedData;
+    return ConvertedData.data();
 }
 
-D3D11Texture::D3D11Texture() {}
+D3D11Texture::D3D11Texture()
+    : ID(0), TextureFormat(DXGI_FORMAT_UNKNOWN), TextureSize(0, 0), MipMapCount(0) {}
 
 D3D11Texture::~D3D11Texture() {
     Thumbnail.Reset();
@@ -42,8 +36,15 @@ D3D11Texture::~D3D11Texture() {
 
 /** Initializes the texture object */
 XRESULT D3D11Texture::Init( INT2 size, ETextureFormat format, UINT mipMapCount, void* data, const std::string& fileName ) {
+    if ( Engine::IsShuttingDown() || !Engine::GraphicsEngine ) {
+        return XR_FAILED;
+    }
+
     HRESULT hr;
     D3D11GraphicsEngineBase* engine = reinterpret_cast<D3D11GraphicsEngineBase*>(Engine::GraphicsEngine);
+    if ( !engine->GetDevice() ) {
+        return XR_FAILED;
+    }
 
     TextureFormat = static_cast<DXGI_FORMAT>(format);
     TextureSize = size;
@@ -82,8 +83,15 @@ XRESULT D3D11Texture::Init( INT2 size, ETextureFormat format, UINT mipMapCount, 
 
 /** Initializes the texture from a file */
 XRESULT D3D11Texture::Init( const std::string& file ) {
+    if ( Engine::IsShuttingDown() || !Engine::GraphicsEngine ) {
+        return XR_FAILED;
+    }
+
     HRESULT hr;
     D3D11GraphicsEngineBase* engine = reinterpret_cast<D3D11GraphicsEngineBase*>(Engine::GraphicsEngine);
+    if ( !engine->GetDevice() ) {
+        return XR_FAILED;
+    }
 
     Microsoft::WRL::ComPtr<ID3D11Texture2D> res;
     if ( std::filesystem::path( file ).is_absolute() ) {
@@ -138,6 +146,7 @@ XRESULT D3D11Texture::Init( const std::string& file ) {
 
     Texture = res;
     TextureFormat = desc.Format;
+    MipMapCount = desc.MipLevels;
 
     TextureSize.x = desc.Width;
     TextureSize.y = desc.Height;
@@ -148,8 +157,15 @@ XRESULT D3D11Texture::Init( const std::string& file ) {
 }
 
 XRESULT D3D11Texture::Init( const uint8_t* data, size_t size, const std::string& debugFileName ) {
+    if ( Engine::IsShuttingDown() || !Engine::GraphicsEngine || !data || size == 0 ) {
+        return XR_FAILED;
+    }
+
     HRESULT hr;
     D3D11GraphicsEngineBase* engine = reinterpret_cast<D3D11GraphicsEngineBase*>(Engine::GraphicsEngine);
+    if ( !engine->GetDevice() ) {
+        return XR_FAILED;
+    }
 
     Microsoft::WRL::ComPtr<ID3D11Texture2D> res;
     LE( CreateDDSTextureFromMemory( engine->GetDevice().Get(), data, size,
@@ -163,6 +179,7 @@ XRESULT D3D11Texture::Init( const uint8_t* data, size_t size, const std::string&
 
     Texture = res;
     TextureFormat = desc.Format;
+    MipMapCount = desc.MipLevels;
 
     TextureSize.x = desc.Width;
     TextureSize.y = desc.Height;
@@ -174,7 +191,15 @@ XRESULT D3D11Texture::Init( const uint8_t* data, size_t size, const std::string&
 
 /** Updates the Texture-Object */
 XRESULT D3D11Texture::UpdateData( void* data, int mip ) {
+    if ( Engine::IsShuttingDown() || !Engine::GraphicsEngine || !data || !Texture
+        || mip < 0 || static_cast<UINT>(mip) >= MipMapCount ) {
+        return XR_FAILED;
+    }
+
     D3D11GraphicsEngineBase* engine = reinterpret_cast<D3D11GraphicsEngineBase*>(Engine::GraphicsEngine);
+    if ( !engine->GetContext() ) {
+        return XR_FAILED;
+    }
 
     UINT TextureWidth = (TextureSize.x >> mip);
     UINT TextureHeight = (TextureSize.y >> mip);
@@ -194,13 +219,21 @@ XRESULT D3D11Texture::UpdateData( void* data, int mip ) {
 
 /** Updates the Texture-Object using the deferred context (For loading in an other thread) */
 XRESULT D3D11Texture::UpdateDataDeferred( void* data, int mip ) {
+    if ( Engine::IsShuttingDown() || !Engine::GraphicsEngine || !Engine::GAPI
+        || !data || !Texture || mip < 0 || static_cast<UINT>(mip) >= MipMapCount ) {
+        return XR_FAILED;
+    }
+
     D3D11GraphicsEngineBase* engine = reinterpret_cast<D3D11GraphicsEngineBase*>(Engine::GraphicsEngine);
+    if ( !engine->GetDevice() ) {
+        return XR_FAILED;
+    }
 
     UINT TextureWidth = (TextureSize.x >> mip);
     UINT TextureHeight = (TextureSize.y >> mip);
 
-    ID3D11Texture2D* stagingTexture;
-    D3D11_TEXTURE2D_DESC stagingTextureDesc;
+    ID3D11Texture2D* stagingTexture = nullptr;
+    D3D11_TEXTURE2D_DESC stagingTextureDesc = {};
     Texture.Get()->GetDesc( &stagingTextureDesc );
     stagingTextureDesc.Width = TextureWidth;
     stagingTextureDesc.Height = TextureHeight;
@@ -210,7 +243,7 @@ XRESULT D3D11Texture::UpdateDataDeferred( void* data, int mip ) {
     stagingTextureDesc.CPUAccessFlags = D3D11_CPU_ACCESS_WRITE;
     stagingTextureDesc.Usage = D3D11_USAGE_STAGING;
 
-    D3D11_SUBRESOURCE_DATA stagingTextureData;
+    D3D11_SUBRESOURCE_DATA stagingTextureData = {};
     if ( Is16BitTexture() && !NativeSupport16BitTextures ) {
         stagingTextureData.pSysMem = ConvertTextureData( TextureWidth, TextureHeight, TextureFormat, reinterpret_cast<unsigned char*>(data) );
         stagingTextureData.SysMemPitch = GetRowPitchBytes( mip ) * 2;
@@ -279,13 +312,20 @@ bool D3D11Texture::Is16BitTexture() {
 
 /** Binds this texture to a pixelshader */
 XRESULT D3D11Texture::BindToPixelShader( int slot ) {
-    reinterpret_cast<D3D11GraphicsEngineBase*>(Engine::GraphicsEngine)->GetContext()->PSSetShaderResources( slot, 1, ShaderResourceView.GetAddressOf() );
+    auto* engine = reinterpret_cast<D3D11GraphicsEngineBase*>(Engine::GraphicsEngine);
+    if ( Engine::IsShuttingDown() || !engine || !engine->GetContext() ) {
+        return XR_FAILED;
+    }
+    engine->GetContext()->PSSetShaderResources( slot, 1, ShaderResourceView.GetAddressOf() );
     return XR_SUCCESS;
 }
 
 /** Binds this texture to a pixelshader */
 XRESULT D3D11Texture::BindToVertexShader( int slot ) {
     D3D11GraphicsEngineBase* engine = reinterpret_cast<D3D11GraphicsEngineBase*>(Engine::GraphicsEngine);
+    if ( Engine::IsShuttingDown() || !engine || !engine->GetContext() ) {
+        return XR_FAILED;
+    }
 
     engine->GetContext()->VSSetShaderResources( slot, 1, ShaderResourceView.GetAddressOf() );
 
@@ -295,6 +335,10 @@ XRESULT D3D11Texture::BindToVertexShader( int slot ) {
 /** Creates a thumbnail for this */
 XRESULT D3D11Texture::CreateThumbnail() {
     D3D11GraphicsEngineBase* engine = reinterpret_cast<D3D11GraphicsEngineBase*>(Engine::GraphicsEngine);
+    if ( Engine::IsShuttingDown() || !engine || !engine->GetDevice()
+        || !engine->GetContext() || !ShaderResourceView ) {
+        return XR_FAILED;
+    }
     HRESULT hr;
     // Since D2D can't load DXTn-Textures on Windows 7, we copy it over to a smaller texture here in d3d11
 
@@ -322,7 +366,7 @@ XRESULT D3D11Texture::CreateThumbnail() {
     // Copy main texture to it
     engine->GetContext()->PSSetShaderResources( 0, 1, ShaderResourceView.GetAddressOf() );
 
-    ID3D11RenderTargetView* oldRTV[2];
+    ID3D11RenderTargetView* oldRTV[2] = {};
     Microsoft::WRL::ComPtr<ID3D11DepthStencilView> oldDSV;
 
     engine->GetContext()->OMGetRenderTargets( 2, oldRTV, oldDSV.GetAddressOf() );
@@ -331,6 +375,11 @@ XRESULT D3D11Texture::CreateThumbnail() {
     engine->DrawQuad( INT2( 0, 0 ), INT2( 256, 256 ) );
 
     engine->GetContext()->OMSetRenderTargets( 2, oldRTV, oldDSV.Get() );
+    for ( ID3D11RenderTargetView* renderTarget : oldRTV ) {
+        if ( renderTarget ) {
+            renderTarget->Release();
+        }
+    }
 
     D3D11_SHADER_RESOURCE_VIEW_DESC srvDesc = {};
     srvDesc.Format = textureDesc.Format; // Anpassen an dein Texturformat
@@ -350,10 +399,14 @@ const Microsoft::WRL::ComPtr<ID3D11Texture2D>& D3D11Texture::GetThumbnail() {
 
 /** Generates mipmaps for this texture (may be slow!) */
 XRESULT D3D11Texture::GenerateMipMaps() {
-    if ( MipMapCount == 1 )
+    if ( MipMapCount <= 1 )
         return XR_SUCCESS;
 
     D3D11GraphicsEngineBase* engine = reinterpret_cast<D3D11GraphicsEngineBase*>(Engine::GraphicsEngine);
+    if ( Engine::IsShuttingDown() || !engine || !engine->GetDevice()
+        || !engine->GetContext() || !Texture ) {
+        return XR_FAILED;
+    }
 
     std::unique_ptr<RenderToTextureBuffer> b = std::make_unique<RenderToTextureBuffer>( engine->GetDevice().Get(), TextureSize.x, TextureSize.y,
         DXGI_FORMAT_ENGINE_DEFAULT, nullptr, DXGI_FORMAT_UNKNOWN, DXGI_FORMAT_UNKNOWN, MipMapCount );
@@ -371,8 +424,12 @@ XRESULT D3D11Texture::GenerateMipMaps() {
 }
 
 XRESULT D3D11Texture::GenerateMipMapsDeferred() {
-    if ( MipMapCount == 1 )
+    if ( MipMapCount <= 1 )
         return XR_SUCCESS;
+
+    if ( Engine::IsShuttingDown() || !Engine::GAPI || !Texture ) {
+        return XR_FAILED;
+    }
 
     Engine::GAPI->AddMipMapGeneration( this );
 

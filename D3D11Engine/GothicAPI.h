@@ -620,6 +620,9 @@ public:
     /** Resets only the vobs */
     void ResetVobs();
 
+    /** Stops renderer work and drops all references into Gothic's world. */
+    void PrepareForShutdown();
+
     /** Releases pointlight shadow resources. */
     void ReleasePointlightShadowResources();
 

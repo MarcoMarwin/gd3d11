@@ -531,8 +531,11 @@ XRESULT D3D11ShadowMap::PrepareRender()
         }
     }
 
-    zCCamera* camera = (zCCamera*)oCGame::GetGame()->_zCSession_camera;
-    if ( !camera ) {
+    oCGame* game = oCGame::GetGame();
+    zCCamera* camera = game ? reinterpret_cast<zCCamera*>(game->_zCSession_camera) : nullptr;
+    auto* worldInfo = Engine::GAPI->GetLoadedWorldInfo();
+    if ( !camera || !worldInfo || !worldInfo->BspTree
+        || !Engine::GAPI->IsWorldRenderCacheReady() ) {
         return XR_SUCCESS;
     }
     camera->Activate();
@@ -629,7 +632,7 @@ XRESULT D3D11ShadowMap::PrepareRender()
     static zTBspMode lastBspMode = zBSP_MODE_OUTDOOR;
 
     // Array fuer alle Cascade-Matrizen
-    bool isOutdoor = Engine::GAPI->GetLoadedWorldInfo()->BspTree->GetBspTreeMode() == zBSP_MODE_OUTDOOR;
+    bool isOutdoor = worldInfo->BspTree->GetBspTreeMode() == zBSP_MODE_OUTDOOR;
 
     const FXMVECTOR p = WorldShadowCP + dir * 10000.0f;
     const FXMVECTOR lookAt = WorldShadowCP;
@@ -678,9 +681,9 @@ XRESULT D3D11ShadowMap::PrepareRender()
         }
 
         Frustum playerFrustum = Frustum::AlwaysContainingFrustum();
-        if ( auto cam = (zCCamera*)oCGame::GetGame()->_zCSession_camera ) {
-            const auto& view = cam->trafoView; // Column-Major, needs Transpose for DxMath
-            const auto& proj = cam->trafoProjection; // Row-Major, does not need transpose.
+        if ( camera ) {
+            const auto& view = camera->trafoView; // Column-Major, needs Transpose for DxMath
+            const auto& proj = camera->trafoProjection; // Row-Major, does not need transpose.
             playerFrustum.BuildPerspective(
                 XMMatrixTranspose( XMLoadFloat4x4( &view ) ),
                 XMLoadFloat4x4( &proj )
@@ -1555,6 +1558,11 @@ void D3D11ShadowMap::RenderShadowmaps( const RenderShadowmapsParams& params ) {
 }
 
 DS_ScreenQuadConstantBuffer D3D11ShadowMap::FillSunCSMConstantBuffer() const {
+    DS_ScreenQuadConstantBuffer scb = {};
+    if ( Engine::IsShuttingDown() || !Engine::GAPI ) {
+        return scb;
+    }
+
     auto& settings = Engine::GAPI->GetRendererState().RendererSettings;
 
     XMMATRIX viewRaw = Engine::GAPI->GetViewMatrixXM();
@@ -1562,7 +1570,6 @@ DS_ScreenQuadConstantBuffer D3D11ShadowMap::FillSunCSMConstantBuffer() const {
 
     auto& proj = Engine::GAPI->GetProjectionMatrix();
 
-    DS_ScreenQuadConstantBuffer scb = {};
     scb.SQ_ProjParams = float4( 1.0f / proj._11, 1.0f / proj._22, proj._43, proj._33 );
     scb.SQ_JitterOffset = float2( proj._13 * 0.5f, -proj._23 * 0.5f );
     XMStoreFloat4x4( &scb.SQ_InvView, XMMatrixInverse( nullptr, viewRaw ) );
@@ -1606,9 +1613,12 @@ DS_ScreenQuadConstantBuffer D3D11ShadowMap::FillSunCSMConstantBuffer() const {
         }
     }
 
-    XMStoreFloat4x4( &scb.SQ_RainViewProj,
-        XMLoadFloat4x4( &reinterpret_cast<D3D11GraphicsEngine*>( Engine::GraphicsEngine )->Effects->GetRainShadowmapCameraRepl().ProjectionReplacement ) *
-        XMLoadFloat4x4( &reinterpret_cast<D3D11GraphicsEngine*>( Engine::GraphicsEngine )->Effects->GetRainShadowmapCameraRepl().ViewReplacement ) );
+    auto* graphicsEngine = dynamic_cast<D3D11GraphicsEngine*>( Engine::GraphicsEngine );
+    if ( graphicsEngine && graphicsEngine->Effects ) {
+        XMStoreFloat4x4( &scb.SQ_RainViewProj,
+            XMLoadFloat4x4( &graphicsEngine->Effects->GetRainShadowmapCameraRepl().ProjectionReplacement ) *
+            XMLoadFloat4x4( &graphicsEngine->Effects->GetRainShadowmapCameraRepl().ViewReplacement ) );
+    }
 
     scb.SQ_ShadowStrength = settings.ShadowStrength;
     scb.SQ_ShadowAOStrength = settings.ShadowAOStrength;
@@ -1618,10 +1628,12 @@ DS_ScreenQuadConstantBuffer D3D11ShadowMap::FillSunCSMConstantBuffer() const {
     scb.SQ_ShadowRuntimeParams = float4(
         settings.GetUsesTemporalReconstruction() ? 1.0f : 0.0f,
         static_cast<float>( settings.GetShadowKernelQuality() ), 0.0f, 0.0f );
-    if ( auto bspTree = Engine::GAPI->GetLoadedWorldInfo()->BspTree )
+    WorldInfo* worldInfo = Engine::GAPI->GetLoadedWorldInfo();
+    if ( worldInfo && worldInfo->BspTree ) {
+        auto bspTree = worldInfo->BspTree;
         if ( bspTree->GetBspTreeMode() == zBSP_MODE_INDOOR ) {
 #if BUILD_GOTHIC_1_08k
-            if ( Engine::GAPI->GetLoadedWorldInfo()->WorldName == "ORCTEMPEL" )
+            if ( worldInfo->WorldName == "ORCTEMPEL" )
                 scb.SQ_ShadowStrength = 0.15f;
             else
                 scb.SQ_ShadowStrength = 0.3f;
@@ -1631,6 +1643,7 @@ DS_ScreenQuadConstantBuffer D3D11ShadowMap::FillSunCSMConstantBuffer() const {
             scb.SQ_WorldAOStrength = 1.0f;
             scb.SQ_LightColor = float4( 1, 1, 1, DEFAULT_INDOOR_VOB_AMBIENT.x );
         }
+    }
 
     return scb;
 }
@@ -1638,8 +1651,10 @@ DS_ScreenQuadConstantBuffer D3D11ShadowMap::FillSunCSMConstantBuffer() const {
 XRESULT D3D11ShadowMap::DrawWorldLights()
 {
     auto graphicsEngine = reinterpret_cast<D3D11GraphicsEngine*>(Engine::GraphicsEngine);
+    WorldInfo* worldInfo = Engine::GAPI ? Engine::GAPI->GetLoadedWorldInfo() : nullptr;
     if ( !graphicsEngine || !m_context || !Engine::GAPI || Engine::IsShuttingDown()
         || !Engine::GAPI->IsWorldRenderCacheReady()
+        || !worldInfo || !worldInfo->BspTree
         || !graphicsEngine->Effects || !graphicsEngine->GetPfxRenderer()
         || !Engine::GAPI->GetSky() ) {
         return XR_FAILED;
@@ -1756,12 +1771,12 @@ XRESULT D3D11ShadowMap::DrawWorldLights()
         settings.GetUsesTemporalReconstruction() ? 1.0f : 0.0f,
         static_cast<float>( settings.GetShadowKernelQuality() ), 0.0f, 0.0f );
     // Modify lightsettings when indoor
-    if ( auto bspTree = Engine::GAPI->GetLoadedWorldInfo()->BspTree )
+    if ( auto bspTree = worldInfo->BspTree )
         if ( bspTree->GetBspTreeMode() == zBSP_MODE_INDOOR ) {
             // TODO: fix caves in Gothic 1 being way too dark. Remove this workaround.
 #if BUILD_GOTHIC_1_08k
             // Kirides: Nah, just make it dark enough.
-            if ( Engine::GAPI->GetLoadedWorldInfo()->WorldName == "ORCTEMPEL" )
+            if ( worldInfo->WorldName == "ORCTEMPEL" )
                 scb.SQ_ShadowStrength = 0.15f;
             else
                 scb.SQ_ShadowStrength = 0.3f;

@@ -6,7 +6,10 @@
 
 FakeDirectDrawSurface7::FakeDirectDrawSurface7() : 
     RefCount(0),
-    Data(nullptr) {
+    MipLevel(0),
+    Data(nullptr),
+    OriginalDesc{},
+    Resource(nullptr) {
 }
 
 
@@ -169,13 +172,22 @@ HRESULT FakeDirectDrawSurface7::IsLost() {
 
 HRESULT FakeDirectDrawSurface7::Lock( LPRECT lpDestRect, LPDDSURFACEDESC2 lpDDSurfaceDesc, DWORD dwFlags, HANDLE hEvent ) {
     DebugWrite( "FakeDirectDrawSurface7(%p)::Lock(%s, %s)" );
+    if ( !lpDDSurfaceDesc ) {
+        return DDERR_INVALIDPARAMS;
+    }
     *lpDDSurfaceDesc = OriginalDesc;
+
+    D3D11Texture* texture = Resource ? Resource->GetEngineTexture() : nullptr;
+    if ( Engine::IsShuttingDown() || !texture ) {
+        lpDDSurfaceDesc->lpSurface = nullptr;
+        return S_OK;
+    }
 
     // Allocate some temporary data
     delete [] Data;
-    Data = new unsigned char[Resource->GetEngineTexture()->GetSizeInBytes( MipLevel )];
+    Data = new unsigned char[texture->GetSizeInBytes( MipLevel )];
     lpDDSurfaceDesc->lpSurface = Data;
-    lpDDSurfaceDesc->lPitch = Resource->GetEngineTexture()->GetRowPitchBytes( MipLevel );
+    lpDDSurfaceDesc->lPitch = texture->GetRowPitchBytes( MipLevel );
 
     int px = (OriginalDesc.dwWidth >> MipLevel);
     int py = (OriginalDesc.dwHeight >> MipLevel);
@@ -189,10 +201,18 @@ HRESULT FakeDirectDrawSurface7::Lock( LPRECT lpDestRect, LPDDSURFACEDESC2 lpDDSu
 HRESULT FakeDirectDrawSurface7::Unlock( LPRECT lpRect ) {
     DebugWrite( "FakeDirectDrawSurface7::Unlock" );
 
+    D3D11Texture* texture = Resource ? Resource->GetEngineTexture() : nullptr;
+    if ( Engine::IsShuttingDown() || !Engine::GAPI || !Engine::GraphicsEngine
+        || !texture || !Data ) {
+        delete [] Data;
+        Data = nullptr;
+        return S_OK;
+    }
+
     if ( Engine::GAPI->GetMainThreadID() != GetCurrentThreadId() ) {
-        Resource->GetEngineTexture()->UpdateDataDeferred( Data, MipLevel );
+        texture->UpdateDataDeferred( Data, MipLevel );
     } else {
-        Resource->GetEngineTexture()->UpdateData( Data, MipLevel );
+        texture->UpdateData( Data, MipLevel );
     }
 
     delete [] Data;

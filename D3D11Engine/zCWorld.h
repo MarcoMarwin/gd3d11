@@ -122,7 +122,7 @@ public:
         GothicAPI* gapi = Engine::GAPI;
         auto* worldInfo = gapi ? gapi->GetLoadedWorldInfo() : nullptr;
         // Reset only if this is the main world; inventory worlds are handled differently.
-        if ( !Engine::IsShuttingDown() && worldInfo && thisptr == worldInfo->MainWorld ) {
+        if ( worldInfo && thisptr == worldInfo->MainWorld ) {
             gapi->ResetVobs();
         }
         HookedFunctions::OriginalFunctions.original_zCWorldDisposeVobs( thisptr, tree );

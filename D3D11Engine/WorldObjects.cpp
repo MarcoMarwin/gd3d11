@@ -88,7 +88,7 @@ float VobLightInfo::GetEffectiveLightIntensity() const {
             time, 5.20f, RendererLightFlickerPhase * 1.73f, 0xC8013EA4u );
         const float shimmer = SampleFlickerNoise(
             time, 11.50f, RendererLightFlickerPhase * 2.41f, 0xAD90777Du );
-        flicker += 0.055f * slow + 0.020f * fast + 0.008f * shimmer;
+        flicker += 0.100f * slow + 0.035f * fast + 0.012f * shimmer;
     }
     return std::max( 0.0f, RendererLightIntensity * flicker );
 }

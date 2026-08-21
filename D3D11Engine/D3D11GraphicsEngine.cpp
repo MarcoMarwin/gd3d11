@@ -2310,10 +2310,12 @@ XRESULT D3D11GraphicsEngine::OnBeginFrame() {
     for ( auto& [res, texture] : stagingTextures ) {
         if ( !texture || !res.second ) {
             if ( res.second ) res.second->Release();
+            if ( texture ) texture->Release();
             continue;
         }
         GetContext()->CopySubresourceRegion( texture, res.first, 0, 0, 0, res.second, 0, nullptr );
         res.second->Release();
+        texture->Release();
     }
     stagingTextures.clear();
 
@@ -4819,9 +4821,13 @@ XRESULT D3D11GraphicsEngine::OnStartWorldRendering() {
             if ( !Engine::GAPI->GetRendererState().RendererSettings.DrawParticleEffects ) {
                 return;
             }
+            zCCamera* camera = zCCamera::GetCamera();
+            if ( !camera ) {
+                return;
+            }
             TracyD3D11ZoneCGX( "D3D11GraphicsEngine::Draw ParticleFX #1" );
             std::vector<zCVob*> decals;
-            zCCamera::GetCamera()->Activate();
+            camera->Activate();
             // Camera->Activate breaks viewport
             SetViewport( ViewportInfo( 0, 0, GetResolution() ) );
 
@@ -5331,12 +5337,16 @@ XRESULT D3D11GraphicsEngine::OnStartWorldRendering() {
             builder.Write( backBufferHandle );
 
             pass.m_executeCallback = [this](const RenderGraph&) {
+                zCCamera* camera = zCCamera::GetCamera();
+                if ( !camera ) {
+                    return;
+                }
                 TracyD3D11ZoneCGX( "D3D11GraphicsEngine::Draw ParticleFX #2" );
 
                 // Draw unlit decals
                 // TODO: Only get them once!
                 std::vector<zCVob*> decals;
-                zCCamera::GetCamera()->Activate();
+                camera->Activate();
                 // Camera->Activate breaks viewport
                 SetViewport( ViewportInfo( 0, 0, GetResolution() ) );
 
@@ -9433,11 +9443,23 @@ void D3D11GraphicsEngine::SetDefaultStates( bool force ) {
 
 /** Draws the sky using the GSky-Object */
 XRESULT D3D11GraphicsEngine::DrawSky() {
+    if ( Engine::IsShuttingDown() || !Engine::GAPI || !Context ) {
+        return XR_FAILED;
+    }
+    WorldInfo* worldInfo = Engine::GAPI->GetLoadedWorldInfo();
+    zCWorld* loadedWorld = worldInfo ? worldInfo->MainWorld : nullptr;
+    zCSkyController_Outdoor* outdoorSky = loadedWorld ? loadedWorld->GetSkyControllerOutdoor() : nullptr;
     GSky* sky = Engine::GAPI->GetSky();
+    if ( !sky || !loadedWorld ) {
+        return XR_FAILED;
+    }
     sky->RenderSky();
 
     auto& rendererState = Engine::GAPI->GetRendererState();
     if ( !rendererState.RendererSettings.AtmosphericScattering ) {
+        if ( !outdoorSky ) {
+            return XR_FAILED;
+        }
         // for engine sky to work with z-buffer after Geometry, we need to override Z-buffer usage and set custom TransformXYZRHW to always set max Z
         auto oldStage = rendererState.RendererInfo.RenderStage;
         rendererState.RendererInfo.RenderStage = STAGE_DRAW_SKY;
@@ -9457,14 +9479,14 @@ XRESULT D3D11GraphicsEngine::DrawSky() {
 
 #if defined(BUILD_GOTHIC_1_08k) && !defined(BUILD_1_12F)
         // Draw sky first
-        reinterpret_cast<void( __fastcall* )(zCSkyController_Outdoor*)>(0x5C0900)(Engine::GAPI->GetLoadedWorldInfo()->MainWorld->GetSkyControllerOutdoor());
+        reinterpret_cast<void( __fastcall* )(zCSkyController_Outdoor*)>(0x5C0900)(outdoorSky);
 
         // Draw barrier second
-        reinterpret_cast<void( __fastcall* )(zCSkyController_Outdoor*)>(0x632140)(Engine::GAPI->GetLoadedWorldInfo()->MainWorld->GetSkyControllerOutdoor());
+        if ( outdoorSky ) {
+            reinterpret_cast<void( __fastcall* )(zCSkyController_Outdoor*)>(0x632140)(outdoorSky);
+        }
 #else
-        Engine::GAPI->GetLoadedWorldInfo()
-            ->MainWorld->GetSkyControllerOutdoor()
-            ->RenderSkyPre();
+        outdoorSky->RenderSkyPre();
 #endif
         Engine::GAPI->SetFarPlane(
             rendererState.RendererSettings.SectionDrawRadius *
@@ -9498,6 +9520,10 @@ XRESULT D3D11GraphicsEngine::DrawSky() {
     }
 
     SetActiveVertexShader( VShaderID::VS_ExWS );
+
+    if ( !ActivePS || !ActiveVS ) {
+        return XR_FAILED;
+    }
 
     ActivePS->GetBuffer("Atmosphere")
         .Update(&sky->GetAtmosphereCB())
@@ -9567,7 +9593,9 @@ XRESULT D3D11GraphicsEngine::DrawSky() {
         UpdateRenderStates();
 
         // Draw barrier after sky
-        reinterpret_cast<void( __fastcall* )(zCSkyController_Outdoor*)>(0x632140)(Engine::GAPI->GetLoadedWorldInfo()->MainWorld->GetSkyControllerOutdoor());
+        if ( outdoorSky ) {
+            reinterpret_cast<void( __fastcall* )(zCSkyController_Outdoor*)>(0x632140)(outdoorSky);
+        }
         Engine::GAPI->SetFarPlane(
             rendererState.RendererSettings.SectionDrawRadius *
             WORLD_SECTION_SIZE );
@@ -9761,14 +9789,17 @@ void D3D11GraphicsEngine::UpdateClipCursor( HWND hWnd )
         return;
     }
 
-    RECT rect;
-    static RECT last_clipped_rect;
+    RECT rect = {};
+    static RECT last_clipped_rect = {};
 
     // People use open settings window to navigate to other screens
     if ( m_isWindowActive && !HasSettingsWindow() ) {
-        GetClientRect( hWnd, &rect );
-        ClientToScreen( hWnd, reinterpret_cast<LPPOINT>(&rect) + 0 );
-        ClientToScreen( hWnd, reinterpret_cast<LPPOINT>(&rect) + 1 );
+        if ( !IsWindow( hWnd ) || !GetClientRect( hWnd, &rect )
+            || !ClientToScreen( hWnd, reinterpret_cast<LPPOINT>(&rect) )
+            || !ClientToScreen( hWnd, reinterpret_cast<LPPOINT>(&rect) + 1 ) ) {
+            ClipCursor( nullptr );
+            return;
+        }
         if ( ClipCursor( &rect ) ) {
             last_clipped_rect = rect;
         }
@@ -10982,9 +11013,9 @@ void D3D11GraphicsEngine::DrawString( const std::string& str, float x, float y, 
 
     float UIScale = 1.0f;
     static int savedBarSize = -1;
-    if ( oCGame::GetGame() ) {
+    if ( oCGame* game = oCGame::GetGame(); game && game->swimBar ) {
         if ( savedBarSize == -1 ) {
-            savedBarSize = oCGame::GetGame()->swimBar->psizex;
+            savedBarSize = game->swimBar->psizex;
         }
         UIScale = static_cast<float>(savedBarSize) / 180.f;
     }

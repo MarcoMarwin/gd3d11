@@ -22,6 +22,7 @@ MyDirectDrawSurface7::MyDirectDrawSurface7() {
     IsReady = false;
     TextureType = ETextureType::TX_UNDEF;
     LockType = 0;
+    ZeroMemory( &OriginalSurfaceDesc, sizeof( OriginalSurfaceDesc ) );
 
     // Check for test-bind mode to figure out what zCTexture-Object we are associated with
     std::string bound;
@@ -72,6 +73,10 @@ D3D11Texture* MyDirectDrawSurface7::GetDisplacementmap() {
 
 /** Binds this texture */
 void MyDirectDrawSurface7::BindToSlot( int slot ) {
+    if ( Engine::IsShuttingDown() || !Engine::GraphicsEngine ) {
+        return;
+    }
+
     if ( !IsReady ) {
         Engine::GraphicsEngine->UnbindTexture( 0 );
         return; // Don't bind half-loaded textures!
@@ -91,6 +96,10 @@ void MyDirectDrawSurface7::BindToSlot( int slot ) {
 
 /** Loads additional resources if possible */
 void MyDirectDrawSurface7::LoadAdditionalResources( zCTexture* ownedTexture ) {
+    if ( Engine::IsShuttingDown() || !Engine::GAPI || !Engine::GraphicsEngine || !ownedTexture ) {
+        return;
+    }
+
     if ( !GothicTexture ) {
         GothicTexture = ownedTexture;
         TextureName = GothicTexture->GetNameWithoutExtView();
@@ -425,6 +434,10 @@ HRESULT MyDirectDrawSurface7::IsLost() {
 HRESULT MyDirectDrawSurface7::Lock( LPRECT lpDestRect, LPDDSURFACEDESC2 lpDDSurfaceDesc, DWORD dwFlags, HANDLE hEvent ) {
     DebugWriteTex( "IDirectDrawSurface7(%p)::Lock()" );
 
+    if ( !lpDDSurfaceDesc ) {
+        return DDERR_INVALIDPARAMS;
+    }
+
     LockType = dwFlags;
 
     *lpDDSurfaceDesc = OriginalSurfaceDesc;
@@ -469,8 +482,10 @@ HRESULT MyDirectDrawSurface7::Lock( LPRECT lpDestRect, LPDDSURFACEDESC2 lpDDSurf
         return S_OK;
     }
 
-    if ( !EngineTexture )
+    if ( !EngineTexture || Engine::IsShuttingDown() ) {
+        lpDDSurfaceDesc->lpSurface = nullptr;
         return S_OK;
+    }
 
     // Check for 16-bit surface. We allocate the texture as 32-bit, so we need to divide the size by two for that
     int redBits = Toolbox::GetNumberOfBits( OriginalSurfaceDesc.ddpfPixelFormat.dwRBitMask );
@@ -511,7 +526,8 @@ HRESULT MyDirectDrawSurface7::Unlock( LPRECT lpRect ) {
         return S_OK;
     }
 
-    if ( !Engine::GAPI || Engine::IsShuttingDown() ) {
+    if ( !Engine::GAPI || !Engine::GraphicsEngine || !EngineTexture
+        || !LockedData || Engine::IsShuttingDown() ) {
         delete[] LockedData;
         LockedData = nullptr;
         return S_OK;

@@ -1468,6 +1468,21 @@ void GothicAPI::ResetWorld() {
     // Clear inventory too?
 }
 
+void GothicAPI::PrepareForShutdown() {
+    WorldRenderCacheReady.store( false, std::memory_order_release );
+    CameraReplacementPtr = nullptr;
+    CurrentCamera = nullptr;
+
+    // ResetWorld drains renderer jobs before deleting any cache entries. This
+    // must happen before Gothic begins destroying the world behind those raw
+    // pointers.
+    ResetWorld();
+    if ( LoadedWorldInfo ) {
+        LoadedWorldInfo->MainWorld = nullptr;
+        LoadedWorldInfo->BspTree = nullptr;
+    }
+}
+
 void GothicAPI::ReloadVobs() {
     ResetVobs();
     OnWorldLoaded();
@@ -1529,6 +1544,9 @@ void GothicAPI::ResetVobs() {
         ~ResetGuard() { flag.store( false, std::memory_order_release ); }
     } resetGuard{ ResettingVobs };
 
+    CameraReplacementPtr = nullptr;
+    CurrentCamera = nullptr;
+
     if ( LoadedWorldInfo ) {
         // Do not publish the world while its renderer data is being dismantled.
         LoadedWorldInfo->MainWorld = nullptr;
@@ -1547,9 +1565,18 @@ void GothicAPI::ResetVobs() {
         if ( res.second ) {
             res.second->Release();
         }
+        if ( texture ) {
+            texture->Release();
+        }
     }
     FrameStagingTextures.clear();
     FrameMipMapGenerations.clear();
+    for ( MyDirectDrawSurface7* surface : FrameLoadedTextures ) {
+        if ( surface ) {
+            surface->Release();
+        }
+    }
+    FrameLoadedTextures.clear();
     LeaveResourceCriticalSection();
     // Delete light vobs, those depend on world sections and load stuff in the background.
     // by deleting them first we block the thread until the destructor finished
@@ -1658,14 +1685,15 @@ void GothicAPI::OnGeometryLoaded( zCBspTree* tree ) {
 void GothicAPI::OnLoadWorld( const std::string& levelName, int loadMode ) {
     // Keep renderer hooks on Gothic's path until the new world cache is ready.
     WorldRenderCacheReady.store( false, std::memory_order_release );
-    ReleasePointlightResources();
-    if ( LoadedWorldInfo ) {
-        LoadedWorldInfo->MainWorld = nullptr;
-    }
     if ( !LoadedWorldInfo ) {
         LogError() << "World load skipped because renderer world state is unavailable.";
         return;
     }
+
+    // Clear every renderer-owned reference while the old Gothic world is
+    // still valid. MainWorld is nulled by ResetVobs; waiting until DisposeVobs
+    // would otherwise lose the identity needed to recognize the main world.
+    ResetVobs();
 
     _canClearVobsByVisual = true;
     if ( (loadMode == zWLD_LOAD_GAME_STARTUP || loadMode == zWLD_LOAD_GAME_SAVED_STAT) ) {
@@ -1902,6 +1930,10 @@ void GothicAPI::SaveRendererGlobalSettings( const GothicRendererSettings& s, con
 }
 /** Goes through the given zCTree and registers all found vobs */
 void GothicAPI::TraverseVobTree( zCTree<zCVob>* tree ) {
+    if ( !tree ) {
+        return;
+    }
+
     // Iterate through the nodes
     if ( tree->FirstChild != nullptr ) {
         TraverseVobTree( tree->FirstChild );
@@ -1913,8 +1945,9 @@ void GothicAPI::TraverseVobTree( zCTree<zCVob>* tree ) {
 
     // Add the vob if it exists and has a visual
     if ( tree->Data ) {
-        if ( tree->Data->GetVisual() )
-            OnAddVob( tree->Data, oCGame::GetGame()->_zCSession_world );
+        oCGame* game = oCGame::GetGame();
+        if ( tree->Data->GetVisual() && game && game->_zCSession_world )
+            OnAddVob( tree->Data, game->_zCSession_world );
     }
 }
 
@@ -2345,7 +2378,8 @@ void GothicAPI::GetVisibleParticleEffectsList( std::vector<zCVob*>& pfxList ) {
     if ( RendererState.RendererSettings.DrawParticleEffects ) {
         FXMVECTOR camPos = GetCameraPositionXM();
 
-        auto sceneCam = reinterpret_cast<zCCamera*>(oCGame::GetGame()->_zCSession_camera);
+        oCGame* game = oCGame::GetGame();
+        auto sceneCam = game ? reinterpret_cast<zCCamera*>(game->_zCSession_camera) : nullptr;
         if ( !sceneCam ) {
             // No camera??
             return;
@@ -2513,15 +2547,39 @@ void GothicAPI::OnVobMoved( zCVob* vob ) {
 
 /** Called when a visual got removed */
 void GothicAPI::OnVisualDeleted( zCVisual* visual ) {
+    if ( !visual ) {
+        return;
+    }
+
+    if ( !ResettingVobs.load( std::memory_order_acquire )
+        && GetCurrentThreadId() == MainThreadID && Engine::WorkerThreadPool ) {
+        Engine::WorkerThreadPool->clearAndFlush();
+    }
+
     std::vector<std::string> extv;
 
     zCClassDef* classDef = reinterpret_cast<zCObject*>(visual)->_GetClassDef();
-    const char* className = classDef->className.ToChar();
+    const char* className = classDef ? classDef->className.ToChar() : "";
+
+    // Some cleanup branches below delete BaseVobInfo objects. Preserve only
+    // their Gothic VOB pointers and detach the owning lookup before that work.
+    std::vector<zCVob*> visualVobs;
+    auto visualIt = VobsByVisual.find( visual );
+    if ( visualIt != VobsByVisual.end() ) {
+        visualVobs.reserve( visualIt->second.size() );
+        for ( BaseVobInfo* info : visualIt->second ) {
+            if ( info && info->Vob )
+                visualVobs.push_back( info->Vob );
+        }
+        VobsByVisual.erase( visualIt );
+    }
 
     // Get the visuals possible file extensions
     int e = 0;
-    while ( strlen( visual->GetFileExtension( e ) ) > 0 ) {
-        extv.push_back( visual->GetFileExtension( e ) );
+    while ( const char* extension = visual->GetFileExtension( e ) ) {
+        if ( !extension[0] )
+            break;
+        extv.emplace_back( extension );
         e++;
     }
 
@@ -2618,21 +2676,17 @@ void GothicAPI::OnVisualDeleted( zCVisual* visual ) {
         }
     }
 
-    // Clear
-    auto& list = VobsByVisual[visual];
     if ( _canClearVobsByVisual ) {
-        for ( auto const& it : list ) {
-            OnRemovedVob( it->Vob, LoadedWorldInfo->MainWorld );
+        zCWorld* mainWorld = LoadedWorldInfo ? LoadedWorldInfo->MainWorld : nullptr;
+        for ( zCVob* vob : visualVobs ) {
+            OnRemovedVob( vob, mainWorld );
         }
     }
-    if ( list.size() > 0 ) {
+    if ( !visualVobs.empty() ) {
 #ifndef PUBLIC_RELEASE
         if ( RendererState.RendererSettings.EnableDebugLog )
-            LogInfo() << std::string( className ) << " had " + std::to_string( list.size() ) << " vobs";
+            LogInfo() << std::string( className ) << " had " + std::to_string( visualVobs.size() ) << " vobs";
 #endif
-
-        VobsByVisual[visual].clear();
-        VobsByVisual.erase( visual );
     }
 }
 /** Draws a MeshInfo */
@@ -2696,6 +2750,10 @@ void GothicAPI::OnRemovedVob( zCVob* vob, zCWorld* world ) {
     if ( it == RegisteredVobs.end() ) {
         // Not registered
         return;
+    }
+
+    if ( GetCurrentThreadId() == MainThreadID && Engine::WorkerThreadPool ) {
+        Engine::WorkerThreadPool->clearAndFlush();
     }
 
     RegisteredVobs.erase( it );
@@ -2965,7 +3023,8 @@ void GothicAPI::OnRemovedVob( zCVob* vob, zCWorld* world ) {
 
 /** Called on a SetVisual-Call of a vob */
 void GothicAPI::OnSetVisual( zCVob* vob ) {
-    if ( !oCGame::GetGame() || !oCGame::GetGame()->_zCSession_world || !vob->GetHomeWorld() )
+    if ( !vob || !oCGame::GetGame() || !oCGame::GetGame()->_zCSession_world
+        || !vob->GetHomeWorld() )
         return;
 
     // Add the vob to the set
@@ -2984,7 +3043,24 @@ void GothicAPI::OnSetVisual( zCVob* vob ) {
 
 /** Called when a VOB got added to the BSP-Tree */
 void GothicAPI::OnAddVob( zCVob* vob, zCWorld* world ) {
-    if ( !vob->GetVisual() ) return; // Don't need it if we can't render it
+    if ( !vob || !vob->GetVisual() ) return; // Don't need it if we can't render it
+
+    zCVisual* visual = vob->GetVisual();
+    zCClassDef* classDef = reinterpret_cast<zCObject*>(visual)->_GetClassDef();
+    const char* className = classDef ? classDef->className.ToChar() : nullptr;
+    if ( !className ) {
+        return;
+    }
+
+    oCGame* game = oCGame::GetGame();
+    zCWorld* mainWorld = game ? game->_zCSession_world : nullptr;
+    if ( !world ) {
+        world = mainWorld;
+    }
+    if ( !world ) {
+        return;
+    }
+
 #ifdef BUILD_SPACER
     if ( strncmp( vob->GetVisual()->GetObjectName(), "INVISIBLE_", strlen( "INVISIBLE_" ) ) == 0 )
         return;
@@ -2995,21 +3071,22 @@ void GothicAPI::OnAddVob( zCVob* vob, zCWorld* world ) {
         // Already got that
         return;
     }
-    RegisteredVobs.insert( vob );
 
-    zCClassDef* classDef = reinterpret_cast<zCObject*>(vob->GetVisual())->_GetClassDef();
-    const char* className = classDef->className.ToChar();
+    if ( IsWorldRenderCacheReady() && GetCurrentThreadId() == MainThreadID
+        && Engine::WorkerThreadPool ) {
+        Engine::WorkerThreadPool->clearAndFlush();
+    }
+    RegisteredVobs.insert( vob );
 
     std::vector<std::string> extv;
 
     int e = 0;
-    while ( strlen( vob->GetVisual()->GetFileExtension( e ) ) > 0 ) {
-        extv.push_back( vob->GetVisual()->GetFileExtension( e ) );
+    while ( const char* extension = visual->GetFileExtension( e ) ) {
+        if ( !extension[0] )
+            break;
+        extv.emplace_back( extension );
         e++;
     }
-
-    if ( !world )
-        world = oCGame::GetGame()->_zCSession_world;
 
     if ( strcmp( className, "zCPolyStrip" ) == 0 ) {
         PolyStripVisuals.insert( reinterpret_cast<zCPolyStrip*>(vob->GetVisual()) );
@@ -3050,7 +3127,7 @@ void GothicAPI::OnAddVob( zCVob* vob, zCWorld* world ) {
             VobsByVisual[vob->GetVisual()].push_back( vi );
 
             // Check for mainworld
-            if ( world == oCGame::GetGame()->_zCSession_world ) {
+            if ( world == mainWorld ) {
                 VobMap[vob] = vi;
 
                 vi->VobSection = &WorldSections[section.x][section.y];
@@ -3071,7 +3148,7 @@ void GothicAPI::OnAddVob( zCVob* vob, zCWorld* world ) {
             break;
         } else if ( ext == ".MDS" || ext == ".ASC" ) {
             // Some mods use MDS/ASC models for inventory
-            if ( world != oCGame::GetGame()->_zCSession_world ) {
+            if ( world != mainWorld ) {
                 // Cast to zCProgMeshProto only to make it work with StaticMeshVisuals
                 zCProgMeshProto* pm = static_cast<zCProgMeshProto*>(vob->GetVisual());
 
@@ -3108,7 +3185,7 @@ void GothicAPI::OnAddVob( zCVob* vob, zCWorld* world ) {
             XMStoreFloat4x4( &vi->WorldMatrix, vob->GetWorldMatrixXM() );
 
             // Check for mainworld
-            if ( world == oCGame::GetGame()->_zCSession_world ) {
+            if ( world == mainWorld ) {
                 SkeletalMeshVobs.push_back( vi );
                 SkeletalVobMap[vob] = vi;
 
@@ -4419,11 +4496,20 @@ bool GothicAPI::TraceWorldMesh( const XMFLOAT3& origin, const XMFLOAT3& dir, XMF
 
 /** Unprojects a pixel-position on the screen */
 void XM_CALLCONV GothicAPI::UnprojectXM(float2 p, XMVECTOR& worldPos, XMVECTOR& worldDir) {
-    
+    worldPos = g_XMZero;
+    worldDir = g_XMZero;
+    if ( Engine::IsShuttingDown() || !Engine::GraphicsEngine ) {
+        return;
+    }
+
     const auto res = Engine::GraphicsEngine->GetBackbufferResolution();
+    zCCamera* camera = zCCamera::GetCamera();
+    if ( !camera || res.x <= 0 || res.y <= 0 ) {
+        return;
+    }
 
     XMMATRIX proj    = XMMatrixTranspose(XMLoadFloat4x4(&RendererState.TransformState.TransformProj));
-    XMMATRIX invView = XMMatrixTranspose(XMLoadFloat4x4(&zCCamera::GetCamera()->GetTransformDX( zCCamera::ETransformType::TT_VIEW_INV )));
+    XMMATRIX invView = XMMatrixTranspose(XMLoadFloat4x4(&camera->GetTransformDX( zCCamera::ETransformType::TT_VIEW_INV )));
 
     const float ux = (((2.0f * p.x) / res.x) - 1.0f) / XMVectorGetX(proj.r[0]);
     const float uy = -(((2.0f * p.y) / res.y) - 1.0f) / XMVectorGetY(proj.r[1]);
@@ -4449,29 +4535,24 @@ XMVECTOR GothicAPI::UnprojectCursorXM() {
 
 /** Returns the current cameraposition */
 XMFLOAT3 GothicAPI::GetCameraPosition() {
-    if ( !oCGame::GetGame()->_zCSession_camVob )
-        return XMFLOAT3( 0, 0, 0 );
-
     if ( CameraReplacementPtr )
         return CameraReplacementPtr->PositionReplacement;
 
-    return oCGame::GetGame()->_zCSession_camVob->GetPositionWorld();
+    oCGame* game = oCGame::GetGame();
+    zCVob* cameraVob = game ? game->_zCSession_camVob : nullptr;
+    return cameraVob ? cameraVob->GetPositionWorld() : XMFLOAT3( 0, 0, 0 );
 }
 /** Returns the current cameraposition */
 FXMVECTOR GothicAPI::GetCameraPositionXM() {
-    if ( !oCGame::GetGame()->_zCSession_camVob )
-        return g_XMZero;
-
     if ( CameraReplacementPtr )
         return XMLoadFloat3( &CameraReplacementPtr->PositionReplacement );
 
-    return oCGame::GetGame()->_zCSession_camVob->GetPositionWorldXM();
+    oCGame* game = oCGame::GetGame();
+    zCVob* cameraVob = game ? game->_zCSession_camVob : nullptr;
+    return cameraVob ? cameraVob->GetPositionWorldXM() : g_XMZero;
 }
 
 zTCam_ClipType GothicAPI::GetCameraBBox3DInFrustum( const zTBBox3D& box, int clipFlags ) {
-    if ( !oCGame::GetGame()->_zCSession_camVob )
-        return zTCam_ClipType::ZTCAM_CLIPTYPE_IN;
-
     if ( CameraReplacementPtr ) {
         auto result = CameraReplacementPtr->frustum.Contains(box);
         if ( result == ContainmentType::DISJOINT )
@@ -4480,6 +4561,11 @@ zTCam_ClipType GothicAPI::GetCameraBBox3DInFrustum( const zTBBox3D& box, int cli
             return zTCam_ClipType::ZTCAM_CLIPTYPE_CROSSING;
         return zTCam_ClipType::ZTCAM_CLIPTYPE_IN;
     }
+
+    oCGame* game = oCGame::GetGame();
+    if ( !game || !game->_zCSession_camVob )
+        return zTCam_ClipType::ZTCAM_CLIPTYPE_IN;
+
     if (auto cam = zCCamera::GetCamera(); cam) {
         return cam->BBox3DInFrustum(box, clipFlags);
     }
@@ -4488,6 +4574,10 @@ zTCam_ClipType GothicAPI::GetCameraBBox3DInFrustum( const zTBBox3D& box, int cli
 }
 
 zTCam_ClipType GothicAPI::GetCameraBBox3DInFrustum( const zCVob* vob, int clipFlags, bool isLocalCamera ) {
+    if ( !vob ) {
+        return zTCam_ClipType::ZTCAM_CLIPTYPE_IN;
+    }
+
     if ( CameraReplacementPtr ) {
         auto box = vob->GetBBox();
         return GetCameraBBox3DInFrustum(box, clipFlags);
@@ -4503,12 +4593,20 @@ zTCam_ClipType GothicAPI::GetCameraBBox3DInFrustum( const zCVob* vob, int clipFl
 
 /** Returns the view matrix */
 void GothicAPI::GetViewMatrix( XMFLOAT4X4* view ) {
+    if ( !view ) {
+        return;
+    }
+
     if ( CameraReplacementPtr ) {
         *view = CameraReplacementPtr->ViewReplacement;
         return;
     }
 
-    *view = zCCamera::GetCamera()->GetTransformDX( zCCamera::ETransformType::TT_VIEW );
+    if ( zCCamera* camera = zCCamera::GetCamera() ) {
+        *view = camera->GetTransformDX( zCCamera::ETransformType::TT_VIEW );
+    } else {
+        XMStoreFloat4x4( view, XMMatrixIdentity() );
+    }
 }
 
 /** Returns the view matrix */
@@ -4516,17 +4614,28 @@ XMMATRIX GothicAPI::GetViewMatrixXM() {
     if ( CameraReplacementPtr ) {
         return XMLoadFloat4x4( &CameraReplacementPtr->ViewReplacement );
     }
-    return XMLoadFloat4x4( &zCCamera::GetCamera()->GetTransformDX( zCCamera::ETransformType::TT_VIEW ) );
+    if ( zCCamera* camera = zCCamera::GetCamera() ) {
+        return XMLoadFloat4x4( &camera->GetTransformDX( zCCamera::ETransformType::TT_VIEW ) );
+    }
+    return XMMatrixIdentity();
 }
 
 /** Returns the view matrix */
 void GothicAPI::GetInverseViewMatrixXM( XMFLOAT4X4* invView ) {
+    if ( !invView ) {
+        return;
+    }
+
     if ( CameraReplacementPtr ) {
         XMStoreFloat4x4( invView, XMMatrixInverse( nullptr, XMLoadFloat4x4( &CameraReplacementPtr->ViewReplacement ) ) );
         return;
     }
 
-    *invView = zCCamera::GetCamera()->GetTransformDX( zCCamera::ETransformType::TT_VIEW_INV );
+    if ( zCCamera* camera = zCCamera::GetCamera() ) {
+        *invView = camera->GetTransformDX( zCCamera::ETransformType::TT_VIEW_INV );
+    } else {
+        XMStoreFloat4x4( invView, XMMatrixIdentity() );
+    }
 }
 
 /** Returns the projection-matrix in Column-Major format, with reversed depth buffer */
@@ -4555,15 +4664,19 @@ GInventory* GothicAPI::GetInventory() {
 
 /** Returns the far Z */
 float GothicAPI::GetFarZ() {
-    zCSkyController_Outdoor* sc = oCGame::GetGame()->_zCSession_world->GetSkyControllerOutdoor();
-    return sc->GetFarZ();
+    oCGame* game = oCGame::GetGame();
+    zCWorld* world = game ? game->_zCSession_world : nullptr;
+    zCSkyController_Outdoor* sc = world ? world->GetSkyControllerOutdoor() : nullptr;
+    return sc ? sc->GetFarZ() : RendererState.RendererInfo.FarPlane;
 }
 
 /** Returns the fog-color */
 FXMVECTOR GothicAPI::GetFogColor() {
-    zCSkyController_Outdoor* sc = oCGame::GetGame()->_zCSession_world->GetSkyControllerOutdoor();
-
     FXMVECTOR FogColorMod = XMLoadFloat3( RendererState.RendererSettings.FogColorMod.toXMFLOAT3() );
+
+    oCGame* game = oCGame::GetGame();
+    zCWorld* world = game ? game->_zCSession_world : nullptr;
+    zCSkyController_Outdoor* sc = world ? world->GetSkyControllerOutdoor() : nullptr;
 
     // Only give the overridden color out if the flag is set
     if ( !sc || !sc->GetOverrideFlag() )
@@ -4616,7 +4729,9 @@ bool GothicAPI::IsInSavingLoadingState() {
 
 /** Returns true if the game is overwriting the fog color with a fog-zone */
 float GothicAPI::GetFogOverride() {
-    zCSkyController_Outdoor* sc = oCGame::GetGame()->_zCSession_world->GetSkyControllerOutdoor();
+    oCGame* game = oCGame::GetGame();
+    zCWorld* world = game ? game->_zCSession_world : nullptr;
+    zCSkyController_Outdoor* sc = world ? world->GetSkyControllerOutdoor() : nullptr;
 
     // Catch invalid controller
     if ( !sc )
@@ -4655,7 +4770,7 @@ void GothicAPI::SendMessageToGameWindow( UINT msg, WPARAM wParam, LPARAM lParam 
 /** Message-Callback for the main window */
 LRESULT GothicAPI::OnWindowMessage( HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam ) {
     if ( msg == WM_CLOSE || msg == WM_DESTROY || msg == WM_NCDESTROY ) {
-        Engine::BeginShutdown();
+        Engine::OnShutDown();
     }
 
     if ( Engine::IsShuttingDown() ) {
@@ -4757,6 +4872,11 @@ LRESULT GothicAPI::OnWindowMessage( HWND hWnd, UINT msg, WPARAM wParam, LPARAM l
 
 /** Recursive helper function to draw the BSP-Tree */
 void GothicAPI::DebugDrawTreeNode( zCBspBase* base, zTBBox3D boxCell, int clipFlags ) {
+    if ( !LoadedWorldInfo || !LoadedWorldInfo->BspTree
+        || !LoadedWorldInfo->BspTree->GetRootNode() ) {
+        return;
+    }
+
     auto camPos = GetCameraPosition();
     auto camPosXm = GetCameraPositionXM();
     while ( base ) {
@@ -5224,7 +5344,8 @@ void GothicAPI::CollectVisibleSections( std::vector<WorldMeshSectionInfo*>& sect
         const Frustum* activeFrustum = queryFrustum;
 
         if ( !activeFrustum ) {
-            if ( auto cam = (zCCamera*)oCGame::GetGame()->_zCSession_camera ) {
+            oCGame* game = oCGame::GetGame();
+            if ( auto cam = game ? reinterpret_cast<zCCamera*>(game->_zCSession_camera) : nullptr ) {
                 const auto& view = cam->trafoView; // Column-Major, needs Transpose for DxMath
                 const auto& proj = cam->trafoProjection; // Row-Major, does not need transpose.
 
@@ -6261,6 +6382,8 @@ void GothicAPI::ConfigureAllPointlightShadowSources() {
             continue;
 
         float originalSourceRange = 0.0f;
+        size_t positionSourceLight = INVALID_INDEX;
+        float positionSourceDistanceSq = FLT_MAX;
         for ( size_t lightIndex = 0; lightIndex < lights.size(); ++lightIndex ) {
             if ( lights[lightIndex].Info->IsRendererLightSuppressed )
                 continue;
@@ -6274,15 +6397,28 @@ void GothicAPI::ConfigureAllPointlightShadowSources() {
                 || winner.SourceIndex != flameIndex )
                 continue;
 
-            originalSourceRange = std::max(
-                originalSourceRange, getOriginalLightRange( lights[lightIndex] ) );
+            const float candidateRange = getOriginalLightRange( lights[lightIndex] );
+            const float candidateDistanceSq = distanceSq(
+                lights[lightIndex].Position, flame.Anchor );
+            if ( positionSourceLight == INVALID_INDEX
+                || candidateRange > originalSourceRange
+                || (candidateRange == originalSourceRange
+                    && candidateDistanceSq < positionSourceDistanceSq) ) {
+                positionSourceLight = lightIndex;
+                positionSourceDistanceSq = candidateDistanceSq;
+            }
+            originalSourceRange = std::max( originalSourceRange, candidateRange );
             suppressRendererSource( lights[lightIndex].Info );
         }
 
-        // Keep the replacement at the visual center and apply the height in Y.
+        // Same-type TGA multi-flames replace the authored light at its exact
+        // position. PFX groups retain their existing visual height handling.
         zCVob* lightAnchor = flame.Parent ? flame.Parent : flame.Vobs.front();
         XMFLOAT3 lightPosition = flame.Anchor;
-        lightPosition.y += flameHeightOffset( flame );
+        if ( !flame.HasPfx && positionSourceLight != INVALID_INDEX )
+            lightPosition = lights[positionSourceLight].Position;
+        else
+            lightPosition.y += flameHeightOffset( flame );
         const float lightRange = originalSourceRange > 0.0f
             ? originalSourceRange : flameLightRange( flame.Size );
 
@@ -6609,6 +6745,13 @@ void BspLeafLinearCache::Clear() {
 void GothicAPI::BuildBspVobMapCache() {
     ZoneScopedN( "GothicAPI::BuildBspVobMapCache" );
 
+    WorldRenderCacheReady.store( false, std::memory_order_release );
+    if ( !LoadedWorldInfo || !LoadedWorldInfo->BspTree
+        || !LoadedWorldInfo->BspTree->GetRootNode() ) {
+        LeafLinearCache.Clear();
+        return;
+    }
+
     BuildBspVobMapCacheHelper( LoadedWorldInfo->BspTree->GetRootNode() );
 
     // Publish the linear BSP cache first. Window validation performs world
@@ -6629,8 +6772,15 @@ void GothicAPI::BuildBspVobMapCache() {
 void GothicAPI::BuildBspLeafLinearCache() {
     WorldRenderCacheReady.store( false, std::memory_order_release );
     LeafLinearCache.Clear();
-    BspInfo* root = &BspLeafVobLists[LoadedWorldInfo->BspTree->GetRootNode()];
-    LeafLinearCache.Build( root );
+    if ( !LoadedWorldInfo || !LoadedWorldInfo->BspTree ) {
+        return;
+    }
+    zCBspBase* rootNode = LoadedWorldInfo->BspTree->GetRootNode();
+    auto rootIt = BspLeafVobLists.find( rootNode );
+    if ( !rootNode || rootIt == BspLeafVobLists.end() || !rootIt->second.OriginalNode ) {
+        return;
+    }
+    LeafLinearCache.Build( &rootIt->second );
     LogInfo() << "BspLeafLinearCache: " << LeafLinearCache.Count << " leaves indexed for SIMD culling";
 }
 
@@ -6652,12 +6802,17 @@ BspInfo* GothicAPI::GetNewBspNode( zCBspBase* base ) {
 
 /** Sets/Gets the far-plane */
 void GothicAPI::SetFarPlane( float value ) {
-    zCCamera::GetCamera()->SetFarPlane( value );
-    zCCamera::GetCamera()->Activate();
+    if ( zCCamera* camera = zCCamera::GetCamera() ) {
+        camera->SetFarPlane( value );
+        camera->Activate();
+    }
 }
 
 float GothicAPI::GetFarPlane() {
-    return zCCamera::GetCamera()->GetFarPlane();
+    if ( zCCamera* camera = zCCamera::GetCamera() ) {
+        return camera->GetFarPlane();
+    }
+    return RendererState.RendererInfo.FarPlane;
 }
 
 /** Sets/Gets the far-plane */
@@ -6666,7 +6821,10 @@ void GothicAPI::SetNearPlane( float value ) {
 }
 
 float GothicAPI::GetNearPlane() {
-    return zCCamera::GetCamera()->GetNearPlane();
+    if ( zCCamera* camera = zCCamera::GetCamera() ) {
+        return camera->GetNearPlane();
+    }
+    return RendererState.RendererInfo.NearPlane;
 }
 
 /** Get material by texture name */
@@ -6695,8 +6853,7 @@ void GothicAPI::GetMaterialListByTextureName( const std::string& name, std::list
 /** Returns the time since the last frame */
 float GothicAPI::GetDeltaTime() {
     const zCTimer* timer = zCTimer::GetTimer();
-
-    return timer->frameTimeFloat / 1000.0f;
+    return timer ? timer->frameTimeFloat / 1000.0f : 0.0f;
 }
 
 /** Sets the current texture test bind mode status */
@@ -6718,7 +6875,11 @@ bool GothicAPI::IsInTextureTestBindMode( std::string& currentBoundTexture ) {
 
 /** Lets Gothic draw its sky */
 void GothicAPI::DrawSkyGothicOriginal() {
-    HookedFunctions::OriginalFunctions.original_zCWorldRender( oCGame::GetGame()->_zCSession_world, *zCCamera::GetCamera() );
+    oCGame* game = oCGame::GetGame();
+    zCCamera* camera = zCCamera::GetCamera();
+    if ( game && game->_zCSession_world && camera ) {
+        HookedFunctions::OriginalFunctions.original_zCWorldRender( game->_zCSession_world, *camera );
+    }
 }
 
 /** Reset's the material info that were previously gathered */
@@ -7389,12 +7550,16 @@ DWORD GothicAPI::GetMainThreadID() {
 
 /** Returns the current cursor position, in pixels */
 POINT GothicAPI::GetCursorPosition() {
-    POINT p;
-    GetCursorPos( &p );
-    ScreenToClient( OutputWindow, &p );
+    POINT p = {};
+    if ( !OutputWindow || !IsWindow( OutputWindow ) || !GetCursorPos( &p )
+        || !ScreenToClient( OutputWindow, &p ) ) {
+        return {};
+    }
 
-    RECT r;
-    GetClientRect( OutputWindow, &r );
+    RECT r = {};
+    if ( !GetClientRect( OutputWindow, &r ) || r.right <= 0 || r.bottom <= 0 ) {
+        return {};
+    }
 
     float x = static_cast<float>(p.x) / static_cast<float>(r.right);
     float y = static_cast<float>(p.y) / static_cast<float>(r.bottom);
@@ -7407,9 +7572,21 @@ POINT GothicAPI::GetCursorPosition() {
 
 /** Adds a staging texture to the list of the staging textures for this frame */
 void GothicAPI::AddStagingTexture( UINT mip, ID3D11Texture2D* stagingTexture, ID3D11Texture2D* texture ) {
-    Engine::GAPI->EnterResourceCriticalSection();
+    if ( !stagingTexture ) {
+        return;
+    }
+
+    EnterResourceCriticalSection();
+    if ( Engine::IsShuttingDown() || !texture ) {
+        stagingTexture->Release();
+        LeaveResourceCriticalSection();
+        return;
+    }
+
+    // The upload can outlive the D3D11Texture wrapper which queued it.
+    texture->AddRef();
     FrameStagingTextures.emplace_back( std::make_pair( mip, stagingTexture ), texture );
-    Engine::GAPI->LeaveResourceCriticalSection();
+    LeaveResourceCriticalSection();
 }
 
 /** Adds a mip map generation deferred command */
@@ -7421,11 +7598,19 @@ void GothicAPI::AddMipMapGeneration( D3D11Texture* texture ) {
 
 /** Adds a texture to the list of the loaded textures for this frame */
 void GothicAPI::AddFrameLoadedTexture( MyDirectDrawSurface7* srf ) {
-    srf->AddRef();
+    if ( !srf ) {
+        return;
+    }
 
-    Engine::GAPI->EnterResourceCriticalSection();
+    EnterResourceCriticalSection();
+    if ( Engine::IsShuttingDown() ) {
+        LeaveResourceCriticalSection();
+        return;
+    }
+
+    srf->AddRef();
     FrameLoadedTextures.push_back( srf );
-    Engine::GAPI->LeaveResourceCriticalSection();
+    LeaveResourceCriticalSection();
 }
 
 /** Sets loaded textures of this frame ready */
@@ -7823,12 +8008,20 @@ void GothicAPI::CollectPolygonsInAABBRec( BspInfo* base, const zTBBox3D& bbox, s
 
 /** Returns our bsp-root-node */
 BspInfo* GothicAPI::GetNewRootNode() {
-    return &BspLeafVobLists[LoadedWorldInfo->BspTree->GetRootNode()];
+    if ( !LoadedWorldInfo || !LoadedWorldInfo->BspTree ) {
+        return nullptr;
+    }
+    zCBspBase* root = LoadedWorldInfo->BspTree->GetRootNode();
+    if ( !root ) {
+        return nullptr;
+    }
+    return &BspLeafVobLists[root];
 }
 
 /** Prints a message to the screen for the given amount of time */
 void GothicAPI::PrintMessageTimed( const INT2& position, const std::string& strMessage, float time, DWORD color ) {
-    zCView* view = oCGame::GetGame()->GetGameView();
+    oCGame* game = oCGame::GetGame();
+    zCView* view = game ? game->GetGameView() : nullptr;
     if ( view ) {
         zSTRING message( strMessage.c_str() );
         view->PrintTimed( position.x, position.y, message, time, &color );
@@ -8282,10 +8475,24 @@ static void CollectVisibleVobsWithLeafCache(
 #endif // __AVX2__
 
 void GothicAPI::CollectVisibleVobs( const RndCullContext& ctx ) {
+    if ( !IsWorldRenderCacheReady() || !LoadedWorldInfo || !LoadedWorldInfo->BspTree ) {
+        return;
+    }
+
     zCBspTree* tree = LoadedWorldInfo->BspTree;
 
     zCBspBase* rootBsp = tree->GetRootNode();
-    BspInfo* root = &BspLeafVobLists[rootBsp];
+    if ( !rootBsp ) {
+        return;
+    }
+    auto rootIt = BspLeafVobLists.find( rootBsp );
+    if ( rootIt == BspLeafVobLists.end() ) {
+        return;
+    }
+    BspInfo* root = &rootIt->second;
+    if ( !root->OriginalNode ) {
+        return;
+    }
 
     thread_local BspTreeVobVisitor bspVobVisitor{};
 
@@ -8302,7 +8509,7 @@ void GothicAPI::CollectVisibleVobs( const RndCullContext& ctx ) {
                 collectCtx,
                 &bspVobVisitor,
                 ContainmentType::INTERSECTS,
-                Engine::GAPI->GetLoadedWorldInfo()->BspTree->GetRootNode()->BBox3D.Max.y
+                rootBsp->BBox3D.Max.y
             );
         }
     };
