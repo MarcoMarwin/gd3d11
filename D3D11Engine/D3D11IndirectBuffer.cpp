@@ -21,7 +21,8 @@ XRESULT D3D11IndirectBuffer::Init( void* initData, unsigned int sizeInBytes, EBi
     }
 
     if ( !engine || !engine->GetDevice() || !engine->GetContext()
-        || cpuAccess != ECPUAccessFlags::CA_NONE ) {
+        || cpuAccess != ECPUAccessFlags::CA_NONE
+        || sizeInBytes % 4u != 0 ) {
         LogError() << "Invalid indirect buffer descriptor for " << fileName;
         return XR_FAILED;
     }
@@ -63,6 +64,12 @@ XRESULT D3D11IndirectBuffer::Init( void* initData, unsigned int sizeInBytes, EBi
 
     LE( engine->GetDevice()->CreateBuffer( &bufferDesc, &InitData, IndirectBuffer.ReleaseAndGetAddressOf() ) );
     if ( FAILED( hr ) || !IndirectBuffer.Get() ) {
+        LogError() << "[D3D11BufferCreate] type=indirect name=" << fileName
+            << " bytes=" << sizeInBytes
+            << " bind=0x" << std::hex << static_cast<unsigned int>( EBindFlags )
+            << " usage=" << std::dec << static_cast<unsigned int>( usage )
+            << " misc=0x" << std::hex << bufferDesc.MiscFlags
+            << " hr=0x" << std::hex << static_cast<unsigned long>( hr );
         delete[] data;
         SizeInBytes = 0;
         return XR_FAILED;
@@ -79,7 +86,9 @@ XRESULT D3D11IndirectBuffer::Init( void* initData, unsigned int sizeInBytes, EBi
 
         hr = engine->GetDevice()->CreateUnorderedAccessView( IndirectBuffer.Get(), &uavDesc, UnorderedAccessView.ReleaseAndGetAddressOf() );
         if ( FAILED( hr ) || !UnorderedAccessView ) {
-            LogError() << "Failed to create indirect buffer UAV for " << fileName;
+            LogError() << "[D3D11BufferView] type=indirect view=UAV name=" << fileName
+                << " bytes=" << sizeInBytes
+                << " hr=0x" << std::hex << static_cast<unsigned long>( hr );
             delete[] data;
             IndirectBuffer.Reset();
             SizeInBytes = 0;
@@ -97,7 +106,9 @@ XRESULT D3D11IndirectBuffer::Init( void* initData, unsigned int sizeInBytes, EBi
         hr = engine->GetDevice()->CreateShaderResourceView(
             IndirectBuffer.Get(), &srvDesc, ShaderResourceView.ReleaseAndGetAddressOf() );
         if ( FAILED( hr ) || !ShaderResourceView ) {
-            LogError() << "Failed to create indirect buffer SRV for " << fileName;
+            LogError() << "[D3D11BufferView] type=indirect view=SRV name=" << fileName
+                << " bytes=" << sizeInBytes
+                << " hr=0x" << std::hex << static_cast<unsigned long>( hr );
             delete[] data;
             IndirectBuffer.Reset();
             UnorderedAccessView.Reset();

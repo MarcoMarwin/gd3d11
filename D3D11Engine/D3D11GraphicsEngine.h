@@ -555,6 +555,13 @@ private:
     void LogGpuVobPerformanceStats();
     uint64_t BuildGpuVobPerformanceSettingsKey() const;
     void AccumulateGpuVobFrameRenderStats();
+    void ApplyGpuVobDisplayTriangleEstimate();
+    bool IsGpuVobRuntimeDisabled() const;
+    void DisableGpuVobRuntime( const char* reason );
+    bool IsGpuVobHiZRuntimeDisabled() const;
+    void DisableGpuVobHiZ( const char* reason );
+    bool IsGpuVobGeometryArenaRuntimeDisabled() const;
+    void DisableGpuVobGeometryArena( const char* reason );
     void RebuildWindowCutoutVolumeCache();
     unsigned int UpdateAndBindWindowCutouts( bool daylightPass = false );
     void UnbindWindowCutouts();
@@ -872,6 +879,19 @@ private:
     uint64_t m_GpuVobPerformanceWorldGeneration = static_cast<uint64_t>( -1 );
     uint64_t m_LastGpuVobFrameStatsAccumulated = 0;
     bool m_GpuVobPerformanceSettingsInitialized = false;
+    uint64_t m_GpuVobFrameMainCandidateTriangles = 0;
+    uint64_t m_LastGpuMainVisibleTrianglesEstimate = 0;
+    bool m_HasLastGpuMainVisibleTrianglesEstimate = false;
+
+    // A failed optional GPU resource must not be retried every frame. The
+    // latch is scoped to the current settings/world and is cleared implicitly
+    // when either changes, so a deliberate retest remains possible.
+    uint64_t m_GpuVobRuntimeDisabledSettingsKey = 0;
+    uint64_t m_GpuVobRuntimeDisabledWorldGeneration = static_cast<uint64_t>( -1 );
+    uint64_t m_GpuVobHiZDisabledSettingsKey = 0;
+    uint64_t m_GpuVobHiZDisabledWorldGeneration = static_cast<uint64_t>( -1 );
+    uint64_t m_GpuVobGeometryArenaDisabledSettingsKey = 0;
+    uint64_t m_GpuVobGeometryArenaDisabledWorldGeneration = static_cast<uint64_t>( -1 );
 
     /** FL11 packed structured buffers for skeletal skinning (main/z-prepass reusable path). */
     std::unique_ptr<D3D11VertexBuffer> SkeletalBoneTransformsBuffer;

@@ -680,8 +680,7 @@ XRESULT D3D11ShadowMap::PrepareRender()
         // Increment frame counter for temporal cascade updates
         perFrameCascadeData.frameCount++;
         bool lazyCascadeUpdate = !m_useAtlas
-            && settings.AdvancedPerformanceOptions
-            && settings.DebugSettings.ShadowCascades.LazyCascadeUpdate;
+            && settings.GetEffectiveLazyCascadeUpdate();
         const bool overheadLight = std::abs( XMVectorGetX( XMVector3Dot( shadowViewDir, c_XM_Up ) ) ) > 0.94f;
         if ( overheadLight ) {
             lazyCascadeUpdate = false;
@@ -778,8 +777,7 @@ XRESULT D3D11ShadowMap::PrepareRender()
         }
     }
 
-    if ( settings.AdvancedPerformanceOptions
-        && settings.ThreadedShadowCulling
+    if ( settings.GetEffectiveThreadedShadowCulling()
         && Engine::WorkerThreadPool ) {
         std::lock_guard<LockableBase( std::mutex )> lock( m_CullingJobsMutex );
         m_ShadowCullingJobs.clear();

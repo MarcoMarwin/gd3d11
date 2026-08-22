@@ -5394,8 +5394,7 @@ void GothicAPI::QueryWorldSectionBVH( const Frustum& frustum,
 }
 
 bool GothicAPI::UseWorldSectionBVH() const {
-    return RendererState.RendererSettings.AdvancedPerformanceOptions
-        && RendererState.RendererSettings.DebugSettings.FeatureSet.UseWorldSectionBVH;
+    return RendererState.RendererSettings.GetEffectiveWorldSectionBVH();
 }
 
 /** Collects visible sections from the current camera perspective */

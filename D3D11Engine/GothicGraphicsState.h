@@ -1276,6 +1276,30 @@ struct GothicRendererSettings {
             : 2;
     }
 
+    // These are pre-existing Build 213 renderer paths. The Advanced master
+    // switch may override them while testing, but disabling Advanced must
+    // restore their original Build 213 behavior instead of silently turning
+    // them off.
+    bool GetEffectiveThreadedShadowCulling() const {
+        return AdvancedPerformanceOptions && ThreadedShadowCulling;
+    }
+
+    bool GetEffectiveLazyCascadeUpdate() const {
+        return AdvancedPerformanceOptions
+            ? DebugSettings.ShadowCascades.LazyCascadeUpdate
+            : true;
+    }
+
+    bool GetEffectiveDoZPrepass() const {
+        return AdvancedPerformanceOptions ? DoZPrepass : true;
+    }
+
+    bool GetEffectiveWorldSectionBVH() const {
+        return AdvancedPerformanceOptions
+            ? DebugSettings.FeatureSet.UseWorldSectionBVH
+            : true;
+    }
+
     bool AreGodRaysEnabled() const {
         return EnableGodRays;
     }

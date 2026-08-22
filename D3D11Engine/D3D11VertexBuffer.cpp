@@ -87,7 +87,10 @@ XRESULT D3D11VertexBuffer::Init( void* initData, unsigned int sizeInBytes, EBind
     if ( !engine || !engine->GetDevice() || !engine->GetContext()
         || (shaderResource && unorderedAccess)
         || (cpuAccess != ECPUAccessFlags::CA_NONE && (shaderResource || unorderedAccess))
-        || ((shaderResource || unorderedAccess) && structuredByteSize == 0) ) {
+        || ((shaderResource || unorderedAccess) && structuredByteSize == 0)
+        || (shaderResource && structuredByteSize != 0
+            && sizeInBytes % structuredByteSize != 0)
+        || (unorderedAccess && sizeInBytes % 4u != 0) ) {
         LogError() << "Invalid vertex buffer descriptor for " << fileName;
         return XR_FAILED;
     }
@@ -138,6 +141,13 @@ XRESULT D3D11VertexBuffer::Init( void* initData, unsigned int sizeInBytes, EBind
 
     LE( engine->GetDevice()->CreateBuffer( &bufferDesc, initDataPtr, VertexBuffer.ReleaseAndGetAddressOf() ) );
     if ( FAILED( hr ) || !VertexBuffer.Get() ) {
+        LogError() << "[D3D11BufferCreate] type=vertex name=" << fileName
+            << " bytes=" << sizeInBytes
+            << " bind=0x" << std::hex << static_cast<unsigned int>( EBindFlags )
+            << " usage=" << std::dec << static_cast<unsigned int>( usage )
+            << " cpuAccess=0x" << std::hex << static_cast<unsigned int>( cpuAccess )
+            << " structuredStride=" << std::dec << structuredByteSize
+            << " hr=0x" << std::hex << static_cast<unsigned long>( hr );
         delete[] data;
         SizeInBytes = 0;
         return XR_FAILED;
@@ -152,7 +162,9 @@ XRESULT D3D11VertexBuffer::Init( void* initData, unsigned int sizeInBytes, EBind
 
         hr = engine->GetDevice()->CreateShaderResourceView( VertexBuffer.Get(), &srvDesc, ShaderResourceView.ReleaseAndGetAddressOf() );
         if ( FAILED( hr ) || !ShaderResourceView ) {
-            LogError() << "Failed to create structured vertex buffer SRV for " << fileName;
+            LogError() << "[D3D11BufferView] type=vertex view=SRV name=" << fileName
+                << " bytes=" << sizeInBytes << " stride=" << structuredByteSize
+                << " hr=0x" << std::hex << static_cast<unsigned long>( hr );
             delete[] data;
             VertexBuffer.Reset();
             SizeInBytes = 0;
@@ -172,7 +184,9 @@ XRESULT D3D11VertexBuffer::Init( void* initData, unsigned int sizeInBytes, EBind
 
         hr = engine->GetDevice()->CreateUnorderedAccessView( VertexBuffer.Get(), &uavDesc, UnorderedAccessView.ReleaseAndGetAddressOf() );
         if ( FAILED( hr ) || !UnorderedAccessView ) {
-            LogError() << "Failed to create vertex buffer UAV for " << fileName;
+            LogError() << "[D3D11BufferView] type=vertex view=UAV name=" << fileName
+                << " bytes=" << sizeInBytes << " stride=" << structuredByteSize
+                << " hr=0x" << std::hex << static_cast<unsigned long>( hr );
             delete[] data;
             VertexBuffer.Reset();
             ShaderResourceView.Reset();
