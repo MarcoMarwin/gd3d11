@@ -620,9 +620,6 @@ public:
     /** Resets only the vobs */
     void ResetVobs();
 
-    /** Stops renderer work and drops all references into Gothic's world. */
-    void PrepareForShutdown();
-
     /** Releases pointlight shadow resources. */
     void ReleasePointlightShadowResources();
 
@@ -812,7 +809,7 @@ private:
         bool useSectionRadiusFilter ) const;
     bool UseWorldSectionBVH() const;
     zCTexture* GetParticleLightingTextureReplacement(
-        zCTexture* texture, bool* replacementRequired = nullptr ) const;
+        zCTexture* texture, bool* replacementRequired = nullptr );
 
     /** Collects polygons in the given AABB */
     void CollectPolygonsInAABBRec( BspInfo* base, const zTBBox3D& bbox, std::vector<zCPolygon*>& list );
@@ -944,6 +941,9 @@ private:
     /** Pre-resolved particle texture pairs used while dynamic particle darkening is active. */
     std::array<MyDirectDrawSurface7*, 4> ParticleDarkSurfaces{};
     std::array<MyDirectDrawSurface7*, 4> ParticleBrightSurfaces{};
+    /** Bright Gothic texture resources requested lazily when only a Dark variant is resident. */
+    std::array<zCTexture*, 4> ParticleBrightTextures{};
+    std::array<bool, 4> ParticleBrightTextureLoadAttempted{};
 
     /** Directory we started in */
     std::string StartDirectory;

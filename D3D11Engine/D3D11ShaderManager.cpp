@@ -493,11 +493,6 @@ XRESULT D3D11ShaderManager::Init() {
         Shaders.push_back( ShaderInfo::make<CShaderID::CS_PFX_DoF_Gauss>( "CS_PFX_DoF.hlsl" )
             .with_macros( {{ "DOF_GAUSS_BLUR", "1" }} ) );
         Shaders.push_back( ShaderInfo::make<CShaderID::CS_PFX_DoF_Composite>( "CS_PFX_DoF_Composite.hlsl" ));
-        Shaders.push_back( ShaderInfo::make<CShaderID::CS_PFX_DoF_SplitDownsample>( "CS_PFX_DoF_SplitDownsample.hlsl" ));
-        Shaders.push_back( ShaderInfo::make<CShaderID::CS_PFX_DoF_SplitBlur>( "CS_PFX_DoF_SplitBlur.hlsl" ));
-        Shaders.push_back( ShaderInfo::make<CShaderID::CS_PFX_DoF_SplitBlur_Gauss>( "CS_PFX_DoF_SplitBlur.hlsl" )
-            .with_macros( {{ "DOF_GAUSS_BLUR", "1" }} ) );
-        Shaders.push_back( ShaderInfo::make<CShaderID::CS_PFX_DoF_SplitComposite>( "CS_PFX_DoF_SplitComposite.hlsl" ));
 
         Shaders.push_back( ShaderInfo::make<CShaderID::CS_PFX_XeGTAO_Prefilter>( "CS_PFX_XeGTAO.hlsl" ).with_entrypoint( "CSPrefilterDepths16x16" ) );
         Shaders.push_back( ShaderInfo::make<CShaderID::CS_PFX_XeGTAO_Low>( "CS_PFX_XeGTAO.hlsl" ).with_entrypoint( "CSGTAOLow" ) );

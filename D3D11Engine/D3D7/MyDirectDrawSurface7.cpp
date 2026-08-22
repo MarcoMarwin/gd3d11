@@ -579,6 +579,10 @@ HRESULT MyDirectDrawSurface7::Restore() {
 HRESULT MyDirectDrawSurface7::SetClipper( LPDIRECTDRAWCLIPPER lpDDClipper ) {
     DebugWriteTex( "IDirectDrawSurface7(%p)::SetClipper()" );
 
+    if ( Engine::IsShuttingDown() || !Engine::GAPI || !lpDDClipper ) {
+        return S_OK;
+    }
+
     hook_infunc
 
         HWND hWnd;
@@ -637,6 +641,10 @@ HRESULT MyDirectDrawSurface7::PageUnlock( DWORD dwFlags ) {
 
 HRESULT MyDirectDrawSurface7::SetSurfaceDesc( LPDDSURFACEDESC2 lpDDSurfaceDesc, DWORD dwFlags ) {
     DebugWriteTex( "IDirectDrawSurface7(%p)::SetSurfaceDesc()" );
+
+    if ( Engine::IsShuttingDown() || !Engine::GraphicsEngine || !lpDDSurfaceDesc ) {
+        return S_OK;
+    }
 
     OriginalSurfaceDesc = *lpDDSurfaceDesc;
 

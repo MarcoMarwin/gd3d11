@@ -10584,9 +10584,8 @@ void D3D11GraphicsEngine::DrawFrameParticles(
     UpdateRenderStates();
 
     const auto bindParticleTexture = []( zCTexture* texture, const ParticleRenderInfo& renderInfo ) {
-        // Never fall back to a recognized Dark texture while renderer-driven
-        // particle lighting is active. If its Bright counterpart is still
-        // loading, omit this batch for the frame instead of flashing black.
+        // Use a replacement only when it is fully available; otherwise the
+        // original particle texture remains the safe fallback.
         if ( renderInfo.TextureOverrideRequired && !renderInfo.TextureOverride )
             return false;
         zCTexture* textureToBind = renderInfo.TextureOverride

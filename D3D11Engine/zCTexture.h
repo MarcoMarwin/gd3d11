@@ -18,6 +18,22 @@ namespace zCTextureCacheHack {
 
 class zCTexture {
 public:
+    /** Loads or returns a Gothic texture resource by file name. */
+    static zCTexture* Load( const char* name ) {
+#if defined(BUILD_GOTHIC_2_6_fix)
+        if ( !name || !*name ) {
+            return nullptr;
+        }
+
+        zSTRING textureName( name );
+        return reinterpret_cast<zCTexture*( __cdecl* )( const zSTRING&, int )>(
+            GothicMemoryLocations::zCTexture::Load )( textureName, 1 );
+#else
+        (void)name;
+        return nullptr;
+#endif
+    }
+
     /** Hooks the functions of this Class */
     static void Hook() {
         //DetourAttachTyped( &HookedFunctions::OriginalFunctions.original_zCTex_D3DXTEX_BuildSurfaces, hooked_XTEX_BuildSurfaces  );

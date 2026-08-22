@@ -61,12 +61,10 @@ namespace Engine {
         }
         ShuttingDown.store( true, std::memory_order_release );
         LogInfo() << "Shutting down...";
-        if ( Engine::GAPI ) {
-            Engine::GAPI->PrepareForShutdown();
-            return;
-        }
-
-        // A partially initialized renderer can still have worker threads.
+        // Stop asynchronous work, but do not dismantle world-owned renderer
+        // objects from inside Gothic's window-destruction callback. Gothic
+        // may still dispatch teardown hooks after WM_CLOSE; keeping these
+        // objects intact until process termination avoids dangling callbacks.
         if ( Engine::RenderingThreadPool ) {
             Engine::RenderingThreadPool->clearAndFlush();
         }

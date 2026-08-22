@@ -206,6 +206,8 @@ public:
 
 	HRESULT __declspec(nothrow) STDMETHODCALLTYPE SetRenderState( D3DRENDERSTATETYPE State, DWORD Value ) override {
 		DebugWrite( "MyDirect3DDevice7::SetRenderState" );
+		if ( Engine::IsShuttingDown() || !Engine::GAPI )
+			return S_OK;
 
 		GothicRendererState& state = Engine::GAPI->GetRendererState();
 
@@ -285,6 +287,8 @@ public:
 
 	HRESULT __declspec(nothrow) STDMETHODCALLTYPE SetTexture( DWORD dwStage, LPDIRECTDRAWSURFACE7 lplpTexture ) override {
 		DebugWrite( "MyDirect3DDevice7::SetTexture" );
+		if ( Engine::IsShuttingDown() || !Engine::GAPI )
+			return S_OK;
 
 		// Bind the texture
 		MyDirectDrawSurface7* surface = static_cast<MyDirectDrawSurface7*>(lplpTexture);
@@ -302,6 +306,8 @@ public:
 
 	HRESULT __declspec(nothrow) STDMETHODCALLTYPE SetTextureStageState( DWORD Stage, D3DTEXTURESTAGESTATETYPE Type, DWORD Value ) override {
 		DebugWrite( "MyDirect3DDevice7::SetTextureStageState" );
+		if ( Engine::IsShuttingDown() || !Engine::GAPI )
+			return S_OK;
 
 		GothicRendererState& state = Engine::GAPI->GetRendererState();
 		switch ( Type ) {
@@ -385,6 +391,8 @@ public:
 
 	HRESULT __declspec(nothrow) STDMETHODCALLTYPE SetTransform( D3DTRANSFORMSTATETYPE dtstTransformStateType, LPD3DMATRIX lpD3DMatrix ) override {
 		DebugWrite( "MyDirect3DDevice7::SetTransform" );
+		if ( Engine::IsShuttingDown() || !Engine::GAPI || !lpD3DMatrix )
+			return S_OK;
 
 		GothicRendererState& state = Engine::GAPI->GetRendererState();
 		switch ( dtstTransformStateType ) {
@@ -424,6 +432,8 @@ public:
 
 	HRESULT __declspec(nothrow) STDMETHODCALLTYPE SetViewport( LPD3DVIEWPORT7 lpViewport ) override {
 		DebugWrite( "MyDirect3DDevice7::SetViewport" );
+		if ( Engine::IsShuttingDown() || !Engine::GAPI || !Engine::GraphicsEngine || !lpViewport )
+			return S_OK;
 
 		float scale = std::max( 0.1f, Engine::GAPI->GetRendererState().RendererSettings.GothicUIScale );
 
@@ -447,6 +457,8 @@ public:
 
 	HRESULT __declspec(nothrow) STDMETHODCALLTYPE BeginScene() override {
 		DebugWrite( "MyDirect3DDevice7::BeginScene" );
+		if ( Engine::IsShuttingDown() || !Engine::GraphicsEngine )
+			return S_OK;
 
 		Engine::GraphicsEngine->OnBeginFrame();
 		return S_OK;
@@ -499,6 +511,8 @@ public:
 
 	HRESULT __declspec(nothrow) STDMETHODCALLTYPE DrawPrimitive( D3DPRIMITIVETYPE dptPrimitiveType, DWORD dwVertexTypeDesc, LPVOID lpvVertices, DWORD dwVertexCount, DWORD dwFlags ) override {
 		DebugWrite( "MyDirect3DDevice7::DrawPrimitive" );
+		if ( Engine::IsShuttingDown() || !Engine::GAPI || !Engine::GraphicsEngine || !lpvVertices || dwVertexCount == 0 )
+			return S_OK;
 
 		// Convert them into ExVertices
 		static std::vector<ExVertexStruct> exv;
@@ -575,6 +589,8 @@ public:
 
 	HRESULT __declspec(nothrow) STDMETHODCALLTYPE DrawPrimitiveVB( D3DPRIMITIVETYPE d3dptPrimitiveType, LPDIRECT3DVERTEXBUFFER7 lpd3dVertexBuffer, DWORD dwStartVertex, DWORD dwNumVertices, DWORD dwFlags ) override {
 		DebugWrite( "MyDirect3DDevice7::DrawPrimitiveVB" );
+		if ( Engine::IsShuttingDown() || !Engine::GAPI || !Engine::GraphicsEngine || !lpd3dVertexBuffer )
+			return S_OK;
 		if ( d3dptPrimitiveType < 4 )
 		{
 			return S_OK;
@@ -612,6 +628,8 @@ public:
 
 	HRESULT __declspec(nothrow) STDMETHODCALLTYPE EndScene() override {
 		DebugWrite( "MyDirect3DDevice7::EndScene" );
+		if ( Engine::IsShuttingDown() || !Engine::GraphicsEngine )
+			return S_OK;
 
 		hook_infunc
 

@@ -216,6 +216,9 @@ public:
 
 	HRESULT __declspec(nothrow) STDMETHODCALLTYPE EnumDisplayModes( DWORD dwFlags, LPDDSURFACEDESC2 lpDDSurfaceDesc2, LPVOID lpContext, LPDDENUMMODESCALLBACK2 lpEnumModesCallback ) override {
 		DebugWrite( "MyDirectDraw::EnumDisplayModes\n" );
+		if ( Engine::IsShuttingDown() || !Engine::GraphicsEngine || !lpEnumModesCallback ) {
+			return S_OK;
+		}
 
 		std::vector<DisplayModeInfo> modes;
 		Engine::GraphicsEngine->GetDisplayModeList( &modes );

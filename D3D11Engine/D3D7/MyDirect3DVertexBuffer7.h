@@ -61,6 +61,11 @@ public:
 
 	HRESULT __declspec(nothrow) STDMETHODCALLTYPE Lock( DWORD dwFlags, LPVOID* lplpData, LPDWORD lpdwSize ) override {
 		DebugWrite( "MyDirect3DVertexBuffer7::Lock\n" );
+		if ( Engine::IsShuttingDown() || !VertexBuffer || !lplpData ) {
+			if ( lplpData ) *lplpData = nullptr;
+			if ( lpdwSize ) *lpdwSize = 0;
+			return S_OK;
+		}
 
 		// Pass the lock-call through to our engine
 		UINT size = 0;
@@ -90,6 +95,9 @@ public:
 
 	HRESULT __declspec(nothrow) STDMETHODCALLTYPE Unlock() override {
 		DebugWrite( "MyDirect3DVertexBuffer7::Unlock\n" );
+		if ( Engine::IsShuttingDown() || !VertexBuffer ) {
+			return S_OK;
+		}
 		VertexBuffer->Unmap();
 		return S_OK;
 	}

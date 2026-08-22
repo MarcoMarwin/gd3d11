@@ -81,6 +81,18 @@ auto CompareGhostDistance = []( const TransparencyVobInfo& a, const Transparency
 extern float vobAnimation_WindStrength;
 
 namespace {
+    struct ParticleTextureReplacement {
+        const char* darkName;
+        const char* brightName;
+    };
+
+    constexpr std::array<ParticleTextureReplacement, 4> PARTICLE_TEXTURE_REPLACEMENTS = {{
+        { "FIRESMOKE_DARK", "FIRESMOKE" },
+        { "WAVEEFFECT_TOP_DARK", "WAVEEFFECT_TOP_BRIGHT" },
+        { "WATERWALL_DARK", "WATERWALL_BRIGHT" },
+        { "WATERFIST_EXPL_DARK", "WATERFIST_EXPL_BRIGHT" }
+    }};
+
     bool s_puddleClockInitialized = false;
     bool s_puddleWetnessReleasing = false;
     float s_puddleLastMasterTime = 0.0f;
@@ -1466,21 +1478,6 @@ void GothicAPI::ResetWorld() {
     SAFE_DELETE( WrappedWorldMesh );
 
     // Clear inventory too?
-}
-
-void GothicAPI::PrepareForShutdown() {
-    WorldRenderCacheReady.store( false, std::memory_order_release );
-    CameraReplacementPtr = nullptr;
-    CurrentCamera = nullptr;
-
-    // ResetWorld drains renderer jobs before deleting any cache entries. This
-    // must happen before Gothic begins destroying the world behind those raw
-    // pointers.
-    ResetWorld();
-    if ( LoadedWorldInfo ) {
-        LoadedWorldInfo->MainWorld = nullptr;
-        LoadedWorldInfo->BspTree = nullptr;
-    }
 }
 
 void GothicAPI::ReloadVobs() {
@@ -4769,7 +4766,9 @@ void GothicAPI::SendMessageToGameWindow( UINT msg, WPARAM wParam, LPARAM lParam 
 
 /** Message-Callback for the main window */
 LRESULT GothicAPI::OnWindowMessage( HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam ) {
-    if ( msg == WM_CLOSE || msg == WM_DESTROY || msg == WM_NCDESTROY ) {
+    // WM_DESTROY/WM_NCDESTROY are also used during window recreation. They
+    // are not a safe point for dismantling renderer-owned world state.
+    if ( msg == WM_CLOSE ) {
         Engine::OnShutDown();
     }
 
@@ -6934,26 +6933,15 @@ MaterialInfo* GothicAPI::GetMaterialInfoFrom( zCTexture* tex, const std::string_
 void GothicAPI::AddSurface( const std::string& name, MyDirectDrawSurface7* surface ) {
     SurfacesByName[name] = surface;
 
-    static constexpr const char* darkTextureNames[] = {
-        "FIRESMOKE_DARK",
-        "WAVEEFFECT_TOP_DARK",
-        "WATERWALL_DARK",
-        "WATERFIST_EXPL_DARK"
-    };
-    static constexpr const char* brightTextureNames[] = {
-        "FIRESMOKE",
-        "WAVEEFFECT_TOP_BRIGHT",
-        "WATERWALL_BRIGHT",
-        "WATERFIST_EXPL_BRIGHT"
-    };
-
-    for ( size_t i = 0; i < ParticleDarkSurfaces.size(); ++i ) {
-        if ( _stricmp( name.c_str(), darkTextureNames[i] ) == 0 ) {
+    for ( size_t i = 0; i < PARTICLE_TEXTURE_REPLACEMENTS.size(); ++i ) {
+        if ( _stricmp( name.c_str(), PARTICLE_TEXTURE_REPLACEMENTS[i].darkName ) == 0 ) {
             ParticleDarkSurfaces[i] = surface;
             return;
         }
-        if ( _stricmp( name.c_str(), brightTextureNames[i] ) == 0 ) {
+        if ( _stricmp( name.c_str(), PARTICLE_TEXTURE_REPLACEMENTS[i].brightName ) == 0 ) {
             ParticleBrightSurfaces[i] = surface;
+            ParticleBrightTextures[i] = surface ? surface->GetGothicTexture() : nullptr;
+            ParticleBrightTextureLoadAttempted[i] = surface != nullptr;
             return;
         }
     }
@@ -6966,21 +6954,27 @@ MyDirectDrawSurface7* GothicAPI::GetSurface( const std::string& name ) {
 
 /** Removes a surface */
 void GothicAPI::RemoveSurface( MyDirectDrawSurface7* surface ) {
+    if ( !surface )
+        return;
+
     SurfacesByName.erase( surface->GetTextureName() );
 
     for ( size_t i = 0; i < ParticleDarkSurfaces.size(); ++i ) {
         if ( ParticleDarkSurfaces[i] == surface )
             ParticleDarkSurfaces[i] = nullptr;
-        if ( ParticleBrightSurfaces[i] == surface )
+        if ( ParticleBrightSurfaces[i] == surface ) {
             ParticleBrightSurfaces[i] = nullptr;
+            ParticleBrightTextures[i] = nullptr;
+            ParticleBrightTextureLoadAttempted[i] = false;
+        }
     }
 }
 
 zCTexture* GothicAPI::GetParticleLightingTextureReplacement(
-    zCTexture* texture, bool* replacementRequired ) const {
+    zCTexture* texture, bool* replacementRequired ) {
     if ( replacementRequired )
         *replacementRequired = false;
-    if ( !texture )
+    if ( !texture || Engine::IsShuttingDown() )
         return nullptr;
 
     MyDirectDrawSurface7* sourceSurface = texture->GetSurface();
@@ -6988,13 +6982,37 @@ zCTexture* GothicAPI::GetParticleLightingTextureReplacement(
         if ( ParticleDarkSurfaces[i] != sourceSurface )
             continue;
 
-        // A recognized Dark texture must never reach the renderer while
-        // dynamic particle lighting is active. Report the requirement
-        // separately from readiness so nullptr cannot mean "use Dark".
-        if ( replacementRequired )
-            *replacementRequired = true;
         MyDirectDrawSurface7* replacement = ParticleBrightSurfaces[i];
-        return replacement ? replacement->GetGothicTexture() : nullptr;
+        if ( replacement && !replacement->IsSurfaceReady() )
+            replacement = nullptr;
+
+        if ( !replacement && !ParticleBrightTextureLoadAttempted[i]
+            && !Engine::IsShuttingDown() ) {
+            ParticleBrightTextureLoadAttempted[i] = true;
+            const std::string textureName =
+                std::string( PARTICLE_TEXTURE_REPLACEMENTS[i].brightName ) + ".TGA";
+            ParticleBrightTextures[i] = zCTexture::Load( textureName.c_str() );
+        }
+
+        if ( !replacement && ParticleBrightTextures[i] && !Engine::IsShuttingDown()
+            && ParticleBrightTextures[i]->CacheIn( 0.6f ) == zRES_CACHED_IN ) {
+            replacement = ParticleBrightTextures[i]->GetSurface();
+        }
+
+        if ( replacement ) {
+            if ( replacementRequired )
+                *replacementRequired = true;
+            return replacement->GetGothicTexture();
+        }
+
+        // Once Gothic accepted a Bright resource, do not expose Dark while
+        // the replacement surface is still being prepared. A missing Bright
+        // resource is the only case where the original Dark texture remains
+        // the fallback.
+        if ( ParticleBrightTextures[i] && replacementRequired )
+            *replacementRequired = true;
+
+        return nullptr;
     }
 
     return nullptr;

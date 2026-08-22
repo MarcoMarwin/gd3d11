@@ -177,10 +177,12 @@ inline ThreadPool::ThreadPool(const wchar_t* poolIdentifier, size_t threads)
 
 inline ThreadPool::~ThreadPool()
 {
-    // Drain queued tasks before joining the workers.
-    clearAndFlush();
+    // Do not execute queued callbacks while their owning renderer objects are
+    // already being destroyed. Active callbacks are still joined below.
+    std::queue<std::pair<std::function<void()>, CancellationToken>> discardedTasks;
     {
         std::unique_lock<std::mutex> lock(queue_mutex);
+        std::swap( tasks, discardedTasks );
         stop = true;
     }
     condition.notify_all();

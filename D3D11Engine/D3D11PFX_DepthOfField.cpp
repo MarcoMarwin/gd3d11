@@ -1,4 +1,4 @@
-﻿#include "pch.h"
+#include "pch.h"
 #include "D3D11PFX_DepthOfField.h"
 #include "Engine.h"
 #include "D3D11GraphicsEngine.h"
@@ -219,7 +219,8 @@ void D3D11PFX_DepthOfField::UpdateAdaptiveFocus( float configuredNearDistance ) 
         m_AutoFocusSuppressed = suppressNearBlur;
         m_AutoFocusTransitionStart = m_AutoFocusBlend;
         m_AutoFocusTransitionElapsed = 0.0f;
-        // Stationary-camera focus reacts quickly; other transitions use the slower duration.
+        // Camera-stationary autofocus reacts quickly; NPC focus and every
+        // return to configured blur retain their deliberately slower timing.
         const bool cameraOnlySuppression = suppressNearBlur
             && cameraStationaryFocus && !m_NpcFocusSuppressed;
         m_AutoFocusTransitionDuration = cameraOnlySuppression ? 1.0f : 2.0f;
@@ -238,15 +239,11 @@ void D3D11PFX_DepthOfField::UpdateAdaptiveFocus( float configuredNearDistance ) 
         + (targetBlend - m_AutoFocusTransitionStart) * smoothTransition;
 }
 XRESULT D3D11PFX_DepthOfField::Render( ID3D11ShaderResourceView* backbuffer, ID3D11ShaderResourceView* waterMaskSRV, ID3D11ShaderResourceView* specularSRV ) {
-    if ( !backbuffer || !waterMaskSRV || !specularSRV
-        || !Engine::GraphicsEngine || !Engine::GAPI || !FxRenderer ) {
+    if ( !backbuffer || !waterMaskSRV || !specularSRV ) {
         return XR_FAILED;
     }
 
     D3D11GraphicsEngine* engine = reinterpret_cast<D3D11GraphicsEngine*>(Engine::GraphicsEngine);
-    if ( !engine || !engine->GetContext() || !engine->GetDepthBuffer() ) {
-        return XR_FAILED;
-    }
 
     engine->SetDefaultStates();
 
@@ -379,7 +376,7 @@ XRESULT D3D11PFX_DepthOfField::Render( ID3D11ShaderResourceView* backbuffer, ID3
 }
 
 /** Compute shader path for FL11+ */
-XRESULT D3D11PFX_DepthOfField::RenderLegacyCS( ID3D11ShaderResourceView* backbuffer, ID3D11ShaderResourceView* waterMaskSRV, ID3D11ShaderResourceView* specularSRV ) {
+XRESULT D3D11PFX_DepthOfField::RenderCS( ID3D11ShaderResourceView* backbuffer, ID3D11ShaderResourceView* waterMaskSRV, ID3D11ShaderResourceView* specularSRV ) {
     D3D11GraphicsEngine* engine = reinterpret_cast<D3D11GraphicsEngine*>(Engine::GraphicsEngine);
     auto& context = engine->GetContext();
 
@@ -515,205 +512,4 @@ XRESULT D3D11PFX_DepthOfField::RenderLegacyCS( ID3D11ShaderResourceView* backbuf
     engine->GetContext()->OMSetRenderTargets( 1, oldRTV.GetAddressOf(), oldDSV.Get() );
 
     return XR_SUCCESS;
-}
-
-XRESULT D3D11PFX_DepthOfField::RenderFidelityFXStyleCS(
-    ID3D11ShaderResourceView* backbuffer,
-    ID3D11ShaderResourceView* waterMaskSRV,
-    ID3D11ShaderResourceView* specularSRV ) {
-    D3D11GraphicsEngine* engine = reinterpret_cast<D3D11GraphicsEngine*>( Engine::GraphicsEngine );
-    if ( !engine || !Engine::GAPI || !FxRenderer
-        || !backbuffer || !waterMaskSRV || !specularSRV ) {
-        return XR_FAILED;
-    }
-
-    auto& context = engine->GetContext();
-    auto* depthBuffer = engine->GetDepthBuffer();
-    auto* texturePool = FxRenderer->GetTexturePool();
-    if ( !context || !depthBuffer || !depthBuffer->GetShaderResView().Get()
-        || !texturePool ) {
-        return XR_FAILED;
-    }
-
-    Microsoft::WRL::ComPtr<ID3D11RenderTargetView> oldRTV;
-    Microsoft::WRL::ComPtr<ID3D11DepthStencilView> oldDSV;
-    context->OMGetRenderTargets( 1, oldRTV.GetAddressOf(), oldDSV.GetAddressOf() );
-    if ( !oldRTV ) {
-        context->OMSetRenderTargets( 1, oldRTV.GetAddressOf(), oldDSV.Get() );
-        return XR_FAILED;
-    }
-
-    auto restoreOutput = [&]() {
-        ID3D11ShaderResourceView* nullSRVs[8] = {};
-        ID3D11UnorderedAccessView* nullUAVs[2] = {};
-        context->CSSetShaderResources( 0, 8, nullSRVs );
-        context->CSSetUnorderedAccessViews( 0, 2, nullUAVs, nullptr );
-        context->CSSetShader( nullptr, nullptr, 0 );
-        context->OMSetRenderTargets( 1, oldRTV.GetAddressOf(), oldDSV.Get() );
-    };
-
-    auto& rendererSettings = Engine::GAPI->GetRendererState().RendererSettings;
-    const INT2 resolution = engine->GetResolution();
-    if ( resolution.x <= 0 || resolution.y <= 0 ) {
-        restoreOutput();
-        return XR_FAILED;
-    }
-
-    if ( !m_FocusSRV[0] || !m_FocusSRV[1]
-        || !m_FocusUAV[0] || !m_FocusUAV[1] ) {
-        restoreOutput();
-        return XR_FAILED;
-    }
-
-    auto focusCS = engine->GetShaderManager().GetCShader( CShaderID::CS_PFX_DoF_FocusResolve );
-    auto downsampleCS = engine->GetShaderManager().GetCShader( CShaderID::CS_PFX_DoF_SplitDownsample );
-    auto blurCS = engine->GetShaderManager().GetCShader(
-        rendererSettings.DoFGaussBlur
-            ? CShaderID::CS_PFX_DoF_SplitBlur_Gauss
-            : CShaderID::CS_PFX_DoF_SplitBlur );
-    auto compositeCS = engine->GetShaderManager().GetCShader( CShaderID::CS_PFX_DoF_SplitComposite );
-    if ( !focusCS || !downsampleCS || !blurCS || !compositeCS
-        || !focusCS->GetShader().Get() || !downsampleCS->GetShader().Get()
-        || !blurCS->GetShader().Get() || !compositeCS->GetShader().Get() ) {
-        restoreOutput();
-        return XR_FAILED;
-    }
-
-    const UINT halfWidth = static_cast<UINT>( std::max( 1, ( resolution.x + 1 ) / 2 ) );
-    const UINT halfHeight = static_cast<UINT>( std::max( 1, ( resolution.y + 1 ) / 2 ) );
-    const uint32_t splitBindFlags = D3D11_BIND_UNORDERED_ACCESS | D3D11_BIND_SHADER_RESOURCE;
-    constexpr DXGI_FORMAT splitColorFormat = DXGI_FORMAT_R16G16B16A16_FLOAT;
-
-    auto nearSource = texturePool->Acquire(
-        TexturePool::Description{ static_cast<int>( halfWidth ), static_cast<int>( halfHeight ), splitColorFormat, splitBindFlags } );
-    auto farSource = texturePool->Acquire(
-        TexturePool::Description{ static_cast<int>( halfWidth ), static_cast<int>( halfHeight ), splitColorFormat, splitBindFlags } );
-    auto nearBlur = texturePool->Acquire(
-        TexturePool::Description{ static_cast<int>( halfWidth ), static_cast<int>( halfHeight ), splitColorFormat, splitBindFlags } );
-    auto farBlur = texturePool->Acquire(
-        TexturePool::Description{ static_cast<int>( halfWidth ), static_cast<int>( halfHeight ), splitColorFormat, splitBindFlags } );
-    auto compositeBuffer = texturePool->Acquire(
-        TexturePool::Description{ resolution.x, resolution.y, engine->GetBackBufferFormat(), splitBindFlags } );
-
-    if ( !nearSource || !farSource || !nearBlur || !farBlur || !compositeBuffer
-        || !nearSource->GetShaderResView().Get() || !nearSource->GetUnorderedAccessView().Get()
-        || !farSource->GetShaderResView().Get() || !farSource->GetUnorderedAccessView().Get()
-        || !nearBlur->GetShaderResView().Get() || !nearBlur->GetUnorderedAccessView().Get()
-        || !farBlur->GetShaderResView().Get() || !farBlur->GetUnorderedAccessView().Get()
-        || !compositeBuffer->GetShaderResView().Get() || !compositeBuffer->GetUnorderedAccessView().Get() ) {
-        restoreOutput();
-        return XR_FAILED;
-    }
-
-    engine->SetDefaultStates();
-    ID3D11RenderTargetView* nullRTV = nullptr;
-    context->OMSetRenderTargets( 1, &nullRTV, nullptr );
-
-    DepthOfFieldConstantBuffer cb = BuildDepthOfFieldConstants( m_AutoFocusBlend );
-    ID3D11SamplerState* defaultSampler = engine->GetDefaultSamplerState();
-    if ( !defaultSampler ) {
-        restoreOutput();
-        return XR_FAILED;
-    }
-
-    ID3D11UnorderedAccessView* nullUAV = nullptr;
-    ID3D11UnorderedAccessView* nullUAVs[2] = {};
-    ID3D11ShaderResourceView* nullSRVs[8] = {};
-
-    // Focus resolve remains the existing deterministic, temporally smoothed
-    // control path. The new split blur only consumes its 1x1 result.
-    const int previousFocusIndex = m_FocusIndex == 1 ? 1 : 0;
-    const int currentFocusIndex = 1 - previousFocusIndex;
-    focusCS->Apply();
-    focusCS->GetBuffer( "DepthOfFieldConstantBuffer" ).Update( &cb ).Bind();
-    context->CSSetSamplers( 0, 1, &defaultSampler );
-    ID3D11ShaderResourceView* focusSRVs[2] = {
-        depthBuffer->GetShaderResView().Get(),
-        m_FocusSRV[previousFocusIndex].Get()
-    };
-    context->CSSetShaderResources( 0, 2, focusSRVs );
-    context->CSSetUnorderedAccessViews( 0, 1, m_FocusUAV[currentFocusIndex].GetAddressOf(), nullptr );
-    context->Dispatch( 1, 1, 1 );
-    context->CSSetUnorderedAccessViews( 0, 1, &nullUAV, nullptr );
-    context->CSSetShaderResources( 0, 2, nullSRVs );
-    m_FocusIndex = currentFocusIndex;
-
-    // Bilateral half-resolution preparation. Near and far colors remain in
-    // separate resources, which is the key edge-quality improvement.
-    downsampleCS->Apply();
-    downsampleCS->GetBuffer( "DepthOfFieldConstantBuffer" ).Update( &cb ).Bind();
-    context->CSSetSamplers( 0, 1, &defaultSampler );
-    ID3D11ShaderResourceView* downsampleSRVs[5] = {
-        backbuffer,
-        depthBuffer->GetShaderResView().Get(),
-        m_FocusSRV[m_FocusIndex].Get(),
-        waterMaskSRV,
-        specularSRV
-    };
-    context->CSSetShaderResources( 0, 5, downsampleSRVs );
-    ID3D11UnorderedAccessView* downsampleUAVs[2] = {
-        nearSource->GetUnorderedAccessView().Get(),
-        farSource->GetUnorderedAccessView().Get()
-    };
-    context->CSSetUnorderedAccessViews( 0, 2, downsampleUAVs, nullptr );
-    context->Dispatch( ( halfWidth + 7 ) / 8, ( halfHeight + 7 ) / 8, 1 );
-    context->CSSetUnorderedAccessViews( 0, 2, nullUAVs, nullptr );
-    context->CSSetShaderResources( 0, 5, nullSRVs );
-
-    // Independent near/far ring-like blur at half resolution.
-    blurCS->Apply();
-    blurCS->GetBuffer( "DepthOfFieldConstantBuffer" ).Update( &cb ).Bind();
-    context->CSSetSamplers( 0, 1, &defaultSampler );
-    ID3D11ShaderResourceView* blurSRVs[2] = {
-        nearSource->GetShaderResView().Get(),
-        farSource->GetShaderResView().Get()
-    };
-    context->CSSetShaderResources( 0, 2, blurSRVs );
-    ID3D11UnorderedAccessView* blurUAVs[2] = {
-        nearBlur->GetUnorderedAccessView().Get(),
-        farBlur->GetUnorderedAccessView().Get()
-    };
-    context->CSSetUnorderedAccessViews( 0, 2, blurUAVs, nullptr );
-    context->Dispatch( ( halfWidth + 7 ) / 8, ( halfHeight + 7 ) / 8, 1 );
-    context->CSSetUnorderedAccessViews( 0, 2, nullUAVs, nullptr );
-    context->CSSetShaderResources( 0, 2, nullSRVs );
-
-    // Full-resolution composition retains the existing sky-edge transition,
-    // water/specular protection and near-over-far ordering.
-    compositeCS->Apply();
-    compositeCS->GetBuffer( "DepthOfFieldConstantBuffer" ).Update( &cb ).Bind();
-    context->CSSetSamplers( 0, 1, &defaultSampler );
-    ID3D11ShaderResourceView* compositeSRVs[7] = {
-        backbuffer,
-        depthBuffer->GetShaderResView().Get(),
-        m_FocusSRV[m_FocusIndex].Get(),
-        nearBlur->GetShaderResView().Get(),
-        farBlur->GetShaderResView().Get(),
-        waterMaskSRV,
-        specularSRV
-    };
-    context->CSSetShaderResources( 0, 7, compositeSRVs );
-    context->CSSetUnorderedAccessViews( 0, 1, compositeBuffer->GetUnorderedAccessView().GetAddressOf(), nullptr );
-    context->Dispatch( ( static_cast<UINT>( resolution.x ) + 7 ) / 8,
-        ( static_cast<UINT>( resolution.y ) + 7 ) / 8, 1 );
-    context->CSSetUnorderedAccessViews( 0, 1, &nullUAV, nullptr );
-    context->CSSetShaderResources( 0, 7, nullSRVs );
-    context->CSSetShader( nullptr, nullptr, 0 );
-
-    FxRenderer->CopyTextureToRTV( compositeBuffer->GetShaderResView(), oldRTV,
-        resolution );
-    context->OMSetRenderTargets( 1, oldRTV.GetAddressOf(), oldDSV.Get() );
-    return XR_SUCCESS;
-}
-
-XRESULT D3D11PFX_DepthOfField::RenderCS(
-    ID3D11ShaderResourceView* backbuffer,
-    ID3D11ShaderResourceView* waterMaskSRV,
-    ID3D11ShaderResourceView* specularSRV ) {
-    const XRESULT splitResult = RenderFidelityFXStyleCS( backbuffer, waterMaskSRV, specularSRV );
-    if ( splitResult == XR_SUCCESS ) {
-        return splitResult;
-    }
-
-    return RenderLegacyCS( backbuffer, waterMaskSRV, specularSRV );
 }
