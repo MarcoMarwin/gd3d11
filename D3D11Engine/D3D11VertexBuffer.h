@@ -55,6 +55,9 @@ public:
     /** Updates the vertexbuffer with the given data */
     XRESULT UpdateBuffer( void* data, UINT size = 0 );
 
+    /** Updates a DEFAULT-usage buffer without requiring CPU access flags. */
+    XRESULT UpdateBufferSubresource( const void* data, UINT size = 0 );
+
     /** Maps the buffer */
     XRESULT Map( int flags, void** dataPtr, UINT* size );
 

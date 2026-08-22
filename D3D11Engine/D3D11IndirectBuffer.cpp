@@ -17,12 +17,24 @@ XRESULT D3D11IndirectBuffer::Init( void* initData, unsigned int sizeInBytes, EBi
 
     if ( sizeInBytes == 0 ) {
         LogError() << "IndirectBuffer size can't be 0!";
+        return XR_FAILED;
     }
+
+    if ( !engine || !engine->GetDevice() || !engine->GetContext()
+        || cpuAccess != ECPUAccessFlags::CA_NONE ) {
+        LogError() << "Invalid indirect buffer descriptor for " << fileName;
+        return XR_FAILED;
+    }
+
+    IndirectBuffer.Reset();
+    UnorderedAccessView.Reset();
+    ShaderResourceView.Reset();
+    SizeInBytes = 0;
 
     SizeInBytes = sizeInBytes;
 
     // Create our own IndirectBuffer
-    D3D11_BUFFER_DESC bufferDesc;
+    D3D11_BUFFER_DESC bufferDesc = {};
     bufferDesc.ByteWidth = sizeInBytes;
     bufferDesc.Usage = static_cast<D3D11_USAGE>(usage);
     bufferDesc.BindFlags = static_cast<D3D11_USAGE>(EBindFlags);
@@ -33,7 +45,6 @@ XRESULT D3D11IndirectBuffer::Init( void* initData, unsigned int sizeInBytes, EBi
     // Check for unordered access
     if ( (EBindFlags & EBindFlags::B_UNORDERED_ACCESS) != 0 ) {
         bufferDesc.MiscFlags |= D3D11_RESOURCE_MISC_BUFFER_ALLOW_RAW_VIEWS;
-        bufferDesc.StructureByteStride = 4;
     }
 
     // Allocate a minimal buffer when no initial data is provided.
@@ -51,9 +62,10 @@ XRESULT D3D11IndirectBuffer::Init( void* initData, unsigned int sizeInBytes, EBi
     InitData.SysMemSlicePitch = 0;
 
     LE( engine->GetDevice()->CreateBuffer( &bufferDesc, &InitData, IndirectBuffer.ReleaseAndGetAddressOf() ) );
-    if ( !IndirectBuffer.Get() ) {
+    if ( FAILED( hr ) || !IndirectBuffer.Get() ) {
         delete[] data;
-        return XR_SUCCESS;
+        SizeInBytes = 0;
+        return XR_FAILED;
     }
 
     // Check for unordered access again to create the UAV
@@ -65,7 +77,14 @@ XRESULT D3D11IndirectBuffer::Init( void* initData, unsigned int sizeInBytes, EBi
         uavDesc.Buffer.FirstElement = 0;
         uavDesc.Buffer.NumElements = sizeInBytes / 4;
 
-        engine->GetDevice()->CreateUnorderedAccessView( IndirectBuffer.Get(), &uavDesc, UnorderedAccessView.ReleaseAndGetAddressOf() );
+        hr = engine->GetDevice()->CreateUnorderedAccessView( IndirectBuffer.Get(), &uavDesc, UnorderedAccessView.ReleaseAndGetAddressOf() );
+        if ( FAILED( hr ) || !UnorderedAccessView ) {
+            LogError() << "Failed to create indirect buffer UAV for " << fileName;
+            delete[] data;
+            IndirectBuffer.Reset();
+            SizeInBytes = 0;
+            return XR_FAILED;
+        }
     }
 
     if ( (EBindFlags & EBindFlags::B_SHADER_RESOURCE) != 0 ) {
@@ -75,8 +94,16 @@ XRESULT D3D11IndirectBuffer::Init( void* initData, unsigned int sizeInBytes, EBi
         srvDesc.BufferEx.FirstElement = 0;
         srvDesc.BufferEx.NumElements = sizeInBytes / 4;
         srvDesc.BufferEx.Flags = D3D11_BUFFEREX_SRV_FLAG_RAW;
-        engine->GetDevice()->CreateShaderResourceView(
+        hr = engine->GetDevice()->CreateShaderResourceView(
             IndirectBuffer.Get(), &srvDesc, ShaderResourceView.ReleaseAndGetAddressOf() );
+        if ( FAILED( hr ) || !ShaderResourceView ) {
+            LogError() << "Failed to create indirect buffer SRV for " << fileName;
+            delete[] data;
+            IndirectBuffer.Reset();
+            UnorderedAccessView.Reset();
+            SizeInBytes = 0;
+            return XR_FAILED;
+        }
         SetDebugName( ShaderResourceView.Get(), fileName + "_SRV" );
     }
 
@@ -89,6 +116,10 @@ XRESULT D3D11IndirectBuffer::Init( void* initData, unsigned int sizeInBytes, EBi
 
 /** Updates the buffer with the given data */
 XRESULT D3D11IndirectBuffer::UpdateBuffer( void* data, UINT size ) {
+    if ( !IndirectBuffer || !data ) {
+        return XR_FAILED;
+    }
+
     void* mappedData;
     UINT bsize;
 
@@ -110,10 +141,37 @@ XRESULT D3D11IndirectBuffer::UpdateBuffer( void* data, UINT size ) {
     return XR_FAILED;
 }
 
+XRESULT D3D11IndirectBuffer::UpdateBufferSubresource( const void* data, UINT size ) {
+    if ( !IndirectBuffer || !data ) {
+        return XR_FAILED;
+    }
+
+    if ( size == 0 ) {
+        size = SizeInBytes;
+    }
+    if ( size == 0 || size > SizeInBytes ) {
+        return XR_FAILED;
+    }
+
+    auto* engine = reinterpret_cast<D3D11GraphicsEngineBase*>(Engine::GraphicsEngine);
+    if ( !engine || !engine->GetContext() ) {
+        return XR_FAILED;
+    }
+
+    D3D11_BOX box = { 0, 0, 0, size, 1, 1 };
+    engine->GetContext()->UpdateSubresource( IndirectBuffer.Get(), 0, &box, data, 0, 0 );
+    return XR_SUCCESS;
+}
+
 /** Maps the buffer */
 XRESULT D3D11IndirectBuffer::Map( int flags, void** dataPtr, UINT* size ) {
+    auto* engine = reinterpret_cast<D3D11GraphicsEngineBase*>(Engine::GraphicsEngine);
+    if ( !IndirectBuffer || !dataPtr || !size || !engine || !engine->GetContext() ) {
+        return XR_FAILED;
+    }
+
     D3D11_MAPPED_SUBRESOURCE res;
-    if ( FAILED( reinterpret_cast<D3D11GraphicsEngineBase*>(Engine::GraphicsEngine)->GetContext()->Map( IndirectBuffer.Get(), 0, static_cast<D3D11_MAP>(flags), 0, &res ) ) ) {
+    if ( FAILED( engine->GetContext()->Map( IndirectBuffer.Get(), 0, static_cast<D3D11_MAP>(flags), 0, &res ) ) ) {
         return XR_FAILED;
     }
 
@@ -125,7 +183,12 @@ XRESULT D3D11IndirectBuffer::Map( int flags, void** dataPtr, UINT* size ) {
 
 /** Unmaps the buffer */
 XRESULT D3D11IndirectBuffer::Unmap() {
-    reinterpret_cast<D3D11GraphicsEngineBase*>(Engine::GraphicsEngine)->GetContext()->Unmap( IndirectBuffer.Get(), 0 );
+    auto* engine = reinterpret_cast<D3D11GraphicsEngineBase*>(Engine::GraphicsEngine);
+    if ( !IndirectBuffer || !engine || !engine->GetContext() ) {
+        return XR_FAILED;
+    }
+
+    engine->GetContext()->Unmap( IndirectBuffer.Get(), 0 );
     return XR_SUCCESS;
 }
 

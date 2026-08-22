@@ -1,9 +1,11 @@
 // Build-213/DX11 GPU-driven static-VOB culling.
 //
 // The CPU still performs BSP/node and distance collection. Individual VOB
-// frustum tests are skipped for the main view, then this shader tests each
-// instance, compacts survivors into the same per-visual range, and patches
-// the indirect draw arguments. CSM shadow collection never uses this path.
+// frustum tests are skipped for the main view and shadow broad-phase queues,
+// then this shader tests each instance, compacts survivors into the same
+// per-visual range, and patches the indirect draw arguments. Shadow passes
+// deliberately dispatch with Hi-Z disabled and use their active camera
+// replacement matrix for frustum-only culling.
 
 struct VobCullVisual
 {

@@ -641,6 +641,7 @@ private:
             unsigned int VisualIndex = 0;
             MeshKey Mesh;
             MeshInfo* MeshEntry = nullptr;
+            bool UseShadowIndex = false;
         };
 
         bool worldMeshBuilt    = false;  ///< CollectVisibleSections + MDI arg build + buffer upload done
@@ -648,6 +649,7 @@ private:
         bool vobInstancesUploaded = false; ///< CollectVisibleVobs + DynamicInstancingBuffer upload done
         bool vobGpuCullingPrepared = false; ///< Main-view GPU cull/indirect args prepared once per frame
         bool vobGpuCullingActive = false; ///< True only when the compute path completed successfully
+        bool gpuVobGeometryArenaPrepared = false; ///< Shared static-VOB arena prepared once per frame
         bool vobWindMetadataPrepared = false; ///< Wind metadata prepared for cached vob visuals
         bool skeletalBonesUploaded = false; ///< FL11 packed skeletal bone buffers uploaded for main/z-prepass reuse
         bool shadowSkeletalBonesUploaded = false; ///< FL11 packed skeletal bone buffers uploaded once for CSM shadows
@@ -681,6 +683,7 @@ private:
             vobInstancesUploaded = false;
             vobGpuCullingPrepared = false;
             vobGpuCullingActive = false;
+            gpuVobGeometryArenaPrepared = false;
             vobWindMetadataPrepared = false;
             skeletalBonesUploaded = false;
             shadowSkeletalBonesUploaded = false;
@@ -710,6 +713,44 @@ private:
     };
     FrameGeometryCache m_FrameGeometryCache;
 
+    struct GpuVobCullVisualBatch {
+        MeshVisualInfo* Visual = nullptr;
+        unsigned int StartInstanceNum = 0;
+        unsigned int InstanceCount = 0;
+    };
+
+    struct GpuVobCullResourceSet {
+        std::unique_ptr<D3D11VertexBuffer> InputBuffer;
+        std::unique_ptr<D3D11VertexBuffer> VisualBuffer;
+        std::unique_ptr<D3D11VertexBuffer> DrawVisualBuffer;
+        std::unique_ptr<D3D11VertexBuffer> OutputBuffer;
+        std::unique_ptr<D3D11IndirectBuffer> ArgsBuffer;
+        std::unique_ptr<D3D11IndirectBuffer> VisibleCountsBuffer;
+        std::unique_ptr<D3D11ConstantBuffer> CullConstantBuffer;
+        std::unique_ptr<D3D11ConstantBuffer> PatchConstantBuffer;
+    };
+
+    bool PrepareGpuVobCulling(
+        D3D11VertexBuffer* inputInstanceBuffer,
+        const std::vector<GpuVobCullVisualBatch>& vobVisuals,
+        const std::vector<FrameGeometryCache::CachedInstancedMeshDraw>& sortedInstancedMeshes,
+        D3D11VertexBuffer* geometryVertexBuffer,
+        D3D11VertexBuffer* geometryIndexBuffer,
+        std::unique_ptr<D3D11VertexBuffer>& cullInputBuffer,
+        std::unique_ptr<D3D11VertexBuffer>& cullVisualBuffer,
+        std::unique_ptr<D3D11VertexBuffer>& cullDrawVisualBuffer,
+        std::unique_ptr<D3D11VertexBuffer>& cullOutputBuffer,
+        std::unique_ptr<D3D11IndirectBuffer>& cullArgsBuffer,
+        std::unique_ptr<D3D11IndirectBuffer>& cullVisibleCountsBuffer,
+        std::unique_ptr<D3D11ConstantBuffer>& cullConstantBuffer,
+        std::unique_ptr<D3D11ConstantBuffer>& patchConstantBuffer,
+        bool useHiZ,
+        D3D11VertexBuffer*& outputInstanceBuffer,
+        D3D11IndirectBuffer*& outputArgsBuffer );
+
+    /** Reused sequentially by the CSM/rain shadow passes. */
+    GpuVobCullResourceSet GpuVobShadowCullResources;
+
     FrameIndirectBufferPool m_MainWorldIndirectPool;
     FrameIndirectBufferPool m_ShadowWorldIndirectPool;
     FrameInstancingBufferPool m_MainVobInstancingPool;
@@ -719,6 +760,7 @@ private:
     std::unique_ptr<D3D11IndirectBuffer> WaterIndirectBuffer;
 
     /** Persistent FL11+ resources for main-view GPU static-VOB culling. */
+    std::unique_ptr<D3D11VertexBuffer> GpuVobCullInputBuffer;
     std::unique_ptr<D3D11VertexBuffer> GpuVobCullVisualBuffer;
     std::unique_ptr<D3D11VertexBuffer> GpuVobCullDrawVisualBuffer;
     std::unique_ptr<D3D11VertexBuffer> GpuVobCullOutputBuffer;
@@ -732,9 +774,11 @@ private:
         INT BaseVertexLocation = 0;
         UINT VertexCount = 0;
         UINT IndexCount = 0;
+        UINT ShadowStartIndexLocation = 0;
+        UINT ShadowIndexCount = 0;
     };
 
-    /** Persistent shared geometry used by the main-view GPU-driven VOB path. */
+    /** Persistent shared geometry used by the main-view and shadow GPU-driven VOB paths. */
     std::unique_ptr<D3D11VertexBuffer> GpuVobGeometryVertexBuffer;
     std::unique_ptr<D3D11VertexBuffer> GpuVobGeometryIndexBuffer;
     std::unordered_map<MeshInfo*, GpuVobGeometryRange> GpuVobGeometryRanges;

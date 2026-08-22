@@ -79,26 +79,42 @@ XRESULT D3D11VertexBuffer::Init( void* initData, unsigned int sizeInBytes, EBind
 
     if ( sizeInBytes == 0 ) {
         LogError() << "VertexBuffer size can't be 0!";
+        return XR_FAILED;
     }
+
+    const bool shaderResource = (EBindFlags & EBindFlags::B_SHADER_RESOURCE) != 0;
+    const bool unorderedAccess = (EBindFlags & EBindFlags::B_UNORDERED_ACCESS) != 0;
+    if ( !engine || !engine->GetDevice() || !engine->GetContext()
+        || (shaderResource && unorderedAccess)
+        || (cpuAccess != ECPUAccessFlags::CA_NONE && (shaderResource || unorderedAccess))
+        || ((shaderResource || unorderedAccess) && structuredByteSize == 0) ) {
+        LogError() << "Invalid vertex buffer descriptor for " << fileName;
+        return XR_FAILED;
+    }
+
+    VertexBuffer.Reset();
+    ShaderResourceView.Reset();
+    UnorderedAccessView.Reset();
+    SizeInBytes = 0;
 
     SizeInBytes = sizeInBytes;
 
     // Create our own vertexbuffer
-    D3D11_BUFFER_DESC bufferDesc;
+    D3D11_BUFFER_DESC bufferDesc = {};
     bufferDesc.ByteWidth = sizeInBytes;
     bufferDesc.Usage = static_cast<D3D11_USAGE>(usage);
     bufferDesc.BindFlags = static_cast<D3D11_USAGE>(EBindFlags);
     bufferDesc.CPUAccessFlags = static_cast<D3D11_USAGE>(cpuAccess);
     bufferDesc.MiscFlags = 0;
-    bufferDesc.StructureByteStride = structuredByteSize;
+    bufferDesc.StructureByteStride = shaderResource ? structuredByteSize : 0;
 
     // Check for structured buffer
-    if ( (EBindFlags & EBindFlags::B_SHADER_RESOURCE) != 0 ) {
+    if ( shaderResource ) {
         bufferDesc.MiscFlags |= D3D11_RESOURCE_MISC_BUFFER_STRUCTURED;
     }
 
     // Check for unordered access
-    if ( (EBindFlags & EBindFlags::B_UNORDERED_ACCESS) != 0 ) {
+    if ( unorderedAccess ) {
         bufferDesc.MiscFlags |= D3D11_RESOURCE_MISC_BUFFER_ALLOW_RAW_VIEWS;
     }
 
@@ -117,24 +133,32 @@ XRESULT D3D11VertexBuffer::Init( void* initData, unsigned int sizeInBytes, EBind
     InitData.SysMemSlicePitch = 0;
 
     LE( engine->GetDevice()->CreateBuffer( &bufferDesc, &InitData, VertexBuffer.ReleaseAndGetAddressOf() ) );
-    if ( !VertexBuffer.Get() ) {
+    if ( FAILED( hr ) || !VertexBuffer.Get() ) {
         delete[] data;
-        return XR_SUCCESS;
+        SizeInBytes = 0;
+        return XR_FAILED;
     }
 
     // Check for structured buffer again to create the SRV
-    if ( (EBindFlags & EBindFlags::B_SHADER_RESOURCE) != 0 && structuredByteSize > 0 ) {
+    if ( shaderResource ) {
         D3D11_SHADER_RESOURCE_VIEW_DESC srvDesc = {};
         srvDesc.Format = DXGI_FORMAT_UNKNOWN;
         srvDesc.ViewDimension = D3D11_SRV_DIMENSION_BUFFER;
         srvDesc.Buffer.ElementWidth = sizeInBytes / structuredByteSize;
 
-        engine->GetDevice()->CreateShaderResourceView( VertexBuffer.Get(), &srvDesc, ShaderResourceView.ReleaseAndGetAddressOf() );
+        hr = engine->GetDevice()->CreateShaderResourceView( VertexBuffer.Get(), &srvDesc, ShaderResourceView.ReleaseAndGetAddressOf() );
+        if ( FAILED( hr ) || !ShaderResourceView ) {
+            LogError() << "Failed to create structured vertex buffer SRV for " << fileName;
+            delete[] data;
+            VertexBuffer.Reset();
+            SizeInBytes = 0;
+            return XR_FAILED;
+        }
         SetDebugName( ShaderResourceView.Get(), fileName+"_SRV");
     }
 
     // Check for unordered access again to create the UAV
-    if ( (EBindFlags & EBindFlags::B_UNORDERED_ACCESS) != 0 ) {
+    if ( unorderedAccess ) {
         D3D11_UNORDERED_ACCESS_VIEW_DESC uavDesc = {};
         uavDesc.Format = DXGI_FORMAT_R32_TYPELESS;
         uavDesc.ViewDimension = D3D11_UAV_DIMENSION_BUFFER;
@@ -142,7 +166,15 @@ XRESULT D3D11VertexBuffer::Init( void* initData, unsigned int sizeInBytes, EBind
         uavDesc.Buffer.FirstElement = 0;
         uavDesc.Buffer.NumElements = sizeInBytes / structuredByteSize;
 
-        engine->GetDevice()->CreateUnorderedAccessView( VertexBuffer.Get(), &uavDesc, UnorderedAccessView.ReleaseAndGetAddressOf() );
+        hr = engine->GetDevice()->CreateUnorderedAccessView( VertexBuffer.Get(), &uavDesc, UnorderedAccessView.ReleaseAndGetAddressOf() );
+        if ( FAILED( hr ) || !UnorderedAccessView ) {
+            LogError() << "Failed to create vertex buffer UAV for " << fileName;
+            delete[] data;
+            VertexBuffer.Reset();
+            ShaderResourceView.Reset();
+            SizeInBytes = 0;
+            return XR_FAILED;
+        }
         SetDebugName( UnorderedAccessView.Get(), fileName + "_UAV" );
     }
 
@@ -155,6 +187,10 @@ XRESULT D3D11VertexBuffer::Init( void* initData, unsigned int sizeInBytes, EBind
 
 /** Updates the vertexbuffer with the given data */
 XRESULT D3D11VertexBuffer::UpdateBuffer( void* data, UINT size ) {
+    if ( !VertexBuffer || !data ) {
+        return XR_FAILED;
+    }
+
     if ( SizeInBytes < size ) {
         size = SizeInBytes;
     }
@@ -182,10 +218,37 @@ XRESULT D3D11VertexBuffer::UpdateBuffer( void* data, UINT size ) {
     return XR_FAILED;
 }
 
+XRESULT D3D11VertexBuffer::UpdateBufferSubresource( const void* data, UINT size ) {
+    if ( !VertexBuffer || !data ) {
+        return XR_FAILED;
+    }
+
+    if ( size == 0 ) {
+        size = SizeInBytes;
+    }
+    if ( size == 0 || size > SizeInBytes ) {
+        return XR_FAILED;
+    }
+
+    auto* engine = reinterpret_cast<D3D11GraphicsEngineBase*>(Engine::GraphicsEngine);
+    if ( !engine || !engine->GetContext() ) {
+        return XR_FAILED;
+    }
+
+    D3D11_BOX box = { 0, 0, 0, size, 1, 1 };
+    engine->GetContext()->UpdateSubresource( VertexBuffer.Get(), 0, &box, data, 0, 0 );
+    return XR_SUCCESS;
+}
+
 /** Maps the buffer */
 XRESULT D3D11VertexBuffer::Map( int flags, void** dataPtr, UINT* size ) {
+    auto* engine = reinterpret_cast<D3D11GraphicsEngineBase*>(Engine::GraphicsEngine);
+    if ( !VertexBuffer || !dataPtr || !size || !engine || !engine->GetContext() ) {
+        return XR_FAILED;
+    }
+
     D3D11_MAPPED_SUBRESOURCE res;
-    if ( FAILED( reinterpret_cast<D3D11GraphicsEngineBase*>(Engine::GraphicsEngine)->GetContext()->Map( VertexBuffer.Get(), 0, static_cast<D3D11_MAP>(flags), 0, &res ) ) ) {
+    if ( FAILED( engine->GetContext()->Map( VertexBuffer.Get(), 0, static_cast<D3D11_MAP>(flags), 0, &res ) ) ) {
         return XR_FAILED;
     }
 
@@ -197,7 +260,12 @@ XRESULT D3D11VertexBuffer::Map( int flags, void** dataPtr, UINT* size ) {
 
 /** Unmaps the buffer */
 XRESULT D3D11VertexBuffer::Unmap() {
-    reinterpret_cast<D3D11GraphicsEngineBase*>(Engine::GraphicsEngine)->GetContext()->Unmap( VertexBuffer.Get(), 0 );
+    auto* engine = reinterpret_cast<D3D11GraphicsEngineBase*>(Engine::GraphicsEngine);
+    if ( !VertexBuffer || !engine || !engine->GetContext() ) {
+        return XR_FAILED;
+    }
+
+    engine->GetContext()->Unmap( VertexBuffer.Get(), 0 );
     return XR_SUCCESS;
 }
 
