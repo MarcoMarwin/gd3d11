@@ -61,6 +61,9 @@ public:
     /** Returns the UAV of this buffer */
     Microsoft::WRL::ComPtr<ID3D11UnorderedAccessView>& GetUnorderedAccessView() { return UnorderedAccessView; }
 
+    /** Returns the raw SRV of this buffer when B_SHADER_RESOURCE was requested. */
+    Microsoft::WRL::ComPtr<ID3D11ShaderResourceView>& GetShaderResourceView() { return ShaderResourceView; }
+
     /** Returns the size in bytes of this buffer */
     unsigned int GetSizeInBytes() const;
 
@@ -70,6 +73,9 @@ private:
 
     /** UAV for unordered access */
     Microsoft::WRL::ComPtr<ID3D11UnorderedAccessView> UnorderedAccessView;
+
+    /** Raw SRV for compute-read access. */
+    Microsoft::WRL::ComPtr<ID3D11ShaderResourceView> ShaderResourceView;
 
     /** Size of the buffer in bytes */
     unsigned int SizeInBytes;

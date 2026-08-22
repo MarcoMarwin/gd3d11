@@ -39,6 +39,16 @@ enum PS_DS_AtmosphericScatteringSlots {
     TX_BlueNoise512 = 8,
 };
 
+/** Per-frame world shadow caster snapshot. Material classification and alpha
+ * texture residency are resolved once; cascades only perform bbox culling. */
+struct ShadowWorldCaster {
+    WorldMeshInfo* Mesh = nullptr;
+    zCTexture* Texture = nullptr;
+    bool AlphaTest = false;
+};
+
+using ShadowWorldCasterCache = std::vector<ShadowWorldCaster>;
+
 
 /** Parameters for rendering shadow maps */
 struct RenderShadowmapsParams {
@@ -67,6 +77,9 @@ struct RenderShadowmapsParams {
     // Optional array of camera replacements for all cascades
     // Used to build frustums for culling without requiring CameraReplacement to be set externally
     const std::array<CameraReplacement, MAX_CSM_CASCADES>* CascadeCameraReplacements = nullptr;
+
+    // Optional per-frame world caster/material snapshot shared by all cascades.
+    const ShadowWorldCasterCache* WorldShadowCasters = nullptr;
 
     // Atlas viewport override for atlas rendering path
     D3D11_VIEWPORT ViewportOverride = {};
@@ -184,6 +197,7 @@ private:
     void EnsureShadowMapBackend( int size );
 
     void WaitShadowCullingComplete();
+    void BuildWorldShadowCasterCache();
 
     Microsoft::WRL::ComPtr<ID3D11Device1> m_device;
     Microsoft::WRL::ComPtr<ID3D11DeviceContext1> m_context;
@@ -202,10 +216,12 @@ private:
 
     int m_lastNumCascades = 0;
     std::array<CameraReplacement, MAX_CSM_CASCADES> m_CascadeCRs;
+    std::array<float, MAX_CSM_CASCADES> m_CascadeTexelWorld = {};
     std::array<std::unique_ptr<D3D11RenderQueue>, MAX_CSM_CASCADES> m_RenderQueues;
     std::vector<float> m_CascadeSplits;
     std::array<bool, MAX_CSM_CASCADES> m_ShouldUpdateCascade;
     XMFLOAT3 m_WorldShadowPos;
+    ShadowWorldCasterCache m_WorldShadowCasters;
 
     std::unique_ptr<D3D11TiledDeferredShading> m_TiledDeferred;
     D3D11LegacyDeferredShading m_LegacyDeferred;

@@ -142,5 +142,9 @@ enum class CShaderID : size_t {
     CS_PFX_XeGTAO_Denoise,
     CS_PFX_XeGTAO_DenoiseLast,
     CS_PFX_Sharpen,
+    CS_VobCull,
+    CS_VobPatchArgs,
+    CS_VobHiZCopy,
+    CS_VobHiZReduce,
     COUNT
 };

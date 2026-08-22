@@ -305,7 +305,11 @@ XRESULT D3D11ShaderManager::Init() {
 
         const bool useSimpleShadowFallback =
             FeatureLevel10Compatibility || s.DebugSettings.FeatureSet.UseShadowAtlas;
-        list.push_back( {"SHD_ENABLE",           s.EnableShadows ? "1" : "0"} );
+        // World-shadow enablement is runtime-controlled through
+        // SQ_ShadowRuntimeParams.z. Keep the shadow-capable shader variant
+        // resident so changing Shadow Quality can enable CSM without a
+        // shader reload.
+        list.push_back( {"SHD_ENABLE",           "1"} );
         // Compile both kernels once; quality is selected at runtime.
         list.push_back( {"SHD_FILTER_16TAP_PCF", "1"} );
         list.push_back( {"SHD_FILTER_PCSS",      useSimpleShadowFallback ? "0" : "1"} );
@@ -475,6 +479,17 @@ XRESULT D3D11ShaderManager::Init() {
         }));
 
         Shaders.push_back( ShaderInfo::make<CShaderID::CS_TiledShading>( "CS_TiledShading.hlsl" ));
+
+        // GPU-driven static-VOB frustum culling/compaction for Build 213.
+        // The shadow paths deliberately keep their existing CPU culling.
+        Shaders.push_back( ShaderInfo::make<CShaderID::CS_VobCull>( "CS_VobCull.hlsl" )
+            .with_entrypoint( "CSCull" ) );
+        Shaders.push_back( ShaderInfo::make<CShaderID::CS_VobPatchArgs>( "CS_VobCull.hlsl" )
+            .with_entrypoint( "CSPatchArgs" ) );
+        Shaders.push_back( ShaderInfo::make<CShaderID::CS_VobHiZCopy>( "CS_VobHiZ.hlsl" )
+            .with_entrypoint( "CSCopyDepth" ) );
+        Shaders.push_back( ShaderInfo::make<CShaderID::CS_VobHiZReduce>( "CS_VobHiZ.hlsl" )
+            .with_entrypoint( "CSReduce" ) );
 
         Shaders.push_back( ShaderInfo::make<CShaderID::CS_PFX_GodRayMask>( "CS_PFX_GodRayMask.hlsl" ));
 

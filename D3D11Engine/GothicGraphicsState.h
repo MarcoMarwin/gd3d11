@@ -665,6 +665,7 @@ struct GothicRendererSettings {
 
         textureMaxSize = 16384;
         ShadowQuality = E_ShadowQuality::SHADOW_QUALITY_MEDIUM;
+        GpuVobCulling = true;
         ShadowMapSize = 2048;
         PointlightShadowMapSize = 128;
         WorldShadowRangeScale = 1.0f;
@@ -828,6 +829,7 @@ struct GothicRendererSettings {
         DebugSettings.Culling.CullBspSections = true;
         DebugSettings.Culling.CullVobs = true;
         DebugSettings.ShadowCascades.LazyCascadeUpdate = true;
+        ShadowCasterMinTexels = 2.0f;
         DebugSettings.FeatureSet.EnableDriverExtensions = true;
         DebugSettings.FeatureSet.UseWorldSectionBVH = true;
         DebugSettings.FeatureSet.UseScreenSpaceShadowMask = false;
@@ -1173,6 +1175,10 @@ struct GothicRendererSettings {
     E_GodRayMode GodRayMode;
     // Appended so existing renderer-settings field offsets remain unchanged.
     E_ShadowQuality ShadowQuality;
+    // Appended so every pre-existing renderer-settings field offset remains unchanged.
+    float ShadowCasterMinTexels;
+    // Appended so every pre-existing renderer-settings field offset remains unchanged.
+    bool GpuVobCulling;
 
     bool AreGodRaysEnabled() const {
         return EnableGodRays;

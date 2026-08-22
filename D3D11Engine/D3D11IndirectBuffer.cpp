@@ -68,6 +68,18 @@ XRESULT D3D11IndirectBuffer::Init( void* initData, unsigned int sizeInBytes, EBi
         engine->GetDevice()->CreateUnorderedAccessView( IndirectBuffer.Get(), &uavDesc, UnorderedAccessView.ReleaseAndGetAddressOf() );
     }
 
+    if ( (EBindFlags & EBindFlags::B_SHADER_RESOURCE) != 0 ) {
+        D3D11_SHADER_RESOURCE_VIEW_DESC srvDesc = {};
+        srvDesc.Format = DXGI_FORMAT_R32_TYPELESS;
+        srvDesc.ViewDimension = D3D11_SRV_DIMENSION_BUFFEREX;
+        srvDesc.BufferEx.FirstElement = 0;
+        srvDesc.BufferEx.NumElements = sizeInBytes / 4;
+        srvDesc.BufferEx.Flags = D3D11_BUFFEREX_SRV_FLAG_RAW;
+        engine->GetDevice()->CreateShaderResourceView(
+            IndirectBuffer.Get(), &srvDesc, ShaderResourceView.ReleaseAndGetAddressOf() );
+        SetDebugName( ShaderResourceView.Get(), fileName + "_SRV" );
+    }
+
     SetDebugName( IndirectBuffer.Get(), fileName );
 
     delete[] data;

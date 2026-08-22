@@ -27,6 +27,7 @@ struct RndCullContext {
     frustum({}),
     cameraPosition({0,0,0}),
     stage(RenderStage::STAGE_DRAW_UNKNOWN),
+    minVobSize(0.0f),
     queue(nullptr),
     drawDistances({}),
     drawDistancesSq({}),
@@ -37,6 +38,9 @@ struct RndCullContext {
     Frustum frustum;
     XMFLOAT3 cameraPosition;
     RenderStage stage;
+    // Optional shadow-caster size threshold in world units. Zero keeps the
+    // regular/main-view behavior unchanged.
+    float minVobSize;
 
     RenderQueue* queue;
     
@@ -67,6 +71,10 @@ struct RndCullContext {
         bool CollectSmallVobs;
         bool CollectMobs;
         bool CollectLights;
+        // The main-view DX11 GPU VOB path keeps only distance/BSP culling on
+        // the CPU and performs the per-instance frustum test in a compute
+        // shader. Shadow collection must never set this flag.
+        bool SkipVobFrustumCull;
     } drawFlags;
 };
 
@@ -566,7 +574,8 @@ public:
         std::vector<VobLightInfo*>& lights,
         std::vector<SkeletalVobInfo*>& mobs,
         EGothicCullFlags cullFlags = EGothicCullFlags::CullAll,
-        EBspTreeCollectFlags collectFlags = EBspTreeCollectFlags::COLLECT_ALL_MUTATE);
+        EBspTreeCollectFlags collectFlags = EBspTreeCollectFlags::COLLECT_ALL_MUTATE,
+        bool skipVobFrustumCull = false);
 
     void CollectVisibleVobs( const RndCullContext& ctx );
 

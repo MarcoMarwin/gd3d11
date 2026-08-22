@@ -2107,6 +2107,12 @@ void GothicAPI::DrawWorldMeshNaive() {
         Engine::GraphicsEngine->DrawWorldMesh();
     }
 
+    // The static-VOB GPU culler must test against world geometry only. Build
+    // the pyramid here, after the world pass and before skeletal meshes/VOBs.
+    if ( auto* d3d11 = dynamic_cast<D3D11GraphicsEngine*>( Engine::GraphicsEngine ) ) {
+        d3d11->BuildGpuVobHiZ();
+    }
+
     const auto cameraPosXm = GetCameraPositionXM();
 
     if ( RendererState.RendererSettings.DrawSkeletalMeshes ) {
@@ -5066,7 +5072,8 @@ void GothicAPI::CollectVisibleVobs(
     std::vector<VobLightInfo*>& lights, 
     std::vector<SkeletalVobInfo*>& mobs, 
     EGothicCullFlags cullFlags,
-    EBspTreeCollectFlags collectFlags ) {
+    EBspTreeCollectFlags collectFlags,
+    bool skipVobFrustumCull ) {
     ZoneScopedN( "GothicAPI::CollectVisibleVobsLegacy" );
     zCBspTree* tree = LoadedWorldInfo->BspTree;
 
@@ -5114,6 +5121,7 @@ void GothicAPI::CollectVisibleVobs(
     ctx.drawFlags.CollectSmallVobs = true;
     ctx.drawFlags.CollectMobs = true;
     ctx.drawFlags.CollectLights = true;
+    ctx.drawFlags.SkipVobFrustumCull = skipVobFrustumCull;
     CollectVisibleVobs( ctx );
 
     if ( RendererState.RendererSettings.SortRenderQueue ) {
@@ -5658,12 +5666,16 @@ static void CVVH_AddNotDrawnVobToList(
     for ( auto const& it : source ) {
         if ( !visitor->Visit( it ) ) continue;
 
+        if ( ctx.minVobSize > 0.0f && it->VisualInfo && it->VisualInfo->MeshSize < ctx.minVobSize )
+            continue;
+
         if ( !it->Vob->GetShowVisual() ) continue;
         float vdSq;
         XMStoreFloat( &vdSq, XMVector3LengthSq( camPos - XMLoadFloat3( &it->LastRenderPosition ) ) );
         if ( vdSq > distSq ) continue;
 
-        if ( bspContainment != ContainmentType::CONTAINS // only do frustum check if previously "INTERSECTS"
+        if ( !ctx.drawFlags.SkipVobFrustumCull
+            && bspContainment != ContainmentType::CONTAINS // only do frustum check if previously "INTERSECTS"
             && cullingEnabled
             && !ctx.frustum.Intersects( it->Vob->GetBBox() ) ) {
             continue;
@@ -5690,12 +5702,16 @@ static void CVVH_AddNotDrawnVobToList(
     for ( auto const& it : source ) {
         if ( !visitor->Visit( it ) ) continue;
 
+        if ( ctx.minVobSize > 0.0f && it->VisualInfo && it->VisualInfo->MeshSize < ctx.minVobSize )
+            continue;
+
         if ( !it->Vob->GetShowVisual() )
             continue;
         if ( XMVector3Greater( XMVector3LengthSq( camPos - it->Vob->GetPositionWorldXM() ), vDistSq ) ) {
             continue;
         }
-        if ( bspContainment != ContainmentType::CONTAINS // only do frustum check if previously "INTERSECTS"
+        if ( !ctx.drawFlags.SkipVobFrustumCull
+            && bspContainment != ContainmentType::CONTAINS // only do frustum check if previously "INTERSECTS"
             && cullingEnabled
             && !ctx.frustum.Intersects( it->Vob->GetBBox() ) ) {
             continue;
@@ -7384,6 +7400,10 @@ XRESULT GothicAPI::SaveMenuSettings( const std::string& file ) {
     WritePrivateProfileStringA( "Shadows", "Quality", std::to_string( static_cast<int>(s.ShadowQuality) ).c_str(), ini.c_str() );
     WritePrivateProfileStringA( "Shadows", "ShadowMapSize", std::to_string( s.ShadowMapSize ).c_str(), ini.c_str() );
     WritePrivateProfileStringA( "Shadows", "ShadowSoftness", std::to_string( s.ShadowSoftness ).c_str(), ini.c_str() );
+    WritePrivateProfileStringA( "Shadows", "CasterMinTexels",
+        float_to_string( s.ShadowCasterMinTexels, 2 ).c_str(), ini.c_str() );
+    WritePrivateProfileStringA( "Performance", "GpuVobCulling",
+        std::to_string( s.GpuVobCulling ? TRUE : FALSE ).c_str(), ini.c_str() );
 
     WritePrivateProfileStringA( "General", "AntiAliasing", std::to_string( (int)s.AntiAliasingMode ).c_str(), ini.c_str() );
 
@@ -7526,6 +7546,11 @@ XRESULT GothicAPI::LoadMenuSettings( const std::string& file ) {
         s.ShadowSoftness = std::clamp( GetPrivateProfileFloatA( "Shadows", "ShadowSoftness", ds.ShadowSoftness, ini ), 0.0f, 2.0f );
         s.ShadowAOStrength = ds.ShadowAOStrength;
         s.WorldAOStrength = ds.WorldAOStrength;
+        s.ShadowCasterMinTexels = std::clamp(
+            GetPrivateProfileFloatA( "Shadows", "CasterMinTexels", ds.ShadowCasterMinTexels, ini ),
+            0.0f, 16.0f );
+        s.GpuVobCulling = GetPrivateProfileBoolA(
+            "Performance", "GpuVobCulling", ds.GpuVobCulling, ini );
 
         INT2 res = {};
         RECT desktopRect;
@@ -8781,6 +8806,9 @@ void GothicAPI::CollectVisibleVobs( const RndCullContext& ctx ) {
         for ( VobInfo* it : DynamicallyAddedVobs ) {
             if ( !bspVobVisitor.Visit( it ) ) continue;
 
+            if ( ctx.minVobSize > 0.0f && it->VisualInfo && it->VisualInfo->MeshSize < ctx.minVobSize )
+                continue;
+
             XMStoreFloat( &dist, XMVector3Length( camPos - it->Vob->GetPositionWorldXM() ) );
             if ( it->VisualInfo && (
                 (dist < vobIndoorDist && it->IsIndoorVob && collectIndoor)
@@ -8794,7 +8822,8 @@ void GothicAPI::CollectVisibleVobs( const RndCullContext& ctx ) {
                 if ( !it->Vob->GetShowVisual() ) {
                     continue;
                 }
-                if ( cullingEnabled && !ctx.frustum.Intersects( it->Vob->GetBBox() ) ) {
+                if ( !ctx.drawFlags.SkipVobFrustumCull
+                    && cullingEnabled && !ctx.frustum.Intersects( it->Vob->GetBBox() ) ) {
                     continue;
                 }
 

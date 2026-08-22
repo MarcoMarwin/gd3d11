@@ -1460,6 +1460,15 @@ void ImGuiShim::RenderSettingsWindow()
             SliderNormalizedUiStrength( "##ShadowSoftness", &settings.ShadowSoftness );
             ImGui::SetItemTooltip( "%s", Tr( "Makes shadow edges sharper or softer.", u8"Macht Schattenkanten h\u00E4rter oder weicher." ) );
 
+            ImText( Tr( "Shadow Caster Minimum", u8"Minimale Schattenwerfergr\u00F6\u00DFe" ), buttonWidth ); ImGui::SameLine();
+            settings.ShadowCasterMinTexels = std::clamp(
+                settings.ShadowCasterMinTexels, 0.0f, 16.0f );
+            ImGui::SliderFloat( "##ShadowCasterMinTexels",
+                &settings.ShadowCasterMinTexels, 0.0f, 16.0f, "%.1f" );
+            ImGui::SetItemTooltip( "%s", Tr(
+                "Skips small VOBs in shadow cascades when their bounding-box size is below this many cascade texels. Zero disables the filter.",
+                u8"Ignoriert kleine VOBs in den Schatten-Cascades, wenn ihre Bounding-Box kleiner als diese Anzahl Cascade-Texel ist. Null deaktiviert den Filter." ) );
+
             const bool ambientOcclusionAvailable = !FeatureLevel10Compatibility;
             bool ambientOcclusionEnabled = ambientOcclusionAvailable && settings.AoMode == AOMode::AO_XEGTAO;
             ImText( Tr( "Ambient Occlusion", u8"Umgebungsverdeckung" ), { buttonWidth.x - ImGui::GetFrameHeight() - style.ItemSpacing.x, buttonWidth.y } ); ImGui::SameLine();

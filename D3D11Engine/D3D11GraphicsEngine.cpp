@@ -13,6 +13,7 @@
 #include "D3D11ShaderManager.h"
 #include "D3D11VShader.h"
 #include "D3D11IndirectBuffer.h"
+#include "D3D11ConstantBuffer.h"
 #include "GMesh.h"
 #include "GSky.h"
 #include "RenderToTextureBuffer.h"
@@ -36,6 +37,8 @@
 #include <locale>
 #include <codecvt>
 #include <cmath>
+#include <functional>
+#include <limits>
 #include <wrl\client.h>
 #include "D3D11_Helpers.h"
 
@@ -77,6 +80,37 @@ bool FeatureLevel10Compatibility = false;
 bool FeatureRTArrayIndexFromAnyShader = false;
 
 VS_ExConstantBuffer_Wind g_windBuffer;
+
+namespace {
+
+struct GpuVobCullVisualInfo {
+    XMFLOAT3 BBoxMin;
+    UINT InstanceBase;
+    XMFLOAT3 BBoxMax;
+    UINT InstanceCount;
+};
+static_assert( sizeof( GpuVobCullVisualInfo ) == 32 );
+static_assert( offsetof( GpuVobCullVisualInfo, InstanceBase ) == 12 );
+static_assert( offsetof( GpuVobCullVisualInfo, InstanceCount ) == 28 );
+
+struct GpuVobCullConstantsData {
+    XMFLOAT4X4 CullViewProj;
+    UINT VisualCount;
+    UINT HiZWidth;
+    UINT HiZHeight;
+    UINT HiZMipCount;
+    UINT EnableOcclusion;
+    UINT Padding[3];
+};
+static_assert( sizeof( GpuVobCullConstantsData ) == 96 );
+
+struct GpuVobPatchConstantsData {
+    UINT DrawCount;
+    UINT Padding[3];
+};
+static_assert( sizeof( GpuVobPatchConstantsData ) == 16 );
+
+}
 
 struct SkyVelocityConstantBuffer {
     XMFLOAT4X4 InvViewProj;
@@ -715,12 +749,28 @@ void D3D11GraphicsEngine::EnsureFrameVobVisibilityCollected() {
         m_CollectedVobWorldGeneration = worldGeneration;
     }
 
-    if ( !renderSettings.FixViewFrustum || m_CollectedCameraVobs.empty() ) {
+    const bool gpuVobShadersAvailable = ShaderManager
+        && ShaderManager->GetCShader( CShaderID::CS_VobCull )
+        && ShaderManager->GetCShader( CShaderID::CS_VobPatchArgs );
+    const bool useGpuVobCulling = renderSettings.GpuVobCulling
+        && !FeatureLevel10Compatibility
+        && renderSettings.DebugSettings.Culling.CullVobs
+        && gpuVobShadersAvailable;
+    if ( useGpuVobCulling ) {
+        // The GPU path must receive the current distance/BSP candidate set;
+        // retaining the previous camera list would make the GPU cull operate
+        // on stale VOB pointers after the camera moved.
+        m_CollectedCameraVobs.clear();
+        m_CollectedCameraMobs.clear();
+    }
+
+    if ( useGpuVobCulling || !renderSettings.FixViewFrustum || m_CollectedCameraVobs.empty() ) {
         m_FrameLights.clear();
         ZoneScopedN( "D3D11GraphicsEngine::EnsureFrameVobVisibilityCollected" );
         Engine::GAPI->CollectVisibleVobs( m_CollectedCameraVobs, m_FrameLights,
             m_CollectedCameraMobs, EGothicCullFlags::CullAll,
-            EBspTreeCollectFlags::COLLECT_ALL_MUTATE );
+            EBspTreeCollectFlags::COLLECT_ALL_MUTATE,
+            useGpuVobCulling );
     }
     cache.cachedMobs = m_CollectedCameraMobs;
 
@@ -734,6 +784,532 @@ void D3D11GraphicsEngine::EnsureFrameVobVisibilityCollected() {
         std::sort( cache.visibleWindowVobs.begin(), cache.visibleWindowVobs.end(),
             std::less<VobInfo*>{} );
     }
+}
+
+bool D3D11GraphicsEngine::EnsureGpuVobHiZResources() {
+    if ( !DepthStencilBufferCopy || !DepthStencilBufferCopy->GetTexture()
+        || !DepthStencilBufferCopy->GetShaderResView() ) {
+        return false;
+    }
+
+    D3D11_TEXTURE2D_DESC depthDesc = {};
+    DepthStencilBufferCopy->GetTexture()->GetDesc( &depthDesc );
+    const UINT width = std::max( 1u, (depthDesc.Width + 1u) / 2u );
+    const UINT height = std::max( 1u, (depthDesc.Height + 1u) / 2u );
+    if ( width == GpuVobHiZWidth && height == GpuVobHiZHeight
+        && GpuVobHiZTexture && GpuVobHiZShaderResourceView
+        && !GpuVobHiZMipShaderResourceViews.empty()
+        && !GpuVobHiZMipUnorderedAccessViews.empty() ) {
+        return true;
+    }
+
+    UINT mipCount = 1;
+    for ( UINT mipWidth = width, mipHeight = height;
+        mipWidth > 1 || mipHeight > 1; ++mipCount ) {
+        // D3D11 texture mip dimensions use floor(width / 2), so mirror that
+        // exact layout when computing the number of levels.
+        mipWidth = std::max( 1u, mipWidth / 2u );
+        mipHeight = std::max( 1u, mipHeight / 2u );
+    }
+
+    D3D11_TEXTURE2D_DESC hiZDesc = {};
+    hiZDesc.Width = width;
+    hiZDesc.Height = height;
+    hiZDesc.MipLevels = mipCount;
+    hiZDesc.ArraySize = 1;
+    hiZDesc.Format = DXGI_FORMAT_R32_FLOAT;
+    hiZDesc.SampleDesc.Count = 1;
+    hiZDesc.Usage = D3D11_USAGE_DEFAULT;
+    hiZDesc.BindFlags = D3D11_BIND_SHADER_RESOURCE | D3D11_BIND_UNORDERED_ACCESS;
+
+    Microsoft::WRL::ComPtr<ID3D11Texture2D> texture;
+    if ( FAILED( GetDevice()->CreateTexture2D( &hiZDesc, nullptr, texture.GetAddressOf() ) )
+        || !texture ) {
+        return false;
+    }
+
+    D3D11_SHADER_RESOURCE_VIEW_DESC fullSrvDesc = {};
+    fullSrvDesc.Format = DXGI_FORMAT_R32_FLOAT;
+    fullSrvDesc.ViewDimension = D3D11_SRV_DIMENSION_TEXTURE2D;
+    fullSrvDesc.Texture2D.MostDetailedMip = 0;
+    fullSrvDesc.Texture2D.MipLevels = mipCount;
+    Microsoft::WRL::ComPtr<ID3D11ShaderResourceView> fullSrv;
+    if ( FAILED( GetDevice()->CreateShaderResourceView(
+        texture.Get(), &fullSrvDesc, fullSrv.GetAddressOf() ) ) || !fullSrv ) {
+        return false;
+    }
+
+    std::vector<Microsoft::WRL::ComPtr<ID3D11ShaderResourceView>> mipSrvs( mipCount );
+    std::vector<Microsoft::WRL::ComPtr<ID3D11UnorderedAccessView>> mipUavs( mipCount );
+    for ( UINT mip = 0; mip < mipCount; ++mip ) {
+        D3D11_SHADER_RESOURCE_VIEW_DESC mipSrvDesc = {};
+        mipSrvDesc.Format = DXGI_FORMAT_R32_FLOAT;
+        mipSrvDesc.ViewDimension = D3D11_SRV_DIMENSION_TEXTURE2D;
+        mipSrvDesc.Texture2D.MostDetailedMip = mip;
+        mipSrvDesc.Texture2D.MipLevels = 1;
+        if ( FAILED( GetDevice()->CreateShaderResourceView(
+            texture.Get(), &mipSrvDesc, mipSrvs[mip].GetAddressOf() ) )
+            || !mipSrvs[mip] ) {
+            return false;
+        }
+
+        D3D11_UNORDERED_ACCESS_VIEW_DESC uavDesc = {};
+        uavDesc.Format = DXGI_FORMAT_R32_FLOAT;
+        uavDesc.ViewDimension = D3D11_UAV_DIMENSION_TEXTURE2D;
+        uavDesc.Texture2D.MipSlice = mip;
+        if ( FAILED( GetDevice()->CreateUnorderedAccessView(
+            texture.Get(), &uavDesc, mipUavs[mip].GetAddressOf() ) )
+            || !mipUavs[mip] ) {
+            return false;
+        }
+    }
+
+    GpuVobHiZTexture = std::move( texture );
+    GpuVobHiZShaderResourceView = std::move( fullSrv );
+    GpuVobHiZMipShaderResourceViews = std::move( mipSrvs );
+    GpuVobHiZMipUnorderedAccessViews = std::move( mipUavs );
+    GpuVobHiZWidth = width;
+    GpuVobHiZHeight = height;
+    GpuVobHiZMipCount = mipCount;
+    return true;
+}
+
+void D3D11GraphicsEngine::BuildGpuVobHiZ() {
+    if ( GpuVobHiZBuildAttemptedThisFrame ) {
+        return;
+    }
+    GpuVobHiZBuiltThisFrame = false;
+    const auto& settings = Engine::GAPI->GetRendererState().RendererSettings;
+    if ( !settings.GpuVobCulling || FeatureLevel10Compatibility
+        || !settings.DebugSettings.Culling.CullVobs || !Context || !ShaderManager ) {
+        return;
+    }
+    GpuVobHiZBuildAttemptedThisFrame = true;
+
+    const auto copyShader = ShaderManager->GetCShader( CShaderID::CS_VobHiZCopy );
+    const auto reduceShader = ShaderManager->GetCShader( CShaderID::CS_VobHiZReduce );
+    if ( !copyShader || !reduceShader || !EnsureGpuVobHiZResources() ) {
+        return;
+    }
+
+    // Copying the DSV is already the renderer's established way of making
+    // the reversed-Z depth SRV readable for compute passes.
+    CopyDepthStencil();
+    ID3D11ShaderResourceView* nullSrv = nullptr;
+    ID3D11UnorderedAccessView* nullUav = nullptr;
+    ID3D11ShaderResourceView* depthSrv = DepthStencilBufferCopy->GetShaderResView().Get();
+    ID3D11UnorderedAccessView* firstUav = GpuVobHiZMipUnorderedAccessViews[0].Get();
+
+    GetContext()->CSSetShaderResources( 0, 1, &depthSrv );
+    GetContext()->CSSetUnorderedAccessViews( 0, 1, &firstUav, nullptr );
+    copyShader->Apply();
+    GetContext()->Dispatch( (GpuVobHiZWidth + 7u) / 8u,
+        (GpuVobHiZHeight + 7u) / 8u, 1 );
+    GetContext()->CSSetUnorderedAccessViews( 0, 1, &nullUav, nullptr );
+    GetContext()->CSSetShaderResources( 0, 1, &nullSrv );
+
+    for ( UINT mip = 1; mip < GpuVobHiZMipCount; ++mip ) {
+        UINT mipWidth = std::max( 1u, GpuVobHiZWidth >> mip );
+        UINT mipHeight = std::max( 1u, GpuVobHiZHeight >> mip );
+        ID3D11ShaderResourceView* sourceSrv = GpuVobHiZMipShaderResourceViews[mip - 1].Get();
+        ID3D11UnorderedAccessView* destinationUav = GpuVobHiZMipUnorderedAccessViews[mip].Get();
+        GetContext()->CSSetShaderResources( 0, 1, &sourceSrv );
+        GetContext()->CSSetUnorderedAccessViews( 0, 1, &destinationUav, nullptr );
+        reduceShader->Apply();
+        GetContext()->Dispatch( (mipWidth + 7u) / 8u,
+            (mipHeight + 7u) / 8u, 1 );
+        GetContext()->CSSetUnorderedAccessViews( 0, 1, &nullUav, nullptr );
+        GetContext()->CSSetShaderResources( 0, 1, &nullSrv );
+    }
+
+    GetContext()->CSSetShader( nullptr, nullptr, 0 );
+    GpuVobHiZBuiltThisFrame = true;
+}
+
+bool D3D11GraphicsEngine::PrepareGpuVobGeometryArena() {
+    auto& cache = m_FrameGeometryCache;
+    const auto& settings = Engine::GAPI->GetRendererState().RendererSettings;
+    const uint64_t worldGeneration = Engine::GAPI->GetCityWindowConfigurationGeneration();
+
+    // Morph-updated static VOBs change their vertex stream every frame. Keep
+    // only those meshes on the existing per-mesh path instead of copying
+    // stale geometry into a persistent arena; ordinary static meshes remain
+    // eligible even when AnimateStaticVobs is enabled globally.
+    if ( !settings.GpuVobCulling || FeatureLevel10Compatibility
+        || cache.sortedInstancedMeshes.empty() ) {
+        return false;
+    }
+
+    // Build the persistent arena from the registered static-VOB geometry, not
+    // from this frame's visible subset. Otherwise a camera turn that adds or
+    // removes one VOB mesh would force a full arena rebuild and CPU re-upload.
+    // The current frame is still included as a fallback for meshes that are
+    // being published while the world is loading asynchronously.
+    std::vector<MeshInfo*> meshes;
+    meshes.reserve( cache.sortedInstancedMeshes.size() + 256 );
+    std::unordered_set<MeshInfo*> morphMeshes;
+    auto addMesh = [&meshes]( MeshInfo* mesh ) {
+        if ( mesh && !mesh->Vertices.empty() && !mesh->Indices.empty() ) {
+            meshes.push_back( mesh );
+        }
+    };
+    for ( const auto& [_, visual] : Engine::GAPI->GetStaticMeshVisuals() ) {
+        if ( !visual ) {
+            continue;
+        }
+        const bool isAnimatedMorph = settings.AnimateStaticVobs
+            && visual->MorphMeshVisual != nullptr;
+        for ( const auto& [__, meshList] : visual->MeshesByTexture ) {
+            for ( MeshInfo* mesh : meshList ) {
+                if ( isAnimatedMorph ) {
+                    if ( mesh ) {
+                        morphMeshes.insert( mesh );
+                    }
+                } else {
+                    addMesh( mesh );
+                }
+            }
+        }
+    }
+    for ( const auto& drawItem : cache.sortedInstancedMeshes ) {
+        if ( morphMeshes.find( drawItem.MeshEntry ) == morphMeshes.end() ) {
+            addMesh( drawItem.MeshEntry );
+        }
+    }
+
+    std::sort( meshes.begin(), meshes.end(), std::less<MeshInfo*>() );
+    meshes.erase( std::unique( meshes.begin(), meshes.end() ), meshes.end() );
+    if ( meshes.empty() ) {
+        return false;
+    }
+
+    bool reusable = worldGeneration == GpuVobGeometryWorldGeneration
+        && meshes == GpuVobGeometryMeshes
+        && GpuVobGeometryVertexBuffer && GpuVobGeometryIndexBuffer
+        && GpuVobGeometryVertexBuffer->GetVertexBuffer()
+        && GpuVobGeometryIndexBuffer->GetVertexBuffer()
+        && GpuVobGeometryRanges.size() == meshes.size();
+    if ( reusable ) {
+        for ( MeshInfo* mesh : meshes ) {
+            const auto it = GpuVobGeometryRanges.find( mesh );
+            if ( it == GpuVobGeometryRanges.end()
+                || it->second.VertexCount != mesh->Vertices.size()
+                || it->second.IndexCount != mesh->Indices.size() ) {
+                reusable = false;
+                break;
+            }
+        }
+    }
+
+    if ( !reusable ) {
+        size_t vertexCount = 0;
+        size_t indexCount = 0;
+        for ( MeshInfo* mesh : meshes ) {
+            vertexCount += mesh->Vertices.size();
+            indexCount += mesh->Indices.size();
+        }
+        if ( vertexCount == 0 || indexCount == 0
+            || vertexCount > static_cast<size_t>( std::numeric_limits<INT>::max() )
+            || vertexCount > std::numeric_limits<UINT>::max()
+            || indexCount > std::numeric_limits<UINT>::max() ) {
+            return false;
+        }
+
+        std::vector<ExVertexStruct> vertices;
+        std::vector<VERTEX_INDEX> indices;
+        vertices.reserve( vertexCount );
+        indices.reserve( indexCount );
+        std::unordered_map<MeshInfo*, GpuVobGeometryRange> ranges;
+        ranges.reserve( meshes.size() );
+
+        UINT vertexOffset = 0;
+        UINT indexOffset = 0;
+        for ( MeshInfo* mesh : meshes ) {
+            GpuVobGeometryRange range;
+            range.StartIndexLocation = indexOffset;
+            range.BaseVertexLocation = static_cast<INT>( vertexOffset );
+            range.VertexCount = static_cast<UINT>( mesh->Vertices.size() );
+            range.IndexCount = static_cast<UINT>( mesh->Indices.size() );
+            ranges.emplace( mesh, range );
+
+            vertices.insert( vertices.end(), mesh->Vertices.begin(), mesh->Vertices.end() );
+            indices.insert( indices.end(), mesh->Indices.begin(), mesh->Indices.end() );
+            vertexOffset += static_cast<UINT>( mesh->Vertices.size() );
+            indexOffset += static_cast<UINT>( mesh->Indices.size() );
+        }
+
+        auto arenaVertices = std::make_unique<D3D11VertexBuffer>();
+        auto arenaIndices = std::make_unique<D3D11VertexBuffer>();
+        if ( arenaVertices->Init( vertices.data(),
+                static_cast<UINT>( vertices.size() * sizeof( ExVertexStruct ) ),
+                D3D11VertexBuffer::B_VERTEXBUFFER,
+                D3D11VertexBuffer::U_DEFAULT,
+                D3D11VertexBuffer::CA_NONE,
+                "GpuVobGeometryVertexArena" ) != XR_SUCCESS
+            || !arenaVertices->GetVertexBuffer()
+            || arenaIndices->Init( indices.data(),
+                static_cast<UINT>( indices.size() * sizeof( VERTEX_INDEX ) ),
+                D3D11VertexBuffer::B_INDEXBUFFER,
+                D3D11VertexBuffer::U_DEFAULT,
+                D3D11VertexBuffer::CA_NONE,
+                "GpuVobGeometryIndexArena" ) != XR_SUCCESS
+            || !arenaIndices->GetVertexBuffer() ) {
+            return false;
+        }
+
+        GpuVobGeometryVertexBuffer = std::move( arenaVertices );
+        GpuVobGeometryIndexBuffer = std::move( arenaIndices );
+        GpuVobGeometryRanges = std::move( ranges );
+        GpuVobGeometryMeshes = std::move( meshes );
+        GpuVobGeometryWorldGeneration = worldGeneration;
+    }
+
+    cache.MainVobGpuGeometryVertexBuffer = GpuVobGeometryVertexBuffer.get();
+    cache.MainVobGpuGeometryIndexBuffer = GpuVobGeometryIndexBuffer.get();
+    return true;
+}
+
+bool D3D11GraphicsEngine::PrepareGpuVobCulling() {
+    auto& cache = m_FrameGeometryCache;
+    const auto& settings = Engine::GAPI->GetRendererState().RendererSettings;
+    if ( !settings.GpuVobCulling || FeatureLevel10Compatibility
+        || !settings.DebugSettings.Culling.CullVobs
+        || !cache.MainVobInstancingBuffer
+        || cache.vobVisuals.empty()
+        || cache.sortedInstancedMeshes.empty()
+        || cache.vobVisuals.size() > 65535 ) {
+        return false;
+    }
+
+    const auto cullShader = ShaderManager->GetCShader( CShaderID::CS_VobCull );
+    const auto patchShader = ShaderManager->GetCShader( CShaderID::CS_VobPatchArgs );
+    if ( !cullShader || !patchShader ) {
+        return false;
+    }
+
+    std::vector<GpuVobCullVisualInfo> visualInfo( cache.vobVisuals.size() );
+    for ( size_t visualIndex = 0; visualIndex < cache.vobVisuals.size(); ++visualIndex ) {
+        const auto& cachedVisual = cache.vobVisuals[visualIndex];
+        if ( !cachedVisual.Visual ) {
+            return false;
+        }
+
+        visualInfo[visualIndex].BBoxMin = XMFLOAT3(
+            cachedVisual.Visual->BBox.Min.x,
+            cachedVisual.Visual->BBox.Min.y,
+            cachedVisual.Visual->BBox.Min.z );
+        visualInfo[visualIndex].BBoxMax = XMFLOAT3(
+            cachedVisual.Visual->BBox.Max.x,
+            cachedVisual.Visual->BBox.Max.y,
+            cachedVisual.Visual->BBox.Max.z );
+        visualInfo[visualIndex].InstanceBase = cachedVisual.StartInstanceNum;
+        visualInfo[visualIndex].InstanceCount = static_cast<UINT>(cachedVisual.Instances.size());
+    }
+
+    std::vector<UINT> drawVisualIndices( cache.sortedInstancedMeshes.size() );
+    std::vector<D3D11_DRAW_INDEXED_INSTANCED_INDIRECT_ARGS> drawArgs(
+        cache.sortedInstancedMeshes.size() );
+    const UINT maxIndices = settings.MaxNumFaces > 0
+        ? static_cast<UINT>( settings.MaxNumFaces ) * 3u : 0u;
+    for ( size_t drawIndex = 0; drawIndex < cache.sortedInstancedMeshes.size(); ++drawIndex ) {
+        const auto& drawItem = cache.sortedInstancedMeshes[drawIndex];
+        if ( drawItem.VisualIndex >= visualInfo.size() || !drawItem.MeshEntry ) {
+            return false;
+        }
+
+        const auto geometryRange = GpuVobGeometryRanges.find( drawItem.MeshEntry );
+        const bool useGeometryArena = cache.MainVobGpuGeometryVertexBuffer
+            && cache.MainVobGpuGeometryIndexBuffer
+            && geometryRange != GpuVobGeometryRanges.end();
+        const UINT meshIndexCount = useGeometryArena
+            ? geometryRange->second.IndexCount
+            : static_cast<UINT>( drawItem.MeshEntry->Indices.size() );
+        drawVisualIndices[drawIndex] = drawItem.VisualIndex;
+        drawArgs[drawIndex].IndexCountPerInstance = maxIndices != 0
+            ? std::min( meshIndexCount, maxIndices ) : meshIndexCount;
+        drawArgs[drawIndex].InstanceCount = visualInfo[drawItem.VisualIndex].InstanceCount;
+        drawArgs[drawIndex].StartIndexLocation = useGeometryArena
+            ? geometryRange->second.StartIndexLocation : 0;
+        drawArgs[drawIndex].BaseVertexLocation = useGeometryArena
+            ? geometryRange->second.BaseVertexLocation : 0;
+        drawArgs[drawIndex].StartInstanceLocation =
+            visualInfo[drawItem.VisualIndex].InstanceBase;
+    }
+
+    const UINT visualBytes = static_cast<UINT>(
+        visualInfo.size() * sizeof( GpuVobCullVisualInfo ) );
+    const UINT drawVisualBytes = static_cast<UINT>(
+        drawVisualIndices.size() * sizeof( UINT ) );
+    const UINT instanceBytes = static_cast<UINT>(
+        cache.MainVobInstancingBuffer->GetSizeInBytes() );
+    const UINT argsBytes = static_cast<UINT>(
+        drawArgs.size() * sizeof( D3D11_DRAW_INDEXED_INSTANCED_INDIRECT_ARGS ) );
+    const UINT visibleCountBytes = static_cast<UINT>( visualInfo.size() * sizeof( UINT ) );
+
+    auto ensureStructuredBuffer = []( std::unique_ptr<D3D11VertexBuffer>& buffer,
+        UINT sizeInBytes, UINT stride, const char* debugName ) -> bool {
+        if ( buffer && buffer->GetSizeInBytes() >= sizeInBytes
+            && buffer->GetShaderResourceView().Get() ) {
+            return true;
+        }
+        buffer = std::make_unique<D3D11VertexBuffer>();
+        return buffer->Init( nullptr, sizeInBytes,
+            D3D11VertexBuffer::B_SHADER_RESOURCE,
+            D3D11VertexBuffer::U_DYNAMIC,
+            D3D11VertexBuffer::CA_WRITE,
+            debugName ? debugName : "GpuVobStructuredBuffer", stride ) == XR_SUCCESS;
+    };
+
+    if ( !ensureStructuredBuffer( GpuVobCullVisualBuffer,
+        std::max( visualBytes, 32u ), sizeof( GpuVobCullVisualInfo ),
+        "GpuVobCullVisuals" )
+        || !ensureStructuredBuffer( GpuVobCullDrawVisualBuffer,
+            std::max( drawVisualBytes, 4u ), sizeof( UINT ),
+            "GpuVobCullDrawVisuals" ) ) {
+        return false;
+    }
+
+    if ( !GpuVobCullOutputBuffer
+        || GpuVobCullOutputBuffer->GetSizeInBytes() < instanceBytes
+        || !GpuVobCullOutputBuffer->GetUnorderedAccessView().Get() ) {
+        GpuVobCullOutputBuffer = std::make_unique<D3D11VertexBuffer>();
+        const auto outputFlags = static_cast<D3D11VertexBuffer::EBindFlags>(
+            D3D11VertexBuffer::B_VERTEXBUFFER
+            | D3D11VertexBuffer::B_UNORDERED_ACCESS );
+        if ( GpuVobCullOutputBuffer->Init( nullptr, instanceBytes, outputFlags,
+            D3D11VertexBuffer::U_DEFAULT,
+            D3D11VertexBuffer::CA_NONE,
+            "GpuVobCullOutput", sizeof( UINT ) ) != XR_SUCCESS ) {
+            return false;
+        }
+    }
+
+    if ( !GpuVobCullVisibleCountsBuffer
+        || GpuVobCullVisibleCountsBuffer->GetSizeInBytes() < visibleCountBytes
+        || !GpuVobCullVisibleCountsBuffer->GetUnorderedAccessView().Get()
+        || !GpuVobCullVisibleCountsBuffer->GetShaderResourceView().Get() ) {
+        GpuVobCullVisibleCountsBuffer = std::make_unique<D3D11IndirectBuffer>();
+        const auto visibleCountFlags = static_cast<D3D11IndirectBuffer::EBindFlags>(
+            D3D11IndirectBuffer::B_SHADER_RESOURCE
+            | D3D11IndirectBuffer::B_UNORDERED_ACCESS );
+        if ( GpuVobCullVisibleCountsBuffer->Init(
+            nullptr, std::max( visibleCountBytes, 4u ), visibleCountFlags,
+            D3D11IndirectBuffer::U_DEFAULT,
+            D3D11IndirectBuffer::CA_NONE,
+            "GpuVobCullVisibleCounts" ) != XR_SUCCESS ) {
+            return false;
+        }
+    }
+
+    if ( !GpuVobCullArgsBuffer
+        || GpuVobCullArgsBuffer->GetSizeInBytes() < argsBytes
+        || !GpuVobCullArgsBuffer->GetUnorderedAccessView().Get() ) {
+        GpuVobCullArgsBuffer = std::make_unique<D3D11IndirectBuffer>();
+        if ( GpuVobCullArgsBuffer->Init( nullptr, argsBytes,
+            D3D11IndirectBuffer::B_UNORDERED_ACCESS,
+            D3D11IndirectBuffer::U_DEFAULT,
+            D3D11IndirectBuffer::CA_NONE,
+            "GpuVobCullIndirectArgs" ) != XR_SUCCESS ) {
+            return false;
+        }
+    }
+
+    if ( !GpuVobCullConstantBuffer ) {
+        GpuVobCullConstantBuffer = std::make_unique<D3D11ConstantBuffer>(
+            sizeof( GpuVobCullConstantsData ), nullptr );
+    }
+    if ( !GpuVobPatchConstantBuffer ) {
+        GpuVobPatchConstantBuffer = std::make_unique<D3D11ConstantBuffer>(
+            sizeof( GpuVobPatchConstantsData ), nullptr );
+    }
+
+    if ( GpuVobCullVisualBuffer->UpdateBuffer( visualInfo.data(), visualBytes ) != XR_SUCCESS
+        || GpuVobCullDrawVisualBuffer->UpdateBuffer(
+            drawVisualIndices.data(), drawVisualBytes ) != XR_SUCCESS ) {
+        return false;
+    }
+
+    // The argument buffer is DEFAULT-usage because it must be UAV-writable.
+    // UpdateSubresource avoids a CPU-readable staging/readback path.
+    GetContext()->UpdateSubresource( GpuVobCullArgsBuffer->GetIndirectBuffer().Get(),
+        0, nullptr, drawArgs.data(), 0, 0 );
+
+    ID3D11ShaderResourceView* cullSrvs[3] = {
+        cache.MainVobInstancingBuffer->GetShaderResourceView().Get(),
+        GpuVobCullVisualBuffer->GetShaderResourceView().Get(),
+        GpuVobHiZBuiltThisFrame ? GpuVobHiZShaderResourceView.Get() : nullptr,
+    };
+    ID3D11UnorderedAccessView* cullUavs[2] = {
+        GpuVobCullOutputBuffer->GetUnorderedAccessView().Get(),
+        GpuVobCullVisibleCountsBuffer->GetUnorderedAccessView().Get(),
+    };
+    if ( !cullSrvs[0] || !cullSrvs[1] || !cullUavs[0] || !cullUavs[1]
+        || (GpuVobHiZBuiltThisFrame && !cullSrvs[2]) ) {
+        return false;
+    }
+
+    ID3D11ShaderResourceView* nullSrvs[3] = {};
+    ID3D11UnorderedAccessView* nullUavs[2] = {};
+    ID3D11Buffer* nullConstantBuffers[2] = {};
+    auto clearComputeBindings = [&]() {
+        GetContext()->CSSetUnorderedAccessViews( 0, 2, nullUavs, nullptr );
+        GetContext()->CSSetShaderResources( 0, 3, nullSrvs );
+        GetContext()->CSSetShader( nullptr, nullptr, 0 );
+        GetContext()->CSSetConstantBuffers( 0, 2, nullConstantBuffers );
+    };
+
+    GpuVobCullConstantsData cullConstants = {};
+    // Keep the exact multiplication order used by SetupVS_ExConstantBuffer
+    // and the DX12 reference: the shader consumes row-vector positions.
+    const XMMATRIX viewProj = XMMatrixMultiply(
+        XMLoadFloat4x4( &Engine::GAPI->GetProjectionMatrix() ),
+        Engine::GAPI->GetViewMatrixXM() );
+    XMStoreFloat4x4( &cullConstants.CullViewProj, viewProj );
+    cullConstants.VisualCount = static_cast<UINT>( visualInfo.size() );
+    cullConstants.HiZWidth = GpuVobHiZBuiltThisFrame ? GpuVobHiZWidth : 0;
+    cullConstants.HiZHeight = GpuVobHiZBuiltThisFrame ? GpuVobHiZHeight : 0;
+    cullConstants.HiZMipCount = GpuVobHiZBuiltThisFrame ? GpuVobHiZMipCount : 0;
+    cullConstants.EnableOcclusion = (GpuVobHiZBuiltThisFrame
+        && GpuVobHiZShaderResourceView) ? 1u : 0u;
+    GpuVobCullConstantBuffer->UpdateBuffer( &cullConstants )
+        ->BindToComputeShader( 0 );
+
+    GetContext()->CSSetShaderResources( 0, 3, cullSrvs );
+    GetContext()->CSSetUnorderedAccessViews( 0, 2, cullUavs, nullptr );
+    cullShader->Apply();
+    GetContext()->Dispatch( static_cast<UINT>( visualInfo.size() ), 1, 1 );
+
+    GetContext()->CSSetUnorderedAccessViews( 0, 2, nullUavs, nullptr );
+    GetContext()->CSSetShaderResources( 0, 3, nullSrvs );
+
+    GpuVobPatchConstantsData patchConstants = {};
+    patchConstants.DrawCount = static_cast<UINT>( drawVisualIndices.size() );
+    GpuVobPatchConstantBuffer->UpdateBuffer( &patchConstants )
+        ->BindToComputeShader( 1 );
+
+    ID3D11ShaderResourceView* patchSrvs[3] = {
+        GpuVobCullVisibleCountsBuffer->GetShaderResourceView().Get(),
+        GpuVobCullDrawVisualBuffer->GetShaderResourceView().Get(),
+        GpuVobCullVisualBuffer->GetShaderResourceView().Get(),
+    };
+    ID3D11UnorderedAccessView* argsUav =
+        GpuVobCullArgsBuffer->GetUnorderedAccessView().Get();
+    if ( !patchSrvs[0] || !patchSrvs[1] || !patchSrvs[2] || !argsUav ) {
+        clearComputeBindings();
+        return false;
+    }
+
+    GetContext()->CSSetShaderResources( 0, 3, patchSrvs );
+    GetContext()->CSSetUnorderedAccessViews( 0, 1, &argsUav, nullptr );
+    patchShader->Apply();
+    GetContext()->Dispatch(
+        (static_cast<UINT>( drawVisualIndices.size() ) + 63u) / 64u, 1, 1 );
+
+    clearComputeBindings();
+
+    cache.MainVobGpuInstanceBuffer = GpuVobCullOutputBuffer.get();
+    cache.MainVobGpuIndirectArgsBuffer = GpuVobCullArgsBuffer.get();
+    return true;
 }
 
 void D3D11GraphicsEngine::RebuildWindowCutoutVolumeCache() {
@@ -2232,10 +2808,13 @@ D3D11VertexBuffer* D3D11GraphicsEngine::AcquireFrameInstancingBuffer( FrameInsta
 
     if ( buffer->GetSizeInBytes() < sizeInBytes ) {
         if ( buffer->Init( nullptr, sizeInBytes,
-            D3D11VertexBuffer::B_VERTEXBUFFER,
+            static_cast<D3D11VertexBuffer::EBindFlags>(
+                D3D11VertexBuffer::B_VERTEXBUFFER
+                | D3D11VertexBuffer::B_SHADER_RESOURCE ),
             D3D11VertexBuffer::U_DYNAMIC,
             D3D11VertexBuffer::CA_WRITE,
-            debugName ? debugName : "" ) != XR_SUCCESS ) {
+            debugName ? debugName : "",
+            sizeof( VobInstanceInfo ) ) != XR_SUCCESS ) {
             return nullptr;
         }
         if ( Engine::GAPI->GetRendererState().RendererSettings.EnableDebugLog ) {
@@ -3583,6 +4162,104 @@ XRESULT D3D11GraphicsEngine::DrawInstanced(
     return XR_SUCCESS;
 }
 
+void D3D11GraphicsEngine::PrepareSkeletalShadowData(
+    const std::array<CameraReplacement, MAX_CSM_CASCADES>& cascadeReplacements,
+    int cascadeCount,
+    const XMFLOAT3& shadowPosition ) {
+    auto& cache = m_FrameGeometryCache;
+    cache.shadowSkeletalBonesUploaded = false;
+    cache.shadowSkeletalBoneVisOrder.clear();
+    cache.shadowSkeletalBoneRanges.clear();
+    cache.shadowSkeletalBoneTransforms.clear();
+    cache.shadowSkeletalPrevBoneTransforms.clear();
+    cache.shadowSkeletalRangeLookup.clear();
+
+    if ( FeatureLevel10Compatibility || !Engine::GAPI )
+        return;
+
+    const auto& settings = Engine::GAPI->GetRendererState().RendererSettings;
+    if ( !settings.DrawSkeletalMeshes )
+        return;
+
+    const int activeCascadeCount = std::min( 2, std::clamp( cascadeCount, 1, MAX_CSM_CASCADES ) );
+    const float skeletalRadius = settings.SkeletalMeshDrawRadius;
+    const float skeletalRadiusSq = skeletalRadius * skeletalRadius;
+    const bool useFrustumCulling = settings.IsShadowFrustumCullingEnabled();
+    const XMVECTOR shadowPositionXm = XMLoadFloat3( &shadowPosition );
+
+    std::vector<XMFLOAT4X4> currentBones;
+    currentBones.reserve( NUM_MAX_BONES );
+
+    for ( SkeletalVobInfo* vi : Engine::GAPI->GetSkeletalMeshVobs() ) {
+        if ( !vi || !vi->Vob || !vi->VisualInfo || !vi->Vob->GetShowVisual() )
+            continue;
+
+        // Match the existing shadow path: strongly transparent/ghost visuals do not cast.
+        if ( vi->Vob->GetVisualAlpha() && vi->Vob->GetVobTransparency() < 0.7f )
+            continue;
+
+        if ( XMVectorGetX( XMVector3LengthSq(
+                vi->Vob->GetPositionWorldXM() - shadowPositionXm ) ) > skeletalRadiusSq )
+            continue;
+
+        bool intersectsShadowCascade = !useFrustumCulling;
+        if ( useFrustumCulling ) {
+            for ( int cascadeIdx = 0; cascadeIdx < activeCascadeCount; ++cascadeIdx ) {
+                if ( !cascadeReplacements[cascadeIdx].frustum.IsValid()
+                    || cascadeReplacements[cascadeIdx].frustum.Intersects( vi->Vob->GetBBox() ) ) {
+                    intersectsShadowCascade = true;
+                    break;
+                }
+            }
+        }
+        if ( !intersectsShadowCascade )
+            continue;
+
+        zCModel* model = static_cast<zCModel*>(vi->Vob->GetVisual());
+        if ( !model )
+            continue;
+
+        currentBones.clear();
+        model->GetBoneTransforms( &currentBones );
+        const int numBones = std::min<int>( static_cast<int>( currentBones.size() ), NUM_MAX_BONES );
+        if ( numBones <= 0 )
+            continue;
+
+        const size_t vobIndex = cache.shadowSkeletalBoneVisOrder.size();
+        cache.shadowSkeletalBoneVisOrder.push_back( vi );
+
+        VS_ExConstantBuffer_SkeletalBoneRange range = {};
+        range.BoneOffset = static_cast<unsigned int>( cache.shadowSkeletalBoneTransforms.size() );
+        range.BoneCount = static_cast<unsigned int>( numBones );
+        range.PrevBoneOffset = static_cast<unsigned int>( cache.shadowSkeletalPrevBoneTransforms.size() );
+        range.UseStructuredBones = 1u;
+        cache.shadowSkeletalBoneRanges.push_back( range );
+        cache.shadowSkeletalRangeLookup.emplace( vi, vobIndex );
+
+        cache.shadowSkeletalBoneTransforms.insert(
+            cache.shadowSkeletalBoneTransforms.end(), currentBones.begin(), currentBones.begin() + numBones );
+
+        if ( vi->HasValidPrevTransforms && vi->PrevBoneTransforms.size() >= static_cast<size_t>( numBones ) ) {
+            cache.shadowSkeletalPrevBoneTransforms.insert(
+                cache.shadowSkeletalPrevBoneTransforms.end(),
+                vi->PrevBoneTransforms.begin(), vi->PrevBoneTransforms.begin() + numBones );
+        } else {
+            cache.shadowSkeletalPrevBoneTransforms.insert(
+                cache.shadowSkeletalPrevBoneTransforms.end(), currentBones.begin(), currentBones.begin() + numBones );
+        }
+    }
+
+    const bool uploadedCurrent = UploadStructuredMatrixBuffer(
+        SkeletalShadowBoneTransformsBuffer,
+        cache.shadowSkeletalBoneTransforms,
+        "SkeletalShadowBoneTransformsBuffer" );
+    const bool uploadedPrevious = UploadStructuredMatrixBuffer(
+        SkeletalShadowPrevBoneTransformsBuffer,
+        cache.shadowSkeletalPrevBoneTransforms,
+        "SkeletalShadowPrevBoneTransformsBuffer" );
+    cache.shadowSkeletalBonesUploaded = uploadedCurrent && uploadedPrevious;
+}
+
 void D3D11GraphicsEngine::DrawSkeletalMeshVobs(
     const std::vector<SkeletalVobInfo*>& vis,
     float distance,
@@ -3634,6 +4311,7 @@ void D3D11GraphicsEngine::DrawSkeletalMeshVobs(
 
     const bool isZPrepass = GetRenderingStage() == DES_Z_PRE_PASS;
     const bool isMainStage = GetRenderingStage() == DES_MAIN;
+    const bool isShadowStage = GetRenderingStage() == DES_SHADOWMAP;
     const bool isMainReuseStage = isZPrepass || isMainStage;
     struct ScopedGraphicsSwitchRestore {
         unsigned int& Value;
@@ -3653,6 +4331,7 @@ void D3D11GraphicsEngine::DrawSkeletalMeshVobs(
 
     std::vector<VS_ExConstantBuffer_SkeletalBoneRange> structuredBoneRanges( vis.size() );
     bool reuseMainPackedUpload = false;
+    bool reuseShadowPackedUpload = false;
 
     if ( useStructuredBones
         && isMainStage
@@ -3663,7 +4342,20 @@ void D3D11GraphicsEngine::DrawSkeletalMeshVobs(
         reuseMainPackedUpload = true;
     }
 
-    if ( useStructuredBones && !reuseMainPackedUpload ) {
+    if ( useStructuredBones && isShadowStage && m_FrameGeometryCache.shadowSkeletalBonesUploaded ) {
+        reuseShadowPackedUpload = true;
+        for ( size_t i = 0; i < vis.size(); ++i ) {
+            const auto lookup = m_FrameGeometryCache.shadowSkeletalRangeLookup.find( vis[i] );
+            if ( lookup == m_FrameGeometryCache.shadowSkeletalRangeLookup.end()
+                || lookup->second >= m_FrameGeometryCache.shadowSkeletalBoneRanges.size() ) {
+                reuseShadowPackedUpload = false;
+                break;
+            }
+            structuredBoneRanges[i] = m_FrameGeometryCache.shadowSkeletalBoneRanges[lookup->second];
+        }
+    }
+
+    if ( useStructuredBones && !reuseMainPackedUpload && !reuseShadowPackedUpload ) {
         BoneTransformCache.clear();
         packedPrevBoneTransforms.clear();
 
@@ -3739,6 +4431,9 @@ void D3D11GraphicsEngine::DrawSkeletalMeshVobs(
         }
     }
 
+    const std::vector<XMFLOAT4X4>* activeBoneTransformData = reuseShadowPackedUpload
+        ? &m_FrameGeometryCache.shadowSkeletalBoneTransforms
+        : &BoneTransformCache;
     BoneTransformCache.clear();
 
     int boneOffset = 0;
@@ -3764,8 +4459,12 @@ void D3D11GraphicsEngine::DrawSkeletalMeshVobs(
     auto prevBoneTransformsCb = GraphicsShaderConstantBuffer();
 
     if ( useStructuredBones ) {
-        auto& currentBuffer = isMainReuseStage ? SkeletalBoneTransformsBuffer : SkeletalBoneTransformsBufferTransient;
-        auto& prevBuffer = isMainReuseStage ? SkeletalPrevBoneTransformsBuffer : SkeletalPrevBoneTransformsBufferTransient;
+        auto& currentBuffer = isMainReuseStage
+            ? SkeletalBoneTransformsBuffer
+            : (reuseShadowPackedUpload ? SkeletalShadowBoneTransformsBuffer : SkeletalBoneTransformsBufferTransient);
+        auto& prevBuffer = isMainReuseStage
+            ? SkeletalPrevBoneTransformsBuffer
+            : (reuseShadowPackedUpload ? SkeletalShadowPrevBoneTransformsBuffer : SkeletalPrevBoneTransformsBufferTransient);
 
         if ( !currentBuffer || !prevBuffer
             || !currentBuffer->GetShaderResourceView().Get()
@@ -3917,11 +4616,20 @@ void D3D11GraphicsEngine::DrawSkeletalMeshVobs(
             XMFLOAT4X4 world; XMStoreFloat4x4( &world, xmWorld );
             float fatness = model->GetModelFatness();
 
-            // Get the bone transforms
-            model->GetBoneTransforms( &BoneTransformCache );
-            auto numBones = BoneTransformCache.size() - boneOffset;
-            auto boneIdx = boneOffset;
-            boneOffset += numBones;
+            // Get the bone transforms, or reuse the once-per-frame CSM palette.
+            size_t numBones = 0;
+            size_t boneIdx = 0;
+            if ( reuseShadowPackedUpload ) {
+                const auto& cachedRange = structuredBoneRanges[currentDrawIndex];
+                boneIdx = cachedRange.BoneOffset;
+                numBones = cachedRange.BoneCount;
+            } else {
+                model->GetBoneTransforms( &BoneTransformCache );
+                numBones = BoneTransformCache.size() - boneOffset;
+                boneIdx = boneOffset;
+                boneOffset += numBones;
+            }
+            const auto transforms = std::span( activeBoneTransformData->data() + boneIdx, numBones );
 
 
             if ( !static_cast<SkeletalMeshVisualInfo*>(vi->VisualInfo)->SkeletalMeshes.empty() ) {
@@ -3930,7 +4638,6 @@ void D3D11GraphicsEngine::DrawSkeletalMeshVobs(
 #else
                 if ( !model->GetDrawHandVisualsOnly() ) {
 #endif
-                    const auto transforms = std::span( &BoneTransformCache[boneIdx], numBones );
                     const auto color = modelColor;
 
                     VS_ExConstantBuffer_PerInstanceSkeletal cb2;
@@ -4093,7 +4800,7 @@ void D3D11GraphicsEngine::DrawSkeletalMeshVobs(
             auto model = data.Model;
             auto modelColor = data.ModelColor;
             modelColor.w = (vi && vi->Vob && vi->Vob->IsIndoorVob()) ? 0.05f : 1.0f;
-            auto transforms = std::span( &BoneTransformCache[data.BoneIdx], data.NumBones );
+            auto transforms = std::span( activeBoneTransformData->data() + data.BoneIdx, data.NumBones );
             auto fatness = data.Fatness;
             auto& world = data.World;
             auto& prevWorld = data.PrevWorld;
@@ -4747,6 +5454,8 @@ XRESULT D3D11GraphicsEngine::OnStartWorldRendering() {
     FrameTransparencyMeshesPortal.clear();
 
     m_FrameGeometryCache.Reset();
+    GpuVobHiZBuildAttemptedThisFrame = false;
+    GpuVobHiZBuiltThisFrame = false;
 
     // Reset the per-frame texture-cache counter.
     zCTextureCacheHack::NumNotCachedTexturesInFrame = 0;
@@ -7338,7 +8047,10 @@ void XM_CALLCONV D3D11GraphicsEngine::DrawWorldAround_Layered(
     }
 }
 
-void D3D11GraphicsEngine::ShadowPass_DrawWorldMesh_Indirect( const std::vector<WorldMeshSectionInfo*>& visibleSections, const Frustum* cullingFrustum )
+void D3D11GraphicsEngine::ShadowPass_DrawWorldMesh_Indirect(
+    const std::vector<WorldMeshSectionInfo*>& visibleSections,
+    const Frustum* cullingFrustum,
+    const ShadowWorldCasterCache* casterCache )
 {
     TracyD3D11ZoneCGX( "ShadowPass_DrawWorldMesh_Indirect" );
     auto _scopeShadowPassIndirect = RecordGraphicsEvent( GE_NAME( "ShadowPass_DrawWorldMesh_Indirect" ) );
@@ -7384,43 +8096,55 @@ void D3D11GraphicsEngine::ShadowPass_DrawWorldMesh_Indirect( const std::vector<W
     {
         TracyD3D11ZoneCGX( "ShadowPass_DrawWorldMesh_Indirect::Classify" );
         auto _scopeClassify = RecordGraphicsEvent( GE_NAME( "ShadowPass_DrawWorldMesh_Indirect::Classify" ) );
-        for ( const WorldMeshSectionInfo* section : visibleSections ) {
-            for ( const auto& meshPair : section->WorldMeshes ) {
-                if ( meshPair.first.Info->MaterialType != MaterialInfo::MT_None )
+        auto appendCaster = [&]( WorldMeshInfo* mesh, zCTexture* tex, bool alphaTest ) {
+            if ( !mesh )
+                return;
+
+            const unsigned int indexCount = GetShadowAwareIndexCount( mesh, alphaTest );
+            if ( alphaTest ) {
+                alphaMeshes.emplace_back( tex, mesh );
+            } else {
+                D3D11_DRAW_INDEXED_INSTANCED_INDIRECT_ARGS args;
+                args.IndexCountPerInstance = indexCount;
+                args.InstanceCount = 1;
+                args.StartIndexLocation = mesh->BaseShadowIndexLocation;
+                args.BaseVertexLocation = 0;
+                args.StartInstanceLocation = 0;
+                opaqueDrawArgs.push_back( args );
+            }
+            Engine::GAPI->GetRendererState().RendererInfo.FrameDrawnTriangles += indexCount / 3;
+        };
+
+        if ( casterCache ) {
+            for ( const ShadowWorldCaster& caster : *casterCache ) {
+                if ( cullingFrustum && !Engine::GAPI->IsWorldMeshVisibleInFrustum( caster.Mesh, *cullingFrustum ) )
                     continue;
+                appendCaster( caster.Mesh, caster.Texture, caster.AlphaTest );
+            }
+        } else {
+            for ( const WorldMeshSectionInfo* section : visibleSections ) {
+                for ( const auto& meshPair : section->WorldMeshes ) {
+                    if ( !meshPair.first.Info || meshPair.first.Info->MaterialType != MaterialInfo::MT_None )
+                        continue;
 
-                WorldMeshInfo* mesh = meshPair.second;
-                if ( cullingFrustum && !Engine::GAPI->IsWorldMeshVisibleInFrustum( mesh, *cullingFrustum ) ) {
-                    continue;
+                    WorldMeshInfo* mesh = meshPair.second;
+                    if ( cullingFrustum && !Engine::GAPI->IsWorldMeshVisibleInFrustum( mesh, *cullingFrustum ) )
+                        continue;
+
+                    zCMaterial* material = meshPair.first.Material;
+                    if ( !material )
+                        continue;
+                    const int alphaFunc = material->GetAlphaFunc();
+                    if ( (alphaFunc > zMAT_ALPHA_FUNC_NONE && alphaFunc != zMAT_ALPHA_FUNC_TEST)
+                        || (alphaFunc == zMAT_ALPHA_FUNC_NONE && zColor( material->GetColor() ).bgra.alpha < 255) )
+                        continue;
+
+                    zCTexture* tex = material->GetTexture();
+                    const bool alphaTest = tex && tex->HasAlphaChannel() && alphaRef > 0.0f;
+                    if ( alphaTest && tex->CacheIn( 0.6f ) != zRES_CACHED_IN )
+                        continue;
+                    appendCaster( mesh, tex, alphaTest );
                 }
-
-                // we don't draw alpha stuff into shadowmaps.
-                if ( (meshPair.first.Material->GetAlphaFunc() > zMAT_ALPHA_FUNC_NONE &&
-                    meshPair.first.Material->GetAlphaFunc() != zMAT_ALPHA_FUNC_TEST)
-                        || (meshPair.first.Material->GetAlphaFunc() == 0 && zColor( meshPair.first.Material->GetColor() ).bgra.alpha < 255) ) {
-                    continue;
-                }
-
-                zCTexture* tex = meshPair.first.Material ? meshPair.first.Material->GetTexture() : nullptr;
-                unsigned int indexCount = 0;
-
-                if ( tex && tex->HasAlphaChannel() && alphaRef > 0.0f ) {
-                    if ( tex->CacheIn( 0.6f ) == zRES_CACHED_IN ) {
-                        alphaMeshes.emplace_back( tex, mesh );
-                    }
-                    indexCount = GetShadowAwareIndexCount( mesh, true );
-                } else {
-                    indexCount = GetShadowAwareIndexCount( mesh, false );
-                    D3D11_DRAW_INDEXED_INSTANCED_INDIRECT_ARGS args;
-                    args.IndexCountPerInstance = indexCount;
-                    args.InstanceCount = 1;
-                    args.StartIndexLocation = mesh->BaseShadowIndexLocation;
-                    args.BaseVertexLocation = 0;
-                    args.StartInstanceLocation = 0;
-                    opaqueDrawArgs.push_back( args );
-                }
-
-                Engine::GAPI->GetRendererState().RendererInfo.FrameDrawnTriangles += indexCount / 3;
             }
         }
     }
@@ -7476,7 +8200,10 @@ void D3D11GraphicsEngine::ShadowPass_DrawWorldMesh_Indirect( const std::vector<W
 
         for ( const auto& [tex, mesh] : alphaMeshes ) {
             if ( tex != lastTex ) {
-                if ( tex->CacheIn( 0.6f ) == zRES_CACHED_IN ) {
+                const bool textureReady = casterCache
+                    ? tex->GetCacheState() == zRES_CACHED_IN
+                    : tex->CacheIn( 0.6f ) == zRES_CACHED_IN;
+                if ( textureReady ) {
                     auto t = tex->GetSurface()->GetEngineTexture()->GetShaderResourceView().Get();
                     Context->PSSetShaderResources( 0, 1, &t );
                     lastTex = tex;
@@ -7491,7 +8218,10 @@ void D3D11GraphicsEngine::ShadowPass_DrawWorldMesh_Indirect( const std::vector<W
     UnbindWindowCutouts();
 }
 
-void D3D11GraphicsEngine::ShadowPass_DrawWorldMesh( const std::vector<WorldMeshSectionInfo*>& visibleSections, const Frustum* cullingFrustum )
+void D3D11GraphicsEngine::ShadowPass_DrawWorldMesh(
+    const std::vector<WorldMeshSectionInfo*>& visibleSections,
+    const Frustum* cullingFrustum,
+    const ShadowWorldCasterCache* casterCache )
 {
     TracyD3D11ZoneCGX( "ShadowPass_DrawWorldMesh" );
     auto _scopeShadowPass = RecordGraphicsEvent( GE_NAME( "ShadowPass_DrawWorldMesh" ) );
@@ -7511,32 +8241,44 @@ void D3D11GraphicsEngine::ShadowPass_DrawWorldMesh( const std::vector<WorldMeshS
     {
         ZoneScopedN( "ShadowPass_DrawWorldMesh::Classify" );
         auto _scopeClassify = RecordGraphicsEvent( GE_NAME( "ShadowPass_DrawWorldMesh::Classify" ) );
-        for ( const WorldMeshSectionInfo* section : visibleSections ) {
-            for ( const auto& meshPair : section->WorldMeshes ) {
-                // Skip non-standard materials (water, portals, etc.)
-                if ( meshPair.first.Info->MaterialType != MaterialInfo::MT_None )
+        auto appendCaster = [&]( WorldMeshInfo* mesh, zCTexture* tex, bool alphaTest ) {
+            if ( !mesh )
+                return;
+            if ( alphaTest )
+                alphaMeshes.emplace_back( tex, mesh );
+            else
+                opaqueMeshes.push_back( mesh );
+        };
+
+        if ( casterCache ) {
+            for ( const ShadowWorldCaster& caster : *casterCache ) {
+                if ( cullingFrustum && !Engine::GAPI->IsWorldMeshVisibleInFrustum( caster.Mesh, *cullingFrustum ) )
                     continue;
+                appendCaster( caster.Mesh, caster.Texture, caster.AlphaTest );
+            }
+        } else {
+            for ( const WorldMeshSectionInfo* section : visibleSections ) {
+                for ( const auto& meshPair : section->WorldMeshes ) {
+                    // Skip non-standard materials (water, portals, etc.)
+                    if ( !meshPair.first.Info || meshPair.first.Info->MaterialType != MaterialInfo::MT_None )
+                        continue;
 
-                if ( cullingFrustum && !Engine::GAPI->IsWorldMeshVisibleInFrustum( meshPair.second, *cullingFrustum ) ) {
-                    continue;
-                }
+                    if ( cullingFrustum && !Engine::GAPI->IsWorldMeshVisibleInFrustum( meshPair.second, *cullingFrustum ) )
+                        continue;
 
-                // we don't draw alpha stuff into shadowmaps.
-                if ( (meshPair.first.Material->GetAlphaFunc() > zMAT_ALPHA_FUNC_NONE &&
-                    meshPair.first.Material->GetAlphaFunc() != zMAT_ALPHA_FUNC_TEST)
-                        || (meshPair.first.Material->GetAlphaFunc() == 0 && zColor( meshPair.first.Material->GetColor() ).bgra.alpha < 255) ) {
-                    continue;
-                }
+                    zCMaterial* material = meshPair.first.Material;
+                    if ( !material )
+                        continue;
+                    const int alphaFunc = material->GetAlphaFunc();
+                    if ( (alphaFunc > zMAT_ALPHA_FUNC_NONE && alphaFunc != zMAT_ALPHA_FUNC_TEST)
+                        || (alphaFunc == zMAT_ALPHA_FUNC_NONE && zColor( material->GetColor() ).bgra.alpha < 255) )
+                        continue;
 
-                zCTexture* tex = meshPair.first.Material ? meshPair.first.Material->GetTexture() : nullptr;
-
-                if ( tex && tex->HasAlphaChannel() && alphaRef > 0.0f ) {
-                    // Need alpha testing - cache texture
-                    if ( tex->CacheIn( 0.6f ) == zRES_CACHED_IN ) {
-                        alphaMeshes.emplace_back( tex, meshPair.second );
-                    }
-                } else {
-                    opaqueMeshes.push_back( meshPair.second );
+                    zCTexture* tex = material->GetTexture();
+                    const bool alphaTest = tex && tex->HasAlphaChannel() && alphaRef > 0.0f;
+                    if ( alphaTest && tex->CacheIn( 0.6f ) != zRES_CACHED_IN )
+                        continue;
+                    appendCaster( meshPair.second, tex, alphaTest );
                 }
             }
         }
@@ -7589,7 +8331,10 @@ void D3D11GraphicsEngine::ShadowPass_DrawWorldMesh( const std::vector<WorldMeshS
 
         for ( const auto& [tex, mesh] : alphaMeshes ) {
             if ( tex != lastTex ) {
-                if ( tex->CacheIn( 0.6f ) == zRES_CACHED_IN ) {
+                const bool textureReady = casterCache
+                    ? tex->GetCacheState() == zRES_CACHED_IN
+                    : tex->CacheIn( 0.6f ) == zRES_CACHED_IN;
+                if ( textureReady ) {
                     auto t = tex->GetSurface()->GetEngineTexture()->GetShaderResourceView().Get();
                     Context->PSSetShaderResources( 0, 1, &t );
                     lastTex = tex;
@@ -7701,7 +8446,9 @@ void XM_CALLCONV D3D11GraphicsEngine::DrawWorldAroundForWorldShadow( FXMVECTOR p
 
         static thread_local std::vector<WorldMeshSectionInfo*> visibleSections;
         visibleSections.clear();
-        Engine::GAPI->CollectVisibleSections( visibleSections, worldMeshShadowFrustum, false );
+        if ( !params.WorldShadowCasters ) {
+            Engine::GAPI->CollectVisibleSections( visibleSections, worldMeshShadowFrustum, false );
+        }
 
         if ( Engine::GAPI->GetRendererState().RendererSettings.DebugSettings.FeatureSet.UseMDI ) {
             MeshInfo* wrappedWorldMesh = Engine::GAPI->GetWrappedWorldMesh();
@@ -7710,12 +8457,12 @@ void XM_CALLCONV D3D11GraphicsEngine::DrawWorldAroundForWorldShadow( FXMVECTOR p
                 && wrappedWorldMesh->MeshIndexBuffer
                 && wrappedWorldMesh->MeshShadowIndexBuffer
                 ) {
-                ShadowPass_DrawWorldMesh_Indirect( visibleSections, worldMeshShadowFrustum );
+                ShadowPass_DrawWorldMesh_Indirect( visibleSections, worldMeshShadowFrustum, params.WorldShadowCasters );
             } else {
-                ShadowPass_DrawWorldMesh( visibleSections, worldMeshShadowFrustum );
+                ShadowPass_DrawWorldMesh( visibleSections, worldMeshShadowFrustum, params.WorldShadowCasters );
             }
         } else {
-            ShadowPass_DrawWorldMesh( visibleSections, worldMeshShadowFrustum );
+            ShadowPass_DrawWorldMesh( visibleSections, worldMeshShadowFrustum, params.WorldShadowCasters );
         }
     }
 
@@ -8533,6 +9280,10 @@ XRESULT D3D11GraphicsEngine::DrawVOBsInstanced() {
                         return a.sortKey < b.sortKey;
                     } );
 
+                PrepareGpuVobGeometryArena();
+                cache.vobGpuCullingPrepared = true;
+                cache.vobGpuCullingActive = PrepareGpuVobCulling();
+
                 if ( !vobs.empty() ) {
                     RenderedVobs.insert( RenderedVobs.end(), vobs.begin(), vobs.end() );
                 }
@@ -8617,7 +9368,13 @@ XRESULT D3D11GraphicsEngine::DrawVOBsInstanced() {
             if ( !cache.sortedInstancedMeshes.empty() ) {
                 TracyD3D11ZoneCGX( "DrawVOBsInstanced::OpaqueSubmission" );
                 auto _scopeOpaqueSubmission = RecordGraphicsEvent( GE_NAME( "DrawVOBsInstanced::OpaqueSubmission" ) );
-                for ( auto const& drawItem : cache.sortedInstancedMeshes ) {
+                std::vector<bool> mdiConsumed( cache.sortedInstancedMeshes.size(), false );
+                for ( size_t drawIndex = 0;
+                    drawIndex < cache.sortedInstancedMeshes.size(); ++drawIndex ) {
+                    if ( mdiConsumed[drawIndex] ) {
+                        continue;
+                    }
+                    const auto& drawItem = cache.sortedInstancedMeshes[drawIndex];
                     if ( drawItem.VisualIndex >= cache.vobVisuals.size() || !drawItem.MeshEntry ) {
                         continue;
                     }
@@ -8813,11 +9570,102 @@ XRESULT D3D11GraphicsEngine::DrawVOBsInstanced() {
                         }
                     }
 
-                    // Draw batch
-                    DrawInstanced( meshInfo->MeshVertexBuffer, meshInfo->MeshIndexBuffer,
-                        meshInfo->Indices.size(), instancingBuffer,
-                        sizeof( VobInstanceInfo ), cachedVisual->Instances.size(),
-                        sizeof( ExVertexStruct ), cachedVisual->StartInstanceNum );
+                    const auto geometryRange = GpuVobGeometryRanges.find( meshInfo );
+                    const bool useGeometryArena = cache.MainVobGpuGeometryVertexBuffer
+                        && cache.MainVobGpuGeometryIndexBuffer
+                        && geometryRange != GpuVobGeometryRanges.end();
+                    size_t mdiDrawCount = 1;
+                    // MDI is only used for adjacent opaque draws that share
+                    // the complete material/visual state. This keeps wind,
+                    // window classification and per-material constants
+                    // identical for every command in the batch.
+                    const bool mdiEligible = cache.vobGpuCullingActive
+                        && cache.MainVobGpuInstanceBuffer
+                        && cache.MainVobGpuIndirectArgsBuffer
+                        && useGeometryArena && tx
+                        && !isAlphaBlendMesh
+                        && ((drawItem.sortKey >> 62) & 0x3u) == 0;
+                    if ( mdiEligible ) {
+                        while ( drawIndex + mdiDrawCount < cache.sortedInstancedMeshes.size() ) {
+                            const auto& nextItem = cache.sortedInstancedMeshes[drawIndex + mdiDrawCount];
+                            if ( nextItem.VisualIndex != drawItem.VisualIndex
+                                || !nextItem.MeshEntry
+                                || nextItem.Mesh.Material != meshKey.Material
+                                || nextItem.Mesh.Texture != meshKey.Texture
+                                || nextItem.Mesh.Info != meshKey.Info
+                                || ((nextItem.sortKey >> 62) & 0x3u) != 0
+                                || nextItem.Mesh.Material == nullptr
+                                || nextItem.Mesh.Material->GetAlphaFunc() == zMAT_ALPHA_FUNC_BLEND
+                                || nextItem.Mesh.Material->GetAlphaFunc() == zMAT_ALPHA_FUNC_ADD
+                                || (IsCityWindowFeatureReady() && IsWindowGlassMaterial( cachedVisual->Visual,
+                                    nextItem.Mesh.Material->GetAniTexture() ) ) {
+                                break;
+                            }
+                            const auto nextRange = GpuVobGeometryRanges.find( nextItem.MeshEntry );
+                            if ( nextRange == GpuVobGeometryRanges.end() ) {
+                                break;
+                            }
+                            mdiConsumed[drawIndex + mdiDrawCount] = true;
+                            ++mdiDrawCount;
+                        }
+                    }
+
+                    // The GPU path keeps the existing per-material state setup,
+                    // but lets the compute shader decide InstanceCount and
+                    // StartInstanceLocation for this mesh's indirect command.
+                    if ( cache.vobGpuCullingActive
+                        && cache.MainVobGpuInstanceBuffer
+                        && cache.MainVobGpuIndirectArgsBuffer ) {
+                        UINT offsets[2] = { 0, 0 };
+                        UINT strides[2] = {
+                            static_cast<UINT>( sizeof( ExVertexStruct ) ),
+                            static_cast<UINT>( sizeof( VobInstanceInfo ) )
+                        };
+                        ID3D11Buffer* vertexBuffers[2] = {
+                            (useGeometryArena
+                                ? cache.MainVobGpuGeometryVertexBuffer->GetVertexBuffer().Get()
+                                : meshInfo->MeshVertexBuffer->GetVertexBuffer().Get()),
+                            cache.MainVobGpuInstanceBuffer->GetVertexBuffer().Get()
+                        };
+                        GetContext()->IASetVertexBuffers( 0, 2,
+                            vertexBuffers, strides, offsets );
+                        GetContext()->IASetIndexBuffer(
+                            (useGeometryArena
+                                ? cache.MainVobGpuGeometryIndexBuffer->GetVertexBuffer().Get()
+                                : meshInfo->MeshIndexBuffer->GetVertexBuffer().Get()),
+                            VERTEX_INDEX_DXGI_FORMAT, 0 );
+                        ID3D11Buffer* argsBuffer =
+                            cache.MainVobGpuIndirectArgsBuffer->GetIndirectBuffer().Get();
+                        if ( mdiDrawCount > 1 ) {
+                            auto drawMulti = Engine::GAPI->GetRendererState().RendererSettings.DebugSettings.FeatureSet.UseMDI
+                                ? DrawMultiIndexedInstancedIndirect
+                                : Stub_DrawMultiIndexedInstancedIndirect;
+                            drawMulti( GetContext().Get(), static_cast<UINT>( mdiDrawCount ),
+                                argsBuffer,
+                                static_cast<UINT>( drawIndex * sizeof( D3D11_DRAW_INDEXED_INSTANCED_INDIRECT_ARGS ) ),
+                                sizeof( D3D11_DRAW_INDEXED_INSTANCED_INDIRECT_ARGS ) );
+                        } else {
+                            GetContext()->DrawIndexedInstancedIndirect( argsBuffer,
+                                static_cast<UINT>( drawIndex
+                                    * sizeof( D3D11_DRAW_INDEXED_INSTANCED_INDIRECT_ARGS ) ) );
+                        }
+
+                        // Keep the existing diagnostics approximate without a
+                        // GPU readback, which would serialize the frame.
+                        const UINT maxDrawIndices = renderSettings.MaxNumFaces > 0
+                            ? std::min<UINT>(
+                                static_cast<UINT>( meshInfo->Indices.size() ),
+                                static_cast<UINT>( renderSettings.MaxNumFaces ) * 3u )
+                            : static_cast<UINT>( meshInfo->Indices.size() );
+                        Engine::GAPI->GetRendererState().RendererInfo.FrameDrawnTriangles +=
+                            (maxDrawIndices / 3) * cachedVisual->Instances.size();
+                        Engine::GAPI->GetRendererState().RendererInfo.FrameDrawnVobs++;
+                    } else {
+                        DrawInstanced( meshInfo->MeshVertexBuffer, meshInfo->MeshIndexBuffer,
+                            meshInfo->Indices.size(), instancingBuffer,
+                            sizeof( VobInstanceInfo ), cachedVisual->Instances.size(),
+                            sizeof( ExVertexStruct ), cachedVisual->StartInstanceNum );
+                    }
                 }
             }
             if ( !isZPrepass ) {

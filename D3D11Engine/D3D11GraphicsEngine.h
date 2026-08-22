@@ -1,4 +1,5 @@
 #pragma once
+#include <unordered_map>
 #include "D3D11GraphicsEngineBase.h"
 #include "D3D11DeferredRenderer.h"
 #include "D3D11ForwardPlusRenderer.h"
@@ -276,8 +277,16 @@ public:
     void DrawVobSingle( VobInfo* vob, zCCamera& camera ) override;
 
     /** Draws everything around the given position */
-    void ShadowPass_DrawWorldMesh_Indirect( const std::vector<WorldMeshSectionInfo*>& visibleSections, const Frustum* cullingFrustum = nullptr );
-    void ShadowPass_DrawWorldMesh( const std::vector<WorldMeshSectionInfo*>& visibleSections, const Frustum* cullingFrustum = nullptr );
+    void ShadowPass_DrawWorldMesh_Indirect( const std::vector<WorldMeshSectionInfo*>& visibleSections,
+        const Frustum* cullingFrustum = nullptr, const ShadowWorldCasterCache* casterCache = nullptr );
+    void ShadowPass_DrawWorldMesh( const std::vector<WorldMeshSectionInfo*>& visibleSections,
+        const Frustum* cullingFrustum = nullptr, const ShadowWorldCasterCache* casterCache = nullptr );
+
+    /** Resolves the CSM skeletal caster pose/palette once per frame. */
+    void PrepareSkeletalShadowData(
+        const std::array<CameraReplacement, MAX_CSM_CASCADES>& cascadeReplacements,
+        int cascadeCount,
+        const XMFLOAT3& shadowPosition );
 
     void XM_CALLCONV DrawWorldAroundForWorldShadow( FXMVECTOR position, float sectionRange, const RenderShadowmapsParams& params );
     void XM_CALLCONV DrawWorldAround( FXMVECTOR position,
@@ -376,6 +385,9 @@ public:
 
     /** Copies the depth stencil buffer to DepthStencilBufferCopy */
     void CopyDepthStencil();
+
+    /** Builds the world-only reversed-Z Hi-Z pyramid used by GPU VOB culling. */
+    void BuildGpuVobHiZ();
 
     /** Draws particle meshes */
     void DrawFrameParticleMeshes( std::unordered_map<zCVob*, MeshVisualInfo*>& progMeshes ) override;
@@ -533,6 +545,9 @@ private:
     void UnbindWindMetadata();
     ID3D11ShaderResourceView* GetWindowGlassReplacementSRV();
     void EnsureFrameVobVisibilityCollected();
+    bool PrepareGpuVobGeometryArena();
+    bool PrepareGpuVobCulling();
+    bool EnsureGpuVobHiZResources();
     void RebuildWindowCutoutVolumeCache();
     unsigned int UpdateAndBindWindowCutouts( bool daylightPass = false );
     void UnbindWindowCutouts();
@@ -631,8 +646,11 @@ private:
         bool worldMeshBuilt    = false;  ///< CollectVisibleSections + MDI arg build + buffer upload done
         bool vobVisibilityCollected = false; ///< Final camera VOB list collected once for VOBs and window cutouts
         bool vobInstancesUploaded = false; ///< CollectVisibleVobs + DynamicInstancingBuffer upload done
+        bool vobGpuCullingPrepared = false; ///< Main-view GPU cull/indirect args prepared once per frame
+        bool vobGpuCullingActive = false; ///< True only when the compute path completed successfully
         bool vobWindMetadataPrepared = false; ///< Wind metadata prepared for cached vob visuals
         bool skeletalBonesUploaded = false; ///< FL11 packed skeletal bone buffers uploaded for main/z-prepass reuse
+        bool shadowSkeletalBonesUploaded = false; ///< FL11 packed skeletal bone buffers uploaded once for CSM shadows
 
         std::vector<WorldMeshSectionInfo*> visibleSections;
         std::vector<D3D11_DRAW_INDEXED_INSTANCED_INDIRECT_ARGS> drawIndirectArgs;
@@ -640,6 +658,10 @@ private:
         std::vector<VobInfo*> visibleWindowVobs;
         D3D11IndirectBuffer*           MainWorldIndirectArgsBuffer = nullptr;
         D3D11VertexBuffer*             MainVobInstancingBuffer = nullptr;
+        D3D11VertexBuffer*             MainVobGpuInstanceBuffer = nullptr;
+        D3D11IndirectBuffer*            MainVobGpuIndirectArgsBuffer = nullptr;
+        D3D11VertexBuffer*             MainVobGpuGeometryVertexBuffer = nullptr;
+        D3D11VertexBuffer*             MainVobGpuGeometryIndexBuffer = nullptr;
         std::vector<VobWindMetadata>   vobWindMetadata;
         std::vector<CachedVobVisual>    vobVisuals;
         std::vector<CachedInstancedMeshDraw> sortedInstancedMeshes;
@@ -647,19 +669,31 @@ private:
         std::vector<SkeletalVobInfo*>   visibleNpcs;
         std::vector<SkeletalVobInfo*> skeletalBoneVisOrder;
         std::vector<VS_ExConstantBuffer_SkeletalBoneRange> skeletalBoneRanges;
+        std::vector<SkeletalVobInfo*> shadowSkeletalBoneVisOrder;
+        std::vector<VS_ExConstantBuffer_SkeletalBoneRange> shadowSkeletalBoneRanges;
+        std::vector<XMFLOAT4X4> shadowSkeletalBoneTransforms;
+        std::vector<XMFLOAT4X4> shadowSkeletalPrevBoneTransforms;
+        std::unordered_map<SkeletalVobInfo*, size_t> shadowSkeletalRangeLookup;
 
         void Reset() {
             worldMeshBuilt      = false;
             vobVisibilityCollected = false;
             vobInstancesUploaded = false;
+            vobGpuCullingPrepared = false;
+            vobGpuCullingActive = false;
             vobWindMetadataPrepared = false;
             skeletalBonesUploaded = false;
+            shadowSkeletalBonesUploaded = false;
             visibleSections.clear();
             drawIndirectArgs.clear();
             sortedDepthWorldMeshes.clear();
             visibleWindowVobs.clear();
             MainWorldIndirectArgsBuffer = nullptr;
             MainVobInstancingBuffer = nullptr;
+            MainVobGpuInstanceBuffer = nullptr;
+            MainVobGpuIndirectArgsBuffer = nullptr;
+            MainVobGpuGeometryVertexBuffer = nullptr;
+            MainVobGpuGeometryIndexBuffer = nullptr;
             vobWindMetadata.clear();
             vobVisuals.clear();
             sortedInstancedMeshes.clear();
@@ -667,6 +701,11 @@ private:
             visibleNpcs.clear();
             skeletalBoneVisOrder.clear();
             skeletalBoneRanges.clear();
+            shadowSkeletalBoneVisOrder.clear();
+            shadowSkeletalBoneRanges.clear();
+            shadowSkeletalBoneTransforms.clear();
+            shadowSkeletalPrevBoneTransforms.clear();
+            shadowSkeletalRangeLookup.clear();
         }
     };
     FrameGeometryCache m_FrameGeometryCache;
@@ -679,6 +718,40 @@ private:
     /** Water surface indirect buffer */
     std::unique_ptr<D3D11IndirectBuffer> WaterIndirectBuffer;
 
+    /** Persistent FL11+ resources for main-view GPU static-VOB culling. */
+    std::unique_ptr<D3D11VertexBuffer> GpuVobCullVisualBuffer;
+    std::unique_ptr<D3D11VertexBuffer> GpuVobCullDrawVisualBuffer;
+    std::unique_ptr<D3D11VertexBuffer> GpuVobCullOutputBuffer;
+    std::unique_ptr<D3D11IndirectBuffer> GpuVobCullArgsBuffer;
+    std::unique_ptr<D3D11IndirectBuffer> GpuVobCullVisibleCountsBuffer;
+    std::unique_ptr<D3D11ConstantBuffer> GpuVobCullConstantBuffer;
+    std::unique_ptr<D3D11ConstantBuffer> GpuVobPatchConstantBuffer;
+
+    struct GpuVobGeometryRange {
+        UINT StartIndexLocation = 0;
+        INT BaseVertexLocation = 0;
+        UINT VertexCount = 0;
+        UINT IndexCount = 0;
+    };
+
+    /** Persistent shared geometry used by the main-view GPU-driven VOB path. */
+    std::unique_ptr<D3D11VertexBuffer> GpuVobGeometryVertexBuffer;
+    std::unique_ptr<D3D11VertexBuffer> GpuVobGeometryIndexBuffer;
+    std::unordered_map<MeshInfo*, GpuVobGeometryRange> GpuVobGeometryRanges;
+    std::vector<MeshInfo*> GpuVobGeometryMeshes;
+    uint64_t GpuVobGeometryWorldGeneration = static_cast<uint64_t>( -1 );
+
+    /** World-only reversed-Z Hi-Z pyramid for GPU VOB occlusion culling. */
+    Microsoft::WRL::ComPtr<ID3D11Texture2D> GpuVobHiZTexture;
+    Microsoft::WRL::ComPtr<ID3D11ShaderResourceView> GpuVobHiZShaderResourceView;
+    std::vector<Microsoft::WRL::ComPtr<ID3D11ShaderResourceView>> GpuVobHiZMipShaderResourceViews;
+    std::vector<Microsoft::WRL::ComPtr<ID3D11UnorderedAccessView>> GpuVobHiZMipUnorderedAccessViews;
+    UINT GpuVobHiZWidth = 0;
+    UINT GpuVobHiZHeight = 0;
+    UINT GpuVobHiZMipCount = 0;
+    bool GpuVobHiZBuildAttemptedThisFrame = false;
+    bool GpuVobHiZBuiltThisFrame = false;
+
     /** FL11 packed structured buffers for skeletal skinning (main/z-prepass reusable path). */
     std::unique_ptr<D3D11VertexBuffer> SkeletalBoneTransformsBuffer;
     std::unique_ptr<D3D11VertexBuffer> SkeletalPrevBoneTransformsBuffer;
@@ -686,6 +759,10 @@ private:
     /** FL11 packed structured buffers for non-reusable stages (shadow/cube/debug paths). */
     std::unique_ptr<D3D11VertexBuffer> SkeletalBoneTransformsBufferTransient;
     std::unique_ptr<D3D11VertexBuffer> SkeletalPrevBoneTransformsBufferTransient;
+
+    /** FL11 packed structured buffers for the once-per-frame CSM skeletal snapshot. */
+    std::unique_ptr<D3D11VertexBuffer> SkeletalShadowBoneTransformsBuffer;
+    std::unique_ptr<D3D11VertexBuffer> SkeletalShadowPrevBoneTransformsBuffer;
 
     /** Cached bone transforms for batched skeletal mesh drawing */
     std::vector<XMFLOAT4X4> BoneTransformCache;

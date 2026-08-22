@@ -16,6 +16,8 @@
 #include "GMesh.h"
 #include "zCVobLight.h"
 #include "zCBspTree.h"
+#include "zCMaterial.h"
+#include "zCTexture.h"
 // ^---------------------------------
 
 using namespace DirectX;
@@ -157,7 +159,8 @@ static void CalculateCascadeMatrices(
     FXMVECTOR lookAtOrig,
     FXMVECTOR upDirOrig,
     GXMVECTOR shadowCameraPosFallback,
-    UINT shadowMapSize )
+    UINT shadowMapSize,
+    float* outTexelWorld )
 {
     XMVECTOR lightDir = XMVector3Normalize( XMVectorSubtract( lookAtOrig, lightPosOrig ) );
 
@@ -211,6 +214,9 @@ static void CalculateCascadeMatrices(
     float cascadeSize = invariantRadius * 2.0f;
 
     float texelSize = cascadeSize / static_cast<float>(shadowMapSize);
+    if ( outTexelWorld ) {
+        *outTexelWorld = texelSize;
+    }
 
     // Establish a GLOBAL, unmoving light-space grid by using the World Origin (0,0,0)
     // By anchoring to XMVectorZero(), the grid never shifts as the player moves.
@@ -765,7 +771,8 @@ XRESULT D3D11ShadowMap::PrepareRender()
                     cascadeLookAt,
                     cascadeUp,
                     WorldShadowCP,
-                    cascadePixelSize );
+                    cascadePixelSize,
+                    &m_CascadeTexelWorld[cascadeIdx] );
             }
         }
     }
@@ -802,6 +809,8 @@ XRESULT D3D11ShadowMap::PrepareRender()
                 ctx.drawDistancesSq.VisualFX = 0.0f;
 
                 const auto& rs = Engine::GAPI->GetRendererState().RendererSettings;
+                ctx.minVobSize = _this->m_CascadeTexelWorld[idx]
+                    * std::clamp( rs.ShadowCasterMinTexels, 0.0f, 16.0f );
                 ctx.drawFlags.DrawVOBs = rs.DrawVOBs;
                 ctx.drawFlags.DrawMobs = rs.DrawMobs;
                 ctx.drawFlags.EnableDynamicLighting = rs.EnableDynamicLighting;
@@ -892,6 +901,9 @@ XRESULT D3D11ShadowMap::PrepareRender()
         ctx.drawDistancesSq.VisualFX = 0.0f;
 
         const auto& rs = Engine::GAPI->GetRendererState().RendererSettings;
+        // The combined cull feeds all cascades. Apply the threshold after the
+        // per-cascade distribution below so each cascade uses its own texel size.
+        ctx.minVobSize = 0.0f;
         ctx.drawFlags.DrawVOBs = rs.DrawVOBs;
         ctx.drawFlags.DrawMobs = rs.DrawMobs;
         ctx.drawFlags.EnableDynamicLighting = rs.EnableDynamicLighting;
@@ -976,6 +988,18 @@ XRESULT D3D11ShadowMap::PrepareRender()
                 if ( m_CascadeCRs[0].frustum.Intersects( boundingSphere ) )
                     m_RenderQueues[0]->GetVobs().push_back( vob );
             }
+        }
+
+        const float casterMinTexels = std::clamp(
+            settings.ShadowCasterMinTexels, 0.0f, 16.0f );
+        for ( int cascadeIdx = 0; cascadeIdx < numCascades; ++cascadeIdx ) {
+            const float minVobSize = m_CascadeTexelWorld[cascadeIdx] * casterMinTexels;
+            auto& cascadeVobs = m_RenderQueues[cascadeIdx]->GetVobs();
+            cascadeVobs.erase( std::remove_if( cascadeVobs.begin(), cascadeVobs.end(),
+                [minVobSize]( const VobInfo* vob ) {
+                    return minVobSize > 0.0f && vob && vob->VisualInfo
+                        && vob->VisualInfo->MeshSize < minVobSize;
+                } ), cascadeVobs.end() );
         }
     }
 
@@ -1263,6 +1287,94 @@ XRESULT D3D11ShadowMap::DrawPointlightShadows( std::vector<VobLightInfo*>& light
     return XR_SUCCESS;
 }
 
+void D3D11ShadowMap::BuildWorldShadowCasterCache() {
+    ZoneScopedN( "D3D11ShadowMap::BuildWorldShadowCasterCache" );
+    m_WorldShadowCasters.clear();
+
+    if ( !Engine::GAPI || !Engine::GAPI->IsWorldRenderCacheReady() )
+        return;
+
+    const auto& settings = Engine::GAPI->GetRendererState().RendererSettings;
+    if ( !settings.DrawWorldMesh || !settings.DrawShadowGeometry )
+        return;
+
+    const int numCascades = std::clamp( settings.NumShadowCascades, 1, MAX_CSM_CASCADES );
+    int lastUpdatedCascade = -1;
+    for ( int cascadeIdx = 0; cascadeIdx < numCascades; ++cascadeIdx ) {
+        if ( m_ShouldUpdateCascade[cascadeIdx] )
+            lastUpdatedCascade = cascadeIdx;
+    }
+    if ( lastUpdatedCascade < 0 || !m_CascadeCRs[lastUpdatedCascade].frustum.IsValid() )
+        return;
+
+    Frustum unionShadowFrustum = Frustum::AlwaysContainingFrustum();
+    std::array<XMFLOAT3, MAX_CSM_CASCADES * 8> combinedCorners = {};
+    size_t combinedCornerCount = 0;
+    static constexpr XMFLOAT3 ndcCorners[8] = {
+        XMFLOAT3( -1.0f, -1.0f, 0.0f ), XMFLOAT3( 1.0f, -1.0f, 0.0f ),
+        XMFLOAT3( -1.0f, 1.0f, 0.0f ),  XMFLOAT3( 1.0f, 1.0f, 0.0f ),
+        XMFLOAT3( -1.0f, -1.0f, 1.0f ), XMFLOAT3( 1.0f, -1.0f, 1.0f ),
+        XMFLOAT3( -1.0f, 1.0f, 1.0f ),  XMFLOAT3( 1.0f, 1.0f, 1.0f )
+    };
+    for ( int cascadeIdx = 0; cascadeIdx <= lastUpdatedCascade; ++cascadeIdx ) {
+        if ( !m_CascadeCRs[cascadeIdx].frustum.IsValid() )
+            continue;
+
+        const XMMATRIX view = XMMatrixTranspose( XMLoadFloat4x4( &m_CascadeCRs[cascadeIdx].ViewReplacement ) );
+        const XMMATRIX projection = XMMatrixTranspose( XMLoadFloat4x4( &m_CascadeCRs[cascadeIdx].ProjectionReplacement ) );
+        const XMMATRIX inverseViewProjection = XMMatrixInverse( nullptr, XMMatrixMultiply( view, projection ) );
+        for ( const XMFLOAT3& ndcCorner : ndcCorners ) {
+            XMStoreFloat3( &combinedCorners[combinedCornerCount++],
+                XMVector3TransformCoord( XMLoadFloat3( &ndcCorner ), inverseViewProjection ) );
+        }
+    }
+    if ( combinedCornerCount > 0 ) {
+        BoundingSphere combinedSphere;
+        BoundingSphere::CreateFromPoints( combinedSphere, combinedCornerCount,
+            combinedCorners.data(), sizeof( XMFLOAT3 ) );
+        combinedSphere.Radius *= 1.2f;
+        unionShadowFrustum.BuildCubemapFace( XMLoadFloat3( &combinedSphere.Center ), combinedSphere.Radius, 0 );
+    }
+
+    static thread_local std::vector<WorldMeshSectionInfo*> shadowSections;
+    shadowSections.clear();
+    Engine::GAPI->CollectVisibleSections( shadowSections, &unionShadowFrustum, false );
+
+    const float alphaRef = Engine::GAPI->GetRendererState().GraphicsState.FF_AlphaRef;
+    for ( const WorldMeshSectionInfo* section : shadowSections ) {
+        if ( !section )
+            continue;
+
+        for ( const auto& meshPair : section->WorldMeshes ) {
+            const MeshKey& meshKey = meshPair.first;
+            WorldMeshInfo* mesh = meshPair.second;
+            if ( !mesh || !meshKey.Info || meshKey.Info->MaterialType != MaterialInfo::MT_None )
+                continue;
+
+            zCMaterial* material = meshKey.Material;
+            if ( !material )
+                continue;
+
+            const int alphaFunc = material->GetAlphaFunc();
+            if ( (alphaFunc > zMAT_ALPHA_FUNC_NONE && alphaFunc != zMAT_ALPHA_FUNC_TEST)
+                || (alphaFunc == zMAT_ALPHA_FUNC_NONE
+                    && zColor( material->GetColor() ).bgra.alpha < 255) ) {
+                continue;
+            }
+
+            zCTexture* texture = material->GetTexture();
+            if ( !texture )
+                texture = material->GetAniTexture();
+
+            const bool alphaTest = texture && texture->HasAlphaChannel() && alphaRef > 0.0f;
+            if ( alphaTest && texture->CacheIn( 0.6f ) != zRES_CACHED_IN )
+                continue;
+
+            m_WorldShadowCasters.push_back( { mesh, texture, alphaTest } );
+        }
+    }
+}
+
 XRESULT D3D11ShadowMap::DrawWorldShadow( )
 {
     auto graphicsEngine = reinterpret_cast<D3D11GraphicsEngine*>(Engine::GraphicsEngine);
@@ -1279,10 +1391,20 @@ XRESULT D3D11ShadowMap::DrawWorldShadow( )
 
     auto& settings = Engine::GAPI->GetRendererState().RendererSettings;
     
-    int numCascades = settings.NumShadowCascades;
+    int numCascades = std::clamp( settings.NumShadowCascades, 1, MAX_CSM_CASCADES );
     bool isOutdoor = Engine::GAPI->GetLoadedWorldInfo()->BspTree->GetBspTreeMode() == zBSP_MODE_OUTDOOR;
 
     if ( isOutdoor ) {
+        const bool anyCascadeUpdate = std::any_of(
+            m_ShouldUpdateCascade.begin(), m_ShouldUpdateCascade.begin() + numCascades,
+            []( bool shouldUpdate ) { return shouldUpdate; } );
+        if ( anyCascadeUpdate ) {
+            BuildWorldShadowCasterCache();
+            graphicsEngine->PrepareSkeletalShadowData( m_CascadeCRs, numCascades, m_WorldShadowPos );
+        } else {
+            m_WorldShadowCasters.clear();
+        }
+
         // For atlas path: clear entire atlas once before rendering all cascades
         if ( m_useAtlas && m_shadowAtlas ) {
             auto dsv = m_shadowAtlas->GetDepthStencilView();
@@ -1312,6 +1434,7 @@ XRESULT D3D11ShadowMap::DrawWorldShadow( )
             renderParams.CascadeIndex = static_cast<int>(cascadeIdx);
             renderParams.CascadeSplits = m_CascadeSplits;
             renderParams.CascadeCameraReplacements = &m_CascadeCRs;
+            renderParams.WorldShadowCasters = &m_WorldShadowCasters;
 
             // Atlas path: provide per-cascade viewport and skip per-cascade clear
             if ( m_useAtlas && m_shadowAtlas ) {
