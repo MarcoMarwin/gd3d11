@@ -99,7 +99,8 @@ float4 PSMain( PS_INPUT Input ) : SV_TARGET
 	HF_WeightZFar);
 	float activeWeatherFog = saturate(AC_RainFXWeight);
 	float nightTimeBlend = smoothstep(0.0f, 1.0f, saturate(-AC_LightPos.y * 4.0f))
-	* saturate(AC_EnableNightAtmosphere);
+	* saturate(AC_EnableNightAtmosphere)
+	* saturate(AC_NightFogEnabled);
 	float worldFogActivation = max(HF_FogOverride, nightTimeBlend * (1.0f - activeWeatherFog));
 	worldFog *= worldFogActivation;
 	// Explicit Gothic world-fog zones conceal distant geometry identically at

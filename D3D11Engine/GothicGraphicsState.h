@@ -666,6 +666,11 @@ struct GothicRendererSettings {
         textureMaxSize = 16384;
         ShadowQuality = E_ShadowQuality::SHADOW_QUALITY_MEDIUM;
         GpuVobCulling = true;
+        GpuVobHiZCulling = true;
+        GpuVobShadowCulling = true;
+        GpuVobGeometryArena = true;
+        GpuVobMdi = true;
+        AdvancedPerformanceOptions = true;
         ShadowMapSize = 2048;
         PointlightShadowMapSize = 128;
         WorldShadowRangeScale = 1.0f;
@@ -677,6 +682,15 @@ struct GothicRendererSettings {
         ShadowAOStrength = 0.50f;
         WorldAOStrength = 0.50f;
         ShadowSoftness = 1.0f; // 1.0 = default softness, higher = softer shadows
+        AdvancedShadowSoftness = ShadowSoftness;
+        // Runtime-only Advanced-menu world/visual test options. These values
+        // intentionally are not persisted in UserSettings.ini.
+        AdvancedWaterAnimation = true;
+        AdvancedPuddles = true;
+        AdvancedWetGroundSSR = true;
+        AdvancedVegetationPushRange = 50.0f;
+        AdvancedNightEnhance = true;
+        AdvancedCityWindowTransparency = true;
 
         BloomStrength = 1.0f;
         GlobalWindStrength = 1.0f; // UI-normalized: 1.0 maps to the former effective 2.0 wind strength.
@@ -689,7 +703,9 @@ struct GothicRendererSettings {
         ShadowFilterMode = E_ShadowFilterMode::SHADOW_FILTER_PCSS;
 
         EnableShadows = true;
-        ThreadedShadowCulling = false;
+        // Runtime-only Advanced-menu test option. Keep it enabled by default so
+        // the DX12-inspired CPU shadow scheduling path is exercised out of the box.
+        ThreadedShadowCulling = true;
         EnableVSync = false;
         DoZPrepass = true;
         SortRenderQueue = false;
@@ -829,7 +845,9 @@ struct GothicRendererSettings {
         DebugSettings.Culling.CullBspSections = true;
         DebugSettings.Culling.CullVobs = true;
         DebugSettings.ShadowCascades.LazyCascadeUpdate = true;
-        ShadowCasterMinTexels = 2.0f;
+        // Keep every shadow caster by default; the experimental size filter
+        // is intentionally disabled to preserve the existing appearance.
+        ShadowCasterMinTexels = 0.0f;
         DebugSettings.FeatureSet.EnableDriverExtensions = true;
         DebugSettings.FeatureSet.UseWorldSectionBVH = true;
         DebugSettings.FeatureSet.UseScreenSpaceShadowMask = false;
@@ -889,7 +907,18 @@ struct GothicRendererSettings {
 
     void DisableEverything() {}
 
-    bool IsShadowFrustumCullingEnabled() const { return ShadowFrustumCullingMode != SHD_FRUSTUM_CULLING_DISABLED && NumShadowCascades > 1; }
+    E_ShadowFrustumCulling GetEffectiveShadowFrustumCullingMode() const {
+        // The Advanced master switch must make every Advanced-menu option a
+        // no-op. Conservative is the existing safe baseline when it is off.
+        return AdvancedPerformanceOptions
+            ? ShadowFrustumCullingMode
+            : SHD_FRUSTUM_CULLING_CONSERVATIVE;
+    }
+
+    bool IsShadowFrustumCullingEnabled() const {
+        return GetEffectiveShadowFrustumCullingMode() != SHD_FRUSTUM_CULLING_DISABLED
+            && NumShadowCascades > 1;
+    }
 
     static E_ShadowQuality ShadowQualityFromShadowMapSize( int size ) {
         if ( size <= 1024 ) return E_ShadowQuality::SHADOW_QUALITY_LOW;
@@ -1179,6 +1208,65 @@ struct GothicRendererSettings {
     float ShadowCasterMinTexels;
     // Appended so every pre-existing renderer-settings field offset remains unchanged.
     bool GpuVobCulling;
+    // Runtime-only test switches. They are intentionally not persisted in UserSettings.ini.
+    bool GpuVobHiZCulling;
+    bool GpuVobShadowCulling;
+    bool GpuVobGeometryArena;
+    bool GpuVobMdi;
+    // Runtime-only master switch for all advanced performance test options.
+    // It is intentionally not persisted in UserSettings.ini.
+    bool AdvancedPerformanceOptions;
+    // Runtime-only shadow softness override used by the Advanced test menu.
+    // It is intentionally not persisted in UserSettings.ini.
+    float AdvancedShadowSoftness;
+    // Runtime-only Advanced-menu world/visual test switches. They are
+    // intentionally not persisted in UserSettings.ini.
+    bool AdvancedWaterAnimation;
+    bool AdvancedPuddles;
+    bool AdvancedWetGroundSSR;
+    float AdvancedVegetationPushRange;
+    bool AdvancedNightEnhance;
+    bool AdvancedCityWindowTransparency;
+
+    float GetEffectiveShadowSoftness() const {
+        return AdvancedPerformanceOptions
+            ? std::clamp( AdvancedShadowSoftness, 0.0f, 100.0f )
+            : ShadowSoftness;
+    }
+
+    bool GetEffectiveWaterAnimation() const {
+        return !AdvancedPerformanceOptions || AdvancedWaterAnimation;
+    }
+
+    bool GetEffectivePuddles() const {
+        return !AdvancedPerformanceOptions || AdvancedPuddles;
+    }
+
+    bool GetEffectiveWetGroundSSR() const {
+        return !AdvancedPerformanceOptions || AdvancedWetGroundSSR;
+    }
+
+    float GetEffectiveVegetationPushRange() const {
+        // 50 world units is Build 213's existing shader falloff. The
+        // Advanced control changes that runtime constant only.
+        return AdvancedPerformanceOptions
+            ? std::clamp( AdvancedVegetationPushRange, 1.0f, 250.0f )
+            : 50.0f;
+    }
+
+    bool GetEffectiveNightEnhance() const {
+        return AdvancedPerformanceOptions && AdvancedNightEnhance;
+    }
+
+    bool GetEffectiveCityWindowTransparency() const {
+        return !AdvancedPerformanceOptions || AdvancedCityWindowTransparency;
+    }
+
+    int GetEffectiveXeGTAOQuality() const {
+        return AdvancedPerformanceOptions
+            ? std::clamp( XegtaoSettings.QualityLevel, 0, 3 )
+            : 2;
+    }
 
     bool AreGodRaysEnabled() const {
         return EnableGodRays;

@@ -680,6 +680,7 @@ XRESULT D3D11ShadowMap::PrepareRender()
         // Increment frame counter for temporal cascade updates
         perFrameCascadeData.frameCount++;
         bool lazyCascadeUpdate = !m_useAtlas
+            && settings.AdvancedPerformanceOptions
             && settings.DebugSettings.ShadowCascades.LazyCascadeUpdate;
         const bool overheadLight = std::abs( XMVectorGetX( XMVector3Dot( shadowViewDir, c_XM_Up ) ) ) > 0.94f;
         if ( overheadLight ) {
@@ -777,7 +778,9 @@ XRESULT D3D11ShadowMap::PrepareRender()
         }
     }
 
-    if ( settings.ThreadedShadowCulling && Engine::WorkerThreadPool ) {
+    if ( settings.AdvancedPerformanceOptions
+        && settings.ThreadedShadowCulling
+        && Engine::WorkerThreadPool ) {
         std::lock_guard<LockableBase( std::mutex )> lock( m_CullingJobsMutex );
         m_ShadowCullingJobs.clear();
 
@@ -1745,7 +1748,7 @@ DS_ScreenQuadConstantBuffer D3D11ShadowMap::FillSunCSMConstantBuffer() const {
     scb.SQ_ShadowStrength = settings.ShadowStrength;
     scb.SQ_ShadowAOStrength = settings.ShadowAOStrength;
     scb.SQ_WorldAOStrength = settings.WorldAOStrength;
-    scb.SQ_ShadowSoftness = settings.ShadowSoftness;
+    scb.SQ_ShadowSoftness = settings.GetEffectiveShadowSoftness();
     scb.SQ_LightSize = std::clamp( settings.PCSSLightSize, 0.005f, 0.5f );
     scb.SQ_ShadowRuntimeParams = float4(
         settings.GetUsesTemporalReconstruction() ? 1.0f : 0.0f,
@@ -1888,7 +1891,7 @@ XRESULT D3D11ShadowMap::DrawWorldLights()
     scb.SQ_ShadowStrength = settings.ShadowStrength;
     scb.SQ_ShadowAOStrength = settings.ShadowAOStrength;
     scb.SQ_WorldAOStrength = settings.WorldAOStrength;
-    scb.SQ_ShadowSoftness = settings.ShadowSoftness;
+    scb.SQ_ShadowSoftness = settings.GetEffectiveShadowSoftness();
     scb.SQ_LightSize = std::clamp( settings.PCSSLightSize, 0.005f, 0.5f );
     scb.SQ_ShadowRuntimeParams = float4(
         settings.GetUsesTemporalReconstruction() ? 1.0f : 0.0f,

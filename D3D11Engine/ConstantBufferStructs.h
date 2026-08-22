@@ -334,7 +334,8 @@ struct VS_ExConstantBuffer_Wind {
     // xyz = actor world position, w = active flag. Slot 0 is the hero, following slots are nearby NPCs.
     float4 interactionPositions[MAX_CHARACTER_INTERACTION_INFLUENCERS];
     float characterInteractionStrength;
-    float3 padding1;
+    float characterInteractionRange;
+    float2 padding1;
 };
 
 struct ParticlePointShadingConstantBuffer {
@@ -499,7 +500,8 @@ struct AtmosphereConstantBuffer {
     float AC_EnableParticleLighting;
     float AC_ParticleLightingStrength;
     float AC_Pad3;
-    float AC_Pad4;
+    // 1 = normal night fog, 0 = suppress the night-fog blend.
+    float AC_NightFogEnabled;
 
     XMFLOAT3 AC_Pad5;
     float AC_Pad6;

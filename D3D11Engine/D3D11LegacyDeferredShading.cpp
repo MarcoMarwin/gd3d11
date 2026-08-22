@@ -133,7 +133,7 @@ XRESULT D3D11LegacyDeferredShading::DrawPointlightLights(
         XMStoreFloat( &dist, XMVector3Length( XMLoadFloat3( plcb.Pl_PositionWorld.toXMFLOAT3() ) - Engine::GAPI->GetCameraPositionXM() ) );
 
         plcb.PL_ShadowSoftness = std::max(
-            settings.ShadowSoftness * 2.0f, minimumTemporalShadowSoftness );
+            settings.GetEffectiveShadowSoftness() * 2.0f, minimumTemporalShadowSoftness );
         plcb.PL_ShadowFilterMode = static_cast<uint32_t>( settings.GetShadowKernelQuality() );
         plcb.PL_ShadowFilterPad[0] = 0;
         plcb.PL_ShadowFilterPad[1] = 0;

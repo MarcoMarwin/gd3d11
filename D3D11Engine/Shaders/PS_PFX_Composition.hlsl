@@ -112,7 +112,8 @@ HF_WeightZNear,
 HF_WeightZFar );
 float activeWeatherFog = saturate(AC_RainFXWeight);
 float nightTimeBlend = smoothstep(0.0f, 1.0f, saturate(-AC_LightPos.y * 4.0f))
-* saturate(AC_EnableNightAtmosphere);
+* saturate(AC_EnableNightAtmosphere)
+* saturate(AC_NightFogEnabled);
 float nightFogRainFade = saturate(HF_NightFogRainFade);
 float worldFogActivation = max(HF_FogOverride, nightTimeBlend * (1.0f - nightFogRainFade));
 worldFog *= worldFogActivation;
@@ -178,7 +179,8 @@ rainPosition = mul( float4( rainPosition, 1 ), HF_InvView ).xyz;
 float3 rainPosOriginal = rainPosition;
 rainPosition -= HF_CameraPosition;
 rainPosition.y -= HF_RainFogHeight;
-float nightTimeBlend = smoothstep(0.0f, 1.0f, saturate(-AC_LightPos.y * 4.0f));
+float nightTimeBlend = smoothstep(0.0f, 1.0f, saturate(-AC_LightPos.y * 4.0f))
+    * saturate(AC_NightFogEnabled);
 float nightAtmosphereBlend = nightTimeBlend * saturate(AC_EnableNightAtmosphere);
 float activeWeatherFog = saturate(AC_RainFXWeight);
 float nightFogRainFade = saturate(HF_NightFogRainFade);

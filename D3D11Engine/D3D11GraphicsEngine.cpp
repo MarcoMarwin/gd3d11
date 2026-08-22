@@ -119,6 +119,8 @@ struct SkyVelocityConstantBuffer {
     XMFLOAT2 Padding;
 };
 static void UpdateCharacterInteractionPositions( VS_ExConstantBuffer_Wind& windBuff ) {
+    windBuff.characterInteractionRange =
+        Engine::GAPI->GetRendererState().RendererSettings.GetEffectiveVegetationPushRange();
     for ( int i = 0; i < MAX_CHARACTER_INTERACTION_INFLUENCERS; ++i ) {
         windBuff.interactionPositions[i] = float4( 0, 0, 0, 0 );
     }
@@ -294,7 +296,13 @@ namespace
     }
 
     bool IsCityWindowFeatureReady() {
-        if ( !Engine::GAPI || !Engine::GAPI->IsWorldRenderCacheReady() ) {
+        if ( !Engine::GAPI ) {
+            return false;
+        }
+        if ( !Engine::GAPI->GetRendererState().RendererSettings.GetEffectiveCityWindowTransparency() ) {
+            return false;
+        }
+        if ( !Engine::GAPI->IsWorldRenderCacheReady() ) {
             return false;
         }
         const WorldInfo* loadedWorld = Engine::GAPI->GetLoadedWorldInfo();
@@ -752,7 +760,8 @@ void D3D11GraphicsEngine::EnsureFrameVobVisibilityCollected() {
     const bool gpuVobShadersAvailable = ShaderManager
         && ShaderManager->GetCShader( CShaderID::CS_VobCull )
         && ShaderManager->GetCShader( CShaderID::CS_VobPatchArgs );
-    const bool useGpuVobCulling = renderSettings.GpuVobCulling
+    const bool useGpuVobCulling = renderSettings.AdvancedPerformanceOptions
+        && renderSettings.GpuVobCulling
         && !FeatureLevel10Compatibility
         && renderSettings.DebugSettings.Culling.CullVobs
         && gpuVobShadersAvailable;
@@ -874,13 +883,63 @@ bool D3D11GraphicsEngine::EnsureGpuVobHiZResources() {
     return true;
 }
 
+void D3D11GraphicsEngine::LogGpuVobPerformanceStats() {
+    const auto& settings = Engine::GAPI->GetRendererState().RendererSettings;
+    const double averageFrameMs = m_GpuVobPerformanceStats.FrameTimeSamples > 0
+        ? m_GpuVobPerformanceStats.FrameTimeMsTotal
+            / static_cast<double>( m_GpuVobPerformanceStats.FrameTimeSamples )
+        : 0.0;
+    const double averageFps = averageFrameMs > 0.0 ? 1000.0 / averageFrameMs : 0.0;
+    LogInfo() << "[GpuVobPerf] frames=" << m_GpuVobPerformanceStats.Frames
+        << " frameMsAvg=" << averageFrameMs
+        << " frameMsMin=" << m_GpuVobPerformanceStats.FrameTimeMsMin
+        << " frameMsMax=" << m_GpuVobPerformanceStats.FrameTimeMsMax
+        << " fpsAvg=" << averageFps
+        << " advanced=" << (settings.AdvancedPerformanceOptions ? 1 : 0)
+        << " shadowSoftness=" << settings.GetEffectiveShadowSoftness()
+        << " waterAnim=" << (settings.GetEffectiveWaterAnimation() ? 1 : 0)
+        << " puddles=" << (settings.GetEffectivePuddles() ? 1 : 0)
+        << " wetGroundSSR=" << (settings.GetEffectiveWetGroundSSR() ? 1 : 0)
+        << " vegetationPushRange=" << settings.GetEffectiveVegetationPushRange()
+        << " nightEnhance=" << (settings.GetEffectiveNightEnhance() ? 1 : 0)
+        << " cityWindowTransparency=" << (settings.GetEffectiveCityWindowTransparency() ? 1 : 0)
+        << " xeGTAOQuality=" << settings.GetEffectiveXeGTAOQuality()
+        << " threadedShadow=" << (settings.AdvancedPerformanceOptions && settings.ThreadedShadowCulling ? 1 : 0)
+        << " lazyCascade=" << (settings.AdvancedPerformanceOptions && settings.DebugSettings.ShadowCascades.LazyCascadeUpdate ? 1 : 0)
+        << " depthPrepass=" << (settings.AdvancedPerformanceOptions && settings.DoZPrepass ? 1 : 0)
+        << " sectionBvh=" << (settings.AdvancedPerformanceOptions && settings.DebugSettings.FeatureSet.UseWorldSectionBVH ? 1 : 0)
+        << " shadowFrustum=" << static_cast<int>( settings.GetEffectiveShadowFrustumCullingMode() )
+        << " gpuVob=" << (settings.GpuVobCulling ? 1 : 0)
+        << " gpuHiZ=" << (settings.GpuVobHiZCulling ? 1 : 0)
+        << " gpuShadow=" << (settings.GpuVobShadowCulling ? 1 : 0)
+        << " arena=" << (settings.GpuVobGeometryArena ? 1 : 0)
+        << " vobMdi=" << (settings.GpuVobMdi ? 1 : 0)
+        << " useMDI=" << (settings.DebugSettings.FeatureSet.UseMDI ? 1 : 0)
+        << " hiz=" << m_GpuVobPerformanceStats.HiZBuilt
+        << "/" << m_GpuVobPerformanceStats.HiZRequests
+        << " mainCull=" << m_GpuVobPerformanceStats.MainCullActive
+        << "/" << m_GpuVobPerformanceStats.MainCullAttempts
+        << " mainFallback=" << m_GpuVobPerformanceStats.MainCullFallback
+        << " shadowCull=" << m_GpuVobPerformanceStats.ShadowCullActive
+        << "/" << m_GpuVobPerformanceStats.ShadowCullAttempts
+        << " indirectCalls=" << m_GpuVobPerformanceStats.IndirectDrawCalls
+        << " mdiBatches=" << m_GpuVobPerformanceStats.MdiBatches
+        << " mdiCommands=" << m_GpuVobPerformanceStats.MdiCommands
+        << " cpuDrawCalls=" << m_GpuVobPerformanceStats.CpuFallbackDrawCalls
+        << " candidateInstances=" << m_GpuVobPerformanceStats.CandidateInstances
+        << " candidateVisuals=" << m_GpuVobPerformanceStats.CandidateVisuals
+        << " candidateDrawItems=" << m_GpuVobPerformanceStats.CandidateDrawItems;
+}
+
 void D3D11GraphicsEngine::BuildGpuVobHiZ() {
+    TracyD3D11ZoneCGX( "GpuVobHiZ" );
+    ++m_GpuVobPerformanceStats.HiZRequests;
     if ( GpuVobHiZBuildAttemptedThisFrame ) {
         return;
     }
     GpuVobHiZBuiltThisFrame = false;
     const auto& settings = Engine::GAPI->GetRendererState().RendererSettings;
-    if ( !settings.GpuVobCulling || FeatureLevel10Compatibility
+    if ( !settings.AdvancedPerformanceOptions || !settings.GpuVobCulling || !settings.GpuVobHiZCulling || FeatureLevel10Compatibility
         || !settings.DebugSettings.Culling.CullVobs || !Context || !ShaderManager ) {
         return;
     }
@@ -924,6 +983,7 @@ void D3D11GraphicsEngine::BuildGpuVobHiZ() {
 
     GetContext()->CSSetShader( nullptr, nullptr, 0 );
     GpuVobHiZBuiltThisFrame = true;
+    ++m_GpuVobPerformanceStats.HiZBuilt;
 }
 
 bool D3D11GraphicsEngine::PrepareGpuVobGeometryArena() {
@@ -935,7 +995,7 @@ bool D3D11GraphicsEngine::PrepareGpuVobGeometryArena() {
     // only those meshes on the existing per-mesh path instead of copying
     // stale geometry into a persistent arena; ordinary static meshes remain
     // eligible even when AnimateStaticVobs is enabled globally.
-    if ( !settings.GpuVobCulling || FeatureLevel10Compatibility ) {
+    if ( !settings.AdvancedPerformanceOptions || !settings.GpuVobCulling || !settings.GpuVobGeometryArena || FeatureLevel10Compatibility ) {
         return false;
     }
 
@@ -1107,10 +1167,11 @@ bool D3D11GraphicsEngine::PrepareGpuVobCulling(
     bool useHiZ,
     D3D11VertexBuffer*& outputInstanceBuffer,
     D3D11IndirectBuffer*& outputArgsBuffer ) {
+    TracyD3D11ZoneCGX( "GpuVobCulling::Prepare" );
     outputInstanceBuffer = nullptr;
     outputArgsBuffer = nullptr;
     const auto& settings = Engine::GAPI->GetRendererState().RendererSettings;
-    if ( !settings.GpuVobCulling || FeatureLevel10Compatibility
+    if ( !settings.AdvancedPerformanceOptions || !settings.GpuVobCulling || FeatureLevel10Compatibility
         || !settings.DebugSettings.Culling.CullVobs
         || !ShaderManager
         || !inputInstanceBuffer
@@ -5496,6 +5557,23 @@ XRESULT D3D11GraphicsEngine::OnStartWorldRendering() {
 
     auto& rendererState = Engine::GAPI->GetRendererState();
 
+    if ( m_GpuVobPerformanceStats.Frames >= 120 ) {
+        LogGpuVobPerformanceStats();
+        m_GpuVobPerformanceStats.Reset();
+    }
+    ++m_GpuVobPerformanceStats.Frames;
+    const double frameTimeMs = static_cast<double>( Engine::GAPI->GetFrameTimeSec() ) * 1000.0;
+    if ( frameTimeMs > 0.0 && frameTimeMs < 10000.0 ) {
+        ++m_GpuVobPerformanceStats.FrameTimeSamples;
+        m_GpuVobPerformanceStats.FrameTimeMsTotal += frameTimeMs;
+        if ( m_GpuVobPerformanceStats.FrameTimeMsMin == 0.0
+            || frameTimeMs < m_GpuVobPerformanceStats.FrameTimeMsMin ) {
+            m_GpuVobPerformanceStats.FrameTimeMsMin = frameTimeMs;
+        }
+        m_GpuVobPerformanceStats.FrameTimeMsMax = std::max(
+            m_GpuVobPerformanceStats.FrameTimeMsMax, frameTimeMs );
+    }
+
     if ( rendererState.RendererSettings.DisableRendering )
         return XR_SUCCESS;
 
@@ -5849,7 +5927,8 @@ XRESULT D3D11GraphicsEngine::OnStartWorldRendering() {
     const bool renderWaterMask =
         renderRainExclusionMask
         || rendererState.RendererSettings.EnableDoF;
-    const bool renderWetGroundSSR = renderRainExclusionMask;
+    const bool renderWetGroundSSR = renderRainExclusionMask
+        && rendererState.RendererSettings.GetEffectiveWetGroundSSR();
     RGResourceHandle waterMaskResource = RG_INVALID_HANDLE;
     if ( renderWaterMask ) {
         const auto maskSize = GetResolution();
@@ -7066,7 +7145,10 @@ XRESULT D3D11GraphicsEngine::DrawWorldMesh( bool noTextures ) {
     std::sort( meshList.begin(), meshList.end(), CompareMesh );
 
     // Draw depth only
-    if ( (Engine::GAPI->GetRendererState().RendererSettings.DoZPrepass && Engine::GAPI->GetRendererState().RendererSettings.RendererMode == GothicRendererSettings::RM_Deferred )
+    const auto& rendererSettings = Engine::GAPI->GetRendererState().RendererSettings;
+    if ( (rendererSettings.AdvancedPerformanceOptions
+            && rendererSettings.DoZPrepass
+            && rendererSettings.RendererMode == GothicRendererSettings::RM_Deferred )
         || isZPrepass) {
         ZoneScopedN( "DrawWorldMesh::DepthPrepass" );
         auto _scopeDepthPrepass = RecordGraphicsEvent( GE_NAME( "DrawWorldMesh::DepthPrepass" ) );
@@ -7235,7 +7317,9 @@ void D3D11GraphicsEngine::DrawWaterSurfaces(
     SetupVS_ExMeshDrawCall();
     SetupVS_ExConstantBuffer();
 
-    float totalTime = Engine::GAPI->GetTotalTime();
+    const auto& rendererSettings = Engine::GAPI->GetRendererState().RendererSettings;
+    float totalTime = rendererSettings.GetEffectiveWaterAnimation()
+        ? Engine::GAPI->GetTotalTime() : 0.0f;
     ActiveVS->GetBuffer( "Matrices_PerInstances" ).Update( &totalTime, 4 ).Bind();
 
     ID3D11RenderTargetView* waterTargets[3] = {
@@ -7397,7 +7481,8 @@ void D3D11GraphicsEngine::DrawWaterSurfaces(
         RefractionInfoConstantBuffer ricb = {};
         ricb.RI_Projection = Engine::GAPI->GetProjectionMatrix();
         ricb.RI_ViewportSize = float2( Resolution.x, Resolution.y );
-        ricb.RI_Time = Engine::GAPI->GetTimeSeconds();
+        ricb.RI_Time = rendererSettings.GetEffectiveWaterAnimation()
+            ? Engine::GAPI->GetTimeSeconds() : 0.0f;
         ricb.RI_CameraPosition = float3( Engine::GAPI->GetCameraPosition() );
         UpdateRefractionViewProjection( ricb );
 
@@ -8848,7 +8933,10 @@ void XM_CALLCONV D3D11GraphicsEngine::DrawWorldAroundForWorldShadow( FXMVECTOR p
         UINT nullShadowOffset = 0;
         GetContext()->IASetVertexBuffers( 1, 1, &nullShadowInstanceBuffer,
             &nullShadowStride, &nullShadowOffset );
-        const bool shadowGpuCullingActive = shadowGpuDrawListComplete
+        ++m_GpuVobPerformanceStats.ShadowCullAttempts;
+        const bool shadowGpuCullingActive = Engine::GAPI->GetRendererState().RendererSettings.AdvancedPerformanceOptions
+            && Engine::GAPI->GetRendererState().RendererSettings.GpuVobShadowCulling
+            && shadowGpuDrawListComplete
             && shadowGpuDraws.size() == instancedMeshesToDraw.size()
             && PrepareGpuVobCulling(
                 shadowInstancingBuffer,
@@ -8864,9 +8952,12 @@ void XM_CALLCONV D3D11GraphicsEngine::DrawWorldAroundForWorldShadow( FXMVECTOR p
                 GpuVobShadowCullResources.VisibleCountsBuffer,
                 GpuVobShadowCullResources.CullConstantBuffer,
                 GpuVobShadowCullResources.PatchConstantBuffer,
-                false,
-                shadowGpuInstanceBuffer,
-                shadowGpuArgsBuffer );
+                 false,
+                 shadowGpuInstanceBuffer,
+                 shadowGpuArgsBuffer );
+        if ( shadowGpuCullingActive ) {
+            ++m_GpuVobPerformanceStats.ShadowCullActive;
+        }
 
         ID3D11Buffer* shadowDrawInstanceBuffer = (shadowGpuCullingActive
             && shadowGpuInstanceBuffer)
@@ -9103,7 +9194,7 @@ void XM_CALLCONV D3D11GraphicsEngine::DrawWorldAroundForWorldShadow( FXMVECTOR p
             animatedSkeletalMeshVobs.push_back( skeletalMeshVob );
         }
         bool drawAttachments = true;
-        if ( Engine::GAPI->GetRendererState().RendererSettings.ShadowFrustumCullingMode
+        if ( Engine::GAPI->GetRendererState().RendererSettings.GetEffectiveShadowFrustumCullingMode()
             == GothicRendererSettings::E_ShadowFrustumCulling::SHD_FRUSTUM_CULLING_AGGRESSIVE ) {
             drawAttachments = params.CascadeIndex <= 1; // skip attachments on higher cascades, player won't notice, hopefully
         }
@@ -9294,6 +9385,7 @@ void D3D11GraphicsEngine::ApplyWindProps( VS_ExConstantBuffer_Wind& windBuff ) {
         XMVectorSetW( Engine::GAPI->GetCameraPositionXM(), 1.0f ) );
     windBuff.characterInteractionStrength =
         settings.HeroAffectsObjects ? 1.0f : 0.0f;
+    windBuff.characterInteractionRange = settings.GetEffectiveVegetationPushRange();
 
     static float WindGlobalTime = 0.0f;
 
@@ -9561,8 +9653,19 @@ XRESULT D3D11GraphicsEngine::DrawVOBsInstanced() {
                     } );
 
                 PrepareGpuVobGeometryArena();
+                m_GpuVobPerformanceStats.CandidateVisuals += cache.vobVisuals.size();
+                m_GpuVobPerformanceStats.CandidateDrawItems += cache.sortedInstancedMeshes.size();
+                for ( const auto& visual : cache.vobVisuals ) {
+                    m_GpuVobPerformanceStats.CandidateInstances += visual.Instances.size();
+                }
+                ++m_GpuVobPerformanceStats.MainCullAttempts;
                 cache.vobGpuCullingPrepared = true;
                 cache.vobGpuCullingActive = PrepareGpuVobCulling();
+                if ( cache.vobGpuCullingActive ) {
+                    ++m_GpuVobPerformanceStats.MainCullActive;
+                } else {
+                    ++m_GpuVobPerformanceStats.MainCullFallback;
+                }
 
                 if ( !vobs.empty() ) {
                     RenderedVobs.insert( RenderedVobs.end(), vobs.begin(), vobs.end() );
@@ -9859,7 +9962,9 @@ XRESULT D3D11GraphicsEngine::DrawVOBsInstanced() {
                     // the complete material/visual state. This keeps wind,
                     // window classification and per-material constants
                     // identical for every command in the batch.
-                    const bool mdiEligible = cache.vobGpuCullingActive
+                    const bool mdiEligible = renderSettings.AdvancedPerformanceOptions
+                        && cache.vobGpuCullingActive
+                        && renderSettings.GpuVobMdi
                         && cache.MainVobGpuInstanceBuffer
                         && cache.MainVobGpuIndirectArgsBuffer
                         && useGeometryArena && tx
@@ -9896,6 +10001,7 @@ XRESULT D3D11GraphicsEngine::DrawVOBsInstanced() {
                     if ( cache.vobGpuCullingActive
                         && cache.MainVobGpuInstanceBuffer
                         && cache.MainVobGpuIndirectArgsBuffer ) {
+                        ++m_GpuVobPerformanceStats.IndirectDrawCalls;
                         UINT offsets[2] = { 0, 0 };
                         UINT strides[2] = {
                             static_cast<UINT>( sizeof( ExVertexStruct ) ),
@@ -9920,6 +10026,10 @@ XRESULT D3D11GraphicsEngine::DrawVOBsInstanced() {
                             auto drawMulti = Engine::GAPI->GetRendererState().RendererSettings.DebugSettings.FeatureSet.UseMDI
                                 ? DrawMultiIndexedInstancedIndirect
                                 : Stub_DrawMultiIndexedInstancedIndirect;
+                            if ( Engine::GAPI->GetRendererState().RendererSettings.DebugSettings.FeatureSet.UseMDI ) {
+                                ++m_GpuVobPerformanceStats.MdiBatches;
+                                m_GpuVobPerformanceStats.MdiCommands += mdiDrawCount;
+                            }
                             drawMulti( GetContext().Get(), static_cast<UINT>( mdiDrawCount ),
                                 argsBuffer,
                                 static_cast<UINT>( drawIndex * sizeof( D3D11_DRAW_INDEXED_INSTANCED_INDIRECT_ARGS ) ),
@@ -9941,6 +10051,7 @@ XRESULT D3D11GraphicsEngine::DrawVOBsInstanced() {
                             (maxDrawIndices / 3) * cachedVisual->Instances.size();
                         Engine::GAPI->GetRendererState().RendererInfo.FrameDrawnVobs++;
                     } else {
+                        ++m_GpuVobPerformanceStats.CpuFallbackDrawCalls;
                         DrawInstanced( meshInfo->MeshVertexBuffer, meshInfo->MeshIndexBuffer,
                             meshInfo->Indices.size(), instancingBuffer,
                             sizeof( VobInstanceInfo ), cachedVisual->Instances.size(),
@@ -11490,7 +11601,8 @@ void D3D11GraphicsEngine::DrawUnderwaterEffects() {
     RefractionInfoConstantBuffer ricb = {};
     ricb.RI_Projection = Engine::GAPI->GetProjectionMatrix();
     ricb.RI_ViewportSize = float2( Resolution.x, Resolution.y );
-    ricb.RI_Time = Engine::GAPI->GetTimeSeconds();
+    ricb.RI_Time = Engine::GAPI->GetRendererState().RendererSettings.GetEffectiveWaterAnimation()
+        ? Engine::GAPI->GetTimeSeconds() : 0.0f;
     ricb.RI_CameraPosition = Engine::GAPI->GetCameraPosition();
 
     // Set up water final copy

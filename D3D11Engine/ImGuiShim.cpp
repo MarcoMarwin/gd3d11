@@ -1193,6 +1193,187 @@ void ImGuiShim::RenderSettingsWindow()
         }
         ImGui::SetItemTooltip( "%s", Tr( "Selects the language used by the D3D11 renderer.", u8"W\u00E4hlt die Sprache des D3D11-Renderers aus." ) );
         ImGui::PopItemWidth();
+        ImGui::SameLine();
+        if ( ImGui::Button( Tr( "Advanced...", u8"Erweitert ..." ) ) ) {
+            ImGui::OpenPopup( "##AdvancedPerformance" );
+        }
+        ImGui::SetItemTooltip( "%s", Tr(
+            "Runtime-only performance test switches. They are not saved to UserSettings.ini.",
+            u8"Laufzeit-Schalter zum Testen der Performance. Sie werden nicht in UserSettings.ini gespeichert." ) );
+        if ( ImGui::BeginPopup( "##AdvancedPerformance" ) ) {
+            ImGui::TextUnformatted( Tr( "Advanced performance tests", u8"Erweiterte Performance-Tests" ) );
+            ImGui::Separator();
+
+            ImGui::Checkbox( Tr( "Enable advanced performance options", u8"Erweiterte Performance-Optionen aktivieren" ),
+                &settings.AdvancedPerformanceOptions );
+            ImGui::SetItemTooltip( "%s", Tr(
+                "Master switch for all advanced performance options. When disabled, their individual settings are ignored.",
+                u8"Hauptschalter fuer alle erweiterten Performance-Optionen. Wenn deaktiviert, werden die einzelnen Einstellungen ignoriert." ) );
+            ImGui::Separator();
+
+            ImGui::BeginDisabled( !settings.AdvancedPerformanceOptions );
+            ImGui::TextUnformatted( Tr( "Shadow softness test override", u8"Testwert fuer Schattenweichheit" ) );
+            ImGui::SetNextItemWidth( -1.0f );
+            ImGui::SliderFloat( "##AdvancedShadowSoftness", &settings.AdvancedShadowSoftness, 0.0f, 100.0f, "%.2f" );
+            ImGui::SetItemTooltip( "%s", Tr(
+                "Runtime override for CSM and point-light shadow softness. Range: 0 to 100. No shader reload or INI entry.",
+                u8"Laufzeit-Override fuer CSM- und Punktlicht-Schattenweichheit. Bereich: 0 bis 100. Kein Shader-Reload und kein INI-Eintrag." ) );
+
+            ImGui::Separator();
+            ImGui::TextUnformatted( Tr( "World and visual test options", u8"Welt- und Darstellungstests" ) );
+
+            ImGui::Checkbox( Tr( "Water animation", u8"Wasseranimation" ), &settings.AdvancedWaterAnimation );
+            ImGui::SetItemTooltip( "%s", Tr(
+                "Enables animated ocean waves and water distortion. Runtime-only; no shader reload.",
+                u8"Aktiviert animierte Meereswellen und Wasserverzerrung. Nur Laufzeit; kein Shader-Reload." ) );
+
+            ImGui::Checkbox( Tr( "Procedural puddles", u8"Prozedurale Pfuetzen" ), &settings.AdvancedPuddles );
+            ImGui::SetItemTooltip( "%s", Tr(
+                "Enables procedural puddle accumulation and puddle reflections in the wet-ground pass.",
+                u8"Aktiviert prozedurale Pfuetzenbildung und Pfuetzenreflexionen im Wet-Ground-Pass." ) );
+
+            ImGui::Checkbox( Tr( "Wet-ground SSR", u8"Wet-Ground-SSR" ), &settings.AdvancedWetGroundSSR );
+            ImGui::SetItemTooltip( "%s", Tr(
+                "Runs screen-space reflections for wet ground during rain. Disabling it skips the whole pass.",
+                u8"Fuehrt bei Regen Screen-Space-Reflexionen fuer nassen Boden aus. Deaktivieren ueberspringt den gesamten Pass." ) );
+
+            ImGui::TextUnformatted( Tr( "Vegetation push range", u8"Reichweite der Vegetationsverdrangung" ) );
+            ImGui::SetNextItemWidth( -1.0f );
+            ImGui::SliderFloat( "##AdvancedVegetationPushRange", &settings.AdvancedVegetationPushRange,
+                1.0f, 250.0f, "%.0f" );
+            ImGui::SetItemTooltip( "%s", Tr(
+                "Controls the radius in which the player and nearby NPCs push grass and wheat. The existing Build 213 value is 50.",
+                u8"Steuert den Radius, in dem der Spieler und nahe NPCs Gras und Getreide verdraengen. Der bisherige Build-213-Wert ist 50." ) );
+
+            ImGui::Checkbox( Tr( "Night enhance", u8"Nacht verbessern" ), &settings.AdvancedNightEnhance );
+            ImGui::SetItemTooltip( "%s", Tr(
+                "Removes the night fog blend and distant night darkening. This changes the intended night atmosphere.",
+                u8"Entfernt den Nachtnebel und die entfernte Nachtdunkelung. Dies veraendert die beabsichtigte Nachtstimmung." ) );
+
+            ImGui::Checkbox( Tr( "City-window transparency", u8"Transparente Stadtfenster" ), &settings.AdvancedCityWindowTransparency );
+            ImGui::SetItemTooltip( "%s", Tr(
+                "Uses the special transparent city_windows rendering path. Disabling it keeps those windows opaque.",
+                u8"Nutzt den speziellen transparenten city_windows-Renderingpfad. Deaktivieren laesst diese Fenster undurchsichtig." ) );
+
+            const std::array<std::pair<const char*, int>, 4> xeGTAOQualityLevels = {{
+                { Tr( "Low", u8"Niedrig" ), 0 },
+                { Tr( "Medium", u8"Mittel" ), 1 },
+                { Tr( "High", u8"Hoch" ), 2 },
+                { Tr( "Ultra", u8"Ultra" ), 3 },
+            }};
+            ImGui::TextUnformatted( Tr( "XeGTAO quality", u8"XeGTAO-Qualitaet" ) );
+            ImGui::SetNextItemWidth( -1.0f );
+            ImGui::BeginDisabled( FeatureLevel10Compatibility );
+            if ( ImComboBoxC( "##AdvancedXeGTAOQuality", xeGTAOQualityLevels,
+                &settings.XegtaoSettings.QualityLevel, [] {} ) ) {
+                ImGui::EndCombo();
+            }
+            ImGui::EndDisabled();
+            ImGui::SetItemTooltip( "%s", Tr(
+                "Selects the precompiled XeGTAO compute quality. Higher levels use more samples; no shader reload.",
+                u8"Waehlt die vorcompilierte XeGTAO-Compute-Qualitaet. Hoehere Stufen verwenden mehr Samples; kein Shader-Reload." ) );
+
+            ImGui::Separator();
+            ImGui::TextUnformatted( Tr( "Shadow and world performance", u8"Schatten- und Welt-Performance" ) );
+
+            ImGui::Checkbox( Tr( "Threaded shadow culling", u8"Paralleles Schatten-Culling" ), &settings.ThreadedShadowCulling );
+            ImGui::SetItemTooltip( "%s", Tr(
+                "Collects CSM shadow casters on worker threads. Can reduce CPU time; no visual change is intended.",
+                u8"Sammelt CSM-Schattenwerfer parallel auf Worker-Threads. Kann CPU-Zeit sparen; keine Bildaenderung beabsichtigt." ) );
+
+            ImGui::Checkbox( Tr( "Lazy cascade updates", u8"Verzoegerte Cascade-Updates" ),
+                &settings.DebugSettings.ShadowCascades.LazyCascadeUpdate );
+            ImGui::SetItemTooltip( "%s", Tr(
+                "Updates distant shadow cascades less often. Camera movement still forces safe updates; minor temporal changes are possible.",
+                u8"Aktualisiert entfernte Schatten-Cascades seltener. Kamerabewegungen erzwingen weiterhin sichere Updates; kleine zeitliche Aenderungen sind moeglich." ) );
+
+            ImGui::Checkbox( Tr( "Deferred depth prepass", u8"Deferred-Depth-Prepass" ), &settings.DoZPrepass );
+            ImGui::SetItemTooltip( "%s", Tr(
+                "Adds a depth-only pass before the deferred G-buffer. It can reduce overdraw on some GPUs; test per system.",
+                u8"Fuegt vor dem Deferred-G-Buffer einen reinen Tiefenpass ein. Kann auf manchen GPUs Overdraw reduzieren; je System testen." ) );
+
+            ImGui::Checkbox( Tr( "World-section BVH", u8"BVH fuer Weltsektionen" ),
+                &settings.DebugSettings.FeatureSet.UseWorldSectionBVH );
+            ImGui::SetItemTooltip( "%s", Tr(
+                "Uses a bounding-volume hierarchy for world-section visibility. Can reduce CPU culling work; no visual change is intended.",
+                u8"Nutzt eine Bounding-Volume-Hierarchy fuer die Sichtbarkeit von Weltsektionen. Kann CPU-Culling reduzieren; keine Bildaenderung beabsichtigt." ) );
+
+            const std::array<std::pair<const char*, GothicRendererSettings::E_ShadowFrustumCulling>, 3> shadowFrustumCullingModes = {{
+                { Tr( "Disabled", u8"Deaktiviert" ), GothicRendererSettings::E_ShadowFrustumCulling::SHD_FRUSTUM_CULLING_DISABLED },
+                { Tr( "Conservative", u8"Konservativ" ), GothicRendererSettings::E_ShadowFrustumCulling::SHD_FRUSTUM_CULLING_CONSERVATIVE },
+                { Tr( "Aggressive", u8"Aggressiv" ), GothicRendererSettings::E_ShadowFrustumCulling::SHD_FRUSTUM_CULLING_AGGRESSIVE },
+            }};
+            ImGui::TextUnformatted( Tr( "Shadow frustum culling mode", u8"Shadow-Frustum-Culling-Modus" ) );
+            ImGui::SetNextItemWidth( -1.0f );
+            if ( ImComboBoxC( "##AdvancedShadowFrustumCulling", shadowFrustumCullingModes,
+                &settings.ShadowFrustumCullingMode, [] {} ) ) {
+                ImGui::EndCombo();
+            }
+            ImGui::SetItemTooltip( "%s", Tr(
+                "Skips shadow casters outside each cascade. Conservative is the safe default; Aggressive can omit marginal attachments.",
+                u8"Ueberspringt Schattenwerfer ausserhalb der jeweiligen Cascade. Konservativ ist der sichere Standard; Aggressiv kann Rand-Attachments auslassen." ) );
+
+            ImGui::Checkbox( Tr( "GPU VOB culling", u8"GPU-VOB-Culling" ), &settings.GpuVobCulling );
+            ImGui::SetItemTooltip( "%s", Tr(
+                "Moves per-VOB main-view frustum tests to the GPU. Recommended: On.",
+                u8"Verlagert die Frustum-Tests der VOBs im Hauptbild auf die GPU. Empfehlung: Ein." ) );
+
+            const bool gpuVobAvailable = settings.GpuVobCulling;
+            ImGui::BeginDisabled( !gpuVobAvailable );
+            ImGui::Checkbox( Tr( "Hi-Z occlusion culling", u8"Hi-Z-Occlusion-Culling" ), &settings.GpuVobHiZCulling );
+            ImGui::SetItemTooltip( "%s", Tr(
+                "Rejects VOBs hidden behind already-rendered world geometry. Recommended: On after visual validation.",
+                u8"Verwirft VOBs hinter bereits gerenderter Weltgeometrie. Empfehlung: Nach Sichtpruefung ein." ) );
+
+            ImGui::Checkbox( Tr( "GPU shadow culling", u8"GPU-Schatten-Culling" ), &settings.GpuVobShadowCulling );
+            ImGui::SetItemTooltip( "%s", Tr(
+                "Uses the GPU culler for CSM shadow caster lists. Rainshadowmap remains separate. Recommended: On.",
+                u8"Nutzt den GPU-Culler fuer CSM-Schattenwerferlisten. Die Rainshadowmap bleibt getrennt. Empfehlung: Ein." ) );
+
+            ImGui::Checkbox( Tr( "Static geometry arena", u8"Statische Geometrie-Arena" ), &settings.GpuVobGeometryArena );
+            ImGui::SetItemTooltip( "%s", Tr(
+                "Uses persistent shared static-VOB geometry for GPU-driven draws. Recommended: On.",
+                u8"Nutzt persistente gemeinsame VOB-Geometrie fuer GPU-gesteuerte Draws. Empfehlung: Ein." ) );
+            ImGui::EndDisabled();
+
+            const bool hardwareMdiAvailable = settings.DebugSettings.FeatureSet.UseMDI;
+            ImGui::BeginDisabled( !hardwareMdiAvailable );
+            ImGui::Checkbox( Tr( "Multi-draw indirect", u8"Multi-Draw-Indirect" ), &settings.GpuVobMdi );
+            ImGui::EndDisabled();
+            ImGui::SameLine();
+            ImGui::TextDisabled( "%s", hardwareMdiAvailable
+                ? Tr( "available", u8"verfuegbar" )
+                : Tr( "fallback", u8"Fallback" ) );
+            ImGui::EndDisabled();
+
+            ImGui::Separator();
+            ImGui::BeginDisabled( !settings.AdvancedPerformanceOptions );
+            if ( ImGui::Button( Tr( "Recommended defaults", u8"Empfohlene Defaults" ) ) ) {
+                settings.GpuVobCulling = true;
+                settings.GpuVobHiZCulling = true;
+                settings.GpuVobShadowCulling = true;
+                settings.GpuVobGeometryArena = true;
+                settings.GpuVobMdi = true;
+                settings.ThreadedShadowCulling = true;
+                settings.DebugSettings.ShadowCascades.LazyCascadeUpdate = true;
+                settings.DoZPrepass = true;
+                settings.DebugSettings.FeatureSet.UseWorldSectionBVH = true;
+                settings.ShadowFrustumCullingMode = GothicRendererSettings::E_ShadowFrustumCulling::SHD_FRUSTUM_CULLING_CONSERVATIVE;
+                settings.AdvancedWaterAnimation = true;
+                settings.AdvancedPuddles = true;
+                settings.AdvancedWetGroundSSR = true;
+                settings.AdvancedVegetationPushRange = 50.0f;
+                settings.AdvancedNightEnhance = true;
+                settings.AdvancedCityWindowTransparency = true;
+                settings.XegtaoSettings.QualityLevel = 2;
+            }
+            ImGui::EndDisabled();
+            ImGui::SameLine();
+            if ( ImGui::Button( Tr( "Close", u8"Schliessen" ) ) ) {
+                ImGui::CloseCurrentPopup();
+            }
+            ImGui::EndPopup();
+        }
         const std::string versionText = std::string( Tr( "D3D11 Version ", u8"D3D11-Version " ) ) + VERSION_NUMBER;
         const ImVec2 versionTextSize = ImGui::CalcTextSize( versionText.c_str() );
         ImGui::SameLine();
@@ -1459,15 +1640,6 @@ void ImGuiShim::RenderSettingsWindow()
             ImText( Tr( "Shadow Softness", u8"Schattenweichheit" ), buttonWidth ); ImGui::SameLine();
             SliderNormalizedUiStrength( "##ShadowSoftness", &settings.ShadowSoftness );
             ImGui::SetItemTooltip( "%s", Tr( "Makes shadow edges sharper or softer.", u8"Macht Schattenkanten h\u00E4rter oder weicher." ) );
-
-            ImText( Tr( "Shadow Caster Minimum", u8"Minimale Schattenwerfergr\u00F6\u00DFe" ), buttonWidth ); ImGui::SameLine();
-            settings.ShadowCasterMinTexels = std::clamp(
-                settings.ShadowCasterMinTexels, 0.0f, 16.0f );
-            ImGui::SliderFloat( "##ShadowCasterMinTexels",
-                &settings.ShadowCasterMinTexels, 0.0f, 16.0f, "%.1f" );
-            ImGui::SetItemTooltip( "%s", Tr(
-                "Skips small VOBs in shadow cascades when their bounding-box size is below this many cascade texels. Zero disables the filter.",
-                u8"Ignoriert kleine VOBs in den Schatten-Cascades, wenn ihre Bounding-Box kleiner als diese Anzahl Cascade-Texel ist. Null deaktiviert den Filter." ) );
 
             const bool ambientOcclusionAvailable = !FeatureLevel10Compatibility;
             bool ambientOcclusionEnabled = ambientOcclusionAvailable && settings.AoMode == AOMode::AO_XEGTAO;

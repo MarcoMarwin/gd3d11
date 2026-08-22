@@ -23,7 +23,8 @@ cbuffer WindParams : register(b1)
      float4 cameraWorldPosition;
      float4 interactionPositions[MAX_CHARACTER_INTERACTION_INFLUENCERS];
      float characterInteractionStrength;
-     float3 padding1;
+     float characterInteractionRange;
+     float2 padding1;
 };
 
 #ifndef WIND_META_SRV
@@ -189,7 +190,6 @@ float3 ApplyVegetationWind(
 #if SHD_INFLUENCE
 
 // HERO/NPC INTERACTION CONST
-static const float heroAffectRange = 50.0f;
 static const float heroAffectStrength = 38.0f;
 
 float3 CalculateSingleActorInfluence(
@@ -215,7 +215,8 @@ float3 CalculateSingleActorInfluence(
     float3 displaceDirWorld = lerp(float3(0.0f, 1.0f, 0.0f), normalize(toVertex), step(0.001f, length(toVertex)));
 
     float distanceXZ = length(toVertex.xz);
-    float distanceFactor = exp(-(distanceXZ * distanceXZ) / (1.8f * heroAffectRange * heroAffectRange));
+    float interactionRange = max(characterInteractionRange, 1.0f);
+    float distanceFactor = exp(-(distanceXZ * distanceXZ) / (1.8f * interactionRange * interactionRange));
 
     float influence = distanceFactor * vertexHeightNorm * heightMask;
 

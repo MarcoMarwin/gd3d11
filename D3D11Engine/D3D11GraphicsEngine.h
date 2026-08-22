@@ -548,6 +548,7 @@ private:
     bool PrepareGpuVobGeometryArena();
     bool PrepareGpuVobCulling();
     bool EnsureGpuVobHiZResources();
+    void LogGpuVobPerformanceStats();
     void RebuildWindowCutoutVolumeCache();
     unsigned int UpdateAndBindWindowCutouts( bool daylightPass = false );
     void UnbindWindowCutouts();
@@ -795,6 +796,32 @@ private:
     UINT GpuVobHiZMipCount = 0;
     bool GpuVobHiZBuildAttemptedThisFrame = false;
     bool GpuVobHiZBuiltThisFrame = false;
+
+    struct GpuVobPerformanceStats {
+        uint64_t Frames = 0;
+        uint64_t HiZRequests = 0;
+        uint64_t HiZBuilt = 0;
+        uint64_t MainCullAttempts = 0;
+        uint64_t MainCullActive = 0;
+        uint64_t MainCullFallback = 0;
+        uint64_t ShadowCullAttempts = 0;
+        uint64_t ShadowCullActive = 0;
+        uint64_t IndirectDrawCalls = 0;
+        uint64_t MdiBatches = 0;
+        uint64_t MdiCommands = 0;
+        uint64_t CpuFallbackDrawCalls = 0;
+        uint64_t CandidateInstances = 0;
+        uint64_t CandidateVisuals = 0;
+        uint64_t CandidateDrawItems = 0;
+        uint64_t FrameTimeSamples = 0;
+        double FrameTimeMsTotal = 0.0;
+        double FrameTimeMsMin = 0.0;
+        double FrameTimeMsMax = 0.0;
+
+        void Reset() {
+            *this = {};
+        }
+    } m_GpuVobPerformanceStats;
 
     /** FL11 packed structured buffers for skeletal skinning (main/z-prepass reusable path). */
     std::unique_ptr<D3D11VertexBuffer> SkeletalBoneTransformsBuffer;

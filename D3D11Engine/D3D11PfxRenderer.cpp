@@ -124,11 +124,12 @@ XRESULT D3D11PfxRenderer::RenderWetGroundSSR( ID3D11RenderTargetView* outputRTV,
     cb.WG_RainFogDensity = rendererSettings.RainFogDensity;
     cb.WG_FogRange = rendererSettings.FogRange;
     cb.WG_WetMaterialReflectionsStrength = 1.0f;
-    cb.WG_ProceduralPuddlesStrength = 1.0f;
-    cb.WG_PuddleReflectionsStrength = 1.0f;
+    const bool puddlesEnabled = rendererSettings.GetEffectivePuddles();
+    cb.WG_ProceduralPuddlesStrength = puddlesEnabled ? 1.0f : 0.0f;
+    cb.WG_PuddleReflectionsStrength = puddlesEnabled ? 1.0f : 0.0f;
     cb.WG_WetGroundRainImpactsStrength = 1.0f;
-    cb.WG_PuddleAccumulation = Engine::GAPI->GetPuddleAccumulation();
-    cb.WG_ReflectionsEnabled = rendererSettings.EnableSSR ? 1.0f : 0.0f;
+    cb.WG_PuddleAccumulation = puddlesEnabled ? Engine::GAPI->GetPuddleAccumulation() : 0.0f;
+    cb.WG_ReflectionsEnabled = (rendererSettings.EnableSSR && rendererSettings.GetEffectiveWetGroundSSR()) ? 1.0f : 0.0f;
     ps->GetBuffer( "WetGroundSSRConstantBuffer" ).Update( &cb ).Bind();
 
     if ( GSky* sky = Engine::GAPI->GetSky() )

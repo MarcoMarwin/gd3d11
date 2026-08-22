@@ -57,7 +57,8 @@ cbuffer Atmosphere : register( b1 )
 	float AC_EnableParticleLighting;
 	float AC_ParticleLightingStrength;
 	float AC_Pad3;
-	float AC_Pad4;
+	// 1 = normal night fog, 0 = suppress the night-fog blend.
+	float AC_NightFogEnabled;
 
 	float3 AC_Pad5;
 	float AC_Pad6;

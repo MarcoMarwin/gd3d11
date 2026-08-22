@@ -5394,7 +5394,8 @@ void GothicAPI::QueryWorldSectionBVH( const Frustum& frustum,
 }
 
 bool GothicAPI::UseWorldSectionBVH() const {
-    return RendererState.RendererSettings.DebugSettings.FeatureSet.UseWorldSectionBVH;
+    return RendererState.RendererSettings.AdvancedPerformanceOptions
+        && RendererState.RendererSettings.DebugSettings.FeatureSet.UseWorldSectionBVH;
 }
 
 /** Collects visible sections from the current camera perspective */
@@ -7310,12 +7311,13 @@ XRESULT GothicAPI::SaveMenuSettings( const std::string& file ) {
     WritePrivateProfileStringA( "Display", "WindStrength", std::to_string( s.GlobalWindStrength ).c_str(), ini.c_str() );
     WritePrivateProfileStringA( "Display", "HeroAffectsObjects", std::to_string( s.HeroAffectsObjects ? TRUE : FALSE ).c_str(), ini.c_str() );
     WritePrivateProfileStringA( "Shadows", "Quality", std::to_string( static_cast<int>(s.ShadowQuality) ).c_str(), ini.c_str() );
-    WritePrivateProfileStringA( "Shadows", "ShadowMapSize", std::to_string( s.ShadowMapSize ).c_str(), ini.c_str() );
     WritePrivateProfileStringA( "Shadows", "ShadowSoftness", std::to_string( s.ShadowSoftness ).c_str(), ini.c_str() );
-    WritePrivateProfileStringA( "Shadows", "CasterMinTexels",
-        float_to_string( s.ShadowCasterMinTexels, 2 ).c_str(), ini.c_str() );
-    WritePrivateProfileStringA( "Performance", "GpuVobCulling",
-        std::to_string( s.GpuVobCulling ? TRUE : FALSE ).c_str(), ini.c_str() );
+
+    // These are renderer-internal controls, not F11 settings. Remove keys
+    // written by older builds so UserSettings.ini remains menu-owned.
+    WritePrivateProfileStringA( "Shadows", "ShadowMapSize", nullptr, ini.c_str() );
+    WritePrivateProfileStringA( "Shadows", "CasterMinTexels", nullptr, ini.c_str() );
+    WritePrivateProfileStringA( "Performance", "GpuVobCulling", nullptr, ini.c_str() );
 
     WritePrivateProfileStringA( "General", "AntiAliasing", std::to_string( (int)s.AntiAliasingMode ).c_str(), ini.c_str() );
 
@@ -7432,20 +7434,10 @@ XRESULT GothicAPI::LoadMenuSettings( const std::string& file ) {
         s.ShadowFilterMode = FeatureLevel10Compatibility
             ? GothicRendererSettings::E_ShadowFilterMode::SHADOW_FILTER_SIMPLE
             : GothicRendererSettings::E_ShadowFilterMode::SHADOW_FILTER_PCSS;
-        s.ShadowMapSize = GetPrivateProfileIntA( "Shadows", "ShadowMapSize", ds.ShadowMapSize, ini.c_str() );
-        if ( s.ShadowMapSize <= 1024 ) s.ShadowMapSize = 1024;
-        else if ( s.ShadowMapSize <= 2048 ) s.ShadowMapSize = 2048;
-        else if ( s.ShadowMapSize <= 4096 ) s.ShadowMapSize = 4096;
-        else s.ShadowMapSize = 8192;
-        const int storedShadowQuality = GetPrivateProfileIntA(
-            "Shadows", "Quality", -1, ini.c_str() );
-        if ( storedShadowQuality >= static_cast<int>(GothicRendererSettings::E_ShadowQuality::SHADOW_QUALITY_OFF)
-            && storedShadowQuality <= static_cast<int>(GothicRendererSettings::E_ShadowQuality::SHADOW_QUALITY_EXTREME) ) {
-            s.ShadowQuality = static_cast<GothicRendererSettings::E_ShadowQuality>( storedShadowQuality );
-        } else {
-            // Older INIs only stored the world shadow-map resolution.
-            s.ShadowQuality = GothicRendererSettings::ShadowQualityFromShadowMapSize( s.ShadowMapSize );
-        }
+        s.ShadowQuality = static_cast<GothicRendererSettings::E_ShadowQuality>( std::clamp<int>(
+            GetPrivateProfileIntA( "Shadows", "Quality", static_cast<int>(ds.ShadowQuality), ini.c_str() ),
+            static_cast<int>(GothicRendererSettings::E_ShadowQuality::SHADOW_QUALITY_OFF),
+            static_cast<int>(GothicRendererSettings::E_ShadowQuality::SHADOW_QUALITY_EXTREME) ) );
         s.ApplyShadowQualitySettings();
         s.WorldShadowRangeScale = ds.WorldShadowRangeScale;
         s.NumShadowCascades = ds.NumShadowCascades;
@@ -7456,13 +7448,25 @@ XRESULT GothicAPI::LoadMenuSettings( const std::string& file ) {
         s.SmoothShadowFrequency = ds.SmoothShadowFrequency;
         s.ShadowStrength = ds.ShadowStrength;
         s.ShadowSoftness = std::clamp( GetPrivateProfileFloatA( "Shadows", "ShadowSoftness", ds.ShadowSoftness, ini ), 0.0f, 2.0f );
+        s.AdvancedShadowSoftness = s.ShadowSoftness;
         s.ShadowAOStrength = ds.ShadowAOStrength;
         s.WorldAOStrength = ds.WorldAOStrength;
-        s.ShadowCasterMinTexels = std::clamp(
-            GetPrivateProfileFloatA( "Shadows", "CasterMinTexels", ds.ShadowCasterMinTexels, ini ),
-            0.0f, 16.0f );
-        s.GpuVobCulling = GetPrivateProfileBoolA(
-            "Performance", "GpuVobCulling", ds.GpuVobCulling, ini );
+        s.ShadowCasterMinTexels = ds.ShadowCasterMinTexels;
+        s.GpuVobCulling = ds.GpuVobCulling;
+        s.GpuVobHiZCulling = ds.GpuVobHiZCulling;
+        s.GpuVobShadowCulling = ds.GpuVobShadowCulling;
+        s.GpuVobGeometryArena = ds.GpuVobGeometryArena;
+        s.GpuVobMdi = ds.GpuVobMdi;
+        s.ThreadedShadowCulling = ds.ThreadedShadowCulling;
+        s.DebugSettings.ShadowCascades.LazyCascadeUpdate = ds.DebugSettings.ShadowCascades.LazyCascadeUpdate;
+        s.DoZPrepass = ds.DoZPrepass;
+        s.AdvancedPerformanceOptions = ds.AdvancedPerformanceOptions;
+        s.AdvancedWaterAnimation = ds.AdvancedWaterAnimation;
+        s.AdvancedPuddles = ds.AdvancedPuddles;
+        s.AdvancedWetGroundSSR = ds.AdvancedWetGroundSSR;
+        s.AdvancedVegetationPushRange = ds.AdvancedVegetationPushRange;
+        s.AdvancedNightEnhance = ds.AdvancedNightEnhance;
+        s.AdvancedCityWindowTransparency = ds.AdvancedCityWindowTransparency;
 
         INT2 res = {};
         RECT desktopRect;
