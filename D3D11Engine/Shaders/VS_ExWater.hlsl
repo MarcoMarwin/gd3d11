@@ -12,6 +12,8 @@ cbuffer Matrices_PerFrame : register( b0 )
 cbuffer Matrices_PerInstances : register( b1 )
 {
 	float M_TotalTime;
+	float M_WaterWaveTime;
+	float2 M_WaterTimePadding;
 };
 
 //--------------------------------------------------------------------------------------
@@ -50,7 +52,7 @@ struct Wave
 
 float gerWave(inout Wave w, float2 d, float amplitude, float2 pos, float speed, float frequency)
 {
-    float x = dot(d, pos) * frequency + M_TotalTime * 0.001 * speed;
+    float x = dot(d, pos) * frequency + M_WaterWaveTime * 0.001 * speed;
     float a = amplitude;
 
     w.binormal += float3(

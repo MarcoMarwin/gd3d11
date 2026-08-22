@@ -539,6 +539,8 @@ public:
     /** Reflection */
     Microsoft::WRL::ComPtr<ID3D11ShaderResourceView> ReflectionCube;
 private:
+    struct FrameGeometryCache;
+
     XRESULT DrawAlphaMeshList( std::vector<AlphaMeshData>& alphaMeshes,
         bool windowGlassOnly );
     bool PrepareAndBindWindMetadata( const std::vector<MeshVisualInfo*>& activeVisuals );
@@ -548,7 +550,11 @@ private:
     bool PrepareGpuVobGeometryArena();
     bool PrepareGpuVobCulling();
     bool EnsureGpuVobHiZResources();
+    void PollGpuVobVisibleCountReadback( uint64_t settingsKey, uint64_t worldGeneration );
+    void ScheduleGpuVobVisibleCountReadback( const FrameGeometryCache& cache );
     void LogGpuVobPerformanceStats();
+    uint64_t BuildGpuVobPerformanceSettingsKey() const;
+    void AccumulateGpuVobFrameRenderStats();
     void RebuildWindowCutoutVolumeCache();
     unsigned int UpdateAndBindWindowCutouts( bool daylightPass = false );
     void UnbindWindowCutouts();
@@ -797,6 +803,24 @@ private:
     bool GpuVobHiZBuildAttemptedThisFrame = false;
     bool GpuVobHiZBuiltThisFrame = false;
 
+    struct GpuVobTriangleWeight {
+        UINT VisualIndex = 0;
+        UINT TrianglesPerInstance = 0;
+    };
+
+    struct GpuVobVisibleCountReadbackSlot {
+        std::unique_ptr<D3D11VertexBuffer> Buffer;
+        UINT Bytes = 0;
+        uint64_t SettingsKey = 0;
+        uint64_t WorldGeneration = static_cast<uint64_t>( -1 );
+        std::vector<UINT> CandidateInstanceCounts;
+        std::vector<GpuVobTriangleWeight> TriangleWeights;
+        bool Pending = false;
+    };
+
+    std::vector<GpuVobVisibleCountReadbackSlot> m_GpuVobVisibleCountReadbackSlots;
+    std::vector<GpuVobTriangleWeight> m_GpuVobCurrentTriangleWeights;
+
     struct GpuVobPerformanceStats {
         uint64_t Frames = 0;
         uint64_t HiZRequests = 0;
@@ -813,6 +837,27 @@ private:
         uint64_t CandidateInstances = 0;
         uint64_t CandidateVisuals = 0;
         uint64_t CandidateDrawItems = 0;
+        uint64_t GpuVisibleCountSamples = 0;
+        uint64_t GpuVisibleCandidateInstances = 0;
+        uint64_t GpuVisibleInstances = 0;
+        uint64_t GpuVisibleOccludedInstances = 0;
+        uint64_t GpuVisibleTriangles = 0;
+        uint64_t GpuCullInputCopyBytes = 0;
+        uint64_t GpuCullMetadataUploadBytes = 0;
+        uint64_t GpuCullArgsUploadBytes = 0;
+        uint64_t GpuCullDispatches = 0;
+        uint64_t HiZDispatches = 0;
+        double GpuCullPrepareMsTotal = 0.0;
+        double GpuCullPrepareMsMax = 0.0;
+        double HiZPrepareMsTotal = 0.0;
+        double HiZPrepareMsMax = 0.0;
+        uint64_t FpsSamples = 0;
+        double FpsTotal = 0.0;
+        uint64_t FrameTriangleSamples = 0;
+        uint64_t FrameTrianglesTotal = 0;
+        uint64_t FrameTrianglesMin = 0;
+        uint64_t FrameTrianglesMax = 0;
+        uint64_t FrameVobsTotal = 0;
         uint64_t FrameTimeSamples = 0;
         double FrameTimeMsTotal = 0.0;
         double FrameTimeMsMin = 0.0;
@@ -822,6 +867,11 @@ private:
             *this = {};
         }
     } m_GpuVobPerformanceStats;
+
+    uint64_t m_GpuVobPerformanceSettingsKey = 0;
+    uint64_t m_GpuVobPerformanceWorldGeneration = static_cast<uint64_t>( -1 );
+    uint64_t m_LastGpuVobFrameStatsAccumulated = 0;
+    bool m_GpuVobPerformanceSettingsInitialized = false;
 
     /** FL11 packed structured buffers for skeletal skinning (main/z-prepass reusable path). */
     std::unique_ptr<D3D11VertexBuffer> SkeletalBoneTransformsBuffer;

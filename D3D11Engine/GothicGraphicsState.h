@@ -665,11 +665,14 @@ struct GothicRendererSettings {
 
         textureMaxSize = 16384;
         ShadowQuality = E_ShadowQuality::SHADOW_QUALITY_MEDIUM;
-        GpuVobCulling = true;
-        GpuVobHiZCulling = true;
-        GpuVobShadowCulling = true;
-        GpuVobGeometryArena = true;
-        GpuVobMdi = true;
+        // GPU-driven VOB rendering is experimental on the DX11 path. Keep
+        // it opt-in until the measured indirect-draw and upload costs beat
+        // the established CPU path on the target hardware.
+        GpuVobCulling = false;
+        GpuVobHiZCulling = false;
+        GpuVobShadowCulling = false;
+        GpuVobGeometryArena = false;
+        GpuVobMdi = false;
         AdvancedPerformanceOptions = true;
         ShadowMapSize = 2048;
         PointlightShadowMapSize = 128;
@@ -849,7 +852,9 @@ struct GothicRendererSettings {
         // is intentionally disabled to preserve the existing appearance.
         ShadowCasterMinTexels = 0.0f;
         DebugSettings.FeatureSet.EnableDriverExtensions = true;
-        DebugSettings.FeatureSet.UseWorldSectionBVH = true;
+        // The existing BSP/SIMD leaf cache remains the safe baseline. The
+        // world-section BVH is an opt-in experiment, not general VOB culling.
+        DebugSettings.FeatureSet.UseWorldSectionBVH = false;
         DebugSettings.FeatureSet.UseScreenSpaceShadowMask = false;
     }
 
@@ -1255,7 +1260,10 @@ struct GothicRendererSettings {
     }
 
     bool GetEffectiveNightEnhance() const {
-        return AdvancedPerformanceOptions && AdvancedNightEnhance;
+        // The F11 switch is intentionally inverted: the unchecked state is
+        // the enhanced-night path, while the checked state keeps the normal
+        // night fog and distant darkening.
+        return AdvancedPerformanceOptions && !AdvancedNightEnhance;
     }
 
     bool GetEffectiveCityWindowTransparency() const {

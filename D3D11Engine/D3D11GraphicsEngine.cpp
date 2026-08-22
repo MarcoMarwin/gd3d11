@@ -37,6 +37,7 @@
 #include <locale>
 #include <codecvt>
 #include <cmath>
+#include <chrono>
 #include <functional>
 #include <limits>
 #include <wrl\client.h>
@@ -109,6 +110,16 @@ struct GpuVobPatchConstantsData {
     UINT Padding[3];
 };
 static_assert( sizeof( GpuVobPatchConstantsData ) == 16 );
+
+template <typename T>
+uint64_t HashGpuVobPerformanceSetting( uint64_t hash, const T& value ) {
+    const auto* bytes = reinterpret_cast<const unsigned char*>( &value );
+    for ( size_t index = 0; index < sizeof( value ); ++index ) {
+        hash ^= bytes[index];
+        hash *= 1099511628211ull;
+    }
+    return hash;
+}
 
 }
 
@@ -240,6 +251,14 @@ namespace
         XMFLOAT3 WM_Padding1;
     };
     static_assert( sizeof( WaterMaterialInfoConstantBuffer ) == 48 );
+
+    struct WaterAnimationTimeConstantBuffer {
+        float M_TotalTime;
+        float M_WaterWaveTime;
+        float M_Padding0;
+        float M_Padding1;
+    };
+    static_assert( sizeof( WaterAnimationTimeConstantBuffer ) == 16 );
 
 
 
@@ -883,6 +902,79 @@ bool D3D11GraphicsEngine::EnsureGpuVobHiZResources() {
     return true;
 }
 
+uint64_t D3D11GraphicsEngine::BuildGpuVobPerformanceSettingsKey() const {
+    const auto& settings = Engine::GAPI->GetRendererState().RendererSettings;
+    uint64_t key = 1469598103934665603ull;
+    const auto add = [&key]( const auto& value ) {
+        key = HashGpuVobPerformanceSetting( key, value );
+    };
+
+    // Advanced switches under test.
+    add( settings.AdvancedPerformanceOptions );
+    add( settings.ThreadedShadowCulling );
+    add( settings.DebugSettings.ShadowCascades.LazyCascadeUpdate );
+    add( settings.DoZPrepass );
+    add( settings.DebugSettings.FeatureSet.UseWorldSectionBVH );
+    add( settings.ShadowFrustumCullingMode );
+    add( settings.GpuVobCulling );
+    add( settings.GpuVobHiZCulling );
+    add( settings.GpuVobShadowCulling );
+    add( settings.GpuVobGeometryArena );
+    add( settings.GpuVobMdi );
+    add( settings.DebugSettings.FeatureSet.UseMDI );
+
+    // Basic render state that changes the amount of work and must not be
+    // mixed into the same comparison window.
+    add( settings.EnableShadows );
+    add( settings.ShadowQuality );
+    add( settings.ShadowMapSize );
+    add( settings.PointlightShadowMapSize );
+    add( settings.NumShadowCascades );
+    add( settings.ShadowFilterMode );
+    add( settings.ShadowCascadePCFLimit );
+    add( settings.MaxNumFaces );
+    add( settings.ResolutionScalePercent );
+    add( settings.AntiAliasingMode );
+    add( settings.Upscaler );
+
+    // Other Advanced-menu switches are included so changing any visible
+    // test option starts a fresh, unambiguous measurement window.
+    add( settings.AdvancedShadowSoftness );
+    add( settings.AdvancedWaterAnimation );
+    add( settings.AdvancedPuddles );
+    add( settings.AdvancedWetGroundSSR );
+    add( settings.AdvancedVegetationPushRange );
+    add( settings.AdvancedNightEnhance );
+    add( settings.AdvancedCityWindowTransparency );
+    add( settings.XegtaoSettings.QualityLevel );
+
+    return key;
+}
+
+void D3D11GraphicsEngine::AccumulateGpuVobFrameRenderStats() {
+    if ( m_GpuVobPerformanceStats.Frames == 0
+        || m_LastGpuVobFrameStatsAccumulated == m_GpuVobPerformanceStats.Frames ) {
+        return;
+    }
+
+    const auto& renderInfo = Engine::GAPI->GetRendererState().RendererInfo;
+    const uint64_t triangles = renderInfo.FrameDrawnTriangles > 0
+        ? static_cast<uint64_t>( renderInfo.FrameDrawnTriangles ) : 0ull;
+    const uint64_t vobs = renderInfo.FrameDrawnVobs > 0
+        ? static_cast<uint64_t>( renderInfo.FrameDrawnVobs ) : 0ull;
+
+    ++m_GpuVobPerformanceStats.FrameTriangleSamples;
+    m_GpuVobPerformanceStats.FrameTrianglesTotal += triangles;
+    if ( m_GpuVobPerformanceStats.FrameTriangleSamples == 1
+        || triangles < m_GpuVobPerformanceStats.FrameTrianglesMin ) {
+        m_GpuVobPerformanceStats.FrameTrianglesMin = triangles;
+    }
+    m_GpuVobPerformanceStats.FrameTrianglesMax = std::max(
+        m_GpuVobPerformanceStats.FrameTrianglesMax, triangles );
+    m_GpuVobPerformanceStats.FrameVobsTotal += vobs;
+    m_LastGpuVobFrameStatsAccumulated = m_GpuVobPerformanceStats.Frames;
+}
+
 void D3D11GraphicsEngine::LogGpuVobPerformanceStats() {
     const auto& settings = Engine::GAPI->GetRendererState().RendererSettings;
     const double averageFrameMs = m_GpuVobPerformanceStats.FrameTimeSamples > 0
@@ -890,14 +982,62 @@ void D3D11GraphicsEngine::LogGpuVobPerformanceStats() {
             / static_cast<double>( m_GpuVobPerformanceStats.FrameTimeSamples )
         : 0.0;
     const double averageFps = averageFrameMs > 0.0 ? 1000.0 / averageFrameMs : 0.0;
+    const double averageFpsCounter = m_GpuVobPerformanceStats.FpsSamples > 0
+        ? m_GpuVobPerformanceStats.FpsTotal
+            / static_cast<double>( m_GpuVobPerformanceStats.FpsSamples )
+        : 0.0;
+    const double averageTriangles = m_GpuVobPerformanceStats.FrameTriangleSamples > 0
+        ? static_cast<double>( m_GpuVobPerformanceStats.FrameTrianglesTotal )
+            / static_cast<double>( m_GpuVobPerformanceStats.FrameTriangleSamples )
+        : 0.0;
+    const double averageVobs = m_GpuVobPerformanceStats.FrameTriangleSamples > 0
+        ? static_cast<double>( m_GpuVobPerformanceStats.FrameVobsTotal )
+            / static_cast<double>( m_GpuVobPerformanceStats.FrameTriangleSamples )
+        : 0.0;
+    const double averageGpuVisibleInstances = m_GpuVobPerformanceStats.GpuVisibleCountSamples > 0
+        ? static_cast<double>( m_GpuVobPerformanceStats.GpuVisibleInstances )
+            / static_cast<double>( m_GpuVobPerformanceStats.GpuVisibleCountSamples )
+        : 0.0;
+    const double averageGpuCandidateInstances = m_GpuVobPerformanceStats.GpuVisibleCountSamples > 0
+        ? static_cast<double>( m_GpuVobPerformanceStats.GpuVisibleCandidateInstances )
+            / static_cast<double>( m_GpuVobPerformanceStats.GpuVisibleCountSamples )
+        : 0.0;
+    const double averageGpuOccludedInstances = m_GpuVobPerformanceStats.GpuVisibleCountSamples > 0
+        ? static_cast<double>( m_GpuVobPerformanceStats.GpuVisibleOccludedInstances )
+            / static_cast<double>( m_GpuVobPerformanceStats.GpuVisibleCountSamples )
+        : 0.0;
+    const double averageGpuVisibleTriangles = m_GpuVobPerformanceStats.GpuVisibleCountSamples > 0
+        ? static_cast<double>( m_GpuVobPerformanceStats.GpuVisibleTriangles )
+            / static_cast<double>( m_GpuVobPerformanceStats.GpuVisibleCountSamples )
+        : 0.0;
+    const double measurementFrames = std::max<double>(
+        1.0, static_cast<double>( m_GpuVobPerformanceStats.Frames ) );
+    const double gpuVisibleSamplePercent =
+        (static_cast<double>( m_GpuVobPerformanceStats.GpuVisibleCountSamples )
+            / measurementFrames) * 100.0;
     LogInfo() << "[GpuVobPerf] frames=" << m_GpuVobPerformanceStats.Frames
+        << " settingsKey=" << m_GpuVobPerformanceSettingsKey
+        << " worldGeneration=" << m_GpuVobPerformanceWorldGeneration
         << " frameMsAvg=" << averageFrameMs
         << " frameMsMin=" << m_GpuVobPerformanceStats.FrameTimeMsMin
         << " frameMsMax=" << m_GpuVobPerformanceStats.FrameTimeMsMax
         << " fpsAvg=" << averageFps
+        << " fpsCounterAvg=" << averageFpsCounter
+        << " trisAvg=" << averageTriangles
+        << " trisMin=" << m_GpuVobPerformanceStats.FrameTrianglesMin
+        << " trisMax=" << m_GpuVobPerformanceStats.FrameTrianglesMax
+        << " vobsAvg=" << averageVobs
+        << " gpuMainVisibleSamples=" << m_GpuVobPerformanceStats.GpuVisibleCountSamples
+        << " gpuMainCandidateInstancesAvg=" << averageGpuCandidateInstances
+        << " gpuMainVisibleInstancesAvg=" << averageGpuVisibleInstances
+        << " gpuMainOccludedInstancesAvg=" << averageGpuOccludedInstances
+        << " gpuMainVisibleTrianglesAvg=" << averageGpuVisibleTriangles
+        << " gpuMainVisibleSamplePct=" << gpuVisibleSamplePercent
+        << " gpuMainOcclusionRejectPct=" << (averageGpuCandidateInstances > 0.0
+            ? (averageGpuOccludedInstances / averageGpuCandidateInstances) * 100.0 : 0.0)
         << " advanced=" << (settings.AdvancedPerformanceOptions ? 1 : 0)
         << " shadowSoftness=" << settings.GetEffectiveShadowSoftness()
-        << " waterAnim=" << (settings.GetEffectiveWaterAnimation() ? 1 : 0)
+        << " waterWaves=" << (settings.GetEffectiveWaterAnimation() ? 1 : 0)
         << " puddles=" << (settings.GetEffectivePuddles() ? 1 : 0)
         << " wetGroundSSR=" << (settings.GetEffectiveWetGroundSSR() ? 1 : 0)
         << " vegetationPushRange=" << settings.GetEffectiveVegetationPushRange()
@@ -909,12 +1049,12 @@ void D3D11GraphicsEngine::LogGpuVobPerformanceStats() {
         << " depthPrepass=" << (settings.AdvancedPerformanceOptions && settings.DoZPrepass ? 1 : 0)
         << " sectionBvh=" << (settings.AdvancedPerformanceOptions && settings.DebugSettings.FeatureSet.UseWorldSectionBVH ? 1 : 0)
         << " shadowFrustum=" << static_cast<int>( settings.GetEffectiveShadowFrustumCullingMode() )
-        << " gpuVob=" << (settings.GpuVobCulling ? 1 : 0)
-        << " gpuHiZ=" << (settings.GpuVobHiZCulling ? 1 : 0)
-        << " gpuShadow=" << (settings.GpuVobShadowCulling ? 1 : 0)
-        << " arena=" << (settings.GpuVobGeometryArena ? 1 : 0)
-        << " vobMdi=" << (settings.GpuVobMdi ? 1 : 0)
-        << " useMDI=" << (settings.DebugSettings.FeatureSet.UseMDI ? 1 : 0)
+        << " gpuVob=" << (settings.AdvancedPerformanceOptions && settings.GpuVobCulling ? 1 : 0)
+        << " gpuHiZ=" << (settings.AdvancedPerformanceOptions && settings.GpuVobHiZCulling ? 1 : 0)
+        << " gpuShadow=" << (settings.AdvancedPerformanceOptions && settings.GpuVobShadowCulling ? 1 : 0)
+        << " arena=" << (settings.AdvancedPerformanceOptions && settings.GpuVobGeometryArena ? 1 : 0)
+        << " vobMdi=" << (settings.AdvancedPerformanceOptions && settings.GpuVobMdi ? 1 : 0)
+        << " useMDI=" << (settings.AdvancedPerformanceOptions && settings.DebugSettings.FeatureSet.UseMDI ? 1 : 0)
         << " hiz=" << m_GpuVobPerformanceStats.HiZBuilt
         << "/" << m_GpuVobPerformanceStats.HiZRequests
         << " mainCull=" << m_GpuVobPerformanceStats.MainCullActive
@@ -928,7 +1068,23 @@ void D3D11GraphicsEngine::LogGpuVobPerformanceStats() {
         << " cpuDrawCalls=" << m_GpuVobPerformanceStats.CpuFallbackDrawCalls
         << " candidateInstances=" << m_GpuVobPerformanceStats.CandidateInstances
         << " candidateVisuals=" << m_GpuVobPerformanceStats.CandidateVisuals
-        << " candidateDrawItems=" << m_GpuVobPerformanceStats.CandidateDrawItems;
+        << " candidateDrawItems=" << m_GpuVobPerformanceStats.CandidateDrawItems
+        << " cullInputMBPerFrame=" << (static_cast<double>( m_GpuVobPerformanceStats.GpuCullInputCopyBytes )
+            / measurementFrames / (1024.0 * 1024.0))
+        << " cullMetadataKBPerFrame=" << (static_cast<double>( m_GpuVobPerformanceStats.GpuCullMetadataUploadBytes )
+            / measurementFrames / 1024.0)
+        << " cullArgsKBPerFrame=" << (static_cast<double>( m_GpuVobPerformanceStats.GpuCullArgsUploadBytes )
+            / measurementFrames / 1024.0)
+        << " cullDispatchesPerFrame=" << (static_cast<double>( m_GpuVobPerformanceStats.GpuCullDispatches )
+            / measurementFrames)
+        << " hizDispatchesPerFrame=" << (static_cast<double>( m_GpuVobPerformanceStats.HiZDispatches )
+            / measurementFrames)
+        << " cullPrepareMsPerFrame=" << (m_GpuVobPerformanceStats.GpuCullPrepareMsTotal
+            / measurementFrames)
+        << " cullPrepareMsMax=" << m_GpuVobPerformanceStats.GpuCullPrepareMsMax
+        << " hizPrepareMsPerFrame=" << (m_GpuVobPerformanceStats.HiZPrepareMsTotal
+            / measurementFrames)
+        << " hizPrepareMsMax=" << m_GpuVobPerformanceStats.HiZPrepareMsMax;
 }
 
 void D3D11GraphicsEngine::BuildGpuVobHiZ() {
@@ -943,6 +1099,7 @@ void D3D11GraphicsEngine::BuildGpuVobHiZ() {
         || !settings.DebugSettings.Culling.CullVobs || !Context || !ShaderManager ) {
         return;
     }
+    const auto hizPrepareStart = std::chrono::steady_clock::now();
     GpuVobHiZBuildAttemptedThisFrame = true;
 
     const auto copyShader = ShaderManager->GetCShader( CShaderID::CS_VobHiZCopy );
@@ -984,6 +1141,12 @@ void D3D11GraphicsEngine::BuildGpuVobHiZ() {
     GetContext()->CSSetShader( nullptr, nullptr, 0 );
     GpuVobHiZBuiltThisFrame = true;
     ++m_GpuVobPerformanceStats.HiZBuilt;
+    m_GpuVobPerformanceStats.HiZDispatches += GpuVobHiZMipCount;
+    const double hizPrepareMs = std::chrono::duration<double, std::milli>(
+        std::chrono::steady_clock::now() - hizPrepareStart ).count();
+    m_GpuVobPerformanceStats.HiZPrepareMsTotal += hizPrepareMs;
+    m_GpuVobPerformanceStats.HiZPrepareMsMax = std::max(
+        m_GpuVobPerformanceStats.HiZPrepareMsMax, hizPrepareMs );
 }
 
 bool D3D11GraphicsEngine::PrepareGpuVobGeometryArena() {
@@ -1186,6 +1349,7 @@ bool D3D11GraphicsEngine::PrepareGpuVobCulling(
     if ( !cullShader || !patchShader ) {
         return false;
     }
+    const auto cullPrepareStart = std::chrono::steady_clock::now();
 
     std::vector<GpuVobCullVisualInfo> visualInfo( vobVisuals.size() );
     for ( size_t visualIndex = 0; visualIndex < vobVisuals.size(); ++visualIndex ) {
@@ -1367,6 +1531,11 @@ bool D3D11GraphicsEngine::PrepareGpuVobCulling(
         return false;
     }
 
+    m_GpuVobPerformanceStats.GpuCullInputCopyBytes += inputBytes;
+    m_GpuVobPerformanceStats.GpuCullMetadataUploadBytes +=
+        static_cast<uint64_t>( visualBytes ) + drawVisualBytes;
+    m_GpuVobPerformanceStats.GpuCullArgsUploadBytes += argsBytes;
+
     ID3D11ShaderResourceView* cullSrvs[3] = {
         cullInputBuffer->GetShaderResourceView().Get(),
         cullVisualBuffer->GetShaderResourceView().Get(),
@@ -1411,6 +1580,7 @@ bool D3D11GraphicsEngine::PrepareGpuVobCulling(
     GetContext()->CSSetUnorderedAccessViews( 0, 2, cullUavs, nullptr );
     cullShader->Apply();
     GetContext()->Dispatch( static_cast<UINT>( visualInfo.size() ), 1, 1 );
+    ++m_GpuVobPerformanceStats.GpuCullDispatches;
 
     GetContext()->CSSetUnorderedAccessViews( 0, 2, nullUavs, nullptr );
     GetContext()->CSSetShaderResources( 0, 3, nullSrvs );
@@ -1437,11 +1607,17 @@ bool D3D11GraphicsEngine::PrepareGpuVobCulling(
     patchShader->Apply();
     GetContext()->Dispatch(
         (static_cast<UINT>( drawVisualIndices.size() ) + 63u) / 64u, 1, 1 );
+    ++m_GpuVobPerformanceStats.GpuCullDispatches;
 
     clearComputeBindings();
 
     outputInstanceBuffer = cullOutputBuffer.get();
     outputArgsBuffer = cullArgsBuffer.get();
+    const double cullPrepareMs = std::chrono::duration<double, std::milli>(
+        std::chrono::steady_clock::now() - cullPrepareStart ).count();
+    m_GpuVobPerformanceStats.GpuCullPrepareMsTotal += cullPrepareMs;
+    m_GpuVobPerformanceStats.GpuCullPrepareMsMax = std::max(
+        m_GpuVobPerformanceStats.GpuCullPrepareMsMax, cullPrepareMs );
     return true;
 }
 
@@ -1473,6 +1649,135 @@ bool D3D11GraphicsEngine::PrepareGpuVobCulling() {
         GpuVobHiZBuiltThisFrame,
         cache.MainVobGpuInstanceBuffer,
         cache.MainVobGpuIndirectArgsBuffer );
+}
+
+void D3D11GraphicsEngine::PollGpuVobVisibleCountReadback(
+    uint64_t settingsKey, uint64_t worldGeneration ) {
+    for ( auto& slot : m_GpuVobVisibleCountReadbackSlots ) {
+        if ( !slot.Pending || !slot.Buffer || !slot.Buffer->GetVertexBuffer() ) {
+            continue;
+        }
+
+        if ( slot.SettingsKey != settingsKey || slot.WorldGeneration != worldGeneration ) {
+            // The copy belongs to a different measurement configuration. It
+            // is safe to discard it; any new copy is queued after this one on
+            // the same immediate context.
+            slot.Pending = false;
+            slot.CandidateInstanceCounts.clear();
+            slot.TriangleWeights.clear();
+            continue;
+        }
+
+        D3D11_MAPPED_SUBRESOURCE mapped = {};
+        const HRESULT mapResult = GetContext()->Map( slot.Buffer->GetVertexBuffer().Get(),
+            0, D3D11_MAP_READ, D3D11_MAP_FLAG_DO_NOT_WAIT, &mapped );
+        if ( mapResult == DXGI_ERROR_WAS_STILL_DRAWING ) {
+            continue;
+        }
+        if ( FAILED( mapResult ) ) {
+            slot.Pending = false;
+            slot.CandidateInstanceCounts.clear();
+            slot.TriangleWeights.clear();
+            continue;
+        }
+
+        const auto* visibleCounts = reinterpret_cast<const UINT*>( mapped.pData );
+        const size_t visibleCountCount = std::min<size_t>(
+            slot.CandidateInstanceCounts.size(), slot.Bytes / sizeof( UINT ) );
+        uint64_t candidateInstances = 0;
+        uint64_t visibleInstances = 0;
+        for ( size_t visualIndex = 0; visualIndex < visibleCountCount; ++visualIndex ) {
+            candidateInstances += slot.CandidateInstanceCounts[visualIndex];
+            visibleInstances += visibleCounts[visualIndex];
+        }
+
+        uint64_t visibleTriangles = 0;
+        for ( const auto& weight : slot.TriangleWeights ) {
+            if ( weight.VisualIndex < visibleCountCount ) {
+                visibleTriangles += static_cast<uint64_t>( visibleCounts[weight.VisualIndex] )
+                    * weight.TrianglesPerInstance;
+            }
+        }
+
+        GetContext()->Unmap( slot.Buffer->GetVertexBuffer().Get(), 0 );
+        slot.Pending = false;
+        slot.CandidateInstanceCounts.clear();
+        slot.TriangleWeights.clear();
+
+        ++m_GpuVobPerformanceStats.GpuVisibleCountSamples;
+        m_GpuVobPerformanceStats.GpuVisibleCandidateInstances += candidateInstances;
+        m_GpuVobPerformanceStats.GpuVisibleInstances += visibleInstances;
+        m_GpuVobPerformanceStats.GpuVisibleOccludedInstances +=
+            candidateInstances > visibleInstances ? candidateInstances - visibleInstances : 0;
+        m_GpuVobPerformanceStats.GpuVisibleTriangles += visibleTriangles;
+    }
+}
+
+void D3D11GraphicsEngine::ScheduleGpuVobVisibleCountReadback(
+    const FrameGeometryCache& cache ) {
+    // The counter is diagnostic telemetry only. Sampling every eighth frame
+    // keeps the CopyResource/readback path from becoming part of the FPS A/B
+    // result while still providing enough samples for a 120-frame window.
+    constexpr uint64_t ReadbackInterval = 8;
+    if ( m_GpuVobPerformanceStats.Frames == 0
+        || (m_GpuVobPerformanceStats.Frames % ReadbackInterval) != 0 ) {
+        m_GpuVobCurrentTriangleWeights.clear();
+        return;
+    }
+
+    if ( !cache.vobGpuCullingActive || !GpuVobCullVisibleCountsBuffer
+        || !GpuVobCullVisibleCountsBuffer->GetIndirectBuffer()
+        || m_GpuVobCurrentTriangleWeights.empty() ) {
+        m_GpuVobCurrentTriangleWeights.clear();
+        return;
+    }
+
+    if ( m_GpuVobVisibleCountReadbackSlots.empty() ) {
+        // Three slots keep the telemetry asynchronous without forcing the
+        // render thread to wait for the GPU merely to read a counter buffer.
+        m_GpuVobVisibleCountReadbackSlots.resize( 3 );
+    }
+
+    GpuVobVisibleCountReadbackSlot* freeSlot = nullptr;
+    for ( auto& slot : m_GpuVobVisibleCountReadbackSlots ) {
+        if ( !slot.Pending ) {
+            freeSlot = &slot;
+            break;
+        }
+    }
+    if ( !freeSlot ) {
+        m_GpuVobCurrentTriangleWeights.clear();
+        return;
+    }
+
+    const UINT requiredBytes = std::max<UINT>(
+        4u, GpuVobCullVisibleCountsBuffer->GetSizeInBytes() );
+    if ( !freeSlot->Buffer || freeSlot->Bytes < requiredBytes ) {
+        auto readback = std::make_unique<D3D11VertexBuffer>();
+        if ( readback->Init( nullptr, requiredBytes,
+            static_cast<D3D11VertexBuffer::EBindFlags>( 0 ),
+            D3D11VertexBuffer::U_STAGING,
+            D3D11VertexBuffer::CA_READ,
+            "GpuVobCullVisibleCountsReadback" ) != XR_SUCCESS ) {
+            m_GpuVobCurrentTriangleWeights.clear();
+            return;
+        }
+        freeSlot->Buffer = std::move( readback );
+        freeSlot->Bytes = requiredBytes;
+    }
+
+    GetContext()->CopyResource( freeSlot->Buffer->GetVertexBuffer().Get(),
+        GpuVobCullVisibleCountsBuffer->GetIndirectBuffer().Get() );
+    freeSlot->SettingsKey = m_GpuVobPerformanceSettingsKey;
+    freeSlot->WorldGeneration = m_GpuVobPerformanceWorldGeneration;
+    freeSlot->CandidateInstanceCounts.clear();
+    freeSlot->CandidateInstanceCounts.reserve( cache.vobVisuals.size() );
+    for ( const auto& visual : cache.vobVisuals ) {
+        freeSlot->CandidateInstanceCounts.push_back(
+            static_cast<UINT>( visual.Instances.size() ) );
+    }
+    freeSlot->TriangleWeights = std::move( m_GpuVobCurrentTriangleWeights );
+    freeSlot->Pending = true;
 }
 
 void D3D11GraphicsEngine::RebuildWindowCutoutVolumeCache() {
@@ -2931,9 +3236,15 @@ D3D11IndirectBuffer* D3D11GraphicsEngine::AcquireFrameIndirectBuffer( FrameIndir
         buffer = std::make_unique<D3D11IndirectBuffer>();
     }
 
-    const bool needsRecreate = buffer->GetSizeInBytes() < sizeInBytes;
+    const UINT currentCapacity = buffer->GetSizeInBytes();
+    const UINT growthStep = std::max( 4096u, currentCapacity / 2u );
+    const UINT grownCapacity = currentCapacity > (std::numeric_limits<UINT>::max)() - growthStep
+        ? sizeInBytes
+        : currentCapacity + growthStep;
+    const UINT allocationSize = std::max( sizeInBytes, grownCapacity );
+    const bool needsRecreate = currentCapacity < sizeInBytes;
     if ( needsRecreate ) {
-        if ( buffer->Init( nullptr, sizeInBytes,
+        if ( buffer->Init( nullptr, allocationSize,
             D3D11IndirectBuffer::B_INDEXBUFFER,
             D3D11IndirectBuffer::U_DEFAULT,
             D3D11IndirectBuffer::CA_NONE,
@@ -2973,8 +3284,14 @@ D3D11VertexBuffer* D3D11GraphicsEngine::AcquireFrameInstancingBuffer( FrameInsta
         buffer = std::make_unique<D3D11VertexBuffer>();
     }
 
-    if ( buffer->GetSizeInBytes() < sizeInBytes ) {
-        if ( buffer->Init( nullptr, sizeInBytes,
+    const UINT currentCapacity = buffer->GetSizeInBytes();
+    const UINT growthStep = std::max( 4096u, currentCapacity / 2u );
+    const UINT grownCapacity = currentCapacity > (std::numeric_limits<UINT>::max)() - growthStep
+        ? sizeInBytes
+        : currentCapacity + growthStep;
+    const UINT allocationSize = std::max( sizeInBytes, grownCapacity );
+    if ( currentCapacity < sizeInBytes ) {
+        if ( buffer->Init( nullptr, allocationSize,
             D3D11VertexBuffer::B_VERTEXBUFFER,
             D3D11VertexBuffer::U_DYNAMIC,
             D3D11VertexBuffer::CA_WRITE,
@@ -3121,6 +3438,7 @@ XRESULT D3D11GraphicsEngine::OnEndFrame() {
     RenderedVobs.clear();
     GetPfxRenderer()->OnEndFrame();
     ResetFrameTransientBufferPools();
+    AccumulateGpuVobFrameRenderStats();
     Engine::GAPI->ResetVobFrameStats();
     PerObjectMaterialInfoPooledBuffer->EndFrame();
     FrameMarkEnd( beginFrameEventName );
@@ -5556,12 +5874,41 @@ XRESULT D3D11GraphicsEngine::OnStartWorldRendering() {
     m_FrameNeedsJitter = false;
 
     auto& rendererState = Engine::GAPI->GetRendererState();
+    const uint64_t performanceSettingsKey = BuildGpuVobPerformanceSettingsKey();
+    const uint64_t worldGeneration = Engine::GAPI->GetCityWindowConfigurationGeneration();
+    PollGpuVobVisibleCountReadback( performanceSettingsKey, worldGeneration );
+
+    if ( !m_GpuVobPerformanceSettingsInitialized ) {
+        m_GpuVobPerformanceSettingsInitialized = true;
+        m_GpuVobPerformanceSettingsKey = performanceSettingsKey;
+        m_GpuVobPerformanceWorldGeneration = worldGeneration;
+    } else if ( performanceSettingsKey != m_GpuVobPerformanceSettingsKey
+        || worldGeneration != m_GpuVobPerformanceWorldGeneration ) {
+        // A 120-frame result is only useful when all frames used the same
+        // render configuration and world-generation snapshot. Discard the
+        // incomplete window as soon as either changes.
+        if ( m_GpuVobPerformanceStats.Frames > 0 ) {
+            LogInfo() << "[GpuVobPerf] discarded incomplete measurement window"
+                << " reason=" << (performanceSettingsKey != m_GpuVobPerformanceSettingsKey
+                    ? "settings" : "world")
+                << " frames=" << m_GpuVobPerformanceStats.Frames;
+        }
+        m_GpuVobPerformanceStats.Reset();
+        m_LastGpuVobFrameStatsAccumulated = 0;
+        m_GpuVobPerformanceSettingsKey = performanceSettingsKey;
+        m_GpuVobPerformanceWorldGeneration = worldGeneration;
+    }
 
     if ( m_GpuVobPerformanceStats.Frames >= 120 ) {
         LogGpuVobPerformanceStats();
         m_GpuVobPerformanceStats.Reset();
+        m_LastGpuVobFrameStatsAccumulated = 0;
     }
     ++m_GpuVobPerformanceStats.Frames;
+    if ( rendererState.RendererInfo.FPS > 0 ) {
+        ++m_GpuVobPerformanceStats.FpsSamples;
+        m_GpuVobPerformanceStats.FpsTotal += rendererState.RendererInfo.FPS;
+    }
     const double frameTimeMs = static_cast<double>( Engine::GAPI->GetFrameTimeSec() ) * 1000.0;
     if ( frameTimeMs > 0.0 && frameTimeMs < 10000.0 ) {
         ++m_GpuVobPerformanceStats.FrameTimeSamples;
@@ -7318,9 +7665,16 @@ void D3D11GraphicsEngine::DrawWaterSurfaces(
     SetupVS_ExConstantBuffer();
 
     const auto& rendererSettings = Engine::GAPI->GetRendererState().RendererSettings;
-    float totalTime = rendererSettings.GetEffectiveWaterAnimation()
-        ? Engine::GAPI->GetTotalTime() : 0.0f;
-    ActiveVS->GetBuffer( "Matrices_PerInstances" ).Update( &totalTime, 4 ).Bind();
+    const float totalTime = Engine::GAPI->GetTotalTime();
+    WaterAnimationTimeConstantBuffer waterTimes = {};
+    // M_TotalTime keeps the existing UV animation alive. Only the vertex-wave
+    // clock is gated by the Advanced F11 option.
+    waterTimes.M_TotalTime = totalTime;
+    waterTimes.M_WaterWaveTime = rendererSettings.GetEffectiveWaterAnimation()
+        ? totalTime : 0.0f;
+    ActiveVS->GetBuffer( "Matrices_PerInstances" )
+        .Update( &waterTimes, sizeof( waterTimes ) )
+        .Bind();
 
     ID3D11RenderTargetView* waterTargets[3] = {
         HDRBackBuffer->GetRenderTargetView().Get(), waterMaskRTV, fsr3ReactiveMaskRTV
@@ -7481,8 +7835,7 @@ void D3D11GraphicsEngine::DrawWaterSurfaces(
         RefractionInfoConstantBuffer ricb = {};
         ricb.RI_Projection = Engine::GAPI->GetProjectionMatrix();
         ricb.RI_ViewportSize = float2( Resolution.x, Resolution.y );
-        ricb.RI_Time = rendererSettings.GetEffectiveWaterAnimation()
-            ? Engine::GAPI->GetTimeSeconds() : 0.0f;
+        ricb.RI_Time = Engine::GAPI->GetTimeSeconds();
         ricb.RI_CameraPosition = float3( Engine::GAPI->GetCameraPosition() );
         UpdateRefractionViewProjection( ricb );
 
@@ -9470,6 +9823,11 @@ XRESULT D3D11GraphicsEngine::DrawVOBsInstanced() {
         auto DIST_DistanceSlot = ActivePS->GetInputIndex( "DIST_Distance" );
 
         bool isZPrepass = RenderingStage == D3D11ENGINE_RENDER_STAGE::DES_Z_PRE_PASS;
+        if ( !isZPrepass ) {
+            m_GpuVobCurrentTriangleWeights.clear();
+            m_GpuVobCurrentTriangleWeights.reserve(
+                m_FrameGeometryCache.sortedInstancedMeshes.size() );
+        }
 
         if ( !isZPrepass ) {
             m_AlphaMeshes.clear();
@@ -9995,12 +10353,26 @@ XRESULT D3D11GraphicsEngine::DrawVOBsInstanced() {
                         }
                     }
 
-                    // The GPU path keeps the existing per-material state setup,
-                    // but lets the compute shader decide InstanceCount and
-                    // StartInstanceLocation for this mesh's indirect command.
+                        // The GPU path keeps the existing per-material state setup,
+                        // but lets the compute shader decide InstanceCount and
+                        // StartInstanceLocation for this mesh's indirect command.
                     if ( cache.vobGpuCullingActive
                         && cache.MainVobGpuInstanceBuffer
                         && cache.MainVobGpuIndirectArgsBuffer ) {
+                        UINT submittedTrianglesPerInstance = 0;
+                        for ( size_t batchIndex = 0; batchIndex < mdiDrawCount; ++batchIndex ) {
+                            const auto& submittedItem = cache.sortedInstancedMeshes[
+                                drawIndex + batchIndex];
+                            const UINT submittedIndices = renderSettings.MaxNumFaces > 0
+                                ? std::min<UINT>(
+                                    static_cast<UINT>( submittedItem.MeshEntry->Indices.size() ),
+                                    static_cast<UINT>( renderSettings.MaxNumFaces ) * 3u )
+                                : static_cast<UINT>( submittedItem.MeshEntry->Indices.size() );
+                            submittedTrianglesPerInstance += submittedIndices / 3;
+                            m_GpuVobCurrentTriangleWeights.push_back({
+                                submittedItem.VisualIndex, submittedIndices / 3 });
+                        }
+
                         ++m_GpuVobPerformanceStats.IndirectDrawCalls;
                         UINT offsets[2] = { 0, 0 };
                         UINT strides[2] = {
@@ -10040,15 +10412,8 @@ XRESULT D3D11GraphicsEngine::DrawVOBsInstanced() {
                                     * sizeof( D3D11_DRAW_INDEXED_INSTANCED_INDIRECT_ARGS ) ) );
                         }
 
-                        // Keep the existing diagnostics approximate without a
-                        // GPU readback, which would serialize the frame.
-                        const UINT maxDrawIndices = renderSettings.MaxNumFaces > 0
-                            ? std::min<UINT>(
-                                static_cast<UINT>( meshInfo->Indices.size() ),
-                                static_cast<UINT>( renderSettings.MaxNumFaces ) * 3u )
-                            : static_cast<UINT>( meshInfo->Indices.size() );
                         Engine::GAPI->GetRendererState().RendererInfo.FrameDrawnTriangles +=
-                            (maxDrawIndices / 3) * cachedVisual->Instances.size();
+                            submittedTrianglesPerInstance * cachedVisual->Instances.size();
                         Engine::GAPI->GetRendererState().RendererInfo.FrameDrawnVobs++;
                     } else {
                         ++m_GpuVobPerformanceStats.CpuFallbackDrawCalls;
@@ -10077,6 +10442,9 @@ XRESULT D3D11GraphicsEngine::DrawVOBsInstanced() {
             }
             if ( useWindMetadata ) {
                 UnbindWindMetadata();
+            }
+            if ( !isZPrepass ) {
+                ScheduleGpuVobVisibleCountReadback( cache );
             }
         }
 
@@ -11601,8 +11969,7 @@ void D3D11GraphicsEngine::DrawUnderwaterEffects() {
     RefractionInfoConstantBuffer ricb = {};
     ricb.RI_Projection = Engine::GAPI->GetProjectionMatrix();
     ricb.RI_ViewportSize = float2( Resolution.x, Resolution.y );
-    ricb.RI_Time = Engine::GAPI->GetRendererState().RendererSettings.GetEffectiveWaterAnimation()
-        ? Engine::GAPI->GetTimeSeconds() : 0.0f;
+    ricb.RI_Time = Engine::GAPI->GetTimeSeconds();
     ricb.RI_CameraPosition = Engine::GAPI->GetCameraPosition();
 
     // Set up water final copy

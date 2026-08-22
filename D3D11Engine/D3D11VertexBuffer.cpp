@@ -118,21 +118,25 @@ XRESULT D3D11VertexBuffer::Init( void* initData, unsigned int sizeInBytes, EBind
         bufferDesc.MiscFlags |= D3D11_RESOURCE_MISC_BUFFER_ALLOW_RAW_VIEWS;
     }
 
-    // Allocate a minimal buffer when no initial data is provided.
+    // Allocate a minimal buffer when no initial data is provided. Staging
+    // readback resources do not need initialization data and are created
+    // without a SUBRESOURCE_DATA block.
     char* data = nullptr;
-    if ( !initData ) {
+    if ( !initData && usage != EUsageFlags::U_STAGING ) {
         data = new char[bufferDesc.ByteWidth];
         memset( data, 0, bufferDesc.ByteWidth );
 
         initData = data;
     }
 
-    D3D11_SUBRESOURCE_DATA InitData;
-    InitData.pSysMem = initData;
-    InitData.SysMemPitch = 0;
-    InitData.SysMemSlicePitch = 0;
+    D3D11_SUBRESOURCE_DATA InitData = {};
+    D3D11_SUBRESOURCE_DATA* initDataPtr = nullptr;
+    if ( initData ) {
+        InitData.pSysMem = initData;
+        initDataPtr = &InitData;
+    }
 
-    LE( engine->GetDevice()->CreateBuffer( &bufferDesc, &InitData, VertexBuffer.ReleaseAndGetAddressOf() ) );
+    LE( engine->GetDevice()->CreateBuffer( &bufferDesc, initDataPtr, VertexBuffer.ReleaseAndGetAddressOf() ) );
     if ( FAILED( hr ) || !VertexBuffer.Get() ) {
         delete[] data;
         SizeInBytes = 0;
@@ -248,7 +252,8 @@ XRESULT D3D11VertexBuffer::Map( int flags, void** dataPtr, UINT* size ) {
     }
 
     D3D11_MAPPED_SUBRESOURCE res;
-    if ( FAILED( engine->GetContext()->Map( VertexBuffer.Get(), 0, static_cast<D3D11_MAP>(flags), 0, &res ) ) ) {
+    if ( FAILED( engine->GetContext()->Map( VertexBuffer.Get(), 0,
+        static_cast<D3D11_MAP>(flags), 0, &res ) ) ) {
         return XR_FAILED;
     }
 

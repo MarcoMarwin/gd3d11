@@ -1194,7 +1194,7 @@ void ImGuiShim::RenderSettingsWindow()
         ImGui::SetItemTooltip( "%s", Tr( "Selects the language used by the D3D11 renderer.", u8"W\u00E4hlt die Sprache des D3D11-Renderers aus." ) );
         ImGui::PopItemWidth();
         ImGui::SameLine();
-        if ( ImGui::Button( Tr( "Advanced...", u8"Erweitert ..." ) ) ) {
+        if ( ImGui::Button( Tr( "Advanced ...", u8"Erweitert ..." ) ) ) {
             ImGui::OpenPopup( "##AdvancedPerformance" );
         }
         ImGui::SetItemTooltip( "%s", Tr(
@@ -1222,10 +1222,10 @@ void ImGuiShim::RenderSettingsWindow()
             ImGui::Separator();
             ImGui::TextUnformatted( Tr( "World and visual test options", u8"Welt- und Darstellungstests" ) );
 
-            ImGui::Checkbox( Tr( "Water animation", u8"Wasseranimation" ), &settings.AdvancedWaterAnimation );
+            ImGui::Checkbox( Tr( "Animate water", u8"Wasser animieren" ), &settings.AdvancedWaterAnimation );
             ImGui::SetItemTooltip( "%s", Tr(
-                "Enables animated ocean waves and water distortion. Runtime-only; no shader reload.",
-                u8"Aktiviert animierte Meereswellen und Wasserverzerrung. Nur Laufzeit; kein Shader-Reload." ) );
+                "Controls vertex wave movement for ocean water only. Rain ripples, puddles, wet-ground reflections, and water distortion remain animated. Runtime-only; no shader reload.",
+                u8"Steuert nur die Vertex-Wellenbewegung des Meereswassers. Regentröpfchen, Pfützen, Wet-Ground-Reflexionen und Wasserverzerrung bleiben animiert. Nur Laufzeit; kein Shader-Reload." ) );
 
             ImGui::Checkbox( Tr( "Procedural puddles", u8"Prozedurale Pfuetzen" ), &settings.AdvancedPuddles );
             ImGui::SetItemTooltip( "%s", Tr(
@@ -1247,8 +1247,8 @@ void ImGuiShim::RenderSettingsWindow()
 
             ImGui::Checkbox( Tr( "Night enhance", u8"Nacht verbessern" ), &settings.AdvancedNightEnhance );
             ImGui::SetItemTooltip( "%s", Tr(
-                "Removes the night fog blend and distant night darkening. This changes the intended night atmosphere.",
-                u8"Entfernt den Nachtnebel und die entfernte Nachtdunkelung. Dies veraendert die beabsichtigte Nachtstimmung." ) );
+                "When disabled, removes the night fog blend and distant night darkening. When enabled, the original night atmosphere is retained.",
+                u8"Wenn deaktiviert, werden Nachtnebel und entfernte Nachtdunkelung entfernt. Wenn aktiviert, bleibt die originale Nachtstimmung erhalten." ) );
 
             ImGui::Checkbox( Tr( "City-window transparency", u8"Transparente Stadtfenster" ), &settings.AdvancedCityWindowTransparency );
             ImGui::SetItemTooltip( "%s", Tr(
@@ -1295,8 +1295,8 @@ void ImGuiShim::RenderSettingsWindow()
             ImGui::Checkbox( Tr( "World-section BVH", u8"BVH fuer Weltsektionen" ),
                 &settings.DebugSettings.FeatureSet.UseWorldSectionBVH );
             ImGui::SetItemTooltip( "%s", Tr(
-                "Uses a bounding-volume hierarchy for world-section visibility. Can reduce CPU culling work; no visual change is intended.",
-                u8"Nutzt eine Bounding-Volume-Hierarchy fuer die Sichtbarkeit von Weltsektionen. Kann CPU-Culling reduzieren; keine Bildaenderung beabsichtigt." ) );
+                "Experimental: accelerates selected world-section visibility and window-validation queries. It is not general per-VOB culling; compare it against the baseline.",
+                u8"Experimentell: Beschleunigt ausgewaehlte Weltsektions- und Fensterpruefungen. Es ist kein allgemeines VOB-Culling; mit dem Basiswert vergleichen." ) );
 
             const std::array<std::pair<const char*, GothicRendererSettings::E_ShadowFrustumCulling>, 3> shadowFrustumCullingModes = {{
                 { Tr( "Disabled", u8"Deaktiviert" ), GothicRendererSettings::E_ShadowFrustumCulling::SHD_FRUSTUM_CULLING_DISABLED },
@@ -1315,25 +1315,25 @@ void ImGuiShim::RenderSettingsWindow()
 
             ImGui::Checkbox( Tr( "GPU VOB culling", u8"GPU-VOB-Culling" ), &settings.GpuVobCulling );
             ImGui::SetItemTooltip( "%s", Tr(
-                "Moves per-VOB main-view frustum tests to the GPU. Recommended: On.",
-                u8"Verlagert die Frustum-Tests der VOBs im Hauptbild auf die GPU. Empfehlung: Ein." ) );
+                "Experimental: moves per-VOB main-view frustum tests to the GPU. Keep enabled only when the measured 120-frame window beats the baseline.",
+                u8"Experimentell: Verlagert die Frustum-Tests der VOBs im Hauptbild auf die GPU. Nur aktiv lassen, wenn das gemessene 120-Frame-Fenster den Basiswert schlaegt." ) );
 
             const bool gpuVobAvailable = settings.GpuVobCulling;
             ImGui::BeginDisabled( !gpuVobAvailable );
             ImGui::Checkbox( Tr( "Hi-Z occlusion culling", u8"Hi-Z-Occlusion-Culling" ), &settings.GpuVobHiZCulling );
             ImGui::SetItemTooltip( "%s", Tr(
-                "Rejects VOBs hidden behind already-rendered world geometry. Recommended: On after visual validation.",
-                u8"Verwirft VOBs hinter bereits gerenderter Weltgeometrie. Empfehlung: Nach Sichtpruefung ein." ) );
+                "Experimental: rejects VOBs hidden behind already-rendered world geometry. Compare the measured FPS and triangle window against the baseline.",
+                u8"Experimentell: Verwirft VOBs hinter bereits gerenderter Weltgeometrie. FPS- und Dreiecksfenster mit dem Basiswert vergleichen." ) );
 
             ImGui::Checkbox( Tr( "GPU shadow culling", u8"GPU-Schatten-Culling" ), &settings.GpuVobShadowCulling );
             ImGui::SetItemTooltip( "%s", Tr(
-                "Uses the GPU culler for CSM shadow caster lists. Rainshadowmap remains separate. Recommended: On.",
-                u8"Nutzt den GPU-Culler fuer CSM-Schattenwerferlisten. Die Rainshadowmap bleibt getrennt. Empfehlung: Ein." ) );
+                "Experimental: uses the GPU culler for CSM shadow caster lists. Rainshadowmap remains separate. Keep enabled only after a clean A/B measurement.",
+                u8"Experimentell: Nutzt den GPU-Culler fuer CSM-Schattenwerferlisten. Die Rainshadowmap bleibt getrennt. Erst nach sauberer A/B-Messung aktiv lassen." ) );
 
             ImGui::Checkbox( Tr( "Static geometry arena", u8"Statische Geometrie-Arena" ), &settings.GpuVobGeometryArena );
             ImGui::SetItemTooltip( "%s", Tr(
-                "Uses persistent shared static-VOB geometry for GPU-driven draws. Recommended: On.",
-                u8"Nutzt persistente gemeinsame VOB-Geometrie fuer GPU-gesteuerte Draws. Empfehlung: Ein." ) );
+                "Experimental: uses persistent shared static-VOB geometry for GPU-driven draws. Its benefit depends on actual indirect-draw batching.",
+                u8"Experimentell: Nutzt persistente gemeinsame VOB-Geometrie fuer GPU-gesteuerte Draws. Der Nutzen haengt vom tatsaechlichen Indirect-Draw-Batching ab." ) );
             ImGui::EndDisabled();
 
             const bool hardwareMdiAvailable = settings.DebugSettings.FeatureSet.UseMDI;
@@ -1348,16 +1348,18 @@ void ImGuiShim::RenderSettingsWindow()
 
             ImGui::Separator();
             ImGui::BeginDisabled( !settings.AdvancedPerformanceOptions );
-            if ( ImGui::Button( Tr( "Recommended defaults", u8"Empfohlene Defaults" ) ) ) {
-                settings.GpuVobCulling = true;
-                settings.GpuVobHiZCulling = true;
-                settings.GpuVobShadowCulling = true;
-                settings.GpuVobGeometryArena = true;
-                settings.GpuVobMdi = true;
+            if ( ImGui::Button( Tr( "Measured safe defaults", u8"Sichere Mess-Defaults" ) ) ) {
+                // The GPU-driven path remains explicitly opt-in until a clean
+                // same-camera measurement proves a benefit on the device.
+                settings.GpuVobCulling = false;
+                settings.GpuVobHiZCulling = false;
+                settings.GpuVobShadowCulling = false;
+                settings.GpuVobGeometryArena = false;
+                settings.GpuVobMdi = false;
                 settings.ThreadedShadowCulling = true;
                 settings.DebugSettings.ShadowCascades.LazyCascadeUpdate = true;
                 settings.DoZPrepass = true;
-                settings.DebugSettings.FeatureSet.UseWorldSectionBVH = true;
+                settings.DebugSettings.FeatureSet.UseWorldSectionBVH = false;
                 settings.ShadowFrustumCullingMode = GothicRendererSettings::E_ShadowFrustumCulling::SHD_FRUSTUM_CULLING_CONSERVATIVE;
                 settings.AdvancedWaterAnimation = true;
                 settings.AdvancedPuddles = true;

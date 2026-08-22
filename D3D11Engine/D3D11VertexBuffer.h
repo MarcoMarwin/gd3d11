@@ -29,7 +29,8 @@ public:
     enum EUsageFlags {
         U_DEFAULT = 0,
         U_DYNAMIC = 2,
-        U_IMMUTABLE = 1
+        U_IMMUTABLE = 1,
+        U_STAGING = 3
     };
 
     /** Layed out for D3D11*/
