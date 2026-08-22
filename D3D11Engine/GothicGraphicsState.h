@@ -889,7 +889,7 @@ struct GothicRendererSettings {
 
     void DisableEverything() {}
 
-    bool IsShadowFrustumCullingEnabled() { return ShadowFrustumCullingMode != SHD_FRUSTUM_CULLING_DISABLED && NumShadowCascades > 1; }
+    bool IsShadowFrustumCullingEnabled() const { return ShadowFrustumCullingMode != SHD_FRUSTUM_CULLING_DISABLED && NumShadowCascades > 1; }
 
     static E_ShadowQuality ShadowQualityFromShadowMapSize( int size ) {
         if ( size <= 1024 ) return E_ShadowQuality::SHADOW_QUALITY_LOW;

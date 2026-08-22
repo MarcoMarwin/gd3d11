@@ -3951,7 +3951,7 @@ XRESULT D3D11GraphicsEngine::DrawSkeletalMesh( SkeletalVobInfo* vi,
             // Don't bind previous, as we don't use them here yet.
         }
         else if ( GetRenderingStage() != DES_SHADOWMAP ) {
-            const std::span<XMFLOAT4X4> prevTransforms = (vi->HasValidPrevTransforms && !vi->PrevBoneTransforms.empty())
+            const std::span<const XMFLOAT4X4> prevTransforms = (vi->HasValidPrevTransforms && !vi->PrevBoneTransforms.empty())
                 ? std::span(vi->PrevBoneTransforms)
                 : transforms;
 
@@ -4672,7 +4672,7 @@ void D3D11GraphicsEngine::DrawSkeletalMeshVobs(
                         if ( GetRenderingStage() == DES_SHADOWMAP_CUBE ) {
                             // Don't bind previous, as we don't use them here yet.
                         } else if ( GetRenderingStage() != DES_SHADOWMAP ) {
-                            const std::span<XMFLOAT4X4> prevTransforms = (vi->HasValidPrevTransforms && !vi->PrevBoneTransforms.empty())
+                            const std::span<const XMFLOAT4X4> prevTransforms = (vi->HasValidPrevTransforms && !vi->PrevBoneTransforms.empty())
                                 ? std::span( vi->PrevBoneTransforms )
                                 : transforms;
 
@@ -9598,7 +9598,7 @@ XRESULT D3D11GraphicsEngine::DrawVOBsInstanced() {
                                 || nextItem.Mesh.Material->GetAlphaFunc() == zMAT_ALPHA_FUNC_BLEND
                                 || nextItem.Mesh.Material->GetAlphaFunc() == zMAT_ALPHA_FUNC_ADD
                                 || (IsCityWindowFeatureReady() && IsWindowGlassMaterial( cachedVisual->Visual,
-                                    nextItem.Mesh.Material->GetAniTexture() ) ) {
+                                    nextItem.Mesh.Material->GetAniTexture() ) ) ) {
                                 break;
                             }
                             const auto nextRange = GpuVobGeometryRanges.find( nextItem.MeshEntry );
