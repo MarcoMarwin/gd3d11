@@ -153,26 +153,29 @@ float4 PSMain(PS_INPUT Input) : SV_TARGET
 
 	float shadow = vertLighting;
 #if SHD_ENABLE
-	// CSM: Use soft cascaded shadow map with configurable softness
-    float3 wsNormal = normalize(mul(float4(normal, 0.0f), SQ_InvView).xyz);
-
-    if (AC_SunVisibility > 0.001f || AC_MoonVisibility > 0.001f) // sample the single active sun or moon shadow map
+	if (UseRuntimeWorldShadows())
 	{
-		float3 wsLightDirection = normalize(mul(float4(SQ_LightDirectionVS, 0.0f), SQ_InvView).xyz);
-		int cascadeIndex = GetPrimaryCascadeIndex(wsPosition);
-		float texelWorldSize = GetCascadeWorldTexelSize(cascadeIndex);
-		float3 biasedWsPosition = ApplyReceiverNormalBias(
-			wsPosition, wsNormal, wsLightDirection, texelWorldSize, vegetationReceiverMask);
+		// CSM: Use soft cascaded shadow map with configurable softness
+        float3 wsNormal = normalize(mul(float4(normal, 0.0f), SQ_InvView).xyz);
 
-		// Rotate the taps from the screen position.
-		shadow = ComputeCascadedShadowValueSoft(
-			biasedWsPosition, vsPosition.z, vertLighting, 0.0f, Input.vPosition.xy, cascadeIndex);
-	} else {
-        // Night-time sky ambient:
-        // saturate(wsNormal.y) restricts the value to [0, 1].
-        // Facing up = 1, Facing sides/down = 0.
-        shadow = saturate(wsNormal.y) * vertLighting;
-    }
+        if (AC_SunVisibility > 0.001f || AC_MoonVisibility > 0.001f) // sample the single active sun or moon shadow map
+		{
+			float3 wsLightDirection = normalize(mul(float4(SQ_LightDirectionVS, 0.0f), SQ_InvView).xyz);
+			int cascadeIndex = GetPrimaryCascadeIndex(wsPosition);
+			float texelWorldSize = GetCascadeWorldTexelSize(cascadeIndex);
+			float3 biasedWsPosition = ApplyReceiverNormalBias(
+				wsPosition, wsNormal, wsLightDirection, texelWorldSize, vegetationReceiverMask);
+
+			// Rotate the taps from the screen position.
+			shadow = ComputeCascadedShadowValueSoft(
+				biasedWsPosition, vsPosition.z, vertLighting, 0.0f, Input.vPosition.xy, cascadeIndex);
+		} else {
+            // Night-time sky ambient:
+            // saturate(wsNormal.y) restricts the value to [0, 1].
+            // Facing up = 1, Facing sides/down = 0.
+            shadow = saturate(wsNormal.y) * vertLighting;
+		}
+	}
 #endif
 
     // Compute specular lighting

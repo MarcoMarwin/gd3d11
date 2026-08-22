@@ -42,7 +42,8 @@ void D3D11ForwardPlusRenderer::AddGeometryPasses(
     const auto& rendererSettings = Engine::GAPI->GetRendererState().RendererSettings;
     const bool fsr3MasksActive = rendererSettings.AntiAliasingMode == GothicRendererSettings::AA_FSR3
         && rendererSettings.Upscaler == GothicRendererSettings::UPSCALER_FSR_3;
-    const bool useScreenSpaceShadowMask = rendererSettings.DebugSettings.FeatureSet.UseScreenSpaceShadowMask;
+    const bool useScreenSpaceShadowMask = rendererSettings.EnableShadows
+        && rendererSettings.DebugSettings.FeatureSet.UseScreenSpaceShadowMask;
 
     // --- Depth prepass ---
     graph.AddPass( RG_PASS_NAME("FP Depth Prepass"), [&]( RGBuilder& builder, RenderPass& pass ) {

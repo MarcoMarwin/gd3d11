@@ -404,6 +404,11 @@ struct VobInfo : public BaseVobInfo {
 };
 
 class BaseShadowedPointLight;
+struct RendererLightFlameVisual {
+    zCVob* Vob = nullptr;
+    bool IsParticle = false;
+};
+
 struct VobLightInfo {
     VobLightInfo() = default;
     VobLightInfo(VobLightInfo&& other) = delete;
@@ -446,6 +451,8 @@ struct VobLightInfo {
     zCVob* RendererLightAnchorVob = nullptr;
     zCVobLight* RendererLightSourceA = nullptr;
     zCVobLight* RendererLightSourceB = nullptr;
+    bool RendererLightFollowsFlameState = false;
+    std::vector<RendererLightFlameVisual> RendererLightFlameVisuals;
 
     /** Optional offset to one unambiguous associated flame. Multiple flames keep the original light position. */
     bool HasFlameAnchor = false;

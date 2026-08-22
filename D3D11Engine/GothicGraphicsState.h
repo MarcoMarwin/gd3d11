@@ -562,6 +562,16 @@ struct GothicRendererSettings {
         SHADOW_FILTER_PCSS = 2,
     };
 
+    enum E_ShadowQuality {
+        SHADOW_QUALITY_OFF = 0,
+        SHADOW_QUALITY_VERY_LOW = 1,
+        SHADOW_QUALITY_LOW = 2,
+        SHADOW_QUALITY_MEDIUM = 3,
+        SHADOW_QUALITY_HIGH = 4,
+        SHADOW_QUALITY_EXTREME = 5,
+        _SHADOW_QUALITY_NUM_MODES
+    };
+
     // Runtime PCF/PCSS quality; avoids shader recompilation when AA/FSR3 changes.
     enum E_ShadowKernelQuality {
         SHADOW_KERNEL_PCF_LOW = 0,
@@ -648,12 +658,13 @@ struct GothicRendererSettings {
         DisableRendering = false;
         DisableDrawcalls = false;
 
-        AntiAliasingMode = E_AntiAliasingMode::AA_FSR3;
+        AntiAliasingMode = E_AntiAliasingMode::AA_SMAA;
 
         TesselationFactor = 20.0f;
         TesselationRange = 8.0f;
 
         textureMaxSize = 16384;
+        ShadowQuality = E_ShadowQuality::SHADOW_QUALITY_MEDIUM;
         ShadowMapSize = 2048;
         PointlightShadowMapSize = 128;
         WorldShadowRangeScale = 1.0f;
@@ -777,7 +788,7 @@ struct GothicRendererSettings {
         LoadedResolution = INT2( desktopRect.right, desktopRect.bottom );
 
         ResolutionScalePercent = 100;
-        Upscaler = E_Upscaler::UPSCALER_FSR_3;
+        Upscaler = E_Upscaler::UPSCALER_DEFAULT;
 
         GothicUIScale = 1.0f;
         LimitLightIntesity = true;
@@ -877,6 +888,64 @@ struct GothicRendererSettings {
     void DisableEverything() {}
 
     bool IsShadowFrustumCullingEnabled() { return ShadowFrustumCullingMode != SHD_FRUSTUM_CULLING_DISABLED && NumShadowCascades > 1; }
+
+    static E_ShadowQuality ShadowQualityFromShadowMapSize( int size ) {
+        if ( size <= 1024 ) return E_ShadowQuality::SHADOW_QUALITY_LOW;
+        if ( size <= 2048 ) return E_ShadowQuality::SHADOW_QUALITY_MEDIUM;
+        if ( size <= 4096 ) return E_ShadowQuality::SHADOW_QUALITY_HIGH;
+        return E_ShadowQuality::SHADOW_QUALITY_EXTREME;
+    }
+
+    void ApplyShadowQualitySettings() {
+        const int quality = std::clamp(
+            static_cast<int>(ShadowQuality),
+            static_cast<int>(E_ShadowQuality::SHADOW_QUALITY_OFF),
+            static_cast<int>(E_ShadowQuality::SHADOW_QUALITY_EXTREME) );
+        ShadowQuality = static_cast<E_ShadowQuality>(quality);
+
+        switch ( ShadowQuality ) {
+        case E_ShadowQuality::SHADOW_QUALITY_OFF:
+            EnableShadows = false;
+            EnablePointlightShadows = EPointLightShadowMode::PLS_DISABLED;
+            ShadowMapSize = 1024;
+            PointlightShadowMapSize = 128;
+            break;
+        case E_ShadowQuality::SHADOW_QUALITY_VERY_LOW:
+            EnableShadows = true;
+            EnablePointlightShadows = EPointLightShadowMode::PLS_DISABLED;
+            ShadowMapSize = 1024;
+            PointlightShadowMapSize = 128;
+            break;
+        case E_ShadowQuality::SHADOW_QUALITY_LOW:
+            EnableShadows = true;
+            EnablePointlightShadows = EPointLightShadowMode::PLS_UPDATE_DYNAMIC;
+            ShadowMapSize = 1024;
+            PointlightShadowMapSize = 128;
+            break;
+        case E_ShadowQuality::SHADOW_QUALITY_MEDIUM:
+            EnableShadows = true;
+            EnablePointlightShadows = EPointLightShadowMode::PLS_UPDATE_DYNAMIC;
+            ShadowMapSize = 2048;
+            PointlightShadowMapSize = 128;
+            break;
+        case E_ShadowQuality::SHADOW_QUALITY_HIGH:
+            EnableShadows = true;
+            EnablePointlightShadows = EPointLightShadowMode::PLS_UPDATE_DYNAMIC;
+            ShadowMapSize = 4096;
+            PointlightShadowMapSize = 256;
+            break;
+        case E_ShadowQuality::SHADOW_QUALITY_EXTREME:
+            EnableShadows = true;
+            EnablePointlightShadows = EPointLightShadowMode::PLS_UPDATE_DYNAMIC;
+            ShadowMapSize = 8192;
+            PointlightShadowMapSize = 256;
+            break;
+        default:
+            ShadowQuality = E_ShadowQuality::SHADOW_QUALITY_MEDIUM;
+            ApplyShadowQualitySettings();
+            break;
+        }
+    }
 
     E_ShadowKernelQuality GetShadowKernelQuality() const {
         if ( ShadowMapSize <= 1024 ) return E_ShadowKernelQuality::SHADOW_KERNEL_PCF_LOW;
@@ -1102,6 +1171,8 @@ struct GothicRendererSettings {
     float NightDarkeningRange;
     float NightDarkeningMax;
     E_GodRayMode GodRayMode;
+    // Appended so existing renderer-settings field offsets remain unchanged.
+    E_ShadowQuality ShadowQuality;
 
     bool AreGodRaysEnabled() const {
         return EnableGodRays;

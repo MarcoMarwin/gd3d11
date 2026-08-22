@@ -281,8 +281,9 @@ struct DS_ScreenQuadConstantBuffer {
     // shadow projection instead of the continuously moving sky direction.
     float4 SQ_CascadeLightDirectionWS[MAX_CSM_CASCADES];
 
-    // x = temporal reconstruction; y = PCF/PCSS quality (0 / 1 / 2).
-    // This must stay runtime-controlled so AA changes never require shader reloads.
+    // x = temporal reconstruction; y = PCF/PCSS quality (0 / 1 / 2);
+    // z = runtime world-shadow enable. These remain runtime-controlled so
+    // changing the associated settings never requires shader reloads.
     float4 SQ_ShadowRuntimeParams;
 };
 

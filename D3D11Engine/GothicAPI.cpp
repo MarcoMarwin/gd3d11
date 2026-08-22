@@ -310,25 +310,40 @@ namespace {
         return true;
     }
 
-    bool IsFlameVisualName( std::string name ) {
-        name = ToLowerMaterialName( std::move( name ) );
-        const bool flameMarker = name.find( "fire" ) != std::string::npos
-            || name.find( "flame" ) != std::string::npos
-            || name.find( "torch" ) != std::string::npos
-            || name.find( "candle" ) != std::string::npos
-            || name.find( "feuer" ) != std::string::npos
-            || name.find( "fackel" ) != std::string::npos
-            || name.find( "kerze" ) != std::string::npos
-            || name.find( "burn" ) != std::string::npos
-            || name.find( "lava" ) != std::string::npos;
-        if ( !flameMarker )
+    // PFX definition names are not reliable at runtime. Classify flames from
+    // the texture bound to the emitter instead.
+    bool HasTextureNamePrefix( zCTexture* texture, const char* prefix ) {
+        if ( !texture || !prefix )
             return false;
 
-        return name.find( "smoke" ) == std::string::npos
-            && name.find( "spark" ) == std::string::npos
-            && name.find( "water" ) == std::string::npos
-            && name.find( "magic" ) == std::string::npos
-            && name.find( "fog" ) == std::string::npos;
+        std::string name = ToLowerMaterialName( texture->GetNameWithoutExt() );
+        const size_t slash = name.find_last_of( "\\/" );
+        if ( slash != std::string::npos )
+            name.erase( 0, slash + 1 );
+
+        return name.rfind( prefix, 0 ) == 0;
+    }
+
+    bool IsPfxFlameTexture( zCTexture* texture ) {
+        return HasTextureNamePrefix( texture, "humanburn" );
+    }
+
+    bool IsTgaFlameTexture( zCTexture* texture ) {
+        return HasTextureNamePrefix( texture, "fire_" );
+    }
+
+    bool IsPfxFlameVisual( zCParticleFX* particle, zCParticleEmitter* emitter ) {
+        if ( !particle || !emitter )
+            return false;
+
+        if ( IsPfxFlameTexture( emitter->GetBaseVisTexture() ) )
+            return true;
+
+        if ( zTParticle* firstParticle = particle->GetFirstParticle() ) {
+            return IsPfxFlameTexture( emitter->GetVisTexture( firstParticle ) );
+        }
+
+        return false;
     }
 
     bool IsOilLampShadowAnchorName( std::string name ) {
@@ -526,7 +541,7 @@ namespace {
         XMStoreFloat3( &originValues, origin );
         XMStoreFloat3( &directionValues, XMVector3Normalize( direction ) );
         if ( !api->TraceWorldMesh( originValues, directionValues, result.Position,
-            nullptr, nullptr, nullptr, nullptr, &result.Indoor ) ) {
+            nullptr, nullptr, nullptr, nullptr, &result.Indoor, true ) ) {
             return false;
         }
 
@@ -2912,7 +2927,18 @@ void GothicAPI::OnRemovedVob( zCVob* vob, zCWorld* world ) {
     }
 
     for ( const auto& rendererLight : RendererPointLights ) {
-        if ( rendererLight && rendererLight->RendererLightAnchorVob == vob ) {
+        if ( !rendererLight )
+            continue;
+
+        if ( rendererLight->RendererLightFollowsFlameState ) {
+            auto& flameVisuals = rendererLight->RendererLightFlameVisuals;
+            flameVisuals.erase( std::remove_if( flameVisuals.begin(), flameVisuals.end(),
+                [vob]( const RendererLightFlameVisual& visual ) {
+                    return visual.Vob == vob;
+                } ), flameVisuals.end() );
+        }
+
+        if ( rendererLight->RendererLightAnchorVob == vob ) {
             rendererLight->RendererLightAnchorVob = nullptr;
             rendererLight->RendererLightEnabled = false;
         }
@@ -4454,7 +4480,7 @@ static bool IsTraceTriangleIndoor( const MeshInfo* mesh, unsigned int firstIndex
     return (a0 + a1 + a2) < (128u * 3u);
 }
 
-bool GothicAPI::TraceWorldMesh( const XMFLOAT3& origin, const XMFLOAT3& dir, XMFLOAT3& hit, std::string* hitTextureName, XMFLOAT3* hitTriangle, MeshInfo** hitMesh, zCMaterial** hitMaterial, bool* hitTriangleIndoor ) {
+bool GothicAPI::TraceWorldMesh( const XMFLOAT3& origin, const XMFLOAT3& dir, XMFLOAT3& hit, std::string* hitTextureName, XMFLOAT3* hitTriangle, MeshInfo** hitMesh, zCMaterial** hitMaterial, bool* hitTriangleIndoor, bool useSectionBVH ) {
     const int maxSections = 2;
     float closest = FLT_MAX;
     if ( hitTriangleIndoor ) {
@@ -4462,18 +4488,65 @@ bool GothicAPI::TraceWorldMesh( const XMFLOAT3& origin, const XMFLOAT3& dir, XMF
     }
     std::list<std::pair<WorldMeshSectionInfo*, float>> hitSections;
 
-    // Trace bounding-boxes first
-    for ( auto&& itx : WorldSections ) {
-        for ( auto&& ity : itx.second ) {
-            WorldMeshSectionInfo& section = ity.second;
+    auto appendHitSection = [&]( WorldMeshSectionInfo& section ) {
+        if ( section.WorldMeshes.empty() )
+            return;
 
-            if ( section.WorldMeshes.empty() )
-                continue;
+        float t = 0.0f;
+        if ( Toolbox::PositionInsideBox( origin, section.BoundingBox.Min, section.BoundingBox.Max )
+            || Toolbox::IntersectBox( section.BoundingBox.Min, section.BoundingBox.Max, origin, dir, t ) ) {
+            if ( t < maxSections * WORLD_SECTION_SIZE )
+                hitSections.push_back( std::make_pair( &section, t ) );
+        }
+    };
 
-            float t = 0;
-            if ( Toolbox::PositionInsideBox( origin, section.BoundingBox.Min, section.BoundingBox.Max ) || Toolbox::IntersectBox( section.BoundingBox.Min, section.BoundingBox.Max, origin, dir, t ) ) {
-                if ( t < maxSections * WORLD_SECTION_SIZE )
-                    hitSections.push_back( std::make_pair( &section, t ) );
+    if ( useSectionBVH && WorldSectionBVHValid && !WorldSectionBVHNodes.empty() ) {
+        // City-window validation performs thousands of short world rays. Use
+        // the already-built section BVH only for that opt-in path; the normal
+        // TraceWorldMesh callers retain their original full section scan.
+        auto visitNode = [&]( auto&& self, uint32_t nodeIndex ) -> void {
+            if ( nodeIndex >= WorldSectionBVHNodes.size() )
+                return;
+
+            const WorldSectionBVHNode& node = WorldSectionBVHNodes[nodeIndex];
+            const XMFLOAT3 nodeMin(
+                node.Bounds.Center.x - node.Bounds.Extents.x,
+                node.Bounds.Center.y - node.Bounds.Extents.y,
+                node.Bounds.Center.z - node.Bounds.Extents.z );
+            const XMFLOAT3 nodeMax(
+                node.Bounds.Center.x + node.Bounds.Extents.x,
+                node.Bounds.Center.y + node.Bounds.Extents.y,
+                node.Bounds.Center.z + node.Bounds.Extents.z );
+            float nodeDistance = 0.0f;
+            if ( !Toolbox::PositionInsideBox( origin, nodeMin, nodeMax )
+                && !Toolbox::IntersectBox( nodeMin, nodeMax, origin, dir, nodeDistance ) ) {
+                return;
+            }
+            if ( nodeDistance >= maxSections * WORLD_SECTION_SIZE )
+                return;
+
+            if ( node.IsLeaf() ) {
+                const uint32_t leafEnd = std::min<uint32_t>(
+                    node.LeafStart + node.LeafCount,
+                    static_cast<uint32_t>(WorldSectionBVHSections.size()) );
+                for ( uint32_t i = node.LeafStart; i < leafEnd; ++i ) {
+                    if ( WorldSectionBVHSections[i] )
+                        appendHitSection( *WorldSectionBVHSections[i] );
+                }
+                return;
+            }
+
+            self( self, node.LeftChild );
+            self( self, node.RightChild );
+        };
+
+        visitNode( visitNode, 0u );
+    } else {
+        // Trace bounding-boxes first. This is the original fallback for all
+        // regular traces and for worlds without a valid section BVH.
+        for ( auto&& itx : WorldSections ) {
+            for ( auto&& ity : itx.second ) {
+                appendHitSection( ity.second );
             }
         }
     }
@@ -5130,8 +5203,13 @@ void GothicAPI::CollectVisibleVobs(
                 if ( !light )
                     return false;
                 const auto lightInfo = VobLightMap.find( light );
-                return lightInfo != VobLightMap.end() && lightInfo->second
-                    && light->IsEnabled();
+                if ( lightInfo == VobLightMap.end() || !lightInfo->second
+                    || !light->IsEnabled() ) {
+                    return false;
+                }
+
+                const float range = light->GetLightRange();
+                return std::isfinite( range ) && range > 0.0f;
             };
             if ( IsWorldRenderCacheReady() && it->OilLampEmissionColor != 0u
                 && (linkedEmissionLightIsEnabled( it->OilLampEmissionStaticLight )
@@ -5649,6 +5727,8 @@ void GothicAPI::ConfigurePointlightShadowSource( VobLightInfo* lightInfo ) const
     lightInfo->RendererLightAnchorVob = nullptr;
     lightInfo->RendererLightSourceA = nullptr;
     lightInfo->RendererLightSourceB = nullptr;
+    lightInfo->RendererLightFollowsFlameState = false;
+    lightInfo->RendererLightFlameVisuals.clear();
 
     zCVobLight* light = lightInfo->Vob;
     if ( !light )
@@ -5882,10 +5962,8 @@ void GothicAPI::ConfigureAllPointlightShadowSources() {
     };
     std::vector<FlameGroup> flameGroups;
 
-    auto addFlame = [&]( zCVob* flameVob, bool isParticle, std::string identity ) {
+    auto addFlame = [&]( zCVob* flameVob, bool isParticle ) {
         if ( !flameVob || !flameVob->GetShowVisual() || hasVisualFXAncestor( flameVob ) )
-            return;
-        if ( !IsFlameVisualName( std::move( identity ) ) )
             return;
 
         zCVob* parent = getPersistentParent( flameVob );
@@ -5931,23 +6009,8 @@ void GothicAPI::ConfigureAllPointlightShadowSources() {
         zCVisual* visual = particleVob->GetVisual();
         zCParticleFX* particle = reinterpret_cast<zCParticleFX*>(visual);
         zCParticleEmitter* emitter = particle->GetEmitter();
-
-        std::string identity = visual->GetObjectName();
-        identity += " ";
-        identity += particleVob->GetName();
-        if ( emitter ) {
-            if ( zCTexture* texture = emitter->GetBaseVisTexture() ) {
-                identity += " ";
-                identity += texture->GetNameWithoutExt();
-            }
-            if ( zTParticle* firstParticle = particle->GetFirstParticle() ) {
-                if ( zCTexture* texture = emitter->GetVisTexture( firstParticle ) ) {
-                    identity += " ";
-                    identity += texture->GetNameWithoutExt();
-                }
-            }
-        }
-        addFlame( particleVob, true, std::move( identity ) );
+        if ( IsPfxFlameVisual( particle, emitter ) )
+            addFlame( particleVob, true );
     }
 
     for ( zCVob* decalVob : DecalVobs ) {
@@ -5958,43 +6021,44 @@ void GothicAPI::ConfigureAllPointlightShadowSources() {
         DecalSettings* settings = decal->GetDecalSettings();
         zCMaterial* material = settings ? settings->DecalMaterial : nullptr;
         zCTexture* texture = material ? material->GetTexture() : nullptr;
-
-        std::string identity = visual->GetObjectName();
-        identity += " ";
-        identity += decalVob->GetName();
-        if ( texture ) {
-            identity += " ";
-            identity += texture->GetNameWithoutExt();
-        }
-        addFlame( decalVob, false, std::move( identity ) );
+        if ( IsTgaFlameTexture( texture ) )
+            addFlame( decalVob, false );
     }
 
     struct ResolvedFlameGroup {
         zCVob* Parent = nullptr;
         bool IsMultiFlame = false;
-        // Prefer PFX when both visual types are present.
+        // A paired PFX/TGA visual uses the PFX light characteristics.
         bool HasPfx = false;
         bool HasNearbyFireplace = false;
         XMFLOAT3 Anchor = {};
         float Size = 1.0f;
         float HeightOffset = 0.0f;
-        size_t FlameCount = 0;
         std::vector<XMFLOAT3> Positions;
         std::vector<zCVob*> Vobs;
+        std::vector<RendererLightFlameVisual> FlameVisuals;
     };
     std::vector<ResolvedFlameGroup> resolvedFlames;
     resolvedFlames.reserve( flameGroups.size() );
 
-    for ( const FlameGroup& group : flameGroups ) {
+    auto appendResolvedFlameGroup = [&]( zCVob* parent,
+        const std::vector<FlameVisual>& particles,
+        const std::vector<FlameVisual>& decals ) {
+        if ( particles.empty() && decals.empty() )
+            return;
+
         ResolvedFlameGroup resolved;
-        resolved.Parent = group.Parent;
-        resolved.IsMultiFlame = group.Particles.size() > 1 || group.Decals.size() > 1;
-        resolved.HasPfx = !group.Particles.empty();
+        resolved.Parent = parent;
+        // Only TGA decals form multi-flame groups. PFX visuals are resolved
+        // individually, except for the explicit single PFX/TGA pairing below.
+        resolved.IsMultiFlame = decals.size() > 1;
+        resolved.HasPfx = !particles.empty();
         XMFLOAT3 boundsMin( FLT_MAX, FLT_MAX, FLT_MAX );
         XMFLOAT3 boundsMax( -FLT_MAX, -FLT_MAX, -FLT_MAX );
-        auto includeFlame = [&]( const FlameVisual& flame ) {
+        auto includeFlame = [&]( const FlameVisual& flame, bool isParticle ) {
             resolved.Positions.push_back( flame.Position );
             resolved.Vobs.push_back( flame.Vob );
+            resolved.FlameVisuals.push_back( { flame.Vob, isParticle } );
             resolved.HasNearbyFireplace = resolved.HasNearbyFireplace || flame.HasNearbyFireplace;
             boundsMin.x = std::min( boundsMin.x, flame.BoundsMin.x );
             boundsMin.y = std::min( boundsMin.y, flame.BoundsMin.y );
@@ -6003,40 +6067,71 @@ void GothicAPI::ConfigureAllPointlightShadowSources() {
             boundsMax.y = std::max( boundsMax.y, flame.BoundsMax.y );
             boundsMax.z = std::max( boundsMax.z, flame.BoundsMax.z );
         };
-        for ( const FlameVisual& flame : group.Particles ) {
-            includeFlame( flame );
+        for ( const FlameVisual& flame : particles ) {
+            includeFlame( flame, true );
         }
-        for ( const FlameVisual& flame : group.Decals ) {
-            includeFlame( flame );
+        for ( const FlameVisual& flame : decals ) {
+            includeFlame( flame, false );
         }
 
-        resolved.FlameCount = resolved.Vobs.size();
-        if ( resolved.FlameCount > 0 ) {
-            resolved.Anchor = XMFLOAT3(
-                (boundsMin.x + boundsMax.x) * 0.5f,
-                (boundsMin.y + boundsMax.y) * 0.5f,
-                (boundsMin.z + boundsMax.z) * 0.5f );
+        resolved.Anchor = XMFLOAT3(
+            (boundsMin.x + boundsMax.x) * 0.5f,
+            (boundsMin.y + boundsMax.y) * 0.5f,
+            (boundsMin.z + boundsMax.z) * 0.5f );
+        if ( resolved.IsMultiFlame ) {
             float totalSize = 0.0f;
-            for ( const FlameVisual& flame : group.Particles )
+            for ( const FlameVisual& flame : particles )
                 totalSize += flame.Size;
-            for ( const FlameVisual& flame : group.Decals )
+            for ( const FlameVisual& flame : decals )
                 totalSize += flame.Size;
-            // Use the average size for multi-flame groups.
-            resolved.Size = totalSize / static_cast<float>( resolved.FlameCount );
-        }
-
-        // A single TGA/PFX pair represents one visible flame, not a
-        // multi-flame group.
-        if ( !resolved.IsMultiFlame ) {
-            if ( group.Particles.size() == 1 ) {
-                resolved.Size = group.Particles.front().Size;
-            } else if ( group.Decals.size() == 1 ) {
-                resolved.Size = group.Decals.front().Size;
-            } else {
-                continue;
-            }
+            // Use the average size for the candle multi-flame group.
+            resolved.Size = totalSize / static_cast<float>( resolved.Vobs.size() );
+        } else if ( !particles.empty() ) {
+            // A PFX/TGA pair uses the PFX size and remains one PFX flame.
+            resolved.Size = particles.front().Size;
+        } else {
+            resolved.Size = decals.front().Size;
         }
         resolvedFlames.push_back( std::move( resolved ) );
+    };
+
+    const std::vector<FlameVisual> emptyFlames;
+    for ( const FlameGroup& group : flameGroups ) {
+        std::vector<bool> pairedDecals( group.Decals.size(), false );
+        for ( const FlameVisual& particle : group.Particles ) {
+            size_t nearestDecal = INVALID_INDEX;
+            float nearestDistanceSq = FLT_MAX;
+            for ( size_t decalIndex = 0; decalIndex < group.Decals.size(); ++decalIndex ) {
+                if ( pairedDecals[decalIndex] )
+                    continue;
+
+                const float candidateDistanceSq = distanceSq(
+                    particle.Center, group.Decals[decalIndex].Center );
+                if ( candidateDistanceSq < nearestDistanceSq ) {
+                    nearestDistanceSq = candidateDistanceSq;
+                    nearestDecal = decalIndex;
+                }
+            }
+
+            const std::vector<FlameVisual> singleParticle = { particle };
+            if ( nearestDecal == INVALID_INDEX ) {
+                appendResolvedFlameGroup( group.Parent, singleParticle, emptyFlames );
+                continue;
+            }
+
+            pairedDecals[nearestDecal] = true;
+            const std::vector<FlameVisual> matchingDecal = { group.Decals[nearestDecal] };
+            // A PFX/TGA pair is one PFX flame, never a multi-flame group.
+            appendResolvedFlameGroup( group.Parent, singleParticle, matchingDecal );
+        }
+
+        // Unmatched TGA decals retain the existing candle multi-flame behavior.
+        std::vector<FlameVisual> unpairedDecals;
+        for ( size_t decalIndex = 0; decalIndex < group.Decals.size(); ++decalIndex ) {
+            if ( !pairedDecals[decalIndex] )
+                unpairedDecals.push_back( group.Decals[decalIndex] );
+        }
+        appendResolvedFlameGroup( group.Parent, emptyFlames, unpairedDecals );
     }
 
     gtl::flat_hash_set<zCVob*> flameVisualVobs;
@@ -6145,10 +6240,6 @@ void GothicAPI::ConfigureAllPointlightShadowSources() {
             ? traceFireplaceFlameObstacle( flame )
             : PARTICLE_FLAME_HEIGHT_OFFSET;
     }
-
-    auto flameHeightOffset = []( const ResolvedFlameGroup& flame ) {
-        return flame.HeightOffset;
-    };
 
     struct OilLampAnchor {
         zCVob* Vob = nullptr;
@@ -6321,6 +6412,18 @@ void GothicAPI::ConfigureAllPointlightShadowSources() {
         return bestAnchor;
     };
 
+    // Anchor ownership is immutable during this configuration pass. Resolve
+    // it once per source light instead of repeating the same hierarchy and
+    // distance scan in the multi-flame, single-flame and final anchor passes.
+    std::vector<size_t> bestVisualAnchorByLight( lights.size(), INVALID_INDEX );
+    {
+        RendererLoadTimer anchorResolutionTimer(
+            "ConfigureAllPointlightShadowSources::AnchorResolution" );
+        for ( size_t lightIndex = 0; lightIndex < lights.size(); ++lightIndex ) {
+            bestVisualAnchorByLight[lightIndex] = findBestVisualAnchor( lightIndex );
+        }
+    }
+
     auto suppressRendererSource = [this]( VobLightInfo* info ) {
         if ( !info )
             return;
@@ -6344,7 +6447,8 @@ void GothicAPI::ConfigureAllPointlightShadowSources() {
 
     auto createRendererLight = [&]( zCVob* anchorVob, const XMFLOAT3& position,
         DWORD baseColor, float intensity, float range, bool flicker,
-        zCVobLight* sourceA, zCVobLight* sourceB ) {
+        zCVobLight* sourceA, zCVobLight* sourceB,
+        std::vector<RendererLightFlameVisual> flameVisuals ) {
         auto rendererLight = std::make_unique<VobLightInfo>();
         rendererLight->IsRendererLight = true;
         rendererLight->AllowsPointlightShadows = true;
@@ -6359,6 +6463,8 @@ void GothicAPI::ConfigureAllPointlightShadowSources() {
         rendererLight->RendererLightAnchorVob = anchorVob;
         rendererLight->RendererLightSourceA = sourceA;
         rendererLight->RendererLightSourceB = sourceB;
+        rendererLight->RendererLightFollowsFlameState = !flameVisuals.empty();
+        rendererLight->RendererLightFlameVisuals = std::move( flameVisuals );
         // Match the authored indoor/outdoor classification.
         rendererLight->IgnoreIndoorOutdoorLimit = false;
         rendererLight->IsIndoorVob = anchorVob && anchorVob->IsIndoorVob();
@@ -6431,7 +6537,7 @@ void GothicAPI::ConfigureAllPointlightShadowSources() {
                 suppressRendererSource( lights[dynamicIndex].Info );
 
             createRendererLight( oilLamp.Vob, oilLamp.ShadowAnchor,
-                stableColor, 1.0f, stableRange, false, sourceA, sourceB );
+                stableColor, 1.0f, stableRange, false, sourceA, sourceB, {} );
             ++oilLampReplacementCount;
         }
     }
@@ -6445,7 +6551,7 @@ void GothicAPI::ConfigureAllPointlightShadowSources() {
             } );
     };
 
-    // One renderer light represents each complete PFX/TGA group.
+    // One renderer light represents each TGA candle multi-flame group.
     for ( size_t flameIndex = 0; flameIndex < resolvedFlames.size(); ++flameIndex ) {
         const ResolvedFlameGroup& flame = resolvedFlames[flameIndex];
         if ( !flame.IsMultiFlame || flame.Vobs.empty() )
@@ -6459,7 +6565,7 @@ void GothicAPI::ConfigureAllPointlightShadowSources() {
             if ( lights[lightIndex].Info->IsRendererLightSuppressed )
                 continue;
 
-            const size_t bestAnchor = findBestVisualAnchor( lightIndex );
+            const size_t bestAnchor = bestVisualAnchorByLight[lightIndex];
             if ( bestAnchor == INVALID_INDEX )
                 continue;
 
@@ -6477,10 +6583,8 @@ void GothicAPI::ConfigureAllPointlightShadowSources() {
             suppressRendererSource( lights[lightIndex].Info );
         }
 
-        // Restore the original multi-flame behavior: use the authored source
-        // light position when one is linked; otherwise use the persistent
-        // parent position with the original particle offset. This applies to
-        // both TGA and PFX multi-flame groups.
+        // Keep the authored TGA candle multi-flame source position when one is
+        // linked; otherwise use the persistent parent and the original offset.
         zCVob* lightAnchor = flame.Parent ? flame.Parent : flame.Vobs.front();
         XMFLOAT3 lightPosition = lightAnchor->GetPositionWorld();
         if ( nearestSource != INVALID_INDEX ) {
@@ -6489,11 +6593,13 @@ void GothicAPI::ConfigureAllPointlightShadowSources() {
             lightPosition.y += PARTICLE_FLAME_HEIGHT_OFFSET;
         }
 
+        zCVobLight* source = nearestSource != INVALID_INDEX
+            ? lights[nearestSource].Info->Vob : nullptr;
         createRendererLight( lightAnchor, lightPosition,
             flameLightColor( flame.HasPfx ),
-            flameLightIntensity( flame.Size, flame.FlameCount, flame.HasPfx ),
+            flameLightIntensity( flame.Size, flame.Vobs.size(), flame.HasPfx ),
             std::clamp( flame.Size * 6.0f, 180.0f, 600.0f ),
-            true, nullptr, nullptr );
+            true, source, nullptr, flame.FlameVisuals );
     }
 
     // A single visual or matching PFX/TGA pair becomes one renderer light.
@@ -6510,7 +6616,7 @@ void GothicAPI::ConfigureAllPointlightShadowSources() {
         for ( size_t lightIndex = 0; lightIndex < lights.size(); ++lightIndex ) {
             if ( lights[lightIndex].Info->IsRendererLightSuppressed )
                 continue;
-            const size_t bestAnchor = findBestVisualAnchor( lightIndex );
+            const size_t bestAnchor = bestVisualAnchorByLight[lightIndex];
             if ( bestAnchor == INVALID_INDEX )
                 continue;
             const VisualAnchorCandidate& winner = visualAnchors[bestAnchor];
@@ -6532,20 +6638,20 @@ void GothicAPI::ConfigureAllPointlightShadowSources() {
         zCVobLight* source = nearestSource != INVALID_INDEX
             ? lights[nearestSource].Info->Vob : nullptr;
         XMFLOAT3 shadowAnchor = flame.Anchor;
-        shadowAnchor.y += flameHeightOffset( flame );
+        shadowAnchor.y += flame.HeightOffset;
         const float lightRange = originalSourceRange > 0.0f
             ? originalSourceRange : flameLightRange( flame.Size );
         createRendererLight( flame.Vobs.front(), shadowAnchor,
             flameLightColor( flame.HasPfx ),
             flameLightIntensity( flame.Size, 1, flame.HasPfx ),
-            lightRange, true, source, nullptr );
+            lightRange, true, source, nullptr, flame.FlameVisuals );
     }
 
     std::vector<bool> resolvedByVisualAnchor( lights.size(), false );
     for ( size_t lightIndex = 0; lightIndex < lights.size(); ++lightIndex ) {
         if ( lights[lightIndex].Info->IsRendererLightSuppressed )
             continue;
-        const size_t bestAnchor = findBestVisualAnchor( lightIndex );
+        const size_t bestAnchor = bestVisualAnchorByLight[lightIndex];
         if ( bestAnchor == INVALID_INDEX )
             continue;
 
@@ -6555,7 +6661,7 @@ void GothicAPI::ConfigureAllPointlightShadowSources() {
         if ( winner.Kind == VisualAnchorKind::SingleFlame ) {
             const ResolvedFlameGroup& flame = resolvedFlames[winner.SourceIndex];
             XMFLOAT3 shadowAnchor = flame.Anchor;
-            shadowAnchor.y += flameHeightOffset( flame );
+            shadowAnchor.y += flame.HeightOffset;
             assignAnchor( lights[lightIndex], shadowAnchor );
         } else if ( winner.Kind == VisualAnchorKind::OilLamp ) {
             assignAnchor( lights[lightIndex],
@@ -7275,6 +7381,7 @@ XRESULT GothicAPI::SaveMenuSettings( const std::string& file ) {
     WritePrivateProfileStringA( "Display", "WindQuality", std::to_string( s.WindQuality ).c_str(), ini.c_str() );
     WritePrivateProfileStringA( "Display", "WindStrength", std::to_string( s.GlobalWindStrength ).c_str(), ini.c_str() );
     WritePrivateProfileStringA( "Display", "HeroAffectsObjects", std::to_string( s.HeroAffectsObjects ? TRUE : FALSE ).c_str(), ini.c_str() );
+    WritePrivateProfileStringA( "Shadows", "Quality", std::to_string( static_cast<int>(s.ShadowQuality) ).c_str(), ini.c_str() );
     WritePrivateProfileStringA( "Shadows", "ShadowMapSize", std::to_string( s.ShadowMapSize ).c_str(), ini.c_str() );
     WritePrivateProfileStringA( "Shadows", "ShadowSoftness", std::to_string( s.ShadowSoftness ).c_str(), ini.c_str() );
 
@@ -7390,8 +7497,6 @@ XRESULT GothicAPI::LoadMenuSettings( const std::string& file ) {
             s.EnableHDR = false;
         }
 
-        static XMFLOAT3 defaultLightDirection = XMFLOAT3( 1, 1, 1 );
-        s.EnableShadows = true;
         s.ShadowFilterMode = FeatureLevel10Compatibility
             ? GothicRendererSettings::E_ShadowFilterMode::SHADOW_FILTER_SIMPLE
             : GothicRendererSettings::E_ShadowFilterMode::SHADOW_FILTER_PCSS;
@@ -7400,8 +7505,16 @@ XRESULT GothicAPI::LoadMenuSettings( const std::string& file ) {
         else if ( s.ShadowMapSize <= 2048 ) s.ShadowMapSize = 2048;
         else if ( s.ShadowMapSize <= 4096 ) s.ShadowMapSize = 4096;
         else s.ShadowMapSize = 8192;
-        s.PointlightShadowMapSize = s.ShadowMapSize >= 4096 ? 256 : 128;
-        s.EnablePointlightShadows = GothicRendererSettings::EPointLightShadowMode::PLS_UPDATE_DYNAMIC;
+        const int storedShadowQuality = GetPrivateProfileIntA(
+            "Shadows", "Quality", -1, ini.c_str() );
+        if ( storedShadowQuality >= static_cast<int>(GothicRendererSettings::E_ShadowQuality::SHADOW_QUALITY_OFF)
+            && storedShadowQuality <= static_cast<int>(GothicRendererSettings::E_ShadowQuality::SHADOW_QUALITY_EXTREME) ) {
+            s.ShadowQuality = static_cast<GothicRendererSettings::E_ShadowQuality>( storedShadowQuality );
+        } else {
+            // Older INIs only stored the world shadow-map resolution.
+            s.ShadowQuality = GothicRendererSettings::ShadowQualityFromShadowMapSize( s.ShadowMapSize );
+        }
+        s.ApplyShadowQualitySettings();
         s.WorldShadowRangeScale = ds.WorldShadowRangeScale;
         s.NumShadowCascades = ds.NumShadowCascades;
         s.ShadowCascadePCFLimit = ds.ShadowCascadePCFLimit;

@@ -1,5 +1,6 @@
 #include "pch.h"
 #include <cmath>
+#include <algorithm>
 #include "WorldObjects.h"
 #include <cstdint>
 #include "GothicAPI.h"
@@ -7,6 +8,7 @@
 #include "BaseGraphicsEngine.h"
 #include "zCVob.h"
 #include "zCVobLight.h"
+#include "zCParticleFX.h"
 #include "zCMaterial.h"
 #include "zCTexture.h"
 #include "D3D11_Helpers.h"
@@ -40,6 +42,25 @@ namespace {
         const float lower = hashAt( cell );
         const float upper = hashAt( cell + 1u );
         return (lower + (upper - lower) * smoothFraction) * 2.0f - 1.0f;
+    }
+
+    bool IsRendererLightSourceActive( zCVobLight* light ) {
+        if ( !light || !light->IsEnabled() )
+            return false;
+
+        const float range = light->GetLightRange();
+        return std::isfinite( range ) && range > 0.0f;
+    }
+
+    bool IsRendererFlameVisualActive( const RendererLightFlameVisual& visual ) {
+        if ( !visual.Vob || !visual.Vob->GetShowVisual() )
+            return false;
+
+        if ( !visual.IsParticle )
+            return true;
+
+        zCParticleFX* particle = reinterpret_cast<zCParticleFX*>( visual.Vob->GetVisual() );
+        return particle && particle->GetFirstParticle() != nullptr;
     }
 }
 
@@ -106,12 +127,20 @@ bool VobLightInfo::IsEffectivelyEnabled() const {
             return false;
 
         if ( RendererLightSourceA || RendererLightSourceB ) {
-            const bool sourceAEnabled = RendererLightSourceA && RendererLightSourceA->IsEnabled();
-            const bool sourceBEnabled = RendererLightSourceB && RendererLightSourceB->IsEnabled();
+            const bool sourceAEnabled = IsRendererLightSourceActive( RendererLightSourceA );
+            const bool sourceBEnabled = IsRendererLightSourceActive( RendererLightSourceB );
             if ( !sourceAEnabled && !sourceBEnabled )
                 return false;
         } else if ( !RendererLightFlicker ) {
             // Keep a fixed replacement while a source light remains enabled.
+            return false;
+        }
+
+        if ( RendererLightFollowsFlameState
+            && !std::any_of( RendererLightFlameVisuals.begin(), RendererLightFlameVisuals.end(),
+                []( const RendererLightFlameVisual& visual ) {
+                    return IsRendererFlameVisualActive( visual );
+                } ) ) {
             return false;
         }
 

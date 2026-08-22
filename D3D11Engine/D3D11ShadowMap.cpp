@@ -1028,6 +1028,10 @@ XRESULT D3D11ShadowMap::DrawPointlightShadows( std::vector<VobLightInfo*>& light
     }
 
     auto& settings = Engine::GAPI->GetRendererState().RendererSettings;
+    if ( settings.EnablePointlightShadows <= 0 ) {
+        return XR_SUCCESS;
+    }
+
     // Shadow resources follow the same frame visibility that is already limited by VisualFXDrawRadius.
     auto releaseIfInvisible = []( VobLightInfo* info ) {
         if ( !info || !info->LightShadowBuffers )
@@ -1047,11 +1051,6 @@ XRESULT D3D11ShadowMap::DrawPointlightShadows( std::vector<VobLightInfo*>& light
     for ( const auto& rendererLight : Engine::GAPI->GetRendererPointLights() ) {
         releaseIfInvisible( rendererLight.get() );
     }
-    if ( settings.EnablePointlightShadows <= 0 ) {
-
-        return XR_SUCCESS;
-    }
-    
     auto _ = graphicsEngine->RecordGraphicsEvent( GE_NAME( "DrawPointlightShadows" ) );
 
     graphicsEngine->SetDefaultStates();
@@ -1627,7 +1626,8 @@ DS_ScreenQuadConstantBuffer D3D11ShadowMap::FillSunCSMConstantBuffer() const {
     scb.SQ_LightSize = std::clamp( settings.PCSSLightSize, 0.005f, 0.5f );
     scb.SQ_ShadowRuntimeParams = float4(
         settings.GetUsesTemporalReconstruction() ? 1.0f : 0.0f,
-        static_cast<float>( settings.GetShadowKernelQuality() ), 0.0f, 0.0f );
+        static_cast<float>( settings.GetShadowKernelQuality() ),
+        settings.EnableShadows ? 1.0f : 0.0f, 0.0f );
     WorldInfo* worldInfo = Engine::GAPI->GetLoadedWorldInfo();
     if ( worldInfo && worldInfo->BspTree ) {
         auto bspTree = worldInfo->BspTree;
@@ -1769,7 +1769,8 @@ XRESULT D3D11ShadowMap::DrawWorldLights()
     scb.SQ_LightSize = std::clamp( settings.PCSSLightSize, 0.005f, 0.5f );
     scb.SQ_ShadowRuntimeParams = float4(
         settings.GetUsesTemporalReconstruction() ? 1.0f : 0.0f,
-        static_cast<float>( settings.GetShadowKernelQuality() ), 0.0f, 0.0f );
+        static_cast<float>( settings.GetShadowKernelQuality() ),
+        settings.EnableShadows ? 1.0f : 0.0f, 0.0f );
     // Modify lightsettings when indoor
     if ( auto bspTree = worldInfo->BspTree )
         if ( bspTree->GetBspTreeMode() == zBSP_MODE_INDOOR ) {

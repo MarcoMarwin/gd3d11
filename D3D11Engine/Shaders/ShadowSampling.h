@@ -58,6 +58,11 @@ bool UseTemporalShadowReconstruction()
     return SQ_ShadowRuntimeParams.x > 0.5f;
 }
 
+bool UseRuntimeWorldShadows()
+{
+    return SQ_ShadowRuntimeParams.z > 0.5f;
+}
+
 int GetShadowKernelQuality()
 {
     return clamp((int)(SQ_ShadowRuntimeParams.y + 0.5f), 0, 2);

@@ -88,6 +88,9 @@ float3 VSPositionFromDepth( float depth, float2 vTexCoord )
 //--------------------------------------------------------------------------------------
 float PSMain( PS_INPUT Input ) : SV_TARGET
 {
+    if ( !UseRuntimeWorldShadows() )
+        return 1.0f;
+
     float2 uv = Input.vTexCoord;
 
     // Sample depth.  Reversed-Z: sky pixels have depth == 0 (no geometry written).

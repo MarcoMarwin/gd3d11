@@ -767,24 +767,6 @@ namespace
             OBJECT_DRAW_DISTANCE_UI_MIN, OBJECT_DRAW_DISTANCE_UI_MAX );
     }
 
-    int PointlightShadowSizeForWorldShadowSize( int worldShadowSize ) {
-        if ( worldShadowSize >= 4096 ) return 256;
-        return 128;
-    }
-
-    int NormalizeShadowMapSize( int value ) {
-        if ( value <= 1024 ) return 1024;
-        if ( value <= 2048 ) return 2048;
-        if ( value <= 4096 ) return 4096;
-        return 8192;
-    }
-
-    int NormalizePointlightShadowMapSize( int value ) {
-        if ( value <= 128 ) return 128;
-        if ( value <= 256 ) return 256;
-        return 512;
-    }
-
     bool UsesTemporalSharpeningBoost( const GothicRendererSettings& s ) {
         return s.AntiAliasingMode == GothicRendererSettings::E_AntiAliasingMode::AA_FSR3;
     }
@@ -808,7 +790,7 @@ namespace {
 }
 struct GraphicsPresetComparable {
     int textureMaxSize;
-    int ShadowMapSize;
+    int ShadowQuality;
     float ShadowSoftness;
     int AoMode;
     bool EnableDoF;
@@ -831,7 +813,7 @@ GraphicsPresetComparable MakeGraphicsPresetComparable(
     const GothicRendererSettings& s ) {
     return {
         s.textureMaxSize,
-        NormalizeShadowMapSize( s.ShadowMapSize ),
+        static_cast<int>(s.ShadowQuality),
         s.ShadowSoftness,
         static_cast<int>(s.AoMode),
         s.EnableDoF,
@@ -856,7 +838,7 @@ bool GraphicsPresetComparableEqual(
     const GraphicsPresetComparable& a,
     const GraphicsPresetComparable& b ) {
     return a.textureMaxSize == b.textureMaxSize
-        && a.ShadowMapSize == b.ShadowMapSize
+        && a.ShadowQuality == b.ShadowQuality
         && a.ShadowSoftness == b.ShadowSoftness
         && a.AoMode == b.AoMode
         && a.EnableDoF == b.EnableDoF
@@ -898,7 +880,7 @@ void ApplyGraphicsPresets( GothicRendererSettings& s, bool applyRuntimeUpdates =
 
     switch ( preset ) {
     case GothicRendererSettings::GRAPHICS_LOW:
-        s.ShadowMapSize = 1024;
+        s.ShadowQuality = GothicRendererSettings::E_ShadowQuality::SHADOW_QUALITY_LOW;
         s.AoMode = AOMode::AO_XEGTAO;
         s.EnableDoF = false;
         s.EnableDynamicClouds = false;
@@ -913,7 +895,7 @@ void ApplyGraphicsPresets( GothicRendererSettings& s, bool applyRuntimeUpdates =
         s.EnableGodRays = false;
         break;
     case GothicRendererSettings::GRAPHICS_MEDIUM:
-        s.ShadowMapSize = 2048;
+        s.ShadowQuality = GothicRendererSettings::E_ShadowQuality::SHADOW_QUALITY_MEDIUM;
         s.AoMode = AOMode::AO_XEGTAO;
         s.EnableDoF = true;
         s.EnableDynamicClouds = false;
@@ -927,7 +909,7 @@ void ApplyGraphicsPresets( GothicRendererSettings& s, bool applyRuntimeUpdates =
         s.HeroAffectsObjects = true;
         break;
     case GothicRendererSettings::GRAPHICS_HIGH:
-        s.ShadowMapSize = 4096;
+        s.ShadowQuality = GothicRendererSettings::E_ShadowQuality::SHADOW_QUALITY_HIGH;
         s.AoMode = AOMode::AO_XEGTAO;
         s.EnableDoF = true;
         s.EnableDynamicClouds = true;
@@ -941,7 +923,7 @@ void ApplyGraphicsPresets( GothicRendererSettings& s, bool applyRuntimeUpdates =
         s.HeroAffectsObjects = true;
         break;
     case GothicRendererSettings::GRAPHICS_VERY_HIGH:
-        s.ShadowMapSize = 8192;
+        s.ShadowQuality = GothicRendererSettings::E_ShadowQuality::SHADOW_QUALITY_EXTREME;
         s.AoMode = AOMode::AO_XEGTAO;
         s.EnableDoF = true;
         s.EnableDynamicClouds = true;
@@ -964,9 +946,7 @@ void ApplyGraphicsPresets( GothicRendererSettings& s, bool applyRuntimeUpdates =
     if ( !s.EnableDoF ) s.DoFBokehRadius = 0.0f;
     if ( IsWindEffectsControlVisible() && s.WindQuality == GothicRendererSettings::EWindQuality::WIND_QUALITY_NONE ) s.GlobalWindStrength = 0.0f;
 
-    s.ShadowMapSize = NormalizeShadowMapSize( s.ShadowMapSize );
-    s.PointlightShadowMapSize = PointlightShadowSizeForWorldShadowSize(
-        s.ShadowMapSize );
+    s.ApplyShadowQualitySettings();
 
     if ( FeatureLevel10Compatibility ) {
         // Preset dependency stays inside the visible AO control; display/AA settings
@@ -1014,6 +994,7 @@ namespace
 {
     void FixupSettings( GothicRendererSettings& s ) {
         s.FixupUpscalingSettings();
+        s.ApplyShadowQualitySettings();
         const int presetValue = static_cast<int>(s.GraphicsPreset);
         if ( presetValue == 1 ) {
             s.GraphicsPreset = GothicRendererSettings::GRAPHICS_LOW;
@@ -1025,16 +1006,9 @@ namespace
             static_cast<int>(GothicRendererSettings::D3D11_LANGUAGE_ENGLISH),
             static_cast<int>(GothicRendererSettings::D3D11_LANGUAGE_GERMAN) ));
         s.LimitLightIntesity = true;
-        s.EnableShadows = true;
         s.ShadowFilterMode = FeatureLevel10Compatibility
             ? GothicRendererSettings::E_ShadowFilterMode::SHADOW_FILTER_SIMPLE
             : GothicRendererSettings::E_ShadowFilterMode::SHADOW_FILTER_PCSS;
-        s.EnablePointlightShadows = GothicRendererSettings::EPointLightShadowMode::PLS_UPDATE_DYNAMIC;
-        s.ShadowMapSize = NormalizeShadowMapSize( s.ShadowMapSize );
-        // Pointlight resolution is intentionally derived from the single
-        // visible Shadow Quality control: Low/Medium=128, High/Extreme=256.
-        s.PointlightShadowMapSize = PointlightShadowSizeForWorldShadowSize(
-            s.ShadowMapSize );
         s.EnableWaterAnimation = true;
         s.EnableSSS = true;
         s.SSSIntensity = 1.0f;
@@ -1464,19 +1438,19 @@ void ImGuiShim::RenderSettingsWindow()
             }
             ImGui::SetItemTooltip( "%s", Tr( "Higher settings keep textures sharper and more detailed.", u8"H\u00F6here Werte zeigen Texturen sch\u00E4rfer und detailreicher." ) );
 
-            const std::array<std::pair<const char*, int>, 4> shadowMapSizes = {{
-                {Tr( "Low", u8"Niedrig" ), 1024},
-                {Tr( "Medium", u8"Mittel" ), 2048},
-                {Tr( "High", u8"Hoch" ), 4096},
-                {Tr( "Extreme", u8"Extrem" ), 8192},
+            const std::array<std::pair<const char*, GothicRendererSettings::E_ShadowQuality>, 6> shadowQualities = {{
+                {Tr( "Off", u8"Aus" ), GothicRendererSettings::E_ShadowQuality::SHADOW_QUALITY_OFF},
+                {Tr( "Very Low", u8"Sehr niedrig" ), GothicRendererSettings::E_ShadowQuality::SHADOW_QUALITY_VERY_LOW},
+                {Tr( "Low", u8"Niedrig" ), GothicRendererSettings::E_ShadowQuality::SHADOW_QUALITY_LOW},
+                {Tr( "Medium", u8"Mittel" ), GothicRendererSettings::E_ShadowQuality::SHADOW_QUALITY_MEDIUM},
+                {Tr( "High", u8"Hoch" ), GothicRendererSettings::E_ShadowQuality::SHADOW_QUALITY_HIGH},
+                {Tr( "Extreme", u8"Extrem" ), GothicRendererSettings::E_ShadowQuality::SHADOW_QUALITY_EXTREME},
             }};
 
-            settings.EnableShadows = true;
-            settings.ShadowMapSize = NormalizeShadowMapSize( settings.ShadowMapSize );
-            settings.PointlightShadowMapSize = NormalizePointlightShadowMapSize( settings.PointlightShadowMapSize );
+            settings.ApplyShadowQualitySettings();
             ImText( Tr( "Shadow Quality", u8"Schattenqualit\u00E4t" ), buttonWidth ); ImGui::SameLine();
-            if ( ImComboBoxC( "##ShadowQuality", shadowMapSizes, &settings.ShadowMapSize, [&settings]{
-                settings.PointlightShadowMapSize = PointlightShadowSizeForWorldShadowSize( settings.ShadowMapSize );
+            if ( ImComboBoxC( "##ShadowQuality", shadowQualities, &settings.ShadowQuality, [&settings]{
+                settings.ApplyShadowQualitySettings();
             } ) ) {
                 ImGui::EndCombo();
             }

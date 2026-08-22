@@ -235,28 +235,31 @@ FORWARD_PLUS_PS_OUTPUT PSMain( PS_INPUT Input )
 	// CSM shadow source is toggleable in Forward+: precomputed screen-space mask or direct CSM.
 	float shadow = vertLighting;
 #if SHD_ENABLE
-	if (AC_SunVisibility > 0.001f || AC_MoonVisibility > 0.001f)
+	if (UseRuntimeWorldShadows())
 	{
-		#if FP_USE_SHADOW_MASK && ALPHATEST != 1
-			float2 screenUV = Input.vPosition.xy / FP_ViewportSize;
-			shadow = FP_ShadowMask.SampleLevel( SS_Linear, screenUV, 0 ).r;
-		#else
+		if (AC_SunVisibility > 0.001f || AC_MoonVisibility > 0.001f)
+		{
+			#if FP_USE_SHADOW_MASK && ALPHATEST != 1
+				float2 screenUV = Input.vPosition.xy / FP_ViewportSize;
+				shadow = FP_ShadowMask.SampleLevel( SS_Linear, screenUV, 0 ).r;
+			#else
+				float3 wsNormal = normalize(mul(float4(nrm, 0.0f), SQ_InvView).xyz);
+				float3 wsLightDirection = normalize(mul(float4(SQ_LightDirectionVS, 0.0f), SQ_InvView).xyz);
+				int cascadeIndex = GetPrimaryCascadeIndex(wsPosition);
+				float texelWorldSize = GetCascadeWorldTexelSize(cascadeIndex);
+				float3 biasedWsPosition = ApplyReceiverNormalBias(
+					wsPosition, wsNormal, wsLightDirection, texelWorldSize, vegetationReceiverMask);
+				shadow = ComputeCascadedShadowValueSoft(
+					biasedWsPosition, vsPosition.z, vertLighting, 0.0f, Input.vPosition.xy, cascadeIndex);
+			#endif
+		} else {
 			float3 wsNormal = normalize(mul(float4(nrm, 0.0f), SQ_InvView).xyz);
-			float3 wsLightDirection = normalize(mul(float4(SQ_LightDirectionVS, 0.0f), SQ_InvView).xyz);
-			int cascadeIndex = GetPrimaryCascadeIndex(wsPosition);
-			float texelWorldSize = GetCascadeWorldTexelSize(cascadeIndex);
-			float3 biasedWsPosition = ApplyReceiverNormalBias(
-				wsPosition, wsNormal, wsLightDirection, texelWorldSize, vegetationReceiverMask);
-			shadow = ComputeCascadedShadowValueSoft(
-				biasedWsPosition, vsPosition.z, vertLighting, 0.0f, Input.vPosition.xy, cascadeIndex);
-		#endif
-	} else {
-		float3 wsNormal = normalize(mul(float4(nrm, 0.0f), SQ_InvView).xyz);
-        // Night-time sky ambient:
-        // saturate(wsNormal.y) restricts the value to [0, 1].
-        // Facing up = 1, Facing sides/down = 0.
-        shadow = saturate(wsNormal.y) * vertLighting;
-    }
+            // Night-time sky ambient:
+            // saturate(wsNormal.y) restricts the value to [0, 1].
+            // Facing up = 1, Facing sides/down = 0.
+            shadow = saturate(wsNormal.y) * vertLighting;
+		}
+	}
 #endif
 
 	float3 litPixel = FP_ComputeSunLighting(wsPosition, vsPosition, nrm, color.rgb, specIntensity, specPower, shadow, vertLighting, twoSidedBacklitMaterial, vegetationBacklitMask);

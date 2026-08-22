@@ -471,7 +471,7 @@ public:
     XMVECTOR XM_CALLCONV UnprojectCursorXM();
 
     /** Traces the worldmesh and returns the hit-location */
-    bool TraceWorldMesh( const XMFLOAT3& origin, const XMFLOAT3& dir, XMFLOAT3& hit, std::string* hitTextureName = nullptr, XMFLOAT3* hitTriangle = nullptr, MeshInfo** hitMesh = nullptr, zCMaterial** hitMaterial = nullptr, bool* hitTriangleIndoor = nullptr );
+    bool TraceWorldMesh( const XMFLOAT3& origin, const XMFLOAT3& dir, XMFLOAT3& hit, std::string* hitTextureName = nullptr, XMFLOAT3* hitTriangle = nullptr, MeshInfo** hitMesh = nullptr, zCMaterial** hitMaterial = nullptr, bool* hitTriangleIndoor = nullptr, bool useSectionBVH = false );
 
     /** Traces vobs with static mesh visual */
     VobInfo* TraceStaticMeshVobsBB( const XMFLOAT3& origin, const XMFLOAT3& dir, XMFLOAT3& hit, zCMaterial** hitMaterial = nullptr );
