@@ -1588,10 +1588,14 @@ bool D3D11GraphicsEngine::PrepareGpuVobCulling(
     // D3D11 forbids combining CPU access flags with structured/raw misc flags,
     // so GPU culling receives a separate DEFAULT structured copy.
     const UINT inputBytes = static_cast<UINT>( inputInstanceBuffer->GetSizeInBytes() );
-    if ( inputBytes == 0
-        || inputBytes % sizeof( VobInstanceInfo ) != 0
-        || !inputInstanceBuffer->GetVertexBuffer().Get() ) {
-        return failGpuVobPath( "input instance buffer unavailable" );
+    if ( inputBytes == 0 ) {
+        return failGpuVobPath( "input instance buffer has zero capacity" );
+    }
+    if ( inputBytes % sizeof( VobInstanceInfo ) != 0 ) {
+        return failGpuVobPath( "input instance buffer capacity is not stride-aligned" );
+    }
+    if ( !inputInstanceBuffer->GetVertexBuffer().Get() ) {
+        return failGpuVobPath( "input instance buffer has no D3D11 resource" );
     }
 
     if ( !cullInputBuffer
@@ -3446,6 +3450,26 @@ D3D11VertexBuffer* D3D11GraphicsEngine::AcquireFrameInstancingBuffer( FrameInsta
         return nullptr;
     }
 
+    // Main- and shadow-VOB instance buffers are also copied into structured
+    // GPU-culling resources. Their capacity must therefore remain a multiple
+    // of the instance stride; the old 4096-byte growth rule could produce a
+    // valid dynamic VB whose byte width was invalid for a structured copy.
+    constexpr UINT InstanceStride = static_cast<UINT>( sizeof( VobInstanceInfo ) );
+    const auto alignInstanceBytes = [&InstanceStride]( UINT bytes ) {
+        const UINT remainder = bytes % InstanceStride;
+        if ( remainder == 0 ) {
+            return bytes;
+        }
+        const UINT padding = InstanceStride - remainder;
+        return bytes > (std::numeric_limits<UINT>::max)() - padding
+            ? 0u
+            : bytes + padding;
+    };
+    sizeInBytes = alignInstanceBytes( sizeInBytes );
+    if ( sizeInBytes == 0 ) {
+        return nullptr;
+    }
+
     if ( pool.NextBuffer >= pool.Buffers.size() ) {
         pool.Buffers.push_back( std::make_unique<D3D11VertexBuffer>() );
     }
@@ -3460,8 +3484,11 @@ D3D11VertexBuffer* D3D11GraphicsEngine::AcquireFrameInstancingBuffer( FrameInsta
     const UINT grownCapacity = currentCapacity > (std::numeric_limits<UINT>::max)() - growthStep
         ? sizeInBytes
         : currentCapacity + growthStep;
-    const UINT allocationSize = std::max( sizeInBytes, grownCapacity );
-    if ( currentCapacity < sizeInBytes ) {
+    const UINT allocationSize = alignInstanceBytes( std::max( sizeInBytes, grownCapacity ) );
+    if ( allocationSize == 0 ) {
+        return nullptr;
+    }
+    if ( currentCapacity < sizeInBytes || currentCapacity % InstanceStride != 0 ) {
         if ( buffer->Init( nullptr, allocationSize,
             D3D11VertexBuffer::B_VERTEXBUFFER,
             D3D11VertexBuffer::U_DYNAMIC,
