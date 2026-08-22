@@ -26,6 +26,7 @@
 #define DIRECTINPUT_VERSION 0x0700
 #include <charconv>
 #include <cstdint>
+#include <chrono>
 #include <numeric>
 #include <cmath>
 #include <dinput.h>
@@ -81,6 +82,25 @@ auto CompareGhostDistance = []( const TransparencyVobInfo& a, const Transparency
 extern float vobAnimation_WindStrength;
 
 namespace {
+    class RendererLoadTimer final {
+    public:
+        explicit RendererLoadTimer( const char* label )
+            : Label( label ), Start( std::chrono::steady_clock::now() ) {}
+
+        ~RendererLoadTimer() {
+            const auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
+                std::chrono::steady_clock::now() - Start ).count();
+            LogInfo() << "[RendererLoadTiming] " << Label << ": " << elapsed << " ms";
+        }
+
+    private:
+        const char* Label;
+        std::chrono::steady_clock::time_point Start;
+    };
+
+    std::chrono::steady_clock::time_point s_rendererWorldLoadStart;
+    bool s_rendererWorldLoadTimingActive = false;
+
     struct ParticleTextureReplacement {
         const char* darkName;
         const char* brightName;
@@ -1645,6 +1665,8 @@ void GothicAPI::OnGeometryLoaded( zCBspTree* tree ) {
         return;
     }
 
+    RendererLoadTimer loadTimer( "OnGeometryLoaded" );
+
     LogInfo() << "World loaded, getting Levelmesh now!";
     LogInfo() << " - Found " << tree->GetNumPolys() << " polygons";
     LogInfo() << "Extracting world";
@@ -1686,6 +1708,10 @@ void GothicAPI::OnLoadWorld( const std::string& levelName, int loadMode ) {
         LogError() << "World load skipped because renderer world state is unavailable.";
         return;
     }
+
+    s_rendererWorldLoadStart = std::chrono::steady_clock::now();
+    s_rendererWorldLoadTimingActive = true;
+    LogInfo() << "[RendererLoadTiming] World load start";
 
     // Clear every renderer-owned reference while the old Gothic world is
     // still valid. MainWorld is nulled by ResetVobs; waiting until DisposeVobs
@@ -1734,6 +1760,8 @@ void GothicAPI::OnWorldLoaded() {
         return;
     }
 
+    RendererLoadTimer loadTimer( "OnWorldLoaded" );
+
     D3D11GraphicsEngine* graphicsEngine = static_cast<D3D11GraphicsEngine*>(Engine::GraphicsEngine);
     if ( graphicsEngine && graphicsEngine->GetPfxRenderer() ) {
         graphicsEngine->GetPfxRenderer()->ResetHDRAdaptation();
@@ -1756,12 +1784,18 @@ void GothicAPI::OnWorldLoaded() {
 
     // Get all VOBs
     zCTree<zCVob>* vobTree = loadedWorld->GetGlobalVobTree();
-    if ( vobTree ) {
-        TraverseVobTree( vobTree );
+    {
+        RendererLoadTimer vobTimer( "OnWorldLoaded::TraverseVobTree" );
+        if ( vobTree ) {
+            TraverseVobTree( vobTree );
+        }
     }
 
     // Build instancing cache for the static vobs for each section
-    BuildStaticMeshInstancingCache();
+    {
+        RendererLoadTimer instancingTimer( "OnWorldLoaded::BuildStaticMeshInstancingCache" );
+        BuildStaticMeshInstancingCache();
+    }
 
     // Build vob info cache for the bsp-leafs
     BuildBspVobMapCache();
@@ -1813,6 +1847,13 @@ s_puddleReleaseStartAccumulation = 0.0f;
 
     if ( graphicsEngine ) {
         graphicsEngine->SyncGothicResolutionState( true );
+    }
+
+    if ( s_rendererWorldLoadTimingActive ) {
+        const auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
+            std::chrono::steady_clock::now() - s_rendererWorldLoadStart ).count();
+        LogInfo() << "[RendererLoadTiming] World load callback span: " << elapsed << " ms";
+        s_rendererWorldLoadTimingActive = false;
     }
     _canClearVobsByVisual = false;
 }
@@ -5138,6 +5179,7 @@ void GothicAPI::CollectVisibleVobs(
 }
 
 void GothicAPI::BuildWorldSectionBVH() {
+    RendererLoadTimer loadTimer( "BuildWorldSectionBVH" );
     ClearWorldSectionBVH();
 
     std::vector<WorldSectionBVHBuildPrimitive> primitives;
@@ -5642,6 +5684,7 @@ void GothicAPI::ConfigurePointlightShadowSource( VobLightInfo* lightInfo ) const
 }
 
 void GothicAPI::ConfigureCityWindows() {
+    RendererLoadTimer loadTimer( "ConfigureCityWindows" );
     ++CityWindowConfigurationGeneration;
 
     // Initial world setup calls this immediately before publishing the renderer
@@ -5655,27 +5698,33 @@ void GothicAPI::ConfigureCityWindows() {
 
     std::vector<CityWindowVolume> windows;
     windows.reserve( 64 );
-    for ( const auto& vobEntry : VobMap ) {
-        VobInfo* info = vobEntry.second;
-        if ( !info )
-            continue;
+    {
+        RendererLoadTimer discoveryTimer( "ConfigureCityWindows::Discover" );
+        for ( const auto& vobEntry : VobMap ) {
+            VobInfo* info = vobEntry.second;
+            if ( !info )
+                continue;
 
-        info->CityWindowFacingInitialized = false;
-        info->CityWindowTransparencyValid = true;
-        info->CityWindowValidationInitialized = false;
-        CityWindowVolume volume;
-        if ( BuildCityWindowVolume( info, volume ) ) {
-            info->CityWindowCenter = volume.Center;
-            info->CityWindowFrontNormal = volume.FrontNormal;
-            info->CityWindowFacingInitialized = volume.HasReliableFrontNormal;
-            windows.push_back( volume );
+            info->CityWindowFacingInitialized = false;
+            info->CityWindowTransparencyValid = true;
+            info->CityWindowValidationInitialized = false;
+            CityWindowVolume volume;
+            if ( BuildCityWindowVolume( info, volume ) ) {
+                info->CityWindowCenter = volume.Center;
+                info->CityWindowFrontNormal = volume.FrontNormal;
+                info->CityWindowFacingInitialized = volume.HasReliableFrontNormal;
+                windows.push_back( volume );
+            }
         }
     }
 
-    for ( const CityWindowVolume& window : windows ) {
-        const bool valid = ValidateCityWindowTransparency( this, window );
-        window.Info->CityWindowTransparencyValid = valid;
-        window.Info->CityWindowValidationInitialized = true;
+    {
+        RendererLoadTimer validationTimer( "ConfigureCityWindows::Validate" );
+        for ( const CityWindowVolume& window : windows ) {
+            const bool valid = ValidateCityWindowTransparency( this, window );
+            window.Info->CityWindowTransparencyValid = valid;
+            window.Info->CityWindowValidationInitialized = true;
+        }
     }
 
     size_t validCount = 0;
@@ -5686,9 +5735,11 @@ void GothicAPI::ConfigureCityWindows() {
     }
     LogInfo() << "City window validation: " << validCount << " transparent, "
         << fallbackCount << " opaque fallback";
+    LogInfo() << "[RendererLoadTiming] City window count: " << windows.size();
 }
 
 void GothicAPI::ConfigureAllPointlightShadowSources() {
+    RendererLoadTimer loadTimer( "ConfigureAllPointlightShadowSources" );
     constexpr float LINK_RADIUS = 150.0f;
     constexpr float LINK_RADIUS_SQ = LINK_RADIUS * LINK_RADIUS;
     constexpr float PARTICLE_FLAME_HEIGHT_OFFSET = 25.0f;
@@ -5797,6 +5848,8 @@ void GothicAPI::ConfigureAllPointlightShadowSources() {
         zCVob* Vob = nullptr;
         XMFLOAT3 Center = {};
     };
+    size_t fireplaceTraceCount = 0;
+    std::chrono::steady_clock::duration fireplaceTraceDuration{};
     std::vector<FireplaceVisual> fireplaceVisuals;
     for ( const auto& vobEntry : VobMap ) {
         VobInfo* vobInfo = vobEntry.second;
@@ -5815,6 +5868,7 @@ void GothicAPI::ConfigureAllPointlightShadowSources() {
 
     struct FlameVisual {
         zCVob* Vob = nullptr;
+        XMFLOAT3 Position = {};
         XMFLOAT3 BoundsMin = {};
         XMFLOAT3 BoundsMax = {};
         XMFLOAT3 Center = {};
@@ -5849,6 +5903,7 @@ void GothicAPI::ConfigureAllPointlightShadowSources() {
 
         FlameVisual flame;
         flame.Vob = flameVob;
+        XMStoreFloat3( &flame.Position, flameVob->GetPositionWorldXM() );
         const zTBBox3D bbox = flameVob->GetBBox();
         flame.BoundsMin = bbox.Min;
         flame.BoundsMax = bbox.Max;
@@ -5924,7 +5979,7 @@ void GothicAPI::ConfigureAllPointlightShadowSources() {
         float Size = 1.0f;
         float HeightOffset = 0.0f;
         size_t FlameCount = 0;
-        std::vector<XMFLOAT3> Centers;
+        std::vector<XMFLOAT3> Positions;
         std::vector<zCVob*> Vobs;
     };
     std::vector<ResolvedFlameGroup> resolvedFlames;
@@ -5938,7 +5993,7 @@ void GothicAPI::ConfigureAllPointlightShadowSources() {
         XMFLOAT3 boundsMin( FLT_MAX, FLT_MAX, FLT_MAX );
         XMFLOAT3 boundsMax( -FLT_MAX, -FLT_MAX, -FLT_MAX );
         auto includeFlame = [&]( const FlameVisual& flame ) {
-            resolved.Centers.push_back( flame.Center );
+            resolved.Positions.push_back( flame.Position );
             resolved.Vobs.push_back( flame.Vob );
             resolved.HasNearbyFireplace = resolved.HasNearbyFireplace || flame.HasNearbyFireplace;
             boundsMin.x = std::min( boundsMin.x, flame.BoundsMin.x );
@@ -5970,7 +6025,8 @@ void GothicAPI::ConfigureAllPointlightShadowSources() {
             resolved.Size = totalSize / static_cast<float>( resolved.FlameCount );
         }
 
-        // A single TGA/PFX pair represents one visible flame.
+        // A single TGA/PFX pair represents one visible flame, not a
+        // multi-flame group.
         if ( !resolved.IsMultiFlame ) {
             if ( group.Particles.size() == 1 ) {
                 resolved.Size = group.Particles.front().Size;
@@ -5999,6 +6055,8 @@ void GothicAPI::ConfigureAllPointlightShadowSources() {
     };
 
     auto traceFireplaceFlameObstacle = [&]( const ResolvedFlameGroup& flame ) {
+        const auto traceStart = std::chrono::steady_clock::now();
+        ++fireplaceTraceCount;
         constexpr float TRACE_CLEARANCE = 3.0f;
         const XMFLOAT3 origin = flame.Anchor;
         const XMFLOAT3 direction( 0.0f, 1.0f, 0.0f );
@@ -6071,9 +6129,12 @@ void GothicAPI::ConfigureAllPointlightShadowSources() {
         }
 
         if ( closestHit < FIREPLACE_FLAME_HEIGHT_OFFSET ) {
-            return std::clamp( closestHit - TRACE_CLEARANCE, 0.0f,
+            const float result = std::clamp( closestHit - TRACE_CLEARANCE, 0.0f,
                 FIREPLACE_FLAME_HEIGHT_OFFSET );
+            fireplaceTraceDuration += std::chrono::steady_clock::now() - traceStart;
+            return result;
         }
+        fireplaceTraceDuration += std::chrono::steady_clock::now() - traceStart;
         return FIREPLACE_FLAME_HEIGHT_OFFSET;
     };
 
@@ -6099,69 +6160,75 @@ void GothicAPI::ConfigureAllPointlightShadowSources() {
     };
     std::vector<OilLampAnchor> oilLampAnchors;
 
-    for ( const auto& vobEntry : VobMap ) {
-        VobInfo* vobInfo = vobEntry.second;
-        if ( !vobInfo )
-            continue;
+    {
+        RendererLoadTimer oilLampDiscoveryTimer( "ConfigureAllPointlightShadowSources::OilLampDiscovery" );
+        for ( const auto& vobEntry : VobMap ) {
+            VobInfo* vobInfo = vobEntry.second;
+            if ( !vobInfo )
+                continue;
 
-        vobInfo->OilLampEmissionStaticLight = nullptr;
-        vobInfo->OilLampEmissionDynamicLight = nullptr;
-        vobInfo->OilLampEmissionColor = 0u;
+            vobInfo->OilLampEmissionStaticLight = nullptr;
+            vobInfo->OilLampEmissionDynamicLight = nullptr;
+            vobInfo->OilLampEmissionColor = 0u;
 
-        if ( !vobInfo->Vob || !vobInfo->Vob->GetShowVisual() || hasVisualFXAncestor( vobInfo->Vob ) )
-            continue;
+            if ( !vobInfo->Vob || !vobInfo->Vob->GetShowVisual() || hasVisualFXAncestor( vobInfo->Vob ) )
+                continue;
 
-        std::string identity;
-        if ( vobInfo->VisualInfo )
-            identity += vobInfo->VisualInfo->VisualName;
-        if ( zCVisual* visual = vobInfo->Vob->GetVisual() ) {
+            std::string identity;
+            if ( vobInfo->VisualInfo )
+                identity += vobInfo->VisualInfo->VisualName;
+            if ( zCVisual* visual = vobInfo->Vob->GetVisual() ) {
+                identity += " ";
+                if ( const char* objectName = visual->GetObjectName() )
+                    identity += objectName;
+            }
             identity += " ";
-            if ( const char* objectName = visual->GetObjectName() )
-                identity += objectName;
+            identity += vobInfo->Vob->GetName();
+            if ( !IsOilLampShadowAnchorName( std::move( identity ) ) )
+                continue;
+
+            const zTBBox3D bbox = vobInfo->Vob->GetBBox();
+            XMFLOAT3 midpoint;
+            XMStoreFloat3( &midpoint, 0.5f * (XMLoadFloat3( &bbox.Min ) + XMLoadFloat3( &bbox.Max )) );
+
+            OilLampAnchor anchor;
+            anchor.Vob = vobInfo->Vob;
+            anchor.Info = vobInfo;
+            anchor.Position = midpoint;
+            anchor.ShadowAnchor = midpoint;
+            anchor.ShadowAnchor.y += 50.0f;
+            anchor.NearestStaticLight = INVALID_INDEX;
+            anchor.NearestDynamicLight = INVALID_INDEX;
+            oilLampAnchors.push_back( anchor );
         }
-        identity += " ";
-        identity += vobInfo->Vob->GetName();
-        if ( !IsOilLampShadowAnchorName( std::move( identity ) ) )
-            continue;
-
-        const zTBBox3D bbox = vobInfo->Vob->GetBBox();
-        XMFLOAT3 midpoint;
-        XMStoreFloat3( &midpoint, 0.5f * (XMLoadFloat3( &bbox.Min ) + XMLoadFloat3( &bbox.Max )) );
-
-        OilLampAnchor anchor;
-        anchor.Vob = vobInfo->Vob;
-        anchor.Info = vobInfo;
-        anchor.Position = midpoint;
-        anchor.ShadowAnchor = midpoint;
-        anchor.ShadowAnchor.y += 50.0f;
-        anchor.NearestStaticLight = INVALID_INDEX;
-        anchor.NearestDynamicLight = INVALID_INDEX;
-        oilLampAnchors.push_back( anchor );
     }
 
     // Emission links deliberately remain independent from exclusive shadow
     // anchor ownership. They may use the nearest static and dynamic lights even
     // when either light is geometrically owned by another visible fixture.
-    for ( size_t oilLampIndex = 0; oilLampIndex < oilLampAnchors.size(); ++oilLampIndex ) {
-        OilLampAnchor& oilLamp = oilLampAnchors[oilLampIndex];
-        for ( int staticKind = 0; staticKind < 2; ++staticKind ) {
-            size_t bestLight = INVALID_INDEX;
-            float bestDistanceSq = LINK_RADIUS_SQ;
-            for ( size_t lightIndex = 0; lightIndex < lights.size(); ++lightIndex ) {
-                if ( static_cast<int>(lights[lightIndex].Info->Vob->IsStatic()) != staticKind )
-                    continue;
+    {
+        RendererLoadTimer oilLampLinkTimer( "ConfigureAllPointlightShadowSources::OilLampLightMatching" );
+        for ( size_t oilLampIndex = 0; oilLampIndex < oilLampAnchors.size(); ++oilLampIndex ) {
+            OilLampAnchor& oilLamp = oilLampAnchors[oilLampIndex];
+            for ( int staticKind = 0; staticKind < 2; ++staticKind ) {
+                size_t bestLight = INVALID_INDEX;
+                float bestDistanceSq = LINK_RADIUS_SQ;
+                for ( size_t lightIndex = 0; lightIndex < lights.size(); ++lightIndex ) {
+                    if ( static_cast<int>(lights[lightIndex].Info->Vob->IsStatic()) != staticKind )
+                        continue;
 
-                const float candidateDistanceSq = distanceSq( lights[lightIndex].Position, oilLamp.Position );
-                if ( candidateDistanceSq <= bestDistanceSq ) {
-                    bestDistanceSq = candidateDistanceSq;
-                    bestLight = lightIndex;
+                    const float candidateDistanceSq = distanceSq( lights[lightIndex].Position, oilLamp.Position );
+                    if ( candidateDistanceSq <= bestDistanceSq ) {
+                        bestDistanceSq = candidateDistanceSq;
+                        bestLight = lightIndex;
+                    }
                 }
-            }
-            if ( bestLight != INVALID_INDEX ) {
-                if ( staticKind != 0 ) {
-                    oilLamp.NearestStaticLight = bestLight;
-                } else {
-                    oilLamp.NearestDynamicLight = bestLight;
+                if ( bestLight != INVALID_INDEX ) {
+                    if ( staticKind != 0 ) {
+                        oilLamp.NearestStaticLight = bestLight;
+                    } else {
+                        oilLamp.NearestDynamicLight = bestLight;
+                    }
                 }
             }
         }
@@ -6191,12 +6258,12 @@ void GothicAPI::ConfigureAllPointlightShadowSources() {
     for ( size_t flameIndex = 0; flameIndex < resolvedFlames.size(); ++flameIndex ) {
         const ResolvedFlameGroup& flame = resolvedFlames[flameIndex];
         if ( flame.IsMultiFlame ) {
-            // Use member centers for source ownership; the replacement uses
-            // the group's union-box center.
-            for ( const XMFLOAT3& center : flame.Centers ) {
+            // Match the original multi-flame source selection by using the
+            // actual member VOB positions, not the union bounding-box center.
+            for ( const XMFLOAT3& position : flame.Positions ) {
                 visualAnchors.push_back( {
                     VisualAnchorKind::MultiFlame, flameIndex,
-                    flame.Parent, nullptr, center } );
+                    flame.Parent, nullptr, position } );
             }
         } else {
             visualAnchors.push_back( {
@@ -6327,40 +6394,46 @@ void GothicAPI::ConfigureAllPointlightShadowSources() {
             0.70f, 1.15f );
     };
 
+    size_t oilLampReplacementCount = 0;
+
     // Resolve oil-lamp sources before generic flame links.
-    for ( OilLampAnchor& oilLamp : oilLampAnchors ) {
-        const size_t staticIndex = oilLamp.NearestStaticLight;
-        const size_t dynamicIndex = oilLamp.NearestDynamicLight;
-        const bool hasStatic = staticIndex != INVALID_INDEX;
-        const bool hasDynamic = dynamicIndex != INVALID_INDEX;
-        // Static-only lamps keep the authored light.
-        if ( !hasDynamic )
-            continue;
+    {
+        RendererLoadTimer oilLampLightTimer( "ConfigureAllPointlightShadowSources::OilLampLightCreation" );
+        for ( OilLampAnchor& oilLamp : oilLampAnchors ) {
+            const size_t staticIndex = oilLamp.NearestStaticLight;
+            const size_t dynamicIndex = oilLamp.NearestDynamicLight;
+            const bool hasStatic = staticIndex != INVALID_INDEX;
+            const bool hasDynamic = dynamicIndex != INVALID_INDEX;
+            // Static-only lamps keep the authored light.
+            if ( !hasDynamic )
+                continue;
 
-        zCVobLight* staticLight = hasStatic ? lights[staticIndex].Info->Vob : nullptr;
-        zCVobLight* dynamicLight = hasDynamic ? lights[dynamicIndex].Info->Vob : nullptr;
-        zCVobLight* sourceA = staticLight ? staticLight : dynamicLight;
-        zCVobLight* sourceB = staticLight ? dynamicLight : nullptr;
-        const DWORD staticColor = staticLight
-            ? lights[staticIndex].Info->StableLightColor : 0u;
-        const DWORD dynamicColor = dynamicLight
-            ? lights[dynamicIndex].Info->StableLightColor : 0u;
-        DWORD stableColor = staticLight && dynamicLight
-            ? MixOilLampEmissionColors( staticColor, dynamicColor )
-            : (sourceA == staticLight ? staticColor : dynamicColor);
-        const float staticRange = hasStatic
-            ? getOriginalLightRange( lights[staticIndex] ) : 0.0f;
-        const float dynamicRange = hasDynamic
-            ? getOriginalLightRange( lights[dynamicIndex] ) : 0.0f;
-        const float stableRange = std::max( staticRange, dynamicRange );
+            zCVobLight* staticLight = hasStatic ? lights[staticIndex].Info->Vob : nullptr;
+            zCVobLight* dynamicLight = hasDynamic ? lights[dynamicIndex].Info->Vob : nullptr;
+            zCVobLight* sourceA = staticLight ? staticLight : dynamicLight;
+            zCVobLight* sourceB = staticLight ? dynamicLight : nullptr;
+            const DWORD staticColor = staticLight
+                ? lights[staticIndex].Info->StableLightColor : 0u;
+            const DWORD dynamicColor = dynamicLight
+                ? lights[dynamicIndex].Info->StableLightColor : 0u;
+            DWORD stableColor = staticLight && dynamicLight
+                ? MixOilLampEmissionColors( staticColor, dynamicColor )
+                : (sourceA == staticLight ? staticColor : dynamicColor);
+            const float staticRange = hasStatic
+                ? getOriginalLightRange( lights[staticIndex] ) : 0.0f;
+            const float dynamicRange = hasDynamic
+                ? getOriginalLightRange( lights[dynamicIndex] ) : 0.0f;
+            const float stableRange = std::max( staticRange, dynamicRange );
 
-        if ( hasStatic )
-            suppressRendererSource( lights[staticIndex].Info );
-        if ( hasDynamic )
-            suppressRendererSource( lights[dynamicIndex].Info );
+            if ( hasStatic )
+                suppressRendererSource( lights[staticIndex].Info );
+            if ( hasDynamic )
+                suppressRendererSource( lights[dynamicIndex].Info );
 
-        createRendererLight( oilLamp.Vob, oilLamp.ShadowAnchor,
-            stableColor, 1.0f, stableRange, false, sourceA, sourceB );
+            createRendererLight( oilLamp.Vob, oilLamp.ShadowAnchor,
+                stableColor, 1.0f, stableRange, false, sourceA, sourceB );
+            ++oilLampReplacementCount;
+        }
     }
 
     auto flameBelongsToOilLamp = [&]( const ResolvedFlameGroup& flame ) {
@@ -6380,9 +6453,8 @@ void GothicAPI::ConfigureAllPointlightShadowSources() {
         if ( flameBelongsToOilLamp( flame ) )
             continue;
 
-        float originalSourceRange = 0.0f;
-        size_t positionSourceLight = INVALID_INDEX;
-        float positionSourceDistanceSq = FLT_MAX;
+        size_t nearestSource = INVALID_INDEX;
+        float nearestDistanceSq = LINK_RADIUS_SQ;
         for ( size_t lightIndex = 0; lightIndex < lights.size(); ++lightIndex ) {
             if ( lights[lightIndex].Info->IsRendererLightSuppressed )
                 continue;
@@ -6396,35 +6468,32 @@ void GothicAPI::ConfigureAllPointlightShadowSources() {
                 || winner.SourceIndex != flameIndex )
                 continue;
 
-            const float candidateRange = getOriginalLightRange( lights[lightIndex] );
             const float candidateDistanceSq = distanceSq(
-                lights[lightIndex].Position, flame.Anchor );
-            if ( positionSourceLight == INVALID_INDEX
-                || candidateRange > originalSourceRange
-                || (candidateRange == originalSourceRange
-                    && candidateDistanceSq < positionSourceDistanceSq) ) {
-                positionSourceLight = lightIndex;
-                positionSourceDistanceSq = candidateDistanceSq;
+                lights[lightIndex].Position, winner.Position );
+            if ( candidateDistanceSq < nearestDistanceSq ) {
+                nearestDistanceSq = candidateDistanceSq;
+                nearestSource = lightIndex;
             }
-            originalSourceRange = std::max( originalSourceRange, candidateRange );
             suppressRendererSource( lights[lightIndex].Info );
         }
 
-        // Same-type TGA multi-flames replace the authored light at its exact
-        // position. PFX groups retain their existing visual height handling.
+        // Restore the original multi-flame behavior: use the authored source
+        // light position when one is linked; otherwise use the persistent
+        // parent position with the original particle offset. This applies to
+        // both TGA and PFX multi-flame groups.
         zCVob* lightAnchor = flame.Parent ? flame.Parent : flame.Vobs.front();
-        XMFLOAT3 lightPosition = flame.Anchor;
-        if ( !flame.HasPfx && positionSourceLight != INVALID_INDEX )
-            lightPosition = lights[positionSourceLight].Position;
-        else
-            lightPosition.y += flameHeightOffset( flame );
-        const float lightRange = originalSourceRange > 0.0f
-            ? originalSourceRange : flameLightRange( flame.Size );
+        XMFLOAT3 lightPosition = lightAnchor->GetPositionWorld();
+        if ( nearestSource != INVALID_INDEX ) {
+            lightPosition = lights[nearestSource].Position;
+        } else {
+            lightPosition.y += PARTICLE_FLAME_HEIGHT_OFFSET;
+        }
 
         createRendererLight( lightAnchor, lightPosition,
             flameLightColor( flame.HasPfx ),
             flameLightIntensity( flame.Size, flame.FlameCount, flame.HasPfx ),
-            lightRange, true, nullptr, nullptr );
+            std::clamp( flame.Size * 6.0f, 180.0f, 600.0f ),
+            true, nullptr, nullptr );
     }
 
     // A single visual or matching PFX/TGA pair becomes one renderer light.
@@ -6500,30 +6569,33 @@ void GothicAPI::ConfigureAllPointlightShadowSources() {
     // cannot be moved to more than one shadow anchor. Capture static and dynamic
     // sources together: their colors are mixed once, while later color
     // animation remains exclusive to scene illumination.
-    for ( OilLampAnchor& oilLamp : oilLampAnchors ) {
-        if ( !oilLamp.Info )
-            continue;
+    {
+        RendererLoadTimer oilLampEmissionTimer( "ConfigureAllPointlightShadowSources::OilLampEmissionLinking" );
+        for ( OilLampAnchor& oilLamp : oilLampAnchors ) {
+            if ( !oilLamp.Info )
+                continue;
 
-        zCVobLight* staticLight = oilLamp.NearestStaticLight != INVALID_INDEX
-            ? lights[oilLamp.NearestStaticLight].Info->Vob : nullptr;
-        zCVobLight* dynamicLight = oilLamp.NearestDynamicLight != INVALID_INDEX
-            ? lights[oilLamp.NearestDynamicLight].Info->Vob : nullptr;
-        oilLamp.Info->OilLampEmissionStaticLight = staticLight;
-        oilLamp.Info->OilLampEmissionDynamicLight = dynamicLight;
+            zCVobLight* staticLight = oilLamp.NearestStaticLight != INVALID_INDEX
+                ? lights[oilLamp.NearestStaticLight].Info->Vob : nullptr;
+            zCVobLight* dynamicLight = oilLamp.NearestDynamicLight != INVALID_INDEX
+                ? lights[oilLamp.NearestDynamicLight].Info->Vob : nullptr;
+            oilLamp.Info->OilLampEmissionStaticLight = staticLight;
+            oilLamp.Info->OilLampEmissionDynamicLight = dynamicLight;
 
-        DWORD mixedColor = 0u;
-        if ( staticLight && dynamicLight ) {
-            mixedColor = MixOilLampEmissionColors(
-                lights[oilLamp.NearestStaticLight].Info->StableLightColor,
-                lights[oilLamp.NearestDynamicLight].Info->StableLightColor );
-        } else if ( staticLight ) {
-            mixedColor = lights[oilLamp.NearestStaticLight].Info->StableLightColor;
-        } else if ( dynamicLight ) {
-            mixedColor = lights[oilLamp.NearestDynamicLight].Info->StableLightColor;
+            DWORD mixedColor = 0u;
+            if ( staticLight && dynamicLight ) {
+                mixedColor = MixOilLampEmissionColors(
+                    lights[oilLamp.NearestStaticLight].Info->StableLightColor,
+                    lights[oilLamp.NearestDynamicLight].Info->StableLightColor );
+            } else if ( staticLight ) {
+                mixedColor = lights[oilLamp.NearestStaticLight].Info->StableLightColor;
+            } else if ( dynamicLight ) {
+                mixedColor = lights[oilLamp.NearestDynamicLight].Info->StableLightColor;
+            }
+            if ( mixedColor != 0u )
+                oilLamp.Info->OilLampEmissionColor =
+                    QuantizeOilLampEmissionColor( mixedColor );
         }
-        if ( mixedColor != 0u )
-            oilLamp.Info->OilLampEmissionColor =
-                QuantizeOilLampEmissionColor( mixedColor );
     }
 
     struct ParentAnchor {
@@ -6594,6 +6666,17 @@ void GothicAPI::ConfigureAllPointlightShadowSources() {
             continue;
         assignAnchor( lights[lightIndex], parentAnchors[parentClaims[lightIndex].ParentIndex].Position );
     }
+
+    const auto fireplaceTraceMs = std::chrono::duration_cast<std::chrono::milliseconds>(
+        fireplaceTraceDuration ).count();
+    LogInfo() << "[RendererLoadTiming] Pointlight source counts: vobs=" << VobMap.size()
+        << ", originalLights=" << lights.size()
+        << ", oilLampAnchors=" << oilLampAnchors.size()
+        << ", oilLampReplacements=" << oilLampReplacementCount
+        << ", flameGroups=" << resolvedFlames.size()
+        << ", fireplaceTraces=" << fireplaceTraceCount
+        << ", fireplaceTraceTime=" << fireplaceTraceMs << " ms"
+        << ", rendererLights=" << RendererPointLights.size();
 }
 
 /** Helper function for going through the bsp-tree */
@@ -6743,6 +6826,7 @@ void BspLeafLinearCache::Clear() {
 /** Builds our BspTreeVobMap */
 void GothicAPI::BuildBspVobMapCache() {
     ZoneScopedN( "GothicAPI::BuildBspVobMapCache" );
+    RendererLoadTimer loadTimer( "BuildBspVobMapCache" );
 
     WorldRenderCacheReady.store( false, std::memory_order_release );
     if ( !LoadedWorldInfo || !LoadedWorldInfo->BspTree
@@ -6769,6 +6853,7 @@ void GothicAPI::BuildBspVobMapCache() {
 }
 
 void GothicAPI::BuildBspLeafLinearCache() {
+    RendererLoadTimer loadTimer( "BuildBspLeafLinearCache" );
     WorldRenderCacheReady.store( false, std::memory_order_release );
     LeafLinearCache.Clear();
     if ( !LoadedWorldInfo || !LoadedWorldInfo->BspTree ) {

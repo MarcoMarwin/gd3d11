@@ -1,4 +1,4 @@
-#include "pch.h"
+﻿#include "pch.h"
 #include "D3D11PFX_DepthOfField.h"
 #include "Engine.h"
 #include "D3D11GraphicsEngine.h"
@@ -279,6 +279,16 @@ XRESULT D3D11PFX_DepthOfField::Render( ID3D11ShaderResourceView* backbuffer, ID3
     }
     vs->Apply();
 
+    // DOF samples neighbouring pixels outside the image at the screen edges.
+    // Use the existing clamp sampler so those samples stay on the edge instead
+    // of wrapping to the opposite side of the frame.
+    auto clampSampler = engine->GetClampSamplerState();
+    if ( !clampSampler ) {
+        engine->GetContext()->OMSetRenderTargets( 1, oldRTV.GetAddressOf(), oldDSV.Get() );
+        return XR_FAILED;
+    }
+    engine->GetContext()->PSSetSamplers( 0, 1, &clampSampler );
+
 
     DepthOfFieldConstantBuffer cb = BuildDepthOfFieldConstants( m_AutoFocusBlend );
 
@@ -396,8 +406,8 @@ XRESULT D3D11PFX_DepthOfField::RenderCS( ID3D11ShaderResourceView* backbuffer, I
         return XR_FAILED;
     }
     DepthOfFieldConstantBuffer cb = BuildDepthOfFieldConstants( m_AutoFocusBlend );
-    auto defaultSampler = engine->GetDefaultSamplerState();
-    if ( !defaultSampler ) {
+    auto clampSampler = engine->GetClampSamplerState();
+    if ( !clampSampler ) {
         context->OMSetRenderTargets( 1, oldRTV.GetAddressOf(), oldDSV.Get() );
         return XR_FAILED;
     }
@@ -416,7 +426,7 @@ XRESULT D3D11PFX_DepthOfField::RenderCS( ID3D11ShaderResourceView* backbuffer, I
     focusCS->Apply();
     focusCS->GetBuffer( "DepthOfFieldConstantBuffer" ).Update( &cb ).Bind();
 
-    context->CSSetSamplers( 0, 1, &defaultSampler );
+    context->CSSetSamplers( 0, 1, &clampSampler );
 
     ID3D11ShaderResourceView* focusSRVs[2] = {
         engine->GetDepthBuffer()->GetShaderResView().Get(),
@@ -445,7 +455,7 @@ XRESULT D3D11PFX_DepthOfField::RenderCS( ID3D11ShaderResourceView* backbuffer, I
     blurCS->Apply();
     blurCS->GetBuffer( "DepthOfFieldConstantBuffer" ).Update( &cb ).Bind();
 
-    context->CSSetSamplers( 0, 1, &defaultSampler );
+    context->CSSetSamplers( 0, 1, &clampSampler );
 
     // t0 = full-res scene, t1 = full-res depth, t2 = focus (1x1)
     ID3D11ShaderResourceView* blurSRVs[5] = {
@@ -474,7 +484,7 @@ XRESULT D3D11PFX_DepthOfField::RenderCS( ID3D11ShaderResourceView* backbuffer, I
     compositeCS->Apply();
     compositeCS->GetBuffer( "DepthOfFieldConstantBuffer" ).Update( &cb ).Bind();
 
-    context->CSSetSamplers( 0, 1, &defaultSampler );
+    context->CSSetSamplers( 0, 1, &clampSampler );
 
     // t0 = full-res scene, t1 = half-res blur, t2 = full-res depth, t3 = focus (1x1)
     ID3D11ShaderResourceView* compositeSRVs[6] = {
