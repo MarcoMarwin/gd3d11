@@ -24,6 +24,12 @@
 #include "GothicAPI.h"
 #include "GSky.h"
 
+namespace {
+    // Water Reflections has its own strength/enable controls in PS_Water.
+    // Wet-ground and puddle reflections use this independent normalized base.
+    constexpr float WET_GROUND_SSR_DEFAULT_STRENGTH = 0.84f;
+}
+
 D3D11PfxRenderer::D3D11PfxRenderer() {
 
     auto engine = reinterpret_cast<D3D11GraphicsEngine*>(Engine::GraphicsEngine);
@@ -117,7 +123,10 @@ XRESULT D3D11PfxRenderer::RenderWetGroundSSR( ID3D11RenderTargetView* outputRTV,
     const INT2 resolution = engine->GetResolution();
     cb.WG_InvResolution = float2( 1.0f / std::max( resolution.x, 1 ), 1.0f / std::max( resolution.y, 1 ) );
     auto& rendererSettings = Engine::GAPI->GetRendererState().RendererSettings;
-    cb.WG_Strength = rendererSettings.SSRStrength * 0.84f;
+    // Do not reuse Water Reflections' EnableSSR/SSRStrength here. Those
+    // controls are intentionally limited to water surfaces; wet-ground SSR
+    // and puddle reflections remain available independently.
+    cb.WG_Strength = WET_GROUND_SSR_DEFAULT_STRENGTH;
     cb.WG_Time = Engine::GAPI->GetTimeSeconds();
     cb.WG_RainFXWeight = Engine::GAPI->GetRainFXWeight();
     cb.WG_RainFogColor = rendererSettings.RainFogColor;
@@ -129,7 +138,7 @@ XRESULT D3D11PfxRenderer::RenderWetGroundSSR( ID3D11RenderTargetView* outputRTV,
     cb.WG_PuddleReflectionsStrength = puddlesEnabled ? 1.0f : 0.0f;
     cb.WG_WetGroundRainImpactsStrength = 1.0f;
     cb.WG_PuddleAccumulation = puddlesEnabled ? Engine::GAPI->GetPuddleAccumulation() : 0.0f;
-    cb.WG_ReflectionsEnabled = (rendererSettings.EnableSSR && rendererSettings.GetEffectiveWetGroundSSR()) ? 1.0f : 0.0f;
+    cb.WG_ReflectionsEnabled = rendererSettings.GetEffectiveWetGroundSSR() ? 1.0f : 0.0f;
     ps->GetBuffer( "WetGroundSSRConstantBuffer" ).Update( &cb ).Bind();
 
     if ( GSky* sky = Engine::GAPI->GetSky() )

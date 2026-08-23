@@ -1208,7 +1208,7 @@ void ImGuiShim::RenderSettingsWindow()
                 &settings.AdvancedPerformanceOptions );
             ImGui::SetItemTooltip( "%s", Tr(
                 "Master switch for all advanced performance options. When disabled, their individual settings are ignored.",
-                u8"Hauptschalter fuer alle erweiterten Performance-Optionen. Wenn deaktiviert, werden die einzelnen Einstellungen ignoriert." ) );
+                u8"Hauptschalter für alle erweiterten Performance-Optionen. Wenn deaktiviert, werden die einzelnen Einstellungen ignoriert." ) );
             ImGui::Separator();
 
             ImGui::BeginDisabled( !settings.AdvancedPerformanceOptions );
@@ -1219,15 +1219,15 @@ void ImGuiShim::RenderSettingsWindow()
                 "Controls vertex wave movement for ocean water only. Rain ripples, puddles, wet-ground reflections, and water distortion remain animated. Runtime-only; no shader reload.",
                 u8"Steuert nur die Vertex-Wellenbewegung des Meereswassers. Regentröpfchen, Pfützen, Wet-Ground-Reflexionen und Wasserverzerrung bleiben animiert. Nur Laufzeit; kein Shader-Reload." ) );
 
-            ImGui::Checkbox( Tr( "Procedural puddles", u8"Prozedurale Pfuetzen" ), &settings.AdvancedPuddles );
+            ImGui::Checkbox( Tr( "Procedural puddles", u8"Prozedurale Pfützen" ), &settings.AdvancedPuddles );
             ImGui::SetItemTooltip( "%s", Tr(
                 "Enables procedural puddle accumulation and puddle reflections in the wet-ground pass.",
-                u8"Aktiviert prozedurale Pfuetzenbildung und Pfuetzenreflexionen im Wet-Ground-Pass." ) );
+                u8"Aktiviert prozedurale Pfützenbildung und Pfützenreflexionen im Wet-Ground-Pass." ) );
 
             ImGui::Checkbox( Tr( "Wet-ground SSR", u8"Wet-Ground-SSR" ), &settings.AdvancedWetGroundSSR );
             ImGui::SetItemTooltip( "%s", Tr(
-                "Runs screen-space reflections for wet ground during rain. Disabling it skips the whole pass.",
-                u8"Fuehrt bei Regen Screen-Space-Reflexionen fuer nassen Boden aus. Deaktivieren ueberspringt den gesamten Pass." ) );
+                "Controls wet-ground screen-space reflections during rain. Disabling it removes only wet-ground reflections; rain impacts on ground and water surfaces remain visible.",
+                u8"Steuert bei Regen die Screen-Space-Reflexionen des nassen Bodens. Deaktivieren entfernt nur die Bodenreflexionen; Regentropfen-Aufpralle auf Boden und Wasseroberflächen bleiben sichtbar." ) );
 
             ImGui::Checkbox( Tr( "Night enhance", u8"Nacht verbessern" ), &settings.AdvancedNightEnhance );
             ImGui::SetItemTooltip( "%s", Tr(
@@ -1237,7 +1237,7 @@ void ImGuiShim::RenderSettingsWindow()
             ImGui::Checkbox( Tr( "City-window transparency", u8"Transparente Stadtfenster" ), &settings.AdvancedCityWindowTransparency );
             ImGui::SetItemTooltip( "%s", Tr(
                 "Uses the special transparent city_windows rendering path. Disabling it keeps those windows opaque.",
-                u8"Nutzt den speziellen transparenten city_windows-Renderingpfad. Deaktivieren laesst diese Fenster undurchsichtig." ) );
+                u8"Nutzt den speziellen transparenten city_windows-Renderingpfad. Deaktivieren lässt diese Fenster undurchsichtig." ) );
 
             ImGui::Separator();
             ImGui::TextUnformatted( Tr( "Shadow and world performance", u8"Schatten- und Welt-Performance" ) );
@@ -1245,24 +1245,24 @@ void ImGuiShim::RenderSettingsWindow()
             ImGui::Checkbox( Tr( "Threaded shadow culling", u8"Paralleles Schatten-Culling" ), &settings.ThreadedShadowCulling );
             ImGui::SetItemTooltip( "%s", Tr(
                 "Collects CSM shadow casters on worker threads. Can reduce CPU time; no visual change is intended.",
-                u8"Sammelt CSM-Schattenwerfer parallel auf Worker-Threads. Kann CPU-Zeit sparen; keine Bildaenderung beabsichtigt." ) );
+                u8"Sammelt CSM-Schattenwerfer parallel auf Worker-Threads. Kann CPU-Zeit sparen; keine Bildänderung beabsichtigt." ) );
 
-            ImGui::Checkbox( Tr( "Lazy cascade updates", u8"Verzoegerte Cascade-Updates" ),
+            ImGui::Checkbox( Tr( "Lazy cascade updates", u8"Verzögerte Cascade-Updates" ),
                 &settings.DebugSettings.ShadowCascades.LazyCascadeUpdate );
             ImGui::SetItemTooltip( "%s", Tr(
                 "Updates distant shadow cascades less often. Camera movement still forces safe updates; minor temporal changes are possible.",
-                u8"Aktualisiert entfernte Schatten-Cascades seltener. Kamerabewegungen erzwingen weiterhin sichere Updates; kleine zeitliche Aenderungen sind moeglich." ) );
+                u8"Aktualisiert entfernte Schatten-Cascades seltener. Kamerabewegungen erzwingen weiterhin sichere Updates; kleine zeitliche Änderungen sind möglich." ) );
 
             ImGui::Checkbox( Tr( "Deferred depth prepass", u8"Deferred-Depth-Prepass" ), &settings.DoZPrepass );
             ImGui::SetItemTooltip( "%s", Tr(
                 "Adds a depth-only pass before the deferred G-buffer. It can reduce overdraw on some GPUs; test per system.",
-                u8"Fuegt vor dem Deferred-G-Buffer einen reinen Tiefenpass ein. Kann auf manchen GPUs Overdraw reduzieren; je System testen." ) );
+                u8"Fügt vor dem Deferred-G-Buffer einen reinen Tiefenpass ein. Kann auf manchen GPUs Overdraw reduzieren; je System testen." ) );
 
-            ImGui::Checkbox( Tr( "World-section BVH", u8"BVH fuer Weltsektionen" ),
+            ImGui::Checkbox( Tr( "World-section BVH", u8"BVH für Weltsektionen" ),
                 &settings.DebugSettings.FeatureSet.UseWorldSectionBVH );
             ImGui::SetItemTooltip( "%s", Tr(
                 "Experimental: accelerates selected world-section visibility and window-validation queries. It is not general per-VOB culling; compare it against the baseline.",
-                u8"Experimentell: Beschleunigt ausgewaehlte Weltsektions- und Fensterpruefungen. Es ist kein allgemeines VOB-Culling; mit dem Basiswert vergleichen." ) );
+                u8"Experimentell: Beschleunigt ausgewählte Weltsektions- und Fensterprüfungen. Es ist kein allgemeines VOB-Culling; mit dem Basiswert vergleichen." ) );
 
             const std::array<std::pair<const char*, GothicRendererSettings::E_ShadowFrustumCulling>, 3> shadowFrustumCullingModes = {{
                 { Tr( "Disabled", u8"Deaktiviert" ), GothicRendererSettings::E_ShadowFrustumCulling::SHD_FRUSTUM_CULLING_DISABLED },
@@ -1277,13 +1277,13 @@ void ImGuiShim::RenderSettingsWindow()
             }
             ImGui::SetItemTooltip( "%s", Tr(
                 "Skips shadow casters outside each cascade. Conservative is the safe default; Aggressive can omit marginal attachments.",
-                u8"Ueberspringt Schattenwerfer ausserhalb der jeweiligen Cascade. Konservativ ist der sichere Standard; Aggressiv kann Rand-Attachments auslassen." ) );
+                u8"Überspringt Schattenwerfer außerhalb der jeweiligen Cascade. Konservativ ist der sichere Standard; Aggressiv kann Rand-Attachments auslassen." ) );
 
             ImGui::Checkbox( Tr( "GPU VOB occlusion culling", u8"GPU-VOB-Occlusion-Culling" ),
                 &settings.GpuVobOcclusionCulling );
             ImGui::SetItemTooltip( "%s", Tr(
                 "Experimental: tests static VOBs against the Hi-Z depth of the already-rendered world and draws only those that remain visible. GPU culling, indirect drawing and shared geometry are managed internally; the standard DX11 path remains available on every supported GPU.",
-                u8"Experimentell: Prueft statische VOBs gegen die Hi-Z-Tiefe der bereits gerenderten Welt und zeichnet nur die sichtbaren VOBs. GPU-Culling, indirektes Zeichnen und gemeinsame Geometrie werden intern verwaltet; der Standard-DX11-Pfad bleibt auf jeder unterstuetzten GPU verfuegbar." ) );
+                u8"Experimentell: Prüft statische VOBs gegen die Hi-Z-Tiefe der bereits gerenderten Welt und zeichnet nur die sichtbaren VOBs. GPU-Culling, indirektes Zeichnen und gemeinsame Geometrie werden intern verwaltet; der Standard-DX11-Pfad bleibt auf jeder unterstützten GPU verfügbar." ) );
             ImGui::EndDisabled();
 
             ImGui::Separator();
@@ -1306,7 +1306,7 @@ void ImGuiShim::RenderSettingsWindow()
             }
             ImGui::EndDisabled();
             ImGui::SameLine();
-            if ( ImGui::Button( Tr( "Close", u8"Schliessen" ) ) ) {
+            if ( ImGui::Button( Tr( "Close", u8"Schließen" ) ) ) {
                 ImGui::CloseCurrentPopup();
             }
             ImGui::EndPopup();

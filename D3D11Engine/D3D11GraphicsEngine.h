@@ -282,12 +282,6 @@ public:
     void ShadowPass_DrawWorldMesh( const std::vector<WorldMeshSectionInfo*>& visibleSections,
         const Frustum* cullingFrustum = nullptr, const ShadowWorldCasterCache* casterCache = nullptr );
 
-    /** Resolves the CSM skeletal caster pose/palette once per frame. */
-    void PrepareSkeletalShadowData(
-        const std::array<CameraReplacement, MAX_CSM_CASCADES>& cascadeReplacements,
-        int cascadeCount,
-        const XMFLOAT3& shadowPosition );
-
     void XM_CALLCONV DrawWorldAroundForWorldShadow( FXMVECTOR position, float sectionRange, const RenderShadowmapsParams& params );
     void XM_CALLCONV DrawWorldAround( FXMVECTOR position,
         float range,
@@ -698,7 +692,6 @@ private:
         bool gpuVobGeometryArenaPrepared = false; ///< Shared static-VOB arena prepared once per frame
         bool vobWindMetadataPrepared = false; ///< Wind metadata prepared for cached vob visuals
         bool skeletalBonesUploaded = false; ///< FL11 packed skeletal bone buffers uploaded for main/z-prepass reuse
-        bool shadowSkeletalBonesUploaded = false; ///< FL11 packed skeletal bone buffers uploaded once for CSM shadows
 
         std::vector<WorldMeshSectionInfo*> visibleSections;
         std::vector<D3D11_DRAW_INDEXED_INSTANCED_INDIRECT_ARGS> drawIndirectArgs;
@@ -717,12 +710,6 @@ private:
         std::vector<SkeletalVobInfo*>   visibleNpcs;
         std::vector<SkeletalVobInfo*> skeletalBoneVisOrder;
         std::vector<VS_ExConstantBuffer_SkeletalBoneRange> skeletalBoneRanges;
-        std::vector<XMFLOAT4X4> skeletalBoneTransforms;
-        std::vector<SkeletalVobInfo*> shadowSkeletalBoneVisOrder;
-        std::vector<VS_ExConstantBuffer_SkeletalBoneRange> shadowSkeletalBoneRanges;
-        std::vector<XMFLOAT4X4> shadowSkeletalBoneTransforms;
-        std::vector<XMFLOAT4X4> shadowSkeletalPrevBoneTransforms;
-        std::unordered_map<SkeletalVobInfo*, size_t> shadowSkeletalRangeLookup;
 
         void Reset() {
             worldMeshBuilt      = false;
@@ -733,7 +720,6 @@ private:
             gpuVobGeometryArenaPrepared = false;
             vobWindMetadataPrepared = false;
             skeletalBonesUploaded = false;
-            shadowSkeletalBonesUploaded = false;
             visibleSections.clear();
             drawIndirectArgs.clear();
             sortedDepthWorldMeshes.clear();
@@ -751,12 +737,6 @@ private:
             visibleNpcs.clear();
             skeletalBoneVisOrder.clear();
             skeletalBoneRanges.clear();
-            skeletalBoneTransforms.clear();
-            shadowSkeletalBoneVisOrder.clear();
-            shadowSkeletalBoneRanges.clear();
-            shadowSkeletalBoneTransforms.clear();
-            shadowSkeletalPrevBoneTransforms.clear();
-            shadowSkeletalRangeLookup.clear();
         }
     };
     FrameGeometryCache m_FrameGeometryCache;
@@ -936,10 +916,6 @@ private:
     /** FL11 packed structured buffers for non-reusable stages (shadow/cube/debug paths). */
     std::unique_ptr<D3D11VertexBuffer> SkeletalBoneTransformsBufferTransient;
     std::unique_ptr<D3D11VertexBuffer> SkeletalPrevBoneTransformsBufferTransient;
-
-    /** FL11 packed structured buffers for the once-per-frame CSM skeletal snapshot. */
-    std::unique_ptr<D3D11VertexBuffer> SkeletalShadowBoneTransformsBuffer;
-    std::unique_ptr<D3D11VertexBuffer> SkeletalShadowPrevBoneTransformsBuffer;
 
     /** Cached bone transforms for batched skeletal mesh drawing */
     std::vector<XMFLOAT4X4> BoneTransformCache;

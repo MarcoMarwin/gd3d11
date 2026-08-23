@@ -5091,104 +5091,6 @@ XRESULT D3D11GraphicsEngine::DrawInstanced(
     return XR_SUCCESS;
 }
 
-void D3D11GraphicsEngine::PrepareSkeletalShadowData(
-    const std::array<CameraReplacement, MAX_CSM_CASCADES>& cascadeReplacements,
-    int cascadeCount,
-    const XMFLOAT3& shadowPosition ) {
-    auto& cache = m_FrameGeometryCache;
-    cache.shadowSkeletalBonesUploaded = false;
-    cache.shadowSkeletalBoneVisOrder.clear();
-    cache.shadowSkeletalBoneRanges.clear();
-    cache.shadowSkeletalBoneTransforms.clear();
-    cache.shadowSkeletalPrevBoneTransforms.clear();
-    cache.shadowSkeletalRangeLookup.clear();
-
-    if ( FeatureLevel10Compatibility || !Engine::GAPI )
-        return;
-
-    const auto& settings = Engine::GAPI->GetRendererState().RendererSettings;
-    if ( !settings.DrawSkeletalMeshes )
-        return;
-
-    const int activeCascadeCount = std::min( 2, std::clamp( cascadeCount, 1, MAX_CSM_CASCADES ) );
-    const float skeletalRadius = settings.SkeletalMeshDrawRadius;
-    const float skeletalRadiusSq = skeletalRadius * skeletalRadius;
-    const bool useFrustumCulling = settings.IsShadowFrustumCullingEnabled();
-    const XMVECTOR shadowPositionXm = XMLoadFloat3( &shadowPosition );
-
-    std::vector<XMFLOAT4X4> currentBones;
-    currentBones.reserve( NUM_MAX_BONES );
-
-    for ( SkeletalVobInfo* vi : Engine::GAPI->GetSkeletalMeshVobs() ) {
-        if ( !vi || !vi->Vob || !vi->VisualInfo || !vi->Vob->GetShowVisual() )
-            continue;
-
-        // Match the existing shadow path: strongly transparent/ghost visuals do not cast.
-        if ( vi->Vob->GetVisualAlpha() && vi->Vob->GetVobTransparency() < 0.7f )
-            continue;
-
-        if ( XMVectorGetX( XMVector3LengthSq(
-                vi->Vob->GetPositionWorldXM() - shadowPositionXm ) ) > skeletalRadiusSq )
-            continue;
-
-        bool intersectsShadowCascade = !useFrustumCulling;
-        if ( useFrustumCulling ) {
-            for ( int cascadeIdx = 0; cascadeIdx < activeCascadeCount; ++cascadeIdx ) {
-                if ( !cascadeReplacements[cascadeIdx].frustum.IsValid()
-                    || cascadeReplacements[cascadeIdx].frustum.Intersects( vi->Vob->GetBBox() ) ) {
-                    intersectsShadowCascade = true;
-                    break;
-                }
-            }
-        }
-        if ( !intersectsShadowCascade )
-            continue;
-
-        zCModel* model = static_cast<zCModel*>(vi->Vob->GetVisual());
-        if ( !model )
-            continue;
-
-        currentBones.clear();
-        model->GetBoneTransforms( &currentBones );
-        const int numBones = std::min<int>( static_cast<int>( currentBones.size() ), NUM_MAX_BONES );
-        if ( numBones <= 0 )
-            continue;
-
-        const size_t vobIndex = cache.shadowSkeletalBoneVisOrder.size();
-        cache.shadowSkeletalBoneVisOrder.push_back( vi );
-
-        VS_ExConstantBuffer_SkeletalBoneRange range = {};
-        range.BoneOffset = static_cast<unsigned int>( cache.shadowSkeletalBoneTransforms.size() );
-        range.BoneCount = static_cast<unsigned int>( numBones );
-        range.PrevBoneOffset = static_cast<unsigned int>( cache.shadowSkeletalPrevBoneTransforms.size() );
-        range.UseStructuredBones = 1u;
-        cache.shadowSkeletalBoneRanges.push_back( range );
-        cache.shadowSkeletalRangeLookup.emplace( vi, vobIndex );
-
-        cache.shadowSkeletalBoneTransforms.insert(
-            cache.shadowSkeletalBoneTransforms.end(), currentBones.begin(), currentBones.begin() + numBones );
-
-        if ( vi->HasValidPrevTransforms && vi->PrevBoneTransforms.size() >= static_cast<size_t>( numBones ) ) {
-            cache.shadowSkeletalPrevBoneTransforms.insert(
-                cache.shadowSkeletalPrevBoneTransforms.end(),
-                vi->PrevBoneTransforms.begin(), vi->PrevBoneTransforms.begin() + numBones );
-        } else {
-            cache.shadowSkeletalPrevBoneTransforms.insert(
-                cache.shadowSkeletalPrevBoneTransforms.end(), currentBones.begin(), currentBones.begin() + numBones );
-        }
-    }
-
-    const bool uploadedCurrent = UploadStructuredMatrixBuffer(
-        SkeletalShadowBoneTransformsBuffer,
-        cache.shadowSkeletalBoneTransforms,
-        "SkeletalShadowBoneTransformsBuffer" );
-    const bool uploadedPrevious = UploadStructuredMatrixBuffer(
-        SkeletalShadowPrevBoneTransformsBuffer,
-        cache.shadowSkeletalPrevBoneTransforms,
-        "SkeletalShadowPrevBoneTransformsBuffer" );
-    cache.shadowSkeletalBonesUploaded = uploadedCurrent && uploadedPrevious;
-}
-
 void D3D11GraphicsEngine::DrawSkeletalMeshVobs(
     const std::vector<SkeletalVobInfo*>& vis,
     float distance,
@@ -5240,7 +5142,6 @@ void D3D11GraphicsEngine::DrawSkeletalMeshVobs(
 
     const bool isZPrepass = GetRenderingStage() == DES_Z_PRE_PASS;
     const bool isMainStage = GetRenderingStage() == DES_MAIN;
-    const bool isShadowStage = GetRenderingStage() == DES_SHADOWMAP;
     const bool isMainReuseStage = isZPrepass || isMainStage;
     struct ScopedGraphicsSwitchRestore {
         unsigned int& Value;
@@ -5260,7 +5161,6 @@ void D3D11GraphicsEngine::DrawSkeletalMeshVobs(
 
     std::vector<VS_ExConstantBuffer_SkeletalBoneRange> structuredBoneRanges( vis.size() );
     bool reuseMainPackedUpload = false;
-    bool reuseShadowPackedUpload = false;
 
     if ( useStructuredBones
         && isMainStage
@@ -5271,20 +5171,7 @@ void D3D11GraphicsEngine::DrawSkeletalMeshVobs(
         reuseMainPackedUpload = true;
     }
 
-    if ( useStructuredBones && isShadowStage && m_FrameGeometryCache.shadowSkeletalBonesUploaded ) {
-        reuseShadowPackedUpload = true;
-        for ( size_t i = 0; i < vis.size(); ++i ) {
-            const auto lookup = m_FrameGeometryCache.shadowSkeletalRangeLookup.find( vis[i] );
-            if ( lookup == m_FrameGeometryCache.shadowSkeletalRangeLookup.end()
-                || lookup->second >= m_FrameGeometryCache.shadowSkeletalBoneRanges.size() ) {
-                reuseShadowPackedUpload = false;
-                break;
-            }
-            structuredBoneRanges[i] = m_FrameGeometryCache.shadowSkeletalBoneRanges[lookup->second];
-        }
-    }
-
-    if ( useStructuredBones && !reuseMainPackedUpload && !reuseShadowPackedUpload ) {
+    if ( useStructuredBones && !reuseMainPackedUpload ) {
         BoneTransformCache.clear();
         packedPrevBoneTransforms.clear();
 
@@ -5357,23 +5244,10 @@ void D3D11GraphicsEngine::DrawSkeletalMeshVobs(
             m_FrameGeometryCache.skeletalBonesUploaded = true;
             m_FrameGeometryCache.skeletalBoneVisOrder = vis;
             m_FrameGeometryCache.skeletalBoneRanges = structuredBoneRanges;
-            m_FrameGeometryCache.skeletalBoneTransforms = BoneTransformCache;
         }
     }
 
-    // Attachments are still assembled on the CPU below, even when the base
-    // meshes use the packed structured-buffer path. Keep the matching packed
-    // CPU palette alive for that work. Clearing BoneTransformCache here made
-    // attachment transforms read from invalid memory; depending on allocator
-    // state this showed up as intermittently stretched NPCs.
-    std::vector<XMFLOAT4X4>* activeBoneTransformData = nullptr;
-    if ( reuseShadowPackedUpload ) {
-        activeBoneTransformData = &m_FrameGeometryCache.shadowSkeletalBoneTransforms;
-    } else if ( reuseMainPackedUpload ) {
-        activeBoneTransformData = &m_FrameGeometryCache.skeletalBoneTransforms;
-    } else {
-        activeBoneTransformData = &BoneTransformCache;
-    }
+    BoneTransformCache.clear();
 
     int boneOffset = 0;
 
@@ -5398,12 +5272,8 @@ void D3D11GraphicsEngine::DrawSkeletalMeshVobs(
     auto prevBoneTransformsCb = GraphicsShaderConstantBuffer();
 
     if ( useStructuredBones ) {
-        auto& currentBuffer = isMainReuseStage
-            ? SkeletalBoneTransformsBuffer
-            : (reuseShadowPackedUpload ? SkeletalShadowBoneTransformsBuffer : SkeletalBoneTransformsBufferTransient);
-        auto& prevBuffer = isMainReuseStage
-            ? SkeletalPrevBoneTransformsBuffer
-            : (reuseShadowPackedUpload ? SkeletalShadowPrevBoneTransformsBuffer : SkeletalPrevBoneTransformsBufferTransient);
+        auto& currentBuffer = isMainReuseStage ? SkeletalBoneTransformsBuffer : SkeletalBoneTransformsBufferTransient;
+        auto& prevBuffer = isMainReuseStage ? SkeletalPrevBoneTransformsBuffer : SkeletalPrevBoneTransformsBufferTransient;
 
         if ( !currentBuffer || !prevBuffer
             || !currentBuffer->GetShaderResourceView().Get()
@@ -5555,26 +5425,11 @@ void D3D11GraphicsEngine::DrawSkeletalMeshVobs(
             XMFLOAT4X4 world; XMStoreFloat4x4( &world, xmWorld );
             float fatness = model->GetModelFatness();
 
-            // Get the bone transforms, or reuse the once-per-frame CSM palette.
-            size_t numBones = 0;
-            size_t boneIdx = 0;
-            if ( reuseShadowPackedUpload ) {
-                const auto& cachedRange = structuredBoneRanges[currentDrawIndex];
-                boneIdx = cachedRange.BoneOffset;
-                numBones = cachedRange.BoneCount;
-            } else {
-                model->GetBoneTransforms( &BoneTransformCache );
-                numBones = BoneTransformCache.size() - boneOffset;
-                boneIdx = boneOffset;
-                boneOffset += numBones;
-            }
-            if ( numBones == 0 || boneIdx + numBones > activeBoneTransformData->size() ) {
-                LogError() << "[Skeletal] base mesh bone range outside packed palette; skipping "
-                    << ( vi->VisualInfo ? vi->VisualInfo->VisualName : "<unknown>" );
-                continue;
-            }
-            const auto transforms = std::span<XMFLOAT4X4>(
-                activeBoneTransformData->data() + boneIdx, numBones );
+            // Get the bone transforms
+            model->GetBoneTransforms( &BoneTransformCache );
+            auto numBones = BoneTransformCache.size() - boneOffset;
+            auto boneIdx = boneOffset;
+            boneOffset += numBones;
 
 
             if ( !static_cast<SkeletalMeshVisualInfo*>(vi->VisualInfo)->SkeletalMeshes.empty() ) {
@@ -5583,6 +5438,7 @@ void D3D11GraphicsEngine::DrawSkeletalMeshVobs(
 #else
                 if ( !model->GetDrawHandVisualsOnly() ) {
 #endif
+                    const auto transforms = std::span( &BoneTransformCache[boneIdx], numBones );
                     const auto color = modelColor;
 
                     VS_ExConstantBuffer_PerInstanceSkeletal cb2;
@@ -5745,14 +5601,7 @@ void D3D11GraphicsEngine::DrawSkeletalMeshVobs(
             auto model = data.Model;
             auto modelColor = data.ModelColor;
             modelColor.w = (vi && vi->Vob && vi->Vob->IsIndoorVob()) ? 0.05f : 1.0f;
-            if ( data.BoneIdx < 0 || data.NumBones <= 0
-                || static_cast<size_t>( data.BoneIdx )
-                    + static_cast<size_t>( data.NumBones ) > activeBoneTransformData->size() ) {
-                LogError() << "[Skeletal] attachment bone range outside packed palette; skipping attachments for "
-                    << ( vi && vi->VisualInfo ? vi->VisualInfo->VisualName : "<unknown>" );
-                continue;
-            }
-            auto transforms = std::span( activeBoneTransformData->data() + data.BoneIdx, data.NumBones );
+            auto transforms = std::span( &BoneTransformCache[data.BoneIdx], data.NumBones );
             auto fatness = data.Fatness;
             auto& world = data.World;
             auto& prevWorld = data.PrevWorld;
@@ -6752,8 +6601,11 @@ XRESULT D3D11GraphicsEngine::OnStartWorldRendering() {
     const bool renderWaterMask =
         renderRainExclusionMask
         || rendererState.RendererSettings.EnableDoF;
-    const bool renderWetGroundSSR = renderRainExclusionMask
-        && rendererState.RendererSettings.GetEffectiveWetGroundSSR();
+    // Keep the pass alive for rain impacts even when the Advanced F11 switch
+    // disables wet-ground reflections. The shader gates only its reflection
+    // composition through WG_ReflectionsEnabled; skipping this pass would
+    // also remove the ground impact/ripple layer.
+    const bool renderWetGroundPass = renderRainExclusionMask;
     RGResourceHandle waterMaskResource = RG_INVALID_HANDLE;
     if ( renderWaterMask ) {
         const auto maskSize = GetResolution();
@@ -6837,7 +6689,7 @@ XRESULT D3D11GraphicsEngine::OnStartWorldRendering() {
         };
     });
 
-    if ( renderWetGroundSSR ) {
+    if ( renderWetGroundPass ) {
       graph.AddPass( RG_PASS_NAME("Wet Ground SSR"), [&]( RGBuilder& builder, RenderPass& pass )
       {
           builder.Read( normalsResource );
