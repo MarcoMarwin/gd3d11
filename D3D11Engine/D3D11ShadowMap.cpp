@@ -1424,7 +1424,6 @@ XRESULT D3D11ShadowMap::DrawWorldShadow( )
             []( bool shouldUpdate ) { return shouldUpdate; } );
         if ( anyCascadeUpdate ) {
             BuildWorldShadowCasterCache();
-            graphicsEngine->PrepareSkeletalShadowData( m_CascadeCRs, numCascades, m_WorldShadowPos );
         } else {
             m_WorldShadowCasters.clear();
         }
