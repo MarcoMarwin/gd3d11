@@ -352,6 +352,9 @@ struct VobInfo : public BaseVobInfo {
     /** Position the vob was at while being rendered last time */
     XMFLOAT3 LastRenderPosition;
 
+    /** World-space bounds mirrored together with LastRenderPosition. */
+    zTBBox3D LastRenderBBox{};
+
     /** True if this is an indoor-vob for culling and draw-distance grouping. */
     bool IsIndoorVob = false;
 

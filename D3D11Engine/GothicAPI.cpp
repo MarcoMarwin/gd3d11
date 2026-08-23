@@ -5636,7 +5636,7 @@ static void CVVH_AddNotDrawnVobToList(
         if ( !ctx.drawFlags.SkipVobFrustumCull
             && bspContainment != ContainmentType::CONTAINS // only do frustum check if previously "INTERSECTS"
             && cullingEnabled
-            && !ctx.frustum.Intersects( it->Vob->GetBBox() ) ) {
+            && !ctx.frustum.Intersects( it->LastRenderBBox ) ) {
             continue;
         }
         if ( it->Vob->GetVisualAlpha() ) {
@@ -8738,7 +8738,7 @@ void GothicAPI::CollectVisibleVobs( const RndCullContext& ctx ) {
                     continue;
                 }
                 if ( !ctx.drawFlags.SkipVobFrustumCull
-                    && cullingEnabled && !ctx.frustum.Intersects( it->Vob->GetBBox() ) ) {
+                    && cullingEnabled && !ctx.frustum.Intersects( it->LastRenderBBox ) ) {
                     continue;
                 }
 

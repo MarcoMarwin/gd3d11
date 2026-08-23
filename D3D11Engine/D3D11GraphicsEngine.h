@@ -448,6 +448,39 @@ public:
     }
 
 private:
+    enum class EGpuTimingZone : unsigned int {
+        HiZ = 0,
+        MainCull,
+        ShadowCull,
+        VobDepth,
+        VobLit,
+        Count
+    };
+
+    static constexpr unsigned int GpuTimingZoneCount =
+        static_cast<unsigned int>( EGpuTimingZone::Count );
+    static constexpr unsigned int GpuTimingMaxIntervals = 8;
+    static constexpr unsigned int GpuTimingRingSize = 8;
+
+    struct GpuTimingFrame {
+        Microsoft::WRL::ComPtr<ID3D11Query> Disjoint;
+        Microsoft::WRL::ComPtr<ID3D11Query> Timestamps[
+            GpuTimingZoneCount][GpuTimingMaxIntervals][2];
+        unsigned int IntervalCount[GpuTimingZoneCount] = {};
+        bool Active[GpuTimingZoneCount] = {};
+        bool Pending = false;
+        unsigned int PendingFrames = 0;
+        uint64_t SettingsKey = 0;
+        uint64_t WorldGeneration = static_cast<uint64_t>( -1 );
+    };
+
+    bool EnsureGpuTimingQueries();
+    void BeginGpuTimingFrame( uint64_t settingsKey, uint64_t worldGeneration );
+    void EndGpuTimingFrame();
+    void PollGpuTimingQueries( uint64_t settingsKey, uint64_t worldGeneration );
+    void BeginGpuTimingZone( EGpuTimingZone zone );
+    void EndGpuTimingZone( EGpuTimingZone zone );
+
     struct FrameIndirectBufferPool {
         std::vector<std::unique_ptr<D3D11IndirectBuffer>> Buffers;
         size_t NextBuffer = 0;
@@ -759,6 +792,7 @@ private:
         std::unique_ptr<D3D11ConstantBuffer>& cullConstantBuffer,
         std::unique_ptr<D3D11ConstantBuffer>& patchConstantBuffer,
         bool useHiZ,
+        bool shadowPass,
         D3D11VertexBuffer*& outputInstanceBuffer,
         D3D11IndirectBuffer*& outputArgsBuffer );
 
@@ -858,6 +892,19 @@ private:
         double GpuCullPrepareMsMax = 0.0;
         double HiZPrepareMsTotal = 0.0;
         double HiZPrepareMsMax = 0.0;
+        uint64_t GpuTimingFrames = 0;
+        uint64_t GpuTimingDroppedFrames = 0;
+        uint64_t GpuHiZTimingSamples = 0;
+        uint64_t GpuMainCullTimingSamples = 0;
+        uint64_t GpuShadowCullTimingSamples = 0;
+        uint64_t GpuVobDepthTimingSamples = 0;
+        uint64_t GpuVobLitTimingSamples = 0;
+        double GpuHiZMsTotal = 0.0;
+        double GpuMainCullMsTotal = 0.0;
+        double GpuShadowCullMsTotal = 0.0;
+        double GpuVobDepthMsTotal = 0.0;
+        double GpuVobLitMsTotal = 0.0;
+        uint64_t GpuTimingIntervalOverflow = 0;
         uint64_t FpsSamples = 0;
         double FpsTotal = 0.0;
         uint64_t FrameTriangleSamples = 0;
@@ -881,7 +928,15 @@ private:
     bool m_GpuVobPerformanceSettingsInitialized = false;
     uint64_t m_GpuVobFrameMainCandidateTriangles = 0;
     uint64_t m_LastGpuMainVisibleTrianglesEstimate = 0;
+    double m_LastGpuMainVisibilityRatio = 0.0;
     bool m_HasLastGpuMainVisibleTrianglesEstimate = false;
+    bool m_HasLastGpuMainVisibilityRatio = false;
+
+    GpuTimingFrame m_GpuTimingFrames[GpuTimingRingSize];
+    unsigned int m_GpuTimingFrameIndex = 0;
+    bool m_GpuTimingQueriesInitialized = false;
+    bool m_GpuTimingAvailable = false;
+    bool m_GpuTimingFrameActive = false;
 
     // A failed optional GPU resource must not be retried every frame. The
     // latch is scoped to the current settings/world and is cleared implicitly

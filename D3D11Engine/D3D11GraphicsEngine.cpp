@@ -977,7 +977,7 @@ void D3D11GraphicsEngine::AccumulateGpuVobFrameRenderStats() {
 }
 
 void D3D11GraphicsEngine::ApplyGpuVobDisplayTriangleEstimate() {
-    if ( !m_HasLastGpuMainVisibleTrianglesEstimate
+    if ( !m_HasLastGpuMainVisibilityRatio
         || m_GpuVobFrameMainCandidateTriangles == 0 ) {
         return;
     }
@@ -988,10 +988,222 @@ void D3D11GraphicsEngine::ApplyGpuVobDisplayTriangleEstimate() {
     const uint64_t nonGpuMainTriangles = submittedTriangles
         > m_GpuVobFrameMainCandidateTriangles
         ? submittedTriangles - m_GpuVobFrameMainCandidateTriangles : 0ull;
+    // The visibility readback is deliberately asynchronous. Applying the raw
+    // triangle count from that older frame made the in-game counter jump when
+    // the camera moved. Reuse only its visibility ratio for the current frame's
+    // candidate triangle count; this keeps the overlay useful without stalling
+    // the D3D11 immediate context for a readback.
+    const uint64_t estimatedGpuMainTriangles = static_cast<uint64_t>( std::llround(
+        static_cast<double>( m_GpuVobFrameMainCandidateTriangles )
+            * std::clamp( m_LastGpuMainVisibilityRatio, 0.0, 1.0 ) ) );
     const uint64_t estimatedTriangles = nonGpuMainTriangles
-        + m_LastGpuMainVisibleTrianglesEstimate;
+        + estimatedGpuMainTriangles;
     renderInfo.FrameDrawnTriangles = static_cast<int>( std::min<uint64_t>(
         estimatedTriangles, static_cast<uint64_t>( std::numeric_limits<int>::max() ) ) );
+}
+
+bool D3D11GraphicsEngine::EnsureGpuTimingQueries() {
+    if ( m_GpuTimingQueriesInitialized ) {
+        return m_GpuTimingAvailable;
+    }
+
+    m_GpuTimingQueriesInitialized = true;
+    if ( !Device || !Context ) {
+        return false;
+    }
+
+    D3D11_QUERY_DESC timestampDesc = {};
+    timestampDesc.Query = D3D11_QUERY_TIMESTAMP;
+    D3D11_QUERY_DESC disjointDesc = {};
+    disjointDesc.Query = D3D11_QUERY_TIMESTAMP_DISJOINT;
+
+    for ( auto& frame : m_GpuTimingFrames ) {
+        if ( FAILED( Device->CreateQuery( &disjointDesc, &frame.Disjoint ) ) ) {
+            m_GpuTimingAvailable = false;
+            return false;
+        }
+        for ( unsigned int zone = 0; zone < GpuTimingZoneCount; ++zone ) {
+            for ( unsigned int interval = 0; interval < GpuTimingMaxIntervals; ++interval ) {
+                if ( FAILED( Device->CreateQuery( &timestampDesc,
+                    &frame.Timestamps[zone][interval][0] ) )
+                    || FAILED( Device->CreateQuery( &timestampDesc,
+                        &frame.Timestamps[zone][interval][1] ) ) ) {
+                    m_GpuTimingAvailable = false;
+                    return false;
+                }
+            }
+        }
+    }
+
+    m_GpuTimingAvailable = true;
+    return true;
+}
+
+void D3D11GraphicsEngine::BeginGpuTimingFrame(
+    uint64_t settingsKey, uint64_t worldGeneration ) {
+    m_GpuTimingFrameActive = false;
+    if ( !EnsureGpuTimingQueries() || !Context ) {
+        return;
+    }
+
+    for ( unsigned int attempt = 0; attempt < GpuTimingRingSize; ++attempt ) {
+        m_GpuTimingFrameIndex = (m_GpuTimingFrameIndex + 1) % GpuTimingRingSize;
+        auto& frame = m_GpuTimingFrames[m_GpuTimingFrameIndex];
+        if ( frame.Pending ) {
+            continue;
+        }
+
+        for ( unsigned int zone = 0; zone < GpuTimingZoneCount; ++zone ) {
+            frame.IntervalCount[zone] = 0;
+            frame.Active[zone] = false;
+        }
+        frame.SettingsKey = settingsKey;
+        frame.WorldGeneration = worldGeneration;
+        frame.Pending = true;
+        frame.PendingFrames = 0;
+        Context->Begin( frame.Disjoint.Get() );
+        m_GpuTimingFrameActive = true;
+        return;
+    }
+
+    ++m_GpuVobPerformanceStats.GpuTimingDroppedFrames;
+}
+
+void D3D11GraphicsEngine::EndGpuTimingFrame() {
+    if ( !m_GpuTimingFrameActive || !Context ) {
+        return;
+    }
+
+    auto& frame = m_GpuTimingFrames[m_GpuTimingFrameIndex];
+    for ( unsigned int zone = 0; zone < GpuTimingZoneCount; ++zone ) {
+        // A malformed caller must not leave a timestamp interval open across
+        // frames. Normal render paths close every interval at its draw/dispatch
+        // boundary, so this is only a defensive cleanup.
+        if ( frame.Active[zone] ) {
+            EndGpuTimingZone( static_cast<EGpuTimingZone>( zone ) );
+        }
+    }
+    Context->End( frame.Disjoint.Get() );
+    m_GpuTimingFrameActive = false;
+}
+
+void D3D11GraphicsEngine::PollGpuTimingQueries(
+    uint64_t settingsKey, uint64_t worldGeneration ) {
+    if ( !m_GpuTimingAvailable || !Context ) {
+        return;
+    }
+
+    for ( auto& frame : m_GpuTimingFrames ) {
+        if ( !frame.Pending ) {
+            continue;
+        }
+        if ( ++frame.PendingFrames > 32 ) {
+            frame.Pending = false;
+            frame.PendingFrames = 0;
+            ++m_GpuVobPerformanceStats.GpuTimingDroppedFrames;
+            continue;
+        }
+        if ( frame.SettingsKey != settingsKey
+            || frame.WorldGeneration != worldGeneration ) {
+            frame.Pending = false;
+            frame.PendingFrames = 0;
+            continue;
+        }
+
+        D3D11_QUERY_DATA_TIMESTAMP_DISJOINT disjoint = {};
+        if ( Context->GetData( frame.Disjoint.Get(), &disjoint,
+            sizeof( disjoint ), D3D11_ASYNC_GETDATA_DONOTFLUSH ) != S_OK ) {
+            continue;
+        }
+
+        double zoneMs[GpuTimingZoneCount] = {};
+        bool ready = true;
+        for ( unsigned int zone = 0; zone < GpuTimingZoneCount && ready; ++zone ) {
+            for ( unsigned int interval = 0;
+                interval < frame.IntervalCount[zone]; ++interval ) {
+                UINT64 beginTimestamp = 0;
+                UINT64 endTimestamp = 0;
+                if ( Context->GetData( frame.Timestamps[zone][interval][0].Get(),
+                    &beginTimestamp, sizeof( beginTimestamp ),
+                    D3D11_ASYNC_GETDATA_DONOTFLUSH ) != S_OK
+                    || Context->GetData( frame.Timestamps[zone][interval][1].Get(),
+                        &endTimestamp, sizeof( endTimestamp ),
+                        D3D11_ASYNC_GETDATA_DONOTFLUSH ) != S_OK ) {
+                    ready = false;
+                    break;
+                }
+                if ( endTimestamp >= beginTimestamp && disjoint.Frequency > 0 ) {
+                    zoneMs[zone] += (static_cast<double>( endTimestamp - beginTimestamp )
+                        / static_cast<double>( disjoint.Frequency )) * 1000.0;
+                }
+            }
+        }
+        if ( !ready ) {
+            continue;
+        }
+
+        frame.Pending = false;
+        frame.PendingFrames = 0;
+        if ( disjoint.Disjoint ) {
+            continue;
+        }
+
+        ++m_GpuVobPerformanceStats.GpuTimingFrames;
+        const auto addZone = [&zoneMs]( EGpuTimingZone zone,
+            uint64_t& samples, double& total ) {
+            const unsigned int index = static_cast<unsigned int>( zone );
+            if ( zoneMs[index] > 0.0 ) {
+                ++samples;
+                total += zoneMs[index];
+            }
+        };
+        addZone( EGpuTimingZone::HiZ, m_GpuVobPerformanceStats.GpuHiZTimingSamples,
+            m_GpuVobPerformanceStats.GpuHiZMsTotal );
+        addZone( EGpuTimingZone::MainCull, m_GpuVobPerformanceStats.GpuMainCullTimingSamples,
+            m_GpuVobPerformanceStats.GpuMainCullMsTotal );
+        addZone( EGpuTimingZone::ShadowCull, m_GpuVobPerformanceStats.GpuShadowCullTimingSamples,
+            m_GpuVobPerformanceStats.GpuShadowCullMsTotal );
+        addZone( EGpuTimingZone::VobDepth, m_GpuVobPerformanceStats.GpuVobDepthTimingSamples,
+            m_GpuVobPerformanceStats.GpuVobDepthMsTotal );
+        addZone( EGpuTimingZone::VobLit, m_GpuVobPerformanceStats.GpuVobLitTimingSamples,
+            m_GpuVobPerformanceStats.GpuVobLitMsTotal );
+    }
+}
+
+void D3D11GraphicsEngine::BeginGpuTimingZone( EGpuTimingZone zone ) {
+    if ( !m_GpuTimingFrameActive || !Context ) {
+        return;
+    }
+    const unsigned int index = static_cast<unsigned int>( zone );
+    if ( index >= GpuTimingZoneCount || m_GpuTimingFrames[m_GpuTimingFrameIndex].Active[index] ) {
+        return;
+    }
+    auto& frame = m_GpuTimingFrames[m_GpuTimingFrameIndex];
+    if ( frame.IntervalCount[index] >= GpuTimingMaxIntervals ) {
+        ++m_GpuVobPerformanceStats.GpuTimingIntervalOverflow;
+        return;
+    }
+    const unsigned int interval = frame.IntervalCount[index];
+    Context->End( frame.Timestamps[index][interval][0].Get() );
+    frame.Active[index] = true;
+}
+
+void D3D11GraphicsEngine::EndGpuTimingZone( EGpuTimingZone zone ) {
+    if ( !m_GpuTimingFrameActive || !Context ) {
+        return;
+    }
+    const unsigned int index = static_cast<unsigned int>( zone );
+    if ( index >= GpuTimingZoneCount ) {
+        return;
+    }
+    auto& frame = m_GpuTimingFrames[m_GpuTimingFrameIndex];
+    if ( !frame.Active[index] || frame.IntervalCount[index] >= GpuTimingMaxIntervals ) {
+        return;
+    }
+    const unsigned int interval = frame.IntervalCount[index];
+    Context->End( frame.Timestamps[index][interval][1].Get() );
+    ++frame.IntervalCount[index];
+    frame.Active[index] = false;
 }
 
 void D3D11GraphicsEngine::LogGpuVobPerformanceStats() {
@@ -1053,6 +1265,8 @@ void D3D11GraphicsEngine::LogGpuVobPerformanceStats() {
         << " gpuMainVisibleTrianglesAvg=" << averageGpuVisibleTriangles
         << " gpuMainDisplayTrianglesLast=" << (m_HasLastGpuMainVisibleTrianglesEstimate
             ? m_LastGpuMainVisibleTrianglesEstimate : 0ull)
+        << " gpuMainDisplayVisibilityRatioLast=" << (m_HasLastGpuMainVisibilityRatio
+            ? m_LastGpuMainVisibilityRatio : 0.0)
         << " gpuMainVisibleSamplePct=" << gpuVisibleSamplePercent
         << " gpuMainOcclusionRejectPct=" << (averageGpuCandidateInstances > 0.0
             ? (averageGpuOccludedInstances / averageGpuCandidateInstances) * 100.0 : 0.0)
@@ -1108,7 +1322,31 @@ void D3D11GraphicsEngine::LogGpuVobPerformanceStats() {
         << " cullPrepareMsMax=" << m_GpuVobPerformanceStats.GpuCullPrepareMsMax
         << " hizPrepareMsPerFrame=" << (m_GpuVobPerformanceStats.HiZPrepareMsTotal
             / measurementFrames)
-        << " hizPrepareMsMax=" << m_GpuVobPerformanceStats.HiZPrepareMsMax;
+        << " hizPrepareMsMax=" << m_GpuVobPerformanceStats.HiZPrepareMsMax
+        << " gpuTiming=" << (m_GpuTimingAvailable ? 1 : 0)
+        << " gpuTimingFrames=" << m_GpuVobPerformanceStats.GpuTimingFrames
+        << " gpuTimingDroppedFrames=" << m_GpuVobPerformanceStats.GpuTimingDroppedFrames
+        << " gpuTimingIntervalOverflow=" << m_GpuVobPerformanceStats.GpuTimingIntervalOverflow
+        << " gpuHiZSamples=" << m_GpuVobPerformanceStats.GpuHiZTimingSamples
+        << " gpuHiZMsAvg=" << (m_GpuVobPerformanceStats.GpuHiZTimingSamples > 0
+            ? m_GpuVobPerformanceStats.GpuHiZMsTotal
+                / static_cast<double>( m_GpuVobPerformanceStats.GpuHiZTimingSamples ) : 0.0)
+        << " gpuMainCullSamples=" << m_GpuVobPerformanceStats.GpuMainCullTimingSamples
+        << " gpuMainCullMsAvg=" << (m_GpuVobPerformanceStats.GpuMainCullTimingSamples > 0
+            ? m_GpuVobPerformanceStats.GpuMainCullMsTotal
+                / static_cast<double>( m_GpuVobPerformanceStats.GpuMainCullTimingSamples ) : 0.0)
+        << " gpuShadowCullSamples=" << m_GpuVobPerformanceStats.GpuShadowCullTimingSamples
+        << " gpuShadowCullMsAvg=" << (m_GpuVobPerformanceStats.GpuShadowCullTimingSamples > 0
+            ? m_GpuVobPerformanceStats.GpuShadowCullMsTotal
+                / static_cast<double>( m_GpuVobPerformanceStats.GpuShadowCullTimingSamples ) : 0.0)
+        << " gpuVobDepthSamples=" << m_GpuVobPerformanceStats.GpuVobDepthTimingSamples
+        << " gpuVobDepthMsAvg=" << (m_GpuVobPerformanceStats.GpuVobDepthTimingSamples > 0
+            ? m_GpuVobPerformanceStats.GpuVobDepthMsTotal
+                / static_cast<double>( m_GpuVobPerformanceStats.GpuVobDepthTimingSamples ) : 0.0)
+        << " gpuVobLitSamples=" << m_GpuVobPerformanceStats.GpuVobLitTimingSamples
+        << " gpuVobLitMsAvg=" << (m_GpuVobPerformanceStats.GpuVobLitTimingSamples > 0
+            ? m_GpuVobPerformanceStats.GpuVobLitMsTotal
+                / static_cast<double>( m_GpuVobPerformanceStats.GpuVobLitTimingSamples ) : 0.0);
 }
 
 bool D3D11GraphicsEngine::IsGpuVobRuntimeDisabled() const {
@@ -1254,6 +1492,8 @@ void D3D11GraphicsEngine::BuildGpuVobHiZ() {
         return;
     }
 
+    BeginGpuTimingZone( EGpuTimingZone::HiZ );
+
     // Copying the DSV is already the renderer's established way of making
     // the reversed-Z depth SRV readable for compute passes.
     CopyDepthStencil();
@@ -1285,6 +1525,7 @@ void D3D11GraphicsEngine::BuildGpuVobHiZ() {
     }
 
     GetContext()->CSSetShader( nullptr, nullptr, 0 );
+    EndGpuTimingZone( EGpuTimingZone::HiZ );
     GpuVobHiZBuiltThisFrame = true;
     ++m_GpuVobPerformanceStats.HiZBuilt;
     m_GpuVobPerformanceStats.HiZDispatches += GpuVobHiZMipCount;
@@ -1489,6 +1730,7 @@ bool D3D11GraphicsEngine::PrepareGpuVobCulling(
     std::unique_ptr<D3D11ConstantBuffer>& cullConstantBuffer,
     std::unique_ptr<D3D11ConstantBuffer>& patchConstantBuffer,
     bool useHiZ,
+    bool shadowPass,
     D3D11VertexBuffer*& outputInstanceBuffer,
     D3D11IndirectBuffer*& outputArgsBuffer ) {
     TracyD3D11ZoneCGX( "GpuVobCulling::Prepare" );
@@ -1586,23 +1828,34 @@ bool D3D11GraphicsEngine::PrepareGpuVobCulling(
 
     // The CPU-side instancing buffer is deliberately a dynamic vertex buffer.
     // D3D11 forbids combining CPU access flags with structured/raw misc flags,
-    // so GPU culling receives a separate DEFAULT structured copy.
-    const UINT inputBytes = static_cast<UINT>( inputInstanceBuffer->GetSizeInBytes() );
-    if ( inputBytes == 0 ) {
-        return failGpuVobPath( "input instance buffer has zero capacity" );
+    // so GPU culling receives a separate DEFAULT structured copy. The source
+    // buffer is a retained-capacity pool allocation; only the contiguous range
+    // occupied by the current visual batches is needed by CSCull.
+    const UINT inputCapacityBytes = static_cast<UINT>( inputInstanceBuffer->GetSizeInBytes() );
+    uint64_t activeInstanceCount = 0;
+    for ( const auto& visual : visualInfo ) {
+        activeInstanceCount = std::max<uint64_t>( activeInstanceCount,
+            static_cast<uint64_t>( visual.InstanceBase ) + visual.InstanceCount );
     }
-    if ( inputBytes % sizeof( VobInstanceInfo ) != 0 ) {
-        return failGpuVobPath( "input instance buffer capacity is not stride-aligned" );
+    if ( inputCapacityBytes == 0 || activeInstanceCount == 0
+        || activeInstanceCount > std::numeric_limits<UINT>::max() / sizeof( VobInstanceInfo ) ) {
+        return failGpuVobPath( "input instance buffer range is invalid" );
+    }
+    const UINT activeInputBytes = static_cast<UINT>( activeInstanceCount
+        * sizeof( VobInstanceInfo ) );
+    if ( inputCapacityBytes % sizeof( VobInstanceInfo ) != 0
+        || activeInputBytes > inputCapacityBytes ) {
+        return failGpuVobPath( "input instance buffer range is not stride-aligned" );
     }
     if ( !inputInstanceBuffer->GetVertexBuffer().Get() ) {
         return failGpuVobPath( "input instance buffer has no D3D11 resource" );
     }
 
     if ( !cullInputBuffer
-        || cullInputBuffer->GetSizeInBytes() != inputBytes
+        || cullInputBuffer->GetSizeInBytes() < inputCapacityBytes
         || !cullInputBuffer->GetShaderResourceView().Get() ) {
         cullInputBuffer = std::make_unique<D3D11VertexBuffer>();
-        if ( cullInputBuffer->Init( nullptr, inputBytes,
+        if ( cullInputBuffer->Init( nullptr, inputCapacityBytes,
             D3D11VertexBuffer::B_SHADER_RESOURCE,
             D3D11VertexBuffer::U_DEFAULT,
             D3D11VertexBuffer::CA_NONE,
@@ -1612,8 +1865,13 @@ bool D3D11GraphicsEngine::PrepareGpuVobCulling(
         }
     }
 
-    GetContext()->CopyResource( cullInputBuffer->GetVertexBuffer().Get(),
-        inputInstanceBuffer->GetVertexBuffer().Get() );
+    // Buffers use byte coordinates for CopySubresourceRegion. This avoids
+    // copying unused tail capacity from the frame pool every frame while
+    // preserving the D3D11 structured-buffer layout required by the SRV.
+    D3D11_BOX activeInstanceRegion = { 0, 0, 0, activeInputBytes, 1, 1 };
+    GetContext()->CopySubresourceRegion(
+        cullInputBuffer->GetVertexBuffer().Get(), 0, 0, 0, 0,
+        inputInstanceBuffer->GetVertexBuffer().Get(), 0, &activeInstanceRegion );
 
     auto ensureStructuredBuffer = []( std::unique_ptr<D3D11VertexBuffer>& buffer,
         UINT sizeInBytes, UINT stride, const char* debugName ) -> bool {
@@ -1704,7 +1962,7 @@ bool D3D11GraphicsEngine::PrepareGpuVobCulling(
         return failGpuVobPath( "GPU culling indirect-args upload failed" );
     }
 
-    m_GpuVobPerformanceStats.GpuCullInputCopyBytes += inputBytes;
+    m_GpuVobPerformanceStats.GpuCullInputCopyBytes += activeInputBytes;
     m_GpuVobPerformanceStats.GpuCullMetadataUploadBytes +=
         static_cast<uint64_t>( visualBytes ) + drawVisualBytes;
     m_GpuVobPerformanceStats.GpuCullArgsUploadBytes += argsBytes;
@@ -1751,6 +2009,9 @@ bool D3D11GraphicsEngine::PrepareGpuVobCulling(
 
     GetContext()->CSSetShaderResources( 0, 3, cullSrvs );
     GetContext()->CSSetUnorderedAccessViews( 0, 2, cullUavs, nullptr );
+    const EGpuTimingZone cullTimingZone = shadowPass
+        ? EGpuTimingZone::ShadowCull : EGpuTimingZone::MainCull;
+    BeginGpuTimingZone( cullTimingZone );
     cullShader->Apply();
     GetContext()->Dispatch( static_cast<UINT>( visualInfo.size() ), 1, 1 );
     ++m_GpuVobPerformanceStats.GpuCullDispatches;
@@ -1771,6 +2032,7 @@ bool D3D11GraphicsEngine::PrepareGpuVobCulling(
     ID3D11UnorderedAccessView* argsUav =
         cullArgsBuffer->GetUnorderedAccessView().Get();
     if ( !patchSrvs[0] || !patchSrvs[1] || !patchSrvs[2] || !argsUav ) {
+        EndGpuTimingZone( cullTimingZone );
         clearComputeBindings();
         return failGpuVobPath( "GPU indirect-args patch binding unavailable" );
     }
@@ -1781,6 +2043,7 @@ bool D3D11GraphicsEngine::PrepareGpuVobCulling(
     GetContext()->Dispatch(
         (static_cast<UINT>( drawVisualIndices.size() ) + 63u) / 64u, 1, 1 );
     ++m_GpuVobPerformanceStats.GpuCullDispatches;
+    EndGpuTimingZone( cullTimingZone );
 
     clearComputeBindings();
 
@@ -1820,6 +2083,7 @@ bool D3D11GraphicsEngine::PrepareGpuVobCulling() {
         GpuVobCullConstantBuffer,
         GpuVobPatchConstantBuffer,
         GpuVobHiZBuiltThisFrame,
+        false,
         cache.MainVobGpuInstanceBuffer,
         cache.MainVobGpuIndirectArgsBuffer );
 }
@@ -1864,9 +2128,13 @@ void D3D11GraphicsEngine::PollGpuVobVisibleCountReadback(
             visibleInstances += visibleCounts[visualIndex];
         }
 
+        uint64_t candidateTriangles = 0;
         uint64_t visibleTriangles = 0;
         for ( const auto& weight : slot.TriangleWeights ) {
             if ( weight.VisualIndex < visibleCountCount ) {
+                candidateTriangles += static_cast<uint64_t>(
+                    slot.CandidateInstanceCounts[weight.VisualIndex] )
+                    * weight.TrianglesPerInstance;
                 visibleTriangles += static_cast<uint64_t>( visibleCounts[weight.VisualIndex] )
                     * weight.TrianglesPerInstance;
             }
@@ -1885,6 +2153,11 @@ void D3D11GraphicsEngine::PollGpuVobVisibleCountReadback(
         m_GpuVobPerformanceStats.GpuVisibleTriangles += visibleTriangles;
         m_LastGpuMainVisibleTrianglesEstimate = visibleTriangles;
         m_HasLastGpuMainVisibleTrianglesEstimate = true;
+        if ( candidateTriangles > 0 ) {
+            m_LastGpuMainVisibilityRatio = static_cast<double>( visibleTriangles )
+                / static_cast<double>( candidateTriangles );
+            m_HasLastGpuMainVisibilityRatio = true;
+        }
     }
 }
 
@@ -3632,6 +3905,7 @@ XRESULT D3D11GraphicsEngine::OnEndFrame() {
     auto& renderInfo = Engine::GAPI->GetRendererState().RendererInfo;
     renderInfo.RenderStage = STAGE_DRAW_PRESENT;
     Present();
+    EndGpuTimingFrame();
 
     RenderedVobs.clear();
     GetPfxRenderer()->OnEndFrame();
@@ -6076,6 +6350,7 @@ XRESULT D3D11GraphicsEngine::OnStartWorldRendering() {
     const uint64_t performanceSettingsKey = BuildGpuVobPerformanceSettingsKey();
     const uint64_t worldGeneration = Engine::GAPI->GetCityWindowConfigurationGeneration();
     PollGpuVobVisibleCountReadback( performanceSettingsKey, worldGeneration );
+    PollGpuTimingQueries( performanceSettingsKey, worldGeneration );
 
     if ( !m_GpuVobPerformanceSettingsInitialized ) {
         m_GpuVobPerformanceSettingsInitialized = true;
@@ -6095,6 +6370,8 @@ XRESULT D3D11GraphicsEngine::OnStartWorldRendering() {
         m_GpuVobPerformanceStats.Reset();
         m_LastGpuVobFrameStatsAccumulated = 0;
         m_HasLastGpuMainVisibleTrianglesEstimate = false;
+        m_HasLastGpuMainVisibilityRatio = false;
+        m_LastGpuMainVisibilityRatio = 0.0;
         m_LastGpuMainVisibleTrianglesEstimate = 0;
         m_GpuVobPerformanceSettingsKey = performanceSettingsKey;
         m_GpuVobPerformanceWorldGeneration = worldGeneration;
@@ -6126,6 +6403,8 @@ XRESULT D3D11GraphicsEngine::OnStartWorldRendering() {
         return XR_SUCCESS;
 
     if ( PresentPending ) return XR_SUCCESS;
+
+    BeginGpuTimingFrame( performanceSettingsKey, worldGeneration );
 
     RenderGraph graph( GetPfxRenderer()->GetTexturePool() );
 
@@ -9510,9 +9789,10 @@ void XM_CALLCONV D3D11GraphicsEngine::DrawWorldAroundForWorldShadow( FXMVECTOR p
                 GpuVobShadowCullResources.VisibleCountsBuffer,
                 GpuVobShadowCullResources.CullConstantBuffer,
                 GpuVobShadowCullResources.PatchConstantBuffer,
-                 false,
-                 shadowGpuInstanceBuffer,
-                 shadowGpuArgsBuffer );
+                false,
+                true,
+                shadowGpuInstanceBuffer,
+                shadowGpuArgsBuffer );
             if ( shadowGpuCullingActive ) {
                 ++m_GpuVobPerformanceStats.ShadowCullActive;
             }
@@ -10322,6 +10602,8 @@ XRESULT D3D11GraphicsEngine::DrawVOBsInstanced() {
             if ( !cache.sortedInstancedMeshes.empty() ) {
                 TracyD3D11ZoneCGX( "DrawVOBsInstanced::OpaqueSubmission" );
                 auto _scopeOpaqueSubmission = RecordGraphicsEvent( GE_NAME( "DrawVOBsInstanced::OpaqueSubmission" ) );
+                BeginGpuTimingZone( isZPrepass
+                    ? EGpuTimingZone::VobDepth : EGpuTimingZone::VobLit );
                 std::vector<bool> mdiConsumed( cache.sortedInstancedMeshes.size(), false );
                 for ( size_t drawIndex = 0;
                     drawIndex < cache.sortedInstancedMeshes.size(); ++drawIndex ) {
@@ -10641,6 +10923,8 @@ XRESULT D3D11GraphicsEngine::DrawVOBsInstanced() {
                             sizeof( ExVertexStruct ), cachedVisual->StartInstanceNum );
                     }
                 }
+                EndGpuTimingZone( isZPrepass
+                    ? EGpuTimingZone::VobDepth : EGpuTimingZone::VobLit );
             }
             if ( !isZPrepass ) {
                 for ( auto const& cv : cache.vobVisuals ) {

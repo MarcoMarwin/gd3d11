@@ -80,16 +80,54 @@ bool IsInstanceVisible( VobCullVisual visual, VobInstanceGpu inst )
         return true;
 
     float4x4 worldViewProj = mul( BuildWorldMatrix( inst ), CullViewProj );
-    bool outNegX = true;
-    bool outPosX = true;
-    bool outNegY = true;
-    bool outPosY = true;
-    bool outNear = true;
+
+    // The clip transform is linear over the local AABB. Testing the interval
+    // of each clip plane is equivalent to the eight-corner reject, but avoids
+    // eight matrix-vector products for the common frustum-only path. The
+    // interval is conservative and therefore cannot cull a visible VOB.
+    const float3 boxCenter = (visual.BBoxMin + visual.BBoxMax) * 0.5f;
+    const float3 boxExtent = (visual.BBoxMax - visual.BBoxMin) * 0.5f;
+    const float4 clipCenter = mul( float4( boxCenter, 1.0f ), worldViewProj );
+    const float4 row0 = worldViewProj[0];
+    const float4 row1 = worldViewProj[1];
+    const float4 row2 = worldViewProj[2];
+
+    const float leftCenter = clipCenter.x + clipCenter.w;
+    const float leftRadius = dot( boxExtent, abs( float3(
+        row0.x + row0.w, row1.x + row1.w, row2.x + row2.w ) ) );
+    const float rightCenter = -clipCenter.x + clipCenter.w;
+    const float rightRadius = dot( boxExtent, abs( float3(
+        -row0.x + row0.w, -row1.x + row1.w, -row2.x + row2.w ) ) );
+    const float bottomCenter = clipCenter.y + clipCenter.w;
+    const float bottomRadius = dot( boxExtent, abs( float3(
+        row0.y + row0.w, row1.y + row1.w, row2.y + row2.w ) ) );
+    const float topCenter = -clipCenter.y + clipCenter.w;
+    const float topRadius = dot( boxExtent, abs( float3(
+        -row0.y + row0.w, -row1.y + row1.w, -row2.y + row2.w ) ) );
+    const float nearCenter = clipCenter.z - clipCenter.w;
+    const float nearRadius = dot( boxExtent, abs( float3(
+        row0.z - row0.w, row1.z - row1.w, row2.z - row2.w ) ) );
+
+    if ( leftCenter + leftRadius < 0.0f
+        || rightCenter + rightRadius < 0.0f
+        || bottomCenter + bottomRadius < 0.0f
+        || topCenter + topRadius < 0.0f
+        || nearCenter - nearRadius > 0.0f ) {
+        return false;
+    }
+
+    // A box straddling the eye plane has an unbounded projected rectangle;
+    // keep it rather than risk an invalid occlusion rejection.
+    if ( EnableOcclusion == 0 || HiZMipCount == 0 )
+        return true;
+
     float2 uvMin = float2( 1e30f, 1e30f );
     float2 uvMax = -float2( 1e30f, 1e30f );
     float closestDepth = 0.0f;
     bool allInFront = true;
 
+    // Hi-Z still needs the projected rectangle and closest depth. Keep the
+    // exact corner projection for this less common, more expensive path.
     [unroll]
     for ( uint cornerIndex = 0; cornerIndex < 8; ++cornerIndex )
     {
@@ -98,14 +136,6 @@ bool IsInstanceVisible( VobCullVisual visual, VobInstanceGpu inst )
             (cornerIndex & 2) != 0 ? visual.BBoxMax.y : visual.BBoxMin.y,
             (cornerIndex & 4) != 0 ? visual.BBoxMax.z : visual.BBoxMin.z );
         float4 clip = mul( float4( corner, 1.0f ), worldViewProj );
-
-        outNegX = outNegX && (clip.x < -clip.w);
-        outPosX = outPosX && (clip.x >  clip.w);
-        outNegY = outNegY && (clip.y < -clip.w);
-        outPosY = outPosY && (clip.y >  clip.w);
-        // Gothic's renderer uses a D3D reversed-Z projection with an
-        // infinite far plane. Only the near plane needs a reject here.
-        outNear = outNear && (clip.z > clip.w);
 
         if ( clip.w > 1e-4f )
         {
@@ -120,12 +150,7 @@ bool IsInstanceVisible( VobCullVisual visual, VobInstanceGpu inst )
         }
     }
 
-    if ( outNegX || outPosX || outNegY || outPosY || outNear )
-        return false;
-
-    // A box straddling the eye plane has an unbounded projected rectangle;
-    // keep it rather than risk an invalid occlusion rejection.
-    if ( EnableOcclusion == 0 || HiZMipCount == 0 || !allInFront )
+    if ( !allInFront )
         return true;
 
     float2 hizSize = float2( HiZWidth, HiZHeight );
