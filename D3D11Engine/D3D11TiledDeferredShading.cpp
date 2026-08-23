@@ -616,7 +616,7 @@ D3D11TiledDeferredShading::CullResult D3D11TiledDeferredShading::CullLights(
         tl.IsIndoor = light->IsIndoorVob ? 1.0f : 0.0f;
         tl.IgnoreIndoorOutdoorLimit = light->IgnoreIndoorOutdoorLimit ? 1.0f : 0.0f;
         tl.ShadowSoftness = std::max(
-            settings.GetEffectiveShadowSoftness() * 2.0f, minimumTemporalShadowSoftness );
+            settings.ShadowSoftness * 2.0f, minimumTemporalShadowSoftness );
         tl.ShadowFilterMode = static_cast<uint32_t>( settings.GetShadowKernelQuality() );
         tl.ShadowFilterPad[0] = 0;
         tl.ShadowFilterPad[1] = 0;

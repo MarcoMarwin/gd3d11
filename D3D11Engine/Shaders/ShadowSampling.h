@@ -41,16 +41,12 @@
 #define PCSS_FILTER_TAPS_NEAR 16
 #endif
 
-#ifndef PCSS_FILTER_TAPS_FAR
-#define PCSS_FILTER_TAPS_FAR 8
-#endif
-
 #ifndef PCF_FILTER_TAPS_NEAR
 #define PCF_FILTER_TAPS_NEAR 16
 #endif
 
 #ifndef PCF_FILTER_TAPS_FAR
-#define PCF_FILTER_TAPS_FAR 8
+#define PCF_FILTER_TAPS_FAR 4
 #endif
 
 bool UseTemporalShadowReconstruction()
@@ -81,6 +77,16 @@ int GetRuntimePCFTapCount(int cascadeIndex)
     if ( quality <= 0 ) return 4;
     if ( quality == 1 ) return nearCascade ? 8 : 4;
     return nearCascade ? PCF_FILTER_TAPS_NEAR : PCF_FILTER_TAPS_FAR;
+}
+
+// High keeps the near cascade on PCSS but limits it to 8 filter samples.
+// Extreme uses the full 16-tap near filter. The shadow-map size is already
+// supplied at runtime, so the quality distinction does not require a shader
+// reload when the user changes the shadow preset.
+int GetRuntimePCSSNearTapCount()
+{
+    const int requestedTaps = SQ_ShadowmapSize >= 8192.0f ? 16 : 8;
+    return min(PCSS_FILTER_TAPS_NEAR, requestedTaps);
 }
 
 // Shadow-map sampling for the atlas and array backends.
@@ -484,7 +490,10 @@ float SampleCascadeShadowSoft(float4 vShadowSamplingPos, float2 projectedTexCoor
     float filterRadius = texelSize * softness;
 
 #if SHD_FILTER_PCSS
-    if (UsePCSSShadowFilter())
+    // PCSS is intentionally restricted to the near cascade. Distant
+    // cascades use the cheaper PCF path below and therefore skip the blocker
+    // search completely.
+    if (UsePCSSShadowFilter() && cascadeIndex < CSM_PCF_LIMIT)
     {
         float noiseVal;
         float2x2 rotMat = GetPoissonRotationMatrixRForCascade(screenPos, cascadeIndex, noiseVal);
@@ -505,32 +514,18 @@ float SampleCascadeShadowSoft(float4 vShadowSamplingPos, float2 projectedTexCoor
             float centerShadow = SampleShadowMapCmp(
                 projectedTexCoords.xy, cascadeIndex, zReceiver);
             float sum = centerShadow;
-            if (cascadeIndex < CSM_PCF_LIMIT)
+            float finalRadius = pcssRadius * lerp(0.85f, 1.15f, noiseVal);
+            int startIdx = GetBlueNoiseStartIndex(screenPos, cascadeIndex, 32, 11);
+            const int tapCount = GetRuntimePCSSNearTapCount();
+            [unroll]
+            for (int i = 0; i < PCSS_FILTER_TAPS_NEAR; i++)
             {
-                float finalRadius = pcssRadius * lerp(0.85f, 1.15f, noiseVal);
-                int startIdx = GetBlueNoiseStartIndex(screenPos, cascadeIndex, 32, 11);
-                [unroll]
-                for (int i = 0; i < PCSS_FILTER_TAPS_NEAR; i++)
-                {
-                    int sampleIdx = (startIdx + i * 9) & 31;
-                    float2 offset = mul(rotMat, g_PoissonDisk32[sampleIdx]) * finalRadius;
-                    sum += SampleShadowMapCmp(projectedTexCoords.xy + offset, cascadeIndex, zReceiver);
-                }
-                shadow = sum * (1.0f / (float)(PCSS_FILTER_TAPS_NEAR + 1));
+                if (i >= tapCount) break;
+                int sampleIdx = (startIdx + i * 9) & 31;
+                float2 offset = mul(rotMat, g_PoissonDisk32[sampleIdx]) * finalRadius;
+                sum += SampleShadowMapCmp(projectedTexCoords.xy + offset, cascadeIndex, zReceiver);
             }
-            else
-            {
-                float finalRadius = pcssRadius * lerp(0.95f, 1.05f, noiseVal);
-                int startIdx = GetBlueNoiseStartIndex(screenPos, cascadeIndex, 16, 17);
-                [unroll]
-                for (int i = 0; i < PCSS_FILTER_TAPS_FAR; i++)
-                {
-                    int sampleIdx = (startIdx + i * 5) & 15;
-                    float2 offset = mul(rotMat, g_PoissonDisk16[sampleIdx]) * finalRadius;
-                    sum += SampleShadowMapCmp(projectedTexCoords.xy + offset, cascadeIndex, zReceiver);
-                }
-                shadow = sum * (1.0f / (float)(PCSS_FILTER_TAPS_FAR + 1));
-            }
+            shadow = sum * (1.0f / (float)(tapCount + 1));
         }
     }
     else

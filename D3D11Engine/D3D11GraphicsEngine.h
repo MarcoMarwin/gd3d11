@@ -386,7 +386,7 @@ public:
     /** Copies the depth stencil buffer to DepthStencilBufferCopy */
     void CopyDepthStencil();
 
-    /** Builds the world-only reversed-Z Hi-Z pyramid used by GPU VOB culling. */
+    /** Builds the world-only reversed-Z Hi-Z pyramid used by GPU VOB occlusion. */
     void BuildGpuVobHiZ();
 
     /** Draws particle meshes */
@@ -451,7 +451,6 @@ private:
     enum class EGpuTimingZone : unsigned int {
         HiZ = 0,
         MainCull,
-        ShadowCull,
         VobDepth,
         VobLit,
         Count
@@ -766,17 +765,6 @@ private:
         unsigned int InstanceCount = 0;
     };
 
-    struct GpuVobCullResourceSet {
-        std::unique_ptr<D3D11VertexBuffer> InputBuffer;
-        std::unique_ptr<D3D11VertexBuffer> VisualBuffer;
-        std::unique_ptr<D3D11VertexBuffer> DrawVisualBuffer;
-        std::unique_ptr<D3D11VertexBuffer> OutputBuffer;
-        std::unique_ptr<D3D11IndirectBuffer> ArgsBuffer;
-        std::unique_ptr<D3D11IndirectBuffer> VisibleCountsBuffer;
-        std::unique_ptr<D3D11ConstantBuffer> CullConstantBuffer;
-        std::unique_ptr<D3D11ConstantBuffer> PatchConstantBuffer;
-    };
-
     bool PrepareGpuVobCulling(
         D3D11VertexBuffer* inputInstanceBuffer,
         const std::vector<GpuVobCullVisualBatch>& vobVisuals,
@@ -791,13 +779,8 @@ private:
         std::unique_ptr<D3D11IndirectBuffer>& cullVisibleCountsBuffer,
         std::unique_ptr<D3D11ConstantBuffer>& cullConstantBuffer,
         std::unique_ptr<D3D11ConstantBuffer>& patchConstantBuffer,
-        bool useHiZ,
-        bool shadowPass,
         D3D11VertexBuffer*& outputInstanceBuffer,
         D3D11IndirectBuffer*& outputArgsBuffer );
-
-    /** Reused sequentially by the CSM/rain shadow passes. */
-    GpuVobCullResourceSet GpuVobShadowCullResources;
 
     FrameIndirectBufferPool m_MainWorldIndirectPool;
     FrameIndirectBufferPool m_ShadowWorldIndirectPool;
@@ -826,7 +809,7 @@ private:
         UINT ShadowIndexCount = 0;
     };
 
-    /** Persistent shared geometry used by the main-view and shadow GPU-driven VOB paths. */
+    /** Persistent shared geometry used by the main-view GPU-driven VOB path. */
     std::unique_ptr<D3D11VertexBuffer> GpuVobGeometryVertexBuffer;
     std::unique_ptr<D3D11VertexBuffer> GpuVobGeometryIndexBuffer;
     std::unordered_map<MeshInfo*, GpuVobGeometryRange> GpuVobGeometryRanges;
@@ -869,8 +852,6 @@ private:
         uint64_t MainCullAttempts = 0;
         uint64_t MainCullActive = 0;
         uint64_t MainCullFallback = 0;
-        uint64_t ShadowCullAttempts = 0;
-        uint64_t ShadowCullActive = 0;
         uint64_t IndirectDrawCalls = 0;
         uint64_t MdiBatches = 0;
         uint64_t MdiCommands = 0;
@@ -896,12 +877,10 @@ private:
         uint64_t GpuTimingDroppedFrames = 0;
         uint64_t GpuHiZTimingSamples = 0;
         uint64_t GpuMainCullTimingSamples = 0;
-        uint64_t GpuShadowCullTimingSamples = 0;
         uint64_t GpuVobDepthTimingSamples = 0;
         uint64_t GpuVobLitTimingSamples = 0;
         double GpuHiZMsTotal = 0.0;
         double GpuMainCullMsTotal = 0.0;
-        double GpuShadowCullMsTotal = 0.0;
         double GpuVobDepthMsTotal = 0.0;
         double GpuVobLitMsTotal = 0.0;
         uint64_t GpuTimingIntervalOverflow = 0;

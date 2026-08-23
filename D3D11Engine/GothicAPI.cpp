@@ -7317,6 +7317,11 @@ XRESULT GothicAPI::SaveMenuSettings( const std::string& file ) {
     WritePrivateProfileStringA( "Shadows", "ShadowMapSize", nullptr, ini.c_str() );
     WritePrivateProfileStringA( "Shadows", "CasterMinTexels", nullptr, ini.c_str() );
     WritePrivateProfileStringA( "Performance", "GpuVobCulling", nullptr, ini.c_str() );
+    WritePrivateProfileStringA( "Performance", "GpuVobHiZCulling", nullptr, ini.c_str() );
+    WritePrivateProfileStringA( "Performance", "GpuVobShadowCulling", nullptr, ini.c_str() );
+    WritePrivateProfileStringA( "Performance", "GpuVobGeometryArena", nullptr, ini.c_str() );
+    WritePrivateProfileStringA( "Performance", "GpuVobMdi", nullptr, ini.c_str() );
+    WritePrivateProfileStringA( "Performance", "GpuVobOcclusionCulling", nullptr, ini.c_str() );
 
     WritePrivateProfileStringA( "General", "AntiAliasing", std::to_string( (int)s.AntiAliasingMode ).c_str(), ini.c_str() );
 
@@ -7447,15 +7452,10 @@ XRESULT GothicAPI::LoadMenuSettings( const std::string& file ) {
         s.SmoothShadowFrequency = ds.SmoothShadowFrequency;
         s.ShadowStrength = ds.ShadowStrength;
         s.ShadowSoftness = std::clamp( GetPrivateProfileFloatA( "Shadows", "ShadowSoftness", ds.ShadowSoftness, ini ), 0.0f, 2.0f );
-        s.AdvancedShadowSoftness = s.ShadowSoftness;
         s.ShadowAOStrength = ds.ShadowAOStrength;
         s.WorldAOStrength = ds.WorldAOStrength;
         s.ShadowCasterMinTexels = ds.ShadowCasterMinTexels;
-        s.GpuVobCulling = ds.GpuVobCulling;
-        s.GpuVobHiZCulling = ds.GpuVobHiZCulling;
-        s.GpuVobShadowCulling = ds.GpuVobShadowCulling;
-        s.GpuVobGeometryArena = ds.GpuVobGeometryArena;
-        s.GpuVobMdi = ds.GpuVobMdi;
+        s.GpuVobOcclusionCulling = ds.GpuVobOcclusionCulling;
         s.ThreadedShadowCulling = ds.ThreadedShadowCulling;
         s.DebugSettings.ShadowCascades.LazyCascadeUpdate = ds.DebugSettings.ShadowCascades.LazyCascadeUpdate;
         s.DoZPrepass = ds.DoZPrepass;
@@ -7463,7 +7463,6 @@ XRESULT GothicAPI::LoadMenuSettings( const std::string& file ) {
         s.AdvancedWaterAnimation = ds.AdvancedWaterAnimation;
         s.AdvancedPuddles = ds.AdvancedPuddles;
         s.AdvancedWetGroundSSR = ds.AdvancedWetGroundSSR;
-        s.AdvancedVegetationPushRange = ds.AdvancedVegetationPushRange;
         s.AdvancedNightEnhance = ds.AdvancedNightEnhance;
         s.AdvancedCityWindowTransparency = ds.AdvancedCityWindowTransparency;
 

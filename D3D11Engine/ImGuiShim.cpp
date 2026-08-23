@@ -1212,14 +1212,6 @@ void ImGuiShim::RenderSettingsWindow()
             ImGui::Separator();
 
             ImGui::BeginDisabled( !settings.AdvancedPerformanceOptions );
-            ImGui::TextUnformatted( Tr( "Shadow softness test override", u8"Testwert fuer Schattenweichheit" ) );
-            ImGui::SetNextItemWidth( -1.0f );
-            ImGui::SliderFloat( "##AdvancedShadowSoftness", &settings.AdvancedShadowSoftness, 0.0f, 100.0f, "%.2f" );
-            ImGui::SetItemTooltip( "%s", Tr(
-                "Runtime override for CSM and point-light shadow softness. Range: 0 to 100. No shader reload or INI entry.",
-                u8"Laufzeit-Override fuer CSM- und Punktlicht-Schattenweichheit. Bereich: 0 bis 100. Kein Shader-Reload und kein INI-Eintrag." ) );
-
-            ImGui::Separator();
             ImGui::TextUnformatted( Tr( "World and visual test options", u8"Welt- und Darstellungstests" ) );
 
             ImGui::Checkbox( Tr( "Animate water", u8"Wasser animieren" ), &settings.AdvancedWaterAnimation );
@@ -1237,14 +1229,6 @@ void ImGuiShim::RenderSettingsWindow()
                 "Runs screen-space reflections for wet ground during rain. Disabling it skips the whole pass.",
                 u8"Fuehrt bei Regen Screen-Space-Reflexionen fuer nassen Boden aus. Deaktivieren ueberspringt den gesamten Pass." ) );
 
-            ImGui::TextUnformatted( Tr( "Vegetation push range", u8"Reichweite der Vegetationsverdrangung" ) );
-            ImGui::SetNextItemWidth( -1.0f );
-            ImGui::SliderFloat( "##AdvancedVegetationPushRange", &settings.AdvancedVegetationPushRange,
-                1.0f, 250.0f, "%.0f" );
-            ImGui::SetItemTooltip( "%s", Tr(
-                "Controls the radius in which the player and nearby NPCs push grass and wheat. The existing Build 213 value is 50.",
-                u8"Steuert den Radius, in dem der Spieler und nahe NPCs Gras und Getreide verdraengen. Der bisherige Build-213-Wert ist 50." ) );
-
             ImGui::Checkbox( Tr( "Night enhance", u8"Nacht verbessern" ), &settings.AdvancedNightEnhance );
             ImGui::SetItemTooltip( "%s", Tr(
                 "When disabled, removes the night fog blend and distant night darkening. When enabled, the original night atmosphere is retained.",
@@ -1254,24 +1238,6 @@ void ImGuiShim::RenderSettingsWindow()
             ImGui::SetItemTooltip( "%s", Tr(
                 "Uses the special transparent city_windows rendering path. Disabling it keeps those windows opaque.",
                 u8"Nutzt den speziellen transparenten city_windows-Renderingpfad. Deaktivieren laesst diese Fenster undurchsichtig." ) );
-
-            const std::array<std::pair<const char*, int>, 4> xeGTAOQualityLevels = {{
-                { Tr( "Low", u8"Niedrig" ), 0 },
-                { Tr( "Medium", u8"Mittel" ), 1 },
-                { Tr( "High", u8"Hoch" ), 2 },
-                { Tr( "Ultra", u8"Ultra" ), 3 },
-            }};
-            ImGui::TextUnformatted( Tr( "XeGTAO quality", u8"XeGTAO-Qualitaet" ) );
-            ImGui::SetNextItemWidth( -1.0f );
-            ImGui::BeginDisabled( FeatureLevel10Compatibility );
-            if ( ImComboBoxC( "##AdvancedXeGTAOQuality", xeGTAOQualityLevels,
-                &settings.XegtaoSettings.QualityLevel, [] {} ) ) {
-                ImGui::EndCombo();
-            }
-            ImGui::EndDisabled();
-            ImGui::SetItemTooltip( "%s", Tr(
-                "Selects the precompiled XeGTAO compute quality. Higher levels use more samples; no shader reload.",
-                u8"Waehlt die vorcompilierte XeGTAO-Compute-Qualitaet. Hoehere Stufen verwenden mehr Samples; kein Shader-Reload." ) );
 
             ImGui::Separator();
             ImGui::TextUnformatted( Tr( "Shadow and world performance", u8"Schatten- und Welt-Performance" ) );
@@ -1313,49 +1279,20 @@ void ImGuiShim::RenderSettingsWindow()
                 "Skips shadow casters outside each cascade. Conservative is the safe default; Aggressive can omit marginal attachments.",
                 u8"Ueberspringt Schattenwerfer ausserhalb der jeweiligen Cascade. Konservativ ist der sichere Standard; Aggressiv kann Rand-Attachments auslassen." ) );
 
-            ImGui::Checkbox( Tr( "GPU VOB culling", u8"GPU-VOB-Culling" ), &settings.GpuVobCulling );
+            ImGui::Checkbox( Tr( "GPU VOB occlusion culling", u8"GPU-VOB-Occlusion-Culling" ),
+                &settings.GpuVobOcclusionCulling );
             ImGui::SetItemTooltip( "%s", Tr(
-                "Experimental: moves per-VOB main-view frustum tests to the GPU. Keep enabled only when the measured 120-frame window beats the baseline.",
-                u8"Experimentell: Verlagert die Frustum-Tests der VOBs im Hauptbild auf die GPU. Nur aktiv lassen, wenn das gemessene 120-Frame-Fenster den Basiswert schlaegt." ) );
-
-            const bool gpuVobAvailable = settings.GpuVobCulling;
-            ImGui::BeginDisabled( !gpuVobAvailable );
-            ImGui::Checkbox( Tr( "Hi-Z occlusion culling", u8"Hi-Z-Occlusion-Culling" ), &settings.GpuVobHiZCulling );
-            ImGui::SetItemTooltip( "%s", Tr(
-                "Experimental: rejects VOBs hidden behind already-rendered world geometry. Compare the measured FPS and triangle window against the baseline.",
-                u8"Experimentell: Verwirft VOBs hinter bereits gerenderter Weltgeometrie. FPS- und Dreiecksfenster mit dem Basiswert vergleichen." ) );
-
-            ImGui::Checkbox( Tr( "GPU shadow culling", u8"GPU-Schatten-Culling" ), &settings.GpuVobShadowCulling );
-            ImGui::SetItemTooltip( "%s", Tr(
-                "Experimental: uses the GPU culler for CSM shadow caster lists. Rainshadowmap remains separate. Keep enabled only after a clean A/B measurement.",
-                u8"Experimentell: Nutzt den GPU-Culler fuer CSM-Schattenwerferlisten. Die Rainshadowmap bleibt getrennt. Erst nach sauberer A/B-Messung aktiv lassen." ) );
-
-            ImGui::Checkbox( Tr( "Static geometry arena", u8"Statische Geometrie-Arena" ), &settings.GpuVobGeometryArena );
-            ImGui::SetItemTooltip( "%s", Tr(
-                "Experimental: uses persistent shared static-VOB geometry for GPU-driven draws. Its benefit depends on actual indirect-draw batching.",
-                u8"Experimentell: Nutzt persistente gemeinsame VOB-Geometrie fuer GPU-gesteuerte Draws. Der Nutzen haengt vom tatsaechlichen Indirect-Draw-Batching ab." ) );
-            ImGui::EndDisabled();
-
-            const bool hardwareMdiAvailable = settings.DebugSettings.FeatureSet.UseMDI;
-            ImGui::BeginDisabled( !hardwareMdiAvailable );
-            ImGui::Checkbox( Tr( "Multi-draw indirect", u8"Multi-Draw-Indirect" ), &settings.GpuVobMdi );
-            ImGui::EndDisabled();
-            ImGui::SameLine();
-            ImGui::TextDisabled( "%s", hardwareMdiAvailable
-                ? Tr( "available", u8"verfuegbar" )
-                : Tr( "fallback", u8"Fallback" ) );
+                "Experimental: tests static VOBs against the Hi-Z depth of the already-rendered world and draws only those that remain visible. GPU culling, indirect drawing and shared geometry are managed internally; the standard DX11 path remains available on every supported GPU.",
+                u8"Experimentell: Prueft statische VOBs gegen die Hi-Z-Tiefe der bereits gerenderten Welt und zeichnet nur die sichtbaren VOBs. GPU-Culling, indirektes Zeichnen und gemeinsame Geometrie werden intern verwaltet; der Standard-DX11-Pfad bleibt auf jeder unterstuetzten GPU verfuegbar." ) );
             ImGui::EndDisabled();
 
             ImGui::Separator();
             ImGui::BeginDisabled( !settings.AdvancedPerformanceOptions );
             if ( ImGui::Button( Tr( "Measured safe defaults", u8"Sichere Mess-Defaults" ) ) ) {
-                // The GPU-driven path remains explicitly opt-in until a clean
-                // same-camera measurement proves a benefit on the device.
-                settings.GpuVobCulling = false;
-                settings.GpuVobHiZCulling = false;
-                settings.GpuVobShadowCulling = false;
-                settings.GpuVobGeometryArena = false;
-                settings.GpuVobMdi = false;
+                // The complete GPU-VOB occlusion path remains explicitly
+                // opt-in until a clean same-camera measurement proves a
+                // benefit on the device.
+                settings.GpuVobOcclusionCulling = false;
                 settings.ThreadedShadowCulling = true;
                 settings.DebugSettings.ShadowCascades.LazyCascadeUpdate = true;
                 settings.DoZPrepass = true;
@@ -1364,10 +1301,8 @@ void ImGuiShim::RenderSettingsWindow()
                 settings.AdvancedWaterAnimation = true;
                 settings.AdvancedPuddles = true;
                 settings.AdvancedWetGroundSSR = true;
-                settings.AdvancedVegetationPushRange = 50.0f;
                 settings.AdvancedNightEnhance = true;
                 settings.AdvancedCityWindowTransparency = true;
-                settings.XegtaoSettings.QualityLevel = 2;
             }
             ImGui::EndDisabled();
             ImGui::SameLine();

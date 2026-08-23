@@ -665,14 +665,10 @@ struct GothicRendererSettings {
 
         textureMaxSize = 16384;
         ShadowQuality = E_ShadowQuality::SHADOW_QUALITY_MEDIUM;
-        // GPU-driven VOB rendering is experimental on the DX11 path. Keep
-        // it opt-in until the measured indirect-draw and upload costs beat
-        // the established CPU path on the target hardware.
-        GpuVobCulling = false;
-        GpuVobHiZCulling = false;
-        GpuVobShadowCulling = false;
-        GpuVobGeometryArena = false;
-        GpuVobMdi = false;
+        // GPU-driven static-VOB occlusion is experimental on the DX11 path.
+        // It remains opt-in until measurements prove that the complete
+        // Hi-Z/cull/indirect path beats the established CPU path.
+        GpuVobOcclusionCulling = false;
         AdvancedPerformanceOptions = true;
         ShadowMapSize = 2048;
         PointlightShadowMapSize = 128;
@@ -685,13 +681,11 @@ struct GothicRendererSettings {
         ShadowAOStrength = 0.50f;
         WorldAOStrength = 0.50f;
         ShadowSoftness = 1.0f; // 1.0 = default softness, higher = softer shadows
-        AdvancedShadowSoftness = ShadowSoftness;
         // Runtime-only Advanced-menu world/visual test options. These values
         // intentionally are not persisted in UserSettings.ini.
         AdvancedWaterAnimation = true;
         AdvancedPuddles = true;
         AdvancedWetGroundSSR = true;
-        AdvancedVegetationPushRange = 50.0f;
         AdvancedNightEnhance = true;
         AdvancedCityWindowTransparency = true;
 
@@ -943,13 +937,15 @@ struct GothicRendererSettings {
         case E_ShadowQuality::SHADOW_QUALITY_OFF:
             EnableShadows = false;
             EnablePointlightShadows = EPointLightShadowMode::PLS_DISABLED;
-            ShadowMapSize = 1024;
+            // Keep the inactive CSM resource at the minimum supported size.
+            // EnableShadows=false still prevents CSM rendering/sampling.
+            ShadowMapSize = 512;
             PointlightShadowMapSize = 128;
             break;
         case E_ShadowQuality::SHADOW_QUALITY_VERY_LOW:
             EnableShadows = true;
             EnablePointlightShadows = EPointLightShadowMode::PLS_DISABLED;
-            ShadowMapSize = 1024;
+            ShadowMapSize = 512;
             PointlightShadowMapSize = 128;
             break;
         case E_ShadowQuality::SHADOW_QUALITY_LOW:
@@ -1212,31 +1208,23 @@ struct GothicRendererSettings {
     // Appended so every pre-existing renderer-settings field offset remains unchanged.
     float ShadowCasterMinTexels;
     // Appended so every pre-existing renderer-settings field offset remains unchanged.
-    bool GpuVobCulling;
-    // Runtime-only test switches. They are intentionally not persisted in UserSettings.ini.
-    bool GpuVobHiZCulling;
-    bool GpuVobShadowCulling;
-    bool GpuVobGeometryArena;
-    bool GpuVobMdi;
+    // Runtime-only; the complete Hi-Z static-VOB occlusion path is controlled
+    // by this one switch. Its internal GPU culling, indirect draws and shared
+    // geometry storage are implementation details, not separate user options.
+    bool GpuVobOcclusionCulling;
     // Runtime-only master switch for all advanced performance test options.
     // It is intentionally not persisted in UserSettings.ini.
     bool AdvancedPerformanceOptions;
-    // Runtime-only shadow softness override used by the Advanced test menu.
-    // It is intentionally not persisted in UserSettings.ini.
-    float AdvancedShadowSoftness;
     // Runtime-only Advanced-menu world/visual test switches. They are
     // intentionally not persisted in UserSettings.ini.
     bool AdvancedWaterAnimation;
     bool AdvancedPuddles;
     bool AdvancedWetGroundSSR;
-    float AdvancedVegetationPushRange;
     bool AdvancedNightEnhance;
     bool AdvancedCityWindowTransparency;
 
-    float GetEffectiveShadowSoftness() const {
-        return AdvancedPerformanceOptions
-            ? std::clamp( AdvancedShadowSoftness, 0.0f, 100.0f )
-            : ShadowSoftness;
+    bool GetEffectiveGpuVobOcclusionCulling() const {
+        return AdvancedPerformanceOptions && GpuVobOcclusionCulling;
     }
 
     bool GetEffectiveWaterAnimation() const {
@@ -1251,14 +1239,6 @@ struct GothicRendererSettings {
         return !AdvancedPerformanceOptions || AdvancedWetGroundSSR;
     }
 
-    float GetEffectiveVegetationPushRange() const {
-        // 50 world units is Build 213's existing shader falloff. The
-        // Advanced control changes that runtime constant only.
-        return AdvancedPerformanceOptions
-            ? std::clamp( AdvancedVegetationPushRange, 1.0f, 250.0f )
-            : 50.0f;
-    }
-
     bool GetEffectiveNightEnhance() const {
         // The F11 switch is intentionally inverted: the unchecked state is
         // the enhanced-night path, while the checked state keeps the normal
@@ -1268,12 +1248,6 @@ struct GothicRendererSettings {
 
     bool GetEffectiveCityWindowTransparency() const {
         return !AdvancedPerformanceOptions || AdvancedCityWindowTransparency;
-    }
-
-    int GetEffectiveXeGTAOQuality() const {
-        return AdvancedPerformanceOptions
-            ? std::clamp( XegtaoSettings.QualityLevel, 0, 3 )
-            : 2;
     }
 
     // These are pre-existing Build 213 renderer paths. The Advanced master

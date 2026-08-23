@@ -1746,7 +1746,7 @@ DS_ScreenQuadConstantBuffer D3D11ShadowMap::FillSunCSMConstantBuffer() const {
     scb.SQ_ShadowStrength = settings.ShadowStrength;
     scb.SQ_ShadowAOStrength = settings.ShadowAOStrength;
     scb.SQ_WorldAOStrength = settings.WorldAOStrength;
-    scb.SQ_ShadowSoftness = settings.GetEffectiveShadowSoftness();
+    scb.SQ_ShadowSoftness = settings.ShadowSoftness;
     scb.SQ_LightSize = std::clamp( settings.PCSSLightSize, 0.005f, 0.5f );
     scb.SQ_ShadowRuntimeParams = float4(
         settings.GetUsesTemporalReconstruction() ? 1.0f : 0.0f,
@@ -1889,7 +1889,7 @@ XRESULT D3D11ShadowMap::DrawWorldLights()
     scb.SQ_ShadowStrength = settings.ShadowStrength;
     scb.SQ_ShadowAOStrength = settings.ShadowAOStrength;
     scb.SQ_WorldAOStrength = settings.WorldAOStrength;
-    scb.SQ_ShadowSoftness = settings.GetEffectiveShadowSoftness();
+    scb.SQ_ShadowSoftness = settings.ShadowSoftness;
     scb.SQ_LightSize = std::clamp( settings.PCSSLightSize, 0.005f, 0.5f );
     scb.SQ_ShadowRuntimeParams = float4(
         settings.GetUsesTemporalReconstruction() ? 1.0f : 0.0f,

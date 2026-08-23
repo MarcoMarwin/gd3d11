@@ -167,7 +167,7 @@ XRESULT D3D11PFX_XeGTAO::Render( ID3D11ShaderResourceView* depthSRV,
     auto projection = Engine::GAPI->GetProjectionMatrix();
 
     XeGTAO::GTAOSettings gtaoSettings;
-    gtaoSettings.QualityLevel = rendererSettings.GetEffectiveXeGTAOQuality();
+    gtaoSettings.QualityLevel = std::clamp( settings.QualityLevel, 0, 3 );
     gtaoSettings.DenoisePasses = std::clamp( settings.DenoisePasses, 1, 3 );
     gtaoSettings.Radius = std::max( 1.0f, settings.Radius );
 

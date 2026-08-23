@@ -322,9 +322,8 @@ XRESULT D3D11ShaderManager::Init() {
         list.push_back( {"SHD_BLUE_NOISE",        "1"} );
         list.push_back( {"PCSS_BLOCKER_TAPS",     "8"} );
         list.push_back( {"PCSS_FILTER_TAPS_NEAR", "16"} );
-        list.push_back( {"PCSS_FILTER_TAPS_FAR",  "8"} );
         list.push_back( {"PCF_FILTER_TAPS_NEAR",  "16"} );
-        list.push_back( {"PCF_FILTER_TAPS_FAR",   "8"} );
+        list.push_back( {"PCF_FILTER_TAPS_FAR",   "4"} );
     };
 
     Shaders.push_back( ShaderInfo::make<PShaderID::PS_DS_AtmosphericScattering>( "PS_DS_AtmosphericScattering.hlsl" )

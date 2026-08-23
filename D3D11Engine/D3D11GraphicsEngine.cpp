@@ -72,6 +72,7 @@ constexpr float inv255f = (1.f / 255.f);
 // Negative alpha values encode renderer draw classes.
 // Keep ordinary VOBs above -0.5; water uses -0.25.
 constexpr float WATER_VOB_MATERIAL_CLASS_MARKER = -0.25f;
+constexpr float BUILD_213_CHARACTER_INTERACTION_RANGE = 50.0f;
 float vobAnimation_WindStrength = 1.0f;
 
 constexpr DXGI_FORMAT VERTEX_INDEX_DXGI_FORMAT = sizeof( VERTEX_INDEX ) == sizeof( unsigned short ) ? DXGI_FORMAT_R16_UINT : DXGI_FORMAT_R32_UINT;
@@ -130,8 +131,7 @@ struct SkyVelocityConstantBuffer {
     XMFLOAT2 Padding;
 };
 static void UpdateCharacterInteractionPositions( VS_ExConstantBuffer_Wind& windBuff ) {
-    windBuff.characterInteractionRange =
-        Engine::GAPI->GetRendererState().RendererSettings.GetEffectiveVegetationPushRange();
+    windBuff.characterInteractionRange = BUILD_213_CHARACTER_INTERACTION_RANGE;
     for ( int i = 0; i < MAX_CHARACTER_INTERACTION_INFLUENCERS; ++i ) {
         windBuff.interactionPositions[i] = float4( 0, 0, 0, 0 );
     }
@@ -779,12 +779,11 @@ void D3D11GraphicsEngine::EnsureFrameVobVisibilityCollected() {
     const bool gpuVobShadersAvailable = ShaderManager
         && ShaderManager->GetCShader( CShaderID::CS_VobCull )
         && ShaderManager->GetCShader( CShaderID::CS_VobPatchArgs );
-    const bool useGpuVobCulling = renderSettings.AdvancedPerformanceOptions
-        && renderSettings.GpuVobCulling
+    const bool useGpuVobOcclusion = renderSettings.GetEffectiveGpuVobOcclusionCulling()
         && !FeatureLevel10Compatibility
         && renderSettings.DebugSettings.Culling.CullVobs
         && gpuVobShadersAvailable;
-    if ( useGpuVobCulling ) {
+    if ( useGpuVobOcclusion ) {
         // The GPU path must receive the current distance/BSP candidate set;
         // retaining the previous camera list would make the GPU cull operate
         // on stale VOB pointers after the camera moved.
@@ -792,13 +791,13 @@ void D3D11GraphicsEngine::EnsureFrameVobVisibilityCollected() {
         m_CollectedCameraMobs.clear();
     }
 
-    if ( useGpuVobCulling || !renderSettings.FixViewFrustum || m_CollectedCameraVobs.empty() ) {
+    if ( useGpuVobOcclusion || !renderSettings.FixViewFrustum || m_CollectedCameraVobs.empty() ) {
         m_FrameLights.clear();
         ZoneScopedN( "D3D11GraphicsEngine::EnsureFrameVobVisibilityCollected" );
         Engine::GAPI->CollectVisibleVobs( m_CollectedCameraVobs, m_FrameLights,
             m_CollectedCameraMobs, EGothicCullFlags::CullAll,
             EBspTreeCollectFlags::COLLECT_ALL_MUTATE,
-            useGpuVobCulling );
+            useGpuVobOcclusion );
     }
     cache.cachedMobs = m_CollectedCameraMobs;
 
@@ -917,11 +916,7 @@ uint64_t D3D11GraphicsEngine::BuildGpuVobPerformanceSettingsKey() const {
     add( settings.GetEffectiveDoZPrepass() );
     add( settings.GetEffectiveWorldSectionBVH() );
     add( static_cast<int>( settings.GetEffectiveShadowFrustumCullingMode() ) );
-    add( settings.AdvancedPerformanceOptions && settings.GpuVobCulling );
-    add( settings.AdvancedPerformanceOptions && settings.GpuVobHiZCulling );
-    add( settings.AdvancedPerformanceOptions && settings.GpuVobShadowCulling );
-    add( settings.AdvancedPerformanceOptions && settings.GpuVobGeometryArena );
-    add( settings.AdvancedPerformanceOptions && settings.GpuVobMdi );
+    add( settings.GetEffectiveGpuVobOcclusionCulling() );
     add( settings.DebugSettings.FeatureSet.UseMDI );
 
     // Basic render state that changes the amount of work and must not be
@@ -938,16 +933,14 @@ uint64_t D3D11GraphicsEngine::BuildGpuVobPerformanceSettingsKey() const {
     add( settings.AntiAliasingMode );
     add( settings.Upscaler );
 
-    // Other Advanced-menu switches are included so changing any visible
-    // test option starts a fresh, unambiguous measurement window.
-    add( settings.GetEffectiveShadowSoftness() );
+    // Visible renderer settings that affect the amount of work must start a
+    // fresh, unambiguous measurement window.
+    add( settings.ShadowSoftness );
     add( settings.GetEffectiveWaterAnimation() );
     add( settings.GetEffectivePuddles() );
     add( settings.GetEffectiveWetGroundSSR() );
-    add( settings.GetEffectiveVegetationPushRange() );
     add( settings.GetEffectiveNightEnhance() );
     add( settings.GetEffectiveCityWindowTransparency() );
-    add( settings.GetEffectiveXeGTAOQuality() );
 
     return key;
 }
@@ -1161,8 +1154,6 @@ void D3D11GraphicsEngine::PollGpuTimingQueries(
             m_GpuVobPerformanceStats.GpuHiZMsTotal );
         addZone( EGpuTimingZone::MainCull, m_GpuVobPerformanceStats.GpuMainCullTimingSamples,
             m_GpuVobPerformanceStats.GpuMainCullMsTotal );
-        addZone( EGpuTimingZone::ShadowCull, m_GpuVobPerformanceStats.GpuShadowCullTimingSamples,
-            m_GpuVobPerformanceStats.GpuShadowCullMsTotal );
         addZone( EGpuTimingZone::VobDepth, m_GpuVobPerformanceStats.GpuVobDepthTimingSamples,
             m_GpuVobPerformanceStats.GpuVobDepthMsTotal );
         addZone( EGpuTimingZone::VobLit, m_GpuVobPerformanceStats.GpuVobLitTimingSamples,
@@ -1271,24 +1262,18 @@ void D3D11GraphicsEngine::LogGpuVobPerformanceStats() {
         << " gpuMainOcclusionRejectPct=" << (averageGpuCandidateInstances > 0.0
             ? (averageGpuOccludedInstances / averageGpuCandidateInstances) * 100.0 : 0.0)
         << " advanced=" << (settings.AdvancedPerformanceOptions ? 1 : 0)
-        << " shadowSoftness=" << settings.GetEffectiveShadowSoftness()
+        << " shadowSoftness=" << settings.ShadowSoftness
         << " waterWaves=" << (settings.GetEffectiveWaterAnimation() ? 1 : 0)
         << " puddles=" << (settings.GetEffectivePuddles() ? 1 : 0)
         << " wetGroundSSR=" << (settings.GetEffectiveWetGroundSSR() ? 1 : 0)
-        << " vegetationPushRange=" << settings.GetEffectiveVegetationPushRange()
         << " nightEnhance=" << (settings.GetEffectiveNightEnhance() ? 1 : 0)
         << " cityWindowTransparency=" << (settings.GetEffectiveCityWindowTransparency() ? 1 : 0)
-        << " xeGTAOQuality=" << settings.GetEffectiveXeGTAOQuality()
         << " threadedShadow=" << (settings.GetEffectiveThreadedShadowCulling() ? 1 : 0)
         << " lazyCascade=" << (settings.GetEffectiveLazyCascadeUpdate() ? 1 : 0)
         << " depthPrepass=" << (settings.GetEffectiveDoZPrepass() ? 1 : 0)
         << " sectionBvh=" << (settings.GetEffectiveWorldSectionBVH() ? 1 : 0)
         << " shadowFrustum=" << static_cast<int>( settings.GetEffectiveShadowFrustumCullingMode() )
-        << " gpuVob=" << (settings.AdvancedPerformanceOptions && settings.GpuVobCulling ? 1 : 0)
-        << " gpuHiZ=" << (settings.AdvancedPerformanceOptions && settings.GpuVobHiZCulling ? 1 : 0)
-        << " gpuShadow=" << (settings.AdvancedPerformanceOptions && settings.GpuVobShadowCulling ? 1 : 0)
-        << " arena=" << (settings.AdvancedPerformanceOptions && settings.GpuVobGeometryArena ? 1 : 0)
-        << " vobMdi=" << (settings.AdvancedPerformanceOptions && settings.GpuVobMdi ? 1 : 0)
+        << " gpuOcclusion=" << (settings.GetEffectiveGpuVobOcclusionCulling() ? 1 : 0)
         << " useMDI=" << (settings.DebugSettings.FeatureSet.UseMDI ? 1 : 0)
         << " gpuRuntimeDisabled=" << (IsGpuVobRuntimeDisabled() ? 1 : 0)
         << " hizRuntimeDisabled=" << (IsGpuVobHiZRuntimeDisabled() ? 1 : 0)
@@ -1298,8 +1283,6 @@ void D3D11GraphicsEngine::LogGpuVobPerformanceStats() {
         << " mainCull=" << m_GpuVobPerformanceStats.MainCullActive
         << "/" << m_GpuVobPerformanceStats.MainCullAttempts
         << " mainFallback=" << m_GpuVobPerformanceStats.MainCullFallback
-        << " shadowCull=" << m_GpuVobPerformanceStats.ShadowCullActive
-        << "/" << m_GpuVobPerformanceStats.ShadowCullAttempts
         << " indirectCalls=" << m_GpuVobPerformanceStats.IndirectDrawCalls
         << " mdiBatches=" << m_GpuVobPerformanceStats.MdiBatches
         << " mdiCommands=" << m_GpuVobPerformanceStats.MdiCommands
@@ -1335,10 +1318,6 @@ void D3D11GraphicsEngine::LogGpuVobPerformanceStats() {
         << " gpuMainCullMsAvg=" << (m_GpuVobPerformanceStats.GpuMainCullTimingSamples > 0
             ? m_GpuVobPerformanceStats.GpuMainCullMsTotal
                 / static_cast<double>( m_GpuVobPerformanceStats.GpuMainCullTimingSamples ) : 0.0)
-        << " gpuShadowCullSamples=" << m_GpuVobPerformanceStats.GpuShadowCullTimingSamples
-        << " gpuShadowCullMsAvg=" << (m_GpuVobPerformanceStats.GpuShadowCullTimingSamples > 0
-            ? m_GpuVobPerformanceStats.GpuShadowCullMsTotal
-                / static_cast<double>( m_GpuVobPerformanceStats.GpuShadowCullTimingSamples ) : 0.0)
         << " gpuVobDepthSamples=" << m_GpuVobPerformanceStats.GpuVobDepthTimingSamples
         << " gpuVobDepthMsAvg=" << (m_GpuVobPerformanceStats.GpuVobDepthTimingSamples > 0
             ? m_GpuVobPerformanceStats.GpuVobDepthMsTotal
@@ -1381,7 +1360,6 @@ void D3D11GraphicsEngine::DisableGpuVobRuntime( const char* reason ) {
     GpuVobCullVisibleCountsBuffer.reset();
     GpuVobCullConstantBuffer.reset();
     GpuVobPatchConstantBuffer.reset();
-    GpuVobShadowCullResources = {};
     m_GpuVobVisibleCountReadbackSlots.clear();
     m_GpuVobCurrentTriangleWeights.clear();
 
@@ -1473,7 +1451,7 @@ void D3D11GraphicsEngine::BuildGpuVobHiZ() {
     GpuVobHiZBuiltThisFrame = false;
     const auto& settings = Engine::GAPI->GetRendererState().RendererSettings;
     if ( IsGpuVobRuntimeDisabled() || IsGpuVobHiZRuntimeDisabled()
-        || !settings.AdvancedPerformanceOptions || !settings.GpuVobCulling || !settings.GpuVobHiZCulling || FeatureLevel10Compatibility
+        || !settings.GetEffectiveGpuVobOcclusionCulling() || FeatureLevel10Compatibility
         || !settings.DebugSettings.Culling.CullVobs || !Context || !ShaderManager ) {
         return;
     }
@@ -1547,8 +1525,8 @@ bool D3D11GraphicsEngine::PrepareGpuVobGeometryArena() {
     // eligible even when AnimateStaticVobs is enabled globally.
     if ( IsGpuVobRuntimeDisabled()
         || IsGpuVobGeometryArenaRuntimeDisabled()
-        || !settings.AdvancedPerformanceOptions || !settings.GpuVobCulling
-        || !settings.GpuVobGeometryArena || FeatureLevel10Compatibility ) {
+        || !settings.GetEffectiveGpuVobOcclusionCulling()
+        || FeatureLevel10Compatibility ) {
         return false;
     }
 
@@ -1729,19 +1707,19 @@ bool D3D11GraphicsEngine::PrepareGpuVobCulling(
     std::unique_ptr<D3D11IndirectBuffer>& cullVisibleCountsBuffer,
     std::unique_ptr<D3D11ConstantBuffer>& cullConstantBuffer,
     std::unique_ptr<D3D11ConstantBuffer>& patchConstantBuffer,
-    bool useHiZ,
-    bool shadowPass,
     D3D11VertexBuffer*& outputInstanceBuffer,
     D3D11IndirectBuffer*& outputArgsBuffer ) {
-    TracyD3D11ZoneCGX( "GpuVobCulling::Prepare" );
+    TracyD3D11ZoneCGX( "GpuVobOcclusion::Prepare" );
     outputInstanceBuffer = nullptr;
     outputArgsBuffer = nullptr;
     const auto& settings = Engine::GAPI->GetRendererState().RendererSettings;
     if ( IsGpuVobRuntimeDisabled()
-        || !settings.AdvancedPerformanceOptions || !settings.GpuVobCulling || FeatureLevel10Compatibility
+        || !settings.GetEffectiveGpuVobOcclusionCulling() || FeatureLevel10Compatibility
         || !settings.DebugSettings.Culling.CullVobs
         || !ShaderManager
         || !inputInstanceBuffer
+        || !GpuVobHiZBuiltThisFrame
+        || !GpuVobHiZShaderResourceView
         || vobVisuals.empty()
         || sortedInstancedMeshes.empty()
         || vobVisuals.size() > 65535 ) {
@@ -1970,14 +1948,14 @@ bool D3D11GraphicsEngine::PrepareGpuVobCulling(
     ID3D11ShaderResourceView* cullSrvs[3] = {
         cullInputBuffer->GetShaderResourceView().Get(),
         cullVisualBuffer->GetShaderResourceView().Get(),
-        useHiZ ? GpuVobHiZShaderResourceView.Get() : nullptr,
+        GpuVobHiZShaderResourceView.Get(),
     };
     ID3D11UnorderedAccessView* cullUavs[2] = {
         cullOutputBuffer->GetUnorderedAccessView().Get(),
         cullVisibleCountsBuffer->GetUnorderedAccessView().Get(),
     };
     if ( !cullSrvs[0] || !cullSrvs[1] || !cullUavs[0] || !cullUavs[1]
-        || (useHiZ && !cullSrvs[2]) ) {
+        || !cullSrvs[2] ) {
         return failGpuVobPath( "GPU culling SRV/UAV binding unavailable" );
     }
 
@@ -1999,18 +1977,16 @@ bool D3D11GraphicsEngine::PrepareGpuVobCulling(
         Engine::GAPI->GetViewMatrixXM() );
     XMStoreFloat4x4( &cullConstants.CullViewProj, viewProj );
     cullConstants.VisualCount = static_cast<UINT>( visualInfo.size() );
-    cullConstants.HiZWidth = useHiZ ? GpuVobHiZWidth : 0;
-    cullConstants.HiZHeight = useHiZ ? GpuVobHiZHeight : 0;
-    cullConstants.HiZMipCount = useHiZ ? GpuVobHiZMipCount : 0;
-    cullConstants.EnableOcclusion = (useHiZ
-        && GpuVobHiZShaderResourceView) ? 1u : 0u;
+    cullConstants.HiZWidth = GpuVobHiZWidth;
+    cullConstants.HiZHeight = GpuVobHiZHeight;
+    cullConstants.HiZMipCount = GpuVobHiZMipCount;
+    cullConstants.EnableOcclusion = 1u;
     cullConstantBuffer->UpdateBuffer( &cullConstants )
         ->BindToComputeShader( 0 );
 
     GetContext()->CSSetShaderResources( 0, 3, cullSrvs );
     GetContext()->CSSetUnorderedAccessViews( 0, 2, cullUavs, nullptr );
-    const EGpuTimingZone cullTimingZone = shadowPass
-        ? EGpuTimingZone::ShadowCull : EGpuTimingZone::MainCull;
+    const EGpuTimingZone cullTimingZone = EGpuTimingZone::MainCull;
     BeginGpuTimingZone( cullTimingZone );
     cullShader->Apply();
     GetContext()->Dispatch( static_cast<UINT>( visualInfo.size() ), 1, 1 );
@@ -2082,8 +2058,6 @@ bool D3D11GraphicsEngine::PrepareGpuVobCulling() {
         GpuVobCullVisibleCountsBuffer,
         GpuVobCullConstantBuffer,
         GpuVobPatchConstantBuffer,
-        GpuVobHiZBuiltThisFrame,
-        false,
         cache.MainVobGpuInstanceBuffer,
         cache.MainVobGpuIndirectArgsBuffer );
 }
@@ -9685,123 +9659,11 @@ void XM_CALLCONV D3D11GraphicsEngine::DrawWorldAroundForWorldShadow( FXMVECTOR p
             return std::get<3>( a ) < std::get<3>( b );
         } );
 
-        // Reuse the main-view culling shader for each shadow camera. The CPU
-        // queue remains the broad-phase caster collector; this pass only
-        // removes individual instances outside the active CSM/rain frustum.
-        // Rainshadowmap activation is deliberately unrelated to EnableShadows.
-        static thread_local std::vector<GpuVobCullVisualBatch> shadowVobVisuals;
-        static thread_local std::unordered_map<MeshVisualInfo*, unsigned int> shadowVisualLookup;
-        static thread_local std::vector<FrameGeometryCache::CachedInstancedMeshDraw> shadowGpuDraws;
-        shadowVobVisuals.clear();
-        shadowVisualLookup.clear();
-        shadowGpuDraws.clear();
-        shadowVobVisuals.reserve( activeVisuals.size() );
-        shadowVisualLookup.reserve( activeVisuals.size() );
-        for ( unsigned int visualIndex = 0; visualIndex < activeVisuals.size(); ++visualIndex ) {
-            MeshVisualInfo* visual = activeVisuals[visualIndex];
-            GpuVobCullVisualBatch cachedVisual;
-            cachedVisual.Visual = visual;
-            cachedVisual.StartInstanceNum = visual->StartInstanceNum;
-            cachedVisual.InstanceCount = static_cast<unsigned int>( visual->Instances.size() );
-            shadowVisualLookup.emplace( visual, visualIndex );
-            shadowVobVisuals.push_back( std::move( cachedVisual ) );
-        }
-
-        shadowGpuDraws.reserve( instancedMeshesToDraw.size() );
-        bool shadowGpuDrawListComplete = true;
-        const bool directionalDaylightPass = RenderingStage == DES_SHADOWMAP && IsSunDaylightActive();
-        for ( const auto& draw : instancedMeshesToDraw ) {
-            MeshVisualInfo* visual = std::get<0>( draw );
-            const MeshKey& meshKey = std::get<1>( draw );
-            MeshInfo* meshInfo = std::get<2>( draw );
-            if ( !visual || !meshKey.Material || !meshInfo ) {
-                shadowGpuDrawListComplete = false;
-                break;
-            }
-
-            zCTexture* tx = meshKey.Material->GetAniTexture();
-            const bool windowGlassMaterial = IsCityWindowFeatureReady()
-                && IsWindowGlassMaterial( visual, tx );
-            const bool indoorWindowGlass = directionalDaylightPass
-                && windowGlassMaterial
-                && IsIndoorWindowVisual( visual->VisualName );
-            const bool outdoorWindowGlass = directionalDaylightPass
-                && windowGlassMaterial
-                && !IsIndoorWindowVisual( visual->VisualName );
-            if ( outdoorWindowGlass ) {
-                shadowGpuDrawListComplete = false;
-                break;
-            }
-
-            const bool bindTexture = tx
-                && (indoorWindowGlass || tx->HasAlphaChannel() || colorWritesEnabled || meshKey.Material->HasAlphaTest());
-            if ( bindTexture && tx->CacheIn( 0.6f ) != zRES_CACHED_IN ) {
-                shadowGpuDrawListComplete = false;
-                break;
-            }
-
-            const auto visualIt = shadowVisualLookup.find( visual );
-            if ( visualIt == shadowVisualLookup.end() ) {
-                shadowGpuDrawListComplete = false;
-                break;
-            }
-
-            FrameGeometryCache::CachedInstancedMeshDraw gpuDraw;
-            gpuDraw.sortKey = std::get<3>( draw );
-            gpuDraw.VisualIndex = visualIt->second;
-            gpuDraw.Mesh = meshKey;
-            gpuDraw.MeshEntry = meshInfo;
-            gpuDraw.UseShadowIndex = !bindTexture && !meshInfo->ShadowIndices.empty();
-            shadowGpuDraws.push_back( std::move( gpuDraw ) );
-        }
-
-        PrepareGpuVobGeometryArena();
-        D3D11VertexBuffer* shadowGpuInstanceBuffer = nullptr;
-        D3D11IndirectBuffer* shadowGpuArgsBuffer = nullptr;
-        // The previous cascade may still have its compacted output bound as
-        // an IA instance stream. Release that binding before the same
-        // persistent buffer is used as the next cascade's UAV output.
-        ID3D11Buffer* nullShadowInstanceBuffer = nullptr;
-        UINT nullShadowStride = 0;
-        UINT nullShadowOffset = 0;
-        GetContext()->IASetVertexBuffers( 1, 1, &nullShadowInstanceBuffer,
-            &nullShadowStride, &nullShadowOffset );
-        const auto& shadowGpuSettings = Engine::GAPI->GetRendererState().RendererSettings;
-        const bool shadowGpuCullingRequested = shadowGpuSettings.AdvancedPerformanceOptions
-            && shadowGpuSettings.GpuVobShadowCulling
-            && !IsGpuVobRuntimeDisabled();
-        bool shadowGpuCullingActive = false;
-        if ( shadowGpuCullingRequested ) {
-            ++m_GpuVobPerformanceStats.ShadowCullAttempts;
-            shadowGpuCullingActive = shadowGpuDrawListComplete
-                && shadowGpuDraws.size() == instancedMeshesToDraw.size()
-                && PrepareGpuVobCulling(
-                shadowInstancingBuffer,
-                shadowVobVisuals,
-                shadowGpuDraws,
-                GpuVobGeometryVertexBuffer.get(),
-                GpuVobGeometryIndexBuffer.get(),
-                GpuVobShadowCullResources.InputBuffer,
-                GpuVobShadowCullResources.VisualBuffer,
-                GpuVobShadowCullResources.DrawVisualBuffer,
-                GpuVobShadowCullResources.OutputBuffer,
-                GpuVobShadowCullResources.ArgsBuffer,
-                GpuVobShadowCullResources.VisibleCountsBuffer,
-                GpuVobShadowCullResources.CullConstantBuffer,
-                GpuVobShadowCullResources.PatchConstantBuffer,
-                false,
-                true,
-                shadowGpuInstanceBuffer,
-                shadowGpuArgsBuffer );
-            if ( shadowGpuCullingActive ) {
-                ++m_GpuVobPerformanceStats.ShadowCullActive;
-            }
-        }
-
-        ID3D11Buffer* shadowDrawInstanceBuffer = (shadowGpuCullingActive
-            && shadowGpuInstanceBuffer)
-            ? shadowGpuInstanceBuffer->GetVertexBuffer().Get()
-            : shadowInstancingBuffer->GetVertexBuffer().Get();
+        // Shadow caster collection stays on the established CPU path. The
+        // public GPU feature is deliberately limited to main-view Hi-Z
+        // occlusion; CSM and rain-shadow frusta have different visibility
+        // rules and must not reuse that result.
+        ID3D11Buffer* shadowDrawInstanceBuffer = shadowInstancingBuffer->GetVertexBuffer().Get();
         if ( shadowDrawInstanceBuffer ) {
             GetContext()->IASetVertexBuffers( 1, 1, &shadowDrawInstanceBuffer,
                 dynuStride, dynOffset );
@@ -9879,25 +9741,13 @@ void XM_CALLCONV D3D11GraphicsEngine::DrawWorldAroundForWorldShadow( FXMVECTOR p
 
             MeshInfo* mi = meshInfo;
 
-            // Draw batch. GPU-cull output uses the same instance base as the
-            // source stream, so the indirect command can be submitted
-            // without a CPU readback. Static meshes in the shared arena also
-            // share one IA vertex/index binding and can be multi-drawn.
+            // Shadow VOBs remain on the established CPU submission path.
             const auto vb = mi->MeshVertexBuffer;
             const auto ib = GetShadowAwareIndexBuffer( mi, isAlpha );
-            const auto geometryRange = GpuVobGeometryRanges.find( mi );
-            const bool useGeometryArena = shadowGpuCullingActive
-                && GpuVobGeometryVertexBuffer
-                && GpuVobGeometryIndexBuffer
-                && geometryRange != GpuVobGeometryRanges.end();
 
             UINT offset[] = { 0 };
             UINT uStride[] = { sizeof( ExVertexStruct ) };
-            ID3D11Buffer* buffers[1] = {
-                useGeometryArena
-                    ? GpuVobGeometryVertexBuffer->GetVertexBuffer().Get()
-                    : vb->GetVertexBuffer().Get()
-            };
+            ID3D11Buffer* buffers[1] = { vb->GetVertexBuffer().Get() };
 
             auto numIndices = static_cast<size_t>(GetShadowAwareIndexCount( mi, isAlpha ));
             const auto numInstances = staticMeshVisual->Instances.size();
@@ -9905,12 +9755,7 @@ void XM_CALLCONV D3D11GraphicsEngine::DrawWorldAroundForWorldShadow( FXMVECTOR p
 
             GetContext()->IASetVertexBuffers( 0, 1, buffers, uStride, offset );
 
-            if ( useGeometryArena ) {
-                Context->IASetIndexBuffer( GpuVobGeometryIndexBuffer->GetVertexBuffer().Get(),
-                    VERTEX_INDEX_DXGI_FORMAT, 0 );
-            } else {
-                Context->IASetIndexBuffer( ib->GetVertexBuffer().Get(), VERTEX_INDEX_DXGI_FORMAT, 0 );
-            }
+            Context->IASetIndexBuffer( ib->GetVertexBuffer().Get(), VERTEX_INDEX_DXGI_FORMAT, 0 );
 
             unsigned int max =
                 Engine::GAPI->GetRendererState().RendererSettings.MaxNumFaces * 3;
@@ -9918,55 +9763,8 @@ void XM_CALLCONV D3D11GraphicsEngine::DrawWorldAroundForWorldShadow( FXMVECTOR p
             size_t submittedDrawCount = 1;
             size_t submittedTriangles = numIndices / 3;
 
-            if ( shadowGpuCullingActive ) {
-                const UINT argsStride = sizeof( D3D11_DRAW_INDEXED_INSTANCED_INDIRECT_ARGS );
-                if ( useGeometryArena
-                    && Engine::GAPI->GetRendererState().RendererSettings.DebugSettings.FeatureSet.UseMDI ) {
-                    size_t mdiDrawCount = 1;
-                    while ( drawIndex + mdiDrawCount < instancedMeshesToDraw.size() ) {
-                        const auto& nextItem = instancedMeshesToDraw[drawIndex + mdiDrawCount];
-                        MeshVisualInfo* nextVisual = std::get<0>( nextItem );
-                        const MeshKey& nextKey = std::get<1>( nextItem );
-                        MeshInfo* nextMesh = std::get<2>( nextItem );
-                        const auto nextRange = GpuVobGeometryRanges.find( nextMesh );
-                        const bool nextUsesArena = nextVisual == staticMeshVisual
-                            && nextKey.Material == meshKey.Material
-                            && nextKey.Texture == meshKey.Texture
-                            && nextMesh
-                            && nextRange != GpuVobGeometryRanges.end();
-                        if ( !nextUsesArena ) {
-                            break;
-                        }
-                        size_t nextNumIndices = static_cast<size_t>(
-                            GetShadowAwareIndexCount( nextMesh, isAlpha ) );
-                        nextNumIndices = max != 0
-                            ? (nextNumIndices < max ? nextNumIndices : max)
-                            : nextNumIndices;
-                        submittedTriangles += nextNumIndices / 3;
-                        ++mdiDrawCount;
-                    }
-
-                    if ( mdiDrawCount > 1 ) {
-                        submittedDrawCount = mdiDrawCount;
-                        DrawMultiIndexedInstancedIndirect( Context.Get(),
-                            static_cast<unsigned int>( mdiDrawCount ),
-                            shadowGpuArgsBuffer->GetIndirectBuffer().Get(),
-                            static_cast<unsigned int>( drawIndex * argsStride ), argsStride );
-                        drawIndex += mdiDrawCount - 1;
-                    } else {
-                        GetContext()->DrawIndexedInstancedIndirect(
-                            shadowGpuArgsBuffer->GetIndirectBuffer().Get(),
-                            static_cast<UINT>( drawIndex * argsStride ) );
-                    }
-                } else {
-                    GetContext()->DrawIndexedInstancedIndirect(
-                        shadowGpuArgsBuffer->GetIndirectBuffer().Get(),
-                        static_cast<UINT>( drawIndex * argsStride ) );
-                }
-            } else {
-                GetContext()->DrawIndexedInstanced( static_cast<UINT>( numIndices ),
-                    static_cast<UINT>( numInstances ), 0, 0, static_cast<UINT>( startInstanceNum ) );
-            }
+            GetContext()->DrawIndexedInstanced( static_cast<UINT>( numIndices ),
+                static_cast<UINT>( numInstances ), 0, 0, static_cast<UINT>( startInstanceNum ) );
 
             Engine::GAPI->GetRendererState().RendererInfo.FrameDrawnTriangles +=
                 submittedTriangles * numInstances;
@@ -10224,7 +10022,7 @@ void D3D11GraphicsEngine::ApplyWindProps( VS_ExConstantBuffer_Wind& windBuff ) {
         XMVectorSetW( Engine::GAPI->GetCameraPositionXM(), 1.0f ) );
     windBuff.characterInteractionStrength =
         settings.HeroAffectsObjects ? 1.0f : 0.0f;
-    windBuff.characterInteractionRange = settings.GetEffectiveVegetationPushRange();
+    windBuff.characterInteractionRange = BUILD_213_CHARACTER_INTERACTION_RANGE;
 
     static float WindGlobalTime = 0.0f;
 
@@ -10503,8 +10301,7 @@ XRESULT D3D11GraphicsEngine::DrawVOBsInstanced() {
                     m_GpuVobPerformanceStats.CandidateInstances += visual.Instances.size();
                 }
                 cache.vobGpuCullingPrepared = true;
-                const bool gpuVobCullingRequested = renderSettings.AdvancedPerformanceOptions
-                    && renderSettings.GpuVobCulling
+                const bool gpuVobCullingRequested = renderSettings.GetEffectiveGpuVobOcclusionCulling()
                     && !IsGpuVobRuntimeDisabled();
                 if ( gpuVobCullingRequested ) {
                     ++m_GpuVobPerformanceStats.MainCullAttempts;
@@ -10815,9 +10612,9 @@ XRESULT D3D11GraphicsEngine::DrawVOBsInstanced() {
                     // the complete material/visual state. This keeps wind,
                     // window classification and per-material constants
                     // identical for every command in the batch.
-                    const bool mdiEligible = renderSettings.AdvancedPerformanceOptions
+                    const bool mdiEligible = renderSettings.GetEffectiveGpuVobOcclusionCulling()
                         && cache.vobGpuCullingActive
-                        && renderSettings.GpuVobMdi
+                        && renderSettings.DebugSettings.FeatureSet.UseMDI
                         && cache.MainVobGpuInstanceBuffer
                         && cache.MainVobGpuIndirectArgsBuffer
                         && useGeometryArena && tx
