@@ -457,6 +457,9 @@ struct VobLightInfo {
     bool RendererLightFollowsFlameState = false;
     std::vector<RendererLightFlameVisual> RendererLightFlameVisuals;
 
+    /** Set when a nominally static source moved at runtime (for example a picked-up item). */
+    bool RequiresDynamicShadowUpdates = false;
+
     /** Optional offset to one unambiguous associated flame. Multiple flames keep the original light position. */
     bool HasFlameAnchor = false;
     XMFLOAT3 FlameAnchorOffset = {};

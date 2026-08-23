@@ -2522,6 +2522,44 @@ bool GothicAPI::IsMaterialActive( zCMaterial* mat ) {
 
 /** Called when a vob moved */
 void GothicAPI::OnVobMoved( zCVob* vob ) {
+    if ( !vob )
+        return;
+
+    auto invalidateLightShadow = []( VobLightInfo* info ) {
+        if ( !info )
+            return;
+
+        // A light that was authored as static can still become movable at
+        // runtime (for example when its owning item is picked up). Keep the
+        // ordinary light update path intact, but permanently leave the
+        // one-time shadow path for this source.
+        info->RequiresDynamicShadowUpdates = true;
+        info->UpdateShadows = true;
+        if ( auto* pointLight = dynamic_cast<D3D11PointLight*>( info->LightShadowBuffers.get() ) )
+            pointLight->Invalidate();
+    };
+
+    // zCVob::Set*Transform also calls this hook for zCVobLight instances.
+    // Mark the original light and any renderer-owned replacement that follows
+    // the same moved anchor/source.
+    if ( auto lightIt = VobLightMap.find( reinterpret_cast<zCVobLight*>( vob ) );
+        lightIt != VobLightMap.end() ) {
+        invalidateLightShadow( lightIt->second );
+    }
+    for ( const auto& rendererLight : RendererPointLights ) {
+        if ( !rendererLight )
+            continue;
+
+        const bool isAnchor = rendererLight->RendererLightAnchorVob == vob;
+        const bool isSource =
+            ( rendererLight->RendererLightSourceA
+                && reinterpret_cast<zCVob*>( rendererLight->RendererLightSourceA ) == vob )
+            || ( rendererLight->RendererLightSourceB
+                && reinterpret_cast<zCVob*>( rendererLight->RendererLightSourceB ) == vob );
+        if ( isAnchor || isSource )
+            invalidateLightShadow( rendererLight.get() );
+    }
+
     static auto checkMatrix = []( FXMMATRIX a, CXMMATRIX b ) -> bool {
         const uint32_t mask = _mm_movemask_epi8( _mm_packs_epi16(
             _mm_packs_epi32 (
@@ -5212,13 +5250,6 @@ void GothicAPI::CollectVisibleVobs(
         for ( auto vi : renderQueue.lights ) {
             if ( vi->IsEffectivelyEnabled() /*&& vob->GetShowVisual()*/ ) {
                 vi->VisibleInFrame = true;
-
-                // Dynamic mode updates every visible, eligible point-light shadow in the active radius.
-                // Ineligible ambience lights stay excluded by AllowsPointlightShadows.
-                if ( !vi->IsRendererLight && vi->AllowsPointlightShadows
-                    && RendererState.RendererSettings.EnablePointlightShadows >= GothicRendererSettings::PLS_UPDATE_DYNAMIC ) {
-                    vi->UpdateShadows = true;
-                }
             }
         }
     }
@@ -5704,6 +5735,7 @@ void GothicAPI::ConfigurePointlightShadowSource( VobLightInfo* lightInfo ) const
     lightInfo->RendererLightSourceB = nullptr;
     lightInfo->RendererLightFollowsFlameState = false;
     lightInfo->RendererLightFlameVisuals.clear();
+    lightInfo->RequiresDynamicShadowUpdates = false;
 
     zCVobLight* light = lightInfo->Vob;
     if ( !light )
@@ -6394,16 +6426,28 @@ void GothicAPI::ConfigureAllPointlightShadowSources() {
         info->LightShadowBuffers.reset();
     };
 
+    auto belongsToPlayer = [this, &isAncestorOrSame]( zCVob* vob ) {
+        return vob && GetPlayerVob() && isAncestorOrSame( GetPlayerVob(), vob );
+    };
+
     auto createRendererLight = [&]( zCVob* anchorVob, const XMFLOAT3& position,
         DWORD baseColor, float intensity, float range, bool flicker,
         zCVobLight* sourceA, zCVobLight* sourceB,
         std::vector<RendererLightFlameVisual> flameVisuals ) {
         auto rendererLight = std::make_unique<VobLightInfo>();
+        const bool attachedToPlayer = belongsToPlayer( anchorVob )
+            || belongsToPlayer( reinterpret_cast<zCVob*>( sourceA ) )
+            || belongsToPlayer( reinterpret_cast<zCVob*>( sourceB ) )
+            || std::any_of( flameVisuals.begin(), flameVisuals.end(),
+                [&belongsToPlayer]( const RendererLightFlameVisual& visual ) {
+                    return belongsToPlayer( visual.Vob );
+                } );
         rendererLight->IsRendererLight = true;
         rendererLight->AllowsPointlightShadows = true;
         rendererLight->RendererLightEnabled = true;
-        // Renderer-owned lights use the animated pointlight path too.
-        rendererLight->RendererLightStatic = false;
+        // Ordinary flame/oil-lamp replacements are static shadow sources.
+        // Only a light attached to the player (the hand torch) stays dynamic.
+        rendererLight->RendererLightStatic = !attachedToPlayer;
         rendererLight->RendererLightFlicker = flicker;
         rendererLight->RendererLightIntensity = std::max( intensity, 0.0f );
         rendererLight->RendererLightRange = std::max( range, 1.0f );
@@ -8405,7 +8449,6 @@ static void CollectLeafVobs(
                 vi->IsVisualFXLight = vi->IsVisualFXLight || hasVisualFXParent( vob->GetVobParent() );
                 if ( vi->IsVisualFXLight ) {
                     vi->AllowsPointlightShadows = true;
-                    vi->UpdateShadows = true;
                 }
                 if ( vi->IsRendererLightSuppressed )
                     continue;

@@ -14918,14 +14918,14 @@
             "specularPower": 15,
             "normalmapStrength": 1.1,
             "displacementFactor": 0.0,
-            "wetGroundSSRStrength": 0.0
+            "wetGroundSSRStrength": 0.1
         },
         "ow_icedragon_housewall_01": {
             "specularIntensity": 0.05,
             "specularPower": 15,
             "normalmapStrength": 1.2,
             "displacementFactor": 0.0,
-            "wetGroundSSRStrength": 0.0
+            "wetGroundSSRStrength": 0.1
         },
         "OW_ICEDRAGON_ICECAVE_01": {
             "specularIntensity": 0.05,
@@ -15051,14 +15051,14 @@
             "specularPower": 15,
             "normalmapStrength": 1.0,
             "displacementFactor": 0.0,
-            "wetGroundSSRStrength": 0.1
+            "wetGroundSSRStrength": 0.0
         },
         "OW_ICEDRAGON_WOODFENCE_01": {
             "specularIntensity": 0.05,
             "specularPower": 15,
             "normalmapStrength": 1.0,
             "displacementFactor": 0.0,
-            "wetGroundSSRStrength": 0.1
+            "wetGroundSSRStrength": 0.0
         },
         "ow_icedragon_woodwall_01": {
             "specularIntensity": 0.05,

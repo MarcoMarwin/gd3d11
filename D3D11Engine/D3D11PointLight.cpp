@@ -1,5 +1,7 @@
 #include "pch.h"
 #include "D3D11PointLight.h"
+#include <algorithm>
+#include <cmath>
 #include "D3D11TiledDeferredShading.h"
 #include "RenderToTextureBuffer.h"
 #include "D3D11GraphicsEngineBase.h"
@@ -90,6 +92,7 @@ void D3D11PointLight::ReleaseShadowMap() {
     ReleaseStaticAsideShadowMap();
     m_CurrentResolution = 0;
     DrawnOnce = false;
+    m_LastDynamicShadowUpdateTime = -FLT_MAX;
 
 }
 
@@ -103,6 +106,7 @@ void D3D11PointLight::SetTiledSlot( int slot, RenderToDepthStencilBuffer* static
     DrawnOnce = false;
     m_StaticShadowReady = false;
     m_DynamicShadowValid = false;
+    m_LastDynamicShadowUpdateTime = -FLT_MAX;
 }
 
 void D3D11PointLight::ClearTiledSlot() {
@@ -143,6 +147,7 @@ void D3D11PointLight::OnTiledSlotEvicted() {
     m_StaticShadowReady = false;
     m_DynamicShadowValid = false;
     DrawnOnce = false;
+    m_LastDynamicShadowUpdateTime = -FLT_MAX;
 }
 
 int D3D11PointLight::GetCurrentShadowMode() const {
@@ -164,6 +169,7 @@ void D3D11PointLight::HandleShadowModeChange( int shadowMode ) {
     m_LastShadowMode = shadowMode;
     m_StaticShadowReady = false;
     DrawnOnce = false;
+    m_LastDynamicShadowUpdateTime = -FLT_MAX;
 
     if ( shadowMode != GothicRendererSettings::PLS_UPDATE_DYNAMIC ) {
         ReleaseStaticAsideShadowMap();
@@ -345,6 +351,22 @@ bool D3D11PointLight::WantsUpdate() {
             return true;
 
     return false;
+}
+
+bool D3D11PointLight::IsDynamicShadowUpdateDue( float currentTime, float minimumInterval ) const {
+    if ( !std::isfinite( currentTime ) || !std::isfinite( minimumInterval ) )
+        return true;
+
+    if ( m_LastDynamicShadowUpdateTime == -FLT_MAX
+        || currentTime < m_LastDynamicShadowUpdateTime ) {
+        return true;
+    }
+
+    return currentTime - m_LastDynamicShadowUpdateTime >= std::max( minimumInterval, 0.0f );
+}
+
+void D3D11PointLight::MarkDynamicShadowUpdated( float currentTime ) {
+    m_LastDynamicShadowUpdateTime = std::isfinite( currentTime ) ? currentTime : 0.0f;
 }
 
 /** Draws the surrounding scene into the cubemap */
@@ -545,6 +567,7 @@ void D3D11PointLight::Invalidate() {
     DrawnOnce = false;
     m_StaticShadowReady = false;
     m_DynamicShadowValid = false;
+    m_LastDynamicShadowUpdateTime = -FLT_MAX;
     VobCache.clear();
     SkeletalVobCache.clear();
     WorldCacheInvalid = true;

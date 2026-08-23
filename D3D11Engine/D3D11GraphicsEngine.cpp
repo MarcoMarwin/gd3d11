@@ -5357,13 +5357,23 @@ void D3D11GraphicsEngine::DrawSkeletalMeshVobs(
             m_FrameGeometryCache.skeletalBonesUploaded = true;
             m_FrameGeometryCache.skeletalBoneVisOrder = vis;
             m_FrameGeometryCache.skeletalBoneRanges = structuredBoneRanges;
+            m_FrameGeometryCache.skeletalBoneTransforms = BoneTransformCache;
         }
     }
 
-    const std::vector<XMFLOAT4X4>* activeBoneTransformData = reuseShadowPackedUpload
-        ? &m_FrameGeometryCache.shadowSkeletalBoneTransforms
-        : &BoneTransformCache;
-    BoneTransformCache.clear();
+    // Attachments are still assembled on the CPU below, even when the base
+    // meshes use the packed structured-buffer path. Keep the matching packed
+    // CPU palette alive for that work. Clearing BoneTransformCache here made
+    // attachment transforms read from invalid memory; depending on allocator
+    // state this showed up as intermittently stretched NPCs.
+    std::vector<XMFLOAT4X4>* activeBoneTransformData = nullptr;
+    if ( reuseShadowPackedUpload ) {
+        activeBoneTransformData = &m_FrameGeometryCache.shadowSkeletalBoneTransforms;
+    } else if ( reuseMainPackedUpload ) {
+        activeBoneTransformData = &m_FrameGeometryCache.skeletalBoneTransforms;
+    } else {
+        activeBoneTransformData = &BoneTransformCache;
+    }
 
     int boneOffset = 0;
 
@@ -5558,7 +5568,13 @@ void D3D11GraphicsEngine::DrawSkeletalMeshVobs(
                 boneIdx = boneOffset;
                 boneOffset += numBones;
             }
-            const auto transforms = std::span( activeBoneTransformData->data() + boneIdx, numBones );
+            if ( numBones == 0 || boneIdx + numBones > activeBoneTransformData->size() ) {
+                LogError() << "[Skeletal] base mesh bone range outside packed palette; skipping "
+                    << ( vi->VisualInfo ? vi->VisualInfo->VisualName : "<unknown>" );
+                continue;
+            }
+            const auto transforms = std::span<XMFLOAT4X4>(
+                activeBoneTransformData->data() + boneIdx, numBones );
 
 
             if ( !static_cast<SkeletalMeshVisualInfo*>(vi->VisualInfo)->SkeletalMeshes.empty() ) {
@@ -5729,6 +5745,13 @@ void D3D11GraphicsEngine::DrawSkeletalMeshVobs(
             auto model = data.Model;
             auto modelColor = data.ModelColor;
             modelColor.w = (vi && vi->Vob && vi->Vob->IsIndoorVob()) ? 0.05f : 1.0f;
+            if ( data.BoneIdx < 0 || data.NumBones <= 0
+                || static_cast<size_t>( data.BoneIdx )
+                    + static_cast<size_t>( data.NumBones ) > activeBoneTransformData->size() ) {
+                LogError() << "[Skeletal] attachment bone range outside packed palette; skipping attachments for "
+                    << ( vi && vi->VisualInfo ? vi->VisualInfo->VisualName : "<unknown>" );
+                continue;
+            }
             auto transforms = std::span( activeBoneTransformData->data() + data.BoneIdx, data.NumBones );
             auto fatness = data.Fatness;
             auto& world = data.World;

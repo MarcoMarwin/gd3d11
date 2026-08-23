@@ -152,9 +152,9 @@ bool VobLightInfo::IsEffectivelyEnabled() const {
 
 bool VobLightInfo::IsEffectivelyStatic() const {
     if ( IsRendererLight )
-        return RendererLightStatic;
+        return RendererLightStatic && !RequiresDynamicShadowUpdates;
 
-    return Vob && Vob->IsStatic();
+    return Vob && Vob->IsStatic() && !RequiresDynamicShadowUpdates;
 }
 
 

@@ -717,6 +717,7 @@ private:
         std::vector<SkeletalVobInfo*>   visibleNpcs;
         std::vector<SkeletalVobInfo*> skeletalBoneVisOrder;
         std::vector<VS_ExConstantBuffer_SkeletalBoneRange> skeletalBoneRanges;
+        std::vector<XMFLOAT4X4> skeletalBoneTransforms;
         std::vector<SkeletalVobInfo*> shadowSkeletalBoneVisOrder;
         std::vector<VS_ExConstantBuffer_SkeletalBoneRange> shadowSkeletalBoneRanges;
         std::vector<XMFLOAT4X4> shadowSkeletalBoneTransforms;
@@ -750,6 +751,7 @@ private:
             visibleNpcs.clear();
             skeletalBoneVisOrder.clear();
             skeletalBoneRanges.clear();
+            skeletalBoneTransforms.clear();
             shadowSkeletalBoneVisOrder.clear();
             shadowSkeletalBoneRanges.clear();
             shadowSkeletalBoneTransforms.clear();

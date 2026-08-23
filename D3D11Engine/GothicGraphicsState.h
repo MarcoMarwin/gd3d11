@@ -944,9 +944,9 @@ struct GothicRendererSettings {
             break;
         case E_ShadowQuality::SHADOW_QUALITY_VERY_LOW:
             EnableShadows = true;
-            EnablePointlightShadows = EPointLightShadowMode::PLS_DISABLED;
+            EnablePointlightShadows = EPointLightShadowMode::PLS_UPDATE_DYNAMIC;
             ShadowMapSize = 512;
-            PointlightShadowMapSize = 128;
+            PointlightShadowMapSize = 64;
             break;
         case E_ShadowQuality::SHADOW_QUALITY_LOW:
             EnableShadows = true;

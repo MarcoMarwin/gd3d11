@@ -4,6 +4,7 @@
 #include <thread>
 #include <condition_variable>
 #include <atomic>
+#include <cfloat>
 #include "TexturePool.h"
 #include "ThreadPool.h"
 
@@ -39,6 +40,12 @@ public:
     /** Returns true when the light may need an update. */
     bool WantsUpdate();
 
+    /** Returns whether a throttled dynamic-shadow refresh is due. */
+    bool IsDynamicShadowUpdateDue( float currentTime, float minimumInterval ) const;
+
+    /** Records the time of the last dynamic-shadow refresh. */
+    void MarkDynamicShadowUpdated( float currentTime );
+
     /** Returns true if this is the first time that light is being rendered */
     bool NotYetDrawn();
 
@@ -62,6 +69,7 @@ public:
 
     void AcquireShadowMap( DepthStencilPool* pool, int resolution );
     void ReleaseShadowMap();
+    void Invalidate();
 
     // Tiled deferred slot management (renders directly into shared TextureCubeArray)
     void SetTiledSlot( int slot, RenderToDepthStencilBuffer* staticTarget, RenderToDepthStencilBuffer* dynamicTarget, D3D11TiledDeferredShading* owner );
@@ -84,7 +92,6 @@ protected:
     void RenderAnimatedShadowPass( RenderToDepthStencilBuffer& target, bool clearDepth );
 
     bool IsReady();
-    void Invalidate();
     void StartReInit();
 
     /** Renders the scene with the given view-proj-matrices */
@@ -119,5 +126,6 @@ protected:
     D3D11TiledDeferredShading* m_TiledOwner = nullptr;
     bool m_DynamicShadowValid = false;
     uint8_t m_InvisibleFrameCount = 0;
+    float m_LastDynamicShadowUpdateTime = -FLT_MAX;
     TaskHandle<void> m_PendingInit;
 };

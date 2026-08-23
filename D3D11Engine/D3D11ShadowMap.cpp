@@ -1086,6 +1086,29 @@ XRESULT D3D11ShadowMap::DrawPointlightShadows( std::vector<VobLightInfo*>& light
     bool partialShadowUpdate = settings.PartialDynamicShadowUpdates;
     const bool staticOnlyMode = settings.EnablePointlightShadows == GothicRendererSettings::PLS_STATIC_ONLY;
     const bool dynamicMode = settings.EnablePointlightShadows >= GothicRendererSettings::PLS_UPDATE_DYNAMIC;
+    const float currentTime = Engine::GAPI->GetTimeSeconds();
+    const float distantDynamicShadowInterval = [&settings] {
+        switch ( settings.ShadowQuality ) {
+        case GothicRendererSettings::E_ShadowQuality::SHADOW_QUALITY_VERY_LOW:
+            return 0.20f;
+        case GothicRendererSettings::E_ShadowQuality::SHADOW_QUALITY_LOW:
+            return 0.14f;
+        case GothicRendererSettings::E_ShadowQuality::SHADOW_QUALITY_MEDIUM:
+            return 0.10f;
+        case GothicRendererSettings::E_ShadowQuality::SHADOW_QUALITY_HIGH:
+            return 0.08f;
+        case GothicRendererSettings::E_ShadowQuality::SHADOW_QUALITY_EXTREME:
+            return 0.06f;
+        default:
+            return 0.10f;
+        }
+    }();
+    const auto isStaticShadowSource = []( const VobLightInfo* light ) {
+        return light
+            && light->IsEffectivelyStatic()
+            && !light->IsDynamicVobLight
+            && !light->IsVisualFXLight;
+    };
 
     // Draw pointlight shadows
     std::list<VobLightInfo*> importantUpdates;
@@ -1121,30 +1144,6 @@ XRESULT D3D11ShadowMap::DrawPointlightShadows( std::vector<VobLightInfo*>& light
         if ( D3D11PointLight* pl = dynamic_cast<D3D11PointLight*>(light->LightShadowBuffers.get()) ) {
             // Preset-controlled point-light shadow resolution.
             int desiredResolution = std::clamp( settings.PointlightShadowMapSize, 64, 512 );
-            if ( dynamicMode ) {
-                const XMVECTOR lightPosition = light->GetEffectivePositionWorldXM();
-                const float lightRange = light->GetEffectiveLightRange();
-
-                float cameraDistance = FLT_MAX;
-                XMStoreFloat( &cameraDistance, XMVector3Length(
-                    lightPosition - Engine::GAPI->GetCameraPositionXM() ) );
-
-                float heroDistance = FLT_MAX;
-                if ( zCVob* hero = Engine::GAPI->GetPlayerVob() ) {
-                    const XMFLOAT3 heroPosition = hero->GetPositionWorld();
-                    XMStoreFloat( &heroDistance, XMVector3Length(
-                        lightPosition - XMLoadFloat3( &heroPosition ) ) );
-                }
-
-                // Never round-robin a light capable of casting a visible hero
-                // shadow. Camera-near lights receive the same per-frame tier.
-                const bool affectsHero = heroDistance <= lightRange + 250.0f;
-                const bool cameraNear = cameraDistance <= lightRange + 1200.0f;
-                if ( affectsHero || cameraNear ) {
-                    light->UpdateShadows = true;
-                }
-            }
-
             float allocationCameraDistance = FLT_MAX;
             XMStoreFloat( &allocationCameraDistance, XMVector3Length(
                 light->GetEffectivePositionWorldXM() - Engine::GAPI->GetCameraPositionXM() ) );
@@ -1156,6 +1155,11 @@ XRESULT D3D11ShadowMap::DrawPointlightShadows( std::vector<VobLightInfo*>& light
             }
             const float allocationRange = light->GetEffectiveLightRange();
             const bool heroRelevant = allocationHeroDistance <= allocationRange + 250.0f;
+            const bool cameraNear = allocationCameraDistance <= allocationRange + 1200.0f;
+            const bool staticShadowSource = isStaticShadowSource( light );
+            const bool nearDynamicShadowSource = dynamicMode
+                && !staticShadowSource
+                && ( heroRelevant || cameraNear );
             const float slotPriority = heroRelevant ? 0.0f
                 : std::min( allocationCameraDistance * allocationCameraDistance,
                     allocationHeroDistance * allocationHeroDistance );
@@ -1201,6 +1205,18 @@ XRESULT D3D11ShadowMap::DrawPointlightShadows( std::vector<VobLightInfo*>& light
             bool needsUpdate = pl->NeedsUpdate();
             bool isInited = pl->IsInited();
 
+            // A nearby dynamic source must keep its animated shadow current.
+            // Distant dynamic sources are refreshed on a quality-dependent
+            // timer; static sources are never put on that queue.
+            if ( nearDynamicShadowSource )
+                light->UpdateShadows = true;
+
+            const bool distantDynamicUpdateDue = dynamicMode
+                && !staticShadowSource
+                && partialShadowUpdate
+                && !staticOnlyMode
+                && pl->IsDynamicShadowUpdateDue( currentTime, distantDynamicShadowInterval );
+
             // Sort into Important vs Background Queue
             if ( isInited ) {
                 // Immediate Priority: Light moved, was just created, or explicit flag set
@@ -1213,20 +1229,23 @@ XRESULT D3D11ShadowMap::DrawPointlightShadows( std::vector<VobLightInfo*>& light
                     importantUpdates.emplace_back( light );
                 }
                 // Background Priority: Add to round-robin queue if not already there
-                else if ( partialShadowUpdate && !staticOnlyMode ) {
+                else if ( distantDynamicUpdateDue ) {
                     auto& queue = graphicsEngine->FrameShadowUpdateLights;
                     if ( std::find( queue.begin(), queue.end(), light ) == queue.end() ) {
                         queue.emplace_back( light );
                     }
-                } else if ( !staticOnlyMode ) {
-                    // Preserve the setting's original full-update semantics.
-                    importantUpdates.emplace_back( light );
-                } else if ( staticOnlyMode ) {
-                    auto& queue = graphicsEngine->FrameShadowUpdateLights;
-                    auto queued = std::find( queue.begin(), queue.end(), light );
-                    if ( queued != queue.end() ) {
-                        queue.erase( queued );
+                } else if ( !partialShadowUpdate && !staticOnlyMode ) {
+                    // Preserve the setting's original full-update semantics
+                    // for dynamic lights when round-robin updates are off.
+                    if ( !staticShadowSource )
+                        importantUpdates.emplace_back( light );
+                    else {
+                        auto& queue = graphicsEngine->FrameShadowUpdateLights;
+                        queue.remove( light );
                     }
+                } else {
+                    auto& queue = graphicsEngine->FrameShadowUpdateLights;
+                    queue.remove( light );
                 }
             }
         }
@@ -1249,6 +1268,8 @@ XRESULT D3D11ShadowMap::DrawPointlightShadows( std::vector<VobLightInfo*>& light
             ++lowStaticRenders;
         }
         pointLight->RenderCubemap( true, m_PointLightCB.get() );
+        if ( !isStaticShadowSource( importantUpdate ) && !pointLight->NotYetDrawn() )
+            pointLight->MarkDynamicShadowUpdated( currentTime );
         importantUpdate->UpdateShadows = false;
     }
 
@@ -1280,6 +1301,8 @@ XRESULT D3D11ShadowMap::DrawPointlightShadows( std::vector<VobLightInfo*>& light
 
         // FORCE the render! It waited in line for its turn, it must draw.
         l->RenderCubemap( true, m_PointLightCB.get() );
+        if ( !isStaticShadowSource( light ) && !l->NotYetDrawn() )
+            l->MarkDynamicShadowUpdated( currentTime );
         graphicsEngine->DebugPointlight = l;
 
         updatesDone++;
