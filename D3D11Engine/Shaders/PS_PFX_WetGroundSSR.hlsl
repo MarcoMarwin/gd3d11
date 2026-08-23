@@ -867,7 +867,9 @@ float4 PSMain(PS_INPUT input) : SV_TARGET
         TX_Material.SampleLevel(SS_Linear, uv, 0).z);
     float materialWetGroundEligibility = step(0.0001f, materialWetGroundSSRStrength);
     float reflectionsEnabled = step(0.5f, WG_ReflectionsEnabled) * step(0.001f, WG_Strength);
-    float materialPuddleEligibility = materialWetGroundEligibility * reflectionsEnabled;
+    // Puddles have their own switch. Wet-ground SSR only controls the
+    // reflection layer of the surrounding wet material.
+    float materialPuddleEligibility = materialWetGroundEligibility;
 
     float3 wsNormal = CalculateSmoothedWetGroundNormal(
         uv,
@@ -895,7 +897,7 @@ float4 PSMain(PS_INPUT input) : SV_TARGET
         * max(WG_WetMaterialReflectionsStrength, 0.0f)
         * reflectionsEnabled;
     puddleMask = saturate(
-        puddleMask * max(WG_ProceduralPuddlesStrength, 0.0f) * reflectionsEnabled);
+        puddleMask * max(WG_ProceduralPuddlesStrength, 0.0f));
     float puddleRainExposure = smoothstep(0.10f, 0.72f, rainExposure);
     float puddleExposure = puddleRainExposure;
     float puddleWetMask = saturate(
@@ -997,9 +999,6 @@ float4 PSMain(PS_INPUT input) : SV_TARGET
         turbidPuddleBase,
         puddleBaseBlend);
 
-    if (reflectionsEnabled <= 0.001f)
-        return float4(surfaceColor, 1.0f);
-
     float materialMicrostructure = lerp(0.115f, 0.045f, puddleMask);
     float2 baseNormalDistortion = float2(staticDistortion.x * 0.55f, staticDistortion.y * 0.85f);
     float3 materialWetNormal = normalize(
@@ -1016,23 +1015,37 @@ float4 PSMain(PS_INPUT input) : SV_TARGET
     float2 reflectionRippleOffset = rippleDistortion * float2(0.0040f, 0.0040f);
     float materialTraceMask = saturate(materialWetMask);
     float puddleTraceMask = saturate(puddleWetMask * slopeWaterFade);
-    WetGroundReflectionTrace materialReflection = TraceWetGroundReflection(
-        materialTraceMask,
-        wsPosition,
-        materialWetNormal,
-        viewRay,
-        uv,
-        depth,
-        surfaceColor,
-        float2(0.0f, 0.0f),
-        baseNormalDistortion,
-        0.82f,
-        0.92f,
-        0.0f,
-        saturate(materialWetMask * 0.72f),
-        float2(0.0f, 0.0f),
-        0.0f,
-        0.0f);
+    float3 composedColor = surfaceColor;
+    if (reflectionsEnabled > 0.001f)
+    {
+        WetGroundReflectionTrace materialReflection = TraceWetGroundReflection(
+            materialTraceMask,
+            wsPosition,
+            materialWetNormal,
+            viewRay,
+            uv,
+            depth,
+            surfaceColor,
+            float2(0.0f, 0.0f),
+            baseNormalDistortion,
+            0.82f,
+            0.92f,
+            0.0f,
+            saturate(materialWetMask * 0.72f),
+            float2(0.0f, 0.0f),
+            0.0f,
+            0.0f);
+        float materialFresnelBase = pow(
+            1.0f - saturate(dot(-viewRay, materialWetNormal)), 3.0f);
+        float materialFresnel = lerp(0.085f, 0.28f, materialFresnelBase);
+        float materialReflectionBlend = saturate(
+            materialWetMask * materialReflection.Weight
+            * materialFresnel * WG_Strength * 2.60f);
+        composedColor = lerp(
+            composedColor,
+            materialReflection.Color,
+            materialReflectionBlend);
+    }
     float puddleDirectColorWeight = smoothstep(0.32f, 0.94f, puddleMask) * 0.42f;
     WetGroundReflectionTrace puddleReflection = TraceWetGroundReflection(
         puddleTraceMask,
@@ -1051,16 +1064,6 @@ float4 PSMain(PS_INPUT input) : SV_TARGET
         reflectionRippleOffset * lerp(0.18f, 0.80f, puddleMask),
         1.0f,
         1.0f);
-    float materialFresnelBase = pow(
-        1.0f - saturate(dot(-viewRay, materialWetNormal)), 3.0f);
-    float materialFresnel = lerp(0.085f, 0.28f, materialFresnelBase);
-    float materialReflectionBlend = saturate(
-        materialWetMask * materialReflection.Weight
-        * materialFresnel * WG_Strength * 2.60f);
-    float3 composedColor = lerp(
-        surfaceColor,
-        materialReflection.Color,
-        materialReflectionBlend);
     float puddleFresnelBase = pow(
         1.0f - saturate(dot(-viewRay, puddleWetNormal)), 3.0f);
     float puddleFresnel = max(puddleFresnelBase, 0.14f);

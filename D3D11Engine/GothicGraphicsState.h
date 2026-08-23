@@ -979,6 +979,14 @@ struct GothicRendererSettings {
         }
     }
 
+    // Very Low and Low keep point-light shadows for the world, but skip the
+    // separate animated NPC/MOB shadow overlay to avoid its six-face cubemap
+    // render cost. Medium and above retain dynamic point-light caster shadows.
+    bool UseDynamicPointlightNpcShadows() const {
+        return static_cast<int>(ShadowQuality)
+            >= static_cast<int>(E_ShadowQuality::SHADOW_QUALITY_MEDIUM);
+    }
+
     E_ShadowKernelQuality GetShadowKernelQuality() const {
         if ( ShadowMapSize <= 1024 ) return E_ShadowKernelQuality::SHADOW_KERNEL_PCF_LOW;
         if ( ShadowMapSize <= 2048 ) return E_ShadowKernelQuality::SHADOW_KERNEL_PCF_MEDIUM;

@@ -74,6 +74,7 @@ float4 PSMain( PS_INPUT Input ) : SV_TARGET
 	// Get specular parameters
 	float4 gb3 = TX_SI_SP.Sample(SS_Linear, uv);
 	float twoSidedBacklitMaterial = gb3.x < -2.0f ? 1.0f : 0.0f;
+	float npcMaterial = (gb3.x < -0.5f && gb3.x >= -2.0f) ? 1.0f : 0.0f;
 	float specIntensity = twoSidedBacklitMaterial > 0.5f ? max(-gb3.x - 3.0f, 0.0f)
         : (gb3.x < -0.5f ? max(-gb3.x - 1.0f, 0.0f) : gb3.x);
 	float alphaTestedMaterial = gb3.y < 0.0f ? 1.0f : 0.0f;
@@ -94,8 +95,15 @@ float4 PSMain( PS_INPUT Input ) : SV_TARGET
 	// Do some simple NdL-Lighting
 	float ndl = PLS_ComputePointLightNdlBacklit(lightDir, normal, Pl_PositionWorld, wsPosition, wsNormal, twoSidedBacklitMaterial, AC_EnableSSS);
 	
-	// Apply dynamic shadow
-	float shadow = PLS_SampleShadowCube(TX_ShadowCube, SS_Linear, SS_Comp, wsPosition, wsNormal, Pl_PositionWorld, PL_Range, PL_ShadowSoftness, PL_ShadowFilterMode);
+	// Low and Very Low deliberately keep NPCs free of point-light receiver
+	// shadows. The flag is carried in the existing filter padding so the
+	// lighting itself remains unchanged.
+	float shadow = 1.0f;
+	[branch]
+	if (npcMaterial <= 0.5f || PL_ShadowFilterPad[0] == 0u)
+	{
+		shadow = PLS_SampleShadowCube(TX_ShadowCube, SS_Linear, SS_Comp, wsPosition, wsNormal, Pl_PositionWorld, PL_Range, PL_ShadowSoftness, PL_ShadowFilterMode);
+	}
 	// Compute range falloff
 	float falloff = PLS_ComputeRangeFalloff(distance, PL_Range);
 	

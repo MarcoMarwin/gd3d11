@@ -104,6 +104,7 @@ struct MeshInfo {
         MeshVertexBuffer = nullptr;
         MeshIndexBuffer = nullptr;
         MeshShadowIndexBuffer = nullptr;
+        MeshShadowLodIndexBuffer = nullptr;
         BaseIndexLocation = 0;
         MeshIndex = -1;
         meshId = 0;
@@ -122,10 +123,13 @@ struct MeshInfo {
     D3D11VertexBuffer* MeshVertexBuffer;
     D3D11VertexBuffer* MeshIndexBuffer;
     D3D11VertexBuffer* MeshShadowIndexBuffer;
+    D3D11VertexBuffer* MeshShadowLodIndexBuffer;
     std::vector<ExVertexStruct> Vertices;
     std::vector<XMFLOAT3> PreviousMorphPositions;
     std::vector<VERTEX_INDEX> Indices;
     std::vector<VERTEX_INDEX> ShadowIndices;
+    std::vector<VERTEX_INDEX> ShadowLodIndices;
+    bool ShadowLodBuildAttempted = false;
 
     // Offset in wrapped world mesh
     unsigned int BaseIndexLocation;

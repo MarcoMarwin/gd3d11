@@ -2560,6 +2560,25 @@ void GothicAPI::OnVobMoved( zCVob* vob ) {
             invalidateLightShadow( rendererLight.get() );
     }
 
+    auto notifyPointLightCasterMoved = [this]( BaseVobInfo* movedVob ) {
+        if ( !movedVob )
+            return;
+
+        std::unordered_set<D3D11PointLight*> notified;
+        auto notify = [&notified, movedVob]( VobLightInfo* info ) {
+            if ( !info )
+                return;
+            auto* pointLight = dynamic_cast<D3D11PointLight*>( info->LightShadowBuffers.get() );
+            if ( pointLight && notified.insert( pointLight ).second )
+                pointLight->OnVobMoved( movedVob );
+        };
+
+        for ( const auto& [_, info] : VobLightMap )
+            notify( info );
+        for ( const auto& rendererLight : RendererPointLights )
+            notify( rendererLight.get() );
+    };
+
     static auto checkMatrix = []( FXMMATRIX a, CXMMATRIX b ) -> bool {
         const uint32_t mask = _mm_movemask_epi8( _mm_packs_epi16(
             _mm_packs_epi32 (
@@ -2587,6 +2606,7 @@ void GothicAPI::OnVobMoved( zCVob* vob ) {
 
         vi->UpdateState();
         Engine::GAPI->GetRendererState().RendererInfo.FrameVobUpdates++;
+        notifyPointLightCasterMoved( vi );
     } else {
         auto sit = SkeletalVobMap.find( vob );
         if ( sit != SkeletalVobMap.end() ) {
@@ -2598,6 +2618,7 @@ void GothicAPI::OnVobMoved( zCVob* vob ) {
             // This is a mob, remove it from the bsp-cache and add to dynamic list
             MoveVobFromBspToDynamic( vi );
             vi->UpdateState();
+            notifyPointLightCasterMoved( vi );
         }
     }
 }
@@ -3129,6 +3150,25 @@ void GothicAPI::OnAddVob( zCVob* vob, zCWorld* world ) {
         return;
     }
 
+    auto notifyPointLightVobAdded = [this]( BaseVobInfo* addedVob ) {
+        if ( !addedVob )
+            return;
+
+        std::unordered_set<D3D11PointLight*> notified;
+        auto notify = [&notified, addedVob]( VobLightInfo* info ) {
+            if ( !info )
+                return;
+            auto* pointLight = dynamic_cast<D3D11PointLight*>( info->LightShadowBuffers.get() );
+            if ( pointLight && notified.insert( pointLight ).second )
+                pointLight->OnVobAdded( addedVob );
+        };
+
+        for ( const auto& [_, info] : VobLightMap )
+            notify( info );
+        for ( const auto& rendererLight : RendererPointLights )
+            notify( rendererLight.get() );
+    };
+
 #ifdef BUILD_SPACER
     if ( strncmp( vob->GetVisual()->GetObjectName(), "INVISIBLE_", strlen( "INVISIBLE_" ) ) == 0 )
         return;
@@ -3209,6 +3249,7 @@ void GothicAPI::OnAddVob( zCVob* vob, zCWorld* world ) {
                         && IsSupportedCityWindowVisual( vi->VisualInfo->VisualName ) )
                         ConfigureCityWindows();
                 }
+                notifyPointLightVobAdded( vi );
             } else {
                 // Must be inventory
                 Inventory->OnAddVob( vi, world );
@@ -3262,6 +3303,7 @@ void GothicAPI::OnAddVob( zCVob* vob, zCWorld* world ) {
                 {
                     AnimatedSkeletalVobs.push_back( vi );
                 }
+                notifyPointLightVobAdded( vi );
             }
             break;
         } else if ( ext == ".PFX" ) {

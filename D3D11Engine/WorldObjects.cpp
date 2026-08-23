@@ -212,6 +212,7 @@ MeshInfo::~MeshInfo() {
     delete MeshVertexBuffer;
     delete MeshIndexBuffer;
     delete MeshShadowIndexBuffer;
+    delete MeshShadowLodIndexBuffer;
 }
 
 SkeletalMeshInfo::~SkeletalMeshInfo() {

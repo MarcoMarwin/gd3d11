@@ -5,6 +5,8 @@
 #include <memory>
 #include <vector>
 #include <array>
+#include <cstdint>
+#include <unordered_map>
 #include <DirectXMath.h>
 #include "RenderToTextureBuffer.h"
 #include "D3D11CascadedShadowMapBuffer.h"
@@ -39,10 +41,12 @@ enum PS_DS_AtmosphericScatteringSlots {
     TX_BlueNoise512 = 8,
 };
 
-/** Per-frame world shadow caster snapshot. Material classification and alpha
- * texture residency are resolved once; cascades only perform bbox culling. */
+/** Persistent world shadow caster snapshot. Material classification is
+ * resolved once per world/configuration; cascades only perform bbox culling.
+ * The section fallback keeps meshes without their own bounds safely culled. */
 struct ShadowWorldCaster {
     WorldMeshInfo* Mesh = nullptr;
+    WorldMeshSectionInfo* Section = nullptr;
     zCTexture* Texture = nullptr;
     bool AlphaTest = false;
 };
@@ -198,6 +202,30 @@ private:
 
     void WaitShadowCullingComplete();
     void BuildWorldShadowCasterCache();
+    void BuildVisibleWorldShadowCasterCache( const Frustum& cullingFrustum );
+    void LogPointlightShadowStats();
+
+    struct PointlightShadowPerformanceStats {
+        uint64_t Frames = 0;
+        uint64_t VisibleLights = 0;
+        uint64_t EligibleLights = 0;
+        uint64_t CreatedLights = 0;
+        uint64_t ResourceReallocations = 0;
+        uint64_t SlotAllocationFailures = 0;
+        uint64_t StaticCacheReadyLights = 0;
+        uint64_t ImmediateUpdates = 0;
+        uint64_t BackgroundQueued = 0;
+        uint64_t BackgroundUpdates = 0;
+        uint64_t CompletedUpdates = 0;
+        uint64_t VisibilityReleases = 0;
+        uint64_t StaticPasses = 0;
+        uint64_t DynamicPasses = 0;
+        double CpuMsTotal = 0.0;
+
+        void Reset() {
+            *this = {};
+        }
+    };
 
     Microsoft::WRL::ComPtr<ID3D11Device1> m_device;
     Microsoft::WRL::ComPtr<ID3D11DeviceContext1> m_context;
@@ -222,6 +250,16 @@ private:
     std::array<bool, MAX_CSM_CASCADES> m_ShouldUpdateCascade;
     XMFLOAT3 m_WorldShadowPos;
     ShadowWorldCasterCache m_WorldShadowCasters;
+    std::unordered_map<WorldMeshInfo*, ShadowWorldCaster> m_WorldShadowCasterLookup;
+    ShadowWorldCasterCache m_WorldShadowVisibleCasters;
+    uint64_t m_WorldShadowCasterCacheGeneration = static_cast<uint64_t>( -1 );
+    float m_WorldShadowCasterCacheAlphaRef = -FLT_MAX;
+    bool m_WorldShadowCasterCacheDrawWorldMesh = false;
+    bool m_WorldShadowCasterCacheDrawShadowGeometry = false;
+    bool m_WorldShadowCasterCacheValid = false;
+    uint64_t m_WorldShadowCasterCacheBuilds = 0;
+    uint64_t m_WorldShadowCasterCacheHits = 0;
+    PointlightShadowPerformanceStats m_PointlightShadowStats;
 
     std::unique_ptr<D3D11TiledDeferredShading> m_TiledDeferred;
     D3D11LegacyDeferredShading m_LegacyDeferred;

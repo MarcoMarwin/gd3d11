@@ -1,6 +1,7 @@
 #include "D3D11ShadowMap.h"
 #include <algorithm>
 #include <cmath>
+#include <chrono>
 #include <DirectXMath.h>
 
 // TODO: Remove circular dependencies
@@ -1057,8 +1058,11 @@ XRESULT D3D11ShadowMap::DrawPointlightShadows( std::vector<VobLightInfo*>& light
         return XR_SUCCESS;
     }
 
+    const auto pointlightStatsStart = std::chrono::steady_clock::now();
+    ++m_PointlightShadowStats.Frames;
+
     // Shadow resources follow the same frame visibility that is already limited by VisualFXDrawRadius.
-    auto releaseIfInvisible = []( VobLightInfo* info ) {
+    auto releaseIfInvisible = [this]( VobLightInfo* info ) {
         if ( !info || !info->LightShadowBuffers )
             return;
 
@@ -1067,6 +1071,7 @@ XRESULT D3D11ShadowMap::DrawPointlightShadows( std::vector<VobLightInfo*>& light
             if ( pl->ShouldReleaseForVisibility( visible ) ) {
                 pl->ClearTiledSlot();
                 pl->ReleaseShadowMap();
+                ++m_PointlightShadowStats.VisibilityReleases;
             }
         }
     };
@@ -1103,13 +1108,6 @@ XRESULT D3D11ShadowMap::DrawPointlightShadows( std::vector<VobLightInfo*>& light
             return 0.10f;
         }
     }();
-    const auto isStaticShadowSource = []( const VobLightInfo* light ) {
-        return light
-            && light->IsEffectivelyStatic()
-            && !light->IsDynamicVobLight
-            && !light->IsVisualFXLight;
-    };
-
     // Draw pointlight shadows
     std::list<VobLightInfo*> importantUpdates;
 
@@ -1121,6 +1119,7 @@ XRESULT D3D11ShadowMap::DrawPointlightShadows( std::vector<VobLightInfo*>& light
         if ( !light || !light->IsEffectivelyEnabled() || !light->VisibleInFrame ) {
             continue;
         }
+        ++m_PointlightShadowStats.VisibleLights;
         const bool visualFxShadowsAllowed = !light->IsVisualFXLight || dynamicMode;
         const bool regularShadowLight = light->AllowsPointlightShadows && visualFxShadowsAllowed;
         if ( !regularShadowLight ) {
@@ -1131,6 +1130,7 @@ XRESULT D3D11ShadowMap::DrawPointlightShadows( std::vector<VobLightInfo*>& light
             }
             continue;
         }
+        ++m_PointlightShadowStats.EligibleLights;
         // Create resources only when an eligible light is actually visible.
         if ( !light->LightShadowBuffers ) {
             BaseShadowedPointLight* bpl;
@@ -1139,9 +1139,14 @@ XRESULT D3D11ShadowMap::DrawPointlightShadows( std::vector<VobLightInfo*>& light
             graphicsEngine->CreateShadowedPointLight( &bpl, light, shadowLightIsDynamic );
             light->LightShadowBuffers.reset( bpl );
             light->UpdateShadows = true;
+            ++m_PointlightShadowStats.CreatedLights;
         }
 
         if ( D3D11PointLight* pl = dynamic_cast<D3D11PointLight*>(light->LightShadowBuffers.get()) ) {
+            if ( pl->UpdateDynamicNpcShadowCasterMode() ) {
+                light->UpdateShadows = true;
+            }
+
             // Preset-controlled point-light shadow resolution.
             int desiredResolution = std::clamp( settings.PointlightShadowMapSize, 64, 512 );
             float allocationCameraDistance = FLT_MAX;
@@ -1156,9 +1161,14 @@ XRESULT D3D11ShadowMap::DrawPointlightShadows( std::vector<VobLightInfo*>& light
             const float allocationRange = light->GetEffectiveLightRange();
             const bool heroRelevant = allocationHeroDistance <= allocationRange + 250.0f;
             const bool cameraNear = allocationCameraDistance <= allocationRange + 1200.0f;
-            const bool staticShadowSource = isStaticShadowSource( light );
-            const bool nearDynamicShadowSource = dynamicMode
-                && !staticShadowSource
+            // Static lights keep their world shadow in a persistent base map,
+            // but still need the animated NPC/MOB overlay when dynamic
+            // pointlight shadows are enabled. Static low-resolution slots do
+            // not have an animated target and therefore remain base-only.
+            const bool animatedShadowOverlayEligible = dynamicMode
+                && pl->UseDynamicNpcShadowCasters()
+                && !pl->IsTiledStaticLowRes();
+            const bool nearDynamicShadowSource = animatedShadowOverlayEligible
                 && ( heroRelevant || cameraNear );
             const float slotPriority = heroRelevant ? 0.0f
                 : std::min( allocationCameraDistance * allocationCameraDistance,
@@ -1174,9 +1184,11 @@ XRESULT D3D11ShadowMap::DrawPointlightShadows( std::vector<VobLightInfo*>& light
             }
 
             // Acquire memory if it doesn't have it (or resolution changed)
-            if ( !pl->HasShadowMap( requiredShadowMapKind )
+            const bool needsResourceReallocation = !pl->HasShadowMap( requiredShadowMapKind )
                 || pl->GetShadowMapResolution() != desiredResolution
-                || (isTiledShadingEnabled && pl->IsTiledStaticLowRes() != staticLowRes) ) {
+                || (isTiledShadingEnabled && pl->IsTiledStaticLowRes() != staticLowRes);
+            if ( needsResourceReallocation ) {
+                ++m_PointlightShadowStats.ResourceReallocations;
                 pl->ClearTiledSlot();
                 pl->ReleaseShadowMap();
 
@@ -1191,6 +1203,7 @@ XRESULT D3D11ShadowMap::DrawPointlightShadows( std::vector<VobLightInfo*>& light
                             m_TiledDeferred.get() );
                         pl->SetCurrentResolution( desiredResolution );
                     } else {
+                        ++m_PointlightShadowStats.SlotAllocationFailures;
                         light->UpdateShadows = false;
                         continue; // failed to allocate tiled slot, skip shadow rendering for this light this frame
                     }
@@ -1204,15 +1217,17 @@ XRESULT D3D11ShadowMap::DrawPointlightShadows( std::vector<VobLightInfo*>& light
 
             bool needsUpdate = pl->NeedsUpdate();
             bool isInited = pl->IsInited();
+            if ( pl->IsStaticShadowReady() ) {
+                ++m_PointlightShadowStats.StaticCacheReadyLights;
+            }
 
-            // A nearby dynamic source must keep its animated shadow current.
-            // Distant dynamic sources are refreshed on a quality-dependent
-            // timer; static sources are never put on that queue.
+            // A nearby light with an animated overlay must keep its NPC/MOB
+            // shadow current. Distant overlays are refreshed on a
+            // quality-dependent timer; the static world base is never rebuilt.
             if ( nearDynamicShadowSource )
                 light->UpdateShadows = true;
 
-            const bool distantDynamicUpdateDue = dynamicMode
-                && !staticShadowSource
+            const bool distantDynamicUpdateDue = animatedShadowOverlayEligible
                 && partialShadowUpdate
                 && !staticOnlyMode
                 && pl->IsDynamicShadowUpdateDue( currentTime, distantDynamicShadowInterval );
@@ -1227,17 +1242,21 @@ XRESULT D3D11ShadowMap::DrawPointlightShadows( std::vector<VobLightInfo*>& light
                         queue.erase( queued );
                     }
                     importantUpdates.emplace_back( light );
+                    ++m_PointlightShadowStats.ImmediateUpdates;
                 }
-                // Background Priority: Add to round-robin queue if not already there
+                // Background Priority: Add animated overlays to the
+                // round-robin queue if not already there. This also applies to
+                // static lights; only their world base is static.
                 else if ( distantDynamicUpdateDue ) {
                     auto& queue = graphicsEngine->FrameShadowUpdateLights;
                     if ( std::find( queue.begin(), queue.end(), light ) == queue.end() ) {
                         queue.emplace_back( light );
+                        ++m_PointlightShadowStats.BackgroundQueued;
                     }
                 } else if ( !partialShadowUpdate && !staticOnlyMode ) {
                     // Preserve the setting's original full-update semantics
-                    // for dynamic lights when round-robin updates are off.
-                    if ( !staticShadowSource )
+                    // for every light that has an animated overlay.
+                    if ( animatedShadowOverlayEligible )
                         importantUpdates.emplace_back( light );
                     else {
                         auto& queue = graphicsEngine->FrameShadowUpdateLights;
@@ -1268,15 +1287,27 @@ XRESULT D3D11ShadowMap::DrawPointlightShadows( std::vector<VobLightInfo*>& light
             ++lowStaticRenders;
         }
         pointLight->RenderCubemap( true, m_PointLightCB.get() );
-        if ( !isStaticShadowSource( importantUpdate ) && !pointLight->NotYetDrawn() )
+        ++m_PointlightShadowStats.CompletedUpdates;
+        if ( dynamicMode && !pointLight->IsTiledStaticLowRes()
+            && !pointLight->NotYetDrawn() )
             pointLight->MarkDynamicShadowUpdated( currentTime );
         importantUpdate->UpdateShadows = false;
     }
 
-    // Process Background Queue (Round-Robin)
-    // Set a strict, safe limit to prevent FPS drops. 
-    // 2 per frame is 120 updates per second at 60fps.
-    int maxBackgroundUpdates = 2;
+    // Process Background Queue (Round-Robin). Keep the budget deliberately
+    // bounded; high quality can refresh more distant overlays while lower
+    // presets retain the original conservative update rate.
+    const int maxBackgroundUpdates = [&settings] {
+        switch ( settings.ShadowQuality ) {
+        case GothicRendererSettings::E_ShadowQuality::SHADOW_QUALITY_HIGH:
+        case GothicRendererSettings::E_ShadowQuality::SHADOW_QUALITY_EXTREME:
+            return 6;
+        case GothicRendererSettings::E_ShadowQuality::SHADOW_QUALITY_MEDIUM:
+            return 4;
+        default:
+            return 2;
+        }
+    }();
     int updatesDone = 0;
 
     while ( !graphicsEngine->FrameShadowUpdateLights.empty() && updatesDone < maxBackgroundUpdates ) {
@@ -1289,7 +1320,7 @@ XRESULT D3D11ShadowMap::DrawPointlightShadows( std::vector<VobLightInfo*>& light
         if ( !l ) continue;
 
         // A queued light can lose its shared slot to a much closer challenger.
-        // Do not spend one of the two background updates on a stale entry.
+        // Do not spend one of the bounded background updates on a stale entry.
         if ( !l->HasShadowMap( requiredShadowMapKind ) ) continue;
 
         if ( staticOnlyMode && l->IsStaticShadowReady() && !l->NeedsUpdate() ) {
@@ -1301,100 +1332,167 @@ XRESULT D3D11ShadowMap::DrawPointlightShadows( std::vector<VobLightInfo*>& light
 
         // FORCE the render! It waited in line for its turn, it must draw.
         l->RenderCubemap( true, m_PointLightCB.get() );
-        if ( !isStaticShadowSource( light ) && !l->NotYetDrawn() )
+        ++m_PointlightShadowStats.BackgroundUpdates;
+        ++m_PointlightShadowStats.CompletedUpdates;
+        if ( dynamicMode && !l->IsTiledStaticLowRes() && !l->NotYetDrawn() )
             l->MarkDynamicShadowUpdated( currentTime );
         graphicsEngine->DebugPointlight = l;
 
         updatesDone++;
     }
 
+    std::vector<D3D11PointLight*> measuredPointLights;
+    measuredPointLights.reserve( lights.size() );
+    for ( VobLightInfo* light : lights ) {
+        auto* pointLight = light && light->LightShadowBuffers
+            ? dynamic_cast<D3D11PointLight*>( light->LightShadowBuffers.get() ) : nullptr;
+        if ( !pointLight || std::find( measuredPointLights.begin(), measuredPointLights.end(), pointLight )
+            != measuredPointLights.end() ) {
+            continue;
+        }
+        measuredPointLights.push_back( pointLight );
+        const auto renderStats = pointLight->ConsumeShadowRenderStats();
+        m_PointlightShadowStats.StaticPasses += renderStats.StaticPasses;
+        m_PointlightShadowStats.DynamicPasses += renderStats.DynamicPasses;
+    }
+
+    const auto pointlightStatsEnd = std::chrono::steady_clock::now();
+    m_PointlightShadowStats.CpuMsTotal += std::chrono::duration<double, std::milli>(
+        pointlightStatsEnd - pointlightStatsStart ).count();
+    if ( m_PointlightShadowStats.Frames >= 120 ) {
+        LogPointlightShadowStats();
+    }
+
     return XR_SUCCESS;
+}
+
+void D3D11ShadowMap::LogPointlightShadowStats() {
+    const double frames = std::max<double>( 1.0, static_cast<double>( m_PointlightShadowStats.Frames ) );
+    LogInfo() << "[ShadowPerf] pointlights frames=" << m_PointlightShadowStats.Frames
+        << " visibleAvg=" << (static_cast<double>( m_PointlightShadowStats.VisibleLights ) / frames)
+        << " eligibleAvg=" << (static_cast<double>( m_PointlightShadowStats.EligibleLights ) / frames)
+        << " staticReadyAvg=" << (static_cast<double>( m_PointlightShadowStats.StaticCacheReadyLights ) / frames)
+        << " created=" << m_PointlightShadowStats.CreatedLights
+        << " reallocations=" << m_PointlightShadowStats.ResourceReallocations
+        << " slotFailures=" << m_PointlightShadowStats.SlotAllocationFailures
+        << " immediateQueued=" << m_PointlightShadowStats.ImmediateUpdates
+        << " backgroundQueued=" << m_PointlightShadowStats.BackgroundQueued
+        << " backgroundRendered=" << m_PointlightShadowStats.BackgroundUpdates
+        << " completed=" << m_PointlightShadowStats.CompletedUpdates
+        << " visibilityReleases=" << m_PointlightShadowStats.VisibilityReleases
+        << " staticPasses=" << m_PointlightShadowStats.StaticPasses
+        << " dynamicPasses=" << m_PointlightShadowStats.DynamicPasses
+        << " cpuMsAvg=" << (m_PointlightShadowStats.CpuMsTotal / frames)
+        << " worldCasterEntries=" << m_WorldShadowCasters.size()
+        << " worldCasterBuilds=" << m_WorldShadowCasterCacheBuilds
+        << " worldCasterHits=" << m_WorldShadowCasterCacheHits;
+    m_PointlightShadowStats.Reset();
 }
 
 void D3D11ShadowMap::BuildWorldShadowCasterCache() {
     ZoneScopedN( "D3D11ShadowMap::BuildWorldShadowCasterCache" );
-    m_WorldShadowCasters.clear();
-
-    if ( !Engine::GAPI || !Engine::GAPI->IsWorldRenderCacheReady() )
+    if ( !Engine::GAPI || !Engine::GAPI->IsWorldRenderCacheReady() ) {
+        m_WorldShadowCasters.clear();
+        m_WorldShadowCasterLookup.clear();
+        m_WorldShadowVisibleCasters.clear();
+        m_WorldShadowCasterCacheValid = false;
         return;
+    }
 
     const auto& settings = Engine::GAPI->GetRendererState().RendererSettings;
-    if ( !settings.DrawWorldMesh || !settings.DrawShadowGeometry )
+    if ( !settings.DrawWorldMesh || !settings.DrawShadowGeometry ) {
+        m_WorldShadowCasters.clear();
+        m_WorldShadowCasterLookup.clear();
+        m_WorldShadowVisibleCasters.clear();
+        m_WorldShadowCasterCacheValid = false;
         return;
-
-    const int numCascades = std::clamp( settings.NumShadowCascades, 1, MAX_CSM_CASCADES );
-    int lastUpdatedCascade = -1;
-    for ( int cascadeIdx = 0; cascadeIdx < numCascades; ++cascadeIdx ) {
-        if ( m_ShouldUpdateCascade[cascadeIdx] )
-            lastUpdatedCascade = cascadeIdx;
     }
-    if ( lastUpdatedCascade < 0 || !m_CascadeCRs[lastUpdatedCascade].frustum.IsValid() )
+
+    const uint64_t worldGeneration = Engine::GAPI->GetCityWindowConfigurationGeneration();
+    const float alphaRef = Engine::GAPI->GetRendererState().GraphicsState.FF_AlphaRef;
+    if ( m_WorldShadowCasterCacheValid
+        && m_WorldShadowCasterCacheGeneration == worldGeneration
+        && m_WorldShadowCasterCacheAlphaRef == alphaRef
+        && m_WorldShadowCasterCacheDrawWorldMesh == settings.DrawWorldMesh
+        && m_WorldShadowCasterCacheDrawShadowGeometry == settings.DrawShadowGeometry ) {
+        ++m_WorldShadowCasterCacheHits;
         return;
+    }
 
-    Frustum unionShadowFrustum = Frustum::AlwaysContainingFrustum();
-    std::array<XMFLOAT3, MAX_CSM_CASCADES * 8> combinedCorners = {};
-    size_t combinedCornerCount = 0;
-    static constexpr XMFLOAT3 ndcCorners[8] = {
-        XMFLOAT3( -1.0f, -1.0f, 0.0f ), XMFLOAT3( 1.0f, -1.0f, 0.0f ),
-        XMFLOAT3( -1.0f, 1.0f, 0.0f ),  XMFLOAT3( 1.0f, 1.0f, 0.0f ),
-        XMFLOAT3( -1.0f, -1.0f, 1.0f ), XMFLOAT3( 1.0f, -1.0f, 1.0f ),
-        XMFLOAT3( -1.0f, 1.0f, 1.0f ),  XMFLOAT3( 1.0f, 1.0f, 1.0f )
-    };
-    for ( int cascadeIdx = 0; cascadeIdx <= lastUpdatedCascade; ++cascadeIdx ) {
-        if ( !m_CascadeCRs[cascadeIdx].frustum.IsValid() )
-            continue;
+    // Build the material-classified set once for the current world. The
+    // previous implementation rebuilt a camera-union snapshot whenever a
+    // cascade updated, which made the cache a per-frame list in practice.
+    // Every cascade now performs its own mesh bbox test against this stable
+    // metadata set. That also prevents a camera move from dropping casters
+    // that were outside the previous union frustum.
+    m_WorldShadowCasters.clear();
+    m_WorldShadowCasterLookup.clear();
+    for ( auto& [sectionCoordinate, sectionRow] : Engine::GAPI->GetWorldSections() ) {
+        (void)sectionCoordinate;
+        for ( auto& [rowCoordinate, section] : sectionRow ) {
+            (void)rowCoordinate;
+            for ( const auto& meshPair : section.WorldMeshes ) {
+                const MeshKey& meshKey = meshPair.first;
+                WorldMeshInfo* mesh = meshPair.second;
+                if ( !mesh || !meshKey.Info || meshKey.Info->MaterialType != MaterialInfo::MT_None )
+                    continue;
 
-        const XMMATRIX view = XMMatrixTranspose( XMLoadFloat4x4( &m_CascadeCRs[cascadeIdx].ViewReplacement ) );
-        const XMMATRIX projection = XMMatrixTranspose( XMLoadFloat4x4( &m_CascadeCRs[cascadeIdx].ProjectionReplacement ) );
-        const XMMATRIX inverseViewProjection = XMMatrixInverse( nullptr, XMMatrixMultiply( view, projection ) );
-        for ( const XMFLOAT3& ndcCorner : ndcCorners ) {
-            XMStoreFloat3( &combinedCorners[combinedCornerCount++],
-                XMVector3TransformCoord( XMLoadFloat3( &ndcCorner ), inverseViewProjection ) );
+                zCMaterial* material = meshKey.Material;
+                if ( !material )
+                    continue;
+
+                const int alphaFunc = material->GetAlphaFunc();
+                if ( (alphaFunc > zMAT_ALPHA_FUNC_NONE && alphaFunc != zMAT_ALPHA_FUNC_TEST)
+                    || (alphaFunc == zMAT_ALPHA_FUNC_NONE
+                        && zColor( material->GetColor() ).bgra.alpha < 255) ) {
+                    continue;
+                }
+
+                zCTexture* texture = material->GetTexture();
+                if ( !texture )
+                    texture = material->GetAniTexture();
+
+                const bool alphaTest = texture && texture->HasAlphaChannel() && alphaRef > 0.0f;
+                // Do not require alpha textures to be resident here. Residency is
+                // transient; the render path checks it per cascade. Caching only
+                // resident textures would permanently lose a valid caster until
+                // the world/configuration generation changed.
+                const ShadowWorldCaster caster = { mesh, &section, texture, alphaTest };
+                m_WorldShadowCasters.push_back( caster );
+                m_WorldShadowCasterLookup.emplace( mesh, caster );
+            }
         }
     }
-    if ( combinedCornerCount > 0 ) {
-        BoundingSphere combinedSphere;
-        BoundingSphere::CreateFromPoints( combinedSphere, combinedCornerCount,
-            combinedCorners.data(), sizeof( XMFLOAT3 ) );
-        combinedSphere.Radius *= 1.2f;
-        unionShadowFrustum.BuildCubemapFace( XMLoadFloat3( &combinedSphere.Center ), combinedSphere.Radius, 0 );
+
+    m_WorldShadowCasterCacheGeneration = worldGeneration;
+    m_WorldShadowCasterCacheAlphaRef = alphaRef;
+    m_WorldShadowCasterCacheDrawWorldMesh = settings.DrawWorldMesh;
+    m_WorldShadowCasterCacheDrawShadowGeometry = settings.DrawShadowGeometry;
+    m_WorldShadowCasterCacheValid = true;
+    ++m_WorldShadowCasterCacheBuilds;
+}
+
+void D3D11ShadowMap::BuildVisibleWorldShadowCasterCache( const Frustum& cullingFrustum ) {
+    m_WorldShadowVisibleCasters.clear();
+    if ( !Engine::GAPI || !m_WorldShadowCasterCacheValid
+        || m_WorldShadowCasterLookup.empty() ) {
+        return;
     }
 
-    static thread_local std::vector<WorldMeshSectionInfo*> shadowSections;
-    shadowSections.clear();
-    Engine::GAPI->CollectVisibleSections( shadowSections, &unionShadowFrustum, false );
-
-    const float alphaRef = Engine::GAPI->GetRendererState().GraphicsState.FF_AlphaRef;
-    for ( const WorldMeshSectionInfo* section : shadowSections ) {
+    // Keep the expensive material classification persistent, but use the
+    // existing section/BVH query to construct only the candidates needed by
+    // this cascade. This avoids scanning every world mesh for every cascade.
+    static thread_local std::vector<WorldMeshSectionInfo*> visibleSections;
+    visibleSections.clear();
+    Engine::GAPI->CollectVisibleSections( visibleSections, &cullingFrustum, false );
+    for ( WorldMeshSectionInfo* section : visibleSections ) {
         if ( !section )
             continue;
-
         for ( const auto& meshPair : section->WorldMeshes ) {
-            const MeshKey& meshKey = meshPair.first;
-            WorldMeshInfo* mesh = meshPair.second;
-            if ( !mesh || !meshKey.Info || meshKey.Info->MaterialType != MaterialInfo::MT_None )
-                continue;
-
-            zCMaterial* material = meshKey.Material;
-            if ( !material )
-                continue;
-
-            const int alphaFunc = material->GetAlphaFunc();
-            if ( (alphaFunc > zMAT_ALPHA_FUNC_NONE && alphaFunc != zMAT_ALPHA_FUNC_TEST)
-                || (alphaFunc == zMAT_ALPHA_FUNC_NONE
-                    && zColor( material->GetColor() ).bgra.alpha < 255) ) {
-                continue;
+            auto casterIt = m_WorldShadowCasterLookup.find( meshPair.second );
+            if ( casterIt != m_WorldShadowCasterLookup.end() ) {
+                m_WorldShadowVisibleCasters.push_back( casterIt->second );
             }
-
-            zCTexture* texture = material->GetTexture();
-            if ( !texture )
-                texture = material->GetAniTexture();
-
-            const bool alphaTest = texture && texture->HasAlphaChannel() && alphaRef > 0.0f;
-            if ( alphaTest && texture->CacheIn( 0.6f ) != zRES_CACHED_IN )
-                continue;
-
-            m_WorldShadowCasters.push_back( { mesh, texture, alphaTest } );
         }
     }
 }
@@ -1419,14 +1517,10 @@ XRESULT D3D11ShadowMap::DrawWorldShadow( )
     bool isOutdoor = Engine::GAPI->GetLoadedWorldInfo()->BspTree->GetBspTreeMode() == zBSP_MODE_OUTDOOR;
 
     if ( isOutdoor ) {
-        const bool anyCascadeUpdate = std::any_of(
-            m_ShouldUpdateCascade.begin(), m_ShouldUpdateCascade.begin() + numCascades,
-            []( bool shouldUpdate ) { return shouldUpdate; } );
-        if ( anyCascadeUpdate ) {
-            BuildWorldShadowCasterCache();
-        } else {
-            m_WorldShadowCasters.clear();
-        }
+        // Keep the material-classified world caster metadata across lazy
+        // cascade frames. BuildWorldShadowCasterCache invalidates it when the
+        // world/configuration or relevant shadow settings change.
+        BuildWorldShadowCasterCache();
 
         // For atlas path: clear entire atlas once before rendering all cascades
         if ( m_useAtlas && m_shadowAtlas ) {
@@ -1443,6 +1537,8 @@ XRESULT D3D11ShadowMap::DrawWorldShadow( )
 
             if ( !shouldUpdateCascade ) continue;
 
+            BuildVisibleWorldShadowCasterCache( m_CascadeCRs[cascadeIdx].frustum );
+
             // Render diese Cascade using the new CascadedShadowMap
             Engine::GAPI->SetCameraReplacementPtr( &m_CascadeCRs[cascadeIdx] );
 
@@ -1457,7 +1553,7 @@ XRESULT D3D11ShadowMap::DrawWorldShadow( )
             renderParams.CascadeIndex = static_cast<int>(cascadeIdx);
             renderParams.CascadeSplits = m_CascadeSplits;
             renderParams.CascadeCameraReplacements = &m_CascadeCRs;
-            renderParams.WorldShadowCasters = &m_WorldShadowCasters;
+            renderParams.WorldShadowCasters = &m_WorldShadowVisibleCasters;
 
             // Atlas path: provide per-cascade viewport and skip per-cascade clear
             if ( m_useAtlas && m_shadowAtlas ) {

@@ -4,6 +4,7 @@
 #include <thread>
 #include <condition_variable>
 #include <atomic>
+#include <cstdint>
 #include <cfloat>
 #include "TexturePool.h"
 #include "ThreadPool.h"
@@ -19,6 +20,11 @@ struct SkeletalVobInfo;
 class D3D11ConstantBuffer;
 class D3D11PointLight : public BaseShadowedPointLight {
 public:
+    struct ShadowRenderStats {
+        uint64_t StaticPasses = 0;
+        uint64_t DynamicPasses = 0;
+    };
+
     D3D11PointLight( VobLightInfo* info, bool dynamicLight = false );
     ~D3D11PointLight() override;
 
@@ -43,6 +49,12 @@ public:
     /** Returns whether a throttled dynamic-shadow refresh is due. */
     bool IsDynamicShadowUpdateDue( float currentTime, float minimumInterval ) const;
 
+    /** Returns whether this quality level renders animated NPC/MOB casters. */
+    bool UseDynamicNpcShadowCasters() const;
+
+    /** Invalidates the active overlay when the shadow-quality policy changes. */
+    bool UpdateDynamicNpcShadowCasterMode();
+
     /** Records the time of the last dynamic-shadow refresh. */
     void MarkDynamicShadowUpdated( float currentTime );
 
@@ -51,6 +63,12 @@ public:
 
     /** Called when a vob got removed from the world */
     void OnVobRemovedFromWorld( BaseVobInfo* vob ) override;
+
+    /** Invalidates cached static casters affected by a moved VOB. */
+    void OnVobMoved( BaseVobInfo* vob );
+
+    /** Invalidates cached static casters affected by a newly added VOB. */
+    void OnVobAdded( BaseVobInfo* vob );
 
     bool HasAnyShadowMap() const {
         return HasShadowMap(0) || HasShadowMap(1) || m_StaticDepthCubemap != nullptr;
@@ -80,6 +98,7 @@ public:
     bool ShouldReleaseForVisibility( bool visible );
     void OnTiledSlotEvicted();
     void SetCurrentResolution( int r ) { m_CurrentResolution = r; }
+    ShadowRenderStats ConsumeShadowRenderStats();
 
 protected:
     int GetCurrentShadowMode() const;
@@ -125,7 +144,10 @@ protected:
     RenderToDepthStencilBuffer* m_TiledDynamicDepthTarget = nullptr;
     D3D11TiledDeferredShading* m_TiledOwner = nullptr;
     bool m_DynamicShadowValid = false;
-    uint8_t m_InvisibleFrameCount = 0;
+    bool m_DynamicNpcShadowCastersEnabled = true;
+    uint16_t m_InvisibleFrameCount = 0;
     float m_LastDynamicShadowUpdateTime = -FLT_MAX;
+    uint64_t m_StaticShadowPasses = 0;
+    uint64_t m_DynamicShadowPasses = 0;
     TaskHandle<void> m_PendingInit;
 };

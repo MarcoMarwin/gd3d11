@@ -128,9 +128,12 @@ bool D3D11PointLight::ShouldReleaseForVisibility( bool visible ) {
         return false;
     }
 
-    // A short retention window prevents visibility-edge oscillation from
-    // constantly destroying and reallocating otherwise valid cube slots.
-    constexpr uint8_t kInvisibleRetentionFrames = 12;
+    // Keep the slot and its cached static/dynamic maps across ordinary
+    // visibility gaps. This matches the intended persistent point-light
+    // cache behaviour: a camera turn must not destroy and rebuild a valid
+    // cubemap just because the light missed the current draw-radius frame.
+    // The tiled allocator can still evict a low-priority owner under pressure.
+    constexpr uint16_t kInvisibleRetentionFrames = 600;
     if ( m_InvisibleFrameCount < kInvisibleRetentionFrames ) {
         ++m_InvisibleFrameCount;
     }
@@ -243,6 +246,7 @@ void D3D11PointLight::CopyStaticAsideToActiveTarget() const {
 }
 
 void D3D11PointLight::RenderStaticShadowPass( RenderToDepthStencilBuffer& target, bool clearDepth ) {
+    ++m_StaticShadowPasses;
     D3D11GraphicsEngine* engine = reinterpret_cast<D3D11GraphicsEngine*>(Engine::GraphicsEngine);
     const float range = LightInfo->GetEffectiveLightRange();
 
@@ -262,6 +266,7 @@ void D3D11PointLight::RenderStaticShadowPass( RenderToDepthStencilBuffer& target
 }
 
 void D3D11PointLight::RenderAnimatedShadowPass( RenderToDepthStencilBuffer& target, bool clearDepth ) {
+    ++m_DynamicShadowPasses;
     D3D11GraphicsEngine* engine = reinterpret_cast<D3D11GraphicsEngine*>(Engine::GraphicsEngine);
     const float range = LightInfo->GetEffectiveLightRange();
 
@@ -353,6 +358,15 @@ bool D3D11PointLight::WantsUpdate() {
     return false;
 }
 
+D3D11PointLight::ShadowRenderStats D3D11PointLight::ConsumeShadowRenderStats() {
+    ShadowRenderStats stats;
+    stats.StaticPasses = m_StaticShadowPasses;
+    stats.DynamicPasses = m_DynamicShadowPasses;
+    m_StaticShadowPasses = 0;
+    m_DynamicShadowPasses = 0;
+    return stats;
+}
+
 bool D3D11PointLight::IsDynamicShadowUpdateDue( float currentTime, float minimumInterval ) const {
     if ( !std::isfinite( currentTime ) || !std::isfinite( minimumInterval ) )
         return true;
@@ -363,6 +377,27 @@ bool D3D11PointLight::IsDynamicShadowUpdateDue( float currentTime, float minimum
     }
 
     return currentTime - m_LastDynamicShadowUpdateTime >= std::max( minimumInterval, 0.0f );
+}
+
+bool D3D11PointLight::UseDynamicNpcShadowCasters() const {
+    return Engine::GAPI
+        && Engine::GAPI->GetRendererState().RendererSettings.UseDynamicPointlightNpcShadows();
+}
+
+bool D3D11PointLight::UpdateDynamicNpcShadowCasterMode() {
+    const bool enabled = UseDynamicNpcShadowCasters();
+    if ( m_DynamicNpcShadowCastersEnabled == enabled ) {
+        return false;
+    }
+
+    m_DynamicNpcShadowCastersEnabled = enabled;
+    m_DynamicShadowValid = false;
+    // Force one render so the standalone target is restored from its static
+    // base map when the animated overlay is disabled, or rebuilt when it is
+    // enabled again. This also handles Medium <-> Low, which share 128px
+    // point-light maps and therefore do not trigger a resource resize.
+    DrawnOnce = false;
+    return true;
 }
 
 void D3D11PointLight::MarkDynamicShadowUpdated( float currentTime ) {
@@ -481,7 +516,10 @@ void D3D11PointLight::RenderFullCubemap() {
     if ( !IsReady() )
         return;
     D3D11GraphicsEngine* engine = reinterpret_cast<D3D11GraphicsEngine*>(Engine::GraphicsEngine); // TODO: Remove and use newer system!
-    if ( !engine || !engine->GetContext() || !engine->GetPfxRenderer() || !m_DepthCubemap ) {
+    // Tiled deferred lights render into the shared array target and do not
+    // own m_DepthCubemap. GetActiveShadowTarget() below validates that either
+    // the tiled or the standalone target is available.
+    if ( !engine || !engine->GetContext() || !engine->GetPfxRenderer() ) {
         return;
     }
     auto _ = engine->RecordGraphicsEvent( GE_NAME("RenderFullCubemap->RenderFullCubemap") );
@@ -492,14 +530,18 @@ void D3D11PointLight::RenderFullCubemap() {
     }
 
     const int shadowMode = GetCurrentShadowMode();
-    if ( shadowMode == GothicRendererSettings::PLS_STATIC_ONLY
-        || (LightInfo && LightInfo->IsEffectivelyStatic()) ) {
+    // A static light still needs an animated overlay while dynamic
+    // pointlight shadows are enabled. Only the explicit static-only mode may
+    // skip the animated caster pass; otherwise static world geometry is kept
+    // in the persistent base map and NPC/MOB casters are rendered separately.
+    if ( shadowMode == GothicRendererSettings::PLS_STATIC_ONLY ) {
         RenderStaticShadowPass( *activeTarget, true );
         m_StaticShadowReady = true;
         return;
     }
 
     if ( shadowMode == GothicRendererSettings::PLS_UPDATE_DYNAMIC ) {
+        const bool renderDynamicNpcShadows = UseDynamicNpcShadowCasters();
         // Low-resolution tiled slots are reserved for truly static lights.
         // They never need an animated twin or a full-resolution aside copy.
         if ( m_TiledDepthTarget && !m_TiledDynamicDepthTarget ) {
@@ -519,8 +561,12 @@ void D3D11PointLight::RenderFullCubemap() {
                 RenderStaticShadowPass( *m_TiledDepthTarget, true );
                 m_StaticShadowReady = true;
             }
-            RenderAnimatedShadowPass( *m_TiledDynamicDepthTarget, true );
-            m_DynamicShadowValid = true;
+            if ( renderDynamicNpcShadows ) {
+                RenderAnimatedShadowPass( *m_TiledDynamicDepthTarget, true );
+                m_DynamicShadowValid = true;
+            } else {
+                m_DynamicShadowValid = false;
+            }
             return;
         }
 
@@ -541,7 +587,12 @@ void D3D11PointLight::RenderFullCubemap() {
             CopyStaticAsideToActiveTarget();
         }
 
-        RenderAnimatedShadowPass( *activeTarget, false );
+        if ( renderDynamicNpcShadows ) {
+            RenderAnimatedShadowPass( *activeTarget, false );
+            m_DynamicShadowValid = true;
+        } else {
+            m_DynamicShadowValid = false;
+        }
         return;
     }
 
@@ -684,4 +735,43 @@ void D3D11PointLight::OnVobRemovedFromWorld( BaseVobInfo* vob ) {
         ClearTiledSlot();
     }
 
+}
+
+void D3D11PointLight::OnVobMoved( BaseVobInfo* vob ) {
+    if ( !vob || !vob->Vob || !LightInfo ) {
+        return;
+    }
+
+    const bool wasCached = std::find( VobCache.begin(), VobCache.end(), vob ) != VobCache.end()
+        || std::find( SkeletalVobCache.begin(), SkeletalVobCache.end(), vob ) != SkeletalVobCache.end();
+
+    // A moved caster can enter a light's range even when it was not part of
+    // the old cache. Conversely, a cached caster can leave the range. Only
+    // invalidate lights that can actually be affected so ordinary animation
+    // does not flush every point-light cache in the world.
+    const XMVECTOR lightPosition = LightInfo->GetEffectivePositionWorldXM();
+    const auto vobBounds = Frustum::BSphereFromzTBBox3D( vob->Vob->GetBBox() );
+    const XMVECTOR vobPosition = XMLoadFloat3( &vobBounds.Center );
+    const float range = std::max( 0.0f, LightInfo->GetEffectiveLightRange() );
+    const float affectedRange = range + std::max( 0.0f, vobBounds.Radius );
+    const bool isNearLight = XMVectorGetX( XMVector3LengthSq( lightPosition - vobPosition ) )
+        <= affectedRange * affectedRange;
+    if ( !wasCached && !isNearLight ) {
+        return;
+    }
+
+    VobCache.clear();
+    SkeletalVobCache.clear();
+    DrawnOnce = false;
+    m_StaticShadowReady = false;
+    m_DynamicShadowValid = false;
+    m_LastDynamicShadowUpdateTime = -FLT_MAX;
+}
+
+void D3D11PointLight::OnVobAdded( BaseVobInfo* vob ) {
+    // A newly registered caster is not present in the old spatial cache, so
+    // reuse the range-aware movement invalidation. This keeps distant light
+    // caches intact while preventing a newly spawned nearby VOB from being
+    // absent until the light itself moves.
+    OnVobMoved( vob );
 }

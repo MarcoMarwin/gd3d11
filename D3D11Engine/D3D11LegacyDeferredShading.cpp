@@ -135,7 +135,7 @@ XRESULT D3D11LegacyDeferredShading::DrawPointlightLights(
         plcb.PL_ShadowSoftness = std::max(
             settings.ShadowSoftness * 2.0f, minimumTemporalShadowSoftness );
         plcb.PL_ShadowFilterMode = static_cast<uint32_t>( settings.GetShadowKernelQuality() );
-        plcb.PL_ShadowFilterPad[0] = 0;
+        plcb.PL_ShadowFilterPad[0] = settings.UseDynamicPointlightNpcShadows() ? 0u : 1u;
         plcb.PL_ShadowFilterPad[1] = 0;
         plcb.PL_ShadowFilterPad[2] = 0;
 

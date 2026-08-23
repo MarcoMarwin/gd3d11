@@ -70,6 +70,7 @@ void CSMain( uint3 groupID : SV_GroupID, uint3 threadID : SV_GroupThreadID, uint
     float3 normal = DecodeNormalGBuffer( TX_Nrm.Load( int3( pixelCoord, 0 ) ).xy );
     float4 gb3 = TX_SI_SP.Load( int3( pixelCoord, 0 ) );
     float twoSidedBacklitMaterial = gb3.x < -2.0f ? 1.0f : 0.0f;
+    float npcMaterial = (gb3.x < -0.5f && gb3.x >= -2.0f) ? 1.0f : 0.0f;
     float specIntensity = twoSidedBacklitMaterial > 0.5f ? max(-gb3.x - 3.0f, 0.0f)
         : (gb3.x < -0.5f ? max(-gb3.x - 1.0f, 0.0f) : gb3.x);
     float alphaTestedMaterial = gb3.y < 0.0f ? 1.0f : 0.0f;
@@ -130,7 +131,8 @@ void CSMain( uint3 groupID : SV_GroupID, uint3 threadID : SV_GroupThreadID, uint
                 AC_EnableSSS, AC_SSSIntensity, 0.42f );
 
             // Sample shadows only for lights that have a visible contribution.
-            if ( light.ShadowCubeIndex >= 0 && any( lighting > 0.001f ) ) {
+            if ( light.ShadowCubeIndex >= 0 && any( lighting > 0.001f )
+                && (npcMaterial <= 0.5f || light.ShadowFilterPad[0] == 0u) ) {
                 const int shadowSlot = light.ShadowCubeIndex & 0x1fffffff;
                 const bool lowStatic = (light.ShadowCubeIndex & 0x20000000) != 0;
                 float shadow;
