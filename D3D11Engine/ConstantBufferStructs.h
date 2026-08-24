@@ -581,6 +581,9 @@ static_assert( sizeof(ForwardPlusTileConstantBuffer) == 32, "ForwardPlusTileCons
 struct PsSimpleFFdata {
     float4 textureFactor;
     float2 windowSkyParams;
+    // x is set for City_Window when both HDR tone mapping and AA are off.
+    // In that direct scene-to-gamma path the authored alpha must not receive
+    // the extra pane-opacity floor used by the post-processed path.
     float2 padding;
 };
 

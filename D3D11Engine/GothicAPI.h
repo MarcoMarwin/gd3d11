@@ -815,7 +815,9 @@ private:
     void ClearWorldSectionBVH();
     void QueryWorldSectionBVH( const Frustum& frustum,
         std::vector<WorldMeshSectionInfo*>& sections,
-        bool useSectionRadiusFilter ) const;
+        bool useSectionRadiusFilter,
+        bool useLegacyCameraFrustum,
+        bool useAabbDistanceFilter );
     bool UseWorldSectionBVH() const;
     zCTexture* GetParticleLightingTextureReplacement(
         zCTexture* texture, bool* replacementRequired = nullptr );

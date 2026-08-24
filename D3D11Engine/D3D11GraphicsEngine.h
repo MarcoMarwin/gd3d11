@@ -768,6 +768,7 @@ private:
         D3D11VertexBuffer* geometryIndexBuffer,
         std::unique_ptr<D3D11VertexBuffer>& cullInputBuffer,
         std::unique_ptr<D3D11VertexBuffer>& cullVisualBuffer,
+        std::unique_ptr<D3D11VertexBuffer>& cullInstanceVisualIndexBuffer,
         std::unique_ptr<D3D11VertexBuffer>& cullDrawVisualBuffer,
         std::unique_ptr<D3D11VertexBuffer>& cullOutputBuffer,
         std::unique_ptr<D3D11IndirectBuffer>& cullArgsBuffer,
@@ -790,6 +791,7 @@ private:
     /** Persistent FL11+ resources for main-view GPU static-VOB culling. */
     std::unique_ptr<D3D11VertexBuffer> GpuVobCullInputBuffer;
     std::unique_ptr<D3D11VertexBuffer> GpuVobCullVisualBuffer;
+    std::unique_ptr<D3D11VertexBuffer> GpuVobCullInstanceVisualIndexBuffer;
     std::unique_ptr<D3D11VertexBuffer> GpuVobCullDrawVisualBuffer;
     std::unique_ptr<D3D11VertexBuffer> GpuVobCullOutputBuffer;
     std::unique_ptr<D3D11IndirectBuffer> GpuVobCullArgsBuffer;

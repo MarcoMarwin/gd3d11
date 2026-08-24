@@ -2067,12 +2067,6 @@ void GothicAPI::DrawWorldMeshNaive() {
         Engine::GraphicsEngine->DrawWorldMesh();
     }
 
-    // The static-VOB GPU culler must test against world geometry only. Build
-    // the pyramid here, after the world pass and before skeletal meshes/VOBs.
-    if ( auto* d3d11 = dynamic_cast<D3D11GraphicsEngine*>( Engine::GraphicsEngine ) ) {
-        d3d11->BuildGpuVobHiZ();
-    }
-
     const auto cameraPosXm = GetCameraPositionXM();
 
     if ( RendererState.RendererSettings.DrawSkeletalMeshes ) {
@@ -5415,7 +5409,9 @@ bool GothicAPI::IsWorldMeshVisibleInFrustum( const WorldMeshInfo* mesh, const Fr
 
 void GothicAPI::QueryWorldSectionBVH( const Frustum& frustum,
     std::vector<WorldMeshSectionInfo*>& sections,
-    bool useSectionRadiusFilter ) const {
+    bool useSectionRadiusFilter,
+    bool useLegacyCameraFrustum,
+    bool useAabbDistanceFilter ) {
     if ( !WorldSectionBVHValid || WorldSectionBVHNodes.empty() ) {
         return;
     }
@@ -5426,8 +5422,14 @@ void GothicAPI::QueryWorldSectionBVH( const Frustum& frustum,
 
     INT2 camSection = {};
     int sectionViewDist = 0;
+    // Keep the legacy camera/frustum and section-radius predicates at the
+    // leaves. The BVH only prunes groups of sections; it must not change the
+    // exact set accepted by the existing world-visibility path.
+    const XMFLOAT3 camPos = Engine::GAPI->GetCameraPosition();
+    const float sectionViewDistWorld = Engine::GAPI->GetRendererState()
+        .RendererSettings.SectionDrawRadius * WORLD_SECTION_SIZE;
     if ( useSectionRadiusFilter ) {
-        camSection = WorldConverter::GetSectionOfPos( Engine::GAPI->GetCameraPosition() );
+        camSection = WorldConverter::GetSectionOfPos( camPos );
         sectionViewDist = Engine::GAPI->GetRendererState().RendererSettings.SectionDrawRadius;
     }
 
@@ -5436,7 +5438,23 @@ void GothicAPI::QueryWorldSectionBVH( const Frustum& frustum,
         nodeStack.pop_back();
 
         const WorldSectionBVHNode& node = WorldSectionBVHNodes[nodeIndex];
-        if ( frustum.Contains( node.Bounds ) == DirectX::ContainmentType::DISJOINT ) {
+        bool nodeVisible = false;
+        if ( useLegacyCameraFrustum ) {
+            zTBBox3D nodeBox = {};
+            nodeBox.Min = XMFLOAT3(
+                node.Bounds.Center.x - node.Bounds.Extents.x,
+                node.Bounds.Center.y - node.Bounds.Extents.y,
+                node.Bounds.Center.z - node.Bounds.Extents.z );
+            nodeBox.Max = XMFLOAT3(
+                node.Bounds.Center.x + node.Bounds.Extents.x,
+                node.Bounds.Center.y + node.Bounds.Extents.y,
+                node.Bounds.Center.z + node.Bounds.Extents.z );
+            nodeVisible = GetCameraBBox3DInFrustum(
+                nodeBox, EGothicCullFlags::CullSidesNear ) != ZTCAM_CLIPTYPE_OUT;
+        } else {
+            nodeVisible = frustum.Contains( node.Bounds ) != DirectX::ContainmentType::DISJOINT;
+        }
+        if ( !nodeVisible ) {
             continue;
         }
 
@@ -5449,12 +5467,30 @@ void GothicAPI::QueryWorldSectionBVH( const Frustum& frustum,
                 }
 
                 if ( useSectionRadiusFilter ) {
-                    if ( abs( section->WorldCoordinates.x - camSection.x ) >= sectionViewDist ) {
-                        continue;
+                    if ( useAabbDistanceFilter ) {
+                        if ( Toolbox::ComputePointAABBDistance(
+                                camPos, section->BoundingBox.Min, section->BoundingBox.Max )
+                            >= sectionViewDistWorld ) {
+                            continue;
+                        }
+                    } else {
+                        if ( abs( section->WorldCoordinates.x - camSection.x ) >= sectionViewDist ) {
+                            continue;
+                        }
+                        if ( abs( section->WorldCoordinates.y - camSection.y ) >= sectionViewDist ) {
+                            continue;
+                        }
                     }
-                    if ( abs( section->WorldCoordinates.y - camSection.y ) >= sectionViewDist ) {
-                        continue;
-                    }
+                }
+
+                const bool sectionVisible = useLegacyCameraFrustum
+                    ? GetCameraBBox3DInFrustum(
+                        section->BoundingBox, EGothicCullFlags::CullSidesNear )
+                        != ZTCAM_CLIPTYPE_OUT
+                    : frustum.Contains( Frustum::BBoxFromzTBBox3D( section->BoundingBox ) )
+                        != DirectX::ContainmentType::DISJOINT;
+                if ( !sectionVisible ) {
+                    continue;
                 }
 
                 sections.push_back( section );
@@ -5495,8 +5531,10 @@ void GothicAPI::CollectVisibleSections( std::vector<WorldMeshSectionInfo*>& sect
     };
 
     const bool queryFrustumValid = queryFrustum == nullptr || queryFrustum->IsValid();
-    if ( UseWorldSectionBVH() && WorldSectionBVHValid && cullingEnabled && queryFrustumValid
-        && (queryFrustum || !drawSectionIntersections) ) {
+    // The BVH is valid for both explicit frusta (shadow/cubemap passes) and
+    // the main camera path. Leaf tests below preserve the old predicate that
+    // was previously selected by DrawSectionIntersections.
+    if ( UseWorldSectionBVH() && WorldSectionBVHValid && cullingEnabled && queryFrustumValid ) {
         ZoneScopedN( "GothicAPI::CollectVisibleSections->BVH" );
 
         Frustum generatedFrustum;
@@ -5518,7 +5556,8 @@ void GothicAPI::CollectVisibleSections( std::vector<WorldMeshSectionInfo*>& sect
             activeFrustum = &generatedFrustum;
         }
 
-        QueryWorldSectionBVH( *activeFrustum, sections, useSectionRadiusFilter );
+        QueryWorldSectionBVH( *activeFrustum, sections, useSectionRadiusFilter,
+            queryFrustum == nullptr, drawSectionIntersections );
         return;
     }
 

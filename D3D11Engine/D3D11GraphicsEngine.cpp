@@ -99,11 +99,12 @@ static_assert( offsetof( GpuVobCullVisualInfo, InstanceCount ) == 28 );
 struct GpuVobCullConstantsData {
     XMFLOAT4X4 CullViewProj;
     UINT VisualCount;
+    UINT TotalInstanceCount;
     UINT HiZWidth;
     UINT HiZHeight;
     UINT HiZMipCount;
     UINT EnableOcclusion;
-    UINT Padding[3];
+    UINT Padding[2];
 };
 static_assert( sizeof( GpuVobCullConstantsData ) == 96 );
 
@@ -771,10 +772,14 @@ void D3D11GraphicsEngine::EnsureFrameVobVisibilityCollected() {
 
     const bool gpuVobShadersAvailable = ShaderManager
         && ShaderManager->GetCShader( CShaderID::CS_VobCull )
-        && ShaderManager->GetCShader( CShaderID::CS_VobPatchArgs );
+        && ShaderManager->GetCShader( CShaderID::CS_VobPatchArgs )
+        && ShaderManager->GetCShader( CShaderID::CS_VobHiZCopy )
+        && ShaderManager->GetCShader( CShaderID::CS_VobHiZReduce );
     const bool useGpuVobOcclusion = renderSettings.GetEffectiveGpuVobOcclusionCulling()
         && !FeatureLevel10Compatibility
         && renderSettings.DebugSettings.Culling.CullVobs
+        && !IsGpuVobRuntimeDisabled()
+        && !IsGpuVobHiZRuntimeDisabled()
         && gpuVobShadersAvailable;
     if ( useGpuVobOcclusion ) {
         // The GPU path must receive the current distance/BSP candidate set;
@@ -1354,6 +1359,7 @@ void D3D11GraphicsEngine::DisableGpuVobRuntime( const char* reason ) {
 
     GpuVobCullInputBuffer.reset();
     GpuVobCullVisualBuffer.reset();
+    GpuVobCullInstanceVisualIndexBuffer.reset();
     GpuVobCullDrawVisualBuffer.reset();
     GpuVobCullOutputBuffer.reset();
     GpuVobCullArgsBuffer.reset();
@@ -1452,7 +1458,9 @@ void D3D11GraphicsEngine::BuildGpuVobHiZ() {
     const auto& settings = Engine::GAPI->GetRendererState().RendererSettings;
     if ( IsGpuVobRuntimeDisabled() || IsGpuVobHiZRuntimeDisabled()
         || !settings.GetEffectiveGpuVobOcclusionCulling() || FeatureLevel10Compatibility
-        || !settings.DebugSettings.Culling.CullVobs || !Context || !ShaderManager ) {
+        || !settings.DebugSettings.Culling.CullVobs || !Context || !ShaderManager
+        || m_FrameGeometryCache.vobVisuals.empty()
+        || m_FrameGeometryCache.sortedInstancedMeshes.empty() ) {
         return;
     }
     ++m_GpuVobPerformanceStats.HiZRequests;
@@ -1703,6 +1711,7 @@ bool D3D11GraphicsEngine::PrepareGpuVobCulling(
     D3D11VertexBuffer* geometryIndexBuffer,
     std::unique_ptr<D3D11VertexBuffer>& cullInputBuffer,
     std::unique_ptr<D3D11VertexBuffer>& cullVisualBuffer,
+    std::unique_ptr<D3D11VertexBuffer>& cullInstanceVisualIndexBuffer,
     std::unique_ptr<D3D11VertexBuffer>& cullDrawVisualBuffer,
     std::unique_ptr<D3D11VertexBuffer>& cullOutputBuffer,
     std::unique_ptr<D3D11IndirectBuffer>& cullArgsBuffer,
@@ -1835,6 +1844,36 @@ bool D3D11GraphicsEngine::PrepareGpuVobCulling(
         || activeInputBytes > inputCapacityBytes ) {
         return failGpuVobPath( "input instance buffer range is not stride-aligned" );
     }
+
+    // The packed instance ranges are already known on the CPU. Uploading one
+    // visual index per instance removes the per-thread binary search in
+    // CSCull while preserving the exact same range ownership and compaction
+    // layout. Gaps are marked invalid and are ignored by the shader.
+    const UINT invalidVisualIndex = std::numeric_limits<UINT>::max();
+    std::vector<UINT> instanceVisualIndices(
+        static_cast<size_t>( activeInstanceCount ), invalidVisualIndex );
+    for ( UINT visualIndex = 0; visualIndex < visualInfo.size(); ++visualIndex ) {
+        const auto& visual = visualInfo[visualIndex];
+        const uint64_t rangeEnd = static_cast<uint64_t>( visual.InstanceBase )
+            + visual.InstanceCount;
+        if ( rangeEnd > instanceVisualIndices.size() ) {
+            return failGpuVobPath( "GPU culling visual range exceeds instance index buffer" );
+        }
+        for ( UINT instanceIndex = 0; instanceIndex < visual.InstanceCount; ++instanceIndex ) {
+            instanceVisualIndices[static_cast<size_t>( visual.InstanceBase ) + instanceIndex]
+                = visualIndex;
+        }
+    }
+    const UINT instanceVisualIndexBytes = static_cast<UINT>(
+        instanceVisualIndices.size() * sizeof( UINT ) );
+
+    // D3D11 exposes 65535 thread groups per dispatch dimension. Keep the
+    // global instance dispatch bounded; falling back is safer than wrapping
+    // the dispatch count and silently leaving a tail of VOBs unprocessed.
+    constexpr uint64_t maxCullDispatchInstances = 65535ull * 64ull;
+    if ( activeInstanceCount > maxCullDispatchInstances ) {
+        return failGpuVobPath( "GPU culling instance dispatch exceeds D3D11 limit" );
+    }
     if ( !inputInstanceBuffer->GetVertexBuffer().Get() ) {
         return failGpuVobPath( "input instance buffer has no D3D11 resource" );
     }
@@ -1878,6 +1917,9 @@ bool D3D11GraphicsEngine::PrepareGpuVobCulling(
     if ( !ensureStructuredBuffer( cullVisualBuffer,
         std::max( visualBytes, 32u ), sizeof( GpuVobCullVisualInfo ),
         "GpuVobCullVisuals" )
+        || !ensureStructuredBuffer( cullInstanceVisualIndexBuffer,
+            std::max( instanceVisualIndexBytes, 4u ), sizeof( UINT ),
+            "GpuVobCullInstanceVisualIndices" )
         || !ensureStructuredBuffer( cullDrawVisualBuffer,
             std::max( drawVisualBytes, 4u ), sizeof( UINT ),
             "GpuVobCullDrawVisuals" ) ) {
@@ -1939,6 +1981,8 @@ bool D3D11GraphicsEngine::PrepareGpuVobCulling(
     }
 
     if ( cullVisualBuffer->UpdateBufferSubresource( visualInfo.data(), visualBytes ) != XR_SUCCESS
+        || cullInstanceVisualIndexBuffer->UpdateBufferSubresource(
+            instanceVisualIndices.data(), instanceVisualIndexBytes ) != XR_SUCCESS
         || cullDrawVisualBuffer->UpdateBufferSubresource(
             drawVisualIndices.data(), drawVisualBytes ) != XR_SUCCESS ) {
         return failGpuVobPath( "GPU culling metadata upload failed" );
@@ -1953,29 +1997,31 @@ bool D3D11GraphicsEngine::PrepareGpuVobCulling(
     if ( enableOcclusion ) {
         m_GpuVobPerformanceStats.GpuCullInputCopyBytes += activeInputBytes;
         m_GpuVobPerformanceStats.GpuCullMetadataUploadBytes +=
-            static_cast<uint64_t>( visualBytes ) + drawVisualBytes;
+            static_cast<uint64_t>( visualBytes ) + instanceVisualIndexBytes + drawVisualBytes;
         m_GpuVobPerformanceStats.GpuCullArgsUploadBytes += argsBytes;
     }
 
-    ID3D11ShaderResourceView* cullSrvs[3] = {
+    ID3D11ShaderResourceView* cullSrvs[4] = {
         cullInputBuffer->GetShaderResourceView().Get(),
         cullVisualBuffer->GetShaderResourceView().Get(),
         enableOcclusion ? GpuVobHiZShaderResourceView.Get() : nullptr,
+        cullInstanceVisualIndexBuffer->GetShaderResourceView().Get(),
     };
     ID3D11UnorderedAccessView* cullUavs[2] = {
         cullOutputBuffer->GetUnorderedAccessView().Get(),
         cullVisibleCountsBuffer->GetUnorderedAccessView().Get(),
     };
-    if ( !cullSrvs[0] || !cullSrvs[1] || !cullUavs[0] || !cullUavs[1] ) {
+    if ( !cullSrvs[0] || !cullSrvs[1] || !cullSrvs[3]
+        || !cullUavs[0] || !cullUavs[1] ) {
         return failGpuVobPath( "GPU culling SRV/UAV binding unavailable" );
     }
 
-    ID3D11ShaderResourceView* nullSrvs[3] = {};
+    ID3D11ShaderResourceView* nullSrvs[4] = {};
     ID3D11UnorderedAccessView* nullUavs[2] = {};
     ID3D11Buffer* nullConstantBuffers[2] = {};
     auto clearComputeBindings = [&]() {
         GetContext()->CSSetUnorderedAccessViews( 0, 2, nullUavs, nullptr );
-        GetContext()->CSSetShaderResources( 0, 3, nullSrvs );
+        GetContext()->CSSetShaderResources( 0, 4, nullSrvs );
         GetContext()->CSSetShader( nullptr, nullptr, 0 );
         GetContext()->CSSetConstantBuffers( 0, 2, nullConstantBuffers );
     };
@@ -1990,6 +2036,7 @@ bool D3D11GraphicsEngine::PrepareGpuVobCulling(
             Engine::GAPI->GetViewMatrixXM() );
     XMStoreFloat4x4( &cullConstants.CullViewProj, viewProj );
     cullConstants.VisualCount = static_cast<UINT>( visualInfo.size() );
+    cullConstants.TotalInstanceCount = static_cast<UINT>( activeInstanceCount );
     cullConstants.HiZWidth = enableOcclusion ? GpuVobHiZWidth : 0u;
     cullConstants.HiZHeight = enableOcclusion ? GpuVobHiZHeight : 0u;
     cullConstants.HiZMipCount = enableOcclusion ? GpuVobHiZMipCount : 0u;
@@ -1997,20 +2044,24 @@ bool D3D11GraphicsEngine::PrepareGpuVobCulling(
     cullConstantBuffer->UpdateBuffer( &cullConstants )
         ->BindToComputeShader( 0 );
 
-    GetContext()->CSSetShaderResources( 0, 3, cullSrvs );
+    GetContext()->CSSetShaderResources( 0, 4, cullSrvs );
     GetContext()->CSSetUnorderedAccessViews( 0, 2, cullUavs, nullptr );
     const EGpuTimingZone cullTimingZone = EGpuTimingZone::MainCull;
     if ( enableOcclusion ) {
         BeginGpuTimingZone( cullTimingZone );
     }
+    const UINT clearCounts[4] = { 0, 0, 0, 0 };
+    GetContext()->ClearUnorderedAccessViewUint(
+        cullVisibleCountsBuffer->GetUnorderedAccessView().Get(), clearCounts );
     cullShader->Apply();
-    GetContext()->Dispatch( static_cast<UINT>( visualInfo.size() ), 1, 1 );
+    GetContext()->Dispatch(
+        (static_cast<UINT>( activeInstanceCount ) + 63u) / 64u, 1, 1 );
     if ( enableOcclusion ) {
         ++m_GpuVobPerformanceStats.GpuCullDispatches;
     }
 
     GetContext()->CSSetUnorderedAccessViews( 0, 2, nullUavs, nullptr );
-    GetContext()->CSSetShaderResources( 0, 3, nullSrvs );
+    GetContext()->CSSetShaderResources( 0, 4, nullSrvs );
 
     GpuVobPatchConstantsData patchConstants = {};
     patchConstants.DrawCount = static_cast<UINT>( drawVisualIndices.size() );
@@ -2060,6 +2111,12 @@ bool D3D11GraphicsEngine::PrepareGpuVobCulling(
 
 bool D3D11GraphicsEngine::PrepareGpuVobCulling() {
     auto& cache = m_FrameGeometryCache;
+    // Keep GPU frustum culling useful even if this frame could not build the
+    // Hi-Z pyramid. EnsureFrameVobVisibilityCollected may already have
+    // skipped the CPU frustum pass for this opt-in path; the compute shader's
+    // conservative frustum test is still safe in that case.
+    const bool enableOcclusion = GpuVobHiZBuiltThisFrame
+        && GpuVobHiZShaderResourceView && GpuVobHiZMipCount > 0;
     std::vector<GpuVobCullVisualBatch> visualBatches;
     visualBatches.reserve( cache.vobVisuals.size() );
     for ( const auto& cachedVisual : cache.vobVisuals ) {
@@ -2077,6 +2134,7 @@ bool D3D11GraphicsEngine::PrepareGpuVobCulling() {
         cache.MainVobGpuGeometryIndexBuffer,
         GpuVobCullInputBuffer,
         GpuVobCullVisualBuffer,
+        GpuVobCullInstanceVisualIndexBuffer,
         GpuVobCullDrawVisualBuffer,
         GpuVobCullOutputBuffer,
         GpuVobCullArgsBuffer,
@@ -2084,7 +2142,9 @@ bool D3D11GraphicsEngine::PrepareGpuVobCulling() {
         GpuVobCullConstantBuffer,
         GpuVobPatchConstantBuffer,
         cache.MainVobGpuInstanceBuffer,
-        cache.MainVobGpuIndirectArgsBuffer );
+        cache.MainVobGpuIndirectArgsBuffer,
+        nullptr,
+        enableOcclusion );
 }
 
 void D3D11GraphicsEngine::PollGpuVobVisibleCountReadback(
@@ -9855,6 +9915,7 @@ void XM_CALLCONV D3D11GraphicsEngine::DrawWorldAroundForWorldShadow( FXMVECTOR p
                     shadowArenaReady ? GpuVobGeometryIndexBuffer.get() : nullptr,
                     GpuVobCullInputBuffer,
                     GpuVobCullVisualBuffer,
+                    GpuVobCullInstanceVisualIndexBuffer,
                     GpuVobCullDrawVisualBuffer,
                     GpuVobCullOutputBuffer,
                     GpuVobCullArgsBuffer,
@@ -10599,14 +10660,21 @@ XRESULT D3D11GraphicsEngine::DrawVOBsInstanced() {
                     } );
 
                 PrepareGpuVobGeometryArena();
+                const bool gpuVobCullingRequested = renderSettings.GetEffectiveGpuVobOcclusionCulling()
+                    && !IsGpuVobRuntimeDisabled();
+                if ( gpuVobCullingRequested ) {
+                    // The world depth is ready here, but no static VOB has
+                    // been submitted yet. Deferring the build until after the
+                    // candidate cache avoids paying for Hi-Z when there is no
+                    // VOB work to cull.
+                    BuildGpuVobHiZ();
+                }
                 m_GpuVobPerformanceStats.CandidateVisuals += cache.vobVisuals.size();
                 m_GpuVobPerformanceStats.CandidateDrawItems += cache.sortedInstancedMeshes.size();
                 for ( const auto& visual : cache.vobVisuals ) {
                     m_GpuVobPerformanceStats.CandidateInstances += visual.Instances.size();
                 }
                 cache.vobGpuCullingPrepared = true;
-                const bool gpuVobCullingRequested = renderSettings.GetEffectiveGpuVobOcclusionCulling()
-                    && !IsGpuVobRuntimeDisabled();
                 if ( gpuVobCullingRequested ) {
                     ++m_GpuVobPerformanceStats.MainCullAttempts;
                     cache.vobGpuCullingActive = PrepareGpuVobCulling();
@@ -11215,6 +11283,10 @@ XRESULT D3D11GraphicsEngine::DrawAlphaMeshList(
         // the ordinary alpha pass, which is normally the much larger list.
         const XMFLOAT3 windowGlassTint = windowGlassOnly
             ? GetWindowGlassTint() : XMFLOAT3( 1.0f, 1.0f, 1.0f );
+        const auto& windowRendererSettings = Engine::GAPI->GetRendererState().RendererSettings;
+        const bool windowDirectSceneToGammaPath = windowGlassOnly
+            && !windowRendererSettings.EnableHDR
+            && windowRendererSettings.AntiAliasingMode == GothicRendererSettings::AA_NONE;
         ID3D11ShaderResourceView* windowSceneDepthSRV = windowGlassOnly && DepthStencilBufferCopy
             ? DepthStencilBufferCopy->GetShaderResView().Get()
             : nullptr;
@@ -11269,6 +11341,7 @@ XRESULT D3D11GraphicsEngine::DrawAlphaMeshList(
                 windowGlassData.windowSkyParams = float2(
                     static_cast<float>(GetResolution().y) * (2.0f / 3.0f),
                     windowSkyGuardAvailable ? 1.0f : 0.0f );
+                windowGlassData.padding.x = windowDirectSceneToGammaPath ? 1.0f : 0.0f;
                 ActivePS->GetBuffer( "cbFFData" )
                     .Update( &windowGlassData )
                     .Bind();

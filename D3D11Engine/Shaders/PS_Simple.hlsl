@@ -49,10 +49,14 @@ float4 PSMain( PS_INPUT Input ) : SV_TARGET
 		if (color.a > (170.0f / 255.0f))
 			discard;
 
-		// Soften overly opaque authored panes but retain a firm visibility floor.
-		// This keeps glass present over sky, world geometry, decals and effects
-		// without making it read as a bright opaque sheet.
-		color.a = max(color.a * 0.82f, 0.16f);
+		// Soften overly opaque authored panes. The visibility floor is useful
+		// after the normal HDR/AA post-processing path, but it creates a dark
+		// veil when the scene goes directly from the linear target to gamma.
+		// Keep the authored alpha in that exact no-HDR/no-AA path instead.
+		const float softenedAlpha = color.a * 0.82f;
+		color.a = cbFFData.padding.x > 0.5f
+			? softenedAlpha
+			: max(softenedAlpha, 0.16f);
 
 		if (cbFFData.windowSkyParams.y > 0.5f)
 		{

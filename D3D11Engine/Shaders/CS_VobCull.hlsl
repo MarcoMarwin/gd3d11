@@ -14,9 +14,8 @@ struct VobCullVisual
     uint   InstanceCount;
 };
 
-// Mirrors VobInstanceInfo (148 bytes). The world matrices are the four rows
-// written by XMStoreFloat4x4; BuildWorldMatrix restores the matrix consumed by
-// the existing VS_ExInstancedObj row-vector mul() calls.
+// Mirrors VobInstanceInfo (148 bytes). The world matrices are copied through
+// unchanged because CSCull only forwards surviving instance records.
 struct VobInstanceGpu
 {
     float4 World0;
@@ -38,16 +37,18 @@ cbuffer VobCullConstantBuffer : register( b0 )
 {
     float4x4 CullViewProj;
     uint     VisualCount;
+    uint     TotalInstanceCount;
     uint     HiZWidth;
     uint     HiZHeight;
     uint     HiZMipCount;
     uint     EnableOcclusion;
-    uint3    CullPadding;
+    uint2    CullPadding;
 };
 
 StructuredBuffer<VobInstanceGpu> InInstances : register( t0 );
 StructuredBuffer<VobCullVisual>  Visuals     : register( t1 );
 Texture2D<float>                  HiZDepth    : register( t2 );
+StructuredBuffer<uint>            InstanceVisualIndices : register( t3 );
 RWByteAddressBuffer               OutInstances : register( u0 );
 RWByteAddressBuffer               VisibleCounts : register( u1 );
 
@@ -78,14 +79,68 @@ bool IsInstanceVisible( VobCullVisual visual, VobInstanceGpu inst )
     if ( any( visual.BBoxMin > visual.BBoxMax ) )
         return true;
 
-    float4x4 worldViewProj = mul( BuildWorldMatrix( inst ), CullViewProj );
+    const float3 localBoxCenter = (visual.BBoxMin + visual.BBoxMax) * 0.5f;
+    const float3 localBoxExtent = (visual.BBoxMax - visual.BBoxMin) * 0.5f;
+    const bool needsDynamicBounds = abs( inst.WindStrength ) > 1.0e-4f
+        || inst.CanBeAffectedByPlayer > 0.5f;
+    float4x4 worldViewProj;
+    float3 boxCenter;
+    float3 boxExtent;
+
+    if ( !needsDynamicBounds )
+    {
+        // Preserve the cheaper authored-box path for ordinary static VOBs.
+        worldViewProj = mul( BuildWorldMatrix( inst ), CullViewProj );
+        boxCenter = localBoxCenter;
+        boxExtent = localBoxExtent;
+    }
+    else
+    {
+        // Build a world-space box in the same matrix convention as the vertex
+        // shader. Wind is applied after this transform, while hero/NPC
+        // interaction is applied before it; both are represented by
+        // conservative expansions.
+        const float4x4 instanceWorld = BuildWorldMatrix( inst );
+        const float3 worldBoxCenter = mul(
+            float4( localBoxCenter, 1.0f ), instanceWorld ).xyz;
+        const float3 worldAxisX = mul(
+            float4( localBoxExtent.x, 0.0f, 0.0f, 0.0f ), instanceWorld ).xyz;
+        const float3 worldAxisY = mul(
+            float4( 0.0f, localBoxExtent.y, 0.0f, 0.0f ), instanceWorld ).xyz;
+        const float3 worldAxisZ = mul(
+            float4( 0.0f, 0.0f, localBoxExtent.z, 0.0f ), instanceWorld ).xyz;
+        const float3 transformedBoxExtent = abs( worldAxisX )
+            + abs( worldAxisY ) + abs( worldAxisZ );
+
+        float dynamicRadius = abs( inst.WindStrength ) * 32.0f;
+        if ( inst.CanBeAffectedByPlayer > 0.5f )
+        {
+            // Hero interaction is clamped to 38 local units in
+            // VS_ExInstancedObj. The Frobenius norm safely bounds the length
+            // of any transformed local displacement, including non-uniformly
+            // scaled VOBs.
+            const float3 basisX = mul(
+                float4( 1.0f, 0.0f, 0.0f, 0.0f ), instanceWorld ).xyz;
+            const float3 basisY = mul(
+                float4( 0.0f, 1.0f, 0.0f, 0.0f ), instanceWorld ).xyz;
+            const float3 basisZ = mul(
+                float4( 0.0f, 0.0f, 1.0f, 0.0f ), instanceWorld ).xyz;
+            const float frobeniusNorm = sqrt(
+                dot( basisX, basisX ) + dot( basisY, basisY )
+                + dot( basisZ, basisZ ) );
+            dynamicRadius += 38.0f * frobeniusNorm;
+        }
+        dynamicRadius += 0.05f;
+
+        worldViewProj = CullViewProj;
+        boxCenter = worldBoxCenter;
+        boxExtent = transformedBoxExtent + dynamicRadius;
+    }
 
     // The clip transform is linear over the local AABB. Testing the interval
     // of each clip plane is equivalent to the eight-corner reject, but avoids
     // eight matrix-vector products for the common frustum-only path. The
     // interval is conservative and therefore cannot cull a visible VOB.
-    const float3 boxCenter = (visual.BBoxMin + visual.BBoxMax) * 0.5f;
-    const float3 boxExtent = (visual.BBoxMax - visual.BBoxMin) * 0.5f;
     const float4 clipCenter = mul( float4( boxCenter, 1.0f ), worldViewProj );
     const float4 row0 = worldViewProj[0];
     const float4 row1 = worldViewProj[1];
@@ -115,8 +170,6 @@ bool IsInstanceVisible( VobCullVisual visual, VobInstanceGpu inst )
         return false;
     }
 
-    // A box straddling the eye plane has an unbounded projected rectangle;
-    // keep it rather than risk an invalid occlusion rejection.
     if ( EnableOcclusion == 0 || HiZMipCount == 0 )
         return true;
 
@@ -131,9 +184,9 @@ bool IsInstanceVisible( VobCullVisual visual, VobInstanceGpu inst )
     for ( uint cornerIndex = 0; cornerIndex < 8; ++cornerIndex )
     {
         float3 corner = float3(
-            (cornerIndex & 1) != 0 ? visual.BBoxMax.x : visual.BBoxMin.x,
-            (cornerIndex & 2) != 0 ? visual.BBoxMax.y : visual.BBoxMin.y,
-            (cornerIndex & 4) != 0 ? visual.BBoxMax.z : visual.BBoxMin.z );
+            (cornerIndex & 1) != 0 ? boxCenter.x + boxExtent.x : boxCenter.x - boxExtent.x,
+            (cornerIndex & 2) != 0 ? boxCenter.y + boxExtent.y : boxCenter.y - boxExtent.y,
+            (cornerIndex & 4) != 0 ? boxCenter.z + boxExtent.z : boxCenter.z - boxExtent.z );
         float4 clip = mul( float4( corner, 1.0f ), worldViewProj );
 
         if ( clip.w > 1e-4f )
@@ -180,39 +233,30 @@ bool IsInstanceVisible( VobCullVisual visual, VobInstanceGpu inst )
     return !( occluderDepth > closestDepth );
 }
 
-groupshared uint VisibleInGroup;
-
 [numthreads(64, 1, 1)]
-void CSCull( uint3 groupId : SV_GroupID, uint groupIndex : SV_GroupIndex )
+void CSCull( uint3 dispatchId : SV_DispatchThreadID )
 {
-    const uint visualIndex = groupId.x;
+    const uint absoluteInstanceIndex = dispatchId.x;
+    if ( absoluteInstanceIndex >= TotalInstanceCount )
+        return;
 
-    if ( groupIndex == 0 )
-        VisibleInGroup = 0;
-    GroupMemoryBarrierWithGroupSync();
+    // The CPU packs this direct ownership index alongside the instance data.
+    // This removes an O(log(visual count)) search from every culling thread;
+    // gaps in the retained-capacity buffer carry the invalid sentinel.
+    const uint visualIndex = InstanceVisualIndices[absoluteInstanceIndex];
+    if ( visualIndex >= VisualCount )
+        return;
+    const VobCullVisual visual = Visuals[visualIndex];
 
-    if ( visualIndex < VisualCount )
+    VobInstanceGpu instance = InInstances[absoluteInstanceIndex];
+    if ( IsInstanceVisible( visual, instance ) )
     {
-        VobCullVisual visual = Visuals[visualIndex];
-        for ( uint instanceIndex = groupIndex;
-              instanceIndex < visual.InstanceCount;
-              instanceIndex += 64 )
-        {
-            VobInstanceGpu instance = InInstances[visual.InstanceBase + instanceIndex];
-            if ( IsInstanceVisible( visual, instance ) )
-            {
-                uint compactedIndex;
-                InterlockedAdd( VisibleInGroup, 1, compactedIndex );
-                const uint outputByteOffset =
-                    (visual.InstanceBase + compactedIndex) * 148;
-                StoreInstance( outputByteOffset, instance );
-            }
-        }
+        uint compactedIndex;
+        VisibleCounts.InterlockedAdd( visualIndex * 4, 1, compactedIndex );
+        const uint outputByteOffset =
+            (visual.InstanceBase + compactedIndex) * 148;
+        StoreInstance( outputByteOffset, instance );
     }
-
-    GroupMemoryBarrierWithGroupSync();
-    if ( groupIndex == 0 && visualIndex < VisualCount )
-        VisibleCounts.Store( visualIndex * 4, VisibleInGroup );
 }
 
 cbuffer VobPatchConstantBuffer : register( b1 )

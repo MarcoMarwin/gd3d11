@@ -1279,7 +1279,7 @@ void ImGuiShim::RenderSettingsWindow()
                 "Skips shadow casters outside each cascade. Conservative is the safe default; Aggressive can omit marginal attachments.",
                 u8"\u00DCberspringt Schattenwerfer au\u00DFerhalb der jeweiligen Cascade. Konservativ ist der sichere Standard; Aggressiv kann Rand-Attachments auslassen." ) );
 
-            ImGui::Checkbox( Tr( "GPU VOB occlusion culling", u8"GPU-VOB-Occlusion-Culling" ),
+            ImGui::Checkbox( Tr( "Hi-Z Occlusion Culling", u8"Hi-Z-Occlusion-Culling" ),
                 &settings.GpuVobOcclusionCulling );
             ImGui::SetItemTooltip( "%s", Tr(
                 "Experimental: tests static VOBs against the Hi-Z depth of the already-rendered world and draws only those that remain visible. GPU culling, indirect drawing and shared geometry are managed internally; the standard DX11 path remains available on every supported GPU.",
