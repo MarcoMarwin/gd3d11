@@ -1136,18 +1136,6 @@
     <None Include="Shaders\CS_VobHiZ.hlsl">
       <Filter>Engine\Shaders</Filter>
     </None>
-    <None Include="Shaders\CS_PFX_XeGTAO_HybridNear.hlsl">
-      <Filter>Engine\Shaders</Filter>
-    </None>
-    <None Include="Shaders\CS_PFX_XeGTAO_HybridFar.hlsl">
-      <Filter>Engine\Shaders</Filter>
-    </None>
-    <None Include="Shaders\PS_PFX_AOCompositeHybrid.hlsl">
-      <Filter>Engine\Shaders</Filter>
-    </None>
-    <None Include="Shaders\PS_PFX_ReconstructNormal.hlsl">
-      <Filter>Engine\Shaders</Filter>
-    </None>
   </ItemGroup>
   <ItemGroup>
     <Natvis Include="include\gtl\debug_vis\gtl.natvis">

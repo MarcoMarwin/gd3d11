@@ -44,17 +44,9 @@ void D3D11ForwardPlusRenderer::AddGeometryPasses(
         && rendererSettings.Upscaler == GothicRendererSettings::UPSCALER_FSR_3;
     const bool useScreenSpaceShadowMask = rendererSettings.EnableShadows
         && rendererSettings.DebugSettings.FeatureSet.UseScreenSpaceShadowMask;
-    const bool preLightingAO = rendererSettings.AoMode == AOMode::AO_XEGTAO
-        && rendererSettings.GetEffectiveXeGTAOPreLighting();
 
     // --- Depth prepass ---
-    graph.AddPass( RG_PASS_NAME("FP Depth Prepass"), [&, preLightingAO]( RGBuilder& builder, RenderPass& pass ) {
-        if ( preLightingAO ) {
-            auto size = engine.GetResolution();
-            normalsResource = builder.CreateTexture( {
-                static_cast<uint32_t>( size.x ), static_cast<uint32_t>( size.y ),
-                DXGI_FORMAT_R16G16_FLOAT, L"GBufferNormals" } );
-        }
+    graph.AddPass( RG_PASS_NAME("FP Depth Prepass"), [&]( RGBuilder& builder, RenderPass& pass ) {
         builder.Write( backBufferHandle );
 
         pass.m_executeCallback = [&engine]( const RenderGraph& ) -> void {
@@ -101,53 +93,6 @@ void D3D11ForwardPlusRenderer::AddGeometryPasses(
             }
         };
     } );
-
-    if ( preLightingAO ) {
-        graph.AddPass( RG_PASS_NAME("FP AO Normal Prepass"), [&]( RGBuilder& builder, RenderPass& pass ) {
-            builder.Write( normalsResource );
-            builder.Write( backBufferHandle );
-
-            pass.m_executeCallback = [this, &engine, normalsResource]( const RenderGraph& graph ) -> void {
-                TracyD3D11ZoneCGX( "D3D11ForwardPlusRenderer::AO Normal Prepass" );
-                auto normalTexture = graph.GetPhysicalTexture( normalsResource );
-                auto* depthCopy = engine.GetDepthBufferCopy();
-                if ( !normalTexture || !depthCopy ) return;
-
-                auto& context = engine.GetContext();
-                ID3D11RenderTargetView* normalRTV = normalTexture->GetRenderTargetView().Get();
-                constexpr float clearNormal[] = { 0.f, 0.f, 0.f, 0.f };
-                context->ClearRenderTargetView( normalRTV, clearNormal );
-                context->OMSetRenderTargets( 1, &normalRTV, nullptr );
-
-                DS_ScreenQuadConstantBuffer scb = engine.GetShadowMaps()->FillSunCSMConstantBuffer();
-                if ( !m_SunCSMConstantBuffer ) {
-                    m_SunCSMConstantBuffer = std::make_unique<D3D11ConstantBuffer>(
-                        sizeof( DS_ScreenQuadConstantBuffer ), &scb );
-                } else {
-                    m_SunCSMConstantBuffer->UpdateBuffer( &scb );
-                }
-                m_SunCSMConstantBuffer->BindToPixelShader( 0 );
-
-                engine.SetActiveVertexShader( VShaderID::VS_PFX );
-                engine.BindActiveVertexShader();
-                engine.SetActivePixelShader( PShaderID::PS_PFX_ReconstructNormal );
-                engine.BindActivePixelShader();
-                ID3D11ShaderResourceView* depthSRV = depthCopy->GetShaderResView().Get();
-                context->PSSetShaderResources( 2, 1, &depthSRV );
-                ID3D11SamplerState* linearSampler = engine.GetDefaultSamplerState();
-                context->PSSetSamplers( 0, 1, &linearSampler );
-                engine.UpdateRenderStates();
-                engine.GetPfxRenderer()->DrawFullScreenQuad();
-
-                ID3D11ShaderResourceView* nullSRV = nullptr;
-                context->PSSetShaderResources( 2, 1, &nullSRV );
-                ID3D11RenderTargetView* nullRTV = nullptr;
-                context->OMSetRenderTargets( 1, &nullRTV, nullptr );
-            };
-        } );
-
-        engine.AddXeGTAOPreLightingPass( graph, normalsResource, backBufferHandle );
-    }
 
     // --- Shadow map rendering ---
     graph.AddPass( RG_PASS_NAME("FP Shadow Maps"), [&]( RGBuilder& builder, RenderPass& pass ) {
@@ -245,9 +190,7 @@ void D3D11ForwardPlusRenderer::AddGeometryPasses(
     // --- Forward+ lit geometry pass ---
     graph.AddPass( RG_PASS_NAME("FP Lit Geometry"), [&]( RGBuilder& builder, RenderPass& pass ) {
         auto size = engine.GetResolution();
-        if ( !preLightingAO ) {
-            normalsResource = builder.CreateTexture( { static_cast<uint32_t>( size.x ), static_cast<uint32_t>( size.y ), DXGI_FORMAT_R16G16_FLOAT, L"GBufferNormals" } );
-        }
+        normalsResource = builder.CreateTexture( { static_cast<uint32_t>( size.x ), static_cast<uint32_t>( size.y ), DXGI_FORMAT_R16G16_FLOAT, L"GBufferNormals" } );
         specularResource = builder.CreateTexture( { static_cast<uint32_t>( size.x ), static_cast<uint32_t>( size.y ), DXGI_FORMAT_R16G16B16A16_FLOAT, L"GBufferSpecular" } );
         if ( fsr3MasksActive ) {
             reactiveMaskResource = builder.CreateTexture( { static_cast<uint32_t>( size.x ), static_cast<uint32_t>( size.y ), DXGI_FORMAT_R8_UNORM, L"ReactiveMask" } );
@@ -321,7 +264,6 @@ void D3D11ForwardPlusRenderer::AddGeometryPasses(
             tileCB.ClusterNearZ = Engine::GAPI->GetNearPlane();
             tileCB.ClusterFarZ = std::max( CLUSTER_MIN_FAR_Z,
                 Engine::GAPI->GetRendererState().RendererSettings.GetEffectiveVisualFXDrawRadius() );
-            tileCB.TilePad[0] = engine.GetPfxRenderer()->IsXeGTAOPreLightReady() ? 1.0f : 0.0f;
             if ( !m_TileConstantBuffer ) {
                 m_TileConstantBuffer = std::make_unique<D3D11ConstantBuffer>(
                     sizeof( ForwardPlusTileConstantBuffer ), &tileCB );
@@ -371,10 +313,6 @@ void D3D11ForwardPlusRenderer::AddGeometryPasses(
                 : nullptr;
             context->PSSetShaderResources( 12, 1, &shadowMaskSRV );
 
-            ID3D11ShaderResourceView* xeGTAOAOSRV = engine.GetPfxRenderer()
-                ? engine.GetPfxRenderer()->GetXeGTAOLightingAOSRV() : nullptr;
-            context->PSSetShaderResources( 10, 1, &xeGTAOAOSRV );
-
             // Draw all world geometry with Forward+ shaders
             Engine::GAPI->DrawWorldMeshNaive();
             engine.SetViewport( ViewportInfo( 0, 0, engine.GetResolution() ) );
@@ -386,7 +324,6 @@ void D3D11ForwardPlusRenderer::AddGeometryPasses(
             context->PSSetShaderResources( 6, 1, s_nullSRVs );
             context->PSSetShaderResources( 8, 4, s_nullSRVs );
             context->PSSetShaderResources( 12, 2, s_nullSRVs );
-            context->PSSetShaderResources( 10, 1, s_nullSRVs );
             context->PSSetShaderResources( 14, MAX_CSM_CASCADES, s_nullSRVs );
             context->PSSetShaderResources( 20, 1, s_nullSRVs );
             context->PSSetShaderResources( 21, 1, s_nullSRVs );

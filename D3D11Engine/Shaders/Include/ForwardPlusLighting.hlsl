@@ -74,7 +74,6 @@ Texture2DArray TX_ShadowmapArray : register( t3 );
 #endif
 
 Texture2D TX_ShadowBlueNoise : register( t6 );
-Texture2D FP_XeGTAO : register( t10 );
 
 // Comparison sampler for shadow maps
 SamplerComparisonState SS_Comp : register( s2 );

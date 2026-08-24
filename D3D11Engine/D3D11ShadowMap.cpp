@@ -1676,10 +1676,6 @@ XRESULT D3D11ShadowMap::DrawLighting(
     m_context->OMSetRenderTargets( 1, graphicsEngine->GetHDRBackBuffer().GetRenderTargetView().GetAddressOf(),
         nullptr );
 
-    ID3D11ShaderResourceView* xeGTAOAOSRV = graphicsEngine->GetPfxRenderer()
-        ? graphicsEngine->GetPfxRenderer()->GetXeGTAOLightingAOSRV() : nullptr;
-    m_context->PSSetShaderResources( 10, 1, &xeGTAOAOSRV );
-
     ID3D11ShaderResourceView* srvs[3] = {
         color.GetShaderResView().Get(),
         normals.GetShaderResView().Get(),
@@ -1697,9 +1693,6 @@ XRESULT D3D11ShadowMap::DrawLighting(
 
     ID3D11ShaderResourceView* nullRainExclusionMask = nullptr;
     m_context->PSSetShaderResources( 9, 1, &nullRainExclusionMask );
-    ID3D11ShaderResourceView* nullXeGTAOAOSRV = nullptr;
-    m_context->PSSetShaderResources( 10, 1, &nullXeGTAOAOSRV );
-
     m_context->OMSetRenderTargets( 1, graphicsEngine->GetHDRBackBuffer().GetRenderTargetView().GetAddressOf(),
         graphicsEngine->GetDepthBuffer()->GetDepthStencilView().Get() );
 

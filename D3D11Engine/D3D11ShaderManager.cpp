@@ -241,8 +241,6 @@ XRESULT D3D11ShaderManager::Init() {
     Shaders.push_back( ShaderInfo::make<PShaderID::PS_PFX_Simple>( "PS_PFX_Simple.hlsl" ) );
     Shaders.push_back( ShaderInfo::make<PShaderID::PS_PFX_Simple_R8>( "PS_PFX_Simple_R8.hlsl" ) );
     Shaders.push_back( ShaderInfo::make<PShaderID::PS_PFX_AOComposite>( "PS_PFX_AOComposite.hlsl" ) );
-    Shaders.push_back( ShaderInfo::make<PShaderID::PS_PFX_AOCompositeHybrid>( "PS_PFX_AOCompositeHybrid.hlsl" ) );
-    Shaders.push_back( ShaderInfo::make<PShaderID::PS_PFX_ReconstructNormal>( "PS_PFX_ReconstructNormal.hlsl" ) );
 
     Shaders.push_back( ShaderInfo::make<PShaderID::PS_PFX_VelocityDebug>( "PS_PFX_VelocityDebug.hlsl" )  );
 
@@ -517,13 +515,6 @@ XRESULT D3D11ShaderManager::Init() {
         Shaders.push_back( ShaderInfo::make<CShaderID::CS_PFX_XeGTAO_Ultra>( "CS_PFX_XeGTAO.hlsl" ).with_entrypoint( "CSGTAOUltra" ) );
         Shaders.push_back( ShaderInfo::make<CShaderID::CS_PFX_XeGTAO_Denoise>( "CS_PFX_XeGTAO.hlsl" ).with_entrypoint( "CSDenoisePass" ) );
         Shaders.push_back( ShaderInfo::make<CShaderID::CS_PFX_XeGTAO_DenoiseLast>( "CS_PFX_XeGTAO.hlsl" ).with_entrypoint( "CSDenoiseLastPass" ) );
-        Shaders.push_back( ShaderInfo::make<CShaderID::CS_PFX_XeGTAO_HybridNear_Low>( "CS_PFX_XeGTAO_HybridNear.hlsl" ).with_entrypoint( "CSGTAOHybridNearLow" ) );
-        Shaders.push_back( ShaderInfo::make<CShaderID::CS_PFX_XeGTAO_HybridNear_Medium>( "CS_PFX_XeGTAO_HybridNear.hlsl" ).with_entrypoint( "CSGTAOHybridNearMedium" ) );
-        Shaders.push_back( ShaderInfo::make<CShaderID::CS_PFX_XeGTAO_HybridNear_High>( "CS_PFX_XeGTAO_HybridNear.hlsl" ).with_entrypoint( "CSGTAOHybridNearHigh" ) );
-        Shaders.push_back( ShaderInfo::make<CShaderID::CS_PFX_XeGTAO_HybridNear_Ultra>( "CS_PFX_XeGTAO_HybridNear.hlsl" ).with_entrypoint( "CSGTAOHybridNearUltra" ) );
-        Shaders.push_back( ShaderInfo::make<CShaderID::CS_PFX_XeGTAO_HybridFar_Low>( "CS_PFX_XeGTAO_HybridFar.hlsl" ).with_entrypoint( "CSGTAOHybridFarLow" ) );
-        Shaders.push_back( ShaderInfo::make<CShaderID::CS_PFX_XeGTAO_HybridFar_Medium>( "CS_PFX_XeGTAO_HybridFar.hlsl" ).with_entrypoint( "CSGTAOHybridFarMedium" ) );
-        Shaders.push_back( ShaderInfo::make<CShaderID::CS_PFX_XeGTAO_HybridFar_High>( "CS_PFX_XeGTAO_HybridFar.hlsl" ).with_entrypoint( "CSGTAOHybridFarHigh" ) );
 
         Shaders.push_back( ShaderInfo::make<CShaderID::CS_PFX_Sharpen>( "CS_PFX_Sharpen.hlsl" ));
 

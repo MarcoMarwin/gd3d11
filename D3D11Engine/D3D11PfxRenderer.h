@@ -110,11 +110,6 @@ public:
     XRESULT RenderXeGTAO( ID3D11ShaderResourceView* depthSRV,
                             ID3D11ShaderResourceView* normalsSRV,
                             ID3D11RenderTargetView* outputRTV );
-    XRESULT RenderXeGTAOToAO( ID3D11ShaderResourceView* depthSRV,
-                               ID3D11ShaderResourceView* normalsSRV );
-    ID3D11ShaderResourceView* GetXeGTAOLightingAOSRV() const;
-    bool IsXeGTAOPreLightReady() const;
-    void ResetXeGTAOPreLightState();
 
     /** Accessors */
     TextureHandle GetTempBuffer();

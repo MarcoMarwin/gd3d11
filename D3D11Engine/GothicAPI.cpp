@@ -7551,8 +7551,6 @@ XRESULT GothicAPI::LoadMenuSettings( const std::string& file ) {
         s.AdvancedWetGroundSSR = ds.AdvancedWetGroundSSR;
         s.AdvancedNightEnhance = ds.AdvancedNightEnhance;
         s.AdvancedCityWindowTransparency = ds.AdvancedCityWindowTransparency;
-        s.AdvancedXeGTAOHybrid = ds.AdvancedXeGTAOHybrid;
-        s.AdvancedXeGTAOPreLighting = ds.AdvancedXeGTAOPreLighting;
 
         INT2 res = {};
         RECT desktopRect;

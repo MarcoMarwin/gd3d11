@@ -911,8 +911,6 @@ uint64_t D3D11GraphicsEngine::BuildGpuVobPerformanceSettingsKey() const {
     add( static_cast<int>( settings.GetEffectiveShadowFrustumCullingMode() ) );
     add( settings.GetEffectiveGpuVobOcclusionCulling() );
     add( settings.DebugSettings.FeatureSet.UseMDI );
-    add( settings.GetEffectiveXeGTAOHybrid() );
-    add( settings.GetEffectiveXeGTAOPreLighting() );
 
     // Basic render state that changes the amount of work and must not be
     // mixed into the same comparison window.
@@ -1270,8 +1268,6 @@ void D3D11GraphicsEngine::LogGpuVobPerformanceStats() {
         << " shadowFrustum=" << static_cast<int>( settings.GetEffectiveShadowFrustumCullingMode() )
         << " gpuOcclusion=" << (settings.GetEffectiveGpuVobOcclusionCulling() ? 1 : 0)
         << " useMDI=" << (settings.DebugSettings.FeatureSet.UseMDI ? 1 : 0)
-        << " xeGTAOHybrid=" << (settings.GetEffectiveXeGTAOHybrid() ? 1 : 0)
-        << " xeGTAOPreLighting=" << (settings.GetEffectiveXeGTAOPreLighting() ? 1 : 0)
         << " gpuRuntimeDisabled=" << (IsGpuVobRuntimeDisabled() ? 1 : 0)
         << " hizRuntimeDisabled=" << (IsGpuVobHiZRuntimeDisabled() ? 1 : 0)
         << " arenaRuntimeDisabled=" << (IsGpuVobGeometryArenaRuntimeDisabled() ? 1 : 0)
@@ -3113,32 +3109,6 @@ void D3D11GraphicsEngine::SelectActiveRenderer() {
     } else {
         ActiveSceneRenderer = &DeferredRenderer;
     }
-}
-
-void D3D11GraphicsEngine::AddXeGTAOPreLightingPass( RenderGraph& graph,
-                                                    RGResourceHandle normalsResource,
-                                                    RGResourceHandle backBufferHandle ) {
-    auto& settings = Engine::GAPI->GetRendererState().RendererSettings;
-    if ( settings.AoMode != AOMode::AO_XEGTAO || !settings.GetEffectiveXeGTAOPreLighting() )
-        return;
-
-    PfxRenderer->ResetXeGTAOPreLightState();
-    if ( normalsResource == RG_INVALID_HANDLE ) return;
-
-    graph.AddPass( RG_PASS_NAME("XeGTAO Pre-Light"), [&]( RGBuilder& builder, RenderPass& pass ) {
-        builder.Read( normalsResource );
-        builder.Write( backBufferHandle );
-        pass.m_executeCallback = [this, normalsResource]( const RenderGraph& renderGraph ) {
-            TracyD3D11ZoneCGX( "D3D11GraphicsEngine::Draw XeGTAO Pre-Light" );
-            auto normalsTexture = renderGraph.GetPhysicalTexture( normalsResource );
-            CopyDepthStencil();
-            auto* depthCopy = GetDepthBufferCopy();
-            if ( !normalsTexture || !depthCopy ) return;
-            PfxRenderer->RenderXeGTAOToAO(
-                depthCopy->GetShaderResView().Get(),
-                normalsTexture->GetShaderResView().Get() );
-        };
-    } );
 }
 
 namespace {
@@ -6458,10 +6428,6 @@ XRESULT D3D11GraphicsEngine::OnStartWorldRendering() {
     BeginGpuTimingFrame( performanceSettingsKey, worldGeneration );
 
     RenderGraph graph( GetPfxRenderer()->GetTexturePool() );
-    // The pre-light mask is frame-local. Clear the previous frame's state
-    // before any renderer-specific pass can bind it.
-    PfxRenderer->ResetXeGTAOPreLightState();
-
     // TODO: Replace global Resources with RenderGraph resource
     RGResourceHandle backBufferHandle = graph.ImportResource( L"BackBuffer", HDRBackBuffer.get() );
     RGResourceHandle velocityBufferHandle = graph.ImportResource( L"VelocityBuffer", VelocityBuffer.get() );
@@ -6611,10 +6577,6 @@ XRESULT D3D11GraphicsEngine::OnStartWorldRendering() {
         };
     });
 
-    if ( rendererState.RendererSettings.RendererMode == GothicRendererSettings::RM_Deferred ) {
-        AddXeGTAOPreLightingPass( graph, normalsResource, backBufferHandle );
-    }
-
     ActiveSceneRenderer->AddLightingPasses( graph, *this,
         colorResource, normalsResource, specularResource,
         transparencyAndCompositionMaskResource, backBufferHandle, m_FrameLights );
@@ -6622,14 +6584,12 @@ XRESULT D3D11GraphicsEngine::OnStartWorldRendering() {
     // XeGTAO is composited before transparent alpha meshes so particles, fire and
     // other translucent effects are not darkened by opaque-world AO.
     if ( rendererState.RendererSettings.AoMode == AOMode::AO_XEGTAO ) {
-        const bool preLightingRequested = rendererState.RendererSettings.GetEffectiveXeGTAOPreLighting();
         graph.AddPass( RG_PASS_NAME("XeGTAO"), [&]( RGBuilder& builder, RenderPass& pass ) {
             builder.Read( normalsResource );
             builder.Write( backBufferHandle );
 
-            pass.m_executeCallback = [this, normalsResource, backBufferHandle, preLightingRequested]( const RenderGraph& graph ) {
+            pass.m_executeCallback = [this, normalsResource, backBufferHandle]( const RenderGraph& graph ) {
                 TracyD3D11ZoneCGX( "D3D11GraphicsEngine::Draw XeGTAO" );
-                if ( preLightingRequested && PfxRenderer->IsXeGTAOPreLightReady() ) return;
                 auto normalsTexture = graph.GetPhysicalTexture( normalsResource );
                 auto backBuffer = graph.GetPhysicalTexture( backBufferHandle );
                 PfxRenderer->RenderXeGTAO(

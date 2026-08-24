@@ -17,7 +17,6 @@
 #include "D3D11PFX_CAS.h"
 #include "D3D11PFX_FSR3.h"
 #include "D3D11PFX_XeGTAO.h"
-#include "D3D11Texture.h"
 #include "D3D11Effect.h"
 #include "D3D11ShadowMap.h"
 #include "D3D11ConstantBuffer.h"
@@ -804,27 +803,6 @@ XRESULT D3D11PfxRenderer::RenderXeGTAO( ID3D11ShaderResourceView* depthSRV,
                                         ID3D11RenderTargetView* outputRTV ) {
     if ( !PFX_XeGTAO ) return XR_FAILED;
     return PFX_XeGTAO->Render( depthSRV, normalsSRV, outputRTV );
-}
-
-XRESULT D3D11PfxRenderer::RenderXeGTAOToAO( ID3D11ShaderResourceView* depthSRV,
-                                             ID3D11ShaderResourceView* normalsSRV ) {
-    if ( !PFX_XeGTAO ) return XR_FAILED;
-    return PFX_XeGTAO->RenderToAO( depthSRV, normalsSRV );
-}
-
-ID3D11ShaderResourceView* D3D11PfxRenderer::GetXeGTAOLightingAOSRV() const {
-    if ( PFX_XeGTAO ) return PFX_XeGTAO->GetLightingAOSRV();
-    auto* engine = reinterpret_cast<D3D11GraphicsEngine*>(Engine::GraphicsEngine);
-    return engine && engine->GetWhiteTexture()
-        ? engine->GetWhiteTexture()->GetShaderResourceView().Get() : nullptr;
-}
-
-bool D3D11PfxRenderer::IsXeGTAOPreLightReady() const {
-    return PFX_XeGTAO && PFX_XeGTAO->IsPreLightReady();
-}
-
-void D3D11PfxRenderer::ResetXeGTAOPreLightState() {
-    if ( PFX_XeGTAO ) PFX_XeGTAO->ResetPreLightState();
 }
 
 TextureHandle D3D11PfxRenderer::GetTempBuffer()

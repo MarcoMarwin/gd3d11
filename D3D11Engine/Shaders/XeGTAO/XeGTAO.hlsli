@@ -339,19 +339,6 @@ void XeGTAO_MainPass( const uint2 pixCoord, lpfloat sliceCount, lpfloat stepsPer
 
         lpfloat screenspaceRadius   = effectRadius / (lpfloat)pixelDirRBViewspaceSizeAtCenterZ.x;
 
-#if defined( XE_GTAO_HYBRID_NEAR_ONLY )
-        // The hybrid Build-213 path keeps the full-resolution result only where
-        // the AO footprint is still large enough to justify it. Distant pixels
-        // are filled by the separate half-resolution pass; this is not an AO
-        // strength fade and therefore leaves the near field unchanged.
-        [branch]
-        if ( screenspaceRadius <= XE_GTAO_HYBRID_FAR_RADIUS_PIXELS )
-        {
-            XeGTAO_OutputWorkingTerm( pixCoord, 1, viewspaceNormal, outWorkingAOTerm );
-            return;
-        }
-#endif
-
         // fade out for small screen radii 
         visibility += saturate((10 - screenspaceRadius)/100)*0.5;
 
@@ -448,11 +435,7 @@ void XeGTAO_MainPass( const uint2 pixCoord, lpfloat sliceCount, lpfloat stepsPer
                 lpfloat sampleOffsetLength = length( sampleOffset );
 
                 // note: when sampling, using point_point_point or point_point_linear sampler works, but linear_linear_linear will cause unwanted interpolation between neighbouring depth values on the same MIP level!
-#if defined( XE_GTAO_HYBRID_HALF_RES )
-                    const lpfloat mipLevel    = (lpfloat)clamp( log2( sampleOffsetLength ) - consts.DepthMIPSamplingOffset, 0, XE_GTAO_HYBRID_DEPTH_MIP_MAX );
-#else
-                    const lpfloat mipLevel    = (lpfloat)clamp( log2( sampleOffsetLength ) - consts.DepthMIPSamplingOffset, 0, XE_GTAO_DEPTH_MIP_LEVELS );
-#endif
+                const lpfloat mipLevel    = (lpfloat)clamp( log2( sampleOffsetLength ) - consts.DepthMIPSamplingOffset, 0, XE_GTAO_DEPTH_MIP_LEVELS );
 
                 // Snap to pixel center (more correct direction math, avoids artifacts due to sampling pos not matching depth texel center - messes up slope - but adds other 
                 // artifacts due to them being pushed off the slice). Also use full precision for high res cases.

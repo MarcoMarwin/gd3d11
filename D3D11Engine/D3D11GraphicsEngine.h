@@ -411,9 +411,6 @@ public:
     std::unique_ptr<D3D11Effect> Effects;
 
     D3D11PfxRenderer* GetPfxRenderer() const { return PfxRenderer.get(); }
-    void AddXeGTAOPreLightingPass( RenderGraph& graph,
-                                   RGResourceHandle normalsResource,
-                                   RGResourceHandle backBufferHandle );
     D3D11Texture* GetDistortionTexture() const { return DistortionTexture.get(); }
     D3D11Texture* GetBlueNoiseTexture() const { return BlueNoiseTexture.get(); }
     D3D11Texture* GetWhiteTexture() const { return WhiteTexture.get(); }
