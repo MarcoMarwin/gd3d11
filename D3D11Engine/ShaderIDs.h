@@ -146,5 +146,6 @@ enum class CShaderID : size_t {
     CS_VobPatchArgs,
     CS_VobHiZCopy,
     CS_VobHiZReduce,
+    CS_WorldMeshCull,
     COUNT
 };

@@ -582,8 +582,8 @@ struct PsSimpleFFdata {
     float4 textureFactor;
     float2 windowSkyParams;
     // x is set for City_Window when both HDR tone mapping and AA are off.
-    // In that direct scene-to-gamma path the authored alpha must not receive
-    // the extra pane-opacity floor used by the post-processed path.
+    // In that direct scene-to-gamma path the transparent pane overlay is
+    // suppressed; the opaque frame remains in the main alpha-test pass.
     float2 padding;
 };
 

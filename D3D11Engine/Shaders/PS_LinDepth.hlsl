@@ -56,6 +56,11 @@ struct PS_OUTPUT
 PS_OUTPUT PSMain( PS_INPUT Input )
 {
 	float4 color = TX_Texture0.Sample(SS_Linear, Input.vTexcoord);
+	// City_Window uses one replacement texture for both the opaque frame and
+	// the transparent pane. The pane must not enter the depth prepass: the
+	// main lit pass discards it and the transparent replay handles it later.
+	if (MI_MaterialPadding1 > 0.5f && color.a <= (170.0f / 255.0f))
+		discard;
 	
 	// WorldMesh can always do the alphatest
 	DoAlphaTest(color.a);

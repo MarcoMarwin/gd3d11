@@ -114,6 +114,25 @@ struct GpuVobPatchConstantsData {
 };
 static_assert( sizeof( GpuVobPatchConstantsData ) == 16 );
 
+struct GpuWorldMeshCullClusterInfo {
+    XMFLOAT3 BBoxMin;
+    UINT ArgIndex;
+    XMFLOAT3 BBoxMax;
+    UINT Enabled;
+};
+static_assert( sizeof( GpuWorldMeshCullClusterInfo ) == 32 );
+
+struct GpuWorldMeshCullConstantsData {
+    XMFLOAT4X4 CullViewProj;
+    UINT ClusterCount;
+    UINT HiZWidth;
+    UINT HiZHeight;
+    UINT HiZMipCount;
+    UINT EnableOcclusion;
+    UINT Padding[3];
+};
+static_assert( sizeof( GpuWorldMeshCullConstantsData ) == 96 );
+
 template <typename T>
 uint64_t HashGpuVobPerformanceSetting( uint64_t hash, const T& value ) {
     const auto* bytes = reinterpret_cast<const unsigned char*>( &value );
@@ -1288,6 +1307,14 @@ void D3D11GraphicsEngine::LogGpuVobPerformanceStats() {
         << " shadowVobLodMeshes=" << m_GpuVobPerformanceStats.ShadowVobLodMeshes
         << " shadowVobLodSourceTris=" << m_GpuVobPerformanceStats.ShadowVobLodSourceTriangles
         << " shadowVobLodTris=" << m_GpuVobPerformanceStats.ShadowVobLodTriangles
+        << " worldMeshCull=" << m_GpuVobPerformanceStats.WorldMeshCullActive
+        << "/" << m_GpuVobPerformanceStats.WorldMeshCullAttempts
+        << " worldMeshCullFallback=" << m_GpuVobPerformanceStats.WorldMeshCullFallback
+        << " worldMeshClusters=" << m_GpuVobPerformanceStats.WorldMeshCullEligibleClusters
+        << "/" << m_GpuVobPerformanceStats.WorldMeshCullCandidateClusters
+        << " worldMeshIndirectCalls=" << m_GpuVobPerformanceStats.WorldMeshCullIndirectDrawCalls
+        << " worldMeshCullDispatchesPerFrame=" << (static_cast<double>( m_GpuVobPerformanceStats.WorldMeshCullDispatches )
+            / measurementFrames)
         << " indirectCalls=" << m_GpuVobPerformanceStats.IndirectDrawCalls
         << " mdiBatches=" << m_GpuVobPerformanceStats.MdiBatches
         << " mdiCommands=" << m_GpuVobPerformanceStats.MdiCommands
@@ -1449,7 +1476,7 @@ void D3D11GraphicsEngine::DisableGpuVobGeometryArena( const char* reason ) {
         << (reason ? reason : "unknown failure");
 }
 
-void D3D11GraphicsEngine::BuildGpuVobHiZ() {
+void D3D11GraphicsEngine::BuildGpuVobHiZ( bool allowWorldMeshOnly ) {
     TracyD3D11ZoneCGX( "GpuVobHiZ" );
     if ( GpuVobHiZBuildAttemptedThisFrame ) {
         return;
@@ -1459,8 +1486,9 @@ void D3D11GraphicsEngine::BuildGpuVobHiZ() {
     if ( IsGpuVobRuntimeDisabled() || IsGpuVobHiZRuntimeDisabled()
         || !settings.GetEffectiveGpuVobOcclusionCulling() || FeatureLevel10Compatibility
         || !settings.DebugSettings.Culling.CullVobs || !Context || !ShaderManager
-        || m_FrameGeometryCache.vobVisuals.empty()
-        || m_FrameGeometryCache.sortedInstancedMeshes.empty() ) {
+        || ( !allowWorldMeshOnly
+            && ( m_FrameGeometryCache.vobVisuals.empty()
+                || m_FrameGeometryCache.sortedInstancedMeshes.empty() ) ) ) {
         return;
     }
     ++m_GpuVobPerformanceStats.HiZRequests;
@@ -1520,6 +1548,176 @@ void D3D11GraphicsEngine::BuildGpuVobHiZ() {
     m_GpuVobPerformanceStats.HiZPrepareMsTotal += hizPrepareMs;
     m_GpuVobPerformanceStats.HiZPrepareMsMax = std::max(
         m_GpuVobPerformanceStats.HiZPrepareMsMax, hizPrepareMs );
+}
+
+bool D3D11GraphicsEngine::PrepareGpuWorldMeshHiZCulling(
+    const std::vector<GpuWorldMeshCullItem>& items ) {
+    auto& cache = m_FrameGeometryCache;
+    cache.worldMeshGpuCullingActive = false;
+    cache.worldMeshGpuCullCount = 0;
+    cache.MainWorldGpuOcclusionArgsBuffer = nullptr;
+    ++m_GpuVobPerformanceStats.WorldMeshCullAttempts;
+
+    const auto& settings = Engine::GAPI->GetRendererState().RendererSettings;
+    const auto failWorldMeshPath = [this]( const char* reason ) {
+        ++m_GpuVobPerformanceStats.WorldMeshCullFallback;
+        LogError() << "[GpuVobPerf] world-mesh Hi-Z cluster fallback: "
+            << ( reason ? reason : "unknown failure" );
+        return false;
+    };
+
+    if ( items.empty()
+        || IsGpuVobRuntimeDisabled() || IsGpuVobHiZRuntimeDisabled()
+        || !settings.GetEffectiveGpuVobOcclusionCulling()
+        || FeatureLevel10Compatibility || !Context || !ShaderManager
+        || !GpuVobHiZBuiltThisFrame || !GpuVobHiZShaderResourceView
+        || GpuVobHiZWidth == 0 || GpuVobHiZHeight == 0 || GpuVobHiZMipCount == 0 ) {
+        return failWorldMeshPath( "world Hi-Z or cluster prerequisites unavailable" );
+    }
+
+    const auto cullShader = ShaderManager->GetCShader( CShaderID::CS_WorldMeshCull );
+    if ( !cullShader ) {
+        return failWorldMeshPath( "world-mesh Hi-Z shader unavailable" );
+    }
+
+    const size_t clusterBytes = items.size() * sizeof( GpuWorldMeshCullClusterInfo );
+    const size_t argsBytes = items.size() * sizeof( D3D11_DRAW_INDEXED_INSTANCED_INDIRECT_ARGS );
+    if ( clusterBytes == 0 || argsBytes == 0
+        || clusterBytes > std::numeric_limits<UINT>::max()
+        || argsBytes > std::numeric_limits<UINT>::max() ) {
+        return failWorldMeshPath( "world-mesh cluster buffer exceeds D3D11 limits" );
+    }
+
+    std::vector<GpuWorldMeshCullClusterInfo> clusters( items.size() );
+    std::vector<D3D11_DRAW_INDEXED_INSTANCED_INDIRECT_ARGS> args( items.size() );
+    UINT eligibleClusters = 0;
+    for ( size_t index = 0; index < items.size(); ++index ) {
+        const auto& item = items[index];
+        auto& cluster = clusters[index];
+        cluster.ArgIndex = static_cast<UINT>( index );
+        cluster.Enabled = 0;
+        cluster.BBoxMin = XMFLOAT3( 0.0f, 0.0f, 0.0f );
+        cluster.BBoxMax = XMFLOAT3( 0.0f, 0.0f, 0.0f );
+
+        args[index].IndexCountPerInstance = item.IndexCount;
+        args[index].InstanceCount = 1;
+        args[index].StartIndexLocation = item.BaseIndexLocation;
+        args[index].BaseVertexLocation = 0;
+        args[index].StartInstanceLocation = 0;
+
+        const WorldMeshInfo* mesh = item.Mesh;
+        const bool validBounds = mesh && mesh->HasBoundingBox
+            && std::isfinite( mesh->BoundingBox.Min.x )
+            && std::isfinite( mesh->BoundingBox.Min.y )
+            && std::isfinite( mesh->BoundingBox.Min.z )
+            && std::isfinite( mesh->BoundingBox.Max.x )
+            && std::isfinite( mesh->BoundingBox.Max.y )
+            && std::isfinite( mesh->BoundingBox.Max.z )
+            && mesh->BoundingBox.Min.x <= mesh->BoundingBox.Max.x
+            && mesh->BoundingBox.Min.y <= mesh->BoundingBox.Max.y
+            && mesh->BoundingBox.Min.z <= mesh->BoundingBox.Max.z;
+        if ( item.OcclusionEligible && validBounds ) {
+            cluster.BBoxMin = mesh->BoundingBox.Min;
+            cluster.BBoxMax = mesh->BoundingBox.Max;
+            cluster.Enabled = 1;
+            ++eligibleClusters;
+        }
+    }
+
+    m_GpuVobPerformanceStats.WorldMeshCullCandidateClusters += items.size();
+    m_GpuVobPerformanceStats.WorldMeshCullEligibleClusters += eligibleClusters;
+    if ( eligibleClusters == 0 ) {
+        return failWorldMeshPath( "no world-mesh cluster has a safe bounding box" );
+    }
+
+    if ( !GpuWorldMeshCullClusterBuffer
+        || GpuWorldMeshCullClusterBuffer->GetSizeInBytes() < clusterBytes ) {
+        auto buffer = std::make_unique<D3D11VertexBuffer>();
+        if ( buffer->Init( clusters.data(), static_cast<UINT>( clusterBytes ),
+            D3D11VertexBuffer::B_SHADER_RESOURCE,
+            D3D11VertexBuffer::U_DEFAULT,
+            D3D11VertexBuffer::CA_NONE,
+            "GpuWorldMeshCullClusters",
+            sizeof( GpuWorldMeshCullClusterInfo ) ) != XR_SUCCESS ) {
+            return failWorldMeshPath( "world-mesh cluster buffer creation failed" );
+        }
+        GpuWorldMeshCullClusterBuffer = std::move( buffer );
+    } else if ( GpuWorldMeshCullClusterBuffer->UpdateBufferSubresource(
+        clusters.data(), static_cast<UINT>( clusterBytes ) ) != XR_SUCCESS ) {
+        return failWorldMeshPath( "world-mesh cluster upload failed" );
+    }
+
+    const auto worldArgsBindFlags = static_cast<D3D11IndirectBuffer::EBindFlags>(
+        D3D11IndirectBuffer::B_INDEXBUFFER | D3D11IndirectBuffer::B_UNORDERED_ACCESS );
+    if ( !GpuWorldMeshCullArgsBuffer
+        || GpuWorldMeshCullArgsBuffer->GetSizeInBytes() < argsBytes ) {
+        auto buffer = std::make_unique<D3D11IndirectBuffer>();
+        if ( buffer->Init( args.data(), static_cast<UINT>( argsBytes ),
+            worldArgsBindFlags,
+            D3D11IndirectBuffer::U_DEFAULT,
+            D3D11IndirectBuffer::CA_NONE,
+            "GpuWorldMeshCullIndirectArgs" ) != XR_SUCCESS ) {
+            return failWorldMeshPath( "world-mesh indirect-args buffer creation failed" );
+        }
+        GpuWorldMeshCullArgsBuffer = std::move( buffer );
+    } else if ( GpuWorldMeshCullArgsBuffer->UpdateBufferSubresource(
+        args.data(), static_cast<UINT>( argsBytes ) ) != XR_SUCCESS ) {
+        return failWorldMeshPath( "world-mesh indirect-args upload failed" );
+    }
+
+    if ( !GpuWorldMeshCullConstantBuffer ) {
+        GpuWorldMeshCullConstantBuffer = std::make_unique<D3D11ConstantBuffer>(
+            sizeof( GpuWorldMeshCullConstantsData ), nullptr );
+    }
+
+    GpuWorldMeshCullConstantsData constants = {};
+    const XMMATRIX viewProj = XMMatrixMultiply(
+        XMLoadFloat4x4( &Engine::GAPI->GetProjectionMatrix() ),
+        Engine::GAPI->GetViewMatrixXM() );
+    XMStoreFloat4x4( &constants.CullViewProj, viewProj );
+    constants.ClusterCount = static_cast<UINT>( items.size() );
+    constants.HiZWidth = GpuVobHiZWidth;
+    constants.HiZHeight = GpuVobHiZHeight;
+    constants.HiZMipCount = GpuVobHiZMipCount;
+    constants.EnableOcclusion = 1;
+    GpuWorldMeshCullConstantBuffer->UpdateBuffer( &constants )
+        ->BindToComputeShader( 0 );
+
+    ID3D11ShaderResourceView* srvs[2] = {
+        GpuWorldMeshCullClusterBuffer->GetShaderResourceView().Get(),
+        GpuVobHiZShaderResourceView.Get(),
+    };
+    ID3D11UnorderedAccessView* argsUav =
+        GpuWorldMeshCullArgsBuffer->GetUnorderedAccessView().Get();
+    if ( !srvs[0] || !srvs[1] || !argsUav ) {
+        ID3D11Buffer* nullConstantBuffer = nullptr;
+        GetContext()->CSSetConstantBuffers( 0, 1, &nullConstantBuffer );
+        return failWorldMeshPath( "world-mesh Hi-Z binding unavailable" );
+    }
+
+    GetContext()->CSSetShaderResources( 0, 2, srvs );
+    GetContext()->CSSetUnorderedAccessViews( 0, 1, &argsUav, nullptr );
+    BeginGpuTimingZone( EGpuTimingZone::MainCull );
+    cullShader->Apply();
+    GetContext()->Dispatch(
+        ( static_cast<UINT>( items.size() ) + 63u ) / 64u, 1, 1 );
+    EndGpuTimingZone( EGpuTimingZone::MainCull );
+    ++m_GpuVobPerformanceStats.WorldMeshCullDispatches;
+    ++m_GpuVobPerformanceStats.GpuCullDispatches;
+
+    ID3D11ShaderResourceView* nullSrvs[2] = {};
+    ID3D11UnorderedAccessView* nullUav = nullptr;
+    ID3D11Buffer* nullConstantBuffer = nullptr;
+    GetContext()->CSSetUnorderedAccessViews( 0, 1, &nullUav, nullptr );
+    GetContext()->CSSetShaderResources( 0, 2, nullSrvs );
+    GetContext()->CSSetConstantBuffers( 0, 1, &nullConstantBuffer );
+    GetContext()->CSSetShader( nullptr, nullptr, 0 );
+
+    cache.worldMeshGpuCullingActive = true;
+    cache.worldMeshGpuCullCount = static_cast<UINT>( items.size() );
+    cache.MainWorldGpuOcclusionArgsBuffer = GpuWorldMeshCullArgsBuffer.get();
+    ++m_GpuVobPerformanceStats.WorldMeshCullActive;
+    return true;
 }
 
 bool D3D11GraphicsEngine::PrepareGpuVobGeometryArena() {
@@ -8066,6 +8264,8 @@ XRESULT D3D11GraphicsEngine::DrawWorldMesh( bool noTextures ) {
 
     // Draw depth only
     const auto& rendererSettings = Engine::GAPI->GetRendererState().RendererSettings;
+    const bool hasWorldDepthPrepass = rendererSettings.GetEffectiveDoZPrepass()
+        && rendererSettings.RendererMode == GothicRendererSettings::RM_Deferred;
     if ( (rendererSettings.GetEffectiveDoZPrepass()
             && rendererSettings.RendererMode == GothicRendererSettings::RM_Deferred )
         || isZPrepass) {
@@ -8109,6 +8309,49 @@ XRESULT D3D11GraphicsEngine::DrawWorldMesh( bool noTextures ) {
 
             DrawVertexBufferIndexedUINT( nullptr, nullptr, mesh.second->Indices.size(), mesh.second->BaseIndexLocation );
         }
+
+        // Build the current-frame world Hi-Z only after the opaque/alpha-test
+        // depth prepass. This allows the color pass to skip complete
+        // world-mesh and alpha-tested vegetation clusters without relying on
+        // stale camera data. A dedicated Z-prepass invocation returns before
+        // this step; the main deferred invocation repeats the depth setup and
+        // then performs the cluster test here.
+        if ( !isZPrepass && hasWorldDepthPrepass
+            && rendererSettings.DrawWorldMesh > 2
+            && rendererSettings.GetEffectiveGpuVobOcclusionCulling() ) {
+            static thread_local std::vector<GpuWorldMeshCullItem> worldMeshCullItems;
+            worldMeshCullItems.clear();
+            worldMeshCullItems.reserve( meshList.size() );
+            for ( const auto& mesh : meshList ) {
+                GpuWorldMeshCullItem item;
+                item.Mesh = static_cast<WorldMeshInfo*>( mesh.second );
+                item.IndexCount = static_cast<UINT>( std::min<size_t>(
+                    mesh.second ? mesh.second->Indices.size() : 0u,
+                    std::numeric_limits<UINT>::max() ) );
+                item.BaseIndexLocation = mesh.second ? mesh.second->BaseIndexLocation : 0u;
+
+                const int alphaFunc = mesh.first.Material
+                    ? mesh.first.Material->GetAlphaFunc() : zMAT_ALPHA_FUNC_NONE;
+                const bool depthMaterial = mesh.first.Info
+                    && mesh.first.Info->MaterialType == MaterialInfo::MT_None
+                    && mesh.first.Material
+                    && ( alphaFunc == zMAT_ALPHA_FUNC_NONE
+                        || alphaFunc == zMAT_ALPHA_FUNC_TEST )
+                    && zColor( mesh.first.Material->GetColor() ).bgra.alpha >= 255;
+                // Alpha-test clusters (the common world vegetation path) are
+                // eligible because the exact same material is present in the
+                // depth prepass. Blended/transparent meshes are deliberately
+                // kept on the original path.
+                item.OcclusionEligible = depthMaterial && mesh.first.AlphaLevel <= 1;
+                worldMeshCullItems.push_back( item );
+            }
+
+            BuildGpuVobHiZ( true );
+            if ( GpuVobHiZBuiltThisFrame ) {
+                PrepareGpuWorldMeshHiZCulling( worldMeshCullItems );
+            }
+        }
+
         if ( isZPrepass ) {
             UnbindWindowCutouts();
             return XR_SUCCESS;
@@ -8188,7 +8431,27 @@ XRESULT D3D11GraphicsEngine::DrawWorldMesh( bool noTextures ) {
             }
 
             if ( Engine::GAPI->GetRendererState().RendererSettings.DrawWorldMesh > 2 ) {
-                DrawVertexBufferIndexedUINT( nullptr, nullptr, mesh.second->Indices.size(), mesh.second->BaseIndexLocation );
+                const bool useWorldMeshGpuCulling =
+                    m_FrameGeometryCache.worldMeshGpuCullingActive
+                    && m_FrameGeometryCache.MainWorldGpuOcclusionArgsBuffer
+                    && i < m_FrameGeometryCache.worldMeshGpuCullCount;
+                if ( useWorldMeshGpuCulling ) {
+                    GetContext()->DrawIndexedInstancedIndirect(
+                        m_FrameGeometryCache.MainWorldGpuOcclusionArgsBuffer->GetIndirectBuffer().Get(),
+                        static_cast<UINT>( i * sizeof( D3D11_DRAW_INDEXED_INSTANCED_INDIRECT_ARGS ) ) );
+                    ++m_GpuVobPerformanceStats.WorldMeshCullIndirectDrawCalls;
+                    // The actual InstanceCount is produced on the GPU. Keep
+                    // the legacy triangle counter conservative and comparable
+                    // to the CPU path instead of reporting zero for culled
+                    // indirect commands.
+                    Engine::GAPI->GetRendererState().RendererInfo.FrameDrawnTriangles +=
+                        static_cast<int>( std::min<size_t>(
+                            mesh.second->Indices.size() / 3u,
+                            static_cast<size_t>( std::numeric_limits<int>::max() ) ) );
+                } else {
+                    DrawVertexBufferIndexedUINT( nullptr, nullptr,
+                        mesh.second->Indices.size(), mesh.second->BaseIndexLocation );
+                }
             }
         }
     }
@@ -10940,7 +11203,13 @@ XRESULT D3D11GraphicsEngine::DrawVOBsInstanced() {
                                     GetContext()->PSSetShaderResources( 13, 1, &srv[3] );
                                 }
 
-                                const int effectiveAlphaFunc = isWindowFallbackMaterial
+                                // City_Window contains opaque frame texels and fractional-alpha
+                                // pane texels in one material.  Keep the frame in the normal
+                                // lit pass, but force the alpha-test shader even when the Gothic
+                                // material declares BLEND.  Otherwise BindShaderForTexture()
+                                // selects PS_ParticleSimple_FF, which has no window-pane discard
+                                // and shades the dark 50%-alpha panes as an opaque surface.
+                                const int effectiveAlphaFunc = isWindowGlass || isWindowFallbackMaterial
                                     ? zMAT_ALPHA_FUNC_NONE
                                     : meshKey.Material->GetAlphaFunc();
                                 if ( BindShaderForTexture( tx,

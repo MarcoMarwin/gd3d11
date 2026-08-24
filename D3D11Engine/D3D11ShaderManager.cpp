@@ -489,6 +489,8 @@ XRESULT D3D11ShaderManager::Init() {
             .with_entrypoint( "CSCopyDepth" ) );
         Shaders.push_back( ShaderInfo::make<CShaderID::CS_VobHiZReduce>( "CS_VobHiZ.hlsl" )
             .with_entrypoint( "CSReduce" ) );
+        Shaders.push_back( ShaderInfo::make<CShaderID::CS_WorldMeshCull>( "CS_WorldMeshCull.hlsl" )
+            .with_entrypoint( "CSCullWorldMesh" ) );
 
         Shaders.push_back( ShaderInfo::make<CShaderID::CS_PFX_GodRayMask>( "CS_PFX_GodRayMask.hlsl" ));
 

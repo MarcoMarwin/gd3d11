@@ -1282,8 +1282,8 @@ void ImGuiShim::RenderSettingsWindow()
             ImGui::Checkbox( Tr( "Hi-Z Occlusion Culling", u8"Hi-Z-Occlusion-Culling" ),
                 &settings.GpuVobOcclusionCulling );
             ImGui::SetItemTooltip( "%s", Tr(
-                "Experimental: tests static VOBs against the Hi-Z depth of the already-rendered world and draws only those that remain visible. GPU culling, indirect drawing and shared geometry are managed internally; the standard DX11 path remains available on every supported GPU.",
-                u8"Experimentell: Pr\u00FCft statische VOBs gegen die Hi-Z-Tiefe der bereits gerenderten Welt und zeichnet nur die sichtbaren VOBs. GPU-Culling, indirektes Zeichnen und gemeinsame Geometrie werden intern verwaltet; der Standard-DX11-Pfad bleibt auf jeder unterst\u00FCtzten GPU verf\u00FCgbar." ) );
+                "Experimental: tests static VOBs and opaque/alpha-tested world-mesh clusters against the already-rendered world depth. Hidden clusters are submitted with zero indirect instances; transparent materials, water and unknown bounds keep the standard path.",
+                u8"Experimentell: Pr\u00FCft statische VOBs sowie opake/alpha-getestete Weltmesh-Cluster gegen die bereits gerenderte Welttiefe. Verdeckte Cluster werden mit null indirekten Instanzen eingereicht; transparente Materialien, Wasser und unbekannte Bounds bleiben im Standardpfad." ) );
             ImGui::EndDisabled();
 
             ImGui::Separator();

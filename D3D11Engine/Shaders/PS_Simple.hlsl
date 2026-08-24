@@ -49,16 +49,29 @@ float4 PSMain( PS_INPUT Input ) : SV_TARGET
 		if (color.a > (170.0f / 255.0f))
 			discard;
 
-		// Soften overly opaque authored panes. The visibility floor is useful
-		// after the normal HDR/AA post-processing path, but it creates a dark
-		// veil when the scene goes directly from the linear target to gamma.
-		// Keep the authored alpha in that exact no-HDR/no-AA path instead.
-		const float softenedAlpha = color.a * 0.82f;
-		color.a = cbFFData.padding.x > 0.5f
-			? softenedAlpha
-			: max(softenedAlpha, 0.16f);
+		// The normal post-processed path uses the replacement texture as a
+		// deliberately subtle glass overlay. With both HDR tone mapping and AA
+		// disabled, however, there is no scene-space post-processing pass to
+		// balance that dark overlay. Keep the pane genuinely transparent in that
+		// direct scene-to-gamma path; the opaque frame was already rendered by the
+		// main alpha-test pass and is not affected here.
+		const bool directSceneToGammaPath = cbFFData.padding.x > 0.5f;
+		if (directSceneToGammaPath)
+		{
+			// There is no transparent glass contribution in the direct
+			// scene-to-gamma path. Discard instead of merely returning alpha 0,
+			// so this pass cannot darken the pane even if a stale/non-alpha blend
+			// state is present. The opaque frame was already rendered by the main
+			// alpha-test pass.
+			discard;
+		}
+		else
+		{
+			const float softenedAlpha = color.a * 0.82f;
+			color.a = max(softenedAlpha, 0.16f);
+		}
 
-		if (cbFFData.windowSkyParams.y > 0.5f)
+		if (!directSceneToGammaPath && cbFFData.windowSkyParams.y > 0.5f)
 		{
 			const float skyCutoff = cbFFData.windowSkyParams.x;
 

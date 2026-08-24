@@ -381,8 +381,8 @@ public:
     /** Copies the depth stencil buffer to DepthStencilBufferCopy */
     void CopyDepthStencil();
 
-    /** Builds the world-only reversed-Z Hi-Z pyramid used by GPU VOB occlusion. */
-    void BuildGpuVobHiZ();
+    /** Builds the world-only reversed-Z Hi-Z pyramid used by GPU scene occlusion. */
+    void BuildGpuVobHiZ( bool allowWorldMeshOnly = false );
 
     /** Draws particle meshes */
     void DrawFrameParticleMeshes( std::unordered_map<zCVob*, MeshVisualInfo*>& progMeshes ) override;
@@ -576,6 +576,13 @@ private:
     void EnsureFrameVobVisibilityCollected();
     bool PrepareGpuVobGeometryArena();
     bool PrepareGpuVobCulling();
+    struct GpuWorldMeshCullItem {
+        WorldMeshInfo* Mesh = nullptr;
+        UINT IndexCount = 0;
+        UINT BaseIndexLocation = 0;
+        bool OcclusionEligible = false;
+    };
+    bool PrepareGpuWorldMeshHiZCulling( const std::vector<GpuWorldMeshCullItem>& items );
     bool EnsureGpuVobHiZResources();
     void PollGpuVobVisibleCountReadback( uint64_t settingsKey, uint64_t worldGeneration );
     void ScheduleGpuVobVisibleCountReadback( const FrameGeometryCache& cache );
@@ -687,6 +694,8 @@ private:
         };
 
         bool worldMeshBuilt    = false;  ///< CollectVisibleSections + MDI arg build + buffer upload done
+        bool worldMeshGpuCullingActive = false; ///< Current-frame Hi-Z cluster args are valid for the main world pass
+        UINT worldMeshGpuCullCount = 0;
         bool vobVisibilityCollected = false; ///< Final camera VOB list collected once for VOBs and window cutouts
         bool vobInstancesUploaded = false; ///< CollectVisibleVobs + DynamicInstancingBuffer upload done
         bool vobGpuCullingPrepared = false; ///< Main-view GPU cull/indirect args prepared once per frame
@@ -700,6 +709,7 @@ private:
         std::vector<CachedWorldMeshDraw> sortedDepthWorldMeshes;
         std::vector<VobInfo*> visibleWindowVobs;
         D3D11IndirectBuffer*           MainWorldIndirectArgsBuffer = nullptr;
+        D3D11IndirectBuffer*           MainWorldGpuOcclusionArgsBuffer = nullptr;
         D3D11VertexBuffer*             MainVobInstancingBuffer = nullptr;
         D3D11VertexBuffer*             MainVobGpuInstanceBuffer = nullptr;
         D3D11IndirectBuffer*            MainVobGpuIndirectArgsBuffer = nullptr;
@@ -725,6 +735,8 @@ private:
 
         void Reset() {
             worldMeshBuilt      = false;
+            worldMeshGpuCullingActive = false;
+            worldMeshGpuCullCount = 0;
             vobVisibilityCollected = false;
             vobInstancesUploaded = false;
             vobGpuCullingPrepared = false;
@@ -737,6 +749,7 @@ private:
             sortedDepthWorldMeshes.clear();
             visibleWindowVobs.clear();
             MainWorldIndirectArgsBuffer = nullptr;
+            MainWorldGpuOcclusionArgsBuffer = nullptr;
             MainVobInstancingBuffer = nullptr;
             MainVobGpuInstanceBuffer = nullptr;
             MainVobGpuIndirectArgsBuffer = nullptr;
@@ -799,6 +812,11 @@ private:
     std::unique_ptr<D3D11ConstantBuffer> GpuVobCullConstantBuffer;
     std::unique_ptr<D3D11ConstantBuffer> GpuVobPatchConstantBuffer;
 
+    /** Per-frame world-mesh cluster metadata/arguments for current-frame Hi-Z culling. */
+    std::unique_ptr<D3D11VertexBuffer> GpuWorldMeshCullClusterBuffer;
+    std::unique_ptr<D3D11IndirectBuffer> GpuWorldMeshCullArgsBuffer;
+    std::unique_ptr<D3D11ConstantBuffer> GpuWorldMeshCullConstantBuffer;
+
     struct GpuVobGeometryRange {
         UINT StartIndexLocation = 0;
         INT BaseVertexLocation = 0;
@@ -858,6 +876,13 @@ private:
         uint64_t ShadowVobLodMeshes = 0;
         uint64_t ShadowVobLodSourceTriangles = 0;
         uint64_t ShadowVobLodTriangles = 0;
+        uint64_t WorldMeshCullAttempts = 0;
+        uint64_t WorldMeshCullActive = 0;
+        uint64_t WorldMeshCullFallback = 0;
+        uint64_t WorldMeshCullCandidateClusters = 0;
+        uint64_t WorldMeshCullEligibleClusters = 0;
+        uint64_t WorldMeshCullIndirectDrawCalls = 0;
+        uint64_t WorldMeshCullDispatches = 0;
         uint64_t IndirectDrawCalls = 0;
         uint64_t MdiBatches = 0;
         uint64_t MdiCommands = 0;
