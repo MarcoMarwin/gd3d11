@@ -1257,6 +1257,18 @@ void D3D11GraphicsEngine::LogGpuVobPerformanceStats() {
     const double gpuVisibleSamplePercent =
         (static_cast<double>( m_GpuVobPerformanceStats.GpuVisibleCountSamples )
             / measurementFrames) * 100.0;
+    const double worldMeshCullAverageEligibleClusters =
+        m_GpuVobPerformanceStats.WorldMeshCullActive > 0
+        ? static_cast<double>( m_GpuVobPerformanceStats.WorldMeshCullEligibleClusters )
+            / static_cast<double>( m_GpuVobPerformanceStats.WorldMeshCullActive )
+        : 0.0;
+    const double worldMeshCullRejectPct =
+        m_GpuVobPerformanceStats.WorldMeshCullReadbackSamples > 0
+        && worldMeshCullAverageEligibleClusters > 0.0
+        ? (static_cast<double>( m_GpuVobPerformanceStats.WorldMeshCullRejectedClusters )
+            / static_cast<double>( m_GpuVobPerformanceStats.WorldMeshCullReadbackSamples )
+            / worldMeshCullAverageEligibleClusters) * 100.0
+        : 0.0;
     LogInfo() << "[GpuVobPerf] frames=" << m_GpuVobPerformanceStats.Frames
         << " settingsKey=" << m_GpuVobPerformanceSettingsKey
         << " worldGeneration=" << m_GpuVobPerformanceWorldGeneration
@@ -1319,14 +1331,7 @@ void D3D11GraphicsEngine::LogGpuVobPerformanceStats() {
         << " worldMeshCullRejectedAvg=" << (m_GpuVobPerformanceStats.WorldMeshCullReadbackSamples > 0
             ? static_cast<double>( m_GpuVobPerformanceStats.WorldMeshCullRejectedClusters )
                 / static_cast<double>( m_GpuVobPerformanceStats.WorldMeshCullReadbackSamples ) : 0.0)
-        << " worldMeshCullRejectPct=" << (m_GpuVobPerformanceStats.WorldMeshCullReadbackSamples > 0
-            && m_GpuVobPerformanceStats.WorldMeshCullEligibleClusters > 0
-            && m_GpuVobPerformanceStats.WorldMeshCullActive > 0
-            ? (static_cast<double>( m_GpuVobPerformanceStats.WorldMeshCullRejectedClusters )
-                / static_cast<double>( m_GpuVobPerformanceStats.WorldMeshCullReadbackSamples )
-                / (static_cast<double>( m_GpuVobPerformanceStats.WorldMeshCullEligibleClusters )
-                    / static_cast<double>( m_GpuVobPerformanceStats.WorldMeshCullActive )) * 100.0
-            : 0.0)
+        << " worldMeshCullRejectPct=" << worldMeshCullRejectPct
         << " worldMeshIndirectCalls=" << m_GpuVobPerformanceStats.WorldMeshCullIndirectDrawCalls
         << " worldMeshCullDispatchesPerFrame=" << (static_cast<double>( m_GpuVobPerformanceStats.WorldMeshCullDispatches )
             / measurementFrames)
