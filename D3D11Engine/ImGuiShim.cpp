@@ -1569,6 +1569,12 @@ void ImGuiShim::RenderSettingsWindow()
             ImText( Tr( "Shadow Quality", u8"Schattenqualit\u00E4t" ), buttonWidth ); ImGui::SameLine();
             if ( ImComboBoxC( "##ShadowQuality", shadowQualities, &settings.ShadowQuality, [&settings]{
                 settings.ApplyShadowQualitySettings();
+                if ( settings.ShadowQuality == GothicRendererSettings::E_ShadowQuality::SHADOW_QUALITY_VERY_LOW
+                    && Engine::GAPI ) {
+                    // Drop already allocated pointlight cubemaps immediately;
+                    // Very Low has pointlight shadows disabled entirely.
+                    Engine::GAPI->ReleasePointlightShadowResources();
+                }
             } ) ) {
                 ImGui::EndCombo();
             }

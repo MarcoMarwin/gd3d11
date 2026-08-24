@@ -944,9 +944,12 @@ struct GothicRendererSettings {
             break;
         case E_ShadowQuality::SHADOW_QUALITY_VERY_LOW:
             EnableShadows = true;
-            EnablePointlightShadows = EPointLightShadowMode::PLS_UPDATE_DYNAMIC;
+            // Very Low keeps CSM shadows, but disables pointlight shadows
+            // completely. The previous 64px cubemap produced visibly poor
+            // results and still consumed update/sampling work.
+            EnablePointlightShadows = EPointLightShadowMode::PLS_DISABLED;
             ShadowMapSize = 512;
-            PointlightShadowMapSize = 64;
+            PointlightShadowMapSize = 128;
             break;
         case E_ShadowQuality::SHADOW_QUALITY_LOW:
             EnableShadows = true;
@@ -991,6 +994,16 @@ struct GothicRendererSettings {
         if ( ShadowMapSize <= 1024 ) return E_ShadowKernelQuality::SHADOW_KERNEL_PCF_LOW;
         if ( ShadowMapSize <= 2048 ) return E_ShadowKernelQuality::SHADOW_KERNEL_PCF_MEDIUM;
         return E_ShadowKernelQuality::SHADOW_KERNEL_PCSS;
+    }
+
+    E_ShadowKernelQuality GetPointlightShadowKernelQuality() const {
+        // Medium keeps the higher CSM quality, but pointlight shadowmaps stay
+        // at 128px. Keep their stable, compact 4-tap PCF footprint instead of
+        // exposing the 8-tap medium kernel on the low-resolution cubemap.
+        if ( ShadowQuality == E_ShadowQuality::SHADOW_QUALITY_MEDIUM ) {
+            return E_ShadowKernelQuality::SHADOW_KERNEL_PCF_LOW;
+        }
+        return GetShadowKernelQuality();
     }
 
     /** Rendering options */
