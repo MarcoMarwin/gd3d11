@@ -4,6 +4,7 @@
 #include "D3D11LegacyDeferredShading.h"
 
 #include "D3D11GraphicsEngine.h"
+#include "D3D11PfxRenderer.h"
 #include "D3D11PointLight.h"
 #include "Engine.h"
 #include "GothicAPI.h"
