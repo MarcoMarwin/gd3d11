@@ -40,6 +40,7 @@ Texture2D	TX_Nrm : register( t1 );
 Texture2D	TX_Depth : register( t2 );
 TextureCube	TX_ShadowCube : register( t3 );
 Texture2D	TX_SI_SP : register( t7 );
+Texture2D	TX_XeGTAO : register( t10 );
 
 //--------------------------------------------------------------------------------------
 // Input / Output structures
@@ -123,6 +124,7 @@ float4 PSMain( PS_INPUT Input ) : SV_TARGET
 	float indoorPixel = diffuse.a < 0.5f ? 1.0f : 0.0f;
 	float indoorBoundary = saturate(PL_Outdoor + (1.0f - PL_Outdoor) * indoorPixel);
 	lighting *= lerp(indoorBoundary, 1.0f, saturate(PL_IgnoreIndoorOutdoorLimit));
+	lighting *= TX_XeGTAO.SampleLevel( SS_Linear, uv, 0 ).r;
 
 	return float4(saturate(lighting),1);
 }

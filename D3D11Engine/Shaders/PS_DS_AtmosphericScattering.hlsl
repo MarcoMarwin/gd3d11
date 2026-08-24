@@ -81,6 +81,7 @@ Texture2DArray TX_ShadowmapArray : register(t3);
 #endif
 Texture2D TX_SI_SP : register(t7);
 Texture2D TX_ShadowBlueNoise : register(t8);
+Texture2D TX_XeGTAO : register(t10);
 
 #include "ShadowSampling.h"
 #include "include/PointLightShadows.h"
@@ -127,6 +128,10 @@ float4 PSMain(PS_INPUT Input) : SV_TARGET
     if (!(expDepth > 0.0f))
         // Sky pixel - no geometry was written, just return the diffuse (sky) color
         return float4(diffuse.rgb, 1);
+
+    // Pre-light A/B path: AO modulates diffuse/ambient energy before the
+    // world-light result is assembled. Specular remains independently tested.
+    float3 aoDiffuse = diffuse.rgb * TX_XeGTAO.SampleLevel( SS_Linear, uv, 0 ).r;
 
 	// Get the second GBuffer
     float2 gb2 = TX_Nrm.Sample(SS_Linear, uv).xy;
@@ -211,18 +216,18 @@ float4 PSMain(PS_INPUT Input) : SV_TARGET
     {
         // Keep the exact pre-moon night base. Moonlight is additive only, so
         // its shadow can remove that tiny contribution but never darken the night.
-        litPixel = diffuse.rgb * SQ_ShadowStrength * sunStrength * shadowAO;
+        litPixel = aoDiffuse * SQ_ShadowStrength * sunStrength * shadowAO;
 
         // Indirect night illumination is not removed by a direct moon or
         // point-light shadow. Keep a restrained floor so indoor materials and
         // downward-facing geometry do not collapse to black.
         const float3 nightAmbientColor = float3(0.34f, 0.40f, 0.52f);
-        litPixel += diffuse.rgb * nightAmbientColor * 0.035f * worldAO;
+        litPixel += aoDiffuse * nightAmbientColor * 0.035f * worldAO;
 
         const float moonLightStrength = 0.14f;
         float moonDirect = sun;
         float3 moonColor = float3(0.42f, 0.56f, 1.0f);
-        litPixel += diffuse.rgb * moonColor * moonLightStrength * moonDirect * worldAO;
+        litPixel += aoDiffuse * moonColor * moonLightStrength * moonDirect * worldAO;
         litPixel += spec * moonColor * (moonLightStrength * 0.25f) * moonDirect;
     }
     else
@@ -231,8 +236,8 @@ float4 PSMain(PS_INPUT Input) : SV_TARGET
         float3 specColored = saturate(
             lerp(specBare, specBare * diffuse.rgb, specMod));
         litPixel = lerp(
-            diffuse.rgb * SQ_ShadowStrength * sunStrength * shadowAO,
-            diffuse.rgb * lightColor.rgb * lightColor.a * worldAO,
+            aoDiffuse * SQ_ShadowStrength * sunStrength * shadowAO,
+            aoDiffuse * lightColor.rgb * lightColor.a * worldAO,
             sun) + specColored;
     }
 
@@ -248,7 +253,7 @@ float4 PSMain(PS_INPUT Input) : SV_TARGET
 			mainLightDir, normal, V, sssShadow * sssVertexGate,
 			vegetationMask, twoSidedBacklitMaterial,
 			AC_EnableSSS, AC_SSSIntensity, 2.4f * sssLightWeight);
-		float3 transmissionLighting = diffuse.rgb * sssLightColor * sss;
+        float3 transmissionLighting = aoDiffuse * sssLightColor * sss;
 		float3 additiveLighting = litPixel + transmissionLighting;
 		float3 boundedExceptionLighting = max(litPixel, transmissionLighting);
 		litPixel = lerp(additiveLighting, boundedExceptionLighting, saturate(twoSidedBacklitMaterial));

@@ -1240,6 +1240,19 @@ void ImGuiShim::RenderSettingsWindow()
                 u8"Nutzt den speziellen transparenten city_windows-Renderingpfad. Deaktivieren l\u00E4sst diese Fenster undurchsichtig." ) );
 
             ImGui::Separator();
+            ImGui::TextUnformatted( Tr( "XeGTAO A/B test", u8"XeGTAO-A/B-Test" ) );
+            ImGui::Checkbox( Tr( "Distant AO optimization", u8"Entfernte AO-Optimierung" ),
+                &settings.AdvancedXeGTAOHybrid );
+            ImGui::Checkbox( Tr( "Apply AO before lighting", u8"AO vor dem Lichtpass anwenden" ),
+                &settings.AdvancedXeGTAOPreLighting );
+            ImGui::SetItemTooltip( "%s", Tr(
+                "A/B test: applies XeGTAO to opaque lighting before the final image is written. Off keeps the existing post-light composite. Unsupported preparation falls back safely.",
+                u8"A/B-Test: Wendet XeGTAO auf die opake Beleuchtung an, bevor das fertige Bild geschrieben wird. Aus behält das bisherige Post-Light-Composite. Bei nicht möglicher Vorbereitung erfolgt ein sicherer Fallback." ) );
+            ImGui::SetItemTooltip( "%s", Tr(
+                "Keeps the near field at full resolution and full quality. Distant XeGTAO uses half-resolution AO, fewer samples, and depth/normal-aware upsampling. No distance fade is applied. Runtime-only; compare against the unchecked baseline.",
+                u8"Beh\u00E4lt im Nahbereich volle Aufl\u00F6sung und volle Qualit\u00E4t. Entfernte XeGTAO-Bereiche nutzen halbe Aufl\u00F6sung, weniger Samples und tiefen-/normalenbewusstes Upsampling. Es wird nichts ausgeblendet. Nur Laufzeit; mit dem deaktivierten Basiswert vergleichen." ) );
+
+            ImGui::Separator();
             ImGui::TextUnformatted( Tr( "Shadow and world performance", u8"Schatten- und Welt-Performance" ) );
 
             ImGui::Checkbox( Tr( "Threaded shadow culling", u8"Paralleles Schatten-Culling" ), &settings.ThreadedShadowCulling );
@@ -1303,6 +1316,8 @@ void ImGuiShim::RenderSettingsWindow()
                 settings.AdvancedWetGroundSSR = true;
                 settings.AdvancedNightEnhance = true;
                 settings.AdvancedCityWindowTransparency = true;
+                settings.AdvancedXeGTAOHybrid = false;
+                settings.AdvancedXeGTAOPreLighting = false;
             }
             ImGui::EndDisabled();
             ImGui::SameLine();

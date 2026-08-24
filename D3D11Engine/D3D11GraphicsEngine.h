@@ -204,7 +204,8 @@ public:
     XRESULT DrawSkeletalMesh_Layered(SkeletalVobInfo* vi, const std::span<XMFLOAT4X4> transforms, float4 color, XMFLOAT4X4& world, float fatness = 1.0f);
 
     /** Draws a batch of skeletal mesh vobs */
-    void DrawSkeletalMeshVobs( const std::vector<SkeletalVobInfo*>& vis, float distance, bool updateState, bool drawAttachments );
+    void DrawSkeletalMeshVobs( const std::vector<SkeletalVobInfo*>& vis, float distance, bool updateState, bool drawAttachments,
+        bool useLayeredShadowPath = false );
 
     /** Draws a screen fade effects */
     XRESULT DrawScreenFade( void* camera ) override;
@@ -410,6 +411,9 @@ public:
     std::unique_ptr<D3D11Effect> Effects;
 
     D3D11PfxRenderer* GetPfxRenderer() const { return PfxRenderer.get(); }
+    void AddXeGTAOPreLightingPass( RenderGraph& graph,
+                                   RGResourceHandle normalsResource,
+                                   RGResourceHandle backBufferHandle );
     D3D11Texture* GetDistortionTexture() const { return DistortionTexture.get(); }
     D3D11Texture* GetBlueNoiseTexture() const { return BlueNoiseTexture.get(); }
     D3D11Texture* GetWhiteTexture() const { return WhiteTexture.get(); }
@@ -692,7 +696,7 @@ private:
         bool vobGpuCullingActive = false; ///< True only when the compute path completed successfully
         bool gpuVobGeometryArenaPrepared = false; ///< Shared static-VOB arena prepared once per frame
         bool vobWindMetadataPrepared = false; ///< Wind metadata prepared for cached vob visuals
-        bool skeletalBonesUploaded = false; ///< FL11 packed skeletal bone buffers uploaded for main/z-prepass reuse
+        bool skeletalBonesUploaded = false; ///< FL11 packed skeletal bone buffers uploaded for this frame
 
         std::vector<WorldMeshSectionInfo*> visibleSections;
         std::vector<D3D11_DRAW_INDEXED_INSTANCED_INDIRECT_ARGS> drawIndirectArgs;
@@ -709,8 +713,18 @@ private:
         std::vector<CachedInstancedMeshDraw> sortedInstancedMeshes;
         std::vector<SkeletalVobInfo*>   cachedMobs;
         std::vector<SkeletalVobInfo*>   visibleNpcs;
-        std::vector<SkeletalVobInfo*> skeletalBoneVisOrder;
-        std::vector<VS_ExConstantBuffer_SkeletalBoneRange> skeletalBoneRanges;
+
+        // Bone ranges are keyed by the vob instead of by one draw-list order.
+        // CSM cascades and pointlight cubes use different subsets of the same
+        // animated vobs, so an order-based cache could not be reused there.
+        struct CachedSkeletalBoneData {
+            VS_ExConstantBuffer_SkeletalBoneRange Range = {};
+            zCModel* Model = nullptr;
+            BaseVisualInfo* VisualInfo = nullptr;
+        };
+        std::unordered_map<SkeletalVobInfo*, CachedSkeletalBoneData> skeletalBoneCache;
+        std::vector<XMFLOAT4X4> skeletalBoneTransforms;
+        std::vector<XMFLOAT4X4> skeletalPrevBoneTransforms;
 
         void Reset() {
             worldMeshBuilt      = false;
@@ -736,8 +750,9 @@ private:
             sortedInstancedMeshes.clear();
             cachedMobs.clear();
             visibleNpcs.clear();
-            skeletalBoneVisOrder.clear();
-            skeletalBoneRanges.clear();
+            skeletalBoneCache.clear();
+            skeletalBoneTransforms.clear();
+            skeletalPrevBoneTransforms.clear();
         }
     };
     FrameGeometryCache m_FrameGeometryCache;
@@ -919,7 +934,7 @@ private:
     uint64_t m_GpuVobGeometryArenaDisabledSettingsKey = 0;
     uint64_t m_GpuVobGeometryArenaDisabledWorldGeneration = static_cast<uint64_t>( -1 );
 
-    /** FL11 packed structured buffers for skeletal skinning (main/z-prepass reusable path). */
+    /** FL11 packed structured buffers for skeletal skinning (shared by main and shadow stages per frame). */
     std::unique_ptr<D3D11VertexBuffer> SkeletalBoneTransformsBuffer;
     std::unique_ptr<D3D11VertexBuffer> SkeletalPrevBoneTransformsBuffer;
 

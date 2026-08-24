@@ -423,6 +423,9 @@ XRESULT D3D11TiledDeferredShading::DrawPointlightLights(
         context->CSSetShaderResources( 1, 1, normals.GetShaderResView().GetAddressOf() );
         context->CSSetShaderResources( 2, 1, depthCopy.GetShaderResView().GetAddressOf() );
         context->CSSetShaderResources( 7, 1, specular.GetShaderResView().GetAddressOf() );
+        ID3D11ShaderResourceView* xeGTAOAOSRV = graphicsEngine->GetPfxRenderer()
+            ? graphicsEngine->GetPfxRenderer()->GetXeGTAOLightingAOSRV() : nullptr;
+        context->CSSetShaderResources( 10, 1, &xeGTAOAOSRV );
 
         // Bind linear sampler to CS slot 0 (required for GBuffer SampleLevel calls)
         ID3D11SamplerState* linearSampler = graphicsEngine->GetDefaultSamplerState();

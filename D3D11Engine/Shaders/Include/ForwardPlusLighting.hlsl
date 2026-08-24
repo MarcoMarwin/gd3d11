@@ -74,6 +74,7 @@ Texture2DArray TX_ShadowmapArray : register( t3 );
 #endif
 
 Texture2D TX_ShadowBlueNoise : register( t6 );
+Texture2D FP_XeGTAO : register( t10 );
 
 // Comparison sampler for shadow maps
 SamplerComparisonState SS_Comp : register( s2 );
@@ -131,7 +132,8 @@ TextureCubeArray FP_StaticLowShadowCubeArray : register( t20 );
 float3 FP_ComputePointLighting(
     float3 wsPosition, float3 vsPosition, float3 normal,
     float4 diffuseColor, float specIntensity, float specPower,
-    float2 screenPos, float twoSidedBacklitMaterial, float vegetationBacklitMask )
+    float2 screenPos, float twoSidedBacklitMaterial, float npcMaterial,
+    float vegetationBacklitMask )
 {
     uint tileX = (uint)screenPos.x / FP_TILE_SIZE;
     uint tileY = (uint)screenPos.y / FP_TILE_SIZE;
@@ -183,7 +185,8 @@ float3 FP_ComputePointLighting(
             AC_EnableSSS, AC_SSSIntensity, 0.42f );
 
         // Don't fetch shadows if the light contribution is effectively zero.
-        if ( light.ShadowCubeIndex >= 0 && any(lighting > 0.001f) )
+        if ( light.ShadowCubeIndex >= 0 && any(lighting > 0.001f)
+            && (npcMaterial <= 0.5f || light.ShadowFilterPad[0] == 0u) )
         {
             const int shadowSlot = light.ShadowCubeIndex & 0x1fffffff;
             const bool lowStatic = (light.ShadowCubeIndex & 0x20000000) != 0;

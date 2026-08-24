@@ -231,6 +231,9 @@ FORWARD_PLUS_PS_OUTPUT PSMain( PS_INPUT Input )
 	ClipWindowCutouts(wsPosition, Input.vPosition.xy);
 	
 	float pixelDistZ = abs(vsPosition.z);
+	float xeGTAO = FP_TilePad.x > 0.5f
+		? FP_XeGTAO.Load( int3( int2( Input.vPosition.xy ), 0 ) ).r : 1.0f;
+	float3 aoDiffuseColor = color.rgb * xeGTAO;
 
 	// CSM shadow source is toggleable in Forward+: precomputed screen-space mask or direct CSM.
 	float shadow = vertLighting;
@@ -262,7 +265,7 @@ FORWARD_PLUS_PS_OUTPUT PSMain( PS_INPUT Input )
 	}
 #endif
 
-	float3 litPixel = FP_ComputeSunLighting(wsPosition, vsPosition, nrm, color.rgb, specIntensity, specPower, shadow, vertLighting, twoSidedBacklitMaterial, vegetationBacklitMask);
+	float3 litPixel = FP_ComputeSunLighting(wsPosition, vsPosition, nrm, aoDiffuseColor, specIntensity, specPower, shadow, vertLighting, twoSidedBacklitMaterial, vegetationBacklitMask);
 	
 	// Atmospheric scattering affects reflected surface lighting, not light
 	// emitted by the lamp itself.
@@ -277,7 +280,7 @@ FORWARD_PLUS_PS_OUTPUT PSMain( PS_INPUT Input )
 	// Point lights, only when close enough
 	if (pixelDistZ < 6000.0f) 
 	{
-		litPixel += FP_ComputePointLighting(wsPosition, vsPosition, nrm, float4(color.rgb, Input.vDiffuse.a), specIntensity, specPower, Input.vPosition.xy, twoSidedBacklitMaterial, npcMaterial, vegetationBacklitMask);
+		litPixel += FP_ComputePointLighting(wsPosition, vsPosition, nrm, float4(aoDiffuseColor, Input.vDiffuse.a), specIntensity, specPower, Input.vPosition.xy, twoSidedBacklitMaterial, npcMaterial, vegetationBacklitMask);
 	}
 
 	output.vColor = float4(litPixel, 1);

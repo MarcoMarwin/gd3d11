@@ -1274,6 +1274,10 @@ copy "$(OutDir)$(TargetName).pdb" "$(G1_SYSTEM_PATH)\ddraw.pdb"</Command>
     <ClCompile Include="zSndMss.cpp" />
     <None Include="Shaders\CS_VobCull.hlsl" />
     <None Include="Shaders\CS_VobHiZ.hlsl" />
+    <None Include="Shaders\CS_PFX_XeGTAO_HybridNear.hlsl" />
+    <None Include="Shaders\CS_PFX_XeGTAO_HybridFar.hlsl" />
+    <None Include="Shaders\PS_PFX_AOCompositeHybrid.hlsl" />
+    <None Include="Shaders\PS_PFX_ReconstructNormal.hlsl" />
     <None Include="Shaders\VS_DecalInstanced.hlsl" />
     <None Include="Shaders\PS_PFX_VelocityDebug.hlsl" />
     <ClCompile Include="RenderGraph.cpp" />

@@ -43,6 +43,7 @@ Texture2D TX_Diffuse : register( t0 );
 Texture2D TX_Nrm : register( t1 );
 Texture2D TX_Depth : register( t2 );
 Texture2D TX_SI_SP : register( t7 );
+Texture2D TX_XeGTAO : register( t10 );
 
 StructuredBuffer<TiledPointLight> SB_Lights : register( t8 );
 StructuredBuffer<LightGrid> SB_LightGrid : register( t9 );
@@ -160,6 +161,8 @@ void CSMain( uint3 groupID : SV_GroupID, uint3 threadID : SV_GroupThreadID, uint
     }
 
     float3 activeLighting = LimitLightIntensity ? maxLighting : totalLighting;
+    float2 aoUV = (float2( pixelCoord ) + 0.5f) / ViewportSize;
+    activeLighting *= TX_XeGTAO.SampleLevel( SS_Linear, aoUV, 0 ).r;
     if ( any( activeLighting > 0 ) ) {
         float4 existing = RW_HDR[pixelCoord];
         if ( LimitLightIntensity ) {

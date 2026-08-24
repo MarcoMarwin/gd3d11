@@ -688,6 +688,11 @@ struct GothicRendererSettings {
         AdvancedWetGroundSSR = true;
         AdvancedNightEnhance = true;
         AdvancedCityWindowTransparency = true;
+        // Runtime-only XeGTAO A/B test. The baseline path remains the default.
+        AdvancedXeGTAOHybrid = false;
+        // Runtime-only XeGTAO placement A/B test. The existing post-light
+        // composite remains the default.
+        AdvancedXeGTAOPreLighting = false;
 
         BloomStrength = 1.0f;
         GlobalWindStrength = 1.0f; // UI-normalized: 1.0 maps to the former effective 2.0 wind strength.
@@ -1230,6 +1235,10 @@ struct GothicRendererSettings {
     bool AdvancedWetGroundSSR;
     bool AdvancedNightEnhance;
     bool AdvancedCityWindowTransparency;
+    // Runtime-only XeGTAO distant half-resolution/sample-count A/B test.
+    bool AdvancedXeGTAOHybrid;
+    // Runtime-only XeGTAO placement A/B test. It is intentionally not persisted.
+    bool AdvancedXeGTAOPreLighting;
 
     bool GetEffectiveGpuVobOcclusionCulling() const {
         return AdvancedPerformanceOptions && GpuVobOcclusionCulling;
@@ -1256,6 +1265,14 @@ struct GothicRendererSettings {
 
     bool GetEffectiveCityWindowTransparency() const {
         return !AdvancedPerformanceOptions || AdvancedCityWindowTransparency;
+    }
+
+    bool GetEffectiveXeGTAOHybrid() const {
+        return AdvancedPerformanceOptions && AdvancedXeGTAOHybrid;
+    }
+
+    bool GetEffectiveXeGTAOPreLighting() const {
+        return AdvancedPerformanceOptions && AdvancedXeGTAOPreLighting;
     }
 
     // These are pre-existing Build 213 renderer paths. The Advanced master

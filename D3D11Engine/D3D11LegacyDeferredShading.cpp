@@ -94,6 +94,9 @@ XRESULT D3D11LegacyDeferredShading::DrawPointlightLights(
     normals.BindToPixelShader( context.Get(), 1 );
     specular.BindToPixelShader( context.Get(), 7 );
     depthCopy.BindToPixelShader( context.Get(), 2 );
+    ID3D11ShaderResourceView* xeGTAOAOSRV = graphicsEngine->GetPfxRenderer()
+        ? graphicsEngine->GetPfxRenderer()->GetXeGTAOLightingAOSRV() : nullptr;
+    context->PSSetShaderResources( 10, 1, &xeGTAOAOSRV );
 
     for ( auto const& light : lights ) {
         zCVobLight* vob = light->Vob;

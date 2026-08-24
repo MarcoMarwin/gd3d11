@@ -110,6 +110,8 @@ XRESULT D3D11PFX_GodRays::Render(
 
 	if ( abs( gcb.GR_Center.y - 0.5f ) > 0.5f )
 		gcb.GR_Weight *= std::max( 0.0f, 1.0f - (abs( gcb.GR_Center.y - 0.5f ) - 0.5f) / 0.5f );
+	if ( gcb.GR_Weight <= 0.0f )
+		return XR_SUCCESS;
 
 	auto vs = engine->GetShaderManager().GetVShader( VShaderID::VS_PFX );
 	auto maskPS = engine->GetShaderManager().GetPShader( PShaderID::PS_PFX_GodRayMask );
@@ -210,6 +212,9 @@ XRESULT D3D11PFX_GodRays::RenderCS(
 
     if ( abs( gcb.GR_Center.y - 0.5f ) > 0.5f )
         gcb.GR_Weight *= std::max( 0.0f, 1.0f - (abs( gcb.GR_Center.y - 0.5f ) - 0.5f) / 0.5f );
+
+    if ( gcb.GR_Weight <= 0.0f )
+        return XR_SUCCESS;
 
     // Save old render targets
     Microsoft::WRL::ComPtr<ID3D11RenderTargetView> oldRTV;
@@ -335,6 +340,9 @@ XRESULT D3D11PFX_GodRays::RenderToTexture(
     if ( abs( gcb.GR_Center.y - 0.5f ) > 0.5f )
         gcb.GR_Weight *= std::max( 0.0f, 1.0f - (abs( gcb.GR_Center.y - 0.5f ) - 0.5f) / 0.5f );
 
+    if ( gcb.GR_Weight <= 0.0f )
+        return XR_SUCCESS;
+
     auto vs = engine->GetShaderManager().GetVShader( VShaderID::VS_PFX );
     auto maskPS = engine->GetShaderManager().GetPShader( PShaderID::PS_PFX_GodRayMask );
     auto zoomPS = engine->GetShaderManager().GetPShader( PShaderID::PS_PFX_GodRayZoom );
@@ -413,6 +421,9 @@ XRESULT D3D11PFX_GodRays::RenderToTextureCS(
     if ( abs( gcb.GR_Center.y - 0.5f ) > 0.5f )
         gcb.GR_Weight *= std::max( 0.0f, 1.0f - (abs( gcb.GR_Center.y - 0.5f ) - 0.5f) / 0.5f );
 
+    if ( gcb.GR_Weight <= 0.0f )
+        return XR_SUCCESS;
+
     ID3D11RenderTargetView* nullRtv = nullptr;
     context->OMSetRenderTargets( 1, &nullRtv, nullptr );
 
@@ -483,6 +494,25 @@ XRESULT D3D11PFX_GodRays::RenderVolumetricToTexture(
     const auto& atmosphere = sky->GetAtmosphereCB();
     if ( sky->GetAtmosphereSettings().LightDirection.y <= 0.0f || atmosphere.AC_SunVisibility <= 0.0001f )
         return XR_SUCCESS;
+    // The low-sun volumetric look remains unchanged through 30 degrees of elevation.
+    // Above that, fade only the volumetric contribution while keeping radial godrays,
+    // low clouds and the FL10 path untouched. At 53 degrees the expensive volumetric
+    // and temporal passes are fully unnecessary and the combined path falls back to radial.
+    constexpr float volumetricSunFadeStart = 0.50f;
+    constexpr float volumetricSunFadeEnd = 0.80f;
+    const float sunHeight = std::clamp( atmosphere.AC_LightPos.y, 0.0f, 1.0f );
+    if ( sunHeight >= volumetricSunFadeEnd ) {
+        ResetTemporalHistory();
+        return XR_SUCCESS;
+    }
+    float volumetricSunFade = 1.0f;
+    if ( sunHeight > volumetricSunFadeStart ) {
+        const float fadeT = std::clamp(
+            (sunHeight - volumetricSunFadeStart) / (volumetricSunFadeEnd - volumetricSunFadeStart),
+            0.0f, 1.0f );
+        const float smoothFade = fadeT * fadeT * (3.0f - 2.0f * fadeT);
+        volumetricSunFade = 1.0f - smoothFade;
+    }
     const auto& settings = Engine::GAPI->GetRendererState().RendererSettings;
     auto& context = engine->GetContext();
     const INT2 resolution = engine->GetResolution();
@@ -530,7 +560,7 @@ XRESULT D3D11PFX_GodRays::RenderVolumetricToTexture(
 #endif
     cb.GRV_RainWeight = std::clamp( atmosphere.AC_RainFXWeight, 0.0f, 1.0f );
     cb.GRV_SunVisibility = std::clamp( atmosphere.AC_SunVisibility, 0.0f, 1.0f ) * GetRainSkyVisibility();
-    cb.GRV_Strength = std::max( settings.GodRayStrength, 0.0f );
+    cb.GRV_Strength = std::max( settings.GodRayStrength, 0.0f ) * volumetricSunFade;
     cb.GRV_FrameIndex = static_cast<uint32_t>(std::max( Engine::GAPI->GetTimeSeconds(), 0.0f ) * 60.0f);
     cb.GRV_NumCascades = static_cast<uint32_t>(std::clamp<size_t>( settings.NumShadowCascades, 1, MAX_CSM_CASCADES ));
     cb.GRV_PreviousViewProjection = m_PreviousViewProjection;
