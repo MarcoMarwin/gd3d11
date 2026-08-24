@@ -582,7 +582,12 @@ private:
         UINT BaseIndexLocation = 0;
         bool OcclusionEligible = false;
     };
-    bool PrepareGpuWorldMeshHiZCulling( const std::vector<GpuWorldMeshCullItem>& items );
+    bool PrepareGpuWorldMeshHiZCulling(
+        const std::vector<GpuWorldMeshCullItem>& items,
+        bool allowPreviousFrameHiZ = false );
+    bool IsGpuVobHiZPreviousFrameUsable() const;
+    void PollGpuWorldMeshCullReadback( uint64_t settingsKey, uint64_t worldGeneration );
+    void ScheduleGpuWorldMeshCullReadback( const FrameGeometryCache& cache );
     bool EnsureGpuVobHiZResources();
     void PollGpuVobVisibleCountReadback( uint64_t settingsKey, uint64_t worldGeneration );
     void ScheduleGpuVobVisibleCountReadback( const FrameGeometryCache& cache );
@@ -843,6 +848,10 @@ private:
     UINT GpuVobHiZMipCount = 0;
     bool GpuVobHiZBuildAttemptedThisFrame = false;
     bool GpuVobHiZBuiltThisFrame = false;
+    XMFLOAT4X4 GpuVobHiZViewProj = {};
+    uint64_t GpuVobHiZSettingsKey = 0;
+    uint64_t GpuVobHiZWorldGeneration = static_cast<uint64_t>( -1 );
+    bool GpuVobHiZViewProjValid = false;
 
     struct GpuVobTriangleWeight {
         UINT VisualIndex = 0;
@@ -861,6 +870,17 @@ private:
 
     std::vector<GpuVobVisibleCountReadbackSlot> m_GpuVobVisibleCountReadbackSlots;
     std::vector<GpuVobTriangleWeight> m_GpuVobCurrentTriangleWeights;
+
+    struct GpuWorldMeshCullReadbackSlot {
+        std::unique_ptr<D3D11VertexBuffer> Buffer;
+        UINT Bytes = 0;
+        UINT ArgumentCount = 0;
+        uint64_t SettingsKey = 0;
+        uint64_t WorldGeneration = static_cast<uint64_t>( -1 );
+        bool Pending = false;
+    };
+
+    std::vector<GpuWorldMeshCullReadbackSlot> m_GpuWorldMeshCullReadbackSlots;
 
     struct GpuVobPerformanceStats {
         uint64_t Frames = 0;
@@ -881,6 +901,8 @@ private:
         uint64_t WorldMeshCullFallback = 0;
         uint64_t WorldMeshCullCandidateClusters = 0;
         uint64_t WorldMeshCullEligibleClusters = 0;
+        uint64_t WorldMeshCullRejectedClusters = 0;
+        uint64_t WorldMeshCullReadbackSamples = 0;
         uint64_t WorldMeshCullIndirectDrawCalls = 0;
         uint64_t WorldMeshCullDispatches = 0;
         uint64_t IndirectDrawCalls = 0;

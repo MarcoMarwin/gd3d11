@@ -51,19 +51,23 @@ float4 PSMain( PS_INPUT Input ) : SV_TARGET
 
 		// The normal post-processed path uses the replacement texture as a
 		// deliberately subtle glass overlay. With both HDR tone mapping and AA
-		// disabled, however, there is no scene-space post-processing pass to
-		// balance that dark overlay. Keep the pane genuinely transparent in that
-		// direct scene-to-gamma path; the opaque frame was already rendered by the
-		// main alpha-test pass and is not affected here.
+		// disabled, the same dark source color would be blended directly into the
+		// scene-to-gamma target and make the pane too dark. Keep the pane visible,
+		// but use a neutral source color for this one path; the opaque frame was
+		// already rendered by the main alpha-test pass.
 		const bool directSceneToGammaPath = cbFFData.padding.x > 0.5f;
 		if (directSceneToGammaPath)
 		{
-			// There is no transparent glass contribution in the direct
-			// scene-to-gamma path. Discard instead of merely returning alpha 0,
-			// so this pass cannot darken the pane even if a stale/non-alpha blend
-			// state is present. The opaque frame was already rendered by the main
-			// alpha-test pass.
-			discard;
+			// Do not discard the pane: the authored City_Window texture uses very
+			// low/zero alpha in parts of the glass, but the renderer deliberately
+			// keeps those panes perceptible. A white source is neutral under alpha
+			// blending and avoids importing the dark replacement RGB into the
+			// direct gamma target. The tint multiplication below is intentionally
+			// skipped for this path as well; it would reintroduce the same unwanted
+			// darkening that this branch is meant to avoid.
+			color.rgb = 1.0f;
+			color.a = max(color.a * 0.82f, 0.16f);
+			return color;
 		}
 		else
 		{
@@ -71,7 +75,7 @@ float4 PSMain( PS_INPUT Input ) : SV_TARGET
 			color.a = max(softenedAlpha, 0.16f);
 		}
 
-		if (!directSceneToGammaPath && cbFFData.windowSkyParams.y > 0.5f)
+		if (cbFFData.windowSkyParams.y > 0.5f)
 		{
 			const float skyCutoff = cbFFData.windowSkyParams.x;
 

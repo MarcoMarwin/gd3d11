@@ -1282,8 +1282,8 @@ void ImGuiShim::RenderSettingsWindow()
             ImGui::Checkbox( Tr( "Hi-Z Occlusion Culling", u8"Hi-Z-Occlusion-Culling" ),
                 &settings.GpuVobOcclusionCulling );
             ImGui::SetItemTooltip( "%s", Tr(
-                "Experimental: tests static VOBs and opaque/alpha-tested world-mesh clusters against the already-rendered world depth. Hidden clusters are submitted with zero indirect instances; transparent materials, water and unknown bounds keep the standard path.",
-                u8"Experimentell: Pr\u00FCft statische VOBs sowie opake/alpha-getestete Weltmesh-Cluster gegen die bereits gerenderte Welttiefe. Verdeckte Cluster werden mit null indirekten Instanzen eingereicht; transparente Materialien, Wasser und unbekannte Bounds bleiben im Standardpfad." ) );
+                "Experimental: tests static VOBs and opaque/alpha-tested world-mesh clusters against current world depth. When the camera is unchanged, the previous frame's Hi-Z can also skip hidden clusters before the depth prepass. Transparent materials, water and unknown bounds keep the standard path.",
+                u8"Experimentell: Pr\u00FCft statische VOBs sowie opake/alpha-getestete Weltmesh-Cluster gegen die aktuelle Welttiefe. Bei unver\u00E4nderter Kamera kann die Hi-Z des vorherigen Frames verdeckte Cluster bereits vor dem Tiefenprepass auslassen. Transparente Materialien, Wasser und unbekannte Bounds bleiben im Standardpfad." ) );
             ImGui::EndDisabled();
 
             ImGui::Separator();
