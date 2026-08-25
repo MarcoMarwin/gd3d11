@@ -149,6 +149,10 @@ public:
 
     XRESULT PrepareRender();
 
+    // Returns whether the current rain state allows CSM rendering. This is a
+    // runtime weather override and never changes the user's shadow settings.
+    bool ShouldRenderCSMShadows();
+
     // Compute cascade split distances.
     // Returns a vector of size (numCascades + 1) where:
     //  splits[0] == nearPlane, splits[numCascades] == farPlane
@@ -225,6 +229,8 @@ private:
     std::array<std::unique_ptr<D3D11RenderQueue>, MAX_CSM_CASCADES> m_RenderQueues;
     std::vector<float> m_CascadeSplits;
     std::array<bool, MAX_CSM_CASCADES> m_ShouldUpdateCascade;
+    bool m_CsmSuppressedByHeavyRain = false;
+    bool m_ForceCsmUpdateAfterHeavyRain = false;
     XMFLOAT3 m_WorldShadowPos;
     ShadowWorldCasterCache m_WorldShadowCasters;
     std::unordered_map<WorldMeshInfo*, ShadowWorldCaster> m_WorldShadowCasterLookup;

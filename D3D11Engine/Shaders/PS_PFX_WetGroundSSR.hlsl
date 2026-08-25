@@ -402,21 +402,19 @@ float3 SampleRoughReflection(float2 uv, float2 distortion, float roughness)
 
 float SampleWetSSRBlockMask(float2 pixelPosition)
 {
-    uint width, height;
-    TX_WaterMask.GetDimensions(width, height);
-    int2 maxPixel = int2((int)width - 1, (int)height - 1);
-    int2 center = clamp(int2(pixelPosition), int2(0, 0), maxPixel);
-    float mask = 0.0f;
-    [unroll]
-    for (int y = -1; y <= 1; ++y)
-    {
-        [unroll]
-        for (int x = -1; x <= 1; ++x)
-        {
-            int2 samplePixel = clamp(center + int2(x, y), int2(0, 0), maxPixel);
-            mask = max(mask, TX_WaterMask.Load(int3(samplePixel, 0)).r);
-        }
-    }
+    // Five clamped linear samples are sufficient for the water exclusion
+    // edge and avoid nine integer texture loads for every fullscreen pixel.
+    float2 uv = saturate(pixelPosition * WG_InvResolution);
+    float2 texel = WG_InvResolution;
+    float mask = TX_WaterMask.SampleLevel(SS_Linear, uv, 0).r;
+    mask = max(mask, TX_WaterMask.SampleLevel(
+        SS_Linear, saturate(uv + float2(texel.x, 0.0f)), 0).r);
+    mask = max(mask, TX_WaterMask.SampleLevel(
+        SS_Linear, saturate(uv - float2(texel.x, 0.0f)), 0).r);
+    mask = max(mask, TX_WaterMask.SampleLevel(
+        SS_Linear, saturate(uv + float2(0.0f, texel.y)), 0).r);
+    mask = max(mask, TX_WaterMask.SampleLevel(
+        SS_Linear, saturate(uv - float2(0.0f, texel.y)), 0).r);
     return mask;
 }
 
@@ -518,68 +516,63 @@ void AccumulateRainImpactLayer(
     float2 worldXZ, float time, float cellSize, float cycleRate, float density, float layerSeed,
     inout float2 rippleVector, inout float ringMask, inout float impactMask)
 {
-    float2 baseCell = floor(worldXZ / cellSize);
+    // One world cell per layer is sufficient for this deliberately subtle
+    // effect. The former 3x3 neighborhood multiplied this full-screen pass
+    // by nine without materially improving the visible impact pattern.
+    float2 cell = floor(worldXZ / cellSize);
+    float seed = PuddleHash21(cell + float2(layerSeed, layerSeed * 1.731f));
+    float cycleTime = time * cycleRate + seed;
+    float cycleIndex = floor(cycleTime);
+    float phase = frac(cycleTime);
+    float2 cycleOffset = float2(
+        cycleIndex * 19.19f + layerSeed * 2.173f,
+        cycleIndex * 47.47f + layerSeed * 0.917f);
+    float eventSeed = PuddleHash21(cell + cycleOffset + float2(13.17f, 47.53f));
+    float eventMask = step(1.0f - density, eventSeed);
+    [branch]
+    if (eventMask <= 0.001f)
+        return;
 
-    [unroll]
-    for (int y = -1; y <= 1; ++y)
-    {
-        [unroll]
-        for (int x = -1; x <= 1; ++x)
-        {
-            float2 cell = baseCell + float2((float)x, (float)y);
-            float seed = PuddleHash21(cell + float2(layerSeed, layerSeed * 1.731f));
-            float cycleTime = time * cycleRate + seed;
-            float cycleIndex = floor(cycleTime);
-            float phase = frac(cycleTime);
-            float2 cycleOffset = float2(
-                cycleIndex * 19.19f + layerSeed * 2.173f,
-                cycleIndex * 47.47f + layerSeed * 0.917f);
-            float eventSeed = PuddleHash21(cell + cycleOffset + float2(13.17f, 47.53f));
-            float eventMask = step(1.0f - density, eventSeed);
+    float2 pointJitter = float2(
+        PuddleHash21(cell + cycleOffset + float2(layerSeed + 5.31f, layerSeed + 19.73f)),
+        PuddleHash21(cell + cycleOffset.yx + float2(layerSeed + 31.91f, layerSeed + 7.57f)));
+    float2 impactPosition = (cell + 0.15f + pointJitter * 0.70f) * cellSize;
+    float2 delta = worldXZ - impactPosition;
+    float distanceToImpact = length(delta);
+    float2 radialDirection = delta / max(distanceToImpact, 0.001f);
 
-            float2 pointJitter = float2(
-                PuddleHash21(cell + cycleOffset + float2(layerSeed + 5.31f, layerSeed + 19.73f)),
-                PuddleHash21(cell + cycleOffset.yx + float2(layerSeed + 31.91f, layerSeed + 7.57f)));
-            float2 impactPosition = (cell + 0.15f + pointJitter * 0.70f) * cellSize;
-            float2 delta = worldXZ - impactPosition;
-            float distanceToImpact = length(delta);
-            float2 radialDirection = delta / max(distanceToImpact, 0.001f);
+    float radiusVariation = lerp(
+        0.82f, 1.12f,
+        PuddleHash21(cell + cycleOffset + float2(layerSeed + 71.11f, layerSeed + 3.29f)));
+    float maximumRadius = cellSize * 0.42f * radiusVariation;
 
-            float radiusVariation = lerp(
-                0.82f, 1.12f,
-                PuddleHash21(cell + cycleOffset + float2(layerSeed + 71.11f, layerSeed + 3.29f)));
+    float primaryRadius = phase * maximumRadius;
+    float primaryWidth = lerp(1.40f, 3.40f, phase);
+    float primaryDelta = (distanceToImpact - primaryRadius) / primaryWidth;
+    float primaryRing = exp2(-primaryDelta * primaryDelta * 2.80f);
+    primaryRing *= pow(saturate(1.0f - phase), 1.40f);
 
-            float maximumRadius = cellSize * 0.42f * radiusVariation;
+    float secondaryPhase = saturate((phase - 0.16f) / 0.84f);
+    float secondaryRadius = secondaryPhase * maximumRadius * 0.68f;
+    float secondaryWidth = lerp(1.25f, 3.10f, secondaryPhase);
+    float secondaryDelta = (distanceToImpact - secondaryRadius) / secondaryWidth;
+    float secondaryRing = exp2(-secondaryDelta * secondaryDelta * 2.60f);
+    secondaryRing *= smoothstep(0.14f, 0.22f, phase);
+    secondaryRing *= pow(saturate(1.0f - secondaryPhase), 1.65f);
 
-            float primaryRadius = phase * maximumRadius;
-            float primaryWidth = lerp(1.40f, 3.40f, phase);
-            float primaryDelta = (distanceToImpact - primaryRadius) / primaryWidth;
-            float primaryRing = exp2(-primaryDelta * primaryDelta * 2.80f);
-            primaryRing *= pow(saturate(1.0f - phase), 1.40f);
+    float impactRadius = lerp(3.20f, 1.60f, saturate(phase * 5.0f));
+    float impactDelta = distanceToImpact / impactRadius;
+    float centralImpact = exp2(-impactDelta * impactDelta * 2.40f);
+    centralImpact *= exp2(-phase * 18.0f);
 
-            float secondaryPhase = saturate((phase - 0.16f) / 0.84f);
-            float secondaryRadius = secondaryPhase * maximumRadius * 0.68f;
-            float secondaryWidth = lerp(1.25f, 3.10f, secondaryPhase);
-            float secondaryDelta = (distanceToImpact - secondaryRadius) / secondaryWidth;
-            float secondaryRing = exp2(-secondaryDelta * secondaryDelta * 2.60f);
-            secondaryRing *= smoothstep(0.14f, 0.22f, phase);
-            secondaryRing *= pow(saturate(1.0f - secondaryPhase), 1.65f);
+    float activePrimaryRing = primaryRing * eventMask;
+    float activeSecondaryRing = secondaryRing * eventMask;
+    float activeCentralImpact = centralImpact * eventMask;
+    float signedRipple = activePrimaryRing - activeSecondaryRing * 0.42f;
 
-            float impactRadius = lerp(3.20f, 1.60f, saturate(phase * 5.0f));
-            float impactDelta = distanceToImpact / impactRadius;
-            float centralImpact = exp2(-impactDelta * impactDelta * 2.40f);
-            centralImpact *= exp2(-phase * 18.0f);
-
-            float activePrimaryRing = primaryRing * eventMask;
-            float activeSecondaryRing = secondaryRing * eventMask;
-            float activeCentralImpact = centralImpact * eventMask;
-            float signedRipple = activePrimaryRing - activeSecondaryRing * 0.42f;
-
-            rippleVector += radialDirection * signedRipple;
-            ringMask = max(ringMask, activePrimaryRing + activeSecondaryRing * 0.38f);
-            impactMask = max(impactMask, activeCentralImpact);
-        }
-    }
+    rippleVector += radialDirection * signedRipple;
+    ringMask = max(ringMask, activePrimaryRing + activeSecondaryRing * 0.38f);
+    impactMask = max(impactMask, activeCentralImpact);
 }
 
 float EvaluatePuddleSurfaceSupport(
@@ -652,8 +645,11 @@ struct WetGroundReflectionTrace
     float3 Color;
     float Weight;
 };
+static const int WETGROUND_MATERIAL_SSR_TRACE_STEPS = 16;
+static const int PUDDLE_SSR_TRACE_STEPS = 48;
 WetGroundReflectionTrace TraceWetGroundReflection(
     float activeMask,
+    int maxTraceSteps,
     float3 wsPosition,
     float3 reflectionNormal,
     float3 viewRay,
@@ -693,7 +689,7 @@ WetGroundReflectionTrace TraceWetGroundReflection(
         WG_ProjParams.z,
         WG_ProjParams.w,
         maxTraceDistance,
-        48,
+        maxTraceSteps,
         5,
         6.0f,
         traceThickness,
@@ -857,16 +853,62 @@ float4 PSMain(PS_INPUT input) : SV_TARGET
 
     float3 wsPosition = ReconstructWorldPosition(depth, uv);
     float3 sourceWSNormal = DecodeWorldNormal(uv);
+
+    float materialWetGroundSSRStrength = saturate(
+        TX_Material.SampleLevel(SS_Linear, uv, 0).z);
+    float materialWetGroundEligibility = step(0.0001f, materialWetGroundSSRStrength);
+    float reflectionsEnabled = step(0.5f, WG_ReflectionsEnabled) * step(0.001f, WG_Strength);
+
+    // Rain impacts remain visible when Rain effects are disabled, but they
+    // must not keep the complete puddle/SSR analysis alive. In this mode the
+    // original result consists only of the small central impact lift on
+    // eligible, rain-exposed ground pixels, so evaluate exactly that part and
+    // return before all puddle geometry, noise and reflection work.
+    if (reflectionsEnabled <= 0.001f && WG_ProceduralPuddlesStrength <= 0.001f)
+    {
+        float upwardMask = smoothstep(0.38f, 0.82f, sourceWSNormal.y);
+        float rainExposure = GetRainExposure(wsPosition);
+        float wetness = saturate(WG_Wetness);
+        float commonWetMask = upwardMask * rainExposure * wetness * wetSSRVisibility;
+        float rainAmount = saturate(WG_RainFXWeight);
+        float rainImpactVisibility = commonWetMask * materialWetGroundEligibility
+            * rainAmount * smoothstep(0.05f, 0.45f, WG_Wetness);
+        if (rainImpactVisibility <= 0.01f)
+            return float4(sceneColor, 1.0f);
+
+        float2 wetUV = wsPosition.xz / 1100.0f;
+        float animationTime = fmod(max(WG_Time, 0.0f), 256.0f);
+        float impactDensity = rainAmount * lerp(0.64f, 1.0f, rainAmount);
+        float2 impactRipple = float2(0.0f, 0.0f);
+        float impactRing = 0.0f;
+        float impactPulse = 0.0f;
+        AccumulateRainImpactLayer(
+            wsPosition.xz, animationTime, 58.0f, 1.08f, impactDensity, 3.17f,
+            impactRipple, impactRing, impactPulse);
+        AccumulateRainImpactLayer(
+            wsPosition.xz, animationTime, 41.0f, 1.46f, impactDensity * 0.98f, 11.83f,
+            impactRipple, impactRing, impactPulse);
+        AccumulateRainImpactLayer(
+            wsPosition.xz, animationTime, 31.0f, 1.92f, impactDensity * 0.94f, 23.41f,
+            impactRipple, impactRing, impactPulse);
+
+        float centralImpactVisibility = saturate(impactPulse)
+            * rainImpactVisibility * 1.10f * max(WG_WetGroundRainImpactsStrength, 0.0f);
+        float rainImpactNightAmount = GetAmbientNightWeight();
+        float rainImpactBrightness = lerp(1.0f, 0.40f, rainImpactNightAmount);
+        float3 boundedImpactLift = max(1.0f - saturate(sceneColor), 0.0f)
+            * float3(0.075f, 0.085f, 0.095f)
+            * rainImpactBrightness;
+        float3 impactColor = sceneColor + boundedImpactLift * centralImpactVisibility;
+        return float4(impactColor, 1.0f);
+    }
+
     float3 geometricWSNormal = CalculateGeometricWorldNormal(
         uv, wsPosition, sourceWSNormal);
     float puddleGeometryValidity = 0.0f;
     float3 puddleGeometricWSNormal = CalculatePuddleGeometricWorldNormal(
         wsPosition, puddleGeometryValidity);
 
-    float materialWetGroundSSRStrength = saturate(
-        TX_Material.SampleLevel(SS_Linear, uv, 0).z);
-    float materialWetGroundEligibility = step(0.0001f, materialWetGroundSSRStrength);
-    float reflectionsEnabled = step(0.5f, WG_ReflectionsEnabled) * step(0.001f, WG_Strength);
     // The Rain effects switch controls both puddles and the reflection layer
     // of the surrounding wet material.
     float materialPuddleEligibility = materialWetGroundEligibility;
@@ -1020,6 +1062,7 @@ float4 PSMain(PS_INPUT input) : SV_TARGET
     {
         WetGroundReflectionTrace materialReflection = TraceWetGroundReflection(
             materialTraceMask,
+            WETGROUND_MATERIAL_SSR_TRACE_STEPS,
             wsPosition,
             materialWetNormal,
             viewRay,
@@ -1049,6 +1092,7 @@ float4 PSMain(PS_INPUT input) : SV_TARGET
     float puddleDirectColorWeight = smoothstep(0.32f, 0.94f, puddleMask) * 0.42f;
     WetGroundReflectionTrace puddleReflection = TraceWetGroundReflection(
         puddleTraceMask,
+        PUDDLE_SSR_TRACE_STEPS,
         wsPosition,
         puddleWetNormal,
         viewRay,

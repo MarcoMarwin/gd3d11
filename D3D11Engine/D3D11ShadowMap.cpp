@@ -511,12 +511,68 @@ void D3D11ShadowMap::BindSamplerToCS( ID3D11DeviceContext1* context, UINT slot )
     if ( m_shadowmapSampler ) context->CSSetSamplers( slot, 1, m_shadowmapSampler.GetAddressOf() );
 }
 
+bool D3D11ShadowMap::ShouldRenderCSMShadows() {
+    constexpr float fullRainDisableThreshold = 0.95f;
+    constexpr float rainClearingReenableThreshold = 0.80f;
+
+    if ( !Engine::GAPI || Engine::IsShuttingDown() ) {
+        m_CsmSuppressedByHeavyRain = false;
+        m_ForceCsmUpdateAfterHeavyRain = false;
+        return true;
+    }
+
+    WorldInfo* worldInfo = Engine::GAPI->GetLoadedWorldInfo();
+    const bool isOutdoor = worldInfo && worldInfo->BspTree
+        && worldInfo->BspTree->GetBspTreeMode() == zBSP_MODE_OUTDOOR;
+    if ( !isOutdoor ) {
+        m_CsmSuppressedByHeavyRain = false;
+        m_ForceCsmUpdateAfterHeavyRain = false;
+        return true;
+    }
+
+    // Snow uses the same normalized rain-effect channel in the renderer, but
+    // it must not implicitly disable the sun's CSM shadows.
+    bool rainWeather = false;
+    if ( oCGame* game = oCGame::GetGame() ) {
+        if ( zCWorld* world = game->_zCSession_world ) {
+            if ( zCSkyController_Outdoor* sky = world->GetSkyControllerOutdoor() ) {
+                rainWeather = sky->GetWeatherType() == zTWEATHER_RAIN;
+            }
+        }
+    }
+
+    const float rainWeight = Engine::GAPI->GetRainFXWeight();
+    const bool wasSuppressed = m_CsmSuppressedByHeavyRain;
+    if ( m_CsmSuppressedByHeavyRain ) {
+        if ( rainWeight <= rainClearingReenableThreshold ) {
+            m_CsmSuppressedByHeavyRain = false;
+        }
+    } else if ( rainWeather && rainWeight >= fullRainDisableThreshold ) {
+        m_CsmSuppressedByHeavyRain = true;
+    }
+
+    if ( wasSuppressed && !m_CsmSuppressedByHeavyRain ) {
+        // The sun and camera can move while CSM rendering is suppressed. Do
+        // not expose stale cascades when the effect becomes visible again.
+        m_ForceCsmUpdateAfterHeavyRain = true;
+    }
+
+    return !m_CsmSuppressedByHeavyRain;
+}
+
 XRESULT D3D11ShadowMap::PrepareRender()
 {
     ZoneScopedN("D3D11ShadowMap::PrepareRender");
     if ( !m_device || !m_context || !Engine::GAPI || Engine::IsShuttingDown() ) {
         return XR_FAILED;
     }
+
+    if ( !ShouldRenderCSMShadows() ) {
+        return XR_SUCCESS;
+    }
+
+    const bool forceCsmUpdate = m_ForceCsmUpdateAfterHeavyRain;
+    m_ForceCsmUpdateAfterHeavyRain = false;
 
     // Finish pending culling before reuse.
     WaitShadowCullingComplete();
@@ -726,6 +782,9 @@ XRESULT D3D11ShadowMap::PrepareRender()
         if ( forceCascadeUpdateForViewChange ) {
             lazyCascadeUpdate = false;
         }
+        if ( forceCsmUpdate ) {
+            lazyCascadeUpdate = false;
+        }
         for ( int cascadeIdx = 0; cascadeIdx < numCascades; ++cascadeIdx ) {
             // pre-calculate all cascade matrices, to be able to frustum-cull anything that is not in this or the next cascade.
 
@@ -738,6 +797,9 @@ XRESULT D3D11ShadowMap::PrepareRender()
                 }
             }
             if ( resetCascadeDirections ) {
+                shouldUpdateCascade = true;
+            }
+            if ( forceCsmUpdate ) {
                 shouldUpdateCascade = true;
             }
             m_ShouldUpdateCascade[cascadeIdx] = shouldUpdateCascade;
@@ -1423,6 +1485,10 @@ XRESULT D3D11ShadowMap::DrawWorldShadow( )
     auto _ = graphicsEngine->RecordGraphicsEvent( GE_NAME( "DrawWorldShadow" ) );
     ZoneScopedN( "DrawWorldShadow" );
 
+    if ( !ShouldRenderCSMShadows() ) {
+        return XR_SUCCESS;
+    }
+
     WaitShadowCullingComplete();
 
     auto& settings = Engine::GAPI->GetRendererState().RendererSettings;
@@ -1575,7 +1641,8 @@ XRESULT D3D11ShadowMap::DrawLighting(
     // Draw pointlight shadows
     DrawPointlightShadows(lights);
 
-    if ( settings.EnableShadows ) {
+    const bool renderCsmShadows = settings.EnableShadows && ShouldRenderCSMShadows();
+    if ( renderCsmShadows ) {
         DrawWorldShadow();
     }
 
@@ -1782,7 +1849,7 @@ DS_ScreenQuadConstantBuffer D3D11ShadowMap::FillSunCSMConstantBuffer() const {
     scb.SQ_ShadowRuntimeParams = float4(
         settings.GetUsesTemporalReconstruction() ? 1.0f : 0.0f,
         static_cast<float>( settings.GetShadowKernelQuality() ),
-        settings.EnableShadows ? 1.0f : 0.0f, 0.0f );
+        settings.EnableShadows && !m_CsmSuppressedByHeavyRain ? 1.0f : 0.0f, 0.0f );
     WorldInfo* worldInfo = Engine::GAPI->GetLoadedWorldInfo();
     if ( worldInfo && worldInfo->BspTree ) {
         auto bspTree = worldInfo->BspTree;
@@ -1925,7 +1992,7 @@ XRESULT D3D11ShadowMap::DrawWorldLights()
     scb.SQ_ShadowRuntimeParams = float4(
         settings.GetUsesTemporalReconstruction() ? 1.0f : 0.0f,
         static_cast<float>( settings.GetShadowKernelQuality() ),
-        settings.EnableShadows ? 1.0f : 0.0f, 0.0f );
+        settings.EnableShadows && !m_CsmSuppressedByHeavyRain ? 1.0f : 0.0f, 0.0f );
     // Modify lightsettings when indoor
     if ( auto bspTree = worldInfo->BspTree )
         if ( bspTree->GetBspTreeMode() == zBSP_MODE_INDOOR ) {

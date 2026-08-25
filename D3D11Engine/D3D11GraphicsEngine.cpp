@@ -4942,7 +4942,8 @@ XRESULT D3D11GraphicsEngine::OnStartWorldRendering() {
     rendererState.RasterizerState.FrontCounterClockwise = false;
     rendererState.RasterizerState.SetDirty();
 
-    if ( rendererState.RendererSettings.EnableShadows ) {
+    if ( rendererState.RendererSettings.EnableShadows
+        && ShadowMaps->ShouldRenderCSMShadows() ) {
         ShadowMaps->PrepareRender();
     }
 

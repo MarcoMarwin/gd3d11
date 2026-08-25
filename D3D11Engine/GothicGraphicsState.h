@@ -795,6 +795,7 @@ struct GothicRendererSettings {
 
         AoMode = AOMode::AO_XEGTAO;
         AOStrength = 1.0f;
+        XegtaoSettings = XeGTAOConfig{};
 
         RECT desktopRect;
         GetClientRect( GetDesktopWindow(), &desktopRect );

@@ -232,76 +232,68 @@ void AccumulateWaterRainImpactLayer(
     float2 worldXZ, float time, float cellSize, float cycleRate, float density, float layerSeed,
     inout float2 rippleVector, inout float ringMask, inout float impactMask)
 {
-    float2 baseCell = floor(worldXZ / cellSize);
+    // Water runs this code only on water geometry, but it still benefits from
+    // the same inexpensive one-cell evaluation as the ground impact path.
+    float2 cell = floor(worldXZ / cellSize);
+    float seed = WaterRainImpactHash21(
+        cell + float2(layerSeed, layerSeed * 1.731f));
+    float cycleTime = time * cycleRate + seed;
+    float cycleIndex = floor(cycleTime);
+    float phase = frac(cycleTime);
+    float2 cycleOffset = float2(
+        cycleIndex * 19.19f + layerSeed * 2.173f,
+        cycleIndex * 47.47f + layerSeed * 0.917f);
+    float eventSeed = WaterRainImpactHash21(
+        cell + cycleOffset + float2(13.17f, 47.53f));
+    float eventMask = step(1.0f - density, eventSeed);
+    [branch]
+    if (eventMask <= 0.001f)
+        return;
 
-    [unroll] for (int y = -1; y <= 1; ++y)
-    {
-        [unroll] for (int x = -1; x <= 1; ++x)
-        {
-            float2 cell = baseCell + float2((float)x, (float)y);
-            float seed = WaterRainImpactHash21(
-                cell + float2(layerSeed, layerSeed * 1.731f));
+    float2 pointJitter = float2(
+        WaterRainImpactHash21(
+            cell + cycleOffset + float2(layerSeed + 5.31f, layerSeed + 19.73f)),
+        WaterRainImpactHash21(
+            cell + cycleOffset.yx + float2(layerSeed + 31.91f, layerSeed + 7.57f)));
+    float2 impactPosition = (cell + 0.15f + pointJitter * 0.70f) * cellSize;
+    float2 delta = worldXZ - impactPosition;
+    float distanceToImpact = length(delta);
+    float2 radialDirection = delta / max(distanceToImpact, 0.001f);
 
-            float cycleTime = time * cycleRate + seed;
-            float cycleIndex = floor(cycleTime);
-            float phase = frac(cycleTime);
-            float2 cycleOffset = float2(
-                cycleIndex * 19.19f + layerSeed * 2.173f,
-                cycleIndex * 47.47f + layerSeed * 0.917f);
+    float radiusVariation = lerp(
+        0.82f, 1.12f,
+        WaterRainImpactHash21(
+            cell + cycleOffset + float2(layerSeed + 71.11f, layerSeed + 3.29f)));
+    float maximumRadius = cellSize * 0.42f * radiusVariation;
 
-            float eventSeed = WaterRainImpactHash21(
-                cell + cycleOffset + float2(13.17f, 47.53f));
-            float eventMask = step(1.0f - density, eventSeed);
+    float primaryRadius = phase * maximumRadius;
+    float primaryWidth = lerp(1.40f, 3.40f, phase);
+    float primaryDelta = (distanceToImpact - primaryRadius) / primaryWidth;
+    float primaryRing = exp2(-primaryDelta * primaryDelta * 2.80f);
+    primaryRing *= pow(saturate(1.0f - phase), 1.40f);
 
-            float2 pointJitter = float2(
-                WaterRainImpactHash21(
-                    cell + cycleOffset + float2(layerSeed + 5.31f, layerSeed + 19.73f)),
-                WaterRainImpactHash21(
-                    cell + cycleOffset.yx + float2(layerSeed + 31.91f, layerSeed + 7.57f)));
-            float2 impactPosition = (cell + 0.15f + pointJitter * 0.70f) * cellSize;
+    float secondaryPhase = saturate((phase - 0.16f) / 0.84f);
+    float secondaryRadius = secondaryPhase * maximumRadius * 0.68f;
+    float secondaryWidth = lerp(1.25f, 3.10f, secondaryPhase);
+    float secondaryDelta = (distanceToImpact - secondaryRadius) / secondaryWidth;
+    float secondaryRing = exp2(-secondaryDelta * secondaryDelta * 2.60f);
+    secondaryRing *= smoothstep(0.14f, 0.22f, phase);
+    secondaryRing *= pow(saturate(1.0f - secondaryPhase), 1.65f);
 
-            float2 delta = worldXZ - impactPosition;
-            float distanceToImpact = length(delta);
-            float2 radialDirection = delta / max(distanceToImpact, 0.001f);
+    float impactRadius = lerp(3.20f, 1.60f, saturate(phase * 5.0f));
+    float impactDelta = distanceToImpact / impactRadius;
+    float centralImpact = exp2(-impactDelta * impactDelta * 2.40f);
+    centralImpact *= exp2(-phase * 18.0f);
 
-            float radiusVariation = lerp(
-                0.82f, 1.12f,
-                WaterRainImpactHash21(
-                    cell + cycleOffset + float2(layerSeed + 71.11f, layerSeed + 3.29f)));
-            float maximumRadius = cellSize * 0.42f * radiusVariation;
-
-            float primaryRadius = phase * maximumRadius;
-            float primaryWidth = lerp(1.40f, 3.40f, phase);
-            float primaryDelta = (distanceToImpact - primaryRadius) / primaryWidth;
-            float primaryRing = exp2(-primaryDelta * primaryDelta * 2.80f);
-            primaryRing *= pow(saturate(1.0f - phase), 1.40f);
-
-            float secondaryPhase = saturate((phase - 0.16f) / 0.84f);
-            float secondaryRadius = secondaryPhase * maximumRadius * 0.68f;
-            float secondaryWidth = lerp(1.25f, 3.10f, secondaryPhase);
-            float secondaryDelta = (distanceToImpact - secondaryRadius) / secondaryWidth;
-            float secondaryRing = exp2(-secondaryDelta * secondaryDelta * 2.60f);
-            secondaryRing *= smoothstep(0.14f, 0.22f, phase);
-            secondaryRing *= pow(saturate(1.0f - secondaryPhase), 1.65f);
-
-            float impactRadius = lerp(3.20f, 1.60f, saturate(phase * 5.0f));
-            float impactDelta = distanceToImpact / impactRadius;
-            float centralImpact = exp2(-impactDelta * impactDelta * 2.40f);
-            centralImpact *= exp2(-phase * 18.0f);
-
-            float activePrimaryRing = primaryRing * eventMask;
-            float activeSecondaryRing = secondaryRing * eventMask;
-            float activeCentralImpact = centralImpact * eventMask;
-
-            float signedRipple = activePrimaryRing - activeSecondaryRing * 0.42f;
-            rippleVector += radialDirection * signedRipple;
-
-            ringMask = max(
-                ringMask, activePrimaryRing + activeSecondaryRing * 0.38f);
-            impactMask = max(
-                impactMask, activeCentralImpact);
-        }
-    }
+    float activePrimaryRing = primaryRing * eventMask;
+    float activeSecondaryRing = secondaryRing * eventMask;
+    float activeCentralImpact = centralImpact * eventMask;
+    float signedRipple = activePrimaryRing - activeSecondaryRing * 0.42f;
+    rippleVector += radialDirection * signedRipple;
+    ringMask = max(
+        ringMask, activePrimaryRing + activeSecondaryRing * 0.38f);
+    impactMask = max(
+        impactMask, activeCentralImpact);
 }
 
 float2 CalculateWaterRainNormalDistortion(
@@ -313,7 +305,6 @@ float2 CalculateWaterRainNormalDistortion(
 
     float animationTime = fmod(max(RI_Time, 0.0f), 256.0f);
     float impactDensity = rainAmount * lerp(0.58f, 1.0f, rainAmount);
-    float heavyRainExtraSetWeight = smoothstep(0.45f, 1.0f, rainAmount);
     float2 impactRipple = float2(0.0f, 0.0f);
     float impactRing = 0.0f;
     float impactPulse = 0.0f;
@@ -327,36 +318,6 @@ float2 CalculateWaterRainNormalDistortion(
     AccumulateWaterRainImpactLayer(
         worldPosition.xz, animationTime, 31.0f, 1.92f, impactDensity * 0.94f, 23.41f,
         impactRipple, impactRing, impactPulse);
-
-    float2 extraRippleA = float2(0.0f, 0.0f);
-    float extraRingA = 0.0f;
-    float extraPulseA = 0.0f;
-    AccumulateWaterRainImpactLayer(
-        worldPosition.xz + float2(17.41f, 53.27f), animationTime, 58.0f, 1.08f, impactDensity, 37.19f,
-        extraRippleA, extraRingA, extraPulseA);
-    AccumulateWaterRainImpactLayer(
-        worldPosition.xz + float2(61.73f, 29.11f), animationTime, 41.0f, 1.46f, impactDensity * 0.98f, 47.83f,
-        extraRippleA, extraRingA, extraPulseA);
-    AccumulateWaterRainImpactLayer(
-        worldPosition.xz + float2(43.37f, 71.59f), animationTime, 31.0f, 1.92f, impactDensity * 0.94f, 59.41f,
-        extraRippleA, extraRingA, extraPulseA);
-
-    float2 extraRippleB = float2(0.0f, 0.0f);
-    float extraRingB = 0.0f;
-    float extraPulseB = 0.0f;
-    AccumulateWaterRainImpactLayer(
-        worldPosition.xz + float2(83.13f, 19.67f), animationTime, 58.0f, 1.08f, impactDensity, 67.31f,
-        extraRippleB, extraRingB, extraPulseB);
-    AccumulateWaterRainImpactLayer(
-        worldPosition.xz + float2(27.89f, 97.43f), animationTime, 41.0f, 1.46f, impactDensity * 0.98f, 79.53f,
-        extraRippleB, extraRingB, extraPulseB);
-    AccumulateWaterRainImpactLayer(
-        worldPosition.xz + float2(109.21f, 41.17f), animationTime, 31.0f, 1.92f, impactDensity * 0.94f, 91.79f,
-        extraRippleB, extraRingB, extraPulseB);
-
-    impactRipple += (extraRippleA + extraRippleB) * heavyRainExtraSetWeight;
-    impactRing = max(impactRing, max(extraRingA, extraRingB) * heavyRainExtraSetWeight);
-    impactPulse = max(impactPulse, max(extraPulseA, extraPulseB) * heavyRainExtraSetWeight);
 
     const float waterRainResponse = 3.40f;
     const float waterRingNormalStrength = 0.230f;

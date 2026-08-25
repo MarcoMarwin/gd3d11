@@ -7504,6 +7504,9 @@ XRESULT GothicAPI::SaveMenuSettings( const std::string& file ) {
 
     WritePrivateProfileStringA( "AO", "Mode", std::to_string( static_cast<int>(s.AoMode) ).c_str(), ini.c_str() );
     WritePrivateProfileStringA( "AO", "Strength", float_to_string( s.AOStrength, 2 ).c_str(), ini.c_str() );
+    WritePrivateProfileStringA( "AO", "Advanced_XeGTAOQuality", std::to_string( s.XegtaoSettings.QualityLevel ).c_str(), ini.c_str() );
+    WritePrivateProfileStringA( "AO", "Advanced_XeGTAODenoise", std::to_string( s.XegtaoSettings.DenoisePasses ).c_str(), ini.c_str() );
+    WritePrivateProfileStringA( "AO", "Advanced_XeGTAORadius", float_to_string( s.XegtaoSettings.Radius, 1 ).c_str(), ini.c_str() );
     return XR_SUCCESS;
 }
 
@@ -7787,6 +7790,16 @@ XRESULT GothicAPI::LoadMenuSettings( const std::string& file ) {
         }
         if ( s.AoMode == AOMode::AO_NONE ) s.AOStrength = 0.0f;
         s.XegtaoSettings = ds.XegtaoSettings;
+        if ( s.AdvancedPerformanceOptions ) {
+            s.XegtaoSettings.QualityLevel = std::clamp<int>(
+                static_cast<int>( GetPrivateProfileIntA(
+                    "AO", "Advanced_XeGTAOQuality", s.XegtaoSettings.QualityLevel, ini.c_str() ) ), 0, 3 );
+            s.XegtaoSettings.DenoisePasses = std::clamp<int>(
+                static_cast<int>( GetPrivateProfileIntA(
+                    "AO", "Advanced_XeGTAODenoise", s.XegtaoSettings.DenoisePasses, ini.c_str() ) ), 1, 3 );
+            s.XegtaoSettings.Radius = std::clamp(
+                GetPrivateProfileFloatA( "AO", "Advanced_XeGTAORadius", s.XegtaoSettings.Radius, ini ), 50.0f, 400.0f );
+        }
         s.EnableCustomFontRendering = ds.EnableCustomFontRendering;
         s.DebugSettings.FeatureSet = ds.DebugSettings.FeatureSet;
         s.DebugSettings.FeatureSet.UseScreenSpaceShadowMask = false; // Forward+ shadow-mask path is incomplete and disabled with deferred rendering.
@@ -7916,7 +7929,11 @@ XRESULT GothicAPI::LoadMenuSettings( const std::string& file ) {
     s.NightDarkeningStart = ds.NightDarkeningStart;
     s.NightDarkeningRange = ds.NightDarkeningRange;
     s.NightDarkeningMax = ds.NightDarkeningMax;
-    s.XegtaoSettings = ds.XegtaoSettings;
+    // XeGTAO fine-tuning is a global Advanced-menu override, not a world setting.
+    // Keep the values loaded from UserSettings.ini while Advanced is enabled.
+    if ( !s.AdvancedPerformanceOptions ) {
+        s.XegtaoSettings = ds.XegtaoSettings;
+    }
     s.EnableCustomFontRendering = ds.EnableCustomFontRendering;
     s.DebugSettings.FeatureSet = ds.DebugSettings.FeatureSet;
     s.SharpeningMode = ds.SharpeningMode;
