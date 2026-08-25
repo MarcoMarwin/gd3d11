@@ -479,19 +479,6 @@ XRESULT D3D11ShaderManager::Init() {
 
         Shaders.push_back( ShaderInfo::make<CShaderID::CS_TiledShading>( "CS_TiledShading.hlsl" ));
 
-        // GPU-driven static-VOB frustum culling/compaction for Build 213.
-        // The shadow paths deliberately keep their existing CPU culling.
-        Shaders.push_back( ShaderInfo::make<CShaderID::CS_VobCull>( "CS_VobCull.hlsl" )
-            .with_entrypoint( "CSCull" ) );
-        Shaders.push_back( ShaderInfo::make<CShaderID::CS_VobPatchArgs>( "CS_VobCull.hlsl" )
-            .with_entrypoint( "CSPatchArgs" ) );
-        Shaders.push_back( ShaderInfo::make<CShaderID::CS_VobHiZCopy>( "CS_VobHiZ.hlsl" )
-            .with_entrypoint( "CSCopyDepth" ) );
-        Shaders.push_back( ShaderInfo::make<CShaderID::CS_VobHiZReduce>( "CS_VobHiZ.hlsl" )
-            .with_entrypoint( "CSReduce" ) );
-        Shaders.push_back( ShaderInfo::make<CShaderID::CS_WorldMeshCull>( "CS_WorldMeshCull.hlsl" )
-            .with_entrypoint( "CSCullWorldMesh" ) );
-
         Shaders.push_back( ShaderInfo::make<CShaderID::CS_PFX_GodRayMask>( "CS_PFX_GodRayMask.hlsl" ));
 
         Shaders.push_back( ShaderInfo::make<CShaderID::CS_PFX_GodRayZoom>( "CS_PFX_GodRayZoom.hlsl" ));

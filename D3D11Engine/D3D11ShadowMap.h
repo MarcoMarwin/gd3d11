@@ -203,29 +203,6 @@ private:
     void WaitShadowCullingComplete();
     void BuildWorldShadowCasterCache();
     void BuildVisibleWorldShadowCasterCache( const Frustum& cullingFrustum );
-    void LogPointlightShadowStats();
-
-    struct PointlightShadowPerformanceStats {
-        uint64_t Frames = 0;
-        uint64_t VisibleLights = 0;
-        uint64_t EligibleLights = 0;
-        uint64_t CreatedLights = 0;
-        uint64_t ResourceReallocations = 0;
-        uint64_t SlotAllocationFailures = 0;
-        uint64_t StaticCacheReadyLights = 0;
-        uint64_t ImmediateUpdates = 0;
-        uint64_t BackgroundQueued = 0;
-        uint64_t BackgroundUpdates = 0;
-        uint64_t CompletedUpdates = 0;
-        uint64_t VisibilityReleases = 0;
-        uint64_t StaticPasses = 0;
-        uint64_t DynamicPasses = 0;
-        double CpuMsTotal = 0.0;
-
-        void Reset() {
-            *this = {};
-        }
-    };
 
     Microsoft::WRL::ComPtr<ID3D11Device1> m_device;
     Microsoft::WRL::ComPtr<ID3D11DeviceContext1> m_context;
@@ -259,7 +236,6 @@ private:
     bool m_WorldShadowCasterCacheValid = false;
     uint64_t m_WorldShadowCasterCacheBuilds = 0;
     uint64_t m_WorldShadowCasterCacheHits = 0;
-    PointlightShadowPerformanceStats m_PointlightShadowStats;
 
     std::unique_ptr<D3D11TiledDeferredShading> m_TiledDeferred;
     D3D11LegacyDeferredShading m_LegacyDeferred;

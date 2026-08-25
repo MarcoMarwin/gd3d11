@@ -1,7 +1,6 @@
 #include "D3D11ShadowMap.h"
 #include <algorithm>
 #include <cmath>
-#include <chrono>
 #include <DirectXMath.h>
 
 // TODO: Remove circular dependencies
@@ -1058,9 +1057,6 @@ XRESULT D3D11ShadowMap::DrawPointlightShadows( std::vector<VobLightInfo*>& light
         return XR_SUCCESS;
     }
 
-    const auto pointlightStatsStart = std::chrono::steady_clock::now();
-    ++m_PointlightShadowStats.Frames;
-
     // Shadow resources follow the same frame visibility that is already limited by VisualFXDrawRadius.
     auto releaseIfInvisible = [this]( VobLightInfo* info ) {
         if ( !info || !info->LightShadowBuffers )
@@ -1071,7 +1067,6 @@ XRESULT D3D11ShadowMap::DrawPointlightShadows( std::vector<VobLightInfo*>& light
             if ( pl->ShouldReleaseForVisibility( visible ) ) {
                 pl->ClearTiledSlot();
                 pl->ReleaseShadowMap();
-                ++m_PointlightShadowStats.VisibilityReleases;
             }
         }
     };
@@ -1092,22 +1087,8 @@ XRESULT D3D11ShadowMap::DrawPointlightShadows( std::vector<VobLightInfo*>& light
     const bool staticOnlyMode = settings.EnablePointlightShadows == GothicRendererSettings::PLS_STATIC_ONLY;
     const bool dynamicMode = settings.EnablePointlightShadows >= GothicRendererSettings::PLS_UPDATE_DYNAMIC;
     const float currentTime = Engine::GAPI->GetTimeSeconds();
-    const float distantDynamicShadowInterval = [&settings] {
-        switch ( settings.ShadowQuality ) {
-        case GothicRendererSettings::E_ShadowQuality::SHADOW_QUALITY_VERY_LOW:
-            return 0.20f;
-        case GothicRendererSettings::E_ShadowQuality::SHADOW_QUALITY_LOW:
-            return 0.14f;
-        case GothicRendererSettings::E_ShadowQuality::SHADOW_QUALITY_MEDIUM:
-            return 0.10f;
-        case GothicRendererSettings::E_ShadowQuality::SHADOW_QUALITY_HIGH:
-            return 0.08f;
-        case GothicRendererSettings::E_ShadowQuality::SHADOW_QUALITY_EXTREME:
-            return 0.06f;
-        default:
-            return 0.10f;
-        }
-    }();
+    const float distantDynamicShadowInterval = std::clamp(
+        static_cast<float>( settings.PointlightShadowUpdateIntervalMs ), 40.0f, 500.0f ) / 1000.0f;
     // Draw pointlight shadows
     std::list<VobLightInfo*> importantUpdates;
 
@@ -1119,7 +1100,6 @@ XRESULT D3D11ShadowMap::DrawPointlightShadows( std::vector<VobLightInfo*>& light
         if ( !light || !light->IsEffectivelyEnabled() || !light->VisibleInFrame ) {
             continue;
         }
-        ++m_PointlightShadowStats.VisibleLights;
         const bool visualFxShadowsAllowed = !light->IsVisualFXLight || dynamicMode;
         const bool regularShadowLight = light->AllowsPointlightShadows && visualFxShadowsAllowed;
         if ( !regularShadowLight ) {
@@ -1130,7 +1110,6 @@ XRESULT D3D11ShadowMap::DrawPointlightShadows( std::vector<VobLightInfo*>& light
             }
             continue;
         }
-        ++m_PointlightShadowStats.EligibleLights;
         // Create resources only when an eligible light is actually visible.
         if ( !light->LightShadowBuffers ) {
             BaseShadowedPointLight* bpl;
@@ -1139,7 +1118,6 @@ XRESULT D3D11ShadowMap::DrawPointlightShadows( std::vector<VobLightInfo*>& light
             graphicsEngine->CreateShadowedPointLight( &bpl, light, shadowLightIsDynamic );
             light->LightShadowBuffers.reset( bpl );
             light->UpdateShadows = true;
-            ++m_PointlightShadowStats.CreatedLights;
         }
 
         if ( D3D11PointLight* pl = dynamic_cast<D3D11PointLight*>(light->LightShadowBuffers.get()) ) {
@@ -1147,7 +1125,8 @@ XRESULT D3D11ShadowMap::DrawPointlightShadows( std::vector<VobLightInfo*>& light
                 light->UpdateShadows = true;
             }
 
-            // Preset-controlled point-light shadow resolution.
+            // Advanced point-light shadow resolution. Shadow Quality only
+            // supplies the initial value; the menu can override it later.
             int desiredResolution = std::clamp( settings.PointlightShadowMapSize, 64, 512 );
             float allocationCameraDistance = FLT_MAX;
             XMStoreFloat( &allocationCameraDistance, XMVector3Length(
@@ -1188,7 +1167,6 @@ XRESULT D3D11ShadowMap::DrawPointlightShadows( std::vector<VobLightInfo*>& light
                 || pl->GetShadowMapResolution() != desiredResolution
                 || (isTiledShadingEnabled && pl->IsTiledStaticLowRes() != staticLowRes);
             if ( needsResourceReallocation ) {
-                ++m_PointlightShadowStats.ResourceReallocations;
                 pl->ClearTiledSlot();
                 pl->ReleaseShadowMap();
 
@@ -1203,7 +1181,6 @@ XRESULT D3D11ShadowMap::DrawPointlightShadows( std::vector<VobLightInfo*>& light
                             m_TiledDeferred.get() );
                         pl->SetCurrentResolution( desiredResolution );
                     } else {
-                        ++m_PointlightShadowStats.SlotAllocationFailures;
                         light->UpdateShadows = false;
                         continue; // failed to allocate tiled slot, skip shadow rendering for this light this frame
                     }
@@ -1217,13 +1194,11 @@ XRESULT D3D11ShadowMap::DrawPointlightShadows( std::vector<VobLightInfo*>& light
 
             bool needsUpdate = pl->NeedsUpdate();
             bool isInited = pl->IsInited();
-            if ( pl->IsStaticShadowReady() ) {
-                ++m_PointlightShadowStats.StaticCacheReadyLights;
-            }
 
             // A nearby light with an animated overlay must keep its NPC/MOB
             // shadow current. Distant overlays are refreshed on a
-            // quality-dependent timer; the static world base is never rebuilt.
+            // independently configured timer; the static world base is never
+            // rebuilt.
             if ( nearDynamicShadowSource )
                 light->UpdateShadows = true;
 
@@ -1242,7 +1217,6 @@ XRESULT D3D11ShadowMap::DrawPointlightShadows( std::vector<VobLightInfo*>& light
                         queue.erase( queued );
                     }
                     importantUpdates.emplace_back( light );
-                    ++m_PointlightShadowStats.ImmediateUpdates;
                 }
                 // Background Priority: Add animated overlays to the
                 // round-robin queue if not already there. This also applies to
@@ -1251,7 +1225,6 @@ XRESULT D3D11ShadowMap::DrawPointlightShadows( std::vector<VobLightInfo*>& light
                     auto& queue = graphicsEngine->FrameShadowUpdateLights;
                     if ( std::find( queue.begin(), queue.end(), light ) == queue.end() ) {
                         queue.emplace_back( light );
-                        ++m_PointlightShadowStats.BackgroundQueued;
                     }
                 } else if ( !partialShadowUpdate && !staticOnlyMode ) {
                     // Preserve the setting's original full-update semantics
@@ -1287,27 +1260,15 @@ XRESULT D3D11ShadowMap::DrawPointlightShadows( std::vector<VobLightInfo*>& light
             ++lowStaticRenders;
         }
         pointLight->RenderCubemap( true, m_PointLightCB.get() );
-        ++m_PointlightShadowStats.CompletedUpdates;
         if ( dynamicMode && !pointLight->IsTiledStaticLowRes()
             && !pointLight->NotYetDrawn() )
             pointLight->MarkDynamicShadowUpdated( currentTime );
         importantUpdate->UpdateShadows = false;
     }
 
-    // Process Background Queue (Round-Robin). Keep the budget deliberately
-    // bounded; high quality can refresh more distant overlays while lower
-    // presets retain the original conservative update rate.
-    const int maxBackgroundUpdates = [&settings] {
-        switch ( settings.ShadowQuality ) {
-        case GothicRendererSettings::E_ShadowQuality::SHADOW_QUALITY_HIGH:
-        case GothicRendererSettings::E_ShadowQuality::SHADOW_QUALITY_EXTREME:
-            return 6;
-        case GothicRendererSettings::E_ShadowQuality::SHADOW_QUALITY_MEDIUM:
-            return 4;
-        default:
-            return 2;
-        }
-    }();
+    // Process the background queue (round-robin) with the independently
+    // configured budget.
+    const int maxBackgroundUpdates = std::clamp( settings.PointlightShadowUpdateBudget, 1, 8 );
     int updatesDone = 0;
 
     while ( !graphicsEngine->FrameShadowUpdateLights.empty() && updatesDone < maxBackgroundUpdates ) {
@@ -1332,8 +1293,6 @@ XRESULT D3D11ShadowMap::DrawPointlightShadows( std::vector<VobLightInfo*>& light
 
         // FORCE the render! It waited in line for its turn, it must draw.
         l->RenderCubemap( true, m_PointLightCB.get() );
-        ++m_PointlightShadowStats.BackgroundUpdates;
-        ++m_PointlightShadowStats.CompletedUpdates;
         if ( dynamicMode && !l->IsTiledStaticLowRes() && !l->NotYetDrawn() )
             l->MarkDynamicShadowUpdated( currentTime );
         graphicsEngine->DebugPointlight = l;
@@ -1341,52 +1300,7 @@ XRESULT D3D11ShadowMap::DrawPointlightShadows( std::vector<VobLightInfo*>& light
         updatesDone++;
     }
 
-    std::vector<D3D11PointLight*> measuredPointLights;
-    measuredPointLights.reserve( lights.size() );
-    for ( VobLightInfo* light : lights ) {
-        auto* pointLight = light && light->LightShadowBuffers
-            ? dynamic_cast<D3D11PointLight*>( light->LightShadowBuffers.get() ) : nullptr;
-        if ( !pointLight || std::find( measuredPointLights.begin(), measuredPointLights.end(), pointLight )
-            != measuredPointLights.end() ) {
-            continue;
-        }
-        measuredPointLights.push_back( pointLight );
-        const auto renderStats = pointLight->ConsumeShadowRenderStats();
-        m_PointlightShadowStats.StaticPasses += renderStats.StaticPasses;
-        m_PointlightShadowStats.DynamicPasses += renderStats.DynamicPasses;
-    }
-
-    const auto pointlightStatsEnd = std::chrono::steady_clock::now();
-    m_PointlightShadowStats.CpuMsTotal += std::chrono::duration<double, std::milli>(
-        pointlightStatsEnd - pointlightStatsStart ).count();
-    if ( m_PointlightShadowStats.Frames >= 120 ) {
-        LogPointlightShadowStats();
-    }
-
     return XR_SUCCESS;
-}
-
-void D3D11ShadowMap::LogPointlightShadowStats() {
-    const double frames = std::max<double>( 1.0, static_cast<double>( m_PointlightShadowStats.Frames ) );
-    LogInfo() << "[ShadowPerf] pointlights frames=" << m_PointlightShadowStats.Frames
-        << " visibleAvg=" << (static_cast<double>( m_PointlightShadowStats.VisibleLights ) / frames)
-        << " eligibleAvg=" << (static_cast<double>( m_PointlightShadowStats.EligibleLights ) / frames)
-        << " staticReadyAvg=" << (static_cast<double>( m_PointlightShadowStats.StaticCacheReadyLights ) / frames)
-        << " created=" << m_PointlightShadowStats.CreatedLights
-        << " reallocations=" << m_PointlightShadowStats.ResourceReallocations
-        << " slotFailures=" << m_PointlightShadowStats.SlotAllocationFailures
-        << " immediateQueued=" << m_PointlightShadowStats.ImmediateUpdates
-        << " backgroundQueued=" << m_PointlightShadowStats.BackgroundQueued
-        << " backgroundRendered=" << m_PointlightShadowStats.BackgroundUpdates
-        << " completed=" << m_PointlightShadowStats.CompletedUpdates
-        << " visibilityReleases=" << m_PointlightShadowStats.VisibilityReleases
-        << " staticPasses=" << m_PointlightShadowStats.StaticPasses
-        << " dynamicPasses=" << m_PointlightShadowStats.DynamicPasses
-        << " cpuMsAvg=" << (m_PointlightShadowStats.CpuMsTotal / frames)
-        << " worldCasterEntries=" << m_WorldShadowCasters.size()
-        << " worldCasterBuilds=" << m_WorldShadowCasterCacheBuilds
-        << " worldCasterHits=" << m_WorldShadowCasterCacheHits;
-    m_PointlightShadowStats.Reset();
 }
 
 void D3D11ShadowMap::BuildWorldShadowCasterCache() {

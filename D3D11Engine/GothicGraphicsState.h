@@ -665,13 +665,14 @@ struct GothicRendererSettings {
 
         textureMaxSize = 16384;
         ShadowQuality = E_ShadowQuality::SHADOW_QUALITY_MEDIUM;
-        // GPU-driven static-VOB occlusion is experimental on the DX11 path.
-        // It remains opt-in until measurements prove that the complete
-        // Hi-Z/cull/indirect path beats the established CPU path.
-        GpuVobOcclusionCulling = false;
         AdvancedPerformanceOptions = true;
         ShadowMapSize = 2048;
+        CSMShadowKernel = E_ShadowKernelQuality::SHADOW_KERNEL_PCF_MEDIUM;
         PointlightShadowMapSize = 128;
+        PointlightShadowKernel = E_ShadowKernelQuality::SHADOW_KERNEL_PCF_LOW;
+        EnablePointlightDynamicCasters = true;
+        PointlightShadowUpdateIntervalMs = 100;
+        PointlightShadowUpdateBudget = 4;
         WorldShadowRangeScale = 1.0f;
         NumShadowCascades = 3; // looks OK and performance friendly
         ShadowCascadePCFLimit = 1;
@@ -680,14 +681,14 @@ struct GothicRendererSettings {
         ShadowStrength = 0.40f;
         ShadowAOStrength = 0.50f;
         WorldAOStrength = 0.50f;
-        ShadowSoftness = 1.0f; // 1.0 = default softness, higher = softer shadows
-        // Runtime-only Advanced-menu world/visual test options. These values
-        // intentionally are not persisted in UserSettings.ini.
+        ShadowSoftness = 1.0f; // CSM: 1.0 = default softness, higher = softer shadows
+        PointlightShadowSoftness = ShadowSoftness;
+        // Advanced-menu values are persisted with an Advanced_ prefix in
+        // UserSettings.ini when the Advanced master switch is enabled.
         AdvancedWaterAnimation = true;
-        AdvancedPuddles = true;
-        AdvancedWetGroundSSR = true;
         AdvancedNightEnhance = true;
         AdvancedCityWindowTransparency = true;
+        RainEffects = true;
 
         BloomStrength = 1.0f;
         GlobalWindStrength = 1.0f; // UI-normalized: 1.0 maps to the former effective 2.0 wind strength.
@@ -700,11 +701,11 @@ struct GothicRendererSettings {
         ShadowFilterMode = E_ShadowFilterMode::SHADOW_FILTER_PCSS;
 
         EnableShadows = true;
-        // Runtime-only Advanced-menu test option. Keep it enabled by default so
-        // the DX12-inspired CPU shadow scheduling path is exercised out of the box.
-        ThreadedShadowCulling = true;
+        // Match the Kirides DX11-Nightly baseline. These Advanced-menu
+        // switches remain available for explicit A/B testing.
+        ThreadedShadowCulling = false;
         EnableVSync = false;
-        DoZPrepass = true;
+        DoZPrepass = false;
         SortRenderQueue = false;
         EnableSSR = true;
         SSRStrength = 1.0f; // UI-normalized: 1.0 equals the former 1.4 slider value.
@@ -846,9 +847,9 @@ struct GothicRendererSettings {
         // is intentionally disabled to preserve the existing appearance.
         ShadowCasterMinTexels = 0.0f;
         DebugSettings.FeatureSet.EnableDriverExtensions = true;
-        // The existing BSP/SIMD leaf cache remains the safe baseline. The
-        // world-section BVH is an opt-in experiment, not general VOB culling.
-        DebugSettings.FeatureSet.UseWorldSectionBVH = false;
+        // Match the Kirides DX11-Nightly baseline. This BVH covers world
+        // sections only; it is not general per-VOB occlusion culling.
+        DebugSettings.FeatureSet.UseWorldSectionBVH = true;
         DebugSettings.FeatureSet.UseScreenSpaceShadowMask = false;
     }
 
@@ -907,11 +908,9 @@ struct GothicRendererSettings {
     void DisableEverything() {}
 
     E_ShadowFrustumCulling GetEffectiveShadowFrustumCullingMode() const {
-        // The Advanced master switch must make every Advanced-menu option a
-        // no-op. Conservative is the existing safe baseline when it is off.
-        return AdvancedPerformanceOptions
-            ? ShadowFrustumCullingMode
-            : SHD_FRUSTUM_CULLING_CONSERVATIVE;
+        // This is an internal renderer setting, not an Advanced-menu option.
+        // It must not change when the Advanced master switch is toggled.
+        return ShadowFrustumCullingMode;
     }
 
     bool IsShadowFrustumCullingEnabled() const {
@@ -926,6 +925,42 @@ struct GothicRendererSettings {
         return E_ShadowQuality::SHADOW_QUALITY_EXTREME;
     }
 
+    static float DefaultShadowSoftnessForQuality( E_ShadowQuality quality ) {
+        return static_cast<int>( quality ) >= static_cast<int>( E_ShadowQuality::SHADOW_QUALITY_HIGH )
+            ? 2.0f
+            : 1.0f;
+    }
+
+    static int SnapCSMShadowMapSize( int size ) {
+        constexpr int levels[] = { 512, 1024, 2048, 4096, 8192 };
+        const int clampedSize = std::clamp( size, levels[0], levels[4] );
+        int nearest = levels[0];
+        int nearestDistance = std::abs( clampedSize - nearest );
+        for ( int level : levels ) {
+            const int distance = std::abs( clampedSize - level );
+            if ( distance < nearestDistance ) {
+                nearest = level;
+                nearestDistance = distance;
+            }
+        }
+        return nearest;
+    }
+
+    static int SnapPointlightShadowMapSize( int size ) {
+        constexpr int levels[] = { 128, 256, 512 };
+        const int clampedSize = std::clamp( size, levels[0], levels[2] );
+        int nearest = levels[0];
+        int nearestDistance = std::abs( clampedSize - nearest );
+        for ( int level : levels ) {
+            const int distance = std::abs( clampedSize - level );
+            if ( distance < nearestDistance ) {
+                nearest = level;
+                nearestDistance = distance;
+            }
+        }
+        return nearest;
+    }
+
     void ApplyShadowQualitySettings() {
         const int quality = std::clamp(
             static_cast<int>(ShadowQuality),
@@ -936,7 +971,17 @@ struct GothicRendererSettings {
         switch ( ShadowQuality ) {
         case E_ShadowQuality::SHADOW_QUALITY_OFF:
             EnableShadows = false;
+            CSMShadowKernel = E_ShadowKernelQuality::SHADOW_KERNEL_PCF_LOW;
             EnablePointlightShadows = EPointLightShadowMode::PLS_DISABLED;
+            PointlightShadowKernel = E_ShadowKernelQuality::SHADOW_KERNEL_PCF_LOW;
+            EnablePointlightDynamicCasters = false;
+            PointlightShadowUpdateIntervalMs = 200;
+            PointlightShadowUpdateBudget = 2;
+            PartialDynamicShadowUpdates = false;
+            WorldShadowRangeScale = 1.0f;
+            NumShadowCascades = 1;
+            ShadowCascadePCFLimit = 0;
+            ShadowSoftness = DefaultShadowSoftnessForQuality( ShadowQuality );
             // Keep the inactive CSM resource at the minimum supported size.
             // EnableShadows=false still prevents CSM rendering/sampling.
             ShadowMapSize = 512;
@@ -944,34 +989,84 @@ struct GothicRendererSettings {
             break;
         case E_ShadowQuality::SHADOW_QUALITY_VERY_LOW:
             EnableShadows = true;
+            CSMShadowKernel = E_ShadowKernelQuality::SHADOW_KERNEL_PCF_LOW;
             // Very Low keeps CSM shadows, but disables pointlight shadows
             // completely. The previous 64px cubemap produced visibly poor
             // results and still consumed update/sampling work.
             EnablePointlightShadows = EPointLightShadowMode::PLS_DISABLED;
+            PointlightShadowKernel = E_ShadowKernelQuality::SHADOW_KERNEL_PCF_LOW;
+            EnablePointlightDynamicCasters = false;
+            PointlightShadowUpdateIntervalMs = 200;
+            PointlightShadowUpdateBudget = 2;
+            PartialDynamicShadowUpdates = false;
+            WorldShadowRangeScale = 1.0f;
+            NumShadowCascades = 1;
+            ShadowCascadePCFLimit = 0;
+            ShadowSoftness = DefaultShadowSoftnessForQuality( ShadowQuality );
             ShadowMapSize = 512;
             PointlightShadowMapSize = 128;
             break;
         case E_ShadowQuality::SHADOW_QUALITY_LOW:
             EnableShadows = true;
+            CSMShadowKernel = E_ShadowKernelQuality::SHADOW_KERNEL_PCF_LOW;
             EnablePointlightShadows = EPointLightShadowMode::PLS_UPDATE_DYNAMIC;
+            PointlightShadowKernel = E_ShadowKernelQuality::SHADOW_KERNEL_PCF_LOW;
+            EnablePointlightDynamicCasters = false;
+            PointlightShadowUpdateIntervalMs = 140;
+            PointlightShadowUpdateBudget = 2;
+            PartialDynamicShadowUpdates = true;
+            WorldShadowRangeScale = 1.0f;
+            NumShadowCascades = 2;
+            ShadowCascadePCFLimit = 0;
+            ShadowSoftness = DefaultShadowSoftnessForQuality( ShadowQuality );
             ShadowMapSize = 1024;
             PointlightShadowMapSize = 128;
             break;
         case E_ShadowQuality::SHADOW_QUALITY_MEDIUM:
             EnableShadows = true;
+            CSMShadowKernel = E_ShadowKernelQuality::SHADOW_KERNEL_PCF_MEDIUM;
             EnablePointlightShadows = EPointLightShadowMode::PLS_UPDATE_DYNAMIC;
+            PointlightShadowKernel = E_ShadowKernelQuality::SHADOW_KERNEL_PCF_LOW;
+            EnablePointlightDynamicCasters = true;
+            PointlightShadowUpdateIntervalMs = 100;
+            PointlightShadowUpdateBudget = 4;
+            PartialDynamicShadowUpdates = true;
+            WorldShadowRangeScale = 1.0f;
+            NumShadowCascades = 3;
+            ShadowCascadePCFLimit = 1;
+            ShadowSoftness = DefaultShadowSoftnessForQuality( ShadowQuality );
             ShadowMapSize = 2048;
             PointlightShadowMapSize = 128;
             break;
         case E_ShadowQuality::SHADOW_QUALITY_HIGH:
             EnableShadows = true;
+            CSMShadowKernel = E_ShadowKernelQuality::SHADOW_KERNEL_PCSS;
             EnablePointlightShadows = EPointLightShadowMode::PLS_UPDATE_DYNAMIC;
+            PointlightShadowKernel = E_ShadowKernelQuality::SHADOW_KERNEL_PCSS;
+            EnablePointlightDynamicCasters = true;
+            PointlightShadowUpdateIntervalMs = 80;
+            PointlightShadowUpdateBudget = 6;
+            PartialDynamicShadowUpdates = true;
+            WorldShadowRangeScale = 1.0f;
+            NumShadowCascades = 3;
+            ShadowCascadePCFLimit = 1;
+            ShadowSoftness = DefaultShadowSoftnessForQuality( ShadowQuality );
             ShadowMapSize = 4096;
             PointlightShadowMapSize = 256;
             break;
         case E_ShadowQuality::SHADOW_QUALITY_EXTREME:
             EnableShadows = true;
+            CSMShadowKernel = E_ShadowKernelQuality::SHADOW_KERNEL_PCSS;
             EnablePointlightShadows = EPointLightShadowMode::PLS_UPDATE_DYNAMIC;
+            PointlightShadowKernel = E_ShadowKernelQuality::SHADOW_KERNEL_PCSS;
+            EnablePointlightDynamicCasters = true;
+            PointlightShadowUpdateIntervalMs = 60;
+            PointlightShadowUpdateBudget = 6;
+            PartialDynamicShadowUpdates = true;
+            WorldShadowRangeScale = 1.0f;
+            NumShadowCascades = 4;
+            ShadowCascadePCFLimit = 1;
+            ShadowSoftness = DefaultShadowSoftnessForQuality( ShadowQuality );
             ShadowMapSize = 8192;
             PointlightShadowMapSize = 256;
             break;
@@ -980,30 +1075,24 @@ struct GothicRendererSettings {
             ApplyShadowQualitySettings();
             break;
         }
+        // Every named Shadow Quality profile starts both softness controls at
+        // the same value. Advanced can separate them afterwards.
+        PointlightShadowSoftness = ShadowSoftness;
     }
 
-    // Very Low and Low keep point-light shadows for the world, but skip the
-    // separate animated NPC/MOB shadow overlay to avoid its six-face cubemap
-    // render cost. Medium and above retain dynamic point-light caster shadows.
+    // Shadow Quality supplies the default policy for animated point-light
+    // casters; the Advanced menu can enable or disable it independently.
     bool UseDynamicPointlightNpcShadows() const {
-        return static_cast<int>(ShadowQuality)
-            >= static_cast<int>(E_ShadowQuality::SHADOW_QUALITY_MEDIUM);
+        return EnablePointlightDynamicCasters
+            && EnablePointlightShadows >= EPointLightShadowMode::PLS_UPDATE_DYNAMIC;
     }
 
     E_ShadowKernelQuality GetShadowKernelQuality() const {
-        if ( ShadowMapSize <= 1024 ) return E_ShadowKernelQuality::SHADOW_KERNEL_PCF_LOW;
-        if ( ShadowMapSize <= 2048 ) return E_ShadowKernelQuality::SHADOW_KERNEL_PCF_MEDIUM;
-        return E_ShadowKernelQuality::SHADOW_KERNEL_PCSS;
+        return CSMShadowKernel;
     }
 
     E_ShadowKernelQuality GetPointlightShadowKernelQuality() const {
-        // Medium keeps the higher CSM quality, but pointlight shadowmaps stay
-        // at 128px. Keep their stable, compact 4-tap PCF footprint instead of
-        // exposing the 8-tap medium kernel on the low-resolution cubemap.
-        if ( ShadowQuality == E_ShadowQuality::SHADOW_QUALITY_MEDIUM ) {
-            return E_ShadowKernelQuality::SHADOW_KERNEL_PCF_LOW;
-        }
-        return GetShadowKernelQuality();
+        return PointlightShadowKernel;
     }
 
     /** Rendering options */
@@ -1228,35 +1317,35 @@ struct GothicRendererSettings {
     E_ShadowQuality ShadowQuality;
     // Appended so every pre-existing renderer-settings field offset remains unchanged.
     float ShadowCasterMinTexels;
-    // Appended so every pre-existing renderer-settings field offset remains unchanged.
-    // Runtime-only; the complete Hi-Z static-VOB occlusion path is controlled
-    // by this one switch. Its internal GPU culling, indirect draws and shared
-    // geometry storage are implementation details, not separate user options.
-    bool GpuVobOcclusionCulling;
-    // Runtime-only master switch for all advanced performance test options.
-    // It is intentionally not persisted in UserSettings.ini.
+    // Master switch for all Advanced-menu overrides and test options. It is
+    // persisted as Shadows/Advanced_Enabled in UserSettings.ini.
     bool AdvancedPerformanceOptions;
-    // Runtime-only Advanced-menu world/visual test switches. They are
-    // intentionally not persisted in UserSettings.ini.
+    // Advanced-menu world/visual test switches. They are persisted with the
+    // Advanced_ prefix when the master switch is enabled.
     bool AdvancedWaterAnimation;
-    bool AdvancedPuddles;
-    bool AdvancedWetGroundSSR;
     bool AdvancedNightEnhance;
     bool AdvancedCityWindowTransparency;
-    bool GetEffectiveGpuVobOcclusionCulling() const {
-        return AdvancedPerformanceOptions && GpuVobOcclusionCulling;
-    }
-
+    // Normal F11 option. It controls procedural puddles and wet-ground
+    // reflections together; rain particles, impacts, and the rain shadowmap
+    // remain independent.
+    bool RainEffects;
+    // Advanced shadow controls. Shadow Quality initializes these values, and
+    // the Advanced menu can override them while its master switch is enabled.
+    bool EnablePointlightDynamicCasters;
+    E_ShadowKernelQuality CSMShadowKernel;
+    E_ShadowKernelQuality PointlightShadowKernel;
+    int PointlightShadowUpdateIntervalMs;
+    int PointlightShadowUpdateBudget;
+    // Appended so the existing ShadowSoftness field offset remains stable.
+    // Shadow Quality initializes this together with CSM softness; Advanced
+    // can override it independently for pointlight shadows.
+    float PointlightShadowSoftness;
     bool GetEffectiveWaterAnimation() const {
         return !AdvancedPerformanceOptions || AdvancedWaterAnimation;
     }
 
-    bool GetEffectivePuddles() const {
-        return !AdvancedPerformanceOptions || AdvancedPuddles;
-    }
-
-    bool GetEffectiveWetGroundSSR() const {
-        return !AdvancedPerformanceOptions || AdvancedWetGroundSSR;
+    bool GetEffectiveRainEffects() const {
+        return RainEffects;
     }
 
     bool GetEffectiveNightEnhance() const {
@@ -1270,28 +1359,22 @@ struct GothicRendererSettings {
         return !AdvancedPerformanceOptions || AdvancedCityWindowTransparency;
     }
 
-    // These are pre-existing Build 213 renderer paths. The Advanced master
-    // switch may override them while testing, but disabling Advanced must
-    // restore their original Build 213 behavior instead of silently turning
-    // them off.
+    // These are internal renderer paths, not Advanced-menu options. The
+    // Advanced master switch must not alter them.
     bool GetEffectiveThreadedShadowCulling() const {
-        return AdvancedPerformanceOptions && ThreadedShadowCulling;
+        return ThreadedShadowCulling;
     }
 
     bool GetEffectiveLazyCascadeUpdate() const {
-        return AdvancedPerformanceOptions
-            ? DebugSettings.ShadowCascades.LazyCascadeUpdate
-            : true;
+        return DebugSettings.ShadowCascades.LazyCascadeUpdate;
     }
 
     bool GetEffectiveDoZPrepass() const {
-        return AdvancedPerformanceOptions ? DoZPrepass : true;
+        return DoZPrepass;
     }
 
     bool GetEffectiveWorldSectionBVH() const {
-        return AdvancedPerformanceOptions
-            ? DebugSettings.FeatureSet.UseWorldSectionBVH
-            : true;
+        return DebugSettings.FeatureSet.UseWorldSectionBVH;
     }
 
     bool AreGodRaysEnabled() const {
@@ -1322,7 +1405,7 @@ struct GothicRendererSettings {
             if ( distance < nearestDistance ) {
                 nearestLevel = level;
                 nearestDistance = distance;
-            }
+        }
         }
         return nearestLevel;
     }

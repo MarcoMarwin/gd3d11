@@ -9,6 +9,10 @@
 #include <imgui_impl_win32.h>
 #include <imgui_impl_dx11.h>
 
+// Reconciles the derived GraphicsPreset value with the actual F11 settings.
+// Loading UserSettings.ini must not leave a stale profile label behind.
+void SyncGraphicsPresetSelection( GothicRendererSettings& settings );
+
 
 class ImGuiShim {
 public:

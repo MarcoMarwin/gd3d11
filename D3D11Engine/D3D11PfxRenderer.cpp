@@ -124,21 +124,22 @@ XRESULT D3D11PfxRenderer::RenderWetGroundSSR( ID3D11RenderTargetView* outputRTV,
     cb.WG_InvResolution = float2( 1.0f / std::max( resolution.x, 1 ), 1.0f / std::max( resolution.y, 1 ) );
     auto& rendererSettings = Engine::GAPI->GetRendererState().RendererSettings;
     // Do not reuse Water Reflections' EnableSSR/SSRStrength here. Those
-    // controls are intentionally limited to water surfaces; wet-ground SSR
-    // and puddle reflections remain available independently.
+    // controls are intentionally limited to water surfaces. The separate
+    // Rain effects option controls wet-ground reflections and procedural
+    // puddles together; rain impacts remain available independently.
     cb.WG_Strength = WET_GROUND_SSR_DEFAULT_STRENGTH;
     cb.WG_Time = Engine::GAPI->GetTimeSeconds();
     cb.WG_RainFXWeight = Engine::GAPI->GetRainFXWeight();
     cb.WG_RainFogColor = rendererSettings.RainFogColor;
     cb.WG_RainFogDensity = rendererSettings.RainFogDensity;
     cb.WG_FogRange = rendererSettings.FogRange;
-    cb.WG_WetMaterialReflectionsStrength = 1.0f;
-    const bool puddlesEnabled = rendererSettings.GetEffectivePuddles();
-    cb.WG_ProceduralPuddlesStrength = puddlesEnabled ? 1.0f : 0.0f;
-    cb.WG_PuddleReflectionsStrength = puddlesEnabled ? 1.0f : 0.0f;
+    const bool rainEffectsEnabled = rendererSettings.GetEffectiveRainEffects();
+    cb.WG_WetMaterialReflectionsStrength = rainEffectsEnabled ? 1.0f : 0.0f;
+    cb.WG_ProceduralPuddlesStrength = rainEffectsEnabled ? 1.0f : 0.0f;
+    cb.WG_PuddleReflectionsStrength = rainEffectsEnabled ? 1.0f : 0.0f;
     cb.WG_WetGroundRainImpactsStrength = 1.0f;
-    cb.WG_PuddleAccumulation = puddlesEnabled ? Engine::GAPI->GetPuddleAccumulation() : 0.0f;
-    cb.WG_ReflectionsEnabled = rendererSettings.GetEffectiveWetGroundSSR() ? 1.0f : 0.0f;
+    cb.WG_PuddleAccumulation = rainEffectsEnabled ? Engine::GAPI->GetPuddleAccumulation() : 0.0f;
+    cb.WG_ReflectionsEnabled = rainEffectsEnabled ? 1.0f : 0.0f;
     ps->GetBuffer( "WetGroundSSRConstantBuffer" ).Update( &cb ).Bind();
 
     if ( GSky* sky = Engine::GAPI->GetSky() )

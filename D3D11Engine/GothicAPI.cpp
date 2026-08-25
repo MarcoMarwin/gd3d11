@@ -964,7 +964,11 @@ namespace
         TCHAR nFloat[float_str_max];
         if ( auto count = ::GetPrivateProfileStringA( lpAppName, lpKeyName, nullptr, nFloat, float_str_max, lpFileName.c_str() ) ) {
             try {
-                return std::stof( std::string( nFloat, count ) );
+                const float value = std::stof( std::string( nFloat, count ) );
+                // std::stof accepts textual NaN/Infinity. Treat those as
+                // invalid INI values so later clamps cannot propagate a
+                // non-finite value into renderer state.
+                return std::isfinite( value ) ? value : nDefault;
             } catch ( const std::exception& ) {
                 return nDefault;
             }
@@ -1808,6 +1812,10 @@ void GothicAPI::OnWorldLoaded() {
     // Load global F11 draw distances first, then optional world-specific environment overrides.
     LoadRendererGlobalSettings( RendererState.RendererSettings, MENU_SETTINGS_FILE );
     LoadRendererWorldSettings( RendererState.RendererSettings );
+    // Finalize the derived profile label only after all settings sources have
+    // been applied. World files currently affect atmosphere only, but keeping
+    // this at the end prevents future world overrides from leaving stale UI state.
+    SyncGraphicsPresetSelection( RendererState.RendererSettings );
     RendererState.RendererSettings.ApplySkyColorValues( GetSky()->GetDaySkyTexture() == ESkyTexture::ST_OldWorld );
     RendererState.RendererSettings.ApplyWorldNightFogBrightness( LoadedWorldInfo->WorldName == "OLDWORLD" || LoadedWorldInfo->WorldName == "WORLD" );
 
@@ -1917,12 +1925,22 @@ void GothicAPI::LoadRendererWorldSettings( GothicRendererSettings& s, const char
 
 void GothicAPI::LoadRendererGlobalSettings( GothicRendererSettings& s, const char* iniFile ) {
     if ( !Toolbox::FileExists( iniFile ) ) {
+        // UserSettings.ini may not exist on a first launch. The actual F11
+        // values still determine the profile shown in the menu.
+        SyncGraphicsPresetSelection( s );
         return;
     }
 
     const std::string ini = iniFile;
-    s.GraphicsPreset = static_cast<GothicRendererSettings::E_GraphicsPreset>(
-        GetPrivateProfileIntA( "General", "GraphicsPreset", static_cast<int>(s.GraphicsPreset), ini.c_str() ) );
+    const int storedGraphicsPreset = GetPrivateProfileIntA(
+        "General", "GraphicsPreset", static_cast<int>(s.GraphicsPreset), ini.c_str() );
+    const int normalizedGraphicsPreset = storedGraphicsPreset == 1
+        ? static_cast<int>(GothicRendererSettings::GRAPHICS_LOW)
+        : std::clamp(
+            storedGraphicsPreset,
+            static_cast<int>(GothicRendererSettings::GRAPHICS_CUSTOM),
+            static_cast<int>(GothicRendererSettings::GRAPHICS_VERY_HIGH) );
+    s.GraphicsPreset = static_cast<GothicRendererSettings::E_GraphicsPreset>( normalizedGraphicsPreset );
 
     if ( !GMPModeActive ) {
         s.OutdoorSmallVobDrawRadius = std::clamp(
@@ -1932,6 +1950,10 @@ void GothicAPI::LoadRendererGlobalSettings( GothicRendererSettings& s, const cha
             static_cast<int>( GetPrivateProfileIntA( "General", "SectionDrawRadius", s.SectionDrawRadius, ini.c_str() ) ),
             1, 10 ) );
     }
+
+    // GraphicsPreset is derived metadata. Reconcile it with all individual
+    // F11 values after loading the complete settings set.
+    SyncGraphicsPresetSelection( s );
 }
 
 void GothicAPI::SaveRendererGlobalSettings( const GothicRendererSettings& s, const char* iniFile ) {
@@ -7430,23 +7452,53 @@ XRESULT GothicAPI::SaveMenuSettings( const std::string& file ) {
     WritePrivateProfileStringA( "Display", "LowLatency", std::to_string( s.LowLatency ? TRUE : FALSE ).c_str(), ini.c_str() );
     WritePrivateProfileStringA( "Display", "StretchWindow", std::to_string( s.StretchWindow ? TRUE : FALSE ).c_str(), ini.c_str() );
     WritePrivateProfileStringA( "Display", "Rain", std::to_string( s.EnableRain ? TRUE : FALSE ).c_str(), ini.c_str() );
+    WritePrivateProfileStringA( "Display", "RainEffects", std::to_string( s.RainEffects ? TRUE : FALSE ).c_str(), ini.c_str() );
     WritePrivateProfileStringA( "Display", "DynamicClouds", std::to_string( s.EnableDynamicClouds ? TRUE : FALSE ).c_str(), ini.c_str() );
     WritePrivateProfileStringA( "Display", "WindQuality", std::to_string( s.WindQuality ).c_str(), ini.c_str() );
     WritePrivateProfileStringA( "Display", "WindStrength", std::to_string( s.GlobalWindStrength ).c_str(), ini.c_str() );
-    WritePrivateProfileStringA( "Display", "HeroAffectsObjects", std::to_string( s.HeroAffectsObjects ? TRUE : FALSE ).c_str(), ini.c_str() );
     WritePrivateProfileStringA( "Shadows", "Quality", std::to_string( static_cast<int>(s.ShadowQuality) ).c_str(), ini.c_str() );
-    WritePrivateProfileStringA( "Shadows", "ShadowSoftness", std::to_string( s.ShadowSoftness ).c_str(), ini.c_str() );
+    WritePrivateProfileStringA( "Shadows", "Advanced_Enabled", std::to_string( s.AdvancedPerformanceOptions ? TRUE : FALSE ).c_str(), ini.c_str() );
+    WritePrivateProfileStringA( "Shadows", "Advanced_CSMEnabled", std::to_string( s.EnableShadows ? TRUE : FALSE ).c_str(), ini.c_str() );
+    WritePrivateProfileStringA( "Shadows", "Advanced_CSMResolution", std::to_string( s.ShadowMapSize ).c_str(), ini.c_str() );
+    WritePrivateProfileStringA( "Shadows", "Advanced_CSMFilter", std::to_string( static_cast<int>(s.CSMShadowKernel) ).c_str(), ini.c_str() );
+    WritePrivateProfileStringA( "Shadows", "Advanced_CSMCascades", std::to_string( s.NumShadowCascades ).c_str(), ini.c_str() );
+    WritePrivateProfileStringA( "Shadows", "Advanced_CSMRange", std::to_string( s.WorldShadowRangeScale ).c_str(), ini.c_str() );
+    WritePrivateProfileStringA( "Shadows", "Advanced_CSMPCFLimit", std::to_string( s.ShadowCascadePCFLimit ).c_str(), ini.c_str() );
+    WritePrivateProfileStringA( "Shadows", "Advanced_PointlightMode", std::to_string( static_cast<int>(s.EnablePointlightShadows) ).c_str(), ini.c_str() );
+    WritePrivateProfileStringA( "Shadows", "Advanced_PointlightResolution", std::to_string( s.PointlightShadowMapSize ).c_str(), ini.c_str() );
+    WritePrivateProfileStringA( "Shadows", "Advanced_PointlightFilter", std::to_string( static_cast<int>(s.PointlightShadowKernel) ).c_str(), ini.c_str() );
+    WritePrivateProfileStringA( "Shadows", "Advanced_PointlightDynamicCasters", std::to_string( s.EnablePointlightDynamicCasters ? TRUE : FALSE ).c_str(), ini.c_str() );
+    WritePrivateProfileStringA( "Shadows", "Advanced_PointlightStaggerUpdates", std::to_string( s.PartialDynamicShadowUpdates ? TRUE : FALSE ).c_str(), ini.c_str() );
+    WritePrivateProfileStringA( "Shadows", "Advanced_PointlightUpdateIntervalMs", std::to_string( s.PointlightShadowUpdateIntervalMs ).c_str(), ini.c_str() );
+    WritePrivateProfileStringA( "Shadows", "Advanced_PointlightUpdateBudget", std::to_string( s.PointlightShadowUpdateBudget ).c_str(), ini.c_str() );
+    WritePrivateProfileStringA( "Shadows", "Advanced_CSMShadowSoftness", float_to_string( s.ShadowSoftness, 2 ).c_str(), ini.c_str() );
+    WritePrivateProfileStringA( "Shadows", "Advanced_PointlightShadowSoftness", float_to_string( s.PointlightShadowSoftness, 2 ).c_str(), ini.c_str() );
+    WritePrivateProfileStringA( "Shadows", "Advanced_VegetationPush", std::to_string( s.HeroAffectsObjects ? TRUE : FALSE ).c_str(), ini.c_str() );
+    WritePrivateProfileStringA( "Shadows", "Advanced_WaterAnimation", std::to_string( s.AdvancedWaterAnimation ? TRUE : FALSE ).c_str(), ini.c_str() );
+    WritePrivateProfileStringA( "Shadows", "Advanced_NightEnhance", std::to_string( s.AdvancedNightEnhance ? TRUE : FALSE ).c_str(), ini.c_str() );
+    WritePrivateProfileStringA( "Shadows", "Advanced_CityWindowTransparency", std::to_string( s.AdvancedCityWindowTransparency ? TRUE : FALSE ).c_str(), ini.c_str() );
 
     // These are renderer-internal controls, not F11 settings. Remove keys
     // written by older builds so UserSettings.ini remains menu-owned.
     WritePrivateProfileStringA( "Shadows", "ShadowMapSize", nullptr, ini.c_str() );
     WritePrivateProfileStringA( "Shadows", "CasterMinTexels", nullptr, ini.c_str() );
-    WritePrivateProfileStringA( "Performance", "GpuVobCulling", nullptr, ini.c_str() );
-    WritePrivateProfileStringA( "Performance", "GpuVobHiZCulling", nullptr, ini.c_str() );
-    WritePrivateProfileStringA( "Performance", "GpuVobShadowCulling", nullptr, ini.c_str() );
-    WritePrivateProfileStringA( "Performance", "GpuVobGeometryArena", nullptr, ini.c_str() );
-    WritePrivateProfileStringA( "Performance", "GpuVobMdi", nullptr, ini.c_str() );
-    WritePrivateProfileStringA( "Performance", "GpuVobOcclusionCulling", nullptr, ini.c_str() );
+    WritePrivateProfileStringA( "Shadows", "EnableCSM", nullptr, ini.c_str() );
+    WritePrivateProfileStringA( "Shadows", "CSMResolution", nullptr, ini.c_str() );
+    WritePrivateProfileStringA( "Shadows", "CSMFilter", nullptr, ini.c_str() );
+    WritePrivateProfileStringA( "Shadows", "CSMCascades", nullptr, ini.c_str() );
+    WritePrivateProfileStringA( "Shadows", "CSMRange", nullptr, ini.c_str() );
+    WritePrivateProfileStringA( "Shadows", "CSMPCFLimit", nullptr, ini.c_str() );
+    WritePrivateProfileStringA( "Shadows", "PointlightMode", nullptr, ini.c_str() );
+    WritePrivateProfileStringA( "Shadows", "PointlightResolution", nullptr, ini.c_str() );
+    WritePrivateProfileStringA( "Shadows", "PointlightFilter", nullptr, ini.c_str() );
+    WritePrivateProfileStringA( "Shadows", "PointlightDynamicCasters", nullptr, ini.c_str() );
+    WritePrivateProfileStringA( "Shadows", "PointlightStaggerUpdates", nullptr, ini.c_str() );
+    WritePrivateProfileStringA( "Shadows", "PointlightUpdateIntervalMs", nullptr, ini.c_str() );
+    WritePrivateProfileStringA( "Shadows", "PointlightUpdateBudget", nullptr, ini.c_str() );
+    WritePrivateProfileStringA( "Shadows", "ShadowSoftness", nullptr, ini.c_str() );
+    WritePrivateProfileStringA( "Shadows", "Advanced_ShadowSoftness", nullptr, ini.c_str() );
+    WritePrivateProfileStringA( "Shadows", "Advanced_BaseVegetationPush", nullptr, ini.c_str() );
+    WritePrivateProfileStringA( "Display", "HeroAffectsObjects", nullptr, ini.c_str() );
 
     WritePrivateProfileStringA( "General", "AntiAliasing", std::to_string( (int)s.AntiAliasingMode ).c_str(), ini.c_str() );
 
@@ -7471,7 +7523,10 @@ XRESULT GothicAPI::LoadMenuSettings( const std::string& file ) {
     if ( Toolbox::FileExists( ini ) ) {
         LogInfo() << "Loading menu settings from " << ini;
 
-        s.ChangeWindowPreset = GetPrivateProfileIntA( "General", "ChangeToMode", 0, ini.c_str() );
+        const int storedWindowPreset = GetPrivateProfileIntA( "General", "ChangeToMode", 0, ini.c_str() );
+        s.ChangeWindowPreset = storedWindowPreset == WINDOW_MODE_WINDOWED
+            ? WINDOW_MODE_WINDOWED
+            : (storedWindowPreset == 0 ? 0 : WINDOW_MODE_FULLSCREEN_BORDERLESS);
         s.D3D11Language = static_cast<GothicRendererSettings::E_D3D11Language>(std::clamp<int>(
             GetPrivateProfileIntA( "General", "D3D11Language", static_cast<int>(ds.D3D11Language), ini.c_str() ),
             static_cast<int>(GothicRendererSettings::D3D11_LANGUAGE_ENGLISH),
@@ -7567,29 +7622,79 @@ XRESULT GothicAPI::LoadMenuSettings( const std::string& file ) {
             GetPrivateProfileIntA( "Shadows", "Quality", static_cast<int>(ds.ShadowQuality), ini.c_str() ),
             static_cast<int>(GothicRendererSettings::E_ShadowQuality::SHADOW_QUALITY_OFF),
             static_cast<int>(GothicRendererSettings::E_ShadowQuality::SHADOW_QUALITY_EXTREME) ) );
+        // Shadow Quality is the complete base profile. Advanced values are
+        // overlaid only when the Advanced master switch is enabled.
         s.ApplyShadowQualitySettings();
-        s.WorldShadowRangeScale = ds.WorldShadowRangeScale;
-        s.NumShadowCascades = ds.NumShadowCascades;
-        s.ShadowCascadePCFLimit = ds.ShadowCascadePCFLimit;
         s.ShadowFrustumCullingMode = ds.ShadowFrustumCullingMode;
         s.EnableDynamicLighting = ds.EnableDynamicLighting;
         s.SmoothShadowCameraUpdate = ds.SmoothShadowCameraUpdate;
         s.SmoothShadowFrequency = ds.SmoothShadowFrequency;
         s.ShadowStrength = ds.ShadowStrength;
-        s.ShadowSoftness = std::clamp( GetPrivateProfileFloatA( "Shadows", "ShadowSoftness", ds.ShadowSoftness, ini ), 0.0f, 2.0f );
         s.ShadowAOStrength = ds.ShadowAOStrength;
         s.WorldAOStrength = ds.WorldAOStrength;
         s.ShadowCasterMinTexels = ds.ShadowCasterMinTexels;
-        s.GpuVobOcclusionCulling = ds.GpuVobOcclusionCulling;
         s.ThreadedShadowCulling = ds.ThreadedShadowCulling;
         s.DebugSettings.ShadowCascades.LazyCascadeUpdate = ds.DebugSettings.ShadowCascades.LazyCascadeUpdate;
         s.DoZPrepass = ds.DoZPrepass;
-        s.AdvancedPerformanceOptions = ds.AdvancedPerformanceOptions;
+        s.AdvancedPerformanceOptions = GetPrivateProfileBoolA(
+            "Shadows", "Advanced_Enabled", ds.AdvancedPerformanceOptions, ini );
         s.AdvancedWaterAnimation = ds.AdvancedWaterAnimation;
-        s.AdvancedPuddles = ds.AdvancedPuddles;
-        s.AdvancedWetGroundSSR = ds.AdvancedWetGroundSSR;
         s.AdvancedNightEnhance = ds.AdvancedNightEnhance;
         s.AdvancedCityWindowTransparency = ds.AdvancedCityWindowTransparency;
+        // Vegetation Push is Advanced-only. The normal/default state is on;
+        // the override is read only while the Advanced master switch is on.
+        s.HeroAffectsObjects = true;
+        if ( s.AdvancedPerformanceOptions ) {
+            s.EnableShadows = GetPrivateProfileBoolA( "Shadows", "Advanced_CSMEnabled", s.EnableShadows, ini );
+            s.ShadowMapSize = GothicRendererSettings::SnapCSMShadowMapSize(
+                GetPrivateProfileIntA( "Shadows", "Advanced_CSMResolution", s.ShadowMapSize, ini.c_str() ) );
+            s.CSMShadowKernel = static_cast<GothicRendererSettings::E_ShadowKernelQuality>( std::clamp<int>(
+                GetPrivateProfileIntA( "Shadows", "Advanced_CSMFilter", static_cast<int>(s.CSMShadowKernel), ini.c_str() ),
+                static_cast<int>(GothicRendererSettings::SHADOW_KERNEL_PCF_LOW),
+                static_cast<int>(GothicRendererSettings::SHADOW_KERNEL_PCSS) ) );
+            s.NumShadowCascades = std::clamp(
+                GetPrivateProfileIntA( "Shadows", "Advanced_CSMCascades", s.NumShadowCascades, ini.c_str() ),
+                1, std::min( 4, MAX_CSM_CASCADES ) );
+            s.WorldShadowRangeScale = std::clamp(
+                GetPrivateProfileFloatA( "Shadows", "Advanced_CSMRange", s.WorldShadowRangeScale, ini ), 0.5f, 2.0f );
+            s.ShadowCascadePCFLimit = std::clamp(
+                GetPrivateProfileIntA( "Shadows", "Advanced_CSMPCFLimit", s.ShadowCascadePCFLimit, ini.c_str() ),
+                0, std::min( std::min( 4, MAX_CSM_CASCADES ), s.NumShadowCascades ) );
+            s.EnablePointlightShadows = static_cast<GothicRendererSettings::EPointLightShadowMode>( std::clamp<int>(
+                GetPrivateProfileIntA( "Shadows", "Advanced_PointlightMode", static_cast<int>(s.EnablePointlightShadows), ini.c_str() ),
+                static_cast<int>(GothicRendererSettings::PLS_DISABLED),
+                static_cast<int>(GothicRendererSettings::PLS_UPDATE_DYNAMIC) ) );
+            s.PointlightShadowMapSize = GothicRendererSettings::SnapPointlightShadowMapSize(
+                GetPrivateProfileIntA( "Shadows", "Advanced_PointlightResolution", s.PointlightShadowMapSize, ini.c_str() ) );
+            s.PointlightShadowKernel = static_cast<GothicRendererSettings::E_ShadowKernelQuality>( std::clamp<int>(
+                GetPrivateProfileIntA( "Shadows", "Advanced_PointlightFilter", static_cast<int>(s.PointlightShadowKernel), ini.c_str() ),
+                static_cast<int>(GothicRendererSettings::SHADOW_KERNEL_PCF_LOW),
+                static_cast<int>(GothicRendererSettings::SHADOW_KERNEL_PCSS) ) );
+            s.EnablePointlightDynamicCasters = GetPrivateProfileBoolA(
+                "Shadows", "Advanced_PointlightDynamicCasters", s.EnablePointlightDynamicCasters, ini );
+            s.PartialDynamicShadowUpdates = GetPrivateProfileBoolA(
+                "Shadows", "Advanced_PointlightStaggerUpdates", s.PartialDynamicShadowUpdates, ini );
+            s.PointlightShadowUpdateIntervalMs = std::clamp(
+                GetPrivateProfileIntA( "Shadows", "Advanced_PointlightUpdateIntervalMs", s.PointlightShadowUpdateIntervalMs, ini.c_str() ), 40, 500 );
+            s.PointlightShadowUpdateBudget = std::clamp(
+                GetPrivateProfileIntA( "Shadows", "Advanced_PointlightUpdateBudget", s.PointlightShadowUpdateBudget, ini.c_str() ), 1, 8 );
+            // Migrate the former shared softness value when the new split
+            // keys are not present, then let each Advanced control diverge.
+            const float legacyShadowSoftness = std::clamp( GetPrivateProfileFloatA(
+                "Shadows", "Advanced_ShadowSoftness", s.ShadowSoftness, ini ), 0.0f, 2.0f );
+            s.ShadowSoftness = std::clamp( GetPrivateProfileFloatA(
+                "Shadows", "Advanced_CSMShadowSoftness", legacyShadowSoftness, ini ), 0.0f, 2.0f );
+            s.PointlightShadowSoftness = std::clamp( GetPrivateProfileFloatA(
+                "Shadows", "Advanced_PointlightShadowSoftness", legacyShadowSoftness, ini ), 0.0f, 2.0f );
+            s.AdvancedWaterAnimation = GetPrivateProfileBoolA(
+                "Shadows", "Advanced_WaterAnimation", s.AdvancedWaterAnimation, ini );
+            s.AdvancedNightEnhance = GetPrivateProfileBoolA(
+                "Shadows", "Advanced_NightEnhance", s.AdvancedNightEnhance, ini );
+            s.AdvancedCityWindowTransparency = GetPrivateProfileBoolA(
+                "Shadows", "Advanced_CityWindowTransparency", s.AdvancedCityWindowTransparency, ini );
+            s.HeroAffectsObjects = GetPrivateProfileBoolA(
+                "Shadows", "Advanced_VegetationPush", s.HeroAffectsObjects, ini );
+        }
 
         INT2 res = {};
         RECT desktopRect;
@@ -7617,6 +7722,7 @@ XRESULT GothicAPI::LoadMenuSettings( const std::string& file ) {
         }
         s.GothicUIScale = ds.GothicUIScale;
         s.EnableRain = GetPrivateProfileBoolA( "Display", "Rain", ds.EnableRain, ini );
+        s.RainEffects = GetPrivateProfileBoolA( "Display", "RainEffects", ds.RainEffects, ini );
         s.EnableDynamicClouds = GetPrivateProfileBoolA( "Display", "DynamicClouds", ds.EnableDynamicClouds, ini );
         s.NightRainMidColor = ds.NightRainMidColor;
         s.NightRainFarColor = ds.NightRainFarColor;
@@ -7638,10 +7744,12 @@ XRESULT GothicAPI::LoadMenuSettings( const std::string& file ) {
         s.EnableTiledLighting = false;
         s.RendererMode = GothicRendererSettings::E_RendererMode::RM_Deferred;
 
-        s.WindQuality = GetPrivateProfileIntA( "Display", "WindQuality", 0, ini.c_str() );
+        s.WindQuality = std::clamp(
+            GetPrivateProfileIntA( "Display", "WindQuality", static_cast<int>(GothicRendererSettings::WIND_QUALITY_NONE), ini.c_str() ),
+            static_cast<int>(GothicRendererSettings::WIND_QUALITY_NONE),
+            static_cast<int>(GothicRendererSettings::WIND_QUALITY_ADVANCED) );
         s.GlobalWindStrength = std::clamp( GetPrivateProfileFloatA( "Display", "WindStrength", ds.GlobalWindStrength, ini ), 0.0f, 2.0f );
         s.EnableWaterAnimation = true;
-        s.HeroAffectsObjects = GetPrivateProfileIntA( "Display", "HeroAffectsObjects", ds.HeroAffectsObjects ? 1 : 0, ini.c_str() ) != 0;
         s.DynamicCloudDensity = ds.DynamicCloudDensity;
         s.DynamicCloudScale = ds.DynamicCloudScale;
         s.DynamicCloudHeight = ds.DynamicCloudHeight;
@@ -7654,7 +7762,10 @@ XRESULT GothicAPI::LoadMenuSettings( const std::string& file ) {
         s.OceanWaterColor = ds.OceanWaterColor;
         s.OceanWaterColorStrength = ds.OceanWaterColorStrength;
 
-        s.AntiAliasingMode = (GothicRendererSettings::E_AntiAliasingMode)GetPrivateProfileIntA( "General", "AntiAliasing", (int)ds.AntiAliasingMode, ini.c_str() );
+        s.AntiAliasingMode = static_cast<GothicRendererSettings::E_AntiAliasingMode>( std::clamp(
+            GetPrivateProfileIntA( "General", "AntiAliasing", static_cast<int>(ds.AntiAliasingMode), ini.c_str() ),
+            static_cast<int>(GothicRendererSettings::AA_NONE),
+            static_cast<int>(GothicRendererSettings::AA_FSR3) ) );
         s.SharpeningMode = ds.SharpeningMode;
         s.SharpenFactor = s.GetUsesTemporalReconstruction() ? 1.0f : 0.2f;
 
@@ -7760,9 +7871,6 @@ XRESULT GothicAPI::LoadMenuSettings( const std::string& file ) {
     s.WaterCubemapStrength = ds.WaterCubemapStrength;
     s.EnableParticleLighting = ds.EnableParticleLighting;
     s.ParticleLightingStrength = ds.ParticleLightingStrength;
-    s.WorldShadowRangeScale = ds.WorldShadowRangeScale;
-    s.NumShadowCascades = ds.NumShadowCascades;
-    s.ShadowCascadePCFLimit = ds.ShadowCascadePCFLimit;
     s.ShadowFrustumCullingMode = ds.ShadowFrustumCullingMode;
     s.EnableDynamicLighting = ds.EnableDynamicLighting;
     s.SmoothShadowCameraUpdate = ds.SmoothShadowCameraUpdate;

@@ -49,31 +49,10 @@ float4 PSMain( PS_INPUT Input ) : SV_TARGET
 		if (color.a > (170.0f / 255.0f))
 			discard;
 
-		// The normal post-processed path uses the replacement texture as a
-		// deliberately subtle glass overlay. With both HDR tone mapping and AA
-		// disabled, the same dark source color would be blended directly into the
-		// scene-to-gamma target and make the pane too dark. Keep the pane visible,
-		// but use a neutral source color for this one path; the opaque frame was
-		// already rendered by the main alpha-test pass.
-		const bool directSceneToGammaPath = cbFFData.padding.x > 0.5f;
-		if (directSceneToGammaPath)
-		{
-			// Do not discard the pane: the authored City_Window texture uses very
-			// low/zero alpha in parts of the glass, but the renderer deliberately
-			// keeps those panes perceptible. A white source is neutral under alpha
-			// blending and avoids importing the dark replacement RGB into the
-			// direct gamma target. The tint multiplication below is intentionally
-			// skipped for this path as well; it would reintroduce the same unwanted
-			// darkening that this branch is meant to avoid.
-			color.rgb = 1.0f;
-			color.a = max(color.a * 0.82f, 0.16f);
-			return color;
-		}
-		else
-		{
-			const float softenedAlpha = color.a * 0.82f;
-			color.a = max(softenedAlpha, 0.16f);
-		}
+		// Soften overly opaque authored panes but retain a firm visibility floor.
+		// This keeps glass present over sky, world geometry, decals and effects
+		// without making it read as a bright opaque sheet.
+		color.a = max(color.a * 0.82f, 0.16f);
 
 		if (cbFFData.windowSkyParams.y > 0.5f)
 		{

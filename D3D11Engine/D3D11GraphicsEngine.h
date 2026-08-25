@@ -381,9 +381,6 @@ public:
     /** Copies the depth stencil buffer to DepthStencilBufferCopy */
     void CopyDepthStencil();
 
-    /** Builds the world-only reversed-Z Hi-Z pyramid used by GPU scene occlusion. */
-    void BuildGpuVobHiZ( bool allowWorldMeshOnly = false );
-
     /** Draws particle meshes */
     void DrawFrameParticleMeshes( std::unordered_map<zCVob*, MeshVisualInfo*>& progMeshes ) override;
 
@@ -443,38 +440,6 @@ public:
     }
 
 private:
-    enum class EGpuTimingZone : unsigned int {
-        HiZ = 0,
-        MainCull,
-        VobDepth,
-        VobLit,
-        Count
-    };
-
-    static constexpr unsigned int GpuTimingZoneCount =
-        static_cast<unsigned int>( EGpuTimingZone::Count );
-    static constexpr unsigned int GpuTimingMaxIntervals = 8;
-    static constexpr unsigned int GpuTimingRingSize = 8;
-
-    struct GpuTimingFrame {
-        Microsoft::WRL::ComPtr<ID3D11Query> Disjoint;
-        Microsoft::WRL::ComPtr<ID3D11Query> Timestamps[
-            GpuTimingZoneCount][GpuTimingMaxIntervals][2];
-        unsigned int IntervalCount[GpuTimingZoneCount] = {};
-        bool Active[GpuTimingZoneCount] = {};
-        bool Pending = false;
-        unsigned int PendingFrames = 0;
-        uint64_t SettingsKey = 0;
-        uint64_t WorldGeneration = static_cast<uint64_t>( -1 );
-    };
-
-    bool EnsureGpuTimingQueries();
-    void BeginGpuTimingFrame( uint64_t settingsKey, uint64_t worldGeneration );
-    void EndGpuTimingFrame();
-    void PollGpuTimingQueries( uint64_t settingsKey, uint64_t worldGeneration );
-    void BeginGpuTimingZone( EGpuTimingZone zone );
-    void EndGpuTimingZone( EGpuTimingZone zone );
-
     struct FrameIndirectBufferPool {
         std::vector<std::unique_ptr<D3D11IndirectBuffer>> Buffers;
         size_t NextBuffer = 0;
@@ -574,33 +539,6 @@ private:
     void UnbindWindMetadata();
     ID3D11ShaderResourceView* GetWindowGlassReplacementSRV();
     void EnsureFrameVobVisibilityCollected();
-    bool PrepareGpuVobGeometryArena();
-    bool PrepareGpuVobCulling();
-    struct GpuWorldMeshCullItem {
-        WorldMeshInfo* Mesh = nullptr;
-        UINT IndexCount = 0;
-        UINT BaseIndexLocation = 0;
-        bool OcclusionEligible = false;
-    };
-    bool PrepareGpuWorldMeshHiZCulling(
-        const std::vector<GpuWorldMeshCullItem>& items,
-        bool allowPreviousFrameHiZ = false );
-    bool IsGpuVobHiZPreviousFrameUsable() const;
-    void PollGpuWorldMeshCullReadback( uint64_t settingsKey, uint64_t worldGeneration );
-    void ScheduleGpuWorldMeshCullReadback( const FrameGeometryCache& cache );
-    bool EnsureGpuVobHiZResources();
-    void PollGpuVobVisibleCountReadback( uint64_t settingsKey, uint64_t worldGeneration );
-    void ScheduleGpuVobVisibleCountReadback( const FrameGeometryCache& cache );
-    void LogGpuVobPerformanceStats();
-    uint64_t BuildGpuVobPerformanceSettingsKey() const;
-    void AccumulateGpuVobFrameRenderStats();
-    void ApplyGpuVobDisplayTriangleEstimate();
-    bool IsGpuVobRuntimeDisabled() const;
-    void DisableGpuVobRuntime( const char* reason );
-    bool IsGpuVobHiZRuntimeDisabled() const;
-    void DisableGpuVobHiZ( const char* reason );
-    bool IsGpuVobGeometryArenaRuntimeDisabled() const;
-    void DisableGpuVobGeometryArena( const char* reason );
     void RebuildWindowCutoutVolumeCache();
     unsigned int UpdateAndBindWindowCutouts( bool daylightPass = false );
     void UnbindWindowCutouts();
@@ -699,13 +637,8 @@ private:
         };
 
         bool worldMeshBuilt    = false;  ///< CollectVisibleSections + MDI arg build + buffer upload done
-        bool worldMeshGpuCullingActive = false; ///< Current-frame Hi-Z cluster args are valid for the main world pass
-        UINT worldMeshGpuCullCount = 0;
         bool vobVisibilityCollected = false; ///< Final camera VOB list collected once for VOBs and window cutouts
         bool vobInstancesUploaded = false; ///< CollectVisibleVobs + DynamicInstancingBuffer upload done
-        bool vobGpuCullingPrepared = false; ///< Main-view GPU cull/indirect args prepared once per frame
-        bool vobGpuCullingActive = false; ///< True only when the compute path completed successfully
-        bool gpuVobGeometryArenaPrepared = false; ///< Shared static-VOB arena prepared once per frame
         bool vobWindMetadataPrepared = false; ///< Wind metadata prepared for cached vob visuals
         bool skeletalBonesUploaded = false; ///< FL11 packed skeletal bone buffers uploaded for this frame
 
@@ -714,12 +647,7 @@ private:
         std::vector<CachedWorldMeshDraw> sortedDepthWorldMeshes;
         std::vector<VobInfo*> visibleWindowVobs;
         D3D11IndirectBuffer*           MainWorldIndirectArgsBuffer = nullptr;
-        D3D11IndirectBuffer*           MainWorldGpuOcclusionArgsBuffer = nullptr;
         D3D11VertexBuffer*             MainVobInstancingBuffer = nullptr;
-        D3D11VertexBuffer*             MainVobGpuInstanceBuffer = nullptr;
-        D3D11IndirectBuffer*            MainVobGpuIndirectArgsBuffer = nullptr;
-        D3D11VertexBuffer*             MainVobGpuGeometryVertexBuffer = nullptr;
-        D3D11VertexBuffer*             MainVobGpuGeometryIndexBuffer = nullptr;
         std::vector<VobWindMetadata>   vobWindMetadata;
         std::vector<CachedVobVisual>    vobVisuals;
         std::vector<CachedInstancedMeshDraw> sortedInstancedMeshes;
@@ -740,13 +668,8 @@ private:
 
         void Reset() {
             worldMeshBuilt      = false;
-            worldMeshGpuCullingActive = false;
-            worldMeshGpuCullCount = 0;
             vobVisibilityCollected = false;
             vobInstancesUploaded = false;
-            vobGpuCullingPrepared = false;
-            vobGpuCullingActive = false;
-            gpuVobGeometryArenaPrepared = false;
             vobWindMetadataPrepared = false;
             skeletalBonesUploaded = false;
             visibleSections.clear();
@@ -754,12 +677,7 @@ private:
             sortedDepthWorldMeshes.clear();
             visibleWindowVobs.clear();
             MainWorldIndirectArgsBuffer = nullptr;
-            MainWorldGpuOcclusionArgsBuffer = nullptr;
             MainVobInstancingBuffer = nullptr;
-            MainVobGpuInstanceBuffer = nullptr;
-            MainVobGpuIndirectArgsBuffer = nullptr;
-            MainVobGpuGeometryVertexBuffer = nullptr;
-            MainVobGpuGeometryIndexBuffer = nullptr;
             vobWindMetadata.clear();
             vobVisuals.clear();
             sortedInstancedMeshes.clear();
@@ -772,32 +690,6 @@ private:
     };
     FrameGeometryCache m_FrameGeometryCache;
 
-    struct GpuVobCullVisualBatch {
-        MeshVisualInfo* Visual = nullptr;
-        unsigned int StartInstanceNum = 0;
-        unsigned int InstanceCount = 0;
-    };
-
-    bool PrepareGpuVobCulling(
-        D3D11VertexBuffer* inputInstanceBuffer,
-        const std::vector<GpuVobCullVisualBatch>& vobVisuals,
-        const std::vector<FrameGeometryCache::CachedInstancedMeshDraw>& sortedInstancedMeshes,
-        D3D11VertexBuffer* geometryVertexBuffer,
-        D3D11VertexBuffer* geometryIndexBuffer,
-        std::unique_ptr<D3D11VertexBuffer>& cullInputBuffer,
-        std::unique_ptr<D3D11VertexBuffer>& cullVisualBuffer,
-        std::unique_ptr<D3D11VertexBuffer>& cullInstanceVisualIndexBuffer,
-        std::unique_ptr<D3D11VertexBuffer>& cullDrawVisualBuffer,
-        std::unique_ptr<D3D11VertexBuffer>& cullOutputBuffer,
-        std::unique_ptr<D3D11IndirectBuffer>& cullArgsBuffer,
-        std::unique_ptr<D3D11IndirectBuffer>& cullVisibleCountsBuffer,
-        std::unique_ptr<D3D11ConstantBuffer>& cullConstantBuffer,
-        std::unique_ptr<D3D11ConstantBuffer>& patchConstantBuffer,
-        D3D11VertexBuffer*& outputInstanceBuffer,
-        D3D11IndirectBuffer*& outputArgsBuffer,
-        const DirectX::XMMATRIX* cullViewProj = nullptr,
-        bool enableOcclusion = true );
-
     FrameIndirectBufferPool m_MainWorldIndirectPool;
     FrameIndirectBufferPool m_ShadowWorldIndirectPool;
     FrameInstancingBufferPool m_MainVobInstancingPool;
@@ -805,180 +697,6 @@ private:
 
     /** Water surface indirect buffer */
     std::unique_ptr<D3D11IndirectBuffer> WaterIndirectBuffer;
-
-    /** Persistent FL11+ resources for main-view GPU static-VOB culling. */
-    std::unique_ptr<D3D11VertexBuffer> GpuVobCullInputBuffer;
-    std::unique_ptr<D3D11VertexBuffer> GpuVobCullVisualBuffer;
-    std::unique_ptr<D3D11VertexBuffer> GpuVobCullInstanceVisualIndexBuffer;
-    std::unique_ptr<D3D11VertexBuffer> GpuVobCullDrawVisualBuffer;
-    std::unique_ptr<D3D11VertexBuffer> GpuVobCullOutputBuffer;
-    std::unique_ptr<D3D11IndirectBuffer> GpuVobCullArgsBuffer;
-    std::unique_ptr<D3D11IndirectBuffer> GpuVobCullVisibleCountsBuffer;
-    std::unique_ptr<D3D11ConstantBuffer> GpuVobCullConstantBuffer;
-    std::unique_ptr<D3D11ConstantBuffer> GpuVobPatchConstantBuffer;
-
-    /** Per-frame world-mesh cluster metadata/arguments for current-frame Hi-Z culling. */
-    std::unique_ptr<D3D11VertexBuffer> GpuWorldMeshCullClusterBuffer;
-    std::unique_ptr<D3D11IndirectBuffer> GpuWorldMeshCullArgsBuffer;
-    std::unique_ptr<D3D11ConstantBuffer> GpuWorldMeshCullConstantBuffer;
-
-    struct GpuVobGeometryRange {
-        UINT StartIndexLocation = 0;
-        INT BaseVertexLocation = 0;
-        UINT VertexCount = 0;
-        UINT IndexCount = 0;
-        UINT ShadowStartIndexLocation = 0;
-        UINT ShadowIndexCount = 0;
-    };
-
-    /** Persistent shared geometry used by main-view and CSM GPU-driven VOB paths. */
-    std::unique_ptr<D3D11VertexBuffer> GpuVobGeometryVertexBuffer;
-    std::unique_ptr<D3D11VertexBuffer> GpuVobGeometryIndexBuffer;
-    std::unordered_map<MeshInfo*, GpuVobGeometryRange> GpuVobGeometryRanges;
-    std::vector<MeshInfo*> GpuVobGeometryMeshes;
-    uint64_t GpuVobGeometryWorldGeneration = static_cast<uint64_t>( -1 );
-
-    /** World-only reversed-Z Hi-Z pyramid for GPU VOB occlusion culling. */
-    Microsoft::WRL::ComPtr<ID3D11Texture2D> GpuVobHiZTexture;
-    Microsoft::WRL::ComPtr<ID3D11ShaderResourceView> GpuVobHiZShaderResourceView;
-    std::vector<Microsoft::WRL::ComPtr<ID3D11ShaderResourceView>> GpuVobHiZMipShaderResourceViews;
-    std::vector<Microsoft::WRL::ComPtr<ID3D11UnorderedAccessView>> GpuVobHiZMipUnorderedAccessViews;
-    UINT GpuVobHiZWidth = 0;
-    UINT GpuVobHiZHeight = 0;
-    UINT GpuVobHiZMipCount = 0;
-    bool GpuVobHiZBuildAttemptedThisFrame = false;
-    bool GpuVobHiZBuiltThisFrame = false;
-    XMFLOAT4X4 GpuVobHiZViewProj = {};
-    uint64_t GpuVobHiZSettingsKey = 0;
-    uint64_t GpuVobHiZWorldGeneration = static_cast<uint64_t>( -1 );
-    bool GpuVobHiZViewProjValid = false;
-
-    struct GpuVobTriangleWeight {
-        UINT VisualIndex = 0;
-        UINT TrianglesPerInstance = 0;
-    };
-
-    struct GpuVobVisibleCountReadbackSlot {
-        std::unique_ptr<D3D11VertexBuffer> Buffer;
-        UINT Bytes = 0;
-        uint64_t SettingsKey = 0;
-        uint64_t WorldGeneration = static_cast<uint64_t>( -1 );
-        std::vector<UINT> CandidateInstanceCounts;
-        std::vector<GpuVobTriangleWeight> TriangleWeights;
-        bool Pending = false;
-    };
-
-    std::vector<GpuVobVisibleCountReadbackSlot> m_GpuVobVisibleCountReadbackSlots;
-    std::vector<GpuVobTriangleWeight> m_GpuVobCurrentTriangleWeights;
-
-    struct GpuWorldMeshCullReadbackSlot {
-        std::unique_ptr<D3D11VertexBuffer> Buffer;
-        UINT Bytes = 0;
-        UINT ArgumentCount = 0;
-        uint64_t SettingsKey = 0;
-        uint64_t WorldGeneration = static_cast<uint64_t>( -1 );
-        bool Pending = false;
-    };
-
-    std::vector<GpuWorldMeshCullReadbackSlot> m_GpuWorldMeshCullReadbackSlots;
-
-    struct GpuVobPerformanceStats {
-        uint64_t Frames = 0;
-        uint64_t HiZRequests = 0;
-        uint64_t HiZBuilt = 0;
-        uint64_t MainCullAttempts = 0;
-        uint64_t MainCullActive = 0;
-        uint64_t MainCullFallback = 0;
-        uint64_t ShadowVobCullAttempts = 0;
-        uint64_t ShadowVobCullActive = 0;
-        uint64_t ShadowVobCullFallback = 0;
-        uint64_t ShadowVobIndirectDrawCalls = 0;
-        uint64_t ShadowVobLodMeshes = 0;
-        uint64_t ShadowVobLodSourceTriangles = 0;
-        uint64_t ShadowVobLodTriangles = 0;
-        uint64_t WorldMeshCullAttempts = 0;
-        uint64_t WorldMeshCullActive = 0;
-        uint64_t WorldMeshCullFallback = 0;
-        uint64_t WorldMeshCullCandidateClusters = 0;
-        uint64_t WorldMeshCullEligibleClusters = 0;
-        uint64_t WorldMeshCullRejectedClusters = 0;
-        uint64_t WorldMeshCullReadbackSamples = 0;
-        uint64_t WorldMeshCullIndirectDrawCalls = 0;
-        uint64_t WorldMeshCullDispatches = 0;
-        uint64_t IndirectDrawCalls = 0;
-        uint64_t MdiBatches = 0;
-        uint64_t MdiCommands = 0;
-        uint64_t CpuFallbackDrawCalls = 0;
-        uint64_t CandidateInstances = 0;
-        uint64_t CandidateVisuals = 0;
-        uint64_t CandidateDrawItems = 0;
-        uint64_t GpuVisibleCountSamples = 0;
-        uint64_t GpuVisibleCandidateInstances = 0;
-        uint64_t GpuVisibleInstances = 0;
-        uint64_t GpuVisibleOccludedInstances = 0;
-        uint64_t GpuVisibleTriangles = 0;
-        uint64_t GpuCullInputCopyBytes = 0;
-        uint64_t GpuCullMetadataUploadBytes = 0;
-        uint64_t GpuCullArgsUploadBytes = 0;
-        uint64_t GpuCullDispatches = 0;
-        uint64_t HiZDispatches = 0;
-        double GpuCullPrepareMsTotal = 0.0;
-        double GpuCullPrepareMsMax = 0.0;
-        double HiZPrepareMsTotal = 0.0;
-        double HiZPrepareMsMax = 0.0;
-        uint64_t GpuTimingFrames = 0;
-        uint64_t GpuTimingDroppedFrames = 0;
-        uint64_t GpuHiZTimingSamples = 0;
-        uint64_t GpuMainCullTimingSamples = 0;
-        uint64_t GpuVobDepthTimingSamples = 0;
-        uint64_t GpuVobLitTimingSamples = 0;
-        double GpuHiZMsTotal = 0.0;
-        double GpuMainCullMsTotal = 0.0;
-        double GpuVobDepthMsTotal = 0.0;
-        double GpuVobLitMsTotal = 0.0;
-        uint64_t GpuTimingIntervalOverflow = 0;
-        uint64_t FpsSamples = 0;
-        double FpsTotal = 0.0;
-        uint64_t FrameTriangleSamples = 0;
-        uint64_t FrameTrianglesTotal = 0;
-        uint64_t FrameTrianglesMin = 0;
-        uint64_t FrameTrianglesMax = 0;
-        uint64_t FrameVobsTotal = 0;
-        uint64_t FrameTimeSamples = 0;
-        double FrameTimeMsTotal = 0.0;
-        double FrameTimeMsMin = 0.0;
-        double FrameTimeMsMax = 0.0;
-
-        void Reset() {
-            *this = {};
-        }
-    } m_GpuVobPerformanceStats;
-
-    uint64_t m_GpuVobPerformanceSettingsKey = 0;
-    uint64_t m_GpuVobPerformanceWorldGeneration = static_cast<uint64_t>( -1 );
-    uint64_t m_LastGpuVobFrameStatsAccumulated = 0;
-    bool m_GpuVobPerformanceSettingsInitialized = false;
-    uint64_t m_GpuVobFrameMainCandidateTriangles = 0;
-    uint64_t m_LastGpuMainVisibleTrianglesEstimate = 0;
-    double m_LastGpuMainVisibilityRatio = 0.0;
-    bool m_HasLastGpuMainVisibleTrianglesEstimate = false;
-    bool m_HasLastGpuMainVisibilityRatio = false;
-
-    GpuTimingFrame m_GpuTimingFrames[GpuTimingRingSize];
-    unsigned int m_GpuTimingFrameIndex = 0;
-    bool m_GpuTimingQueriesInitialized = false;
-    bool m_GpuTimingAvailable = false;
-    bool m_GpuTimingFrameActive = false;
-
-    // A failed optional GPU resource must not be retried every frame. The
-    // latch is scoped to the current settings/world and is cleared implicitly
-    // when either changes, so a deliberate retest remains possible.
-    uint64_t m_GpuVobRuntimeDisabledSettingsKey = 0;
-    uint64_t m_GpuVobRuntimeDisabledWorldGeneration = static_cast<uint64_t>( -1 );
-    uint64_t m_GpuVobHiZDisabledSettingsKey = 0;
-    uint64_t m_GpuVobHiZDisabledWorldGeneration = static_cast<uint64_t>( -1 );
-    uint64_t m_GpuVobGeometryArenaDisabledSettingsKey = 0;
-    uint64_t m_GpuVobGeometryArenaDisabledWorldGeneration = static_cast<uint64_t>( -1 );
 
     /** FL11 packed structured buffers for skeletal skinning (shared by main and shadow stages per frame). */
     std::unique_ptr<D3D11VertexBuffer> SkeletalBoneTransformsBuffer;

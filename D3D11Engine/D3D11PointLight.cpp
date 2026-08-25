@@ -246,7 +246,6 @@ void D3D11PointLight::CopyStaticAsideToActiveTarget() const {
 }
 
 void D3D11PointLight::RenderStaticShadowPass( RenderToDepthStencilBuffer& target, bool clearDepth ) {
-    ++m_StaticShadowPasses;
     D3D11GraphicsEngine* engine = reinterpret_cast<D3D11GraphicsEngine*>(Engine::GraphicsEngine);
     const float range = LightInfo->GetEffectiveLightRange();
 
@@ -266,7 +265,6 @@ void D3D11PointLight::RenderStaticShadowPass( RenderToDepthStencilBuffer& target
 }
 
 void D3D11PointLight::RenderAnimatedShadowPass( RenderToDepthStencilBuffer& target, bool clearDepth ) {
-    ++m_DynamicShadowPasses;
     D3D11GraphicsEngine* engine = reinterpret_cast<D3D11GraphicsEngine*>(Engine::GraphicsEngine);
     const float range = LightInfo->GetEffectiveLightRange();
 
@@ -356,15 +354,6 @@ bool D3D11PointLight::WantsUpdate() {
             return true;
 
     return false;
-}
-
-D3D11PointLight::ShadowRenderStats D3D11PointLight::ConsumeShadowRenderStats() {
-    ShadowRenderStats stats;
-    stats.StaticPasses = m_StaticShadowPasses;
-    stats.DynamicPasses = m_DynamicShadowPasses;
-    m_StaticShadowPasses = 0;
-    m_DynamicShadowPasses = 0;
-    return stats;
 }
 
 bool D3D11PointLight::IsDynamicShadowUpdateDue( float currentTime, float minimumInterval ) const {

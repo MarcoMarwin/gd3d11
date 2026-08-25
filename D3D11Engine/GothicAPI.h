@@ -71,9 +71,6 @@ struct RndCullContext {
         bool CollectSmallVobs;
         bool CollectMobs;
         bool CollectLights;
-        // The main-view DX11 GPU VOB path keeps only distance/BSP culling on
-        // the CPU and performs the per-instance frustum test in a compute
-        // shader. Shadow collection must never set this flag.
         bool SkipVobFrustumCull;
     } drawFlags;
 };

@@ -867,8 +867,8 @@ float4 PSMain(PS_INPUT input) : SV_TARGET
         TX_Material.SampleLevel(SS_Linear, uv, 0).z);
     float materialWetGroundEligibility = step(0.0001f, materialWetGroundSSRStrength);
     float reflectionsEnabled = step(0.5f, WG_ReflectionsEnabled) * step(0.001f, WG_Strength);
-    // Puddles have their own switch. Wet-ground SSR only controls the
-    // reflection layer of the surrounding wet material.
+    // The Rain effects switch controls both puddles and the reflection layer
+    // of the surrounding wet material.
     float materialPuddleEligibility = materialWetGroundEligibility;
 
     float3 wsNormal = CalculateSmoothedWetGroundNormal(

@@ -20,11 +20,6 @@ struct SkeletalVobInfo;
 class D3D11ConstantBuffer;
 class D3D11PointLight : public BaseShadowedPointLight {
 public:
-    struct ShadowRenderStats {
-        uint64_t StaticPasses = 0;
-        uint64_t DynamicPasses = 0;
-    };
-
     D3D11PointLight( VobLightInfo* info, bool dynamicLight = false );
     ~D3D11PointLight() override;
 
@@ -49,7 +44,7 @@ public:
     /** Returns whether a throttled dynamic-shadow refresh is due. */
     bool IsDynamicShadowUpdateDue( float currentTime, float minimumInterval ) const;
 
-    /** Returns whether this quality level renders animated NPC/MOB casters. */
+    /** Returns whether the current pointlight policy renders animated NPC/MOB casters. */
     bool UseDynamicNpcShadowCasters() const;
 
     /** Invalidates the active overlay when the shadow-quality policy changes. */
@@ -98,7 +93,6 @@ public:
     bool ShouldReleaseForVisibility( bool visible );
     void OnTiledSlotEvicted();
     void SetCurrentResolution( int r ) { m_CurrentResolution = r; }
-    ShadowRenderStats ConsumeShadowRenderStats();
 
 protected:
     int GetCurrentShadowMode() const;
@@ -147,7 +141,5 @@ protected:
     bool m_DynamicNpcShadowCastersEnabled = true;
     uint16_t m_InvisibleFrameCount = 0;
     float m_LastDynamicShadowUpdateTime = -FLT_MAX;
-    uint64_t m_StaticShadowPasses = 0;
-    uint64_t m_DynamicShadowPasses = 0;
     TaskHandle<void> m_PendingInit;
 };
