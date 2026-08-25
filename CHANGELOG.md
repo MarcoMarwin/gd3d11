@@ -1,4 +1,8 @@
 ﻿## Build 217
+- Korrekturpush: F11-Menü Presets & Pointlight UI Fix
+  - **XeGTAO in Presets:** Die XeGTAO-Parameter (Quality, Denoise, Radius) fließen nun sauber in den Preset-Abgleich (GraphicsPresetComparable) ein. Wenn man diese manuell verstellt, springt das generelle Preset im Menü nun wie erwartet auf "Custom".
+  - **Pointlight UI:** Die Checkbox "Fernschatten staffeln" ("Stagger distant updates") wird nun korrekt ausgegraut, wenn die dynamischen Pointlight-Schatten deaktiviert sind.
+  - **Defaults:** Die AdvancedPerformanceOptions sind standardmäßig wieder alse.
 - Korrekturpush: Performance-Optimierung für Wasser-Regeneffekte
   - **Water Rain Ripples:** Die prozeduralen Regentropfen auf Wasseroberflächen (AccumulateWaterRainImpactLayer) wurden drastisch optimiert. Anstatt pro Pixel aufwendig 9 umliegende Grid-Zellen abzufragen (um Ring-Clipping am Zellenrand zu vermeiden), wird nun nur noch die direkte Zelle berechnet. Zudem wurden teure Extra-Layer (extraRippleA/extraRippleB), die bei starkem Regen für mehr Dichte sorgen sollten, ersatzlos gestrichen. Das spart signifikant Shader-Laufzeit auf großen Wasserflächen.
 
@@ -1073,6 +1077,7 @@ ightAmbientColor * 0.035f * worldAO) erhalten, um zu verhindern, dass Indoor-Mat
 - Korrekturpush: Software-PCF f�r PointLight-Schatten in Build 208. Da die Cubemaps ohnehin lineare radiale Tiefenwerte speichern, wurde das Hardware-PCF (SampleCmpLevelZero) durch einen manuellen Software-PCF Ansatz �ber einen linearen Sampler (SampleLevel) und smoothstep ersetzt. Das verhindert effektiv, dass sehr weite Shadow-Softness-Kernels die bin�ren PCF-Coverage-Level sichtbar freilegen (Banding-Artefakte). Dementsprechend wurden die Sampler in Tiled-Shading, Forward-Plus und DynShadow auf SS_Linear umgebogen.
 - Korrekturpush: Hardware-PCF Comeback und Adaptive Shadow-Taps in Build 208. Das Software-PCF-Experiment wurde verworfen und auf Hardware-PCF (SampleCmpLevelZero) zur�ckgerollt. Stattdessen wurde nun ein adaptives Distance-LOD f�r die Pointlight-Schatten eingebaut (eceiverCameraDistance): Ab einer Softness > 0.75 interpolieren im Nahbereich (< 5m und < 2m) dynamisch bis zu 8 zus�tzliche, dichte Filter-Taps stufenlos hinzu. Dadurch bleibt das Shadow-Sampling in der Ferne bei performanten 8 Taps, w�hrend Kanten im Nahbereich butterweich verschmelzen und Banding verstecken. Die Sampler wurden entsprechend wieder auf SS_Comp zur�ckgesetzt.
 - Regul�rer Push: Abschlie�ende Optimierungen in Build 208. Das adaptive Shadow-LOD wurde verworfen und stattdessen durch eine massive Hardware-Beschleunigung ersetzt: F�r extrem weiche Pointlight-Schatten (shadowSoftness > 0.75) nutzt die Engine nun die GatherCmp-Instruktion. Damit werden mit nur 4 Texture-Fetches gleich 16 Tiefenwerte gesampelt (Hardware-PCF x4 pro Fetch). So erhalten weite Pointlight-Schatten nun butterweiche 16 Taps zum Preis von 4, ohne jegliche Distanz-Zonen oder komplexes LOD-Management!
+
 
 
 

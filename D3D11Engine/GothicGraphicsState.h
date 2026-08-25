@@ -665,7 +665,7 @@ struct GothicRendererSettings {
 
         textureMaxSize = 16384;
         ShadowQuality = E_ShadowQuality::SHADOW_QUALITY_MEDIUM;
-        AdvancedPerformanceOptions = true;
+        AdvancedPerformanceOptions = false;
         ShadowMapSize = 2048;
         CSMShadowKernel = E_ShadowKernelQuality::SHADOW_KERNEL_PCF_MEDIUM;
         PointlightShadowMapSize = 128;

@@ -843,6 +843,9 @@ struct GraphicsPresetComparable {
     bool AdvancedWaterAnimation;
     bool AdvancedNightEnhance;
     bool AdvancedCityWindowTransparency;
+    int XegtaoQuality;
+    int XegtaoDenoise;
+    float XegtaoRadius;
     bool RainEffects;
     int OutdoorSmallVobDrawDistance;
     int SectionDrawRadius;
@@ -872,6 +875,9 @@ GraphicsPresetComparable MakeGraphicsPresetComparable(
         s.AdvancedWaterAnimation,
         s.AdvancedNightEnhance,
         s.AdvancedCityWindowTransparency,
+        s.XegtaoSettings.QualityLevel,
+        s.XegtaoSettings.DenoisePasses,
+        s.XegtaoSettings.Radius,
         s.RainEffects,
         ObjectDrawDistanceMetersToUi(
             s.OutdoorSmallVobDrawRadius ),
@@ -903,6 +909,9 @@ bool GraphicsPresetComparableEqual(
         && a.AdvancedWaterAnimation == b.AdvancedWaterAnimation
         && a.AdvancedNightEnhance == b.AdvancedNightEnhance
         && a.AdvancedCityWindowTransparency == b.AdvancedCityWindowTransparency
+        && a.XegtaoQuality == b.XegtaoQuality
+        && a.XegtaoDenoise == b.XegtaoDenoise
+        && std::abs( a.XegtaoRadius - b.XegtaoRadius ) < 0.0001f
         && a.RainEffects == b.RainEffects
         && a.OutdoorSmallVobDrawDistance
             == b.OutdoorSmallVobDrawDistance
@@ -1518,10 +1527,12 @@ void ImGuiShim::RenderSettingsWindow()
                 u8"Nimmt animierte Figuren in dynamische Pointlight-Schattenupdates auf. Nahe Lichter werden weiterhin sofort aktualisiert." ) );
             ImGui::EndDisabled();
 
-            ImGui::Checkbox( Tr( "Stagger distant updates", u8"Ferne Updates staffeln" ), &settings.PartialDynamicShadowUpdates );
+            ImGui::BeginDisabled( !dynamicPointlightMode );
+            ImGui::Checkbox( Tr( "Stagger distant shadows", u8"Fernschatten staffeln" ), &settings.PartialDynamicShadowUpdates );
             ImGui::SetItemTooltip( "%s", Tr(
                 "Spreads distant dynamic shadow updates over time. Disabling it updates all eligible dynamic lights every frame.",
                 u8"Verteilt ferne dynamische Schattenupdates \u00FCber die Zeit. Bei deaktivierter Staffelung werden alle geeigneten dynamischen Lichter pro Frame aktualisiert." ) );
+            ImGui::EndDisabled();
 
             ImGui::BeginDisabled( !dynamicPointlightMode || !settings.PartialDynamicShadowUpdates );
             settings.PointlightShadowUpdateIntervalMs = std::clamp( settings.PointlightShadowUpdateIntervalMs, 40, 500 );
