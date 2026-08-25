@@ -7652,13 +7652,13 @@ XRESULT GothicAPI::LoadMenuSettings( const std::string& file ) {
                 GetPrivateProfileIntA( "Shadows", "Advanced_CSMFilter", static_cast<int>(s.CSMShadowKernel), ini.c_str() ),
                 static_cast<int>(GothicRendererSettings::SHADOW_KERNEL_PCF_LOW),
                 static_cast<int>(GothicRendererSettings::SHADOW_KERNEL_PCSS) ) );
-            s.NumShadowCascades = std::clamp(
-                GetPrivateProfileIntA( "Shadows", "Advanced_CSMCascades", s.NumShadowCascades, ini.c_str() ),
+            s.NumShadowCascades = std::clamp<int>(
+                static_cast<int>( GetPrivateProfileIntA( "Shadows", "Advanced_CSMCascades", s.NumShadowCascades, ini.c_str() ) ),
                 1, std::min( 4, MAX_CSM_CASCADES ) );
             s.WorldShadowRangeScale = std::clamp(
                 GetPrivateProfileFloatA( "Shadows", "Advanced_CSMRange", s.WorldShadowRangeScale, ini ), 0.5f, 2.0f );
-            s.ShadowCascadePCFLimit = std::clamp(
-                GetPrivateProfileIntA( "Shadows", "Advanced_CSMPCFLimit", s.ShadowCascadePCFLimit, ini.c_str() ),
+            s.ShadowCascadePCFLimit = std::clamp<int>(
+                static_cast<int>( GetPrivateProfileIntA( "Shadows", "Advanced_CSMPCFLimit", s.ShadowCascadePCFLimit, ini.c_str() ) ),
                 0, std::min( std::min( 4, MAX_CSM_CASCADES ), s.NumShadowCascades ) );
             s.EnablePointlightShadows = static_cast<GothicRendererSettings::EPointLightShadowMode>( std::clamp<int>(
                 GetPrivateProfileIntA( "Shadows", "Advanced_PointlightMode", static_cast<int>(s.EnablePointlightShadows), ini.c_str() ),
@@ -7674,10 +7674,10 @@ XRESULT GothicAPI::LoadMenuSettings( const std::string& file ) {
                 "Shadows", "Advanced_PointlightDynamicCasters", s.EnablePointlightDynamicCasters, ini );
             s.PartialDynamicShadowUpdates = GetPrivateProfileBoolA(
                 "Shadows", "Advanced_PointlightStaggerUpdates", s.PartialDynamicShadowUpdates, ini );
-            s.PointlightShadowUpdateIntervalMs = std::clamp(
-                GetPrivateProfileIntA( "Shadows", "Advanced_PointlightUpdateIntervalMs", s.PointlightShadowUpdateIntervalMs, ini.c_str() ), 40, 500 );
-            s.PointlightShadowUpdateBudget = std::clamp(
-                GetPrivateProfileIntA( "Shadows", "Advanced_PointlightUpdateBudget", s.PointlightShadowUpdateBudget, ini.c_str() ), 1, 8 );
+            s.PointlightShadowUpdateIntervalMs = std::clamp<int>(
+                static_cast<int>( GetPrivateProfileIntA( "Shadows", "Advanced_PointlightUpdateIntervalMs", s.PointlightShadowUpdateIntervalMs, ini.c_str() ) ), 40, 500 );
+            s.PointlightShadowUpdateBudget = std::clamp<int>(
+                static_cast<int>( GetPrivateProfileIntA( "Shadows", "Advanced_PointlightUpdateBudget", s.PointlightShadowUpdateBudget, ini.c_str() ) ), 1, 8 );
             // Migrate the former shared softness value when the new split
             // keys are not present, then let each Advanced control diverge.
             const float legacyShadowSoftness = std::clamp( GetPrivateProfileFloatA(
@@ -7744,8 +7744,8 @@ XRESULT GothicAPI::LoadMenuSettings( const std::string& file ) {
         s.EnableTiledLighting = false;
         s.RendererMode = GothicRendererSettings::E_RendererMode::RM_Deferred;
 
-        s.WindQuality = std::clamp(
-            GetPrivateProfileIntA( "Display", "WindQuality", static_cast<int>(GothicRendererSettings::WIND_QUALITY_NONE), ini.c_str() ),
+        s.WindQuality = std::clamp<int>(
+            static_cast<int>( GetPrivateProfileIntA( "Display", "WindQuality", static_cast<int>(GothicRendererSettings::WIND_QUALITY_NONE), ini.c_str() ) ),
             static_cast<int>(GothicRendererSettings::WIND_QUALITY_NONE),
             static_cast<int>(GothicRendererSettings::WIND_QUALITY_ADVANCED) );
         s.GlobalWindStrength = std::clamp( GetPrivateProfileFloatA( "Display", "WindStrength", ds.GlobalWindStrength, ini ), 0.0f, 2.0f );
@@ -7762,8 +7762,8 @@ XRESULT GothicAPI::LoadMenuSettings( const std::string& file ) {
         s.OceanWaterColor = ds.OceanWaterColor;
         s.OceanWaterColorStrength = ds.OceanWaterColorStrength;
 
-        s.AntiAliasingMode = static_cast<GothicRendererSettings::E_AntiAliasingMode>( std::clamp(
-            GetPrivateProfileIntA( "General", "AntiAliasing", static_cast<int>(ds.AntiAliasingMode), ini.c_str() ),
+        s.AntiAliasingMode = static_cast<GothicRendererSettings::E_AntiAliasingMode>( std::clamp<int>(
+            static_cast<int>( GetPrivateProfileIntA( "General", "AntiAliasing", static_cast<int>(ds.AntiAliasingMode), ini.c_str() ) ),
             static_cast<int>(GothicRendererSettings::AA_NONE),
             static_cast<int>(GothicRendererSettings::AA_FSR3) ) );
         s.SharpeningMode = ds.SharpeningMode;
