@@ -688,6 +688,7 @@ struct GothicRendererSettings {
         AdvancedWaterAnimation = true;
         AdvancedNightEnhance = true;
         AdvancedCityWindowTransparency = true;
+        AdvancedBacklitVegetation = true;
         RainEffects = true;
 
         BloomStrength = 1.0f;
@@ -1343,6 +1344,10 @@ struct GothicRendererSettings {
     // Shadow Quality initializes this together with CSM softness; Advanced
     // can override it independently for pointlight shadows.
     float PointlightShadowSoftness;
+    // Appended so all existing renderer-settings field offsets remain stable.
+    // Backlit vegetation is enabled by default and can be disabled only by
+    // the Advanced master switch.
+    bool AdvancedBacklitVegetation;
     bool GetEffectiveWaterAnimation() const {
         return !AdvancedPerformanceOptions || AdvancedWaterAnimation;
     }
@@ -1360,6 +1365,10 @@ struct GothicRendererSettings {
 
     bool GetEffectiveCityWindowTransparency() const {
         return !AdvancedPerformanceOptions || AdvancedCityWindowTransparency;
+    }
+
+    bool GetEffectiveBacklitVegetation() const {
+        return !AdvancedPerformanceOptions || AdvancedBacklitVegetation;
     }
 
     bool GetEffectiveLazyCascadeUpdate() const {

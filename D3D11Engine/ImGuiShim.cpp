@@ -819,6 +819,7 @@ namespace {
         settings.AdvancedWaterAnimation = true;
         settings.AdvancedNightEnhance = true;
         settings.AdvancedCityWindowTransparency = true;
+        settings.AdvancedBacklitVegetation = true;
         settings.XegtaoSettings = XeGTAOConfig{};
         // Vegetation Push is an Advanced-only override. Its normal/default
         // value is enabled and is not owned by any graphics preset.
@@ -844,6 +845,7 @@ struct GraphicsPresetComparable {
     bool AdvancedWaterAnimation;
     bool AdvancedNightEnhance;
     bool AdvancedCityWindowTransparency;
+    bool AdvancedBacklitVegetation;
     int XegtaoQuality;
     int XegtaoDenoise;
     float XegtaoRadius;
@@ -876,6 +878,7 @@ GraphicsPresetComparable MakeGraphicsPresetComparable(
         s.AdvancedWaterAnimation,
         s.AdvancedNightEnhance,
         s.AdvancedCityWindowTransparency,
+        s.AdvancedBacklitVegetation,
         s.XegtaoSettings.QualityLevel,
         s.XegtaoSettings.DenoisePasses,
         s.XegtaoSettings.Radius,
@@ -910,6 +913,7 @@ bool GraphicsPresetComparableEqual(
         && a.AdvancedWaterAnimation == b.AdvancedWaterAnimation
         && a.AdvancedNightEnhance == b.AdvancedNightEnhance
         && a.AdvancedCityWindowTransparency == b.AdvancedCityWindowTransparency
+        && a.AdvancedBacklitVegetation == b.AdvancedBacklitVegetation
         && a.XegtaoQuality == b.XegtaoQuality
         && a.XegtaoDenoise == b.XegtaoDenoise
         && std::abs( a.XegtaoRadius - b.XegtaoRadius ) < 0.0001f
@@ -1380,6 +1384,12 @@ void ImGuiShim::RenderSettingsWindow()
             ImGui::SetItemTooltip( "%s", Tr(
                 "Enables transparent rendering for city_windows. Disabling it renders those windows opaque.",
                 u8"Aktiviert die transparente Darstellung von city_windows. Deaktivieren rendert diese Fenster undurchsichtig." ) );
+
+            advancedRow( Tr( "Backlit vegetation", u8"Gegenlicht Vegetation" ) );
+            ImGui::Checkbox( "##AdvancedBacklitVegetation", &settings.AdvancedBacklitVegetation );
+            ImGui::SetItemTooltip( "%s", Tr(
+                "Controls SSS backlighting for vegetation lit from behind. Disabling it removes only this effect; normal vegetation lighting remains active.",
+                u8"Steuert das SSS-Durchlicht für von hinten beleuchtete Vegetation. Beim Deaktivieren entfällt nur dieser Effekt; die normale Vegetationsbeleuchtung bleibt aktiv." ) );
 
             advancedRow( Tr( "Vegetation push", u8"Vegetationsverdr\u00E4ngung" ) );
             ImGui::Checkbox( "##AdvancedVegetationPush", &settings.HeroAffectsObjects );

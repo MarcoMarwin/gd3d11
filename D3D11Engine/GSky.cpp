@@ -445,12 +445,16 @@ XRESULT GSky::RenderSky() {
         AtmosphereCB.AC_SceneWettness =
             Engine::GAPI->GetSceneWetness();
     }
-    AtmosphereCB.AC_RainFXWeight = atmosphericRainWeight;
-    AtmosphereCB.AC_EnableSSR = Engine::GAPI->GetRendererState().RendererSettings.EnableSSR ? 1.0f : 0.0f;
-    AtmosphereCB.AC_EnableSSS = 1.0f;
-    AtmosphereCB.AC_SSRStrength = Engine::GAPI->GetRendererState().RendererSettings.SSRStrength * 0.84f;
-    AtmosphereCB.AC_SSSIntensity = 1.0f;
     const auto& rendererSettings = Engine::GAPI->GetRendererState().RendererSettings;
+    AtmosphereCB.AC_RainFXWeight = atmosphericRainWeight;
+    AtmosphereCB.AC_EnableSSR = rendererSettings.EnableSSR ? 1.0f : 0.0f;
+    const bool backlitVegetationEnabled = rendererSettings.EnableSSS
+        && rendererSettings.GetEffectiveBacklitVegetation();
+    AtmosphereCB.AC_EnableSSS = backlitVegetationEnabled ? 1.0f : 0.0f;
+    AtmosphereCB.AC_SSRStrength = rendererSettings.SSRStrength * 0.84f;
+    AtmosphereCB.AC_SSSIntensity = backlitVegetationEnabled
+        ? std::clamp( rendererSettings.SSSIntensity, 0.0f, 2.0f )
+        : 0.0f;
     AtmosphereCB.AC_WaterCubemapStrength = rendererSettings.WaterCubemapStrength;
     AtmosphereCB.AC_EnableNightAtmosphere = 1.0f;
     AtmosphereCB.AC_NearNightBrightness = rendererSettings.NightNearBrightness;

@@ -7477,6 +7477,7 @@ XRESULT GothicAPI::SaveMenuSettings( const std::string& file ) {
     WritePrivateProfileStringA( "Shadows", "Advanced_WaterAnimation", std::to_string( s.AdvancedWaterAnimation ? TRUE : FALSE ).c_str(), ini.c_str() );
     WritePrivateProfileStringA( "Shadows", "Advanced_NightEnhance", std::to_string( s.AdvancedNightEnhance ? TRUE : FALSE ).c_str(), ini.c_str() );
     WritePrivateProfileStringA( "Shadows", "Advanced_CityWindowTransparency", std::to_string( s.AdvancedCityWindowTransparency ? TRUE : FALSE ).c_str(), ini.c_str() );
+    WritePrivateProfileStringA( "Shadows", "Advanced_BacklitVegetation", std::to_string( s.AdvancedBacklitVegetation ? TRUE : FALSE ).c_str(), ini.c_str() );
 
     // These are renderer-internal controls, not F11 settings. Remove keys
     // written by older builds so UserSettings.ini remains menu-owned.
@@ -7643,6 +7644,7 @@ XRESULT GothicAPI::LoadMenuSettings( const std::string& file ) {
         s.AdvancedWaterAnimation = ds.AdvancedWaterAnimation;
         s.AdvancedNightEnhance = ds.AdvancedNightEnhance;
         s.AdvancedCityWindowTransparency = ds.AdvancedCityWindowTransparency;
+        s.AdvancedBacklitVegetation = ds.AdvancedBacklitVegetation;
         // Vegetation Push is Advanced-only. The normal/default state is on;
         // the override is read only while the Advanced master switch is on.
         s.HeroAffectsObjects = true;
@@ -7694,6 +7696,8 @@ XRESULT GothicAPI::LoadMenuSettings( const std::string& file ) {
                 "Shadows", "Advanced_NightEnhance", s.AdvancedNightEnhance, ini );
             s.AdvancedCityWindowTransparency = GetPrivateProfileBoolA(
                 "Shadows", "Advanced_CityWindowTransparency", s.AdvancedCityWindowTransparency, ini );
+            s.AdvancedBacklitVegetation = GetPrivateProfileBoolA(
+                "Shadows", "Advanced_BacklitVegetation", s.AdvancedBacklitVegetation, ini );
             s.HeroAffectsObjects = GetPrivateProfileBoolA(
                 "Shadows", "Advanced_VegetationPush", s.HeroAffectsObjects, ini );
         }
