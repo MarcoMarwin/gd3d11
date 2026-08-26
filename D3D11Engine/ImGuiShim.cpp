@@ -1152,8 +1152,8 @@ void ImGuiShim::RenderSettingsWindow()
     const float framebufferWidth = static_cast<float>( windowSize.x );
     const float framebufferHeight = static_cast<float>( windowSize.y );
     const float menuScale = 1.0f;
-    const float labelWidth = std::round( 240.0f * menuScale );
-    const float controlWidth = std::round( 215.0f * menuScale );
+    const float labelWidth = std::round( 225.0f * menuScale );
+    const float controlWidth = std::round( 195.0f * menuScale );
     const float footerHeight = std::round( 30.0f * menuScale );
     const ImVec2 scaledWindowPadding(
         std::round( style.WindowPadding.x * menuScale ),
@@ -1219,12 +1219,18 @@ void ImGuiShim::RenderSettingsWindow()
             }
         }
 
-        const float topPresetLabelWidth = 145.0f;
-        const float topPresetControlWidth = 125.0f;
-        const float topLanguageLabelWidth = topPresetLabelWidth;
-        const float topLanguageControlWidth = topPresetControlWidth;
+        const std::string versionText = std::string( Tr( "D3D11 Version ", u8"D3D11-Version " ) ) + VERSION_NUMBER;
+        const ImVec2 versionTextSize = ImGui::CalcTextSize( versionText.c_str() );
 
-        ImText( Tr( "Graphics Preset", u8"Grafikprofil" ), ImVec2( topPresetLabelWidth, 0.0f ) ); ImGui::SameLine();
+        // Keep the header compact while reserving enough room for the actual
+        // localized combo previews, including the custom preset state.
+        const float leftF11ColumnWidth = labelWidth + style.ItemSpacing.x + controlWidth;
+        const float topPresetLabelWidth = 105.0f;
+        const float topPresetControlWidth = 135.0f;
+        const float topLanguageLabelWidth = 105.0f;
+        const float topLanguageControlWidth = 125.0f;
+
+        ImText( Tr( "Preset", u8"Profil" ), ImVec2( topPresetLabelWidth, 0.0f ) ); ImGui::SameLine();
 
         ImGui::PushItemWidth( topPresetControlWidth );
         if ( ImGui::BeginCombo( "##GraphicsPreset", graphicsPresetPreview ) ) {
@@ -1277,8 +1283,21 @@ void ImGuiShim::RenderSettingsWindow()
         }
         ImGui::SetItemTooltip( "%s", Tr( "Selects the language used by the D3D11 renderer.", u8"W\u00E4hlt die Sprache des D3D11-Renderers aus." ) );
         ImGui::PopItemWidth();
-        ImGui::SameLine( 0.0f, std::max( style.ItemSpacing.x * 1.5f, 10.0f ) );
-        if ( ImGui::Button( Tr( "Advanced ...", u8"Erweitert ..." ) ) ) {
+        const float advancedHeaderGap = std::max( style.ItemSpacing.x * 1.5f, 10.0f );
+        ImGui::SameLine( 0.0f, advancedHeaderGap );
+        const char* advancedButtonText = Tr( "Advanced ...", u8"Erweitert ..." );
+        const float advancedButtonWidth = 125.0f;
+        const float headerFieldsEndX = topPresetLabelWidth + style.ItemSpacing.x + topPresetControlWidth
+            + style.ItemSpacing.x + topLanguageLabelWidth + style.ItemSpacing.x + topLanguageControlWidth;
+        const float advancedAreaStartX = std::max(
+            leftF11ColumnWidth + style.ItemSpacing.x,
+            headerFieldsEndX + advancedHeaderGap );
+        const float fixedContentWidth = leftF11ColumnWidth * 2.0f + style.ItemSpacing.x;
+        const float advancedAreaEndX = fixedContentWidth - 210.0f;
+        const float advancedButtonX = advancedAreaStartX
+            + std::max( 0.0f, ( advancedAreaEndX - advancedAreaStartX - advancedButtonWidth ) * 0.5f );
+        ImGui::SetCursorPosX( advancedButtonX );
+        if ( ImGui::Button( advancedButtonText, ImVec2( advancedButtonWidth, 0.0f ) ) ) {
             ImGui::OpenPopup( "##AdvancedPerformance" );
         }
         ImGui::SetItemTooltip( "%s", Tr(
@@ -1286,8 +1305,8 @@ void ImGuiShim::RenderSettingsWindow()
             u8"\u00D6ffnet erweiterte Renderer-Einstellungen. Sie werden in UserSettings.ini gespeichert." ) );
         const float advancedPopupMaxHeight = std::max( 320.0f, std::round( framebufferHeight * 0.5f ) );
         ImGui::SetNextWindowSizeConstraints(
-            ImVec2( 460.0f, 0.0f ),
-            ImVec2( std::max( 460.0f, framebufferWidth - 32.0f ), advancedPopupMaxHeight ) );
+            ImVec2( 440.0f, 0.0f ),
+            ImVec2( std::max( 440.0f, framebufferWidth - 32.0f ), advancedPopupMaxHeight ) );
         if ( ImGui::BeginPopup( "##AdvancedPerformance", ImGuiWindowFlags_AlwaysVerticalScrollbar ) ) {
             ImGui::SeparatorText( Tr( "Advanced settings", u8"Erweiterte Einstellungen" ) );
 
@@ -1311,7 +1330,7 @@ void ImGuiShim::RenderSettingsWindow()
             // Keep every advanced setting on the same two-column grid. The
             // fixed label column prevents long German labels from moving the
             // controls horizontally between rows.
-            const float advancedLabelColumnWidth = 220.0f;
+            const float advancedLabelColumnWidth = 245.0f;
             const ImGuiTableFlags advancedTableFlags =
                 ImGuiTableFlags_SizingStretchProp
                 | ImGuiTableFlags_BordersInnerV
@@ -1343,7 +1362,7 @@ void ImGuiShim::RenderSettingsWindow()
             ImGui::Checkbox( "##AdvancedAnimateWater", &settings.AdvancedWaterAnimation );
             ImGui::SetItemTooltip( "%s", Tr(
                 "Controls vertex wave movement for ocean water only. Rain impacts, puddles, wet-ground reflections, and water distortion use their own settings.",
-                u8"Steuert nur die Vertex-Wellenbewegung des Meereswassers. Regenaufpralle, P\u00FCtzen, Wet-Ground-Reflexionen und Wasserverzerrung nutzen eigene Einstellungen." ) );
+                u8"Steuert nur die Vertex-Wellenbewegung des Meereswassers. Regenaufpralle, P\u00FCtzen, Bodenreflexionen bei N\u00E4sse und Wasserverzerrung nutzen eigene Einstellungen." ) );
 
             bool enhancedNightPresentation = settings.AdvancedNightEnhance;
             advancedRow( Tr( "Atmospheric night", u8"Atmosph\u00E4rische Nacht" ) );
@@ -1356,13 +1375,13 @@ void ImGuiShim::RenderSettingsWindow()
                 "Adds the atmospheric night presentation with night fog and distant darkening.",
                 u8"Aktiviert die atmosph\u00E4rische Nachtdarstellung mit Nachtnebel und entfernter Nachtdunkelung." ) );
 
-            advancedRow( Tr( "City-window transparency", u8"Transparente Stadtfenster" ) );
+            advancedRow( Tr( "Window transparency", u8"Fenstertransparenz" ) );
             ImGui::Checkbox( "##AdvancedCityWindowTransparency", &settings.AdvancedCityWindowTransparency );
             ImGui::SetItemTooltip( "%s", Tr(
                 "Enables transparent rendering for city_windows. Disabling it renders those windows opaque.",
                 u8"Aktiviert die transparente Darstellung von city_windows. Deaktivieren rendert diese Fenster undurchsichtig." ) );
 
-            advancedRow( Tr( "Vegetation Push", u8"Vegetationsverdr\u00E4ngung" ) );
+            advancedRow( Tr( "Vegetation push", u8"Vegetationsverdr\u00E4ngung" ) );
             ImGui::Checkbox( "##AdvancedVegetationPush", &settings.HeroAffectsObjects );
             ImGui::SetItemTooltip( "%s", Tr(
                 "Lets nearby vegetation move aside when the player passes through it.",
@@ -1442,11 +1461,11 @@ void ImGuiShim::RenderSettingsWindow()
 
             const int maxCsmCascades = std::min( 4, MAX_CSM_CASCADES );
             const std::array<std::pair<const char*, int>, 5> csmNearCascadeOptions = {{
-                { Tr( "All cascades: 4-tap PCF", u8"Alle Kaskaden: 4-Tap-PCF" ), 0 },
-                { Tr( "1 near cascade: high-quality filter", u8"1 nahe Kaskade: Hochqualit\u00E4tsfilter" ), 1 },
-                { Tr( "2 near cascades: high-quality filter", u8"2 nahe Kaskaden: Hochqualit\u00E4tsfilter" ), 2 },
-                { Tr( "3 near cascades: high-quality filter", u8"3 nahe Kaskaden: Hochqualit\u00E4tsfilter" ), 3 },
-                { Tr( "All cascades: high-quality filter", u8"Alle Kaskaden: Hochqualit\u00E4tsfilter" ), 4 },
+                { Tr( "All: 4-tap", u8"Alle: 4-Tap" ), 0 },
+                { Tr( "1 near", u8"1 nahe" ), 1 },
+                { Tr( "2 near", u8"2 nahe" ), 2 },
+                { Tr( "3 near", u8"3 nahe" ), 3 },
+                { Tr( "All", u8"Alle" ), 4 },
             }};
             settings.ShadowCascadePCFLimit = std::clamp(
                 settings.ShadowCascadePCFLimit, 0, std::min( maxCsmCascades, settings.NumShadowCascades ) );
@@ -1483,8 +1502,8 @@ void ImGuiShim::RenderSettingsWindow()
             if ( beginAdvancedTable( "##AdvancedPointlightSettings" ) ) {
             const std::array<std::pair<const char*, GothicRendererSettings::EPointLightShadowMode>, 3> pointlightModes = {{
                 { Tr( "Disabled", u8"Aus" ), GothicRendererSettings::EPointLightShadowMode::PLS_DISABLED },
-                { Tr( "Static casters only", u8"Nur statische Schattengeber" ), GothicRendererSettings::EPointLightShadowMode::PLS_STATIC_ONLY },
-                { Tr( "Dynamic casters", u8"Dynamische Schattengeber" ), GothicRendererSettings::EPointLightShadowMode::PLS_UPDATE_DYNAMIC },
+                { Tr( "Static only", u8"Nur statisch" ), GothicRendererSettings::EPointLightShadowMode::PLS_STATIC_ONLY },
+                { Tr( "Dynamic", u8"Dynamisch" ), GothicRendererSettings::EPointLightShadowMode::PLS_UPDATE_DYNAMIC },
             }};
             advancedRow( Tr( "Mode", u8"Modus" ) );
             if ( ImComboBoxC( "##AdvancedPointlightShadowMode", pointlightModes, &settings.EnablePointlightShadows, [&settings]{
@@ -1608,9 +1627,9 @@ void ImGuiShim::RenderSettingsWindow()
                 u8"H\u00F6here XeGTAO-Qualit\u00E4t verwendet mehr Abtastungen und mehr GPU-Zeit." ) );
 
             const std::array<std::pair<const char*, int>, 3> xegtaoDenoiseOptions = {{
-                { Tr( "1 pass (sharp)", u8"1 Pass (scharf)" ), 1 },
-                { Tr( "2 passes (balanced)", u8"2 Durchl\u00E4ufe (ausgewogen)" ), 2 },
-                { Tr( "3 passes (soft)", u8"3 Durchl\u00E4ufe (weich)" ), 3 },
+                { Tr( "1 pass", u8"1 Durchlauf" ), 1 },
+                { Tr( "2 passes", u8"2 Durchl\u00E4ufe" ), 2 },
+                { Tr( "3 passes", u8"3 Durchl\u00E4ufe" ), 3 },
             }};
             settings.XegtaoSettings.DenoisePasses = std::clamp( settings.XegtaoSettings.DenoisePasses, 1, 3 );
             advancedRow( Tr( "AO denoise", u8"AO-Gl\u00E4ttung" ) );
@@ -1618,8 +1637,8 @@ void ImGuiShim::RenderSettingsWindow()
                 ImGui::EndCombo();
             }
             ImGui::SetItemTooltip( "%s", Tr(
-                "More denoise passes smooth the AO more strongly and cost more GPU time.",
-                u8"Mehr Gl\u00E4ttungsdurchl\u00E4ufe machen die AO weicher und kosten mehr GPU-Zeit." ) );
+                "More denoise passes smooth the AO more strongly and cost more GPU time. One pass is sharpest; three passes are softest.",
+                u8"Mehr Gl\u00E4ttungsdurchl\u00E4ufe machen die AO weicher und kosten mehr GPU-Zeit. Ein Durchlauf ist am sch\u00E4rfsten, drei sind am weichsten." ) );
 
             settings.XegtaoSettings.Radius = std::clamp( settings.XegtaoSettings.Radius, 50.0f, 400.0f );
             advancedRow( Tr( "AO radius", u8"AO-Reichweite" ) );
@@ -1639,10 +1658,11 @@ void ImGuiShim::RenderSettingsWindow()
             if ( ImGui::Button( Tr( "Close", u8"Schlie\u00DFen" ) ) ) {
                 ImGui::CloseCurrentPopup();
             }
+            ImGui::SetItemTooltip( "%s", Tr(
+                "Closes the Advanced settings popup. Changes remain active until you cancel or save the F11 menu.",
+                u8"Schlie\u00DFt das Fenster der erweiterten Einstellungen. \u00C4nderungen bleiben aktiv, bis das F11-Men\u00FC abgebrochen oder gespeichert wird." ) );
             ImGui::EndPopup();
         }
-        const std::string versionText = std::string( Tr( "D3D11 Version ", u8"D3D11-Version " ) ) + VERSION_NUMBER;
-        const ImVec2 versionTextSize = ImGui::CalcTextSize( versionText.c_str() );
         ImGui::SameLine();
         ImGui::SetCursorPosX( std::max( ImGui::GetCursorPosX(), ImGui::GetWindowContentRegionMax().x - versionTextSize.x ) );
         ImGui::TextDisabled( "%s", versionText.c_str() );
@@ -1655,7 +1675,7 @@ void ImGuiShim::RenderSettingsWindow()
         // Anti-aliasing has two compact controls before its resolution-scale
         // control. Give the localized label the larger share so German text
         // such as "Kantenglättung" remains fully visible.
-        const float compactAAMethodWidth = 100.0f;
+        const float compactAAMethodWidth = 88.0f;
         const float compactAALabelWidth = buttonWidth.x - compactAAMethodWidth - style.ItemSpacing.x;
         const float compactAAValueWidth = standardComboWidth;
         
@@ -1686,7 +1706,7 @@ void ImGuiShim::RenderSettingsWindow()
             }
             ImGui::SetItemTooltip( "%s", Tr( "Changes the game output size.", u8"\u00C4ndert die Ausgabeaufl\u00F6sung des Spiels." ) );
 
-            ImText( Tr( "Display Mode [Restart]", u8"Anzeigemodus [Neustart]" ), buttonWidth );
+            ImText( Tr( "Display Mode", u8"Anzeigemodus" ), buttonWidth );
             ImGui::SetItemTooltip( "%s", Tr( "Changes between fullscreen and windowed mode after restarting.", u8"Wechselt nach einem Neustart zwischen Vollbild und Fenstermodus." ) );
             ImGui::SameLine();
 
@@ -1720,7 +1740,7 @@ void ImGuiShim::RenderSettingsWindow()
                 ImGui::PushID( "AntiAliasingSettings" );
                 auto selectedMode = settings.AntiAliasingMode;
                 const bool wasFSRAntiAliasing = settings.AntiAliasingMode == GothicRendererSettings::E_AntiAliasingMode::AA_FSR3;
-                ImText( Tr( "Anti-Aliasing", u8"Kantengl\u00E4ttung" ), ImVec2( compactAALabelWidth, buttonWidth.y ) );
+                ImText( Tr( "AA Mode", u8"AA-Modus" ), ImVec2( compactAALabelWidth, buttonWidth.y ) );
                 ImGui::SameLine();
                 ImGui::SetNextItemWidth( compactAAMethodWidth );
                 if ( ImComboBoxCT( "##AntiAliasing", antiAliasing, &selectedMode, [&selectedMode, &settings, wasFSRAntiAliasing] {
@@ -1744,11 +1764,11 @@ void ImGuiShim::RenderSettingsWindow()
                     settings.ResolutionScalePercent = std::clamp( settings.ResolutionScalePercent, 33, 100 );
                     const std::array<std::pair<const char*, int>, 6> fsrLevels = {{
                         { Tr( "Native AA", u8"Nativ mit AA" ), 100 },
-                        { Tr( "High Quality", u8"Sehr hohe Qualit\u00E4t" ), 83 },
+                        { Tr( "High quality", u8"Hohe Qualit\u00E4t" ), 83 },
                         { Tr( "Quality", u8"Qualit\u00E4t" ), 75 },
                         { Tr( "Balanced", u8"Ausgeglichen" ), 66 },
                         { Tr( "Performance", u8"Leistung" ), 50 },
-                        { Tr( "Ultra Performance", u8"Maximale Leistung" ), 33 },
+                        { Tr( "Ultra perf.", u8"Max. Leistung" ), 33 },
                     }};
                     if ( ImComboBox( "##ResolutionScalePercent", fsrLevels, &settings.ResolutionScalePercent ) ) {
                         ImGui::EndCombo();
@@ -1941,7 +1961,7 @@ void ImGuiShim::RenderSettingsWindow()
 
             const bool ambientOcclusionAvailable = !FeatureLevel10Compatibility;
             bool ambientOcclusionEnabled = ambientOcclusionAvailable && settings.AoMode == AOMode::AO_XEGTAO;
-            ImText( Tr( "Ambient Occlusion", u8"Umgebungsverdeckung" ), { buttonWidth.x - ImGui::GetFrameHeight() - style.ItemSpacing.x, buttonWidth.y } ); ImGui::SameLine();
+            ImText( Tr( "AO", u8"AO" ), { buttonWidth.x - ImGui::GetFrameHeight() - style.ItemSpacing.x, buttonWidth.y } ); ImGui::SameLine();
             ImGui::BeginDisabled( !ambientOcclusionAvailable );
             if ( CoupledStrengthCheckbox( "##Enable Ambient Occlusion", "AOStrength",
                     &ambientOcclusionEnabled, &settings.AOStrength, 1.0f ) ) {
@@ -1984,7 +2004,7 @@ void ImGuiShim::RenderSettingsWindow()
         {
             ImGui::BeginGroup();
             bool waterReflections = settings.EnableSSR;
-            ImText( Tr( "Water Reflections", u8"Wasserreflektionen" ), { buttonWidth.x - ImGui::GetFrameHeight() - style.ItemSpacing.x, buttonWidth.y } ); ImGui::SameLine();
+            ImText( Tr( "Water Reflections", u8"Wasserreflexion" ), { buttonWidth.x - ImGui::GetFrameHeight() - style.ItemSpacing.x, buttonWidth.y } ); ImGui::SameLine();
             if ( CoupledStrengthCheckbox( "##Enable Water Reflections", "WaterReflectionsStrength",
                     &waterReflections, &settings.SSRStrength, 1.0f ) ) {
                 settings.EnableSSR = waterReflections;
@@ -2037,17 +2057,17 @@ void ImGuiShim::RenderSettingsWindow()
             }
 #endif //BUILD_GOTHIC_2_6_fix
 
-            ImText( Tr( "Rain effects", u8"Regeneffekte" ), { buttonWidth.x - ImGui::GetFrameHeight() - style.ItemSpacing.x, buttonWidth.y } ); ImGui::SameLine();
+            ImText( Tr( "Rain Effects", u8"Regeneffekte" ), { buttonWidth.x - ImGui::GetFrameHeight() - style.ItemSpacing.x, buttonWidth.y } ); ImGui::SameLine();
             ImGui::Checkbox( "##Enable Rain Effects", &settings.RainEffects );
             ImGui::SetItemTooltip( "%s", Tr(
-                "Controls procedural puddles and wet-ground reflections during rain. Rain drops, impacts, and the rain shadowmap remain independent.",
-                u8"Steuert prozedurale P\u00FCtzen und Bodenreflexionen bei Regen. Regentropfen, Aufpralle und die Rain-Shadowmap bleiben unabh\u00E4ngig." ) );
+                "Controls procedural puddles and wet-ground reflections during rain. Rain drops and impacts remain independent.",
+                u8"Steuert prozedurale P\u00FCtzen und Bodenreflexionen bei Regen. Regentropfen und Aufpralle bleiben unabh\u00E4ngig." ) );
 
-            ImText( Tr( "Dynamic Clouds", u8"Dynamische Wolken" ), { buttonWidth.x - ImGui::GetFrameHeight() - style.ItemSpacing.x, buttonWidth.y } ); ImGui::SameLine();
+            ImText( Tr( "Clouds", u8"Wolken" ), { buttonWidth.x - ImGui::GetFrameHeight() - style.ItemSpacing.x, buttonWidth.y } ); ImGui::SameLine();
             ImGui::Checkbox( "##Enable Dynamic Clouds", &settings.EnableDynamicClouds );
             ImGui::SetItemTooltip( "%s", Tr( "Enables moving low cloud fields.", u8"Aktiviert bewegte tiefe Wolkenfelder." ) );
 
-            ImText( Tr( "Surface Detail", u8"Oberfl\u00E4chendetails" ), { buttonWidth.x - ImGui::GetFrameHeight() - style.ItemSpacing.x, buttonWidth.y } ); ImGui::SameLine();
+            ImText( Tr( "Surface Detail", u8"Oberfl\u00E4chendetail" ), { buttonWidth.x - ImGui::GetFrameHeight() - style.ItemSpacing.x, buttonWidth.y } ); ImGui::SameLine();
             if ( ImGui::Checkbox( "##Enable Surface Detail", &settings.AllowNormalmaps ) ) {
                 settings.EnableParallaxOcclusionMapping = settings.AllowNormalmaps;
                 Engine::GAPI->UpdateTextureMaxSize();
