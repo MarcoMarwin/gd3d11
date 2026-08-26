@@ -4967,9 +4967,9 @@ namespace {
                 continue;
             }
 
-            const auto& p0 = vertices[firstIndices[0]].Position;
-            const auto& p1 = vertices[firstIndices[1]].Position;
-            const auto& p2 = vertices[firstIndices[2]].Position;
+            const XMFLOAT3& p0 = vertices[firstIndices[0]].Position;
+            const XMFLOAT3& p1 = vertices[firstIndices[1]].Position;
+            const XMFLOAT3& p2 = vertices[firstIndices[2]].Position;
             const float ux = p1.x - p0.x;
             const float uy = p1.y - p0.y;
             const float uz = p1.z - p0.z;

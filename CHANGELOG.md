@@ -1,6 +1,4 @@
 ﻿## Build 219
-- Korrekturpush: Code-Cleanup im Vegetation-Culling (Build 219)
-  - **Auto Type Deduction:** Bei der Flächenberechnung in D3D11GraphicsEngine.cpp wurde auf const auto& statt starrer Typbindung (XMFLOAT3) gewechselt.
 - Korrekturpush: Vegetations-Culling (Density) hinzugefügt
   - **Vegetation Density:** Es wurde ein neues, abstandsabhängiges Culling-System für 2-Dreieck-Vegetationskarten (VegetationCardCullInfo) in WorldObjects.h implementiert. 
   - **F11-Menü:** Ein neuer Schieberegler "Vegetationsdichte" (0-100% in 25%-Schritten) erlaubt es, die Dichte der Gras-/Farn-Karten in Kameranähe festzulegen, welche ab 30 m und 60 m dann zusätzlich ausgedünnt werden, um Drawcalls bzw. Polygonlast zu sparen.
