@@ -1152,8 +1152,8 @@ void ImGuiShim::RenderSettingsWindow()
     const float framebufferWidth = static_cast<float>( windowSize.x );
     const float framebufferHeight = static_cast<float>( windowSize.y );
     const float menuScale = 1.0f;
-    const float labelWidth = std::round( 275.0f * menuScale );
-    const float controlWidth = std::round( 250.0f * menuScale );
+    const float labelWidth = std::round( 240.0f * menuScale );
+    const float controlWidth = std::round( 215.0f * menuScale );
     const float footerHeight = std::round( 30.0f * menuScale );
     const ImVec2 scaledWindowPadding(
         std::round( style.WindowPadding.x * menuScale ),
@@ -1219,8 +1219,8 @@ void ImGuiShim::RenderSettingsWindow()
             }
         }
 
-        const float topPresetLabelWidth = 170.0f;
-        const float topPresetControlWidth = 145.0f;
+        const float topPresetLabelWidth = 145.0f;
+        const float topPresetControlWidth = 125.0f;
         const float topLanguageLabelWidth = topPresetLabelWidth;
         const float topLanguageControlWidth = topPresetControlWidth;
 
@@ -1277,17 +1277,17 @@ void ImGuiShim::RenderSettingsWindow()
         }
         ImGui::SetItemTooltip( "%s", Tr( "Selects the language used by the D3D11 renderer.", u8"W\u00E4hlt die Sprache des D3D11-Renderers aus." ) );
         ImGui::PopItemWidth();
-        ImGui::SameLine();
+        ImGui::SameLine( 0.0f, std::max( style.ItemSpacing.x * 1.5f, 10.0f ) );
         if ( ImGui::Button( Tr( "Advanced ...", u8"Erweitert ..." ) ) ) {
             ImGui::OpenPopup( "##AdvancedPerformance" );
         }
         ImGui::SetItemTooltip( "%s", Tr(
             "Opens advanced renderer settings. They are saved in UserSettings.ini.",
             u8"\u00D6ffnet erweiterte Renderer-Einstellungen. Sie werden in UserSettings.ini gespeichert." ) );
+        const float advancedPopupMaxHeight = std::max( 320.0f, std::round( framebufferHeight * 0.5f ) );
         ImGui::SetNextWindowSizeConstraints(
             ImVec2( 460.0f, 0.0f ),
-            ImVec2( std::max( 460.0f, framebufferWidth - 32.0f ),
-                std::max( 320.0f, framebufferHeight - 32.0f ) ) );
+            ImVec2( std::max( 460.0f, framebufferWidth - 32.0f ), advancedPopupMaxHeight ) );
         if ( ImGui::BeginPopup( "##AdvancedPerformance", ImGuiWindowFlags_AlwaysVerticalScrollbar ) ) {
             ImGui::SeparatorText( Tr( "Advanced settings", u8"Erweiterte Einstellungen" ) );
 
@@ -1311,7 +1311,7 @@ void ImGuiShim::RenderSettingsWindow()
             // Keep every advanced setting on the same two-column grid. The
             // fixed label column prevents long German labels from moving the
             // controls horizontally between rows.
-            const float advancedLabelColumnWidth = 240.0f;
+            const float advancedLabelColumnWidth = 220.0f;
             const ImGuiTableFlags advancedTableFlags =
                 ImGuiTableFlags_SizingStretchProp
                 | ImGuiTableFlags_BordersInnerV
@@ -1397,7 +1397,7 @@ void ImGuiShim::RenderSettingsWindow()
                 { "4096", 4096 }, { "8192", 8192 },
             }};
             settings.ShadowMapSize = GothicRendererSettings::SnapCSMShadowMapSize( settings.ShadowMapSize );
-            advancedRow( Tr( "CSM resolution", u8"CSM-Aufl\u00F6sung" ) );
+            advancedRow( Tr( "Resolution", u8"Aufl\u00F6sung" ) );
             if ( ImComboBoxC( "##AdvancedCSMResolution", csmResolutions, &settings.ShadowMapSize, []{} ) ) {
                 ImGui::EndCombo();
             }
@@ -1410,7 +1410,7 @@ void ImGuiShim::RenderSettingsWindow()
                 { Tr( "8-tap PCF", u8"8-Tap-PCF" ), GothicRendererSettings::E_ShadowKernelQuality::SHADOW_KERNEL_PCF_MEDIUM },
                 { Tr( "PCSS", u8"PCSS" ), GothicRendererSettings::E_ShadowKernelQuality::SHADOW_KERNEL_PCSS },
             }};
-            advancedRow( Tr( "CSM filter", u8"CSM-Filter" ) );
+            advancedRow( Tr( "Filter", u8"Filter" ) );
             if ( ImComboBoxC( "##AdvancedCSMFilter", csmFilters, &settings.CSMShadowKernel, []{} ) ) {
                 ImGui::EndCombo();
             }
@@ -1425,7 +1425,7 @@ void ImGuiShim::RenderSettingsWindow()
                 { Tr( "4 cascades", u8"4 Kaskaden" ), 4 },
             }};
             settings.NumShadowCascades = std::clamp( settings.NumShadowCascades, 1, std::min( 4, MAX_CSM_CASCADES ) );
-            advancedRow( Tr( "CSM cascades", u8"CSM-Kaskaden" ) );
+            advancedRow( Tr( "Cascades", u8"Kaskaden" ) );
             if ( ImComboBoxC( "##AdvancedCSMCascades", csmCascadeOptions, &settings.NumShadowCascades, []{} ) ) {
                 ImGui::EndCombo();
             }
@@ -1434,7 +1434,7 @@ void ImGuiShim::RenderSettingsWindow()
                 u8"Mehr Kaskaden verteilen Schattendetails \u00FCber eine gr\u00F6\u00DFere Entfernung, ben\u00F6tigen aber mehr Schattenarbeit." ) );
 
             settings.WorldShadowRangeScale = std::clamp( settings.WorldShadowRangeScale, 0.5f, 2.0f );
-            advancedRow( Tr( "CSM range", u8"CSM-Reichweite" ) );
+            advancedRow( Tr( "Range", u8"Reichweite" ) );
             ImGui::SliderFloat( "##AdvancedCSMShadowRange", &settings.WorldShadowRangeScale, 0.5f, 2.0f, "%.2fx", ImGuiSliderFlags_AlwaysClamp );
             ImGui::SetItemTooltip( "%s", Tr(
                 "Scales the distance covered by the cascades. Higher values spread the same map detail farther away.",
@@ -1453,7 +1453,7 @@ void ImGuiShim::RenderSettingsWindow()
             const bool nearCascadeFilterAvailable = settings.CSMShadowKernel
                 != GothicRendererSettings::E_ShadowKernelQuality::SHADOW_KERNEL_PCF_LOW;
             ImGui::BeginDisabled( !nearCascadeFilterAvailable );
-            advancedRow( Tr( "Near-cascade filter", u8"Filter nahe Kaskaden" ) );
+            advancedRow( Tr( "Near-cascade filter", u8"Nahkaskadenfilter" ) );
             if ( ImComboBoxC( "##AdvancedCSMNearCascadeFilter", csmNearCascadeOptions, &settings.ShadowCascadePCFLimit, []{} ) ) {
                 ImGui::EndCombo();
             }
@@ -1462,7 +1462,7 @@ void ImGuiShim::RenderSettingsWindow()
                 u8"Legt fest, wie viele nahe Kaskaden den h\u00F6herwertigen Filter verwenden; ferne Kaskaden nutzen den g\u00FCnstigeren Filter. Bei 4-Tap-PCF ist diese Einstellung wirkungslos." ) );
             ImGui::EndDisabled();
 
-            advancedRow( Tr( "CSM softness", u8"CSM-Weichheit" ) );
+            advancedRow( Tr( "Softness", u8"Weichheit" ) );
             char csmSoftnessText[16] = {};
             std::snprintf( csmSoftnessText, sizeof( csmSoftnessText ), "%.1f", settings.ShadowSoftness );
             SliderNormalizedUiStrength( "##AdvancedCSMShadowSoftness", &settings.ShadowSoftness, false, csmSoftnessText );
@@ -1486,7 +1486,7 @@ void ImGuiShim::RenderSettingsWindow()
                 { Tr( "Static casters only", u8"Nur statische Schattengeber" ), GothicRendererSettings::EPointLightShadowMode::PLS_STATIC_ONLY },
                 { Tr( "Dynamic casters", u8"Dynamische Schattengeber" ), GothicRendererSettings::EPointLightShadowMode::PLS_UPDATE_DYNAMIC },
             }};
-            advancedRow( Tr( "Pointlight mode", u8"Pointlight-Modus" ) );
+            advancedRow( Tr( "Mode", u8"Modus" ) );
             if ( ImComboBoxC( "##AdvancedPointlightShadowMode", pointlightModes, &settings.EnablePointlightShadows, [&settings]{
                 if ( settings.EnablePointlightShadows == GothicRendererSettings::EPointLightShadowMode::PLS_DISABLED
                     && Engine::GAPI ) {
@@ -1508,7 +1508,7 @@ void ImGuiShim::RenderSettingsWindow()
                 { Tr( "8-tap PCF", u8"8-Tap-PCF" ), GothicRendererSettings::E_ShadowKernelQuality::SHADOW_KERNEL_PCF_MEDIUM },
                 { Tr( "PCSS", u8"PCSS" ), GothicRendererSettings::E_ShadowKernelQuality::SHADOW_KERNEL_PCSS },
             }};
-            advancedRow( Tr( "Pointlight filter", u8"Pointlight-Filter" ) );
+            advancedRow( Tr( "Filter", u8"Filter" ) );
             if ( ImComboBoxC( "##AdvancedPointlightFilter", pointlightFilters, &settings.PointlightShadowKernel, []{} ) ) {
                 ImGui::EndCombo();
             }
@@ -1516,7 +1516,7 @@ void ImGuiShim::RenderSettingsWindow()
                 "Selects the pointlight filter independently of the CSM filter and Shadow Quality.",
                 u8"W\u00E4hlt den Pointlight-Filter unabh\u00E4ngig vom CSM-Filter und der Schattenqualit\u00E4t." ) );
 
-            advancedRow( Tr( "Pointlight softness", u8"Pointlight-Weichheit" ) );
+            advancedRow( Tr( "Softness", u8"Weichheit" ) );
             char pointlightSoftnessText[16] = {};
             std::snprintf( pointlightSoftnessText, sizeof( pointlightSoftnessText ), "%.1f", settings.PointlightShadowSoftness );
             SliderNormalizedUiStrength( "##AdvancedPointlightShadowSoftness", &settings.PointlightShadowSoftness, false, pointlightSoftnessText );
@@ -1528,7 +1528,7 @@ void ImGuiShim::RenderSettingsWindow()
                 { "128", 128 }, { "256", 256 }, { "512", 512 },
             }};
             settings.PointlightShadowMapSize = GothicRendererSettings::SnapPointlightShadowMapSize( settings.PointlightShadowMapSize );
-            advancedRow( Tr( "Pointlight resolution", u8"Pointlight-Aufl\u00F6sung" ) );
+            advancedRow( Tr( "Resolution", u8"Aufl\u00F6sung" ) );
             if ( ImComboBoxC( "##AdvancedPointlightResolution", pointlightResolutions, &settings.PointlightShadowMapSize, []{
                 if ( Engine::GAPI ) {
                     Engine::GAPI->ReleasePointlightShadowResources();
@@ -1542,7 +1542,7 @@ void ImGuiShim::RenderSettingsWindow()
 
             const bool dynamicPointlightMode = settings.EnablePointlightShadows == GothicRendererSettings::EPointLightShadowMode::PLS_UPDATE_DYNAMIC;
             ImGui::BeginDisabled( !dynamicPointlightMode );
-            advancedRow( Tr( "Animated NPC/MOB casters", u8"Animierte NPC-/MOB-Schattengeber" ) );
+            advancedRow( Tr( "Animated casters", u8"Animierte Schattengeber" ) );
             ImGui::Checkbox( "##AdvancedAnimatedPointlightCasters", &settings.EnablePointlightDynamicCasters );
             ImGui::SetItemTooltip( "%s", Tr(
                 "Adds animated characters to dynamic pointlight shadow updates. Nearby lights still update immediately.",
@@ -1559,14 +1559,14 @@ void ImGuiShim::RenderSettingsWindow()
 
             ImGui::BeginDisabled( !dynamicPointlightMode || !settings.PartialDynamicShadowUpdates );
             settings.PointlightShadowUpdateIntervalMs = std::clamp( settings.PointlightShadowUpdateIntervalMs, 40, 500 );
-            advancedRow( Tr( "Distant update interval", u8"Intervall ferne Updates" ) );
+            advancedRow( Tr( "Distant interval", u8"Fernintervall" ) );
             ImGui::SliderInt( "##AdvancedPointlightUpdateInterval", &settings.PointlightShadowUpdateIntervalMs, 40, 500, "%d ms", ImGuiSliderFlags_AlwaysClamp );
             ImGui::SetItemTooltip( "%s", Tr(
                 "Minimum time between refreshes of distant dynamic pointlight shadows.",
                 u8"Mindestzeit zwischen Aktualisierungen ferner dynamischer Pointlight-Schatten." ) );
 
             settings.PointlightShadowUpdateBudget = std::clamp( settings.PointlightShadowUpdateBudget, 1, 8 );
-            advancedRow( Tr( "Distant updates per frame", u8"Ferne Updates pro Frame" ) );
+            advancedRow( Tr( "Updates per frame", u8"Updates pro Frame" ) );
             ImGui::SliderInt( "##AdvancedPointlightUpdateBudget", &settings.PointlightShadowUpdateBudget, 1, 8, "%d", ImGuiSliderFlags_AlwaysClamp );
             ImGui::SetItemTooltip( "%s", Tr(
                 "Maximum number of queued distant dynamic pointlight shadows rendered in one frame.",
@@ -1652,8 +1652,11 @@ void ImGuiShim::RenderSettingsWindow()
         // All right-column value controls start at the same x position.
         const float inlineToggleWidth = (buttonWidth.x - style.ItemSpacing.x) * 0.5f;
         const float inlineToggleLabelWidth = inlineToggleWidth - ImGui::GetFrameHeight() - style.ItemSpacing.x;
-        const float compactAALabelWidth = inlineToggleWidth;
-        const float compactAAMethodWidth = inlineToggleWidth;
+        // Anti-aliasing has two compact controls before its resolution-scale
+        // control. Give the localized label the larger share so German text
+        // such as "Kantenglättung" remains fully visible.
+        const float compactAAMethodWidth = 100.0f;
+        const float compactAALabelWidth = buttonWidth.x - compactAAMethodWidth - style.ItemSpacing.x;
         const float compactAAValueWidth = standardComboWidth;
         
         {

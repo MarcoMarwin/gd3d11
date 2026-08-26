@@ -1,4 +1,7 @@
 ﻿## Build 217
+- Korrekturpush: UI-Feinschliff im F11-Menü (Build 217)
+  - **Kürzere Labels:** Die Texte für die erweiterten Schattenoptionen ("Advanced Shadows") wurden verkürzt ("CSM Range" -> "Range", "Pointlight Softness" -> "Softness" etc.), da durch die neue Tabellen-/Listenstruktur ohnehin klar ist, auf welche Kategorie sie sich beziehen.
+  - **Spaltenbreite:** Das Label für "Kantenglättung" (Anti-Aliasing) hat nun mehr Platz erhalten, damit das lange deutsche Wort nicht mehr abgeschnitten wird.
 - Korrekturpush: Reduzierung von Shader-Permutationen (Build 217)
   - **Dynamische CSM Cascades:** Die Anzahl der Shadow Cascades (NUM_CSM_CASCADES) und das PCF-Limit (CSM_PCF_LIMIT) sind keine starren #define-Makros mehr, sondern werden dynamisch als Runtime-Parameter (SQ_ShadowCascadeRuntimeParams) an die Shader übergeben. Dadurch muss bei einer Änderung der Schattenqualität nicht mehr der komplette Schatten-Shader neu kompiliert werden!
   - **Dynamischer Wind & Godrays:** Ebenso wurden Wind, Charakter-Interaktion (Vegetationsverdrängung) und Godrays auf Runtime-Branches (windEnabled, CC_GodRaysEnabled) umgestellt, was die Anzahl der nötigen Shader-Permutationen weiter drastisch reduziert und nervige Nachladeruckler beim Verstellen der Optionen verhindert.
@@ -1080,6 +1083,7 @@ ightAmbientColor * 0.035f * worldAO) erhalten, um zu verhindern, dass Indoor-Mat
 - Korrekturpush: Software-PCF f�r PointLight-Schatten in Build 208. Da die Cubemaps ohnehin lineare radiale Tiefenwerte speichern, wurde das Hardware-PCF (SampleCmpLevelZero) durch einen manuellen Software-PCF Ansatz �ber einen linearen Sampler (SampleLevel) und smoothstep ersetzt. Das verhindert effektiv, dass sehr weite Shadow-Softness-Kernels die bin�ren PCF-Coverage-Level sichtbar freilegen (Banding-Artefakte). Dementsprechend wurden die Sampler in Tiled-Shading, Forward-Plus und DynShadow auf SS_Linear umgebogen.
 - Korrekturpush: Hardware-PCF Comeback und Adaptive Shadow-Taps in Build 208. Das Software-PCF-Experiment wurde verworfen und auf Hardware-PCF (SampleCmpLevelZero) zur�ckgerollt. Stattdessen wurde nun ein adaptives Distance-LOD f�r die Pointlight-Schatten eingebaut (eceiverCameraDistance): Ab einer Softness > 0.75 interpolieren im Nahbereich (< 5m und < 2m) dynamisch bis zu 8 zus�tzliche, dichte Filter-Taps stufenlos hinzu. Dadurch bleibt das Shadow-Sampling in der Ferne bei performanten 8 Taps, w�hrend Kanten im Nahbereich butterweich verschmelzen und Banding verstecken. Die Sampler wurden entsprechend wieder auf SS_Comp zur�ckgesetzt.
 - Regul�rer Push: Abschlie�ende Optimierungen in Build 208. Das adaptive Shadow-LOD wurde verworfen und stattdessen durch eine massive Hardware-Beschleunigung ersetzt: F�r extrem weiche Pointlight-Schatten (shadowSoftness > 0.75) nutzt die Engine nun die GatherCmp-Instruktion. Damit werden mit nur 4 Texture-Fetches gleich 16 Tiefenwerte gesampelt (Hardware-PCF x4 pro Fetch). So erhalten weite Pointlight-Schatten nun butterweiche 16 Taps zum Preis von 4, ohne jegliche Distanz-Zonen oder komplexes LOD-Management!
+
 
 
 
