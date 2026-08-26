@@ -168,12 +168,6 @@ protected:
     /** Constantbuffers */
     std::unique_ptr<D3D11ConstantBuffer> TransformsCB; // Holds View/Proj-Transforms
 
-    /** Resolved shader IDs (may point to different actual shaders based on settings like AllowNormalmaps) */
-    PShaderID Resolved_DiffuseNormalmapped;
-    PShaderID Resolved_DiffuseNormalmappedFxMap;
-    PShaderID Resolved_DiffuseNormalmappedAlphatest;
-    PShaderID Resolved_DiffuseNormalmappedAlphatestFxMap;
-
     std::shared_ptr<D3D11VShader> ActiveVS;
     std::shared_ptr<D3D11PShader> ActivePS;
     std::shared_ptr<D3D11GShader> ActiveGS;

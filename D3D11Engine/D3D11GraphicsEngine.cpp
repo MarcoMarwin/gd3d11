@@ -276,11 +276,8 @@ namespace
         return false;
     }
 
-    bool IsCityWindowFeatureReady() {
+    bool IsCityWindowSceneReady() {
         if ( !Engine::GAPI ) {
-            return false;
-        }
-        if ( !Engine::GAPI->GetRendererState().RendererSettings.GetEffectiveCityWindowTransparency() ) {
             return false;
         }
         if ( !Engine::GAPI->IsWorldRenderCacheReady() ) {
@@ -292,6 +289,11 @@ namespace
         }
         const oCGame* game = oCGame::GetGame();
         return game && game->_zCSession_world;
+    }
+
+    bool IsCityWindowFeatureReady() {
+        return IsCityWindowSceneReady()
+            && Engine::GAPI->GetRendererState().RendererSettings.GetEffectiveCityWindowTransparency();
     }
 
     bool IsIndoorWindowVisual( const std::string& visualName ) {
@@ -2374,18 +2376,6 @@ XRESULT D3D11GraphicsEngine::OnBeginFrame() {
     SetActivePixelShader( PShaderID::PS_Simple );
     SetActiveVertexShader( VShaderID::VS_Ex );
 
-    if ( rendererState.RendererSettings.AllowNormalmaps ) {
-        Resolved_DiffuseNormalmappedFxMap = PShaderID::PS_DiffuseNormalmappedFxMap;
-        Resolved_DiffuseNormalmappedAlphatestFxMap = PShaderID::PS_DiffuseNormalmappedAlphaTestFxMap;
-        Resolved_DiffuseNormalmapped = PShaderID::PS_DiffuseNormalmapped;
-        Resolved_DiffuseNormalmappedAlphatest = PShaderID::PS_DiffuseNormalmappedAlphaTest;
-    } else {
-        Resolved_DiffuseNormalmappedFxMap = PShaderID::PS_Diffuse;
-        Resolved_DiffuseNormalmappedAlphatestFxMap = PShaderID::PS_DiffuseAlphaTest;
-        Resolved_DiffuseNormalmapped = PShaderID::PS_Diffuse;
-        Resolved_DiffuseNormalmappedAlphatest = PShaderID::PS_DiffuseAlphaTest;
-    }
-
     return XR_SUCCESS;
 }
 
@@ -3869,7 +3859,11 @@ void D3D11GraphicsEngine::DrawSkeletalMeshVobs(
     }
 
     // Ensure we have correct Constantbuffer for eventual Alphatest stuff.
-    auto cbFFPipelineConstantBuffer = ShaderManager->GetPShader( Resolved_DiffuseNormalmappedAlphatest )
+    const PShaderID activeNormalmappedAlphaTest =
+        Engine::GAPI->GetRendererState().RendererSettings.AllowNormalmaps
+        ? PShaderID::PS_DiffuseNormalmappedAlphaTest
+        : PShaderID::PS_DiffuseAlphaTest;
+    auto cbFFPipelineConstantBuffer = ShaderManager->GetPShader( activeNormalmappedAlphaTest )
         ->GetBuffer( "FFPipelineConstantBuffer" )
         .Update( &graphicsState )
         .Bind();
@@ -8118,19 +8112,14 @@ void XM_CALLCONV D3D11GraphicsEngine::DrawWorldAroundForWorldShadow( FXMVECTOR p
         }
 
         GraphicsShaderConstantBuffer windBuffer = {};
-        const auto& windSettings =
-            Engine::GAPI->GetRendererState().RendererSettings;
 
-        if ( ActiveVS
-            && (windSettings.WindQuality
-                    != GothicRendererSettings::EWindQuality::
-                        WIND_QUALITY_NONE
-                || windSettings.HeroAffectsObjects) ) {
+        if ( ActiveVS ) {
             windBuffer = ActiveVS->GetBuffer( "WindParams" );
             windBuffer.Bind();
         }
 
         if ( windBuffer.GetRawBuffer() ) {
+            g_windBuffer.windMetadataEnabled = useWindMetadata ? 1.0f : 0.0f;
             UpdateCharacterInteractionPositions( g_windBuffer );
             windBuffer.Update( &g_windBuffer );
         }
@@ -8548,6 +8537,11 @@ void D3D11GraphicsEngine::ApplyWindProps( VS_ExConstantBuffer_Wind& windBuff ) {
     XMStoreFloat3( reinterpret_cast<XMFLOAT3*>(&windBuff.windDir), currentDir );
 
     const auto& settings = Engine::GAPI->GetRendererState().RendererSettings;
+    windBuff.windEnabled = settings.WindQuality
+        != GothicRendererSettings::EWindQuality::WIND_QUALITY_NONE ? 1.0f : 0.0f;
+    windBuff.influenceEnabled = settings.HeroAffectsObjects ? 1.0f : 0.0f;
+    // Metadata is selected per draw and is reset before each VOB batch.
+    windBuff.windMetadataEnabled = 0.0f;
     windBuff.accurateWindVelocity = settings.Upscaler
         == GothicRendererSettings::UPSCALER_FSR_3 ? 1.0f : 0.0f;
     XMStoreFloat4( reinterpret_cast<XMFLOAT4*>(&windBuff.cameraWorldPosition),
@@ -8624,14 +8618,8 @@ XRESULT D3D11GraphicsEngine::DrawVOBsInstanced() {
         SetupVS_ExConstantBuffer();
 
         GraphicsShaderConstantBuffer windBuffer = {};
-        const auto& windSettings =
-            Engine::GAPI->GetRendererState().RendererSettings;
 
-        if ( ActiveVS
-            && (windSettings.WindQuality
-                    != GothicRendererSettings::EWindQuality::
-                        WIND_QUALITY_NONE
-                || windSettings.HeroAffectsObjects) ) {
+        if ( ActiveVS ) {
             windBuffer = ActiveVS->GetBuffer( "WindParams" );
             windBuffer.Bind();
         }
@@ -8873,6 +8861,7 @@ XRESULT D3D11GraphicsEngine::DrawVOBsInstanced() {
             }
 
             if ( windBuffer.GetRawBuffer() ) {
+                g_windBuffer.windMetadataEnabled = useWindMetadata ? 1.0f : 0.0f;
                 UpdateCharacterInteractionPositions( g_windBuffer );
                 windBuffer.Update( &g_windBuffer );
             }
@@ -8880,7 +8869,11 @@ XRESULT D3D11GraphicsEngine::DrawVOBsInstanced() {
             float cachedSmallVobRadius = -1.0f;
             float cachedVobRadius = -1.0f;
             // Ensure we have correct Constantbuffer for eventual Alphatest stuff.
-            ShaderManager->GetPShader( Resolved_DiffuseNormalmappedAlphatest )
+            const PShaderID activeNormalmappedAlphaTest =
+                Engine::GAPI->GetRendererState().RendererSettings.AllowNormalmaps
+                ? PShaderID::PS_DiffuseNormalmappedAlphaTest
+                : PShaderID::PS_DiffuseAlphaTest;
+            ShaderManager->GetPShader( activeNormalmappedAlphaTest )
                 ->GetBuffer( "FFPipelineConstantBuffer" )
                 .Update( &Engine::GAPI->GetRendererState().GraphicsState )
                 .Bind();
@@ -8977,7 +8970,7 @@ XRESULT D3D11GraphicsEngine::DrawVOBsInstanced() {
                         windBuffer.Update( &g_windBuffer );
                     }
 
-                    const bool oilLampEmissiveTexture = IsCityWindowFeatureReady()
+                    const bool oilLampEmissiveTexture = IsCityWindowSceneReady()
                         && IsOilLampEmissiveTexture( tx );
 
                     if ( !tx ) {
@@ -9296,9 +9289,10 @@ XRESULT D3D11GraphicsEngine::DrawAlphaMeshList(
     }
 
     GraphicsShaderConstantBuffer windBuffer = {};
-    if ( ActiveVS && (Engine::GAPI->GetRendererState().RendererSettings.WindQuality > 0 || Engine::GAPI->GetRendererState().RendererSettings.HeroAffectsObjects) ) {
+    if ( ActiveVS ) {
         windBuffer = ActiveVS->GetBuffer( "WindParams" );
         windBuffer.Bind();
+        g_windBuffer.windMetadataEnabled = useWindMetadata ? 1.0f : 0.0f;
         UpdateCharacterInteractionPositions( g_windBuffer );
         windBuffer.Update( &g_windBuffer );
     }
@@ -9771,13 +9765,6 @@ XRESULT D3D11GraphicsEngine::OnKeyDown( unsigned int key ) {
         return XR_FAILED;
     }
     switch ( key ) {
-#ifndef PUBLIC_RELEASE
-    case VK_NUMPAD0:
-        Engine::GAPI->PrintMessageTimed( INT2( 30, 30 ), "Reloading shaders..." );
-        ReloadShaders();
-        break;
-#endif
-
     case VK_NUMPAD7:
         if ( Engine::GAPI->GetRendererState().RendererSettings.AllowNumpadKeys ) {
             SaveScreenshotNextFrame = true;
@@ -10153,12 +10140,22 @@ bool D3D11GraphicsEngine::BindShaderForTexture( zCTexture* texture,
     int zMatAlphaFunc,
     MaterialInfo::EMaterialType materialInfo,
     bool allowWetNormalFallback ) {
+    const bool useNormalmappedShaders =
+        Engine::GAPI->GetRendererState().RendererSettings.AllowNormalmaps;
+    const PShaderID normalmapped = useNormalmappedShaders
+        ? PShaderID::PS_DiffuseNormalmapped : PShaderID::PS_Diffuse;
+    const PShaderID normalmappedFxMap = useNormalmappedShaders
+        ? PShaderID::PS_DiffuseNormalmappedFxMap : PShaderID::PS_Diffuse;
+    const PShaderID normalmappedAlphaTest = useNormalmappedShaders
+        ? PShaderID::PS_DiffuseNormalmappedAlphaTest : PShaderID::PS_DiffuseAlphaTest;
+    const PShaderID normalmappedAlphaTestFxMap = useNormalmappedShaders
+        ? PShaderID::PS_DiffuseNormalmappedAlphaTestFxMap : PShaderID::PS_DiffuseAlphaTest;
     return ActiveSceneRenderer->BindShaderForTexture( GetShaderManager(), ActivePS,
         texture, forceAlphaTest, zMatAlphaFunc, materialInfo,
-        Resolved_DiffuseNormalmapped,
-        Resolved_DiffuseNormalmappedFxMap,
-        Resolved_DiffuseNormalmappedAlphatest,
-        Resolved_DiffuseNormalmappedAlphatestFxMap,
+        normalmapped,
+        normalmappedFxMap,
+        normalmappedAlphaTest,
+        normalmappedAlphaTestFxMap,
         allowWetNormalFallback );
 }
 

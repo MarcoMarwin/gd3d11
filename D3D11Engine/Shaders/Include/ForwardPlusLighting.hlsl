@@ -6,15 +6,6 @@
 #define MAX_CSM_CASCADES 4
 #endif
 
-#ifndef NUM_CSM_CASCADES
-#define NUM_CSM_CASCADES 3
-#endif
-
-#ifndef CSM_PCF_LIMIT
-#define CSM_PCF_LIMIT 3
-#endif
-
-
 #ifndef SHD_FILTER_PCSS
 #define SHD_FILTER_PCSS 0
 #endif
@@ -49,6 +40,7 @@ cbuffer FP_ScreenQuadConstantBuffer : register( b4 )
     float4 SQ_CascadeAtlasRect[MAX_CSM_CASCADES];
     float4 SQ_CascadeLightDirectionWS[MAX_CSM_CASCADES];
     float4 SQ_ShadowRuntimeParams;
+    float4 SQ_ShadowCascadeRuntimeParams;
 };
 
 // Forward+ tile data

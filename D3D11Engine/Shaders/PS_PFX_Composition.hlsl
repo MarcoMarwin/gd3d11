@@ -39,13 +39,12 @@ cbuffer PFXBuffer : register( b0 )
 
 #endif
 
-#if COMPOSE_HEIGHTFOG
 cbuffer CompositionControl : register( b2 )
 {
     float CC_HeightFogEnabled;
-    float3 CC_Pad;
+    float CC_GodRaysEnabled;
+    float2 CC_Pad;
 };
-#endif
 
 //--------------------------------------------------------------------------------------
 // Textures and Samplers
@@ -54,9 +53,7 @@ SamplerState SS_Linear : register( s0 );
 
 Texture2D TX_Backbuffer : register( t0 );
 
-#if COMPOSE_GODRAYS
 Texture2D TX_GodRays : register( t1 );
-#endif
 
 #if COMPOSE_HEIGHTFOG
 Texture2D TX_Depth : register( t2 );
@@ -260,8 +257,11 @@ float rainVeil = max(rainFogOpacity, rainVeilBase) * activeWeatherFog;
 #endif
 
 #if COMPOSE_GODRAYS
-    float3 godrays = TX_GodRays.Sample( SS_Linear, Input.vTexcoord ).rgb;
-    color.rgb += godrays;
+    [branch] if ( CC_GodRaysEnabled > 0.5f )
+    {
+        float3 godrays = TX_GodRays.Sample( SS_Linear, Input.vTexcoord ).rgb;
+        color.rgb += godrays;
+    }
 #endif
 
 

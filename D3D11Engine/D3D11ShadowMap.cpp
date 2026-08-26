@@ -328,9 +328,6 @@ D3D11ShadowMap::D3D11ShadowMap() {
 }
 
 D3D11ShadowMap::~D3D11ShadowMap() {
-    // Jobs capture this object and its render queues. Complete them before any
-    // member starts destruction, then sever the non-owning point-light links.
-    WaitShadowCullingComplete();
     if ( m_TiledDeferred ) {
         m_TiledDeferred->DetachAllOwners();
     }
@@ -420,17 +417,6 @@ void D3D11ShadowMap::EnsureShadowMapBackend( int size ) {
     }
 }
 
-void D3D11ShadowMap::WaitShadowCullingComplete()
-{
-    ZoneScopedN( "WaitShadowCullingComplete" );
-    std::lock_guard<LockableBase( std::mutex )> lock( m_CullingJobsMutex );
-    for ( auto& job : m_ShadowCullingJobs ) {
-        if ( job.valid() ) {
-            job.wait();
-        }
-    }
-}
-
 void D3D11ShadowMap::Init( Microsoft::WRL::ComPtr<ID3D11Device1>& device, Microsoft::WRL::ComPtr<ID3D11DeviceContext1>& context, int size ) {
     HRESULT hr;
     m_device = device;
@@ -468,9 +454,6 @@ void D3D11ShadowMap::Init( Microsoft::WRL::ComPtr<ID3D11Device1>& device, Micros
 void D3D11ShadowMap::Resize( int size ) {
 
     if ( !m_device ) return;
-
-    // Finish culling before reusing cascade queues or data.
-    WaitShadowCullingComplete();
 
     const int maxSize = (FeatureLevel10Compatibility ? 8192 : 16384);
     const int s = std::min<int>( std::max<int>( size, 512 ), maxSize );
@@ -573,9 +556,6 @@ XRESULT D3D11ShadowMap::PrepareRender()
 
     const bool forceCsmUpdate = m_ForceCsmUpdateAfterHeavyRain;
     m_ForceCsmUpdateAfterHeavyRain = false;
-
-    // Finish pending culling before reuse.
-    WaitShadowCullingComplete();
 
     // Check if shadowmap resources need to be recreated due to setting changes
     {
@@ -837,59 +817,6 @@ XRESULT D3D11ShadowMap::PrepareRender()
                     &m_CascadeTexelWorld[cascadeIdx] );
             }
         }
-    }
-
-    if ( settings.GetEffectiveThreadedShadowCulling()
-        && Engine::WorkerThreadPool ) {
-        std::lock_guard<LockableBase( std::mutex )> lock( m_CullingJobsMutex );
-        m_ShadowCullingJobs.clear();
-
-        for ( size_t i = 0; i < static_cast<size_t>(numCascades); i++ ) {
-            m_RenderQueues[i]->Reset();
-            if ( !m_ShouldUpdateCascade[i] ) {
-                continue; // Skip culling for this cascade if we're not updating it this frame
-            }
-
-            m_ShadowCullingJobs.push_back( Engine::WorkerThreadPool->enqueue( []( const CancellationToken& token, D3D11ShadowMap* _this, size_t idx ) {
-                if ( token.isCancelled() || Engine::IsShuttingDown() || !Engine::GAPI ) {
-                    return;
-                }
-                ZoneScoped;
-                ZoneNameF( "Shadow Cascade %zu", idx );
-
-                RndCullContext ctx;
-                ctx.queue = _this->m_RenderQueues[idx].get();
-                ctx.frustum = _this->m_CascadeCRs[idx].frustum;
-                ctx.cameraPosition = _this->m_WorldShadowPos;
-                ctx.stage = RenderStage::STAGE_DRAW_SHADOWS;
-                ctx.drawDistances.OutdoorVobs = 20000;
-                ctx.drawDistances.OutdoorVobsSmall = 20000;
-                ctx.drawDistances.IndoorVobs = 20000;
-                ctx.drawDistances.VisualFX = 0.0f;
-                ctx.drawDistancesSq.OutdoorVobs = ctx.drawDistances.OutdoorVobs * ctx.drawDistances.OutdoorVobs;
-                ctx.drawDistancesSq.OutdoorVobsSmall = ctx.drawDistances.OutdoorVobsSmall * ctx.drawDistances.OutdoorVobsSmall;
-                ctx.drawDistancesSq.IndoorVobs = ctx.drawDistances.IndoorVobs * ctx.drawDistances.IndoorVobs;
-                ctx.drawDistancesSq.VisualFX = 0.0f;
-
-                const auto& rs = Engine::GAPI->GetRendererState().RendererSettings;
-                ctx.minVobSize = _this->m_CascadeTexelWorld[idx]
-                    * std::clamp( rs.ShadowCasterMinTexels, 0.0f, 16.0f );
-                ctx.drawFlags.DrawVOBs = rs.DrawVOBs;
-                ctx.drawFlags.DrawMobs = rs.DrawMobs;
-                ctx.drawFlags.EnableDynamicLighting = rs.EnableDynamicLighting;
-                ctx.drawFlags.CullVobs = rs.DebugSettings.Culling.CullVobs;
-                ctx.drawFlags.CollectIndoorVobs = false;
-                ctx.drawFlags.CollectLargeVobs = true;
-                ctx.drawFlags.CollectSmallVobs = true;
-                ctx.drawFlags.CollectMobs = false;
-                ctx.drawFlags.CollectLights = false;
-
-                Engine::GAPI->CollectVisibleVobs( ctx );
-
-            }, this, i ).future );
-        }
-        
-        return XR_SUCCESS;
     }
 
     // Build a conservative culling volume that covers all cascades rendered this frame.
@@ -1489,8 +1416,6 @@ XRESULT D3D11ShadowMap::DrawWorldShadow( )
         return XR_SUCCESS;
     }
 
-    WaitShadowCullingComplete();
-
     auto& settings = Engine::GAPI->GetRendererState().RendererSettings;
     
     int numCascades = std::clamp( settings.NumShadowCascades, 1, MAX_CSM_CASCADES );
@@ -1846,10 +1771,14 @@ DS_ScreenQuadConstantBuffer D3D11ShadowMap::FillSunCSMConstantBuffer() const {
     scb.SQ_WorldAOStrength = settings.WorldAOStrength;
     scb.SQ_ShadowSoftness = settings.ShadowSoftness;
     scb.SQ_LightSize = std::clamp( settings.PCSSLightSize, 0.005f, 0.5f );
+    const int runtimeCascadeCount = std::clamp( settings.NumShadowCascades, 1, MAX_CSM_CASCADES );
+    const int runtimePCFLimit = std::clamp( settings.ShadowCascadePCFLimit, 0, runtimeCascadeCount );
     scb.SQ_ShadowRuntimeParams = float4(
         settings.GetUsesTemporalReconstruction() ? 1.0f : 0.0f,
         static_cast<float>( settings.GetShadowKernelQuality() ),
         settings.EnableShadows && !m_CsmSuppressedByHeavyRain ? 1.0f : 0.0f, 0.0f );
+    scb.SQ_ShadowCascadeRuntimeParams = float4(
+        static_cast<float>( runtimeCascadeCount ), static_cast<float>( runtimePCFLimit ), 0.0f, 0.0f );
     WorldInfo* worldInfo = Engine::GAPI->GetLoadedWorldInfo();
     if ( worldInfo && worldInfo->BspTree ) {
         auto bspTree = worldInfo->BspTree;
@@ -1989,10 +1918,14 @@ XRESULT D3D11ShadowMap::DrawWorldLights()
     scb.SQ_WorldAOStrength = settings.WorldAOStrength;
     scb.SQ_ShadowSoftness = settings.ShadowSoftness;
     scb.SQ_LightSize = std::clamp( settings.PCSSLightSize, 0.005f, 0.5f );
+    const int runtimeCascadeCount = std::clamp( settings.NumShadowCascades, 1, MAX_CSM_CASCADES );
+    const int runtimePCFLimit = std::clamp( settings.ShadowCascadePCFLimit, 0, runtimeCascadeCount );
     scb.SQ_ShadowRuntimeParams = float4(
         settings.GetUsesTemporalReconstruction() ? 1.0f : 0.0f,
         static_cast<float>( settings.GetShadowKernelQuality() ),
         settings.EnableShadows && !m_CsmSuppressedByHeavyRain ? 1.0f : 0.0f, 0.0f );
+    scb.SQ_ShadowCascadeRuntimeParams = float4(
+        static_cast<float>( runtimeCascadeCount ), static_cast<float>( runtimePCFLimit ), 0.0f, 0.0f );
     // Modify lightsettings when indoor
     if ( auto bspTree = worldInfo->BspTree )
         if ( bspTree->GetBspTreeMode() == zBSP_MODE_INDOOR ) {

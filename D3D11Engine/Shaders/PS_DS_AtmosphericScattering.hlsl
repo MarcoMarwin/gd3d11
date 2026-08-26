@@ -63,6 +63,7 @@ cbuffer DS_ScreenQuadConstantBuffer : register(b0)
     float4 SQ_CascadeAtlasRect[MAX_CSM_CASCADES];
     float4 SQ_CascadeLightDirectionWS[MAX_CSM_CASCADES];
     float4 SQ_ShadowRuntimeParams;
+    float4 SQ_ShadowCascadeRuntimeParams;
 };
 
 //--------------------------------------------------------------------------------------

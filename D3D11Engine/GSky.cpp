@@ -454,20 +454,20 @@ XRESULT GSky::RenderSky() {
     AtmosphereCB.AC_WaterCubemapStrength = rendererSettings.WaterCubemapStrength;
     AtmosphereCB.AC_EnableNightAtmosphere = 1.0f;
     AtmosphereCB.AC_NearNightBrightness = rendererSettings.NightNearBrightness;
-    const bool nightEnhance = rendererSettings.GetEffectiveNightEnhance();
-    // Advanced Night Enhance removes the night-fog blend and far-distance
-    // darkening, while keeping the normal night sky/lighting atmosphere.
-    AtmosphereCB.AC_NightFogBrightness = nightEnhance ? 1.0f : rendererSettings.NightFogBrightness;
+    const bool atmosphericNight = rendererSettings.GetEffectiveNightEnhance();
+    // Atmospheric night uses the normal night fog and distant darkening.
+    // Turning it off leaves the unprocessed night path in place.
+    AtmosphereCB.AC_NightFogBrightness = atmosphericNight ? rendererSettings.NightFogBrightness : 1.0f;
     AtmosphereCB.AC_NightDarkeningStart = rendererSettings.NightDarkeningStart;
     AtmosphereCB.AC_NightDarkeningRange = rendererSettings.NightDarkeningRange;
-    AtmosphereCB.AC_NightDarkeningMax = nightEnhance ? 0.0f : rendererSettings.NightDarkeningMax;
+    AtmosphereCB.AC_NightDarkeningMax = atmosphericNight ? rendererSettings.NightDarkeningMax : 0.0f;
     // AC_SunVisibility was filled together with the moon visibility above.
     AtmosphereCB.AC_WorldCameraPos = camPos;
     AtmosphereCB.AC_SkyEffectsEnabled = rendererSettings.EnableRain ? 1.0f : 0.0f;
     AtmosphereCB.AC_EnableParticleLighting = rendererSettings.EnableParticleLighting ? 1.0f : 0.0f;
     AtmosphereCB.AC_ParticleLightingStrength = rendererSettings.ParticleLightingStrength * 1.5f;
     AtmosphereCB.AC_Pad3 = 0.0f;
-    AtmosphereCB.AC_NightFogEnabled = nightEnhance ? 0.0f : 1.0f;
+    AtmosphereCB.AC_NightFogEnabled = atmosphericNight ? 1.0f : 0.0f;
     AtmosphereCB.AC_Pad5 = XMFLOAT3( 0.0f, 0.0f, 0.0f );
     AtmosphereCB.AC_Pad6 = 0.0f;
     AtmosphereCB.AC_Pad7 = XMFLOAT3( 0.0f, 0.0f, 0.0f );

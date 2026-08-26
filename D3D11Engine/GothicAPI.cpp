@@ -7636,7 +7636,6 @@ XRESULT GothicAPI::LoadMenuSettings( const std::string& file ) {
         s.ShadowAOStrength = ds.ShadowAOStrength;
         s.WorldAOStrength = ds.WorldAOStrength;
         s.ShadowCasterMinTexels = ds.ShadowCasterMinTexels;
-        s.ThreadedShadowCulling = ds.ThreadedShadowCulling;
         s.DebugSettings.ShadowCascades.LazyCascadeUpdate = ds.DebugSettings.ShadowCascades.LazyCascadeUpdate;
         s.DoZPrepass = ds.DoZPrepass;
         s.AdvancedPerformanceOptions = GetPrivateProfileBoolA(

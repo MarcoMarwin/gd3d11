@@ -204,7 +204,6 @@ private:
     void RecreateShadowSampler();
     void EnsureShadowMapBackend( int size );
 
-    void WaitShadowCullingComplete();
     void BuildWorldShadowCasterCache();
     void BuildVisibleWorldShadowCasterCache( const Frustum& cullingFrustum );
 
@@ -246,6 +245,4 @@ private:
     std::unique_ptr<D3D11TiledDeferredShading> m_TiledDeferred;
     D3D11LegacyDeferredShading m_LegacyDeferred;
 
-    TracyLockable(std::mutex, m_CullingJobsMutex);
-    std::vector<std::future<void>> m_ShadowCullingJobs;
 };

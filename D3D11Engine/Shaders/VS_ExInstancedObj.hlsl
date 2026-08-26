@@ -24,7 +24,10 @@ cbuffer WindParams : register(b1)
      float4 interactionPositions[MAX_CHARACTER_INTERACTION_INFLUENCERS];
      float characterInteractionStrength;
      float characterInteractionRange;
-     float2 padding1;
+     float windEnabled;
+     float influenceEnabled;
+     float windMetadataEnabled;
+     float padding1;
 };
 
 #ifndef WIND_META_SRV
@@ -279,6 +282,8 @@ VS_OUTPUT VSMain( VS_INPUT Input )
     float grassShearProfile = 0.0f;
 
 #if WIND_META_SRV
+    [branch] if (windMetadataEnabled > 0.5f)
+    {
     WindMetaDataEntry meta = WindMetaData[Input.InstanceWindMetaIndex];
     localMinHeight = meta.minHeight;
     localMaxHeight = meta.maxHeight;
@@ -313,10 +318,11 @@ VS_OUTPUT VSMain( VS_INPUT Input )
         signedTerrainShear = clamp(
             rootHeightAboveGround / rootVisibleHeight, -0.35f, 1.25f);
     }
+    }
 #endif
 
 #if SHD_INFLUENCE
-    if (Input.InstanceWind.y > 0) {
+    if (influenceEnabled > 0.5f && Input.InstanceWind.y > 0) {
         // CHARACTER INTERACTION MOVING BUSHES SHADER
         float3 interactionOffset = CalculateActorInteractionInfluence(
             position, localMinHeight, localMaxHeight, Input.InstanceWorldMatrix);
@@ -332,7 +338,7 @@ VS_OUTPUT VSMain( VS_INPUT Input )
 #endif
 
 #if SHD_WIND
-    if (Input.InstanceWind.x > 0) {
+    if (windEnabled > 0.5f && Input.InstanceWind.x > 0) {
         // WIND SHADER
         // Protect 0 height
         float heightRange = max(localMaxHeight - localMinHeight, 0.001);

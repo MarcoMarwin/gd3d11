@@ -5,14 +5,6 @@
 #define MAX_CSM_CASCADES 4
 #endif
 
-#ifndef NUM_CSM_CASCADES
-#define NUM_CSM_CASCADES 3
-#endif
-
-#ifndef CSM_PCF_LIMIT
-#define CSM_PCF_LIMIT 3
-#endif
-
 #ifndef SHD_FILTER_PCSS
 #define SHD_FILTER_PCSS 0
 #endif
@@ -64,6 +56,16 @@ int GetShadowKernelQuality()
     return clamp((int)(SQ_ShadowRuntimeParams.y + 0.5f), 0, 2);
 }
 
+int GetRuntimeCascadeCount()
+{
+    return clamp((int)(SQ_ShadowCascadeRuntimeParams.x + 0.5f), 1, MAX_CSM_CASCADES);
+}
+
+int GetRuntimePCFLimit()
+{
+    return clamp((int)(SQ_ShadowCascadeRuntimeParams.y + 0.5f), 0, GetRuntimeCascadeCount());
+}
+
 bool UsePCSSShadowFilter()
 {
     return GetShadowKernelQuality() >= 2;
@@ -71,7 +73,7 @@ bool UsePCSSShadowFilter()
 
 int GetRuntimePCFTapCount(int cascadeIndex)
 {
-    const bool nearCascade = cascadeIndex < CSM_PCF_LIMIT;
+    const bool nearCascade = cascadeIndex < GetRuntimePCFLimit();
     const int quality = GetShadowKernelQuality();
 
     if ( quality <= 0 ) return 4;
@@ -381,8 +383,11 @@ int GetPrimaryCascadeIndex(float3 wsPosition)
     float inBounds;
     float blendFactor;
 
-    for (int c = 0; c < NUM_CSM_CASCADES; c++)
+    const int cascadeCount = GetRuntimeCascadeCount();
+    [unroll]
+    for (int c = 0; c < MAX_CSM_CASCADES; c++)
     {
+        if (c >= cascadeCount) break;
         GetCascadeUVAndBounds(wsPosition, c, vShadowPos, projCoords, inBounds, blendFactor);
         if (inBounds > 0.5f)
             return c;
@@ -445,7 +450,7 @@ float SampleCascadeShadowStablePCF(float4 vShadowSamplingPos, float2 projectedTe
 {
     float sum = 0.0f;
     float2x2 rotMat = GetPoissonRotationMatrixForCascade(screenPos, cascadeIndex);
-    const bool nearCascade = cascadeIndex < CSM_PCF_LIMIT;
+    const bool nearCascade = cascadeIndex < GetRuntimePCFLimit();
     const int tapCount = GetRuntimePCFTapCount(cascadeIndex);
 
     if (nearCascade)
@@ -493,7 +498,7 @@ float SampleCascadeShadowSoft(float4 vShadowSamplingPos, float2 projectedTexCoor
     // PCSS is intentionally restricted to the near cascade. Distant
     // cascades use the cheaper PCF path below and therefore skip the blocker
     // search completely.
-    if (UsePCSSShadowFilter() && cascadeIndex < CSM_PCF_LIMIT)
+    if (UsePCSSShadowFilter() && cascadeIndex < GetRuntimePCFLimit())
     {
         float noiseVal;
         float2x2 rotMat = GetPoissonRotationMatrixRForCascade(screenPos, cascadeIndex, noiseVal);
@@ -602,12 +607,13 @@ float ComputeCascadedShadowValueSoft(float3 wsPosition, float viewSpaceZ, float 
     float softness = SQ_ShadowSoftness * (1.0f + distanceFactor * 0.5f);
 
     int selectedCascade = -1;
+    const int cascadeCount = GetRuntimeCascadeCount();
     float4 vShadowPos;
     float2 projCoords;
     float blendFactor = 0.0f;
 
     // Reuse a cascade selected during receiver-bias calculation when possible.
-    if (preferredCascade >= 0 && preferredCascade < NUM_CSM_CASCADES)
+    if (preferredCascade >= 0 && preferredCascade < cascadeCount)
     {
         float inBounds;
         GetCascadeUVAndBounds(wsPosition, preferredCascade, vShadowPos, projCoords, inBounds, blendFactor);
@@ -617,8 +623,10 @@ float ComputeCascadedShadowValueSoft(float3 wsPosition, float viewSpaceZ, float 
 
     if (selectedCascade < 0)
     {
-        for (int c = 0; c < NUM_CSM_CASCADES; c++)
+        [unroll]
+        for (int c = 0; c < MAX_CSM_CASCADES; c++)
         {
+            if (c >= cascadeCount) break;
             float inBounds;
             GetCascadeUVAndBounds(wsPosition, c, vShadowPos, projCoords, inBounds, blendFactor);
 
@@ -634,7 +642,7 @@ float ComputeCascadedShadowValueSoft(float3 wsPosition, float viewSpaceZ, float 
     {
         shadow = SampleCascadeShadowSoft(vShadowPos, projCoords, selectedCascade, bias, screenPos, softness);
 
-        if (selectedCascade < NUM_CSM_CASCADES - 1 && blendFactor > 0.0f)
+        if (selectedCascade < cascadeCount - 1 && blendFactor > 0.0f)
         {
             float4 nextShadowPos;
             float2 nextProjCoords;

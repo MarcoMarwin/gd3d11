@@ -701,8 +701,8 @@ struct GothicRendererSettings {
         ShadowFilterMode = E_ShadowFilterMode::SHADOW_FILTER_PCSS;
 
         EnableShadows = true;
-        // Match the Kirides DX11-Nightly baseline. These Advanced-menu
-        // switches remain available for explicit A/B testing.
+        // Retained for renderer-settings ABI compatibility. Threaded shadow
+        // culling was removed and this field is intentionally unused.
         ThreadedShadowCulling = false;
         EnableVSync = false;
         DoZPrepass = false;
@@ -1124,6 +1124,8 @@ struct GothicRendererSettings {
     E_ShadowFilterMode ShadowFilterMode;
     float PCSSLightSize;
     bool EnableShadows;
+    // Deprecated ABI field. The threaded shadow-culling implementation was
+    // removed; keep this slot so external settings consumers retain offsets.
     bool ThreadedShadowCulling;
     int ShadowCascadePCFLimit;
     E_ShadowFrustumCulling ShadowFrustumCullingMode;
@@ -1350,20 +1352,14 @@ struct GothicRendererSettings {
     }
 
     bool GetEffectiveNightEnhance() const {
-        // The F11 switch is intentionally inverted: the unchecked state is
-        // the enhanced-night path, while the checked state keeps the normal
-        // night fog and distant darkening.
-        return AdvancedPerformanceOptions && !AdvancedNightEnhance;
+        // The Advanced checkbox directly controls the atmospheric night
+        // presentation. Advanced off keeps the normal/default atmosphere;
+        // only an active Advanced override can turn it off.
+        return !AdvancedPerformanceOptions || AdvancedNightEnhance;
     }
 
     bool GetEffectiveCityWindowTransparency() const {
         return !AdvancedPerformanceOptions || AdvancedCityWindowTransparency;
-    }
-
-    // These are internal renderer paths, not Advanced-menu options. The
-    // Advanced master switch must not alter them.
-    bool GetEffectiveThreadedShadowCulling() const {
-        return ThreadedShadowCulling;
     }
 
     bool GetEffectiveLazyCascadeUpdate() const {

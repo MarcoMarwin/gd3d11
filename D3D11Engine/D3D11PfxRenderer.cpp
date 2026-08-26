@@ -386,8 +386,8 @@ XRESULT D3D11PfxRenderer::RenderPostFXComposition(
     GSky* sky = Engine::GAPI->GetSky();
     CompositionControlConstantBuffer control = {};
     control.CC_HeightFogEnabled = compositionHeightFog ? 1.0f : 0.0f;
-    if ( compositionHeightFog )
-        compositionPS->GetBuffer( "CompositionControl" ).Update( &control ).Bind();
+    control.CC_GodRaysEnabled = godraysSRV ? 1.0f : 0.0f;
+    compositionPS->GetBuffer( "CompositionControl" ).Update( &control ).Bind();
     if ( compositionHeightFog ) {
         HeightfogConstantBuffer cb = {};
         {

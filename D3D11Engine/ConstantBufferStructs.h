@@ -158,7 +158,8 @@ static_assert( sizeof(HeightfogConstantBuffer) == 176, "HeightfogConstantBuffer 
 
 struct CompositionControlConstantBuffer {
     float CC_HeightFogEnabled;
-    XMFLOAT3 CC_Pad;
+    float CC_GodRaysEnabled;
+    XMFLOAT2 CC_Pad;
 };
 
 struct LumAdaptConstantBuffer {
@@ -285,6 +286,10 @@ struct DS_ScreenQuadConstantBuffer {
     // z = runtime world-shadow enable. These remain runtime-controlled so
     // changing the associated settings never requires shader reloads.
     float4 SQ_ShadowRuntimeParams;
+
+    // x = active CSM cascade count; y = near-cascade high-quality filter limit.
+    // These are runtime-controlled for the same reason as SQ_ShadowRuntimeParams.
+    float4 SQ_ShadowCascadeRuntimeParams;
 };
 
 struct CloudConstantBuffer {
@@ -335,7 +340,10 @@ struct VS_ExConstantBuffer_Wind {
     float4 interactionPositions[MAX_CHARACTER_INTERACTION_INFLUENCERS];
     float characterInteractionStrength;
     float characterInteractionRange;
-    float2 padding1;
+    float windEnabled;
+    float influenceEnabled;
+    float windMetadataEnabled;
+    float padding1;
 };
 
 struct ParticlePointShadingConstantBuffer {

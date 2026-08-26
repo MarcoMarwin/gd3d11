@@ -109,8 +109,6 @@ HRESULT D3D11ShaderManager::CompileShaderFromFile( const WCHAR* szFileName, LPCS
 /** Creates list with ShaderInfos */
 XRESULT D3D11ShaderManager::Init() {
     Shaders = std::vector<ShaderInfo>();
-    static const char* sNums[] = { "0","1","2","3","4","5","6","7","8","9","10","11","12","13","14","15" };
-
     Shaders.push_back( ShaderInfo::make<VShaderID::VS_Ex>( "VS_Ex.hlsl" )
         .with_layout( VERTEX_INPUT_LAYOUT_1 )  );
 
@@ -175,19 +173,21 @@ XRESULT D3D11ShaderManager::Init() {
     Shaders.push_back( ShaderInfo::make<VShaderID::VS_ExInstancedObj>( "VS_ExInstancedObj.hlsl" )
         .with_layout( VERTEX_INPUT_LAYOUT_10_VS_ExInstancedObj )
         .with_macros( [](std::vector<D3D_SHADER_MACRO>& list) {
-            const auto& s = Engine::GAPI->GetRendererState().RendererSettings;
 #ifdef BUILD_GOTHIC_2_6_fix
-		list.push_back( {"SHD_WIND", s.WindQuality == GothicRendererSettings::EWindQuality::WIND_QUALITY_ADVANCED ? "1" : "0"} );
-		list.push_back( {"SHD_INFLUENCE", s.HeroAffectsObjects ? "1" : "0"} );
-		list.push_back( {"WIND_META_SRV", (!FeatureLevel10Compatibility && (s.WindQuality == GothicRendererSettings::EWindQuality::WIND_QUALITY_ADVANCED || s.HeroAffectsObjects)) ? "1" : "0"} );
+		// Wind and character interaction are runtime-controlled through WindParams.
+		// Keep one variant resident so the F11 menu never needs to recompile it.
+		list.push_back( {"SHD_WIND", "1"} );
+		list.push_back( {"SHD_INFLUENCE", "1"} );
+		list.push_back( {"WIND_META_SRV", !FeatureLevel10Compatibility ? "1" : "0"} );
 #elif defined(BUILD_1_12F)
 		list.push_back( {"SHD_WIND", "0"} );
 		list.push_back( {"SHD_INFLUENCE", "0"} );
 		list.push_back( {"WIND_META_SRV", "0"} );
 #else
-		list.push_back( {"SHD_WIND", (haveWindAnimations && s.WindQuality == GothicRendererSettings::EWindQuality::WIND_QUALITY_ADVANCED) ? "1" : "0"} );
-		list.push_back( {"SHD_INFLUENCE", (haveWindAnimations && s.HeroAffectsObjects) ? "1" : "0"} );
-		list.push_back( {"WIND_META_SRV", (!FeatureLevel10Compatibility && haveWindAnimations && (s.WindQuality == GothicRendererSettings::EWindQuality::WIND_QUALITY_ADVANCED || s.HeroAffectsObjects)) ? "1" : "0"} );
+		const char* windVariant = haveWindAnimations ? "1" : "0";
+		list.push_back( {"SHD_WIND", windVariant} );
+		list.push_back( {"SHD_INFLUENCE", windVariant} );
+		list.push_back( {"WIND_META_SRV", (!FeatureLevel10Compatibility && haveWindAnimations) ? "1" : "0"} );
 #endif
         }) );
 
@@ -275,8 +275,10 @@ XRESULT D3D11ShaderManager::Init() {
     Shaders.push_back( ShaderInfo::make<PShaderID::PS_PFX_Composition>( "PS_PFX_Composition.hlsl" )
         .with_category( ShaderCategory::Other )
         .with_macros( [](std::vector<D3D_SHADER_MACRO>& list) {
+            // The texture sample is runtime-gated by CompositionControl. This
+            // keeps the composition shader resident while Godrays are toggled.
+            list.push_back( { "COMPOSE_GODRAYS", "1" } );
             const auto& s = Engine::GAPI->GetRendererState().RendererSettings;
-            list.push_back( { "COMPOSE_GODRAYS", s.AreGodRaysEnabled() ? "1" : "0" } );
             list.push_back( { "COMPOSE_HEIGHTFOG", s.DrawFog ? "1" : "0" } );
         } ) );
 
@@ -299,23 +301,20 @@ XRESULT D3D11ShaderManager::Init() {
     Shaders.push_back( ShaderInfo::make<PShaderID::PS_DS_PointLightDynShadow>( "PS_DS_PointLightDynShadow.hlsl" )
         .with_category( ShaderCategory::LightsAndShadows ) );
 
-    // Shadow macro builder shared by both atmospheric scattering shader variants
+    // Shadow macro builder shared by all shader variants that sample CSM data
     ShaderInfo::MacroBuilder shadowMacroBuilder = [](std::vector<D3D_SHADER_MACRO>& list) {
         const auto& s = Engine::GAPI->GetRendererState().RendererSettings;
 
         const bool useSimpleShadowFallback =
             FeatureLevel10Compatibility || s.DebugSettings.FeatureSet.UseShadowAtlas;
-        // World-shadow enablement is runtime-controlled through
-        // SQ_ShadowRuntimeParams.z. Keep the shadow-capable shader variant
-        // resident so changing Shadow Quality can enable CSM without a
-        // shader reload.
+        // Shadow Quality and the Advanced CSM controls are runtime-controlled
+        // through the shadow constant buffer. Keep one shadow-capable variant
+        // resident so changing them never requires a shader reload.
         list.push_back( {"SHD_ENABLE",           "1"} );
         // Compile both kernels once; quality is selected at runtime.
         list.push_back( {"SHD_FILTER_16TAP_PCF", "1"} );
         list.push_back( {"SHD_FILTER_PCSS",      useSimpleShadowFallback ? "0" : "1"} );
         list.push_back( {"MAX_CSM_CASCADES",     TO_LITERAL(MAX_CSM_CASCADES)} );
-        list.push_back( {"NUM_CSM_CASCADES",     sNums[std::clamp<size_t>(s.NumShadowCascades, 1, MAX_CSM_CASCADES)]} );
-        list.push_back( {"CSM_PCF_LIMIT",        sNums[std::clamp<size_t>(s.ShadowCascadePCFLimit, 0, MAX_CSM_CASCADES)]} );
         list.push_back( {"SHADOW_ATLAS",         (FeatureLevel10Compatibility || s.DebugSettings.FeatureSet.UseShadowAtlas) ? "1" : "0"} );
         list.push_back( {"FP_USE_SHADOW_MASK",   s.DebugSettings.FeatureSet.UseScreenSpaceShadowMask ? "1" : "0"} );
         // Tap counts and sample rotation are selected at runtime.
@@ -328,8 +327,9 @@ XRESULT D3D11ShaderManager::Init() {
 
     Shaders.push_back( ShaderInfo::make<PShaderID::PS_DS_AtmosphericScattering>( "PS_DS_AtmosphericScattering.hlsl" )
         .with_macros( [](std::vector<D3D_SHADER_MACRO>& list) {
-            const auto& s = Engine::GAPI->GetRendererState().RendererSettings;
-            list.push_back( { "SURFACE_DETAILS_ENABLED", s.AllowNormalmaps ? "1" : "0" } );
+            // Surface-detail selection is done at material binding time; this
+            // macro is not a menu-dependent shader permutation.
+            list.push_back( { "SURFACE_DETAILS_ENABLED", "1" } );
         } )
         .with_macros( shadowMacroBuilder )
         .with_category( ShaderCategory::LightsAndShadows ) );
@@ -349,8 +349,7 @@ XRESULT D3D11ShaderManager::Init() {
     Shaders.push_back( ShaderInfo::make<PShaderID::PS_DS_AtmosphericScattering_Rain>( "PS_DS_AtmosphericScattering.hlsl" )
         .with_macros( { { "APPLY_RAIN_EFFECTS", "1" } })
         .with_macros( [](std::vector<D3D_SHADER_MACRO>& list) {
-            const auto& s = Engine::GAPI->GetRendererState().RendererSettings;
-            list.push_back( { "SURFACE_DETAILS_ENABLED", s.AllowNormalmaps ? "1" : "0" } );
+            list.push_back( { "SURFACE_DETAILS_ENABLED", "1" } );
         } )
         .with_macros( shadowMacroBuilder )
         .with_category( ShaderCategory::LightsAndShadows ) );
