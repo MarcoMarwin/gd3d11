@@ -689,6 +689,8 @@ struct GothicRendererSettings {
         AdvancedNightEnhance = true;
         AdvancedCityWindowTransparency = true;
         AdvancedBacklitVegetation = true;
+        VegetationCullingEnabled = false;
+        VegetationCullingDensity = 100;
         RainEffects = true;
 
         BloomStrength = 1.0f;
@@ -1348,6 +1350,10 @@ struct GothicRendererSettings {
     // Backlit vegetation is enabled by default and can be disabled only by
     // the Advanced master switch.
     bool AdvancedBacklitVegetation;
+    // Normal F11 option. It thins isolated two-triangle vegetation cards at
+    // 30 m and 60 m; larger connected polygons remain untouched.
+    bool VegetationCullingEnabled;
+    int VegetationCullingDensity;
     bool GetEffectiveWaterAnimation() const {
         return !AdvancedPerformanceOptions || AdvancedWaterAnimation;
     }

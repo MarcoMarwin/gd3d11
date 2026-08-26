@@ -98,6 +98,36 @@ struct meshKeyHasher {
     }
 };
 
+/** Cached index information for the optional SSS vegetation-card culler. */
+struct VegetationCardCullCard {
+    size_t FirstTriangle = 0;
+    size_t SecondTriangle = 0;
+    size_t SelectionRank = 0;
+};
+
+struct VegetationCardCullVariant {
+    std::unique_ptr<D3D11VertexBuffer> IndexBuffer;
+    unsigned int IndexCount = 0;
+    bool Built = false;
+};
+
+struct VegetationCardCullInfo {
+    bool AnalysisAttempted = false;
+    int BuiltDensity = -1;
+    std::vector<int> TriangleCardIds;
+    std::vector<VegetationCardCullCard> Cards;
+    std::array<VegetationCardCullVariant, 3> Variants;
+
+    void ResetVariants() {
+        for ( auto& variant : Variants ) {
+            variant.IndexBuffer.reset();
+            variant.IndexCount = 0;
+            variant.Built = false;
+        }
+        BuiltDensity = -1;
+    }
+};
+
 /** Holds information about a mesh, ready to be loaded into the renderer */
 struct MeshInfo {
     MeshInfo() {
@@ -130,6 +160,8 @@ struct MeshInfo {
     std::vector<VERTEX_INDEX> ShadowIndices;
     std::vector<VERTEX_INDEX> ShadowLodIndices;
     bool ShadowLodBuildAttempted = false;
+    VegetationCardCullInfo VegetationCardCull;
+    VegetationCardCullInfo VegetationShadowCardCull;
 
     // Offset in wrapped world mesh
     unsigned int BaseIndexLocation;

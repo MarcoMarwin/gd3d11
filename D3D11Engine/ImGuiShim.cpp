@@ -841,6 +841,8 @@ struct GraphicsPresetComparable {
     bool AllowNormalmaps;
     bool EnableSSR;
     float SSRStrength;
+    bool VegetationCullingEnabled;
+    int VegetationCullingDensity;
     bool HeroAffectsObjects;
     bool AdvancedWaterAnimation;
     bool AdvancedNightEnhance;
@@ -874,6 +876,8 @@ GraphicsPresetComparable MakeGraphicsPresetComparable(
         s.AllowNormalmaps,
         s.EnableSSR,
         s.SSRStrength,
+        s.VegetationCullingEnabled,
+        s.VegetationCullingDensity,
         s.HeroAffectsObjects,
         s.AdvancedWaterAnimation,
         s.AdvancedNightEnhance,
@@ -909,6 +913,8 @@ bool GraphicsPresetComparableEqual(
         && a.AllowNormalmaps == b.AllowNormalmaps
         && a.EnableSSR == b.EnableSSR
         && a.SSRStrength == b.SSRStrength
+        && a.VegetationCullingEnabled == b.VegetationCullingEnabled
+        && a.VegetationCullingDensity == b.VegetationCullingDensity
         && a.HeroAffectsObjects == b.HeroAffectsObjects
         && a.AdvancedWaterAnimation == b.AdvancedWaterAnimation
         && a.AdvancedNightEnhance == b.AdvancedNightEnhance
@@ -940,6 +946,8 @@ void ApplyGraphicsPresets( GothicRendererSettings& s, bool applyRuntimeUpdates =
     s.EnableSSR = true;
     s.SSRStrength = 1.0f;
     s.RainEffects = true;
+    s.VegetationCullingEnabled = false;
+    s.VegetationCullingDensity = 100;
 
     // Reset all visible effect strengths to their normalized UI defaults.
     s.AOStrength = 1.0f;
@@ -962,6 +970,8 @@ void ApplyGraphicsPresets( GothicRendererSettings& s, bool applyRuntimeUpdates =
         s.SSRStrength = 1.0f;
         s.RainEffects = false;
         s.EnableGodRays = false;
+        s.VegetationCullingEnabled = true;
+        s.VegetationCullingDensity = 50;
         break;
     case GothicRendererSettings::GRAPHICS_MEDIUM:
         s.ShadowQuality = GothicRendererSettings::E_ShadowQuality::SHADOW_QUALITY_MEDIUM;
@@ -975,6 +985,8 @@ void ApplyGraphicsPresets( GothicRendererSettings& s, bool applyRuntimeUpdates =
         s.AllowNormalmaps = false;
         s.EnableSSR = true;
         s.SSRStrength = 1.0f;
+        s.VegetationCullingEnabled = true;
+        s.VegetationCullingDensity = 100;
         break;
     case GothicRendererSettings::GRAPHICS_HIGH:
         s.ShadowQuality = GothicRendererSettings::E_ShadowQuality::SHADOW_QUALITY_HIGH;
@@ -1101,6 +1113,8 @@ namespace
         if ( !s.EnableDoF ) s.DoFBokehRadius = 0.0f;
         if ( s.WindQuality == GothicRendererSettings::EWindQuality::WIND_QUALITY_NONE ) s.GlobalWindStrength = 0.0f;
         s.OutdoorSmallVobDrawRadius = ObjectDrawDistanceUiToMeters( ObjectDrawDistanceMetersToUi( s.OutdoorSmallVobDrawRadius ) );
+        s.VegetationCullingDensity = std::clamp(
+            ((s.VegetationCullingDensity + 12) / 25) * 25, 0, 100 );
         s.ForceFOV = false;
         s.FOVHoriz = 100.0f;
         s.FOVVert = 100.0f;
@@ -1879,17 +1893,6 @@ void ImGuiShim::RenderSettingsWindow()
             ImGui::BeginGroup();
             ImGui::PushItemWidth( controlWidth );
 
-            ImText( Tr( "World Draw Distance", u8"Weltsichtweite" ), buttonWidth ); ImGui::SameLine();
-            ImGui::SliderInt( "##SectionDrawRadius", &settings.SectionDrawRadius, 1, 10, "%d", ImGuiSliderFlags_::ImGuiSliderFlags_ClampOnInput );
-            ImGui::SetItemTooltip( "%s", Tr( "Higher values show terrain and buildings from farther away.", u8"H\u00F6here Werte zeigen Gel\u00E4nde und Geb\u00E4ude aus gr\u00F6\u00DFerer Entfernung." ) );
-
-            int objectDrawDistance = ObjectDrawDistanceMetersToUi( settings.OutdoorSmallVobDrawRadius );
-            ImText( Tr( "Object Draw Distance", u8"Objektsichtweite" ), buttonWidth ); ImGui::SameLine();
-            if ( ImGui::SliderInt( "##OutdoorSmallVobDrawRadius", &objectDrawDistance, OBJECT_DRAW_DISTANCE_UI_MIN, OBJECT_DRAW_DISTANCE_UI_MAX, "%d", ImGuiSliderFlags_::ImGuiSliderFlags_ClampOnInput ) ) {
-                settings.OutdoorSmallVobDrawRadius = ObjectDrawDistanceUiToMeters( objectDrawDistance );
-            }
-            ImGui::SetItemTooltip( "%s", Tr( "Higher values show small objects and vegetation from farther away.", u8"H\u00F6here Werte zeigen kleine Objekte und Vegetation aus gr\u00F6\u00DFerer Entfernung." ) );
-
             ImText( Tr( "Texture Quality", u8"Texturqualit\u00E4t" ), buttonWidth ); ImGui::SameLine();
             const std::array<std::pair<const char*, int>, 6> QualityOptions = {{
                 { Tr( "Very Low", u8"Sehr niedrig" ), static_cast<int>(TX_QUALITY::VeryLow) },
@@ -1968,6 +1971,40 @@ void ImGuiShim::RenderSettingsWindow()
                     "Selects the CSM and pointlight shadow profile. Changing it resets only the shadow values; other Advanced options remain unchanged.",
                     u8"W\u00E4hlt das CSM- und Pointlight-Schattenprofil. Eine \u00C4nderung setzt nur die Schattenwerte zur\u00FCck; andere erweiterte Einstellungen bleiben unver\u00E4ndert." ) );
             }
+
+            ImText( Tr( "World Draw Distance", u8"Weltsichtweite" ), buttonWidth ); ImGui::SameLine();
+            ImGui::SliderInt( "##SectionDrawRadius", &settings.SectionDrawRadius, 1, 10, "%d", ImGuiSliderFlags_::ImGuiSliderFlags_ClampOnInput );
+            ImGui::SetItemTooltip( "%s", Tr( "Higher values show terrain and buildings from farther away.", u8"H\u00F6here Werte zeigen Gel\u00E4nde und Geb\u00E4ude aus gr\u00F6\u00DFerer Entfernung." ) );
+
+            int objectDrawDistance = ObjectDrawDistanceMetersToUi( settings.OutdoorSmallVobDrawRadius );
+            ImText( Tr( "Object Draw Distance", u8"Objektsichtweite" ), buttonWidth ); ImGui::SameLine();
+            if ( ImGui::SliderInt( "##OutdoorSmallVobDrawRadius", &objectDrawDistance, OBJECT_DRAW_DISTANCE_UI_MIN, OBJECT_DRAW_DISTANCE_UI_MAX, "%d", ImGuiSliderFlags_::ImGuiSliderFlags_ClampOnInput ) ) {
+                settings.OutdoorSmallVobDrawRadius = ObjectDrawDistanceUiToMeters( objectDrawDistance );
+            }
+            ImGui::SetItemTooltip( "%s", Tr( "Higher values show small objects and vegetation from farther away.", u8"H\u00F6here Werte zeigen kleine Objekte und Vegetation aus gr\u00F6\u00DFerer Entfernung." ) );
+
+            settings.VegetationCullingDensity = std::clamp(
+                ((settings.VegetationCullingDensity + 12) / 25) * 25, 0, 100 );
+            ImText( Tr( "Vegetation Density", u8"Vegetationsdichte" ), buttonWidth ); ImGui::SameLine();
+            ImGui::Checkbox( "##VegetationCullingEnabled", &settings.VegetationCullingEnabled );
+            ImGui::SetItemTooltip( "%s", Tr(
+                "Reduces eligible two-triangle vegetation cards from 30 m and 60 m. Larger connected polygons are unchanged.",
+                u8"Reduziert geeignete Vegetationskarten aus zwei Dreiecken ab 30 m und 60 m. Gr\u00F6\u00DFere zusammenh\u00E4ngende Polygone bleiben unver\u00E4ndert." ) );
+            ImGui::SameLine();
+            const float vegetationSliderWidth = std::max(
+                1.0f, controlWidth - ImGui::GetFrameHeight() - style.ItemSpacing.x );
+            ImGui::SetNextItemWidth( vegetationSliderWidth );
+            ImGui::BeginDisabled( !settings.VegetationCullingEnabled );
+            if ( ImGui::SliderInt( "##VegetationCullingDensity",
+                &settings.VegetationCullingDensity, 0, 100, "%d%%",
+                ImGuiSliderFlags_::ImGuiSliderFlags_ClampOnInput ) ) {
+                settings.VegetationCullingDensity = std::clamp(
+                    ((settings.VegetationCullingDensity + 12) / 25) * 25, 0, 100 );
+            }
+            ImGui::EndDisabled();
+            ImGui::SetItemTooltip( "%s", Tr(
+                "Keeps this share of eligible cards near the camera; it is reduced again after 30 m and 60 m.",
+                u8"Legt den Anteil geeigneter Karten in Kameran\u00E4he fest; ab 30 m und 60 m wird er weiter reduziert." ) );
 
             const bool ambientOcclusionAvailable = !FeatureLevel10Compatibility;
             bool ambientOcclusionEnabled = ambientOcclusionAvailable && settings.AoMode == AOMode::AO_XEGTAO;

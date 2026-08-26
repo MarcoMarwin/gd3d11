@@ -102,6 +102,7 @@ struct AlphaMeshData {
     MeshInfo* mi;
     MeshVisualInfo* vi;
     unsigned int StartInstanceNum = 0;
+    int VegetationCullTier = -1;
     std::vector<VobInstanceInfo> instances;
 };
 
@@ -537,6 +538,8 @@ private:
         bool windowGlassOnly );
     bool PrepareAndBindWindMetadata( const std::vector<MeshVisualInfo*>& activeVisuals );
     void UnbindWindMetadata();
+    bool GetVegetationCardCullDraw( MeshInfo* mesh, bool shadowIndices, int tier,
+        D3D11VertexBuffer*& indexBuffer, unsigned int& indexCount );
     ID3D11ShaderResourceView* GetWindowGlassReplacementSRV();
     void EnsureFrameVobVisibilityCollected();
     void RebuildWindowCutoutVolumeCache();
@@ -587,6 +590,7 @@ private:
             std::vector<VobInstanceInfo> Instances;
             unsigned int                 StartInstanceNum = 0;
             bool                         WindowFallbackOpaque = false;
+            int                          VegetationCullTier = -1;
         };
 
         struct SortKeyBuilder {

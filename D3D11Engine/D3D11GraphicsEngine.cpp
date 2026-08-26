@@ -4822,6 +4822,275 @@ namespace {
         return mesh && !mesh->ShadowLodIndices.empty()
             ? static_cast<unsigned int>( mesh->ShadowLodIndices.size() ) : 0u;
     }
+
+    int GetVegetationCullTier( const VobInstanceInfo& instance,
+        const XMFLOAT3& cameraPosition ) {
+        const float dx = instance.world._41 - cameraPosition.x;
+        const float dz = instance.world._43 - cameraPosition.z;
+        const float distanceSq = dx * dx + dz * dz;
+        return distanceSq < 30.0f * 30.0f
+            ? 0
+            : (distanceSq < 60.0f * 60.0f ? 1 : 2);
+    }
+
+    uint64_t HashVegetationCardKey( const XMFLOAT3& center, size_t firstTriangle ) {
+        // Quantization keeps the order stable when a mesh is loaded through
+        // slightly different floating-point paths.  The integer mix spreads
+        // retained cards over the whole group instead of keeping the first
+        // source-order cards, which are often clustered together.
+        const auto quantize = []( float value ) -> uint32_t {
+            const int32_t quantized = static_cast<int32_t>( std::lround( value * 4.0f ) );
+            return static_cast<uint32_t>( quantized );
+        };
+        uint64_t hash = 1469598103934665603ull;
+        const uint64_t triangleKey = static_cast<uint64_t>( firstTriangle );
+        const uint32_t values[] = {
+            quantize( center.x ), quantize( center.y ), quantize( center.z ),
+            static_cast<uint32_t>( triangleKey ),
+            static_cast<uint32_t>( triangleKey >> 32 )
+        };
+        for ( uint32_t value : values ) {
+            hash ^= value;
+            hash *= 1099511628211ull;
+        }
+        hash ^= hash >> 30;
+        hash *= 0xbf58476d1ce4e5b9ull;
+        hash ^= hash >> 27;
+        hash *= 0x94d049bb133111ebull;
+        return hash ^ (hash >> 31);
+    }
+
+    void AnalyzeVegetationCards( const std::vector<ExVertexStruct>& vertices,
+        const std::vector<VERTEX_INDEX>& indices, VegetationCardCullInfo& info ) {
+        if ( info.AnalysisAttempted ) {
+            return;
+        }
+        info.AnalysisAttempted = true;
+        info.TriangleCardIds.clear();
+        info.Cards.clear();
+
+        if ( vertices.empty() || indices.empty() || indices.size() % 3 != 0 ) {
+            return;
+        }
+
+        const size_t triangleCount = indices.size() / 3;
+        info.TriangleCardIds.assign( triangleCount, -1 );
+
+        struct EdgeUse {
+            size_t FirstTriangle = 0;
+            size_t SecondTriangle = 0;
+            unsigned int Count = 0;
+        };
+
+        std::vector<unsigned int> vertexUseCount( vertices.size(), 0 );
+        std::unordered_map<uint64_t, EdgeUse> edges;
+        edges.reserve( triangleCount * 2 );
+
+        const auto addEdge = [&edges]( uint32_t a, uint32_t b, size_t triangle ) {
+            if ( a > b ) {
+                std::swap( a, b );
+            }
+            const uint64_t key = static_cast<uint64_t>( a )
+                | (static_cast<uint64_t>( b ) << 32);
+            auto& edge = edges[key];
+            if ( edge.Count == 0 ) {
+                edge.FirstTriangle = triangle;
+            } else if ( edge.Count == 1 ) {
+                edge.SecondTriangle = triangle;
+            }
+            ++edge.Count;
+        };
+
+        for ( size_t triangle = 0; triangle < triangleCount; ++triangle ) {
+            const uint32_t a = static_cast<uint32_t>( indices[triangle * 3 + 0] );
+            const uint32_t b = static_cast<uint32_t>( indices[triangle * 3 + 1] );
+            const uint32_t c = static_cast<uint32_t>( indices[triangle * 3 + 2] );
+            if ( a >= vertices.size() || b >= vertices.size() || c >= vertices.size() ) {
+                info.TriangleCardIds.clear();
+                return;
+            }
+
+            ++vertexUseCount[a];
+            ++vertexUseCount[b];
+            ++vertexUseCount[c];
+            addEdge( a, b, triangle );
+            addEdge( b, c, triangle );
+            addEdge( c, a, triangle );
+        }
+
+        std::vector<std::pair<uint64_t, size_t>> cardOrder;
+        cardOrder.reserve( triangleCount / 2 );
+        for ( const auto& [_, edge] : edges ) {
+            if ( edge.Count != 2 || edge.FirstTriangle == edge.SecondTriangle ) {
+                continue;
+            }
+
+            const size_t first = edge.FirstTriangle;
+            const size_t second = edge.SecondTriangle;
+            if ( info.TriangleCardIds[first] != -1
+                || info.TriangleCardIds[second] != -1 ) {
+                continue;
+            }
+
+            const uint32_t firstIndices[] = {
+                static_cast<uint32_t>( indices[first * 3 + 0] ),
+                static_cast<uint32_t>( indices[first * 3 + 1] ),
+                static_cast<uint32_t>( indices[first * 3 + 2] )
+            };
+            const uint32_t secondIndices[] = {
+                static_cast<uint32_t>( indices[second * 3 + 0] ),
+                static_cast<uint32_t>( indices[second * 3 + 1] ),
+                static_cast<uint32_t>( indices[second * 3 + 2] )
+            };
+
+            std::array<uint32_t, 6> allVertices = {
+                firstIndices[0], firstIndices[1], firstIndices[2],
+                secondIndices[0], secondIndices[1], secondIndices[2]
+            };
+            std::sort( allVertices.begin(), allVertices.end() );
+            const auto uniqueEnd = std::unique( allVertices.begin(), allVertices.end() );
+            if ( std::distance( allVertices.begin(), uniqueEnd ) != 4 ) {
+                continue;
+            }
+
+            bool isolated = true;
+            for ( auto vertex = allVertices.begin(); vertex != uniqueEnd; ++vertex ) {
+                unsigned int pairUseCount = 0;
+                for ( uint32_t index : firstIndices ) pairUseCount += index == *vertex;
+                for ( uint32_t index : secondIndices ) pairUseCount += index == *vertex;
+                if ( vertexUseCount[*vertex] != pairUseCount ) {
+                    isolated = false;
+                    break;
+                }
+            }
+            if ( !isolated ) {
+                continue;
+            }
+
+            const XMFLOAT3& p0 = vertices[firstIndices[0]].Position;
+            const XMFLOAT3& p1 = vertices[firstIndices[1]].Position;
+            const XMFLOAT3& p2 = vertices[firstIndices[2]].Position;
+            const float ux = p1.x - p0.x;
+            const float uy = p1.y - p0.y;
+            const float uz = p1.z - p0.z;
+            const float vx = p2.x - p0.x;
+            const float vy = p2.y - p0.y;
+            const float vz = p2.z - p0.z;
+            const float nx = uy * vz - uz * vy;
+            const float ny = uz * vx - ux * vz;
+            const float nz = ux * vy - uy * vx;
+            if ( nx * nx + ny * ny + nz * nz < 0.000001f ) {
+                continue;
+            }
+
+            XMFLOAT3 center = {};
+            for ( auto vertex = allVertices.begin(); vertex != uniqueEnd; ++vertex ) {
+                center.x += vertices[*vertex].Position.x;
+                center.y += vertices[*vertex].Position.y;
+                center.z += vertices[*vertex].Position.z;
+            }
+            center.x *= 0.25f;
+            center.y *= 0.25f;
+            center.z *= 0.25f;
+
+            const int cardId = static_cast<int>( info.Cards.size() );
+            info.Cards.push_back( { first, second, 0 } );
+            info.TriangleCardIds[first] = cardId;
+            info.TriangleCardIds[second] = cardId;
+            cardOrder.emplace_back( HashVegetationCardKey( center, first ),
+                static_cast<size_t>( cardId ) );
+        }
+
+        std::sort( cardOrder.begin(), cardOrder.end(),
+            [&info]( const auto& a, const auto& b ) {
+                if ( a.first != b.first ) return a.first < b.first;
+                const auto& cardA = info.Cards[a.second];
+                const auto& cardB = info.Cards[b.second];
+                return cardA.FirstTriangle < cardB.FirstTriangle;
+            } );
+        for ( size_t rank = 0; rank < cardOrder.size(); ++rank ) {
+            info.Cards[cardOrder[rank].second].SelectionRank = rank;
+        }
+    }
+}
+
+bool D3D11GraphicsEngine::GetVegetationCardCullDraw( MeshInfo* mesh,
+    bool shadowIndices, int tier, D3D11VertexBuffer*& indexBuffer,
+    unsigned int& indexCount ) {
+    // Callers initialize these outputs with the original index buffer/count.
+    // Preserve that fallback for every non-culling path and replace it only
+    // after a valid reduced variant has been built.
+    if ( !mesh || tier < 0 || tier > 2 || !Engine::GAPI ) {
+        return false;
+    }
+
+    auto& settings = Engine::GAPI->GetRendererState().RendererSettings;
+    if ( !settings.VegetationCullingEnabled || !mesh->PreviousMorphPositions.empty() ) {
+        return false;
+    }
+
+    const int density = std::clamp(
+        ((settings.VegetationCullingDensity + 12) / 25) * 25, 0, 100 );
+    const std::vector<VERTEX_INDEX>& source = shadowIndices && !mesh->ShadowIndices.empty()
+        ? mesh->ShadowIndices : mesh->Indices;
+    VegetationCardCullInfo& info = shadowIndices && !mesh->ShadowIndices.empty()
+        ? mesh->VegetationShadowCardCull : mesh->VegetationCardCull;
+    if ( source.empty() || source.size() % 3 != 0 ) {
+        return false;
+    }
+
+    AnalyzeVegetationCards( mesh->Vertices, source, info );
+    if ( info.Cards.empty() ) {
+        return false;
+    }
+
+    if ( info.BuiltDensity != density ) {
+        info.ResetVariants();
+        info.BuiltDensity = density;
+    }
+
+    const size_t cardCount = info.Cards.size();
+    const size_t keepCount = std::min( cardCount,
+        (cardCount * static_cast<size_t>( density )
+            * static_cast<size_t>( tier == 0 ? 100 : (tier == 1 ? 50 : 25)) + 9999u)
+            / 10000u );
+    if ( keepCount >= cardCount ) {
+        return false;
+    }
+
+    auto& variant = info.Variants[static_cast<size_t>(tier)];
+    if ( !variant.Built ) {
+        std::vector<VERTEX_INDEX> culledIndices;
+        culledIndices.reserve( source.size() );
+        for ( size_t triangle = 0; triangle < source.size() / 3; ++triangle ) {
+            const int cardId = info.TriangleCardIds[triangle];
+            if ( cardId >= 0
+                && info.Cards[static_cast<size_t>(cardId)].SelectionRank >= keepCount ) {
+                continue;
+            }
+            culledIndices.push_back( source[triangle * 3 + 0] );
+            culledIndices.push_back( source[triangle * 3 + 1] );
+            culledIndices.push_back( source[triangle * 3 + 2] );
+        }
+
+        variant.IndexCount = static_cast<unsigned int>( culledIndices.size() );
+        if ( !culledIndices.empty() ) {
+            variant.IndexBuffer = std::make_unique<D3D11VertexBuffer>();
+            if ( variant.IndexBuffer->Init( culledIndices.data(),
+                static_cast<unsigned int>(culledIndices.size() * sizeof( VERTEX_INDEX )),
+                D3D11VertexBuffer::B_INDEXBUFFER,
+                D3D11VertexBuffer::U_IMMUTABLE ) != XR_SUCCESS ) {
+                variant.IndexBuffer.reset();
+                variant.IndexCount = 0;
+                return false;
+            }
+        }
+        variant.Built = true;
+    }
+
+    indexBuffer = variant.IndexBuffer.get();
+    indexCount = variant.IndexCount;
+    return true;
 }
 
 /** Called when we started to render the world */
@@ -8087,17 +8356,80 @@ void XM_CALLCONV D3D11GraphicsEngine::DrawWorldAroundForWorldShadow( FXMVECTOR p
         ActiveVS->Apply();
         const bool useWindMetadata = PrepareAndBindWindMetadata( activeVisuals );
 
+        struct ShadowVobBatch {
+            MeshVisualInfo* Visual = nullptr;
+            std::vector<VobInstanceInfo> Instances;
+            const std::vector<VobInstanceInfo>* SourceInstances = nullptr;
+            unsigned int StartInstanceNum = 0;
+            int VegetationCullTier = -1;
+
+            const std::vector<VobInstanceInfo>& GetInstances() const {
+                return SourceInstances ? *SourceInstances : Instances;
+            }
+        };
+        std::vector<ShadowVobBatch> shadowBatches;
+        shadowBatches.reserve( activeVisuals.size() * 3 );
+        const auto& shadowRenderSettings =
+            Engine::GAPI->GetRendererState().RendererSettings;
+        const bool shadowVegetationCulling =
+            shadowRenderSettings.VegetationCullingEnabled;
+        const XMFLOAT3 shadowCameraPosition = Engine::GAPI->GetCameraPosition();
+        for ( MeshVisualInfo* visual : activeVisuals ) {
+            bool visualHasShadowCards = false;
+            if ( shadowVegetationCulling
+                && IsTwoSidedBacklitVegetationVisual( visual->VisualName ) ) {
+                for ( const auto& [_, meshes] : visual->MeshesByTexture ) {
+                    for ( MeshInfo* mesh : meshes ) {
+                        if ( !mesh || !mesh->PreviousMorphPositions.empty() ) continue;
+                        const std::vector<VERTEX_INDEX>& source = mesh->ShadowIndices.empty()
+                            ? mesh->Indices : mesh->ShadowIndices;
+                        if ( source.empty() ) continue;
+                        VegetationCardCullInfo& info = mesh->ShadowIndices.empty()
+                            ? mesh->VegetationCardCull : mesh->VegetationShadowCardCull;
+                        AnalyzeVegetationCards( mesh->Vertices, source, info );
+                        visualHasShadowCards = visualHasShadowCards || !info.Cards.empty();
+                    }
+                }
+            }
+
+            if ( visualHasShadowCards ) {
+                std::array<std::vector<VobInstanceInfo>, 3> tierInstances;
+                for ( auto& instances : tierInstances ) {
+                    instances.reserve( visual->Instances.size() / 3 + 1 );
+                }
+                for ( const auto& instance : visual->Instances ) {
+                    tierInstances[static_cast<size_t>(GetVegetationCullTier(
+                        instance, shadowCameraPosition ))].push_back( instance );
+                }
+                for ( int tier = 0; tier < 3; ++tier ) {
+                    auto& instances = tierInstances[static_cast<size_t>(tier)];
+                    if ( instances.empty() ) continue;
+                    ShadowVobBatch batch;
+                    batch.Visual = visual;
+                    batch.Instances = std::move( instances );
+                    batch.VegetationCullTier = tier;
+                    shadowBatches.push_back( std::move( batch ) );
+                }
+            } else {
+                ShadowVobBatch batch;
+                batch.Visual = visual;
+                batch.SourceInstances = &visual->Instances;
+                shadowBatches.push_back( std::move( batch ) );
+            }
+        }
+
         byte* data = nullptr;
         UINT size = 0;
         bool shadowInstanceUploadSucceeded = false;
         if ( SUCCEEDED( shadowInstancingBuffer->Map( D3D11VertexBuffer::M_WRITE_DISCARD,
             reinterpret_cast<void**>(&data), &size ) ) ) {
             UINT loc = 0;
-            for ( auto const& staticMeshVisual : activeVisuals ) {
-                staticMeshVisual->StartInstanceNum = loc;
-                memcpy( data + loc * sizeof( VobInstanceInfo ), staticMeshVisual->Instances.data(),
-                    sizeof( VobInstanceInfo ) * staticMeshVisual->Instances.size() );
-                loc += staticMeshVisual->Instances.size();
+            for ( auto& batch : shadowBatches ) {
+                const auto& instances = batch.GetInstances();
+                batch.StartInstanceNum = loc;
+                memcpy( data + loc * sizeof( VobInstanceInfo ), instances.data(),
+                    sizeof( VobInstanceInfo ) * instances.size() );
+                loc += static_cast<UINT>(instances.size());
             }
             shadowInstancingBuffer->Unmap();
             shadowInstanceUploadSucceeded = true;
@@ -8131,22 +8463,22 @@ void XM_CALLCONV D3D11GraphicsEngine::DrawWorldAroundForWorldShadow( FXMVECTOR p
         D3D11PShader* currPs = nullptr;
 
         size_t numMeshesToDraw = 0;
-        for ( auto const& staticMeshVisual : activeVisuals ) {
-            if ( staticMeshVisual->Instances.empty() ) continue;
-            for ( auto const& itt : staticMeshVisual->MeshesByTexture ) {
-                std::vector<MeshInfo*>& mlist = staticMeshVisual->MeshesByTexture[itt.first];
+        for ( auto const& batch : shadowBatches ) {
+            if ( batch.GetInstances().empty() || !batch.Visual ) continue;
+            for ( auto const& itt : batch.Visual->MeshesByTexture ) {
+                const std::vector<MeshInfo*>& mlist = itt.second;
                 if ( mlist.empty() ) continue;
                 for ( unsigned int i = 0; i < mlist.size(); i++ ) {
                     ++numMeshesToDraw;
                 }
             }
         }
-        std::vector<std::tuple<MeshVisualInfo*, MeshKey, MeshInfo*, uint64_t>> instancedMeshesToDraw;
+        std::vector<std::tuple<ShadowVobBatch*, MeshKey, MeshInfo*, uint64_t>> instancedMeshesToDraw;
         instancedMeshesToDraw.reserve( numMeshesToDraw );
 
-        for ( auto const& staticMeshVisual : activeVisuals ) {
-            if ( staticMeshVisual->Instances.empty() ) continue;
-            for ( auto const& itt : staticMeshVisual->MeshesByTexture ) {
+        for ( auto& batch : shadowBatches ) {
+            if ( batch.GetInstances().empty() || !batch.Visual ) continue;
+            for ( auto const& itt : batch.Visual->MeshesByTexture ) {
                 const std::vector<MeshInfo*>& mlist = itt.second;
 
                 uint64_t sortKeyBase = 0;
@@ -8161,12 +8493,12 @@ void XM_CALLCONV D3D11GraphicsEngine::DrawWorldAroundForWorldShadow( FXMVECTOR p
                 for ( unsigned int i = 0; i < mlist.size(); i++ ) {
                     MeshInfo* mi = mlist[i];
 
-                    instancedMeshesToDraw.emplace_back( staticMeshVisual, itt.first, mi, sortKeyBase + mi->meshId );
+                    instancedMeshesToDraw.emplace_back( &batch, itt.first, mi, sortKeyBase + mi->meshId );
                 }
             }
         }
 
-        std::sort( instancedMeshesToDraw.begin(), instancedMeshesToDraw.end(), []( const std::tuple<MeshVisualInfo*, MeshKey, MeshInfo*, uint64_t>& a, const std::tuple<MeshVisualInfo*, MeshKey, MeshInfo*, uint64_t>& b ) {
+        std::sort( instancedMeshesToDraw.begin(), instancedMeshesToDraw.end(), []( const std::tuple<ShadowVobBatch*, MeshKey, MeshInfo*, uint64_t>& a, const std::tuple<ShadowVobBatch*, MeshKey, MeshInfo*, uint64_t>& b ) {
             return std::get<3>( a ) < std::get<3>( b );
         } );
 
@@ -8187,10 +8519,11 @@ void XM_CALLCONV D3D11GraphicsEngine::DrawWorldAroundForWorldShadow( FXMVECTOR p
 
         for ( size_t drawIndex = 0; drawIndex < instancedMeshesToDraw.size(); ++drawIndex ) {
             const auto& drawItem = instancedMeshesToDraw[drawIndex];
-            MeshVisualInfo* staticMeshVisual = std::get<0>( drawItem );
+            ShadowVobBatch* shadowBatch = std::get<0>( drawItem );
+            MeshVisualInfo* staticMeshVisual = shadowBatch ? shadowBatch->Visual : nullptr;
             const MeshKey& meshKey = std::get<1>( drawItem );
             MeshInfo* meshInfo = std::get<2>( drawItem );
-            if ( !staticMeshVisual || !meshKey.Material || !meshInfo ) {
+            if ( !shadowBatch || !staticMeshVisual || !meshKey.Material || !meshInfo ) {
                 continue;
             }
             if ( !useWindMetadata && windBuffer.GetRawBuffer() && lastWindVisual != staticMeshVisual ) {
@@ -8263,18 +8596,26 @@ void XM_CALLCONV D3D11GraphicsEngine::DrawWorldAroundForWorldShadow( FXMVECTOR p
             }
 
             const auto vb = mi->MeshVertexBuffer;
-            const auto ib = useShadowLod ? mi->MeshShadowLodIndexBuffer
+            D3D11VertexBuffer* ib = useShadowLod ? mi->MeshShadowLodIndexBuffer
                 : GetShadowAwareIndexBuffer( mi, isAlpha );
 
             UINT offset[] = { 0 };
             UINT uStride[] = { sizeof( ExVertexStruct ) };
             ID3D11Buffer* buffers[1] = { vb->GetVertexBuffer().Get() };
 
-            auto numIndices = useShadowLod
+            unsigned int numIndices = useShadowLod
                 ? static_cast<size_t>( GetShadowLodIndexCount( mi ) )
                 : static_cast<size_t>( GetShadowAwareIndexCount( mi, isAlpha ) );
-            const auto numInstances = staticMeshVisual->Instances.size();
-            const auto startInstanceNum = staticMeshVisual->StartInstanceNum;
+            const bool vegetationCardCull = !useShadowLod
+                && shadowBatch->VegetationCullTier >= 0
+                && GetVegetationCardCullDraw( mi, !isAlpha,
+                    shadowBatch->VegetationCullTier, ib, numIndices );
+            if ( vegetationCardCull && numIndices == 0 ) {
+                continue;
+            }
+
+            const auto numInstances = shadowBatch->GetInstances().size();
+            const auto startInstanceNum = shadowBatch->StartInstanceNum;
 
             GetContext()->IASetVertexBuffers( 0, 1, buffers, uStride, offset );
 
@@ -8677,13 +9018,14 @@ XRESULT D3D11GraphicsEngine::DrawVOBsInstanced() {
                 // Snapshot visuals + instance data into cache so subsequent passes
                 // don't rely on MeshVisualInfo::Instances, which may be mutated by shadow passes
                 cache.vobVisuals.clear();
-                cache.vobVisuals.reserve( activeVisuals.size() + 16 );
+                cache.vobVisuals.reserve( activeVisuals.size() * 3 + 16 );
                 {
                     UINT loc = 0;
                     auto appendCachedVisual = [&cache, &loc](
                         MeshVisualInfo* visual,
                         std::vector<VobInstanceInfo>&& instances,
-                        bool windowFallbackOpaque ) {
+                        bool windowFallbackOpaque,
+                        int vegetationCullTier = -1 ) {
                         if ( instances.empty() )
                             return;
                         FrameGeometryCache::CachedVobVisual cv;
@@ -8691,11 +9033,48 @@ XRESULT D3D11GraphicsEngine::DrawVOBsInstanced() {
                         cv.Instances = std::move( instances );
                         cv.StartInstanceNum = loc;
                         cv.WindowFallbackOpaque = windowFallbackOpaque;
+                        cv.VegetationCullTier = vegetationCullTier;
                         loc += static_cast<UINT>(cv.Instances.size());
                         cache.vobVisuals.push_back( std::move( cv ) );
                     };
 
+                    const bool vegetationCullingEnabled =
+                        renderSettings.VegetationCullingEnabled;
+                    const XMFLOAT3 cameraPosition = Engine::GAPI->GetCameraPosition();
                     for ( auto smv : activeVisuals ) {
+                        bool vegetationVisualHasCards = false;
+                        if ( vegetationCullingEnabled
+                            && IsTwoSidedBacklitVegetationVisual( smv->VisualName ) ) {
+                            for ( const auto& [_, meshes] : smv->MeshesByTexture ) {
+                                for ( MeshInfo* mesh : meshes ) {
+                                    if ( !mesh || !mesh->PreviousMorphPositions.empty()
+                                        || mesh->Indices.empty() ) {
+                                        continue;
+                                    }
+                                    AnalyzeVegetationCards( mesh->Vertices, mesh->Indices,
+                                        mesh->VegetationCardCull );
+                                    vegetationVisualHasCards = vegetationVisualHasCards
+                                        || !mesh->VegetationCardCull.Cards.empty();
+                                }
+                            }
+                        }
+
+                        if ( vegetationVisualHasCards ) {
+                            std::array<std::vector<VobInstanceInfo>, 3> tierInstances;
+                            for ( auto& instances : tierInstances ) {
+                                instances.reserve( smv->Instances.size() / 3 + 1 );
+                            }
+                            for ( const auto& instance : smv->Instances ) {
+                                tierInstances[static_cast<size_t>(GetVegetationCullTier(
+                                    instance, cameraPosition ))].push_back( instance );
+                            }
+                            for ( int tier = 0; tier < 3; ++tier ) {
+                                appendCachedVisual( smv, std::move( tierInstances[static_cast<size_t>(tier)] ),
+                                    false, tier );
+                            }
+                            continue;
+                        }
+
                         const bool scopedWindowVisual = IsCityWindowFeatureReady()
                             && IsWindowGlassVisual( smv->VisualName );
                         if ( !scopedWindowVisual
@@ -8930,6 +9309,7 @@ XRESULT D3D11GraphicsEngine::DrawVOBsInstanced() {
                             alphaMesh.mi = meshInfo;
                             alphaMesh.vi = cachedVisual->Visual;
                             alphaMesh.StartInstanceNum = cachedVisual->StartInstanceNum;
+                            alphaMesh.VegetationCullTier = cachedVisual->VegetationCullTier;
                             alphaMesh.instances = cachedVisual->Instances;
                             (isWindowGlass ? m_WindowAlphaMeshes : m_AlphaMeshes)
                                 .push_back( std::move( alphaMesh ) );
@@ -9103,8 +9483,18 @@ XRESULT D3D11GraphicsEngine::DrawVOBsInstanced() {
                         }
                     }
 
-                    DrawInstanced( meshInfo->MeshVertexBuffer, meshInfo->MeshIndexBuffer,
-                        meshInfo->Indices.size(), instancingBuffer,
+                    D3D11VertexBuffer* drawIndexBuffer = meshInfo->MeshIndexBuffer;
+                    unsigned int drawIndexCount = static_cast<unsigned int>(meshInfo->Indices.size());
+                    const bool vegetationCardCull = cachedVisual->VegetationCullTier >= 0
+                        && GetVegetationCardCullDraw( meshInfo, false,
+                            cachedVisual->VegetationCullTier,
+                            drawIndexBuffer, drawIndexCount );
+                    if ( vegetationCardCull && drawIndexCount == 0 ) {
+                        continue;
+                    }
+
+                    DrawInstanced( meshInfo->MeshVertexBuffer, drawIndexBuffer,
+                        drawIndexCount, instancingBuffer,
                         sizeof( VobInstanceInfo ), cachedVisual->Instances.size(),
                         sizeof( ExVertexStruct ), cachedVisual->StartInstanceNum );
                 }
@@ -9433,7 +9823,17 @@ XRESULT D3D11GraphicsEngine::DrawAlphaMeshList(
             }
 
             // Draw batch
-            DrawInstanced( mi->MeshVertexBuffer, mi->MeshIndexBuffer, mi->Indices.size(),
+            D3D11VertexBuffer* drawIndexBuffer = mi->MeshIndexBuffer;
+            unsigned int drawIndexCount = static_cast<unsigned int>(mi->Indices.size());
+            const bool vegetationCardCull = alphaMesh.VegetationCullTier >= 0
+                && GetVegetationCardCullDraw( mi, false,
+                    alphaMesh.VegetationCullTier, drawIndexBuffer, drawIndexCount );
+            if ( vegetationCardCull && drawIndexCount == 0 ) {
+                vi->StartNewFrame();
+                continue;
+            }
+
+            DrawInstanced( mi->MeshVertexBuffer, drawIndexBuffer, drawIndexCount,
                 instancingBuffer, sizeof( VobInstanceInfo ),
                 instances.size(), sizeof( ExVertexStruct ),
                 alphaMesh.StartInstanceNum );
