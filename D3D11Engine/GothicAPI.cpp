@@ -1962,8 +1962,9 @@ void GothicAPI::SaveRendererGlobalSettings( const GothicRendererSettings& s, con
     WritePrivateProfileStringA( "General", "GraphicsPreset", std::to_string( static_cast<int>(s.GraphicsPreset) ).c_str(), ini.c_str() );
     WritePrivateProfileStringA( "General", "OutdoorSmallVobDrawRadius", std::to_string( s.OutdoorSmallVobDrawRadius ).c_str(), ini.c_str() );
     WritePrivateProfileStringA( "General", "SectionDrawRadius", std::to_string( s.SectionDrawRadius ).c_str(), ini.c_str() );
-    WritePrivateProfileStringA( "Display", "VegetationCulling", std::to_string( s.VegetationCullingEnabled ? TRUE : FALSE ).c_str(), ini.c_str() );
-    WritePrivateProfileStringA( "Display", "VegetationCullingDensity", std::to_string( s.VegetationCullingDensity ).c_str(), ini.c_str() );
+    WritePrivateProfileStringA( "Display", "GrassDetails", std::to_string( s.GrassDetailsLevel ).c_str(), ini.c_str() );
+    WritePrivateProfileStringA( "Display", "VegetationCulling", nullptr, ini.c_str() );
+    WritePrivateProfileStringA( "Display", "VegetationCullingDensity", nullptr, ini.c_str() );
 }
 /** Goes through the given zCTree and registers all found vobs */
 void GothicAPI::TraverseVobTree( zCTree<zCVob>* tree ) {
@@ -7458,8 +7459,9 @@ XRESULT GothicAPI::SaveMenuSettings( const std::string& file ) {
     WritePrivateProfileStringA( "Display", "DynamicClouds", std::to_string( s.EnableDynamicClouds ? TRUE : FALSE ).c_str(), ini.c_str() );
     WritePrivateProfileStringA( "Display", "WindQuality", std::to_string( s.WindQuality ).c_str(), ini.c_str() );
     WritePrivateProfileStringA( "Display", "WindStrength", std::to_string( s.GlobalWindStrength ).c_str(), ini.c_str() );
-    WritePrivateProfileStringA( "Display", "VegetationCulling", std::to_string( s.VegetationCullingEnabled ? TRUE : FALSE ).c_str(), ini.c_str() );
-    WritePrivateProfileStringA( "Display", "VegetationCullingDensity", std::to_string( s.VegetationCullingDensity ).c_str(), ini.c_str() );
+    WritePrivateProfileStringA( "Display", "GrassDetails", std::to_string( s.GrassDetailsLevel ).c_str(), ini.c_str() );
+    WritePrivateProfileStringA( "Display", "VegetationCulling", nullptr, ini.c_str() );
+    WritePrivateProfileStringA( "Display", "VegetationCullingDensity", nullptr, ini.c_str() );
     WritePrivateProfileStringA( "Shadows", "Quality", std::to_string( static_cast<int>(s.ShadowQuality) ).c_str(), ini.c_str() );
     WritePrivateProfileStringA( "Shadows", "Advanced_Enabled", std::to_string( s.AdvancedPerformanceOptions ? TRUE : FALSE ).c_str(), ini.c_str() );
     WritePrivateProfileStringA( "Shadows", "Advanced_CSMEnabled", std::to_string( s.EnableShadows ? TRUE : FALSE ).c_str(), ini.c_str() );
@@ -7759,33 +7761,12 @@ XRESULT GothicAPI::LoadMenuSettings( const std::string& file ) {
             static_cast<int>(GothicRendererSettings::WIND_QUALITY_NONE),
             static_cast<int>(GothicRendererSettings::WIND_QUALITY_ADVANCED) );
         s.GlobalWindStrength = std::clamp( GetPrivateProfileFloatA( "Display", "WindStrength", ds.GlobalWindStrength, ini ), 0.0f, 2.0f );
-        char vegetationCullingValue[16] = {};
-        const bool hasVegetationCullingValue = GetPrivateProfileStringA(
-            "Display", "VegetationCulling", "", vegetationCullingValue,
-            static_cast<DWORD>(std::size(vegetationCullingValue)), ini.c_str() ) > 0;
-        char vegetationCullingDensityValue[16] = {};
-        const bool hasVegetationCullingDensityValue = GetPrivateProfileStringA(
-            "Display", "VegetationCullingDensity", "", vegetationCullingDensityValue,
-            static_cast<DWORD>(std::size(vegetationCullingDensityValue)), ini.c_str() ) > 0;
-        const bool presetEnablesVegetationCulling =
-            s.GraphicsPreset == GothicRendererSettings::GRAPHICS_LOW
-            || s.GraphicsPreset == GothicRendererSettings::GRAPHICS_MEDIUM;
-        const int presetVegetationCullingDensity =
-            s.GraphicsPreset == GothicRendererSettings::GRAPHICS_LOW ? 50 : 100;
-        s.VegetationCullingEnabled = GetPrivateProfileBoolA(
-            "Display", "VegetationCulling",
-            hasVegetationCullingValue ? ds.VegetationCullingEnabled
-                : presetEnablesVegetationCulling,
-            ini );
-        s.VegetationCullingDensity = std::clamp<int>(
+        const int presetGrassDetails =
+            s.GraphicsPreset == GothicRendererSettings::GRAPHICS_LOW ? 2 : 4;
+        s.GrassDetailsLevel = std::clamp<int>(
             static_cast<int>( GetPrivateProfileIntA(
-                "Display", "VegetationCullingDensity",
-                hasVegetationCullingDensityValue ? ds.VegetationCullingDensity
-                    : presetVegetationCullingDensity,
-                ini.c_str() ) ),
-            0, 100 );
-        s.VegetationCullingDensity =
-            ((s.VegetationCullingDensity + 12) / 25) * 25;
+                "Display", "GrassDetails", presetGrassDetails, ini.c_str() ) ),
+            0, 4 );
         s.EnableWaterAnimation = true;
         s.DynamicCloudDensity = ds.DynamicCloudDensity;
         s.DynamicCloudScale = ds.DynamicCloudScale;

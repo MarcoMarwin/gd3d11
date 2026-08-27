@@ -113,18 +113,16 @@ struct VegetationCardCullVariant {
 
 struct VegetationCardCullInfo {
     bool AnalysisAttempted = false;
-    int BuiltDensity = -1;
+    int BuiltLevel = -1;
     std::vector<int> TriangleCardIds;
     std::vector<VegetationCardCullCard> Cards;
-    std::array<VegetationCardCullVariant, 3> Variants;
+    VegetationCardCullVariant Variant;
 
-    void ResetVariants() {
-        for ( auto& variant : Variants ) {
-            variant.IndexBuffer.reset();
-            variant.IndexCount = 0;
-            variant.Built = false;
-        }
-        BuiltDensity = -1;
+    void ResetVariant() {
+        Variant.IndexBuffer.reset();
+        Variant.IndexCount = 0;
+        Variant.Built = false;
+        BuiltLevel = -1;
     }
 };
 

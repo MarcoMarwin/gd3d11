@@ -1,4 +1,4 @@
-﻿#include "D3D11GraphicsEngine.h"
+#include "D3D11GraphicsEngine.h"
 #include "D3D11DeferredRenderer.h"
 #include "D3D11ShadowMap.h"
 
@@ -258,6 +258,19 @@ namespace
             }
         }
         return false;
+    }
+
+    // Grass Details uses the same vegetation family as the SSS/backlighting
+    // path, except for the two explicitly excluded special cases. Keep this
+    // separate from IsTwoSidedBacklitVegetationVisual so the SSS treatment
+    // remains unchanged for NW_NATURE_PLANT_03* and NW_KORN*.
+    bool IsGrassDetailsCullVisual( const std::string& visualName ) {
+        const std::string stem = NormalizeVisualStemForMarker( visualName );
+        if ( stem.rfind( "NW_NATURE_PLANT_03", 0 ) == 0
+            || stem.rfind( "NW_KORN", 0 ) == 0 ) {
+            return false;
+        }
+        return IsTwoSidedBacklitVegetationVisual( visualName );
     }
 
     bool IsWindowGlassVisual( const std::string& visualName ) {
@@ -4823,16 +4836,6 @@ namespace {
             ? static_cast<unsigned int>( mesh->ShadowLodIndices.size() ) : 0u;
     }
 
-    int GetVegetationCullTier( const VobInstanceInfo& instance,
-        const XMFLOAT3& cameraPosition ) {
-        const float dx = instance.world._41 - cameraPosition.x;
-        const float dz = instance.world._43 - cameraPosition.z;
-        const float distanceSq = dx * dx + dz * dz;
-        return distanceSq < 30.0f * 30.0f
-            ? 0
-            : (distanceSq < 60.0f * 60.0f ? 1 : 2);
-    }
-
     uint64_t HashVegetationCardKey( const XMFLOAT3& center, size_t firstTriangle ) {
         // Quantization keeps the order stable when a mesh is loaded through
         // slightly different floating-point paths.  The integer mix spreads
@@ -5015,22 +5018,24 @@ namespace {
 }
 
 bool D3D11GraphicsEngine::GetVegetationCardCullDraw( MeshInfo* mesh,
-    bool shadowIndices, int tier, D3D11VertexBuffer*& indexBuffer,
+    bool shadowIndices, D3D11VertexBuffer*& indexBuffer,
     unsigned int& indexCount ) {
     // Callers initialize these outputs with the original index buffer/count.
     // Preserve that fallback for every non-culling path and replace it only
     // after a valid reduced variant has been built.
-    if ( !mesh || tier < 0 || tier > 2 || !Engine::GAPI ) {
+    if ( !mesh || !Engine::GAPI ) {
         return false;
     }
 
     auto& settings = Engine::GAPI->GetRendererState().RendererSettings;
-    if ( !settings.VegetationCullingEnabled || !mesh->PreviousMorphPositions.empty() ) {
+    if ( !mesh->PreviousMorphPositions.empty() ) {
         return false;
     }
 
-    const int density = std::clamp(
-        ((settings.VegetationCullingDensity + 12) / 25) * 25, 0, 100 );
+    const int level = std::clamp( settings.GrassDetailsLevel, 0, 4 );
+    if ( level >= 4 ) {
+        return false;
+    }
     const std::vector<VERTEX_INDEX>& source = shadowIndices && !mesh->ShadowIndices.empty()
         ? mesh->ShadowIndices : mesh->Indices;
     VegetationCardCullInfo& info = shadowIndices && !mesh->ShadowIndices.empty()
@@ -5044,21 +5049,19 @@ bool D3D11GraphicsEngine::GetVegetationCardCullDraw( MeshInfo* mesh,
         return false;
     }
 
-    if ( info.BuiltDensity != density ) {
-        info.ResetVariants();
-        info.BuiltDensity = density;
+    if ( info.BuiltLevel != level ) {
+        info.ResetVariant();
+        info.BuiltLevel = level;
     }
 
     const size_t cardCount = info.Cards.size();
     const size_t keepCount = std::min( cardCount,
-        (cardCount * static_cast<size_t>( density )
-            * static_cast<size_t>( tier == 0 ? 100 : (tier == 1 ? 50 : 25)) + 9999u)
-            / 10000u );
+        (cardCount * static_cast<size_t>( level ) + 3u) / 4u );
     if ( keepCount >= cardCount ) {
         return false;
     }
 
-    auto& variant = info.Variants[static_cast<size_t>(tier)];
+    auto& variant = info.Variant;
     if ( !variant.Built ) {
         std::vector<VERTEX_INDEX> culledIndices;
         culledIndices.reserve( source.size() );
@@ -7336,6 +7339,8 @@ void XM_CALLCONV D3D11GraphicsEngine::DrawWorldAround(
 
         // At this point either renderedVobs or rndVob is filled with something
         D3D11Texture* lastBoundTexture = nullptr;
+        const bool grassDetailsCulling =
+            Engine::GAPI->GetRendererState().RendererSettings.GrassDetailsLevel < 4;
         std::list<VobInfo*>& rl = renderedVobs != nullptr ? *renderedVobs : rndVob;
         VS_ExConstantBuffer_PerInstance cb;
 
@@ -7344,6 +7349,9 @@ void XM_CALLCONV D3D11GraphicsEngine::DrawWorldAround(
             // Bind per-instance buffer
             vobInfo->UpdateVobConstantBuffer(cb);
             buffer.Update(&cb, sizeof(cb));
+            const bool grassDetailsVisual =
+                grassDetailsCulling
+                && IsGrassDetailsCullVisual( vobInfo->VisualInfo->VisualName );
 
             // Draw the vob
             for ( auto const& materialMesh : vobInfo->VisualInfo->Meshes ) {
@@ -7367,10 +7375,19 @@ void XM_CALLCONV D3D11GraphicsEngine::DrawWorldAround(
                     }
                 }
                 for ( auto const& meshInfo : materialMesh.second ) {
+                    D3D11VertexBuffer* drawIndexBuffer =
+                        GetShadowAwareIndexBuffer( meshInfo, isAlpha );
+                    unsigned int drawIndexCount =
+                        GetShadowAwareIndexCount( meshInfo, isAlpha );
+                    const bool grassDetailsCull = grassDetailsVisual
+                        && GetVegetationCardCullDraw(
+                            meshInfo, !isAlpha, drawIndexBuffer, drawIndexCount );
+                    if ( grassDetailsCull && drawIndexCount == 0 ) {
+                        continue;
+                    }
                     DrawVertexBufferIndexed(
                         meshInfo->MeshVertexBuffer,
-                        GetShadowAwareIndexBuffer( meshInfo, isAlpha ),
-                        GetShadowAwareIndexCount( meshInfo, isAlpha ) );
+                        drawIndexBuffer, drawIndexCount );
                 }
             }
         }
@@ -7702,10 +7719,15 @@ void XM_CALLCONV D3D11GraphicsEngine::DrawWorldAround_Layered(
         auto buffer = GetActiveVS()->GetBuffer(1).Bind();
 
         D3D11Texture* lastBoundTexture = nullptr;
+        const bool grassDetailsCulling =
+            Engine::GAPI->GetRendererState().RendererSettings.GrassDetailsLevel < 4;
         for ( auto const& vobInfo : rl ) {
             // Bind per-instance buffer
             vobInfo->UpdateVobConstantBuffer(cb);
             buffer.Update(&cb, sizeof(cb));
+            const bool grassDetailsVisual =
+                grassDetailsCulling
+                && IsGrassDetailsCullVisual( vobInfo->VisualInfo->VisualName );
 
             // Draw the vob1
             for ( auto const& materialMesh : vobInfo->VisualInfo->Meshes ) {
@@ -7729,11 +7751,19 @@ void XM_CALLCONV D3D11GraphicsEngine::DrawWorldAround_Layered(
                     }
                 }
                 for ( auto const& meshInfo : materialMesh.second ) {
+                    D3D11VertexBuffer* drawIndexBuffer =
+                        GetShadowAwareIndexBuffer( meshInfo, isAlpha );
+                    unsigned int drawIndexCount =
+                        GetShadowAwareIndexCount( meshInfo, isAlpha );
+                    const bool grassDetailsCull = grassDetailsVisual
+                        && GetVegetationCardCullDraw(
+                            meshInfo, !isAlpha, drawIndexBuffer, drawIndexCount );
+                    if ( grassDetailsCull && drawIndexCount == 0 ) {
+                        continue;
+                    }
                     DrawVertexBufferInstancedIndexed(
                         meshInfo->MeshVertexBuffer,
-                        GetShadowAwareIndexBuffer( meshInfo, isAlpha ),
-                        GetShadowAwareIndexCount( meshInfo, isAlpha ),
-                        6 );
+                        drawIndexBuffer, drawIndexCount, 6 );
                 }
             }
         }
@@ -8361,23 +8391,22 @@ void XM_CALLCONV D3D11GraphicsEngine::DrawWorldAroundForWorldShadow( FXMVECTOR p
             std::vector<VobInstanceInfo> Instances;
             const std::vector<VobInstanceInfo>* SourceInstances = nullptr;
             unsigned int StartInstanceNum = 0;
-            int VegetationCullTier = -1;
+            bool VegetationCardCull = false;
 
             const std::vector<VobInstanceInfo>& GetInstances() const {
                 return SourceInstances ? *SourceInstances : Instances;
             }
         };
         std::vector<ShadowVobBatch> shadowBatches;
-        shadowBatches.reserve( activeVisuals.size() * 3 );
+        shadowBatches.reserve( activeVisuals.size() );
         const auto& shadowRenderSettings =
             Engine::GAPI->GetRendererState().RendererSettings;
         const bool shadowVegetationCulling =
-            shadowRenderSettings.VegetationCullingEnabled;
-        const XMFLOAT3 shadowCameraPosition = Engine::GAPI->GetCameraPosition();
+            shadowRenderSettings.GrassDetailsLevel < 4;
         for ( MeshVisualInfo* visual : activeVisuals ) {
             bool visualHasShadowCards = false;
             if ( shadowVegetationCulling
-                && IsTwoSidedBacklitVegetationVisual( visual->VisualName ) ) {
+                && IsGrassDetailsCullVisual( visual->VisualName ) ) {
                 for ( const auto& [_, meshes] : visual->MeshesByTexture ) {
                     for ( MeshInfo* mesh : meshes ) {
                         if ( !mesh || !mesh->PreviousMorphPositions.empty() ) continue;
@@ -8392,30 +8421,11 @@ void XM_CALLCONV D3D11GraphicsEngine::DrawWorldAroundForWorldShadow( FXMVECTOR p
                 }
             }
 
-            if ( visualHasShadowCards ) {
-                std::array<std::vector<VobInstanceInfo>, 3> tierInstances;
-                for ( auto& instances : tierInstances ) {
-                    instances.reserve( visual->Instances.size() / 3 + 1 );
-                }
-                for ( const auto& instance : visual->Instances ) {
-                    tierInstances[static_cast<size_t>(GetVegetationCullTier(
-                        instance, shadowCameraPosition ))].push_back( instance );
-                }
-                for ( int tier = 0; tier < 3; ++tier ) {
-                    auto& instances = tierInstances[static_cast<size_t>(tier)];
-                    if ( instances.empty() ) continue;
-                    ShadowVobBatch batch;
-                    batch.Visual = visual;
-                    batch.Instances = std::move( instances );
-                    batch.VegetationCullTier = tier;
-                    shadowBatches.push_back( std::move( batch ) );
-                }
-            } else {
-                ShadowVobBatch batch;
-                batch.Visual = visual;
-                batch.SourceInstances = &visual->Instances;
-                shadowBatches.push_back( std::move( batch ) );
-            }
+            ShadowVobBatch batch;
+            batch.Visual = visual;
+            batch.SourceInstances = &visual->Instances;
+            batch.VegetationCardCull = visualHasShadowCards;
+            shadowBatches.push_back( std::move( batch ) );
         }
 
         byte* data = nullptr;
@@ -8596,20 +8606,31 @@ void XM_CALLCONV D3D11GraphicsEngine::DrawWorldAroundForWorldShadow( FXMVECTOR p
             }
 
             const auto vb = mi->MeshVertexBuffer;
-            D3D11VertexBuffer* ib = useShadowLod ? mi->MeshShadowLodIndexBuffer
-                : GetShadowAwareIndexBuffer( mi, isAlpha );
-
             UINT offset[] = { 0 };
             UINT uStride[] = { sizeof( ExVertexStruct ) };
             ID3D11Buffer* buffers[1] = { vb->GetVertexBuffer().Get() };
 
-            unsigned int numIndices = useShadowLod
-                ? static_cast<size_t>( GetShadowLodIndexCount( mi ) )
-                : static_cast<size_t>( GetShadowAwareIndexCount( mi, isAlpha ) );
-            const bool vegetationCardCull = !useShadowLod
-                && shadowBatch->VegetationCullTier >= 0
-                && GetVegetationCardCullDraw( mi, !isAlpha,
-                    shadowBatch->VegetationCullTier, ib, numIndices );
+            // A reduced vegetation index buffer must also be used for the
+            // distant cascades. Otherwise the shadow-LOD path would restore
+            // the removed grass cards in the shadow map.
+            const bool wantsVegetationCardCull =
+                shadowBatch->VegetationCardCull;
+            D3D11VertexBuffer* ib = nullptr;
+            unsigned int numIndices = 0;
+            bool vegetationCardCull = false;
+            if ( wantsVegetationCardCull ) {
+                ib = GetShadowAwareIndexBuffer( mi, isAlpha );
+                numIndices = GetShadowAwareIndexCount( mi, isAlpha );
+                vegetationCardCull = GetVegetationCardCullDraw(
+                    mi, !isAlpha, ib, numIndices );
+            }
+            if ( !vegetationCardCull ) {
+                ib = useShadowLod ? mi->MeshShadowLodIndexBuffer
+                    : GetShadowAwareIndexBuffer( mi, isAlpha );
+                numIndices = useShadowLod
+                    ? GetShadowLodIndexCount( mi )
+                    : GetShadowAwareIndexCount( mi, isAlpha );
+            }
             if ( vegetationCardCull && numIndices == 0 ) {
                 continue;
             }
@@ -9018,14 +9039,14 @@ XRESULT D3D11GraphicsEngine::DrawVOBsInstanced() {
                 // Snapshot visuals + instance data into cache so subsequent passes
                 // don't rely on MeshVisualInfo::Instances, which may be mutated by shadow passes
                 cache.vobVisuals.clear();
-                cache.vobVisuals.reserve( activeVisuals.size() * 3 + 16 );
+                cache.vobVisuals.reserve( activeVisuals.size() + 16 );
                 {
                     UINT loc = 0;
                     auto appendCachedVisual = [&cache, &loc](
                         MeshVisualInfo* visual,
                         std::vector<VobInstanceInfo>&& instances,
                         bool windowFallbackOpaque,
-                        int vegetationCullTier = -1 ) {
+                        bool vegetationCardCull = false ) {
                         if ( instances.empty() )
                             return;
                         FrameGeometryCache::CachedVobVisual cv;
@@ -9033,18 +9054,17 @@ XRESULT D3D11GraphicsEngine::DrawVOBsInstanced() {
                         cv.Instances = std::move( instances );
                         cv.StartInstanceNum = loc;
                         cv.WindowFallbackOpaque = windowFallbackOpaque;
-                        cv.VegetationCullTier = vegetationCullTier;
+                        cv.VegetationCardCull = vegetationCardCull;
                         loc += static_cast<UINT>(cv.Instances.size());
                         cache.vobVisuals.push_back( std::move( cv ) );
                     };
 
                     const bool vegetationCullingEnabled =
-                        renderSettings.VegetationCullingEnabled;
-                    const XMFLOAT3 cameraPosition = Engine::GAPI->GetCameraPosition();
+                        renderSettings.GrassDetailsLevel < 4;
                     for ( auto smv : activeVisuals ) {
                         bool vegetationVisualHasCards = false;
                         if ( vegetationCullingEnabled
-                            && IsTwoSidedBacklitVegetationVisual( smv->VisualName ) ) {
+                            && IsGrassDetailsCullVisual( smv->VisualName ) ) {
                             for ( const auto& [_, meshes] : smv->MeshesByTexture ) {
                                 for ( MeshInfo* mesh : meshes ) {
                                     if ( !mesh || !mesh->PreviousMorphPositions.empty()
@@ -9060,18 +9080,8 @@ XRESULT D3D11GraphicsEngine::DrawVOBsInstanced() {
                         }
 
                         if ( vegetationVisualHasCards ) {
-                            std::array<std::vector<VobInstanceInfo>, 3> tierInstances;
-                            for ( auto& instances : tierInstances ) {
-                                instances.reserve( smv->Instances.size() / 3 + 1 );
-                            }
-                            for ( const auto& instance : smv->Instances ) {
-                                tierInstances[static_cast<size_t>(GetVegetationCullTier(
-                                    instance, cameraPosition ))].push_back( instance );
-                            }
-                            for ( int tier = 0; tier < 3; ++tier ) {
-                                appendCachedVisual( smv, std::move( tierInstances[static_cast<size_t>(tier)] ),
-                                    false, tier );
-                            }
+                            appendCachedVisual( smv,
+                                std::vector<VobInstanceInfo>( smv->Instances ), false, true );
                             continue;
                         }
 
@@ -9309,7 +9319,7 @@ XRESULT D3D11GraphicsEngine::DrawVOBsInstanced() {
                             alphaMesh.mi = meshInfo;
                             alphaMesh.vi = cachedVisual->Visual;
                             alphaMesh.StartInstanceNum = cachedVisual->StartInstanceNum;
-                            alphaMesh.VegetationCullTier = cachedVisual->VegetationCullTier;
+                            alphaMesh.VegetationCardCull = cachedVisual->VegetationCardCull;
                             alphaMesh.instances = cachedVisual->Instances;
                             (isWindowGlass ? m_WindowAlphaMeshes : m_AlphaMeshes)
                                 .push_back( std::move( alphaMesh ) );
@@ -9485,9 +9495,8 @@ XRESULT D3D11GraphicsEngine::DrawVOBsInstanced() {
 
                     D3D11VertexBuffer* drawIndexBuffer = meshInfo->MeshIndexBuffer;
                     unsigned int drawIndexCount = static_cast<unsigned int>(meshInfo->Indices.size());
-                    const bool vegetationCardCull = cachedVisual->VegetationCullTier >= 0
+                    const bool vegetationCardCull = cachedVisual->VegetationCardCull
                         && GetVegetationCardCullDraw( meshInfo, false,
-                            cachedVisual->VegetationCullTier,
                             drawIndexBuffer, drawIndexCount );
                     if ( vegetationCardCull && drawIndexCount == 0 ) {
                         continue;
@@ -9825,9 +9834,9 @@ XRESULT D3D11GraphicsEngine::DrawAlphaMeshList(
             // Draw batch
             D3D11VertexBuffer* drawIndexBuffer = mi->MeshIndexBuffer;
             unsigned int drawIndexCount = static_cast<unsigned int>(mi->Indices.size());
-            const bool vegetationCardCull = alphaMesh.VegetationCullTier >= 0
+            const bool vegetationCardCull = alphaMesh.VegetationCardCull
                 && GetVegetationCardCullDraw( mi, false,
-                    alphaMesh.VegetationCullTier, drawIndexBuffer, drawIndexCount );
+                    drawIndexBuffer, drawIndexCount );
             if ( vegetationCardCull && drawIndexCount == 0 ) {
                 vi->StartNewFrame();
                 continue;
@@ -11713,4 +11722,3 @@ void D3D11GraphicsEngine::StoreVobPreviousTransforms() {
     // Store view-projection matrix
     StorePrevViewProjMatrix();
 }
-
