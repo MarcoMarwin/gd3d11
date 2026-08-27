@@ -41,7 +41,8 @@ float4 AdaptParticleLighting(float4 color, float particleLightingScale)
     // Preserve the former 0.25 water-particle rain response while allowing
     // its night lighting to use the full renderer strength.
     const float rainStrength = waterParticle ? enabledStrength * 0.25f : regularStrength;
-    const float nightFloor = (groundFog || waterParticle) ? 0.10f : 0.24f;
+    const float nightFloor = waterParticle ? 0.10f
+        : (groundFog ? 0.10f : 0.24f);
     const float nightTintStrength = waterParticle ? 1.0f : 0.80f;
     color.rgb = ApplyAmbientNightTint(color.rgb, night * nightStrength * nightTintStrength);
     if (waterParticle)
@@ -54,6 +55,17 @@ float4 AdaptParticleLighting(float4 color, float particleLightingScale)
     }
     float nightDim = lerp(1.0f, nightFloor, night);
     color.rgb *= lerp(1.0f, nightDim, nightStrength);
+    const float waterNightAmount = saturate(night * nightStrength);
+    if (waterParticle && waterNightAmount > 0.0001f)
+    {
+        // Increase water-particle contrast, not overall brightness: keep the
+        // dark midpoint fixed while separating dark spray from highlights.
+        const float waterNightContrast = lerp(1.0f, 1.12f,
+            waterNightAmount);
+        const float waterContrastPivot = 0.06f;
+        color.rgb = saturate((color.rgb - waterContrastPivot)
+            * waterNightContrast + waterContrastPivot);
+    }
     float rainAlpha = lerp(1.0f, 0.24f, rain);
     color.a *= lerp(1.0f, rainAlpha, rainStrength);
     return color;

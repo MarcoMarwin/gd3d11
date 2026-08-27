@@ -203,6 +203,7 @@ private:
     bool ShouldUseAtlas() const;
     void RecreateShadowSampler();
     void EnsureShadowMapBackend( int size );
+    uint64_t UpdateGrassDetailsShadowGeneration();
 
     void BuildWorldShadowCasterCache();
     void BuildVisibleWorldShadowCasterCache( const Frustum& cullingFrustum );
@@ -230,6 +231,10 @@ private:
     std::array<bool, MAX_CSM_CASCADES> m_ShouldUpdateCascade;
     bool m_CsmSuppressedByHeavyRain = false;
     bool m_ForceCsmUpdateAfterHeavyRain = false;
+    int m_LastGrassDetailsLevel = -1;
+    uint64_t m_GrassDetailsShadowGeneration = 0;
+    uint64_t m_CsmGrassDetailsGeneration = static_cast<uint64_t>( -1 );
+    uint64_t m_PointlightGrassDetailsGeneration = static_cast<uint64_t>( -1 );
     XMFLOAT3 m_WorldShadowPos;
     ShadowWorldCasterCache m_WorldShadowCasters;
     std::unordered_map<WorldMeshInfo*, ShadowWorldCaster> m_WorldShadowCasterLookup;

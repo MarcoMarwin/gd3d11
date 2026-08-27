@@ -1161,7 +1161,9 @@ void ImGuiShim::RenderSettingsWindow()
     const float framebufferHeight = static_cast<float>( windowSize.y );
     const float menuScale = 1.0f;
     const float labelWidth = std::round( 230.0f * menuScale );
-    const float controlWidth = std::round( 205.0f * menuScale );
+    // Give the two F11 columns a small amount of breathing room. Keep this
+    // deliberately modest so the menu remains compact at low resolutions.
+    const float controlWidth = std::round( 217.0f * menuScale );
     const float footerHeight = std::round( 30.0f * menuScale );
     const ImVec2 scaledWindowPadding(
         std::round( style.WindowPadding.x * menuScale ),
@@ -1230,16 +1232,20 @@ void ImGuiShim::RenderSettingsWindow()
         const std::string versionText = std::string( Tr( "D3D11 Version ", u8"D3D11-Version " ) ) + VERSION_NUMBER;
         const ImVec2 versionTextSize = ImGui::CalcTextSize( versionText.c_str() );
 
-        // Keep the header compact while reserving enough room for the actual
-        // localized combo previews, including the custom preset state.
+        // The left F11 half consists of two equal header cells. Profile uses
+        // cell one and Language uses cell two, matching the two-quarter grid
+        // of the regular left-column controls.
         const float leftF11ColumnWidth = labelWidth + style.ItemSpacing.x + controlWidth;
-        // Keep the header fields flush with the left F11 column while
-        // reserving enough width for the localized combo previews.
-        const float topHeaderGap = std::max( style.ItemSpacing.x * 0.5f, 4.0f );
-        const float topPresetLabelWidth = 75.0f;
-        const float topPresetControlWidth = 136.0f;
-        const float topLanguageLabelWidth = 102.0f;
-        const float topLanguageControlWidth = 118.0f;
+        const float topHeaderGap = style.ItemSpacing.x;
+        const float topHeaderBlockWidth =
+            ( leftF11ColumnWidth - topHeaderGap ) * 0.5f;
+        const float topHeaderLabelWidth = 90.0f;
+        const float topHeaderControlWidth = std::max(
+            1.0f, topHeaderBlockWidth - topHeaderLabelWidth - topHeaderGap );
+        const float topPresetLabelWidth = topHeaderLabelWidth;
+        const float topPresetControlWidth = topHeaderControlWidth;
+        const float topLanguageLabelWidth = topHeaderLabelWidth;
+        const float topLanguageControlWidth = topHeaderControlWidth;
 
         ImText( Tr( "Preset", u8"Profil" ), ImVec2( topPresetLabelWidth, 0.0f ) );
         ImGui::SameLine( 0.0f, topHeaderGap );
@@ -1741,7 +1747,7 @@ void ImGuiShim::RenderSettingsWindow()
                 auto selectedMode = settings.AntiAliasingMode;
                 const bool wasFSRAntiAliasing = settings.AntiAliasingMode == GothicRendererSettings::E_AntiAliasingMode::AA_FSR3;
                 ImGui::PushStyleVar( ImGuiStyleVar_FramePadding, ImVec2( 1.0f, style.FramePadding.y ) );
-                ImText( Tr( "Anti-Aliasing", u8"Anti-Aliasing" ), ImVec2( compactAALabelWidth, buttonWidth.y ) );
+                ImText( Tr( "Anti-Aliasing", u8"Kantengl\u00E4ttung" ), ImVec2( compactAALabelWidth, buttonWidth.y ) );
                 ImGui::SameLine();
                 ImGui::SetNextItemWidth( compactAAMethodWidth );
                 if ( ImComboBoxCT( "##AntiAliasing", antiAliasing, &selectedMode, [&selectedMode, &settings, wasFSRAntiAliasing] {

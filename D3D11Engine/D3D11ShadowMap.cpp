@@ -333,6 +333,20 @@ D3D11ShadowMap::~D3D11ShadowMap() {
     }
 }
 
+uint64_t D3D11ShadowMap::UpdateGrassDetailsShadowGeneration() {
+    if ( !Engine::GAPI ) {
+        return m_GrassDetailsShadowGeneration;
+    }
+
+    const int level = std::clamp(
+        Engine::GAPI->GetRendererState().RendererSettings.GrassDetailsLevel, 0, 4 );
+    if ( level != m_LastGrassDetailsLevel ) {
+        m_LastGrassDetailsLevel = level;
+        ++m_GrassDetailsShadowGeneration;
+    }
+    return m_GrassDetailsShadowGeneration;
+}
+
 bool D3D11ShadowMap::ShouldUseAtlas() const {
     const auto& settings = Engine::GAPI->GetRendererState().RendererSettings;
     // FL10 always needs atlas fallback. On FL11+, this can be toggled at runtime.
@@ -554,9 +568,6 @@ XRESULT D3D11ShadowMap::PrepareRender()
         return XR_SUCCESS;
     }
 
-    const bool forceCsmUpdate = m_ForceCsmUpdateAfterHeavyRain;
-    m_ForceCsmUpdateAfterHeavyRain = false;
-
     // Check if shadowmap resources need to be recreated due to setting changes
     {
         auto& settings = Engine::GAPI->GetRendererState().RendererSettings;
@@ -584,6 +595,12 @@ XRESULT D3D11ShadowMap::PrepareRender()
     const XMVECTOR cameraPositionXm = Engine::GAPI->GetCameraPositionXM();
 
     auto& settings = Engine::GAPI->GetRendererState().RendererSettings;
+
+    const uint64_t grassDetailsGeneration = UpdateGrassDetailsShadowGeneration();
+    const bool forceCsmUpdate = m_ForceCsmUpdateAfterHeavyRain
+        || m_CsmGrassDetailsGeneration != grassDetailsGeneration;
+    m_CsmGrassDetailsGeneration = grassDetailsGeneration;
+    m_ForceCsmUpdateAfterHeavyRain = false;
 
     // ********************************
     // Cascade Shadow Map Rendering (Simple Sequential Version)
@@ -1044,6 +1061,25 @@ XRESULT D3D11ShadowMap::DrawPointlightShadows( std::vector<VobLightInfo*>& light
     auto& settings = Engine::GAPI->GetRendererState().RendererSettings;
     if ( settings.EnablePointlightShadows <= 0 ) {
         return XR_SUCCESS;
+    }
+
+    const uint64_t grassDetailsGeneration = UpdateGrassDetailsShadowGeneration();
+    const bool grassDetailsChanged = m_PointlightGrassDetailsGeneration != grassDetailsGeneration;
+    m_PointlightGrassDetailsGeneration = grassDetailsGeneration;
+    if ( grassDetailsChanged ) {
+        // Pointlight shadow maps are persistent and are normally updated only
+        // when their light/caster state changes. Grass Details changes the
+        // caster geometry, so invalidate every known pointlight map once.
+        for ( auto& [_, info] : Engine::GAPI->VobLightMap ) {
+            if ( info ) {
+                info->UpdateShadows = true;
+            }
+        }
+        for ( const auto& info : Engine::GAPI->GetRendererPointLights() ) {
+            if ( info ) {
+                info->UpdateShadows = true;
+            }
+        }
     }
 
     // Shadow resources follow the same frame visibility that is already limited by VisualFXDrawRadius.

@@ -8410,13 +8410,24 @@ void XM_CALLCONV D3D11GraphicsEngine::DrawWorldAroundForWorldShadow( FXMVECTOR p
                 for ( const auto& [_, meshes] : visual->MeshesByTexture ) {
                     for ( MeshInfo* mesh : meshes ) {
                         if ( !mesh || !mesh->PreviousMorphPositions.empty() ) continue;
-                        const std::vector<VERTEX_INDEX>& source = mesh->ShadowIndices.empty()
-                            ? mesh->Indices : mesh->ShadowIndices;
-                        if ( source.empty() ) continue;
-                        VegetationCardCullInfo& info = mesh->ShadowIndices.empty()
-                            ? mesh->VegetationCardCull : mesh->VegetationShadowCardCull;
-                        AnalyzeVegetationCards( mesh->Vertices, source, info );
-                        visualHasShadowCards = visualHasShadowCards || !info.Cards.empty();
+
+                        // Analyze both possible shadow sources. Alpha-tested
+                        // vegetation draws regular indices; opaque casters can
+                        // use ShadowIndices. The old preflight only inspected
+                        // ShadowIndices and could therefore suppress culling
+                        // for the actual alpha index variant.
+                        if ( !mesh->Indices.empty() ) {
+                            AnalyzeVegetationCards( mesh->Vertices, mesh->Indices,
+                                mesh->VegetationCardCull );
+                            visualHasShadowCards = visualHasShadowCards
+                                || !mesh->VegetationCardCull.Cards.empty();
+                        }
+                        if ( !mesh->ShadowIndices.empty() ) {
+                            AnalyzeVegetationCards( mesh->Vertices, mesh->ShadowIndices,
+                                mesh->VegetationShadowCardCull );
+                            visualHasShadowCards = visualHasShadowCards
+                                || !mesh->VegetationShadowCardCull.Cards.empty();
+                        }
                     }
                 }
             }
