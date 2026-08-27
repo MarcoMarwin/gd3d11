@@ -1160,10 +1160,12 @@ void ImGuiShim::RenderSettingsWindow()
     const float framebufferWidth = static_cast<float>( windowSize.x );
     const float framebufferHeight = static_cast<float>( windowSize.y );
     const float menuScale = 1.0f;
-    const float labelWidth = std::round( 230.0f * menuScale );
+    // Give the localized labels and their value controls a little more room.
+    // Keep both cells identical so the two F11 halves remain perfectly aligned.
+    const float labelWidth = std::round( 250.0f * menuScale );
     // Keep the label and value cells equal. This also makes each header cell
     // line up exactly with one quarter of the regular F11 row.
-    const float controlWidth = std::round( 230.0f * menuScale );
+    const float controlWidth = std::round( 250.0f * menuScale );
     const float footerHeight = std::round( 30.0f * menuScale );
     const ImVec2 scaledWindowPadding(
         std::round( style.WindowPadding.x * menuScale ),
@@ -1318,26 +1320,45 @@ void ImGuiShim::RenderSettingsWindow()
             u8"\u00D6ffnet die erweiterten Einstellungen." ) );
         const float advancedPopupMaxHeight = std::max( 320.0f, std::round( framebufferHeight * 0.5f ) );
         ImGui::SetNextWindowSizeConstraints(
-            ImVec2( 440.0f, 0.0f ),
+            // The body scrolls in its own child, so keep the popup at the
+            // constrained height and leave the header outside that scroll area.
+            ImVec2( 440.0f, advancedPopupMaxHeight ),
             ImVec2( std::max( 440.0f, framebufferWidth - 32.0f ), advancedPopupMaxHeight ) );
-        if ( ImGui::BeginPopup( "##AdvancedPerformance", ImGuiWindowFlags_AlwaysVerticalScrollbar ) ) {
-            ImGui::SeparatorText( Tr( "Advanced settings", u8"Erweiterte Einstellungen" ) );
-
-            const bool wasAdvancedEnabled = settings.AdvancedPerformanceOptions;
-            if ( ImGui::Checkbox( Tr( "Enable advanced options", u8"Erweiterte Einstellungen aktivieren" ),
-                &settings.AdvancedPerformanceOptions )
-                && wasAdvancedEnabled && !settings.AdvancedPerformanceOptions ) {
-                ResetAllAdvancedOverridesToCurrentProfile( settings );
-                if ( settings.EnablePointlightShadows == GothicRendererSettings::EPointLightShadowMode::PLS_DISABLED
-                    && Engine::GAPI ) {
-                    Engine::GAPI->ReleasePointlightShadowResources();
+        if ( ImGui::BeginPopup( "##AdvancedPerformance" ) ) {
+            const float advancedPopupCloseButtonSize = ImGui::GetFrameHeight();
+            if ( ImGui::BeginTable( "##AdvancedPerformanceHeader", 2,
+                ImGuiTableFlags_SizingStretchProp | ImGuiTableFlags_NoSavedSettings ) ) {
+                ImGui::TableSetupColumn( "##AdvancedPerformanceHeaderOptions", ImGuiTableColumnFlags_WidthStretch );
+                ImGui::TableSetupColumn( "##AdvancedPerformanceHeaderClose", ImGuiTableColumnFlags_WidthFixed,
+                    advancedPopupCloseButtonSize );
+                ImGui::TableNextRow();
+                ImGui::TableSetColumnIndex( 0 );
+                const bool wasAdvancedEnabled = settings.AdvancedPerformanceOptions;
+                if ( ImGui::Checkbox( Tr( "Enable advanced options", u8"Erweiterte Einstellungen aktivieren" ),
+                    &settings.AdvancedPerformanceOptions )
+                    && wasAdvancedEnabled && !settings.AdvancedPerformanceOptions ) {
+                    ResetAllAdvancedOverridesToCurrentProfile( settings );
+                    if ( settings.EnablePointlightShadows == GothicRendererSettings::EPointLightShadowMode::PLS_DISABLED
+                        && Engine::GAPI ) {
+                        Engine::GAPI->ReleasePointlightShadowResources();
+                    }
                 }
+                ImGui::SetItemTooltip( "%s", Tr(
+                    "Enables Advanced settings. Disabling it resets them.",
+                    u8"Aktiviert die erweiterten Einstellungen. Beim Deaktivieren werden sie zur\u00FCckgesetzt." ) );
+                ImGui::TableSetColumnIndex( 1 );
+                if ( ImGui::Button( "X", ImVec2( advancedPopupCloseButtonSize, 0.0f ) ) ) {
+                    ImGui::CloseCurrentPopup();
+                }
+                ImGui::SetItemTooltip( "%s", Tr(
+                    "Closes Advanced settings.",
+                    u8"Schlie\u00DFt die erweiterten Einstellungen." ) );
+                ImGui::EndTable();
             }
-            ImGui::SetItemTooltip( "%s", Tr(
-                "Enables Advanced settings. Disabling it resets them.",
-                u8"Aktiviert die erweiterten Einstellungen. Beim Deaktivieren werden sie zur\u00FCckgesetzt." ) );
             ImGui::Separator();
 
+            if ( ImGui::BeginChild( "##AdvancedPerformanceScroll", ImVec2( 0.0f, 0.0f ),
+                ImGuiChildFlags_None, ImGuiWindowFlags_AlwaysVerticalScrollbar ) ) {
             // Keep every advanced setting on a balanced two-column grid.
             const ImGuiTableFlags advancedTableFlags =
                 ImGuiTableFlags_SizingStretchProp
@@ -1404,7 +1425,6 @@ void ImGuiShim::RenderSettingsWindow()
             }
 
             ImGui::Separator();
-            ImGui::SeparatorText( Tr( "Shadow tuning", u8"Schatten-Feineinstellungen" ) );
 
             if ( ImGui::BeginChild( "##AdvancedCSMSection", ImVec2( 0.0f, 0.0f ),
                 ImGuiChildFlags_Borders | ImGuiChildFlags_FrameStyle | ImGuiChildFlags_AutoResizeY ) ) {
@@ -1662,12 +1682,8 @@ void ImGuiShim::RenderSettingsWindow()
 
             ImGui::EndDisabled();
 
-            if ( ImGui::Button( Tr( "Close", u8"Schlie\u00DFen" ) ) ) {
-                ImGui::CloseCurrentPopup();
             }
-            ImGui::SetItemTooltip( "%s", Tr(
-                "Closes Advanced settings.",
-                u8"Schlie\u00DFt die erweiterten Einstellungen." ) );
+            ImGui::EndChild();
             ImGui::EndPopup();
         }
         ImGui::SameLine();

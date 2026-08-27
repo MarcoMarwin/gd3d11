@@ -66,7 +66,8 @@ cbuffer Atmosphere : register( b1 )
 	float AC_Pad8;
 	float3 AC_Pad9;
 	float AC_Pad10;
-	float AC_Pad11;
+	// 1 = keep the legacy atmosphere dither, 0 = suppress it for FSR3.
+	float AC_AtmosphereDitherEnabled;
 	float AC_Pad12;
 	float AC_Pad13;
 	float AC_DayRainAtmosphereStrength;

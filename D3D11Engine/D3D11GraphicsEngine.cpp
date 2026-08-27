@@ -5846,9 +5846,17 @@ XRESULT D3D11GraphicsEngine::OnStartWorldRendering() {
         graph.AddPass( RG_PASS_NAME("PostFX Composition"), [&]( RGBuilder& builder, RenderPass& pass ) {
             builder.Read( backBufferHandle );
             builder.Write( backBufferHandle );
+            if ( fsr3UpscalingActive ) {
+                builder.Read( transparencyAndCompositionMaskResource );
+                builder.Write( transparencyAndCompositionMaskResource );
+                builder.Read( reactiveMaskResource );
+                builder.Write( reactiveMaskResource );
+            }
 
             pass.m_executeCallback = [this, backBufferHandle, compositionNeedsDepth,
-                                      compositionHeightFog, &compositionGodRaysSRV](const RenderGraph& graph) {
+                                      compositionHeightFog, fsr3UpscalingActive,
+                                      transparencyAndCompositionMaskResource, reactiveMaskResource,
+                                      &compositionGodRaysSRV](const RenderGraph& graph) {
                 TracyD3D11ZoneCGX( "D3D11GraphicsEngine::PostFX Composition" );
 
                 auto backBuffer = graph.GetPhysicalTexture(backBufferHandle);
@@ -5858,13 +5866,24 @@ XRESULT D3D11GraphicsEngine::OnStartWorldRendering() {
 
                 // Gather SRVs for composition
                 ID3D11ShaderResourceView* depthSRV = compositionNeedsDepth ? GetDepthBuffer()->GetShaderResView().Get() : nullptr;
+                ID3D11RenderTargetView* transparencyAndCompositionMaskRTV = nullptr;
+                ID3D11RenderTargetView* reactiveMaskRTV = nullptr;
+                if ( fsr3UpscalingActive ) {
+                    auto* transparencyAndCompositionMask = graph.GetPhysicalTexture( transparencyAndCompositionMaskResource );
+                    auto* reactiveMask = graph.GetPhysicalTexture( reactiveMaskResource );
+                    transparencyAndCompositionMaskRTV = transparencyAndCompositionMask
+                        ? transparencyAndCompositionMask->GetRenderTargetView().Get() : nullptr;
+                    reactiveMaskRTV = reactiveMask ? reactiveMask->GetRenderTargetView().Get() : nullptr;
+                }
 
                 PfxRenderer->RenderPostFXComposition(
                     backBuffer->GetRenderTargetView().Get(),
                     tempBuffer->GetShaderResView().Get(),
                     compositionGodRaysSRV,
                     depthSRV,
-                    compositionHeightFog );
+                    compositionHeightFog,
+                    transparencyAndCompositionMaskRTV,
+                    reactiveMaskRTV );
 
                 GetContext()->PSSetSamplers( 0, 1, DefaultSamplerState.GetAddressOf() );
             };

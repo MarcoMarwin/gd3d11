@@ -478,7 +478,13 @@ XRESULT GSky::RenderSky() {
     AtmosphereCB.AC_Pad8 = 0.0f;
     AtmosphereCB.AC_Pad9 = XMFLOAT3( 0.0f, 0.0f, 0.0f );
     AtmosphereCB.AC_Pad10 = 0.0f;
-    AtmosphereCB.AC_Pad11 = 0.0f;
+    // The old screen-space hash is useful as a last-resort native-resolution
+    // sky dither, but FSR3 reconstructs its directional pattern as diagonal
+    // streaks. Keep it out of the FSR3 input entirely.
+    const bool fsr3AtmosphereDither = rendererSettings.AntiAliasingMode == GothicRendererSettings::AA_FSR3
+        && rendererSettings.Upscaler == GothicRendererSettings::UPSCALER_FSR_3
+        && rendererSettings.ResolutionScalePercent <= 100;
+    AtmosphereCB.AC_AtmosphereDitherEnabled = fsr3AtmosphereDither ? 0.0f : 1.0f;
     AtmosphereCB.AC_Pad12 = 0.0f;
     AtmosphereCB.AC_Pad13 = 0.0f;
     AtmosphereCB.AC_DayRainAtmosphereStrength = rendererSettings.DayRainAtmosphereStrength;

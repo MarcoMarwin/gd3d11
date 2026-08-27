@@ -108,6 +108,7 @@ XRESULT D3D11PFX_HeightFog::Render( RenderToTextureBuffer* fxbuffer ) {
 
 	// Bind depthbuffer
 	engine->GetDepthBuffer()->BindToPixelShader( engine->GetContext().Get(), 1 );
+	engine->GetBlueNoiseTexture()->BindToPixelShader( 2 );
 
     engine->SetDefaultStates();
     Engine::GAPI->GetRendererState().RasterizerState.CullMode = GothicRasterizerStateInfo::CM_CULL_NONE;
@@ -121,8 +122,8 @@ XRESULT D3D11PFX_HeightFog::Render( RenderToTextureBuffer* fxbuffer ) {
 	FxRenderer->DrawFullScreenQuad();
 
 	// Restore rendertargets
-	Microsoft::WRL::ComPtr<ID3D11ShaderResourceView> srv;
-	engine->GetContext()->PSSetShaderResources( 1, 1, srv.GetAddressOf() );
+    ID3D11ShaderResourceView* nullResources[2] = {};
+	engine->GetContext()->PSSetShaderResources( 1, 2, nullResources );
 
 	engine->GetContext()->OMSetRenderTargets( 1, oldRTV.GetAddressOf(), oldDSV.Get() );
 

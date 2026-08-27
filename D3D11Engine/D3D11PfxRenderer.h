@@ -105,7 +105,9 @@ public:
                                      ID3D11ShaderResourceView* backbufferSRV,
                                      ID3D11ShaderResourceView* godraysSRV,
                                      ID3D11ShaderResourceView* depthSRV,
-                                     bool compositionHeightFog );
+                                     bool compositionHeightFog,
+                                     ID3D11RenderTargetView* transparencyAndCompositionMaskRTV,
+                                     ID3D11RenderTargetView* reactiveMaskRTV );
 
     XRESULT RenderXeGTAO( ID3D11ShaderResourceView* depthSRV,
                             ID3D11ShaderResourceView* normalsSRV,
@@ -131,6 +133,8 @@ public:
     TexturePool* GetTexturePool() { return m_texturePool.get(); }
     DepthStencilPool* GetDepthStencilPool() { return m_depthStencilPool.get(); }
 private:
+    ID3D11BlendState* GetFogCompositionBlendState();
+
     /** Blur effect referenced here because it's often needed by PFX */
     std::unique_ptr<D3D11PFX_Blur> FX_Blur;
     std::unique_ptr<D3D11PFX_HeightFog> FX_HeightFog;
@@ -145,8 +149,9 @@ private:
     std::unique_ptr<D3D11PFX_SimpleSharpen> PFX_SimpleSharpen;
     std::unique_ptr<D3D11PFX_FSR3> PFX_FSR3;
     std::unique_ptr<D3D11PFX_XeGTAO> PFX_XeGTAO;
-std::unique_ptr<TexturePool> m_texturePool;
-float NightFogRainFade = 0.0f;
+    std::unique_ptr<TexturePool> m_texturePool;
+    Microsoft::WRL::ComPtr<ID3D11BlendState> m_FogCompositionBlendState;
+    float NightFogRainFade = 0.0f;
 float LastNightFogRainFadeTime = 0.0f;
 bool NightFogRainFadeInitialized = false;
 std::unique_ptr<DepthStencilPool> m_depthStencilPool;

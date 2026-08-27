@@ -370,7 +370,9 @@ XRESULT D3D11PfxRenderer::RenderPostFXComposition(
     ID3D11ShaderResourceView* backbufferSRV,
     ID3D11ShaderResourceView* godraysSRV,
     ID3D11ShaderResourceView* depthSRV,
-    bool compositionHeightFog ) {
+    bool compositionHeightFog,
+    ID3D11RenderTargetView* transparencyAndCompositionMaskRTV,
+    ID3D11RenderTargetView* reactiveMaskRTV ) {
 
     D3D11GraphicsEngine* engine = reinterpret_cast<D3D11GraphicsEngine*>(Engine::GraphicsEngine);
     auto& context = engine->GetContext();
@@ -475,14 +477,27 @@ compositionPS->GetBuffer( "PFXBuffer" ).Update( &cb ).Bind();
     vp.MaxDepth = 1.0f;
     context->RSSetViewports( 1, &vp );
 
-    // Bind output RTV (no depth)
-    context->OMSetRenderTargets( 1, &outputRTV, nullptr );
+    const bool requestedFsr3Masks = transparencyAndCompositionMaskRTV && reactiveMaskRTV;
+    ID3D11BlendState* fogMaskBlendState = requestedFsr3Masks
+        ? GetFogCompositionBlendState() : nullptr;
+    const bool writeFsr3Masks = requestedFsr3Masks && fogMaskBlendState;
 
-    // Bind SRVs: t0=backbuffer, t1=GodRays, t2=Depth
-    ID3D11ShaderResourceView* srvs[3] = {
-        backbufferSRV, godraysSRV, depthSRV
+    // Bind the scene output and, for FSR3, preserve/extend both masks. The
+    // mask blend state uses MAX so earlier geometry and rain contributions are
+    // not overwritten by this late full-screen composition pass.
+    ID3D11RenderTargetView* rtvs[3] = {
+        outputRTV,
+        transparencyAndCompositionMaskRTV,
+        reactiveMaskRTV
     };
-    context->PSSetShaderResources( 0, 3, srvs );
+    context->OMSetRenderTargets( writeFsr3Masks ? 3u : 1u, rtvs, nullptr );
+
+    // Bind SRVs: t0=backbuffer, t1=GodRays, t2=Depth, t3=BlueNoise.
+    ID3D11ShaderResourceView* srvs[4] = {
+        backbufferSRV, godraysSRV, depthSRV, nullptr
+    };
+    context->PSSetShaderResources( 0, 4, srvs );
+    engine->GetBlueNoiseTexture()->BindToPixelShader( 3 );
 
     // No blending - direct overwrite
     Engine::GAPI->GetRendererState().BlendState.SetDefault();
@@ -492,11 +507,30 @@ compositionPS->GetBuffer( "PFXBuffer" ).Update( &cb ).Bind();
     Engine::GAPI->GetRendererState().DepthState.DepthWriteEnabled = false;
     Engine::GAPI->GetRendererState().DepthState.SetDirty();
 
-    DrawFullScreenQuad();
+    // DrawFullScreenQuad updates the engine's cached blend state immediately
+    // before drawing, so apply the mask-preserving state after that update and
+    // issue the fullscreen triangle directly.
+    engine->UpdateRenderStates();
+    Microsoft::WRL::ComPtr<ID3D11BlendState> previousBlendState;
+    FLOAT previousBlendFactor[4] = {};
+    UINT previousSampleMask = 0xffffffff;
+    context->OMGetBlendState( previousBlendState.GetAddressOf(), previousBlendFactor, &previousSampleMask );
+    if ( writeFsr3Masks ) {
+        const FLOAT blendFactor[4] = {};
+        context->OMSetBlendState( fogMaskBlendState, blendFactor, 0xffffffff );
+    }
+    context->IASetPrimitiveTopology( D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST );
+    context->Draw( 3, 0 );
+    if ( writeFsr3Masks ) {
+        context->OMSetBlendState( previousBlendState.Get(), previousBlendFactor, previousSampleMask );
+    }
+
+    // Release mask RTV bindings before FSR3 consumes the same textures as SRVs.
+    context->OMSetRenderTargets( 1, &outputRTV, nullptr );
 
     // Unbind SRVs
-    ID3D11ShaderResourceView* nullSRVs[3] = {};
-    context->PSSetShaderResources( 0, 3, nullSRVs );
+    ID3D11ShaderResourceView* nullSRVs[4] = {};
+    context->PSSetShaderResources( 0, 4, nullSRVs );
 
     // Restore default states
     Engine::GAPI->GetRendererState().DepthState.DepthBufferCompareFunc =
@@ -505,6 +539,42 @@ compositionPS->GetBuffer( "PFXBuffer" ).Update( &cb ).Bind();
     Engine::GAPI->GetRendererState().DepthState.SetDirty();
 
     return XR_SUCCESS;
+}
+
+ID3D11BlendState* D3D11PfxRenderer::GetFogCompositionBlendState() {
+    if ( m_FogCompositionBlendState ) {
+        return m_FogCompositionBlendState.Get();
+    }
+
+    auto* engine = reinterpret_cast<D3D11GraphicsEngine*>( Engine::GraphicsEngine );
+    if ( !engine || !engine->GetDevice().Get() ) {
+        return nullptr;
+    }
+
+    D3D11_BLEND_DESC desc = {};
+    desc.IndependentBlendEnable = TRUE;
+
+    auto& sceneTarget = desc.RenderTarget[0];
+    sceneTarget.RenderTargetWriteMask = D3D11_COLOR_WRITE_ENABLE_ALL;
+
+    for ( UINT targetIndex = 1; targetIndex <= 2; ++targetIndex ) {
+        auto& maskTarget = desc.RenderTarget[targetIndex];
+        maskTarget.BlendEnable = TRUE;
+        maskTarget.SrcBlend = D3D11_BLEND_ONE;
+        maskTarget.DestBlend = D3D11_BLEND_ONE;
+        maskTarget.BlendOp = D3D11_BLEND_OP_MAX;
+        maskTarget.SrcBlendAlpha = D3D11_BLEND_ONE;
+        maskTarget.DestBlendAlpha = D3D11_BLEND_ONE;
+        maskTarget.BlendOpAlpha = D3D11_BLEND_OP_MAX;
+        maskTarget.RenderTargetWriteMask = D3D11_COLOR_WRITE_ENABLE_RED;
+    }
+
+    if ( FAILED( engine->GetDevice()->CreateBlendState(
+        &desc, m_FogCompositionBlendState.GetAddressOf() ) ) ) {
+        LogError() << "Fog: Failed to create FSR3 composition-mask blend state.";
+        return nullptr;
+    }
+    return m_FogCompositionBlendState.Get();
 }
 
 XRESULT D3D11PfxRenderer::RenderLowCloudLayer(

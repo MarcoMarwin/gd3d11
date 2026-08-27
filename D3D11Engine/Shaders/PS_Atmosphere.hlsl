@@ -156,6 +156,13 @@ float4 PSMain( PS_INPUT Input ) : SV_TARGET
 		atmoColor = lerp(atmoColor, rainClouds.rgb, rainClouds.a * rainCloudWeight);
 	}
 	
-	atmoColor = saturate(atmoColor + AtmosphereDither(Input.vPosition.xy) * (GetNightWeight() * 1.5f / 255.0f));
+	// This legacy hash has a directional component that FSR3 can preserve as
+	// diagonal streaks. Fog has its own neutral blue-noise treatment in the
+	// composition pass, so do not feed this pattern into FSR3.
+	[branch]
+	if (AC_AtmosphereDitherEnabled > 0.5f)
+	{
+		atmoColor = saturate(atmoColor + AtmosphereDither(Input.vPosition.xy) * (GetNightWeight() * 1.5f / 255.0f));
+	}
 	return float4(atmoColor,1);
 }
