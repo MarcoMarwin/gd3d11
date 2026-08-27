@@ -58,7 +58,7 @@ PS_OUTPUT PSMain( PS_INPUT Input )
 		// stronger water-particle night treatment.
 		const float rainLightingStrength = waterParticle
 			? enabledStrength * 0.25f : regularStrength;
-        const float nightFloor = waterParticle ? 0.10f
+        const float nightFloor = waterParticle ? 0.075f
             : (groundFog ? 0.10f : 0.28f);
 		const float nightTintStrength = waterParticle ? 1.0f : 0.80f;
 		color.rgb = ApplyAmbientNightTint(
@@ -69,7 +69,7 @@ PS_OUTPUT PSMain( PS_INPUT Input )
 			// and add a restrained steel-blue bias for overlapping water spray.
 			const float waterNightTint = nightParticle * nightLightingStrength;
 			color.rgb *= lerp(float3(1.0f, 1.0f, 1.0f),
-				float3(0.78f, 0.90f, 1.08f), waterNightTint);
+				float3(0.82f, 0.92f, 1.04f), waterNightTint);
 		}
 		float nightDim = lerp(1.0f, nightFloor, nightParticle);
 		color.rgb *= lerp(1.0f, nightDim, nightLightingStrength);
@@ -78,7 +78,7 @@ PS_OUTPUT PSMain( PS_INPUT Input )
 		{
 			// Increase water-particle contrast, not overall brightness: keep the
 			// dark midpoint fixed while separating dark spray from highlights.
-			const float waterNightContrast = lerp(1.0f, 1.12f,
+			const float waterNightContrast = lerp(1.0f, 1.18f,
 				waterNightAmount);
 			const float waterContrastPivot = 0.06f;
 			color.rgb = saturate((color.rgb - waterContrastPivot)

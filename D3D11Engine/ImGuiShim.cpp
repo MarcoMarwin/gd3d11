@@ -1161,9 +1161,9 @@ void ImGuiShim::RenderSettingsWindow()
     const float framebufferHeight = static_cast<float>( windowSize.y );
     const float menuScale = 1.0f;
     const float labelWidth = std::round( 230.0f * menuScale );
-    // Give the two F11 columns a small amount of breathing room. Keep this
-    // deliberately modest so the menu remains compact at low resolutions.
-    const float controlWidth = std::round( 217.0f * menuScale );
+    // Keep the label and value cells equal. This also makes each header cell
+    // line up exactly with one quarter of the regular F11 row.
+    const float controlWidth = std::round( 230.0f * menuScale );
     const float footerHeight = std::round( 30.0f * menuScale );
     const ImVec2 scaledWindowPadding(
         std::round( style.WindowPadding.x * menuScale ),
@@ -1681,7 +1681,7 @@ void ImGuiShim::RenderSettingsWindow()
         const float inlineToggleLabelWidth = inlineToggleWidth - ImGui::GetFrameHeight() - style.ItemSpacing.x;
         // Anti-aliasing has two compact controls before its resolution-scale
         // control. Keep enough room for the full label and SMAA preview.
-        const float compactAAMethodWidth = 95.0f;
+        const float compactAAMethodWidth = 85.0f;
         const float compactAALabelWidth = buttonWidth.x - compactAAMethodWidth - style.ItemSpacing.x;
         const float compactAAValueWidth = standardComboWidth;
         
