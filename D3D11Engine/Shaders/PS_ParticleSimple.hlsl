@@ -50,7 +50,7 @@ float4 AdaptParticleLighting(float4 color, float particleLightingScale)
         // steel-blue bias so dense overlapping spray does not return to grey.
         const float waterNightTint = night * nightStrength;
         color.rgb *= lerp(float3(1.0f, 1.0f, 1.0f),
-            float3(0.78f, 0.90f, 1.08f), waterNightTint);
+            float3(0.92f, 0.96f, 1.02f), waterNightTint);
     }
     float nightDim = lerp(1.0f, nightFloor, night);
     color.rgb *= lerp(1.0f, nightDim, nightStrength);

@@ -1162,10 +1162,10 @@ void ImGuiShim::RenderSettingsWindow()
     const float menuScale = 1.0f;
     // Give the localized labels and their value controls a little more room.
     // Keep both cells identical so the two F11 halves remain perfectly aligned.
-    const float labelWidth = std::round( 250.0f * menuScale );
+    const float labelWidth = std::round( 225.0f * menuScale );
     // Keep the label and value cells equal. This also makes each header cell
     // line up exactly with one quarter of the regular F11 row.
-    const float controlWidth = std::round( 250.0f * menuScale );
+    const float controlWidth = std::round( 195.0f * menuScale );
     const float footerHeight = std::round( 30.0f * menuScale );
     const ImVec2 scaledWindowPadding(
         std::round( style.WindowPadding.x * menuScale ),
