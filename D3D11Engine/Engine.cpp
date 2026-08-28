@@ -61,15 +61,11 @@ namespace Engine {
         }
         ShuttingDown.store( true, std::memory_order_release );
         LogInfo() << "Shutting down...";
-        // Stop asynchronous work, but do not dismantle world-owned renderer
-        // objects from inside Gothic's window-destruction callback. Gothic
-        // may still dispatch teardown hooks after WM_CLOSE; keeping these
-        // objects intact until process termination avoids dangling callbacks.
         if ( Engine::RenderingThreadPool ) {
-            Engine::RenderingThreadPool->clearAndFlush();
+            Engine::RenderingThreadPool->shutdown();
         }
         if ( Engine::WorkerThreadPool ) {
-            Engine::WorkerThreadPool->clearAndFlush();
+            Engine::WorkerThreadPool->shutdown();
         }
     }
 

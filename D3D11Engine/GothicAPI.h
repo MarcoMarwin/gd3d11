@@ -2,6 +2,9 @@
 
 #include "pch.h"
 #include <atomic>
+#include <cstdint>
+#include <mutex>
+#include <unordered_set>
 #include "AlignedAllocator.h"
 #include "Frustum.h"
 #include "GothicGraphicsState.h"
@@ -18,6 +21,8 @@ const float INDOOR_LIGHT_DISTANCE_SCALE_FACTOR = 0.5f;
 
 class zCFlash;
 class zCBspBase;
+class zCBspTree;
+class zCWorld;
 class zCModelPrototype;
 struct ScreenSpaceLine;
 struct LineVertex;
@@ -279,10 +284,10 @@ public:
     void SendMessageToGameWindow( UINT msg, WPARAM wParam, LPARAM lParam );
 
     /** Called when the game is about to load a new level */
-    void OnLoadWorld( const std::string& levelName, int loadMode );
+    void OnLoadWorld( const std::string& levelName, int loadMode, zCWorld* world = nullptr );
 
     /** Called when the game loaded a new level */
-    void OnGeometryLoaded( zCBspTree* tree );
+    bool OnGeometryLoaded( zCBspTree* tree, zCWorld* sourceWorld = nullptr );
 
     /** Called when the game is done loading the world */
     void OnWorldLoaded();
@@ -511,6 +516,9 @@ public:
     /** True only after the world VOB/BSP caches have been published completely. */
     bool IsWorldRenderCacheReady() const {
         return WorldRenderCacheReady.load( std::memory_order_acquire );
+    }
+    bool IsWorldTransitionActive() const {
+        return WorldTransition.load( std::memory_order_acquire ) != WorldTransitionState::Ready;
     }
 
     /** Returns wether the camera is indoor or not */
@@ -827,7 +835,7 @@ private:
 
 
     /** Helper function for going through the bsp-tree */
-    void BuildBspVobMapCacheHelper( zCBspBase* base );
+    bool BuildBspVobMapCacheHelper( zCBspBase* base, std::unordered_set<zCBspBase*>& visited );
     void BuildBspLeafLinearCache();
 
     /** Puts the custom-polygons into the bsp-tree */
@@ -923,6 +931,15 @@ private:
     // already being dismantled.
     std::atomic_bool WorldRenderCacheReady{ false };
     std::atomic_bool ResettingVobs{ false };
+    enum class WorldTransitionState : uint8_t { Ready, Loading, Finalizing };
+    std::atomic<WorldTransitionState> WorldTransition{ WorldTransitionState::Loading };
+    uint64_t WorldLoadGeneration = 0;
+    uint64_t FinalizedGeometryGeneration = static_cast<uint64_t>( -1 );
+    zCBspTree* FinalizedGeometryTree = nullptr;
+    zCWorld* LoadingWorld = nullptr;
+    bool GeometryLoadObserved = false;
+    std::recursive_mutex WorldTransitionMutex;
+    std::recursive_mutex ResetVobsMutex;
     gtl::flat_hash_map<zCVob*, SkeletalVobInfo*> SkeletalVobMap;
 
     /** Map of VobInfo-Lists for zCBspLeafs */

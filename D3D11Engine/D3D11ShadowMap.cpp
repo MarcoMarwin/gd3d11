@@ -588,6 +588,7 @@ XRESULT D3D11ShadowMap::PrepareRender()
     zCCamera* camera = game ? reinterpret_cast<zCCamera*>(game->_zCSession_camera) : nullptr;
     auto* worldInfo = Engine::GAPI->GetLoadedWorldInfo();
     if ( !camera || !worldInfo || !worldInfo->BspTree
+        || Engine::GAPI->IsWorldTransitionActive()
         || !Engine::GAPI->IsWorldRenderCacheReady() ) {
         return XR_SUCCESS;
     }
@@ -1051,6 +1052,7 @@ XRESULT D3D11ShadowMap::DrawPointlightShadows( std::vector<VobLightInfo*>& light
     auto* graphicsEngine = reinterpret_cast<D3D11GraphicsEngine*>( Engine::GraphicsEngine );
     if ( !graphicsEngine || !graphicsEngine->GetPfxRenderer()
         || !Engine::GAPI || Engine::IsShuttingDown()
+        || Engine::GAPI->IsWorldTransitionActive()
         || !Engine::GAPI->IsWorldRenderCacheReady() ) {
         // Loading screens can still execute renderer callbacks while the old
         // world is being destroyed. Do not touch any raw world pointers here;
@@ -1328,9 +1330,33 @@ XRESULT D3D11ShadowMap::DrawPointlightShadows( std::vector<VobLightInfo*>& light
     return XR_SUCCESS;
 }
 
+void D3D11ShadowMap::InvalidateWorldCaches() {
+    m_lastNumCascades = 0;
+    m_CascadeSplits.clear();
+    m_CascadeTexelWorld.fill( 0.0f );
+    m_ShouldUpdateCascade.fill( true );
+    m_CsmSuppressedByHeavyRain = false;
+    m_ForceCsmUpdateAfterHeavyRain = true;
+    m_CsmGrassDetailsGeneration = static_cast<uint64_t>( -1 );
+    m_PointlightGrassDetailsGeneration = static_cast<uint64_t>( -1 );
+    m_WorldShadowCasters.clear();
+    m_WorldShadowCasterLookup.clear();
+    m_WorldShadowVisibleCasters.clear();
+    m_WorldShadowCasterCacheGeneration = static_cast<uint64_t>( -1 );
+    m_WorldShadowCasterCacheAlphaRef = -FLT_MAX;
+    m_WorldShadowCasterCacheValid = false;
+
+    for ( auto& queue : m_RenderQueues ) {
+        if ( queue ) {
+            queue->Reset();
+        }
+    }
+}
+
 void D3D11ShadowMap::BuildWorldShadowCasterCache() {
     ZoneScopedN( "D3D11ShadowMap::BuildWorldShadowCasterCache" );
-    if ( !Engine::GAPI || !Engine::GAPI->IsWorldRenderCacheReady() ) {
+    if ( !Engine::GAPI || Engine::GAPI->IsWorldTransitionActive()
+        || !Engine::GAPI->IsWorldRenderCacheReady() ) {
         m_WorldShadowCasters.clear();
         m_WorldShadowCasterLookup.clear();
         m_WorldShadowVisibleCasters.clear();
@@ -1440,6 +1466,7 @@ XRESULT D3D11ShadowMap::DrawWorldShadow( )
 {
     auto graphicsEngine = reinterpret_cast<D3D11GraphicsEngine*>(Engine::GraphicsEngine);
     if ( !graphicsEngine || !m_context || !Engine::GAPI || Engine::IsShuttingDown()
+        || Engine::GAPI->IsWorldTransitionActive()
         || !Engine::GAPI->IsWorldRenderCacheReady()
         || !Engine::GAPI->GetLoadedWorldInfo()
         || !Engine::GAPI->GetLoadedWorldInfo()->BspTree ) {
@@ -1587,6 +1614,7 @@ XRESULT D3D11ShadowMap::DrawLighting(
     RenderToTextureBuffer& depthCopy) {
     auto graphicsEngine = reinterpret_cast<D3D11GraphicsEngine*>(Engine::GraphicsEngine);
     if ( !graphicsEngine || !m_context || !Engine::GAPI || Engine::IsShuttingDown()
+        || Engine::GAPI->IsWorldTransitionActive()
         || !Engine::GAPI->IsWorldRenderCacheReady()
         || !graphicsEngine->GetHDRBackBufferPtr()
         || !graphicsEngine->GetHDRBackBufferPtr()->GetRenderTargetView()
@@ -1648,6 +1676,7 @@ void D3D11ShadowMap::RenderShadowmaps( const RenderShadowmapsParams& params ) {
 
     auto graphicsEngine = (D3D11GraphicsEngine*)Engine::GraphicsEngine;
     if ( !graphicsEngine || !m_context || !Engine::GAPI || Engine::IsShuttingDown()
+        || Engine::GAPI->IsWorldTransitionActive()
         || !Engine::GAPI->IsWorldRenderCacheReady() ) {
         return;
     }
@@ -1840,6 +1869,7 @@ XRESULT D3D11ShadowMap::DrawWorldLights()
     auto graphicsEngine = reinterpret_cast<D3D11GraphicsEngine*>(Engine::GraphicsEngine);
     WorldInfo* worldInfo = Engine::GAPI ? Engine::GAPI->GetLoadedWorldInfo() : nullptr;
     if ( !graphicsEngine || !m_context || !Engine::GAPI || Engine::IsShuttingDown()
+        || Engine::GAPI->IsWorldTransitionActive()
         || !Engine::GAPI->IsWorldRenderCacheReady()
         || !worldInfo || !worldInfo->BspTree
         || !graphicsEngine->Effects || !graphicsEngine->GetPfxRenderer()
@@ -2021,6 +2051,7 @@ void XM_CALLCONV D3D11ShadowMap::RenderShadowCube(
 
     auto graphicsEngine = reinterpret_cast<D3D11GraphicsEngine*>(Engine::GraphicsEngine);
     if ( !graphicsEngine || !m_context || !Engine::GAPI || Engine::IsShuttingDown()
+        || Engine::GAPI->IsWorldTransitionActive()
         || !Engine::GAPI->IsWorldRenderCacheReady() ) {
         return;
     }

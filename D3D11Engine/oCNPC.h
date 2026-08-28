@@ -30,6 +30,9 @@ public:
     static void __fastcall hooked_oCNPCInitModel( zCVob* thisptr, void* unknwn ) {
         HookedFunctions::OriginalFunctions.original_oCNPCInitModel( thisptr );
 
+        if ( !Engine::GAPI || Engine::IsShuttingDown() )
+            return;
+
         hook_infunc
 
             if ( /*((zCVob *)thisptr)->GetVisual() || */Engine::GAPI->GetSkeletalVobByVob( thisptr ) ) {
@@ -45,6 +48,9 @@ public:
     static void __fastcall hooked_oCNPCEnable( zCVob* thisptr, void* unknwn, XMFLOAT3& position ) {
         HookedFunctions::OriginalFunctions.original_oCNPCEnable( thisptr, position );
 
+        if ( !Engine::GAPI || Engine::IsShuttingDown() )
+            return;
+
         hook_infunc
 
             // Re-Add if needed
@@ -55,6 +61,11 @@ public:
     }
 
     static void __fastcall hooked_oCNPCDisable( oCNPC* thisptr, void* unknwn ) {
+        if ( !Engine::GAPI || Engine::IsShuttingDown() ) {
+            HookedFunctions::OriginalFunctions.original_oCNPCDisable( thisptr );
+            return;
+        }
+
         hook_infunc
 
             // Remove vob from world

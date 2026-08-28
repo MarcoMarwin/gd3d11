@@ -1250,22 +1250,35 @@ void GothicAPI::UpdateTextureMaxSize() {
 /** Called to update the world, before rendering */
 void GothicAPI::OnWorldUpdate() {
     ZoneScopedN( "GothicAPI::OnWorldUpdate" );
+    if ( Engine::IsShuttingDown() ) {
+        return;
+    }
 #if BUILD_SPACER
-    zCBspBase* rootBsp = oCGame::GetGame()->_zCSession_world->GetBspTree()->GetRootNode();
-    BspInfo* root = &BspLeafVobLists[rootBsp];
-
-    if ( !root->OriginalNode )
-        Engine::GAPI->OnWorldLoaded();
+    if ( oCGame* game = oCGame::GetGame() ) {
+        zCWorld* world = game->_zCSession_world;
+        zCBspTree* tree = world ? world->GetBspTree() : nullptr;
+        zCBspBase* rootBsp = tree ? tree->GetRootNode() : nullptr;
+        auto rootIt = rootBsp ? BspLeafVobLists.find( rootBsp ) : BspLeafVobLists.end();
+        if ( rootIt == BspLeafVobLists.end() || !rootIt->second.OriginalNode )
+            OnWorldLoaded();
+    }
 #endif
 #ifdef BUILD_SPACER_NET
     if ( RendererState.RendererSettings.RunInSpacerNet ) {
-        zCBspBase* rootBsp = oCGame::GetGame()->_zCSession_world->GetBspTree()->GetRootNode();
-        BspInfo* root = &BspLeafVobLists[rootBsp];
-
-        if ( !root->OriginalNode )
-            Engine::GAPI->OnWorldLoaded();
+        if ( oCGame* game = oCGame::GetGame() ) {
+            zCWorld* world = game->_zCSession_world;
+            zCBspTree* tree = world ? world->GetBspTree() : nullptr;
+            zCBspBase* rootBsp = tree ? tree->GetRootNode() : nullptr;
+            auto rootIt = rootBsp ? BspLeafVobLists.find( rootBsp ) : BspLeafVobLists.end();
+            if ( rootIt == BspLeafVobLists.end() || !rootIt->second.OriginalNode )
+                OnWorldLoaded();
+        }
     }
 #endif
+
+    if ( IsWorldTransitionActive() || !IsWorldRenderCacheReady() ) {
+        return;
+    }
 
     RendererState.RendererInfo.Reset();
     RendererState.RendererInfo.FPS = GetFramesPerSecond();
@@ -1490,6 +1503,8 @@ GothicRendererState& GothicAPI::GetRendererState() { return RendererState; }
 
 /** Resets the object, like at level load */
 void GothicAPI::ResetWorld() {
+    FinalizedGeometryTree = nullptr;
+    FinalizedGeometryGeneration = static_cast<uint64_t>( -1 );
     ResetVobs();
     ClearWorldSectionBVH();
     WorldSections.clear();
@@ -1549,6 +1564,10 @@ void GothicAPI::ReleasePointlightResources() {
 
 /** Resets only the vobs */
 void GothicAPI::ResetVobs() {
+    std::lock_guard<std::recursive_mutex> resetLock( ResetVobsMutex );
+    if ( WorldTransition.load( std::memory_order_acquire ) == WorldTransitionState::Ready ) {
+        WorldTransition.store( WorldTransitionState::Loading, std::memory_order_release );
+    }
     bool expected = false;
     if ( !ResettingVobs.compare_exchange_strong(
             expected, true, std::memory_order_acq_rel, std::memory_order_acquire ) ) {
@@ -1566,10 +1585,15 @@ void GothicAPI::ResetVobs() {
     if ( LoadedWorldInfo ) {
         // Do not publish the world while its renderer data is being dismantled.
         LoadedWorldInfo->MainWorld = nullptr;
+        LoadedWorldInfo->BspTree = nullptr;
     }
 
     // Release pointlight shadow handles before destroying world-owned lights/VOBs.
     ReleasePointlightResources();
+
+    if ( auto* graphicsEngine = dynamic_cast<D3D11GraphicsEngine*>( Engine::GraphicsEngine ) ) {
+        graphicsEngine->InvalidateWorldRenderCaches();
+    }
 
     // Invalidate world-owned VOB references before destroying the objects below.
     ++CityWindowConfigurationGeneration;
@@ -1618,6 +1642,21 @@ void GothicAPI::ResetVobs() {
 
     FrameThunderPolyStrips.clear();
     FlashVisuals.clear();
+    PolyStripVisuals.clear();
+    PolyStripInfos.clear();
+    QuadMarks.clear();
+    FrameMeshInstances.clear();
+    TransparencyVobs.clear();
+    VNSkeletalVobs.clear();
+    FrameParticles.clear();
+    FrameParticleInfo.clear();
+    LoadedMaterials.clear();
+    tempParticleNames.clear();
+    for ( auto& [vob, mesh] : ParticleEffectProgMeshes ) {
+        (void)vob;
+        delete mesh;
+    }
+    ParticleEffectProgMeshes.clear();
     ParticleEffectVobs.clear();
     RegisteredVobs.clear();
     BspLeafVobLists.clear();
@@ -1658,31 +1697,54 @@ void GothicAPI::ResetVobs() {
 }
 
 /** Called when the game loaded a new level */
-void GothicAPI::OnGeometryLoaded( zCBspTree* tree ) {
-    if ( !tree || !LoadedWorldInfo ) {
+bool GothicAPI::OnGeometryLoaded( zCBspTree* tree, zCWorld* sourceWorld ) {
+    std::lock_guard<std::recursive_mutex> transitionLock( WorldTransitionMutex );
+    if ( Engine::IsShuttingDown() || !tree || !LoadedWorldInfo ) {
         LogError() << "World geometry load skipped because required world data is unavailable.";
-        return;
+        return false;
     }
+
+    if ( sourceWorld ) {
+        LoadingWorld = sourceWorld;
+    }
+
+    if ( FinalizedGeometryTree == tree
+        && FinalizedGeometryGeneration == WorldLoadGeneration ) {
+        return true;
+    }
+
+    std::vector<zCPolygon*> polys;
+    if ( !tree->TryGetLOD0Polygons( polys ) ) {
+        LogError() << "World geometry load skipped because the BSP data is incomplete.";
+        return false;
+    }
+
+    const zTBspMode bspMode = tree->GetBspTreeMode();
+    if ( bspMode != zBSP_MODE_INDOOR && bspMode != zBSP_MODE_OUTDOOR ) {
+        LogError() << "World geometry load skipped because the BSP mode is invalid.";
+        return false;
+    }
+    const WorldTransitionState previousState = WorldTransition.load( std::memory_order_acquire );
+    if ( previousState == WorldTransitionState::Finalizing ) {
+        LogWarn() << "World geometry load ignored while another world finalization is active.";
+        return false;
+    }
+    GeometryLoadObserved = true;
+
+    WorldTransition.store( WorldTransitionState::Finalizing, std::memory_order_release );
+    WorldRenderCacheReady.store( false, std::memory_order_release );
+    LoadedWorldInfo->MainWorld = nullptr;
 
     LogInfo() << "World loaded, getting Levelmesh now!";
     LogInfo() << " - Found " << tree->GetNumPolys() << " polygons";
     LogInfo() << "Extracting world";
 
-    std::vector<zCPolygon*> polys;
-    tree->GetLOD0Polygons( polys );
-    GetLoadedWorldInfo()->BspTree = tree;
-
     ResetWorld();
     ResetMaterialInfo();
+    LoadedWorldInfo->BspTree = tree;
 
-    if ( polys.empty() ) {
-        LogError() << "World geometry contains no polygons; renderer world data was cleared safely.";
-        return;
-    }
-
-    bool indoorLocation = (LoadedWorldInfo->BspTree->GetBspTreeMode() == zBSP_MODE_INDOOR);
+    const bool indoorLocation = bspMode == zBSP_MODE_INDOOR;
     std::string worldStr = "system\\GD3D11\\meshes\\WLD_" + LoadedWorldInfo->WorldName + ".obj";
-    // Convert world to our own format
 #ifdef BUILD_GOTHIC_2_6_fix
     WorldConverter::ConvertWorldMesh( &polys[0], polys.size(), &WorldSections, LoadedWorldInfo.get(), &WrappedWorldMesh, indoorLocation );
 #else
@@ -1694,22 +1756,39 @@ void GothicAPI::OnGeometryLoaded( zCBspTree* tree ) {
     }
 #endif
     BuildWorldSectionBVH();
+    FinalizedGeometryTree = tree;
+    FinalizedGeometryGeneration = WorldLoadGeneration;
+    WorldTransition.store( WorldTransitionState::Loading, std::memory_order_release );
     LogInfo() << "Done extracting world!";
+    return true;
 }
 
 /** Called when the game is about to load a new level */
-void GothicAPI::OnLoadWorld( const std::string& levelName, int loadMode ) {
-    // Keep renderer hooks on Gothic's path until the new world cache is ready.
+void GothicAPI::OnLoadWorld( const std::string& levelName, int loadMode, zCWorld* world ) {
+    std::lock_guard<std::recursive_mutex> transitionLock( WorldTransitionMutex );
+    WorldTransition.store( WorldTransitionState::Loading, std::memory_order_release );
+    ++WorldLoadGeneration;
+    FinalizedGeometryGeneration = static_cast<uint64_t>( -1 );
+    FinalizedGeometryTree = nullptr;
+    LoadingWorld = world;
+    GeometryLoadObserved = false;
     WorldRenderCacheReady.store( false, std::memory_order_release );
     if ( !LoadedWorldInfo ) {
         LogError() << "World load skipped because renderer world state is unavailable.";
         return;
     }
 
+    ResetMaterialInfo();
+    if ( Inventory ) {
+        Inventory->Clear();
+    }
     // Clear every renderer-owned reference while the old Gothic world is
     // still valid. MainWorld is nulled by ResetVobs; waiting until DisposeVobs
     // would otherwise lose the identity needed to recognize the main world.
     ResetVobs();
+    LoadedWorldInfo->MainWorld = nullptr;
+    LoadedWorldInfo->BspTree = nullptr;
+    LoadedWorldInfo->CustomWorldLoaded = false;
 
     _canClearVobsByVisual = true;
     if ( (loadMode == zWLD_LOAD_GAME_STARTUP || loadMode == zWLD_LOAD_GAME_SAVED_STAT) ) {
@@ -1746,12 +1825,47 @@ void GothicAPI::OnLoadWorld( const std::string& levelName, int loadMode ) {
 
 /** Called when the game is done loading the world */
 void GothicAPI::OnWorldLoaded() {
+    std::lock_guard<std::recursive_mutex> transitionLock( WorldTransitionMutex );
+    if ( Engine::IsShuttingDown() ) {
+        return;
+    }
+
     oCGame* game = oCGame::GetGame();
     zCWorld* loadedWorld = game ? game->_zCSession_world : nullptr;
-    if ( !LoadedWorldInfo || !loadedWorld || !loadedWorld->GetBspTree() ) {
+    zCBspTree* loadedTree = loadedWorld ? loadedWorld->GetBspTree() : nullptr;
+    if ( !LoadedWorldInfo || !loadedWorld || !loadedTree ) {
         LogError() << "World finalization skipped because required world data is unavailable.";
         return;
     }
+
+    if ( WorldTransition.load( std::memory_order_acquire ) == WorldTransitionState::Finalizing ) {
+        return;
+    }
+
+    if ( FinalizedGeometryTree != loadedTree
+        || FinalizedGeometryGeneration != WorldLoadGeneration ) {
+        if ( !GeometryLoadObserved ) {
+            LoadedWorldInfo->MainWorld = nullptr;
+            WorldRenderCacheReady.store( false, std::memory_order_release );
+            LogError() << "World finalization skipped because no successful BSP load was observed.";
+            return;
+        }
+        if ( !OnGeometryLoaded( loadedTree, loadedWorld ) ) {
+            return;
+        }
+    }
+
+    if ( WorldTransition.load( std::memory_order_acquire ) == WorldTransitionState::Ready
+        && LoadedWorldInfo->MainWorld == loadedWorld
+        && LoadedWorldInfo->BspTree == loadedTree
+        && IsWorldRenderCacheReady() ) {
+        return;
+    }
+
+    WorldTransition.store( WorldTransitionState::Finalizing, std::memory_order_release );
+    WorldRenderCacheReady.store( false, std::memory_order_release );
+    LoadedWorldInfo->BspTree = loadedTree;
+    LoadedWorldInfo->MainWorld = nullptr;
 
     D3D11GraphicsEngine* graphicsEngine = static_cast<D3D11GraphicsEngine*>(Engine::GraphicsEngine);
     if ( graphicsEngine && graphicsEngine->GetPfxRenderer() ) {
@@ -1770,9 +1884,6 @@ void GothicAPI::OnWorldLoaded() {
         s_firstLoad = false;
     }
 
-    LoadedWorldInfo->BspTree = loadedWorld->GetBspTree();
-    LoadedWorldInfo->MainWorld = loadedWorld;
-
     // Get all VOBs
     zCTree<zCVob>* vobTree = loadedWorld->GetGlobalVobTree();
     if ( vobTree ) {
@@ -1784,6 +1895,16 @@ void GothicAPI::OnWorldLoaded() {
 
     // Build vob info cache for the bsp-leafs
     BuildBspVobMapCache();
+
+    if ( !LoadedWorldInfo->BspTree || LeafLinearCache.Count == 0 ) {
+        LoadedWorldInfo->MainWorld = nullptr;
+        WorldRenderCacheReady.store( false, std::memory_order_release );
+        WorldTransition.store( WorldTransitionState::Loading, std::memory_order_release );
+        LogError() << "World finalization skipped because the BSP cache is incomplete.";
+        return;
+    }
+
+    WorldRenderCacheReady.store( false, std::memory_order_release );
 
 #ifdef BUILD_GOTHIC_1_08k
     if ( LoadedWorldInfo->CustomWorldLoaded ) {
@@ -1839,6 +1960,10 @@ s_puddleReleaseStartAccumulation = 0.0f;
     }
 
     _canClearVobsByVisual = false;
+    LoadedWorldInfo->MainWorld = loadedWorld;
+    WorldRenderCacheReady.store( true, std::memory_order_release );
+    WorldTransition.store( WorldTransitionState::Ready, std::memory_order_release );
+    LoadingWorld = nullptr;
 }
 
 void GothicAPI::LoadRendererWorldSettings( GothicRendererSettings& s )
@@ -2541,7 +2666,7 @@ bool GothicAPI::IsMaterialActive( zCMaterial* mat ) {
 
 /** Called when a vob moved */
 void GothicAPI::OnVobMoved( zCVob* vob ) {
-    if ( !vob )
+    if ( !vob || ResettingVobs.load( std::memory_order_acquire ) )
         return;
 
     auto invalidateLightShadow = []( VobLightInfo* info ) {
@@ -2644,7 +2769,7 @@ void GothicAPI::OnVobMoved( zCVob* vob ) {
 
 /** Called when a visual got removed */
 void GothicAPI::OnVisualDeleted( zCVisual* visual ) {
-    if ( !visual ) {
+    if ( !visual || ResettingVobs.load( std::memory_order_acquire ) ) {
         return;
     }
 
@@ -2836,7 +2961,7 @@ void GothicAPI::LeaveResourceCriticalSection() {
 
 /** Called when a VOB got removed from the world */
 void GothicAPI::OnRemovedVob( zCVob* vob, zCWorld* world ) {
-    if ( !vob )
+    if ( !vob || ResettingVobs.load( std::memory_order_acquire ) )
         return;
 
     if ( Engine::GraphicsEngine ) {
@@ -2886,7 +3011,10 @@ void GothicAPI::OnRemovedVob( zCVob* vob, zCWorld* world ) {
         if ( Inventory && Inventory->OnRemovedVob( vob, world ) )
             return; // Don't search in the other lists since it wont be in it anyways
 
-        if ( LoadedWorldInfo && world != LoadedWorldInfo->MainWorld )
+        oCGame* game = oCGame::GetGame();
+        zCWorld* sessionWorld = game ? game->_zCSession_world : nullptr;
+        if ( LoadedWorldInfo && world != LoadedWorldInfo->MainWorld
+            && world != LoadingWorld && world != sessionWorld )
             return; // *should* be already deleted from the inventory here. But watch out for dem leaks, dragons be here!
     }
 
@@ -3131,7 +3259,8 @@ void GothicAPI::OnRemovedVob( zCVob* vob, zCWorld* world ) {
 
 /** Called on a SetVisual-Call of a vob */
 void GothicAPI::OnSetVisual( zCVob* vob ) {
-    if ( !vob || !oCGame::GetGame() || !oCGame::GetGame()->_zCSession_world
+    if ( !vob || ResettingVobs.load( std::memory_order_acquire )
+        || !oCGame::GetGame() || !oCGame::GetGame()->_zCSession_world
         || !vob->GetHomeWorld() )
         return;
 
@@ -3151,7 +3280,8 @@ void GothicAPI::OnSetVisual( zCVob* vob ) {
 
 /** Called when a VOB got added to the BSP-Tree */
 void GothicAPI::OnAddVob( zCVob* vob, zCWorld* world ) {
-    if ( !vob || !vob->GetVisual() ) return; // Don't need it if we can't render it
+    if ( ResettingVobs.load( std::memory_order_acquire )
+        || !vob || !vob->GetVisual() ) return; // Don't need it if we can't render it
 
     zCVisual* visual = vob->GetVisual();
     zCClassDef* classDef = reinterpret_cast<zCObject*>(visual)->_GetClassDef();
@@ -3161,7 +3291,10 @@ void GothicAPI::OnAddVob( zCVob* vob, zCWorld* world ) {
     }
 
     oCGame* game = oCGame::GetGame();
-    zCWorld* mainWorld = game ? game->_zCSession_world : nullptr;
+    zCWorld* mainWorld = LoadingWorld;
+    if ( !mainWorld ) {
+        mainWorld = game ? game->_zCSession_world : nullptr;
+    }
     if ( !world ) {
         world = mainWorld;
     }
@@ -4103,11 +4236,15 @@ void GothicAPI::DrawSkeletalVN() {
 
 /** Called when a particle system got removed */
 void GothicAPI::OnParticleFXDeleted( zCParticleFX* pfx ) {
+    if ( !pfx || ResettingVobs.load( std::memory_order_acquire ) ) {
+        return;
+    }
+
     // Remove this from our list
     size_t i = 0, end = ParticleEffectVobs.size();
     while ( i < end ) {
         zCVob* pfxVob = ParticleEffectVobs[i];
-        if ( pfxVob->GetVisual() == reinterpret_cast<zCVisual*>(pfx) ) {
+        if ( pfxVob && pfxVob->GetVisual() == reinterpret_cast<zCVisual*>(pfx) ) {
             DestroyParticleEffect( ParticleEffectVobs[i] );
             ParticleEffectVobs[i] = ParticleEffectVobs.back();
             ParticleEffectVobs.pop_back();
@@ -5118,8 +5255,14 @@ void GothicAPI::DebugDrawTreeNode( zCBspBase* base, zTBBox3D boxCell, int clipFl
 
 /** Draws the AABB for the BSP-Tree using the line renderer*/
 void GothicAPI::DebugDrawBSPTree() {
+    if ( !IsWorldRenderCacheReady() || !LoadedWorldInfo || !LoadedWorldInfo->BspTree ) {
+        return;
+    }
     zCBspTree* tree = LoadedWorldInfo->BspTree;
     zCBspBase* root = tree->GetRootNode();
+    if ( !root ) {
+        return;
+    }
 
     // Recursively go through the tree and draw all nodes
     DebugDrawTreeNode( root, root->BBox3D );
@@ -5134,9 +5277,15 @@ void GothicAPI::CollectVisibleVobs(
     EBspTreeCollectFlags collectFlags,
     bool skipVobFrustumCull ) {
     ZoneScopedN( "GothicAPI::CollectVisibleVobsLegacy" );
+    if ( !IsWorldRenderCacheReady() || !LoadedWorldInfo || !LoadedWorldInfo->BspTree ) {
+        return;
+    }
     zCBspTree* tree = LoadedWorldInfo->BspTree;
 
     zCBspBase* rootBsp = tree->GetRootNode();
+    if ( !rootBsp ) {
+        return;
+    }
     Frustum frustum = Frustum::AlwaysContainingFrustum();
     if ( auto cam = zCCamera::GetCamera() ) {
         cam->Activate();
@@ -6866,9 +7015,16 @@ void GothicAPI::ConfigureAllPointlightShadowSources() {
 }
 
 /** Helper function for going through the bsp-tree */
-void GothicAPI::BuildBspVobMapCacheHelper( zCBspBase* base ) {
-    if ( !base )
-        return;
+bool GothicAPI::BuildBspVobMapCacheHelper( zCBspBase* base, std::unordered_set<zCBspBase*>& visited ) {
+    constexpr int MaxLeafEntries = 1000000;
+    if ( !base || !LoadedWorldInfo || !LoadedWorldInfo->BspTree
+        || !visited.insert( base ).second
+        || ( !base->IsLeaf() && !base->IsNode() ) ) {
+        return false;
+    }
+    if ( visited.size() > 2000000 ) {
+        return false;
+    }
 
     // Put it into the cache
     BspInfo& bvi = BspLeafVobLists[base];
@@ -6878,18 +7034,27 @@ void GothicAPI::BuildBspVobMapCacheHelper( zCBspBase* base ) {
     if ( base->IsLeaf() ) {
         zCBspLeaf* leaf = static_cast<zCBspLeaf*>(base);
 
+        if ( leaf->LeafVobList.NumInArray < 0 || leaf->LeafVobList.NumInArray > MaxLeafEntries
+            || ( leaf->LeafVobList.NumInArray > 0 && !leaf->LeafVobList.Array )
+            || leaf->LightVobList.NumInArray < 0 || leaf->LightVobList.NumInArray > MaxLeafEntries
+            || ( leaf->LightVobList.NumInArray > 0 && !leaf->LightVobList.Array ) ) {
+            return false;
+        }
+
         bvi.Front = nullptr;
         bvi.Back = nullptr;
 
         for ( int i = 0; i < leaf->LeafVobList.NumInArray; i++ ) {
             zCVob* vob = leaf->LeafVobList.Array[i];
+            if ( !vob )
+                continue;
             const bool indoorVobInOutdoorLeaf = outdoorLocation && vob->IsIndoorVob();
 
             // Get the vob info for this one
             auto vit = VobMap.find( vob );
             if ( vit != VobMap.end() ) {
                 VobInfo* v = vit->second;
-                if ( v ) {
+                if ( v && v->VisualInfo ) {
                     float vobSmallSize = Engine::GAPI->GetRendererState().RendererSettings.SmallVobSize;
 
                     // Treat indoor vobs as indoor vobs only in outdoor locations
@@ -6935,6 +7100,8 @@ void GothicAPI::BuildBspVobMapCacheHelper( zCBspBase* base ) {
 
         for ( int i = 0; i < leaf->LightVobList.NumInArray; i++ ) {
             zCVobLight* vob = leaf->LightVobList.Array[i];
+            if ( !vob )
+                continue;
 
             // Add the light to the map if not already done
             auto vit = VobLightMap.find( vob );
@@ -6954,13 +7121,23 @@ void GothicAPI::BuildBspVobMapCacheHelper( zCBspBase* base ) {
 
         bvi.OriginalNode = base;
 
-        BuildBspVobMapCacheHelper( node->Front );
-        BuildBspVobMapCacheHelper( node->Back );
+        if ( !node->Front || !node->Back
+            || !BuildBspVobMapCacheHelper( node->Front, visited )
+            || !BuildBspVobMapCacheHelper( node->Back, visited ) ) {
+            return false;
+        }
 
         // Save front and back to this
-        bvi.Front = &BspLeafVobLists[node->Front];
-        bvi.Back = &BspLeafVobLists[node->Back];
+        auto frontIt = BspLeafVobLists.find( node->Front );
+        auto backIt = BspLeafVobLists.find( node->Back );
+        if ( frontIt == BspLeafVobLists.end() || backIt == BspLeafVobLists.end() ) {
+            return false;
+        }
+        bvi.Front = &frontIt->second;
+        bvi.Back = &backIt->second;
     }
+
+    return true;
 }
 
 /** Builds the flat leaf cache by DFS over the BspInfo mirror tree */
@@ -7014,13 +7191,58 @@ void GothicAPI::BuildBspVobMapCache() {
     ZoneScopedN( "GothicAPI::BuildBspVobMapCache" );
 
     WorldRenderCacheReady.store( false, std::memory_order_release );
+    for ( auto& [vob, info] : VobMap ) {
+        (void)vob;
+        if ( info ) {
+            info->ParentBSPNodes.clear();
+        }
+    }
+    for ( auto& [vob, info] : SkeletalVobMap ) {
+        (void)vob;
+        if ( info ) {
+            info->ParentBSPNodes.clear();
+        }
+    }
+    BspLeafVobLists.clear();
     if ( !LoadedWorldInfo || !LoadedWorldInfo->BspTree
         || !LoadedWorldInfo->BspTree->GetRootNode() ) {
         LeafLinearCache.Clear();
         return;
     }
 
-    BuildBspVobMapCacheHelper( LoadedWorldInfo->BspTree->GetRootNode() );
+    const int leafCount = LoadedWorldInfo->BspTree->GetNumLeafes();
+    if ( leafCount <= 0 || leafCount > 1000000 ) {
+        LogError() << "BSP VOB cache build skipped because the leaf count is invalid.";
+        LeafLinearCache.Clear();
+        return;
+    }
+    BspLeafVobLists.reserve( static_cast<size_t>( leafCount ) * 2u + 1u );
+
+    std::unordered_set<zCBspBase*> visited;
+    visited.reserve( static_cast<size_t>( leafCount ) * 2u + 1u );
+    if ( !BuildBspVobMapCacheHelper( LoadedWorldInfo->BspTree->GetRootNode(), visited ) ) {
+        for ( auto& [vob, info] : VobMap ) {
+            (void)vob;
+            if ( info ) {
+                info->ParentBSPNodes.clear();
+            }
+        }
+        for ( auto& [vob, info] : SkeletalVobMap ) {
+            (void)vob;
+            if ( info ) {
+                info->ParentBSPNodes.clear();
+            }
+        }
+        BspLeafVobLists.clear();
+        LeafLinearCache.Clear();
+        for ( auto& [vob, info] : VobLightMap ) {
+            (void)vob;
+            delete info;
+        }
+        VobLightMap.clear();
+        LogError() << "BSP VOB cache build aborted because the BSP tree is incomplete.";
+        return;
+    }
 
     // Publish the linear BSP cache first. Window validation performs world
     // queries and must never run while Gothic is still constructing/loading
@@ -7065,7 +7287,11 @@ void GothicAPI::CleanBSPNodes() {
 
 /** Returns the new node from tha base node */
 BspInfo* GothicAPI::GetNewBspNode( zCBspBase* base ) {
-    return &BspLeafVobLists[base];
+    if ( !base ) {
+        return nullptr;
+    }
+    auto it = BspLeafVobLists.find( base );
+    return it == BspLeafVobLists.end() ? nullptr : &it->second;
 }
 
 /** Sets/Gets the far-plane */
@@ -8291,7 +8517,17 @@ float GothicAPI::GetBrightnessValue() {
 
 /** Puts the custom-polygons into the bsp-tree */
 void GothicAPI::PutCustomPolygonsIntoBspTree() {
-    PutCustomPolygonsIntoBspTreeRec( &BspLeafVobLists[LoadedWorldInfo->BspTree->GetRootNode()] );
+    if ( !LoadedWorldInfo || !LoadedWorldInfo->BspTree ) {
+        return;
+    }
+
+    zCBspBase* root = LoadedWorldInfo->BspTree->GetRootNode();
+    auto rootIt = root ? BspLeafVobLists.find( root ) : BspLeafVobLists.end();
+    if ( rootIt == BspLeafVobLists.end() ) {
+        return;
+    }
+
+    PutCustomPolygonsIntoBspTreeRec( &rootIt->second );
 }
 
 void GothicAPI::PutCustomPolygonsIntoBspTreeRec( BspInfo* base ) {
@@ -8368,12 +8604,24 @@ void GothicAPI::CollectPolygonsInAABB( const zTBBox3D& bbox, zCPolygon**& polyLi
     static std::vector<zCPolygon*> list; // This function is defined to only temporary hold the found polygons in the game. 
                                          // This is ugly, but that's how they do it.
     list.clear();
+    polyList = nullptr;
+    numFound = 0;
 
-    CollectPolygonsInAABBRec( &BspLeafVobLists[LoadedWorldInfo->BspTree->GetRootNode()], bbox, list );
+    if ( !IsWorldRenderCacheReady() || !LoadedWorldInfo || !LoadedWorldInfo->BspTree ) {
+        return;
+    }
+
+    zCBspBase* root = LoadedWorldInfo->BspTree->GetRootNode();
+    auto rootIt = root ? BspLeafVobLists.find( root ) : BspLeafVobLists.end();
+    if ( rootIt == BspLeafVobLists.end() ) {
+        return;
+    }
+
+    CollectPolygonsInAABBRec( &rootIt->second, bbox, list );
 
     // Give out data to calling function
-    polyList = &list[0];
-    numFound = list.size();
+    polyList = list.empty() ? nullptr : list.data();
+    numFound = static_cast<int>( list.size() );
 }
 
 /** Collects polygons in the given AABB */
@@ -8430,7 +8678,8 @@ BspInfo* GothicAPI::GetNewRootNode() {
     if ( !root ) {
         return nullptr;
     }
-    return &BspLeafVobLists[root];
+    auto it = BspLeafVobLists.find( root );
+    return it == BspLeafVobLists.end() ? nullptr : &it->second;
 }
 
 /** Prints a message to the screen for the given amount of time */

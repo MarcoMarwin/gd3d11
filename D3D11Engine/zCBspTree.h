@@ -70,9 +70,15 @@ public:
         Engine::GraphicsEngine->GetLineRenderer()->AddLine( LineVertex( start, 0xFF0000FF ), LineVertex( end, 0xFFFFFFFF ) );
 #endif
 
-        if ( Engine::GAPI->GetLoadedWorldInfo()->CustomWorldLoaded ) {
+        GothicAPI* gapi = Engine::GAPI;
+        WorldInfo* worldInfo = gapi ? gapi->GetLoadedWorldInfo() : nullptr;
+        if ( gapi && worldInfo && !gapi->IsWorldTransitionActive()
+            && gapi->IsWorldRenderCacheReady() && worldInfo->CustomWorldLoaded ) {
             zCBspBase* base = reinterpret_cast<zCBspBase*>(thisptr);
-            BspInfo* newNode = Engine::GAPI->GetNewBspNode( base );
+            BspInfo* newNode = gapi->GetNewBspNode( base );
+            if ( !newNode || newNode->NodePolygons.empty() ) {
+                return HookedFunctions::OriginalFunctions.original_zCBspBaseCheckRayAgainstPolysNearestHit( thisptr, start, end, intersection );
+            }
 
             zCPolygon** polysOld = base->PolyList;
             int numPolysOld = base->NumPolys;
@@ -100,14 +106,20 @@ public:
         // Get our version of this node
         //Engine::GAPI->Get
 
-        if ( Engine::GAPI->GetLoadedWorldInfo()->CustomWorldLoaded ) {
+        GothicAPI* gapi = Engine::GAPI;
+        WorldInfo* worldInfo = gapi ? gapi->GetLoadedWorldInfo() : nullptr;
+        if ( gapi && worldInfo && !gapi->IsWorldTransitionActive()
+            && gapi->IsWorldRenderCacheReady() && worldInfo->CustomWorldLoaded ) {
 
 #ifdef DEBUG_SHOW_COLLISION
             Engine::GraphicsEngine->GetLineRenderer()->AddLine( LineVertex( start, 0xFF0000FF ), LineVertex( end, 0xFFFFFFFF ) );
 #endif
 
             zCBspBase* base = reinterpret_cast<zCBspBase*>(thisptr);
-            BspInfo* newNode = Engine::GAPI->GetNewBspNode( base );
+            BspInfo* newNode = gapi->GetNewBspNode( base );
+            if ( !newNode || newNode->NodePolygons.empty() ) {
+                return HookedFunctions::OriginalFunctions.original_zCBspBaseCheckRayAgainstPolysCache( thisptr, start, end, intersection );
+            }
 
             zCPolygon** polysOld = base->PolyList;
             int numPolysOld = base->NumPolys;
@@ -136,9 +148,15 @@ public:
         Engine::GraphicsEngine->GetLineRenderer()->AddLine( LineVertex( start, 0xFF0000FF ), LineVertex( end, 0xFFFFFFFF ) );
 #endif
 
-        if ( Engine::GAPI->GetLoadedWorldInfo()->CustomWorldLoaded ) {
+        GothicAPI* gapi = Engine::GAPI;
+        WorldInfo* worldInfo = gapi ? gapi->GetLoadedWorldInfo() : nullptr;
+        if ( gapi && worldInfo && !gapi->IsWorldTransitionActive()
+            && gapi->IsWorldRenderCacheReady() && worldInfo->CustomWorldLoaded ) {
             zCBspBase* base = reinterpret_cast<zCBspBase*>(thisptr);
-            BspInfo* newNode = Engine::GAPI->GetNewBspNode( base );
+            BspInfo* newNode = gapi->GetNewBspNode( base );
+            if ( !newNode || newNode->NodePolygons.empty() ) {
+                return HookedFunctions::OriginalFunctions.original_zCBspBaseCheckRayAgainstPolys( thisptr, start, end, intersection );
+            }
 
             zCPolygon** polysOld = base->PolyList;
             int numPolysOld = base->NumPolys;
@@ -162,8 +180,11 @@ public:
     }
 
     static int __fastcall hooked_zCBspBaseCollectPolysInBBox3D( void* thisptr, const zTBBox3D& bbox, zCPolygon**& polyList, int& numFound ) {
-        if ( Engine::GAPI->GetLoadedWorldInfo()->CustomWorldLoaded ) {
-            Engine::GAPI->CollectPolygonsInAABB( bbox, polyList, numFound );
+        GothicAPI* gapi = Engine::GAPI;
+        WorldInfo* worldInfo = gapi ? gapi->GetLoadedWorldInfo() : nullptr;
+        if ( gapi && worldInfo && !gapi->IsWorldTransitionActive()
+            && gapi->IsWorldRenderCacheReady() && worldInfo->CustomWorldLoaded ) {
+            gapi->CollectPolygonsInAABB( bbox, polyList, numFound );
             //HookedFunctions::OriginalFunctions.original_zCBspBaseCollectPolysInBBox3D(thisptr, bbox, polyList, numFound);
 
 #ifdef DEBUG_SHOW_COLLISION
@@ -226,27 +247,54 @@ public:
     static int __fastcall hooked_LoadBIN( void* thisptr, void* unknwn, zCFileBIN& file, int skip ) {
         LogInfo() << "Loading world!";
 
-        // Make sure worker thread don't work on any point light
-        Engine::RefreshWorkerThreadpool();
+        if ( !Engine::IsShuttingDown() ) {
+            Engine::RefreshWorkerThreadpool();
+        }
 
         int r = HookedFunctions::OriginalFunctions.original_zCBspTreeLoadBIN( thisptr, file, skip );
-        Engine::GAPI->OnGeometryLoaded( reinterpret_cast<zCBspTree*>(thisptr) );
+        if ( Engine::GAPI && !Engine::IsShuttingDown() ) {
+            Engine::GAPI->OnGeometryLoaded( reinterpret_cast<zCBspTree*>(thisptr) );
+        }
 
         return r;
     }
 
     /** Returns only the polygons used in LOD0 of the world */
-    void GetLOD0Polygons( std::vector<zCPolygon*>& target ) {
+    bool TryGetLOD0Polygons( std::vector<zCPolygon*>& target ) {
+        target.clear();
+
         int num = GetNumLeafes();
-        target.reserve( num * 3 ); // preallocate a little space
+        int totalPolys = GetNumPolys();
+        if ( num <= 0 || num > 1000000 || totalPolys <= 0 || totalPolys > 100000000 ) {
+            return false;
+        }
+
+        char* list = *reinterpret_cast<char**>(THISPTR_OFFSET( GothicMemoryLocations::zCBspTree::Offset_LeafList ));
+        if ( !list || !GetRootNode() ) {
+            return false;
+        }
+
+        target.reserve( static_cast<size_t>(num) * 3u );
 
         for ( int i = 0; i < num; i++ ) {
             zCBspLeaf* leaf = GetLeaf( i );
+            if ( !leaf || !leaf->IsLeaf() || leaf->NumPolys < 0 || leaf->NumPolys > totalPolys
+                || ( leaf->NumPolys > 0 && !leaf->PolyList ) ) {
+                target.clear();
+                return false;
+            }
 
             for ( int j = 0; j < leaf->NumPolys; j++ ) {
-                target.push_back( leaf->PolyList[j] );
+                zCPolygon* polygon = leaf->PolyList[j];
+                if ( !polygon ) {
+                    target.clear();
+                    return false;
+                }
+                target.push_back( polygon );
             }
         }
+
+        return !target.empty();
     }
 
     int GetNumLeafes() {

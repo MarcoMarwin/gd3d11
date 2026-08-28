@@ -15,13 +15,17 @@ public:
     static void Hook() {
         
 #if BUILD_GOTHIC_2_6_fix
-
         original_CGameManagerWrite_Savegame = reinterpret_cast<CGameManagerWrite_Savegame>(0x0042a2d0);
-        // Some plugins or patches override savegame behavior and cause crashing.
-        // Chronicles of Myrtana save-path workaround.
-        // Savegame hook disabled.
+        DetourAttachTyped( &HookedFunctions::OriginalFunctions.original_CGameManagerExitGame, hooked_ExitGame );
 #endif
     }
+
+#if BUILD_GOTHIC_2_6_fix
+    static int __fastcall hooked_ExitGame( void* thisptr, void* ) {
+        Engine::OnShutDown();
+        return HookedFunctions::OriginalFunctions.original_CGameManagerExitGame( thisptr );
+    }
+#endif
 
     static void __fastcall hooked_Write_Savegame( void* thisptr, void* unknwn, int slot ) {
         original_CGameManagerWrite_Savegame( thisptr, slot );

@@ -122,6 +122,29 @@ public:
         }
     }
 
+    void shutdown()
+    {
+        std::queue<std::pair<std::function<void()>, CancellationToken>> discarded_tasks;
+        {
+            std::unique_lock<std::mutex> lock(queue_mutex);
+            std::swap(tasks, discarded_tasks);
+            stop = true;
+        }
+
+        while (!discarded_tasks.empty())
+        {
+            discarded_tasks.front().second.cancel();
+            discarded_tasks.pop();
+        }
+
+        condition.notify_all();
+        for (std::thread& worker : workers)
+        {
+            if (worker.joinable())
+                worker.join();
+        }
+    }
+
 private:
     std::vector<std::thread> workers;
     std::queue<std::pair<std::function<void()>, CancellationToken>> tasks;
@@ -177,15 +200,5 @@ inline ThreadPool::ThreadPool(const wchar_t* poolIdentifier, size_t threads)
 
 inline ThreadPool::~ThreadPool()
 {
-    // Do not execute queued callbacks while their owning renderer objects are
-    // already being destroyed. Active callbacks are still joined below.
-    std::queue<std::pair<std::function<void()>, CancellationToken>> discardedTasks;
-    {
-        std::unique_lock<std::mutex> lock(queue_mutex);
-        std::swap( tasks, discardedTasks );
-        stop = true;
-    }
-    condition.notify_all();
-    for (std::thread& worker : workers)
-        worker.join();
+    shutdown();
 }

@@ -23,6 +23,9 @@ public:
     static void __fastcall hooked_oCSpawnManagerSpawnNpc( zCVob* thisptr, void* unknwn, oCNPC* npc, const XMFLOAT3& position, float f ) {
         HookedFunctions::OriginalFunctions.original_oCSpawnManagerSpawnNpc( thisptr, npc, position, f );
 
+        if ( !Engine::GAPI || Engine::IsShuttingDown() || !npc )
+            return;
+
         hook_infunc
 
             if ( npc->GetSleepingMode() != 0 || npc->IsAPlayer() ) {

@@ -194,10 +194,16 @@ public:
     /** Fix particle emitter setup */
 #ifdef BUILD_GOTHIC_2_6_fix
     static int __fastcall Hooked_zCModelGetLowestLODNumPolys( void* thisptr ) {
+        if ( !Engine::GAPI || Engine::IsShuttingDown() )
+            return HookedFunctions::OriginalFunctions.original_zCModelGetLowestLODNumPolys( thisptr );
+
         return Engine::GAPI->GetLowestLODNumPolys_SkeletalMesh( static_cast<zCModel*>(thisptr) );
     }
 
     static float3* __fastcall Hooked_zCModelGetLowestLODPoly( void* thisptr, void*, const int polyId, float3*& polyNormal ) {
+        if ( !Engine::GAPI || Engine::IsShuttingDown() )
+            return HookedFunctions::OriginalFunctions.original_zCModelGetLowestLODPoly( thisptr, polyId, polyNormal );
+
         return Engine::GAPI->GetLowestLODPoly_SkeletalMesh( static_cast<zCModel*>(thisptr), polyId, polyNormal );
     }
 #endif

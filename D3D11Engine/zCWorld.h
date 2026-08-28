@@ -119,11 +119,12 @@ public:
 
     static void __fastcall hooked_zCWorldDisposeVobs( zCWorld* thisptr, void* unknwn, zCTree<zCVob>* tree ) {
         ZoneScoped;
-        GothicAPI* gapi = Engine::GAPI;
-        auto* worldInfo = gapi ? gapi->GetLoadedWorldInfo() : nullptr;
-        // Reset only if this is the main world; inventory worlds are handled differently.
-        if ( worldInfo && thisptr == worldInfo->MainWorld ) {
-            gapi->ResetVobs();
+        if ( !Engine::IsShuttingDown() ) {
+            GothicAPI* gapi = Engine::GAPI;
+            auto* worldInfo = gapi ? gapi->GetLoadedWorldInfo() : nullptr;
+            if ( worldInfo && thisptr == worldInfo->MainWorld ) {
+                gapi->ResetVobs();
+            }
         }
         HookedFunctions::OriginalFunctions.original_zCWorldDisposeVobs( thisptr, tree );
     }
@@ -144,15 +145,9 @@ public:
         ZoneScoped;
         GothicAPI* gapi = Engine::GAPI;
         if ( gapi && !Engine::IsShuttingDown() ) {
-            gapi->OnLoadWorld( fileName.ToChar(), loadMode );
+            gapi->OnLoadWorld( fileName.ToChar(), loadMode, thisptr );
         }
         HookedFunctions::OriginalFunctions.original_zCWorldLoadWorld( thisptr, fileName, loadMode );
-        if ( gapi && !Engine::IsShuttingDown() ) {
-            auto* worldInfo = gapi->GetLoadedWorldInfo();
-            if ( worldInfo ) {
-                worldInfo->MainWorld = thisptr;
-            }
-        }
     }
 
     static void __fastcall hooked_VobAddedToWorld( zCWorld* thisptr, void* unknwn, zCVob* vob ) {
@@ -180,8 +175,7 @@ public:
         Engine::RefreshWorkerThreadpool();
 
         LogInfo() << "Loading world!";
-        gapi->GetLoadedWorldInfo()->MainWorld = thisptr;
-        gapi->OnGeometryLoaded( thisptr->GetBspTree() );
+        gapi->OnGeometryLoaded( thisptr->GetBspTree(), thisptr );
     }
 
     static void __fastcall hooked_zCWorldGenerateStaticWorldLighting( zCWorld* thisptr, void* unknwn, int& a2, void* a3 ) {
@@ -195,8 +189,7 @@ public:
         Engine::RefreshWorkerThreadpool();
 
         LogInfo() << "Loading world!";
-        gapi->GetLoadedWorldInfo()->MainWorld = thisptr;
-        gapi->OnGeometryLoaded( thisptr->GetBspTree() );
+        gapi->OnGeometryLoaded( thisptr->GetBspTree(), thisptr );
     }
 #endif
 
@@ -225,6 +218,7 @@ public:
 
         // Ignore stale renderer caches while the world is loading or disposing.
         if ( Engine::IsShuttingDown() || !gapi || !worldInfo || !worldInfo->MainWorld
+            || gapi->IsWorldTransitionActive()
             || !gapi->IsWorldRenderCacheReady() ) {
             HookedFunctions::OriginalFunctions.original_zCWorldRender( thisptr, camera );
             return;

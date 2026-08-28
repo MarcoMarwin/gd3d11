@@ -44,11 +44,14 @@ public:
     }
 
     static int __fastcall hooked_LoadResourceData( zCTexture* thisptr ) {
-        Engine::GAPI->SetBoundTexture( 7, thisptr ); // Slot 7 is reserved for this
-        // TODO: Figure out why some DTX1a Textures crash this
+        if ( !Engine::GAPI || Engine::IsShuttingDown() )
+            return HookedFunctions::OriginalFunctions.ofiginal_zCTextureLoadResourceData( thisptr );
+
+        GothicAPI* gapi = Engine::GAPI;
+        gapi->SetBoundTexture( 7, thisptr );
         int ret = HookedFunctions::OriginalFunctions.ofiginal_zCTextureLoadResourceData( thisptr );
 
-        Engine::GAPI->SetBoundTexture( 7, nullptr ); // Slot 7 is reserved for this
+        gapi->SetBoundTexture( 7, nullptr );
 
         return ret;
     }

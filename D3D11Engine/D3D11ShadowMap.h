@@ -173,6 +173,8 @@ public:
     XRESULT DrawLighting(std::vector<VobLightInfo*>& lights, RenderToTextureBuffer& color, RenderToTextureBuffer& normals, RenderToTextureBuffer
                          & specular, RenderToTextureBuffer* rainExclusionMask, RenderToTextureBuffer& depthCopy);
 
+    void InvalidateWorldCaches();
+
     D3D11TiledDeferredShading* GetTiledDeferred() const { return m_TiledDeferred.get(); }
 
     void XM_CALLCONV RenderShadowCube( DirectX::FXMVECTOR position,
