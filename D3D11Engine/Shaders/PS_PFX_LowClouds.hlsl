@@ -110,14 +110,30 @@ PS_OUTPUT PSMain( PS_INPUT Input )
     float3 moonDir = normalize( lerp( float3( 0.22f, 0.64f, -0.28f ), AC_MoonPos, saturate( abs( AC_MoonPos.y ) + 0.12f ) ) );
     float moonDiskWeight = saturate( AC_MoonVisibility ) * saturate( AC_EnableNightAtmosphere ) * smoothstep( 0.02f, 0.34f, AC_MoonPos.y );
 
-    float4 clouds = ComputeWorldLowCloudVolume(
-        HF_CameraPosition,
-        worldPosition,
-        cameraDistance,
-        skyPixel,
-        HF_FogHeight,
-        HF_FogColorMod,
-        nightTimeBlend );
+    float4 clouds;
+    if ( skyPixel > 0.5f )
+    {
+        clouds = ComputeWorldLowCloudVolumeWithSteps(
+            HF_CameraPosition,
+            worldPosition,
+            cameraDistance,
+            1.0f,
+            HF_FogHeight,
+            HF_FogColorMod,
+            nightTimeBlend,
+            12 );
+    }
+    else
+    {
+        clouds = ComputeWorldLowCloudVolume(
+            HF_CameraPosition,
+            worldPosition,
+            cameraDistance,
+            0.0f,
+            HF_FogHeight,
+            HF_FogColorMod,
+            nightTimeBlend );
+    }
 
     float3 skyWorldPosition = VSPositionFromDepth( 0.0f, Input.vTexcoord );
     skyWorldPosition = mul( float4( skyWorldPosition, 1.0f ), HF_InvView ).xyz;
@@ -132,14 +148,15 @@ PS_OUTPUT PSMain( PS_INPUT Input )
     float4 skyClouds = clouds;
     if ( depthFootprint.hasSky && depthFootprint.hasGeometry )
     {
-        skyClouds = ComputeWorldLowCloudVolume(
+        skyClouds = ComputeWorldLowCloudVolumeWithSteps(
             HF_CameraPosition,
             skyWorldPosition,
             skyCameraDistance,
             1.0f,
             HF_FogHeight,
             HF_FogColorMod,
-            nightTimeBlend );
+            nightTimeBlend,
+            12 );
     }
 
     float3 viewDir = normalize( worldPosition - HF_CameraPosition );

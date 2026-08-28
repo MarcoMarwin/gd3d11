@@ -59,7 +59,6 @@ float4 SampleStableSkyLowClouds( float2 texcoord )
     float2 cloudPosition = texcoord * float2( cloudSize ) - 0.5f;
     int2 centerCloudPixel = int2( floor( cloudPosition + 0.5f ) );
     float4 filteredClouds = 0.0f;
-    float4 bestClouds = 0.0f;
     float totalWeight = 0.0f;
     [unroll]
     for ( int y = -1; y <= 1; ++y )
@@ -85,16 +84,11 @@ float4 SampleStableSkyLowClouds( float2 texcoord )
             float weight = spatialWeight * alphaWeight;
             filteredClouds += sampleClouds * weight;
             totalWeight += weight;
-            if ( sampleClouds.a > bestClouds.a )
-            {
-                bestClouds = sampleClouds;
-            }
         }
     }
     if ( totalWeight > 0.00001f )
     {
-        float4 averagedClouds = filteredClouds / totalWeight;
-        return lerp( averagedClouds, bestClouds, 0.20f );
+        return filteredClouds / totalWeight;
     }
     return float4( 0.0f, 0.0f, 0.0f, 0.0f );
 }
@@ -166,6 +160,20 @@ float4 ComputeRefinedLowClouds( float2 texcoord, float depth )
     return float4( clouds.rgb * originalCloudAlpha, originalCloudAlpha );
 }
 
+float ComputeRefinedSkyLowCloudAlpha( float2 texcoord )
+{
+    float3 viewPosition = ReconstructVSPositionFromDepthReverseZInfinite(
+        0.0f, texcoord, HF_ProjParams.xy );
+    float3 worldPosition = mul( float4( viewPosition, 1.0f ), HF_InvView ).xyz;
+    float cameraDistance = length( worldPosition - HF_CameraPosition );
+    float nightTimeBlend = smoothstep( 0.0f, 1.0f, saturate( -AC_LightPos.y * 4.0f ) )
+        * saturate( AC_EnableNightAtmosphere );
+    float4 refinedClouds = ComputeWorldLowCloudVolumeWithSteps(
+        HF_CameraPosition, worldPosition, cameraDistance, 1.0f,
+        HF_FogHeight, HF_FogColorMod, nightTimeBlend, 4 );
+    return refinedClouds.a;
+}
+
 float4 SampleDepthAwareLowClouds(
     float2 texcoord, float4 pixelPosition )
 {
@@ -183,7 +191,26 @@ float4 SampleDepthAwareLowClouds(
     const float skyDepthEpsilon = 0.00001f;
     if ( targetDepth < skyDepthEpsilon )
     {
-        return SampleStableSkyLowClouds( texcoord );
+        float4 skyClouds = SampleStableSkyLowClouds( texcoord );
+        float3 skyViewPosition = ReconstructVSPositionFromDepthReverseZInfinite(
+            0.0f, texcoord, HF_ProjParams.xy );
+        float3 skyWorldPosition = mul( float4( skyViewPosition, 1.0f ), HF_InvView ).xyz;
+        float3 skyRayDir = normalize( skyWorldPosition - HF_CameraPosition );
+        float horizonWeight = 1.0f - smoothstep( 0.015f, 0.18f, abs( skyRayDir.y ) );
+        float transitionWeight = smoothstep( 0.001f, 0.04f, skyClouds.a )
+            * ( 1.0f - smoothstep( 0.02f, 0.75f, skyClouds.a ) );
+        float refineWeight = horizonWeight * transitionWeight;
+        if ( refineWeight > 0.01f )
+        {
+            float sampledAlpha = saturate( skyClouds.a );
+            float refinedAlpha = saturate( ComputeRefinedSkyLowCloudAlpha( texcoord ) );
+            float colorScale = sampledAlpha > 0.00001f
+                ? lerp( 1.0f, refinedAlpha / sampledAlpha, refineWeight )
+                : 0.0f;
+            skyClouds.rgb *= colorScale;
+            skyClouds.a = lerp( sampledAlpha, refinedAlpha, refineWeight );
+        }
+        return skyClouds;
     }
     float2 cloudPosition = texcoord * float2( cloudSize ) - 0.5f;
     int2 baseCloudPixel = int2( floor( cloudPosition ) );

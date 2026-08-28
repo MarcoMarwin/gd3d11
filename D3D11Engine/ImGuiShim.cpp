@@ -2,8 +2,6 @@
 #include "GSky.h"
 #include "D3D11PfxRenderer.h"
 #include "D3D11PFX_FSR3.h"
-#include <VersionHelpers.h>
-#include <ShellScalingApi.h>
 #include <windowsx.h>
 
 #include "zCParser.h"
@@ -61,28 +59,31 @@ namespace {
         const INT2 backbuffer = Engine::GraphicsEngine->GetBackbufferResolution();
         const auto& settings = Engine::GAPI->GetRendererState().RendererSettings;
         if ( settings.StretchWindow && backbuffer.x > 0 && backbuffer.y > 0 ) {
-            const float renderAspect = static_cast<float>(backbuffer.x) / static_cast<float>(backbuffer.y);
+            const float renderAspect = static_cast<float>( backbuffer.x ) / static_cast<float>( backbuffer.y );
             const float clientAspect = clientWidth / clientHeight;
             if ( std::abs( renderAspect - clientAspect ) > 0.001f ) {
                 if ( clientAspect > renderAspect ) {
                     const float fittedWidth = clientHeight * renderAspect;
-                    contentOffsetX = (clientWidth - fittedWidth) * 0.5f;
+                    contentOffsetX = ( clientWidth - fittedWidth ) * 0.5f;
                     clientWidth = fittedWidth;
                 } else {
                     const float fittedHeight = clientWidth / renderAspect;
-                    contentOffsetY = (clientHeight - fittedHeight) * 0.5f;
+                    contentOffsetY = ( clientHeight - fittedHeight ) * 0.5f;
                     clientHeight = fittedHeight;
                 }
             }
         }
-        uiScale = std::max( 0.01f, std::min( clientWidth / 1920.0f, clientHeight / 1080.0f ) );
+        const float monitorDpiScale = std::clamp(
+            ImGui_ImplWin32_GetDpiScaleForHwnd( window ), 0.5f, 4.0f );
+        uiScale = std::max( 0.01f,
+            std::min( clientWidth / 1920.0f, clientHeight / 1080.0f ) * monitorDpiScale );
 
         if ( cursorPos ) {
             if ( !GetCursorPos( cursorPos ) || !ScreenToClient( window, cursorPos ) ) {
                 return false;
             }
-            cursorPos->x -= static_cast<LONG>(std::lround( contentOffsetX ));
-            cursorPos->y -= static_cast<LONG>(std::lround( contentOffsetY ));
+            cursorPos->x -= static_cast<LONG>( std::lround( contentOffsetX ) );
+            cursorPos->y -= static_cast<LONG>( std::lround( contentOffsetY ) );
         }
         return true;
     }
@@ -389,40 +390,6 @@ namespace {
     }
 }
 
-int GetDpi( HWND hWnd )
-{
-    bool v81 = IsWindows8Point1OrGreater();
-    bool v10 = IsWindows10OrGreater();
-
-    if ( v81 || v10 ) {
-
-        typedef HRESULT( WINAPI* GetDpiForMonitor_t )(
-        HMONITOR, MONITOR_DPI_TYPE, UINT*, UINT*);
-
-        HMODULE hShcore = LoadLibraryW( L"Shcore.dll" );
-        if ( hShcore ) {
-            GetDpiForMonitor_t pGetDpiForMonitor = reinterpret_cast<GetDpiForMonitor_t>(GetProcAddress( hShcore, "GetDpiForMonitor" ));
-            if ( pGetDpiForMonitor ) {
-                HMONITOR hMonitor = ::MonitorFromWindow( hWnd, MONITOR_DEFAULTTONEAREST );
-                UINT xdpi, ydpi;
-                LRESULT success = pGetDpiForMonitor( hMonitor, MDT_EFFECTIVE_DPI, &xdpi, &ydpi );
-                if ( success == S_OK ) {
-                    FreeLibrary( hShcore );
-                    return static_cast<int>(ydpi);
-                }
-            }
-            FreeLibrary( hShcore );
-        }
-    }
-
-    // fallback if not available
-    HDC hDC = ::GetDC( hWnd );
-    INT ydpi = ::GetDeviceCaps( hDC, LOGPIXELSY );
-    ::ReleaseDC( NULL, hDC );
-
-    return ydpi;
-}
-
 void ApplyFeatureLevel10Downgrades(GothicRendererSettings& s);
 
 void ImGuiShim::Init(
@@ -441,7 +408,6 @@ void ImGuiShim::Init(
     ImGui_ImplWin32_Init( OutputWindow );
     ImGui_ImplDX11_Init( device.Get(), context.Get() );
 
-    const auto actualDPI = GetDpi( Window );
     Initiated = true;
 
     std::vector<DisplayModeInfo> modes;
@@ -457,8 +423,7 @@ void ImGuiShim::Init(
     const auto path = std::filesystem::current_path();
     const auto fontpath = path / "system" / "GD3D11" / "Fonts" / "Lato-Semibold.ttf";
 
-    auto dpiScale = actualDPI / 96.0f;
-    io.Fonts->AddFontFromFileTTF( fontpath.string().c_str(), 20.0f * dpiScale, &config );}
+    io.Fonts->AddFontFromFileTTF( fontpath.string().c_str(), 20.0f, &config );}
 
 
 ImGuiShim::~ImGuiShim()
@@ -479,9 +444,6 @@ void ImGuiShim::RenderLoop()
     ImGui_ImplDX11_NewFrame();
     ImGui_ImplWin32_NewFrame();
 
-    // Keep the settings UI at a stable physical size when the game resolution
-    // changes. Mouse coordinates use the same virtual canvas, so the smooth OS
-    // cursor and ImGui hit targets remain aligned.
     if ( SettingsVisible && OutputWindow ) {
         POINT cursorPos = {};
         float clientWidth = 0.0f;
@@ -586,8 +548,6 @@ LRESULT ImGuiShim::OnWindowMessage( HWND hWnd, UINT msg, WPARAM wParam, LPARAM l
 
     if ( Initiated && GetIsActive() )
     {
-        // Queue the virtual F11 position before actions so ImGui never
-        // evaluates a click with the Win32 backend's physical coordinates.
         if ( SettingsVisible && IsMouseActionMessage( msg ) ) {
             float clientWidth = 0.0f;
             float clientHeight = 0.0f;
@@ -1240,17 +1200,10 @@ void ImGuiShim::RenderSettingsWindow()
             ( leftF11ColumnWidth - topHeaderGap ) * 0.5f;
         const float topHeaderFieldWidth = std::max(
             1.0f, ( topHeaderBlockWidth - topHeaderGap ) * 0.5f );
-        const float topHeaderLabelWidth = topHeaderFieldWidth;
-        const float topHeaderControlWidth = topHeaderFieldWidth;
-        const float topPresetLabelWidth = topHeaderLabelWidth;
-        const float topPresetControlWidth = topHeaderControlWidth;
-        const float topLanguageLabelWidth = topHeaderLabelWidth;
-        const float topLanguageControlWidth = topHeaderControlWidth;
-
-        ImText( Tr( "Preset", u8"Profil" ), ImVec2( topPresetLabelWidth, 0.0f ) );
+        ImText( Tr( "Preset", u8"Profil" ), ImVec2( topHeaderFieldWidth, 0.0f ) );
         ImGui::SameLine( 0.0f, topHeaderGap );
 
-        ImGui::PushItemWidth( topPresetControlWidth );
+        ImGui::SetNextItemWidth( topHeaderFieldWidth );
         if ( ImGui::BeginCombo( "##GraphicsPreset", graphicsPresetPreview ) ) {
             for ( const auto& preset : graphicsPresets ) {
                 const bool isSelected = static_cast<int>(settings.GraphicsPreset) == preset.second;
@@ -1268,12 +1221,11 @@ void ImGuiShim::RenderSettingsWindow()
         ImGui::SetItemTooltip( "%s", Tr(
             "Applies a preset. Resets Advanced settings.",
             u8"Wendet ein Profil an. Setzt die erweiterten Einstellungen zur\u00FCck." ) );
-        ImGui::PopItemWidth();
 
         ImGui::SameLine( 0.0f, topHeaderGap );
-        ImText( Tr( "Language", u8"Sprache" ), ImVec2( topLanguageLabelWidth, 0.0f ) );
+        ImText( Tr( "Language", u8"Sprache" ), ImVec2( topHeaderFieldWidth, 0.0f ) );
         ImGui::SameLine( 0.0f, topHeaderGap );
-        ImGui::PushItemWidth( topLanguageControlWidth );
+        ImGui::SetNextItemWidth( topHeaderFieldWidth );
         const char* languagePreview = settings.D3D11Language == GothicRendererSettings::D3D11_LANGUAGE_GERMAN
             ? "Deutsch"
             : "English";
@@ -1295,20 +1247,17 @@ void ImGuiShim::RenderSettingsWindow()
             ImGui::EndCombo();
         }
         ImGui::SetItemTooltip( "%s", Tr( "Selects the language used by the D3D11 renderer.", u8"W\u00E4hlt die Sprache des D3D11-Renderers aus." ) );
-        ImGui::PopItemWidth();
-        const float advancedHeaderGap = std::max( style.ItemSpacing.x * 1.5f, 10.0f );
-        ImGui::SameLine( 0.0f, advancedHeaderGap );
         const char* advancedButtonText = Tr( "Advanced ...", u8"Erweitert ..." );
         const float advancedButtonWidth = 125.0f;
-        const float headerFieldsEndX = topPresetLabelWidth + topHeaderGap + topPresetControlWidth
-            + topHeaderGap + topLanguageLabelWidth + topHeaderGap + topLanguageControlWidth;
-        const float advancedAreaStartX = std::max(
-            leftF11ColumnWidth + style.ItemSpacing.x,
-            headerFieldsEndX + advancedHeaderGap );
-        const float fixedContentWidth = leftF11ColumnWidth * 2.0f + style.ItemSpacing.x;
-        const float advancedAreaEndX = fixedContentWidth - 210.0f;
-        const float advancedButtonX = advancedAreaStartX
-            + std::max( 0.0f, ( advancedAreaEndX - advancedAreaStartX - advancedButtonWidth ) * 0.5f );
+        const float languageComboEndX = ImGui::GetItemRectMax().x;
+        const float versionStartX = ImGui::GetWindowPos().x
+            + ImGui::GetWindowContentRegionMax().x - versionTextSize.x;
+        const float advancedButtonX = std::max(
+            languageComboEndX,
+            languageComboEndX
+                + ( versionStartX - languageComboEndX - advancedButtonWidth ) * 0.5f )
+            - ImGui::GetWindowPos().x;
+        ImGui::SameLine( 0.0f, 0.0f );
         ImGui::SetCursorPosX( advancedButtonX );
         if ( ImGui::Button( advancedButtonText, ImVec2( advancedButtonWidth, 0.0f ) ) ) {
             ImGui::OpenPopup( "##AdvancedPerformance" );
@@ -1318,8 +1267,6 @@ void ImGuiShim::RenderSettingsWindow()
             u8"\u00D6ffnet die erweiterten Einstellungen." ) );
         const float advancedPopupMaxHeight = std::max( 320.0f, std::round( framebufferHeight * 0.5f ) );
         ImGui::SetNextWindowSizeConstraints(
-            // The body scrolls in its own child, so keep the popup at the
-            // constrained height and leave the header outside that scroll area.
             ImVec2( 440.0f, advancedPopupMaxHeight ),
             ImVec2( std::max( 440.0f, framebufferWidth - 32.0f ), advancedPopupMaxHeight ) );
         if ( ImGui::BeginPopup( "##AdvancedPerformance" ) ) {
@@ -1690,8 +1637,7 @@ void ImGuiShim::RenderSettingsWindow()
         const float standardComboWidth = controlWidth;
         const float inlineToggleWidth = (buttonWidth.x - style.ItemSpacing.x) * 0.5f;
         const float inlineToggleLabelWidth = inlineToggleWidth - ImGui::GetFrameHeight() - style.ItemSpacing.x;
-        const float compactAALabelTextWidth = ImGui::CalcTextSize(
-            Tr( "Anti-Aliasing", u8"Kantengl\u00E4ttung" ) ).x
+        const float compactAALabelTextWidth = ImGui::CalcTextSize( u8"Kantengl\u00E4ttung" ).x
             + style.FramePadding.x * 2.0f + 2.0f;
         const float compactAAStartGap = style.ItemSpacing.x;
         const float compactAAMethodWidth = std::min(

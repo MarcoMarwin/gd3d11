@@ -260,7 +260,7 @@ void GetWorldLowCloudLight(out float3 lightDir, out float lightWeight)
 	lightWeight = max(sunWeight, moonWeight);
 }
 
-float ComputeWorldLowCloudDensity(float3 worldPosition, float baseFogHeight)
+float ComputeWorldLowCloudDensity(float3 worldPosition, float baseFogHeight, float skyPixel)
 {
 	float cloudBase = ResolveWorldLowCloudBase(baseFogHeight);
 	float cloudScale = max(0.35f, AC_LowCloudScale);
@@ -296,7 +296,9 @@ float ComputeWorldLowCloudDensity(float3 worldPosition, float baseFogHeight)
 	float lowerCore = 1.0f - smoothstep(1500.0f * cloudHeightScale, 5200.0f * cloudHeightScale, abs(worldPosition.y - lowCenter));
 	float lowerSkirt = 1.0f - smoothstep(3400.0f * cloudHeightScale, 9800.0f * cloudHeightScale, abs(worldPosition.y - (localBase + 2800.0f * cloudHeightScale)));
 	float highBank = 1.0f - smoothstep(2800.0f * cloudHeightScale, 8700.0f * cloudHeightScale, abs(worldPosition.y - highCenter));
-	float bottomFade = smoothstep(localBase - 1200.0f * cloudHeightScale, localBase + 2400.0f * cloudHeightScale, worldPosition.y);
+	float regularBottomFade = smoothstep(localBase - 1200.0f * cloudHeightScale, localBase + 2400.0f * cloudHeightScale, worldPosition.y);
+	float skyBottomFade = smoothstep(localBase - 2600.0f * cloudHeightScale, localBase + 4200.0f * cloudHeightScale, worldPosition.y);
+	float bottomFade = lerp(regularBottomFade, skyBottomFade, saturate(skyPixel));
 	float topFeather = lerp(3200.0f, 6200.0f, topNoise) * cloudHeightScale;
 	float topFade = 1.0f - smoothstep(localTop - topFeather, localTop + topFeather * 0.85f, worldPosition.y);
 	float verticalBand = saturate(lowerCore * 1.14f + lowerSkirt * 0.40f + highBank * 0.50f) * bottomFade * topFade;
@@ -367,7 +369,7 @@ float4 ComputeWorldLowCloudVolumeWithSteps(float3 cameraWorld, float3 endWorld, 
     float transmittance = 1.0f;
     float3 scattering = 0.0f;
     float accumulatedAlpha = 0.0f;
-    const int CLOUD_FIELD_STEPS = 8;
+    const int CLOUD_FIELD_STEPS = 12;
     int activeCloudSteps = clamp(requestedCloudSteps, 1, CLOUD_FIELD_STEPS);
     float stepLength = usableDistance / max((float)activeCloudSteps, 1.0f);
 
@@ -382,16 +384,13 @@ float4 ComputeWorldLowCloudVolumeWithSteps(float3 cameraWorld, float3 endWorld, 
         float sampleDistance = startDistance + (i + 0.58f + stepJitter * 0.24f) * stepLength;
         float3 sampleWorld = cameraWorld + rayDir * sampleDistance;
         // Horizon fill
-        float horizonFillDistance = SmootherStep01(saturate(
-            (sampleDistance - 26000.0f * cloudDistanceScale)
-            / max(8000.0f, 36000.0f * cloudDistanceScale)));
         float3 cloudSampleWorld = sampleWorld;
         float distanceFade =
             smoothstep(nearCloudFadeStart, nearCloudFadeEnd, sampleDistance)
             * (1.0f - smoothstep(farCloudFadeStart, farCloudFadeEnd, sampleDistance));
 
         float density =
-            ComputeWorldLowCloudDensity(cloudSampleWorld, baseFogHeight)
+            ComputeWorldLowCloudDensity(cloudSampleWorld, baseFogHeight, skyPixel)
             * distanceFade
             * skyHorizonWeight
             * nightHorizonClearance;
