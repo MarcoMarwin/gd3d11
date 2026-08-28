@@ -1864,8 +1864,7 @@ XRESULT D3D11GraphicsEngine::RecreateBuffers() {
 
     OnResetBackBuffer();
 
-    // actual native-resolution backbuffer for UI and copy operations !!
-    Backbuffer = std::make_unique<RenderToTextureBuffer>( GetDevice().Get(), Resolution.x, Resolution.y, DXGI_FORMAT_ENGINE_SWAPCHAIN, nullptr, DXGI_FORMAT_UNKNOWN, DXGI_FORMAT_UNKNOWN, 1, 1,
+    Backbuffer = std::make_unique<RenderToTextureBuffer>( GetDevice().Get(), Resolution.x, Resolution.y, DXGI_FORMAT_R16G16B16A16_FLOAT, nullptr, DXGI_FORMAT_UNKNOWN, DXGI_FORMAT_UNKNOWN, 1, 1,
     D3D11_BIND_RENDER_TARGET | D3D11_BIND_SHADER_RESOURCE | (Device->GetFeatureLevel() >= D3D_FEATURE_LEVEL_11_0 ? D3D11_BIND_UNORDERED_ACCESS : 0) );
 
     m_SwapchainDepthStencilBuffer = std::make_unique<RenderToDepthStencilBuffer>(
@@ -2654,11 +2653,15 @@ XRESULT D3D11GraphicsEngine::Present() {
         GammaCorrectConstantBuffer gcb = {};
         gcb.G_Gamma = Engine::GAPI->GetGammaValue();
         gcb.G_Brightness = Engine::GAPI->GetBrightnessValue();
-        // Dither exactly once immediately before the final 8-bit presentation.
-        gcb.G_OutputDitherStrength = 1.0f / 255.0f;
+        gcb.G_OutputDitherStrength = aspectFitPresentation ? 0.0f : 1.0f / 255.0f;
         ActivePS->GetBuffer( "GammaCorrectConstantBuffer" ).Update( &gcb ).Bind();
 
+        BlueNoiseTexture->BindToPixelShader( 1 );
+
         PfxRenderer->CopyTextureToRTV( Backbuffer->GetShaderResView(), presentationRTV, {}, true );
+
+        ID3D11ShaderResourceView* nullOutputNoise = nullptr;
+        GetContext()->PSSetShaderResources( 1, 1, &nullOutputNoise );
 
         static int show_velocity = 0;
         if ( settings.DebugSettings.Velocity.DisplayVelocity || show_velocity == 2 ) {
@@ -2686,9 +2689,17 @@ XRESULT D3D11GraphicsEngine::Present() {
         UpdateRenderStates();
         const float black[4] = {};
         GetContext()->ClearRenderTargetView( BackbufferRTV.Get(), black );
+        auto outputDitherPS = ShaderManager->GetPShader( PShaderID::PS_PFX_OutputDither );
+        if ( !outputDitherPS ) {
+            return failPresent();
+        }
+        outputDitherPS->Apply();
+        BlueNoiseTexture->BindToPixelShader( 1 );
         PfxRenderer->CopyTextureToRTV(
             fittedPresentation->GetShaderResView(), BackbufferRTV,
-            presentContentSize, false, presentContentOffset );
+            presentContentSize, true, presentContentOffset );
+        ID3D11ShaderResourceView* nullOutputNoise = nullptr;
+        GetContext()->PSSetShaderResources( 1, 1, &nullOutputNoise );
         GetContext()->OMSetRenderTargets( 1, BackbufferRTV.GetAddressOf(), nullptr );
     }
 

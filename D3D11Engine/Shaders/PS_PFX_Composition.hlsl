@@ -59,10 +59,6 @@ Texture2D TX_GodRays : register( t1 );
 Texture2D TX_Depth : register( t2 );
 #endif
 
-// The texture is shared with the shadow system, but sampled here with an
-// independent phase so the fog never inherits a screen-space direction.
-Texture2D TX_FogBlueNoise : register( t3 );
-
 //--------------------------------------------------------------------------------------
 // HeightFog helpers (inlined from PS_PFX_Heightfog.hlsl)
 //--------------------------------------------------------------------------------------
@@ -93,17 +89,6 @@ fogInt *= ( abs( t ) > 0.0001 ? ( ( 1.0 - exp( -t ) ) / t ) : 1.0 );
 }
 return exp( -globalDensity * w * fogInt );
 }
-
-float GetFogBlueNoise( float2 pixelPosition )
-{
-    uint frame = (uint)max( AC_Time * 60.0f, 0.0f );
-    uint2 pixel = uint2( max( pixelPosition, 0.0f ) );
-    uint2 noiseCoord = (pixel + uint2( frame * 17u, frame * 29u )) & uint2( 511u, 511u );
-    float4 noiseSample = TX_FogBlueNoise.Load( int3( noiseCoord, 0 ) );
-    uint channel = frame & 3u;
-    return noiseSample[channel] * 2.0f - 1.0f;
-}
-
 
 float4 ComputeHeightFog( float2 texcoord )
 {
@@ -276,30 +261,10 @@ float rainVeil = max(rainFogOpacity, rainVeilBase) * activeWeatherFog;
             rainVeilColor,
             globalRainWinnerBlend);
 
-        // Break up low-resolution quantization only in the useful part of the
-        // night-fog gradient. The envelope is zero in clear and fully opaque
-        // fog, avoiding visible grain at either end of the blend.
-        float fogGradientMask = saturate(finalFogWeight * (1.0f - finalFogWeight) * 4.0f);
-        float fogDarknessMask = 1.0f - smoothstep(
-            0.32f,
-            0.78f,
-            dot(finalFogColor, float3(0.2126f, 0.7152f, 0.0722f)));
-        float fogNightMask = saturate(max(nightAtmosphereBlend, nightTimeBlend));
-        float fogDitherMask = fogGradientMask * fogDarknessMask * fogNightMask;
-        float fogDither = GetFogBlueNoise( Input.vPosition.xy )
-            * (1.0f / 255.0f)
-            * fogDitherMask;
-        finalFogWeight = saturate(finalFogWeight + fogDither);
-
         color.rgb = lerp(color.rgb, finalFogColor, finalFogWeight);
 
-        // Preserve existing geometry/rain mask values through MAX blending in
-        // the renderer. Composition is marked for FSR3, while only the
-        // temporally changing gradient receives a stronger reactive signal.
         fogCompositionMask = saturate(finalFogWeight);
-        fogReactiveMask = saturate(max(
-            fogCompositionMask * 0.20f,
-            fogDitherMask * 0.75f));
+        fogReactiveMask = fogCompositionMask * 0.20f;
     }
 #endif
 

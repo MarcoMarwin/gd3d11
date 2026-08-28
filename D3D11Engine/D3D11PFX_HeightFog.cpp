@@ -108,7 +108,6 @@ XRESULT D3D11PFX_HeightFog::Render( RenderToTextureBuffer* fxbuffer ) {
 
 	// Bind depthbuffer
 	engine->GetDepthBuffer()->BindToPixelShader( engine->GetContext().Get(), 1 );
-	engine->GetBlueNoiseTexture()->BindToPixelShader( 2 );
 
     engine->SetDefaultStates();
     Engine::GAPI->GetRendererState().RasterizerState.CullMode = GothicRasterizerStateInfo::CM_CULL_NONE;

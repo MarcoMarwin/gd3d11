@@ -493,7 +493,7 @@ float3 ApplyAtmosphericScatteringGround(float3 worldPosition, float3 in_color, b
 		
 	float innerRadius = AC_InnerRadius;
 				
-	const int iSamples = 1;
+	const int iSamples = 4;
 	const int fSamples = iSamples;
 				
 	// Get the ray from the camera to the vertex, and its length (which is the far point of the ray passing through the atmosphere)

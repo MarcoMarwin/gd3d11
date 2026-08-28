@@ -57,35 +57,44 @@ float4 SampleStableSkyLowClouds( float2 texcoord )
     TX_SkyLowClouds.GetDimensions( cloudWidth, cloudHeight );
     int2 cloudSize = max( int2( cloudWidth, cloudHeight ), int2( 1, 1 ) );
     float2 cloudPosition = texcoord * float2( cloudSize ) - 0.5f;
-    int2 baseCloudPixel = int2( floor( cloudPosition ) );
-    float2 cloudFraction = frac( cloudPosition );
+    int2 centerCloudPixel = int2( floor( cloudPosition + 0.5f ) );
     float4 filteredClouds = 0.0f;
+    float4 bestClouds = 0.0f;
     float totalWeight = 0.0f;
     [unroll]
-    for ( int y = 0; y < 2; ++y )
+    for ( int y = -1; y <= 1; ++y )
     {
         [unroll]
-        for ( int x = 0; x < 2; ++x )
+        for ( int x = -1; x <= 1; ++x )
         {
             int2 cloudPixel = clamp(
-                baseCloudPixel + int2( x, y ),
+                centerCloudPixel + int2( x, y ),
                 int2( 0, 0 ),
                 cloudSize - int2( 1, 1 ) );
-            float4 sampleClouds = TX_SkyLowClouds.Load( int3( cloudPixel, 0 ) );
+            float4 sampleClouds =
+                TX_SkyLowClouds.Load( int3( cloudPixel, 0 ) );
             if ( sampleClouds.a < 0.0f )
             {
                 continue;
             }
-            float spatialWeight =
-                (x == 0 ? 1.0f - cloudFraction.x : cloudFraction.x)
-                * (y == 0 ? 1.0f - cloudFraction.y : cloudFraction.y);
-            filteredClouds += sampleClouds * spatialWeight;
-            totalWeight += spatialWeight;
+            float2 spatialDelta = float2( cloudPixel ) - cloudPosition;
+            float spatialWeight = exp2(
+                -dot( spatialDelta, spatialDelta ) * 0.55f );
+            float alphaWeight = lerp(
+                0.35f, 0.85f, saturate( sampleClouds.a * 2.0f ) );
+            float weight = spatialWeight * alphaWeight;
+            filteredClouds += sampleClouds * weight;
+            totalWeight += weight;
+            if ( sampleClouds.a > bestClouds.a )
+            {
+                bestClouds = sampleClouds;
+            }
         }
     }
     if ( totalWeight > 0.00001f )
     {
-        return filteredClouds / totalWeight;
+        float4 averagedClouds = filteredClouds / totalWeight;
+        return lerp( averagedClouds, bestClouds, 0.20f );
     }
     return float4( 0.0f, 0.0f, 0.0f, 0.0f );
 }

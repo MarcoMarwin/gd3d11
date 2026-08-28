@@ -1234,16 +1234,14 @@ void ImGuiShim::RenderSettingsWindow()
         const std::string versionText = std::string( Tr( "D3D11 Version ", u8"D3D11-Version " ) ) + VERSION_NUMBER;
         const ImVec2 versionTextSize = ImGui::CalcTextSize( versionText.c_str() );
 
-        // The left F11 half consists of two equal header cells. Profile uses
-        // cell one and Language uses cell two, matching the two-quarter grid
-        // of the regular left-column controls.
         const float leftF11ColumnWidth = labelWidth + style.ItemSpacing.x + controlWidth;
         const float topHeaderGap = style.ItemSpacing.x;
         const float topHeaderBlockWidth =
             ( leftF11ColumnWidth - topHeaderGap ) * 0.5f;
-        const float topHeaderLabelWidth = 90.0f;
-        const float topHeaderControlWidth = std::max(
-            1.0f, topHeaderBlockWidth - topHeaderLabelWidth - topHeaderGap );
+        const float topHeaderFieldWidth = std::max(
+            1.0f, ( topHeaderBlockWidth - topHeaderGap ) * 0.5f );
+        const float topHeaderLabelWidth = topHeaderFieldWidth;
+        const float topHeaderControlWidth = topHeaderFieldWidth;
         const float topPresetLabelWidth = topHeaderLabelWidth;
         const float topPresetControlWidth = topHeaderControlWidth;
         const float topLanguageLabelWidth = topHeaderLabelWidth;
@@ -1383,8 +1381,6 @@ void ImGuiShim::RenderSettingsWindow()
             };
 
             ImGui::BeginDisabled( !settings.AdvancedPerformanceOptions );
-            ImGui::TextUnformatted( Tr( "Additional effects", u8"Zus\u00E4tzliche Effekte" ) );
-
             if ( beginAdvancedTable( "##AdvancedAdditionalEffects" ) ) {
             advancedRow( Tr( "Animate water", u8"Wasser animieren" ) );
             ImGui::Checkbox( "##AdvancedAnimateWater", &settings.AdvancedWaterAnimation );
@@ -1692,13 +1688,18 @@ void ImGuiShim::RenderSettingsWindow()
         ImGui::Separator();
 
         const float standardComboWidth = controlWidth;
-        // All right-column value controls start at the same x position.
         const float inlineToggleWidth = (buttonWidth.x - style.ItemSpacing.x) * 0.5f;
         const float inlineToggleLabelWidth = inlineToggleWidth - ImGui::GetFrameHeight() - style.ItemSpacing.x;
-        // Anti-aliasing has two compact controls before its resolution-scale
-        // control. Keep enough room for the full label and SMAA preview.
-        const float compactAAMethodWidth = 85.0f;
-        const float compactAALabelWidth = buttonWidth.x - compactAAMethodWidth - style.ItemSpacing.x;
+        const float compactAALabelTextWidth = ImGui::CalcTextSize(
+            Tr( "Anti-Aliasing", u8"Kantengl\u00E4ttung" ) ).x
+            + style.FramePadding.x * 2.0f + 2.0f;
+        const float compactAAStartGap = style.ItemSpacing.x;
+        const float compactAAMethodWidth = std::min(
+            100.0f,
+            std::max( 1.0f, buttonWidth.x - compactAAStartGap - compactAALabelTextWidth ) );
+        const float compactAALabelWidth =
+            buttonWidth.x - compactAAStartGap - compactAAMethodWidth;
+        const float compactAAScaleGap = style.ItemSpacing.x;
         const float compactAAValueWidth = standardComboWidth;
         
         {
@@ -1764,7 +1765,7 @@ void ImGuiShim::RenderSettingsWindow()
                 const bool wasFSRAntiAliasing = settings.AntiAliasingMode == GothicRendererSettings::E_AntiAliasingMode::AA_FSR3;
                 ImGui::PushStyleVar( ImGuiStyleVar_FramePadding, ImVec2( 1.0f, style.FramePadding.y ) );
                 ImText( Tr( "Anti-Aliasing", u8"Kantengl\u00E4ttung" ), ImVec2( compactAALabelWidth, buttonWidth.y ) );
-                ImGui::SameLine();
+                ImGui::SameLine( 0.0f, compactAAStartGap );
                 ImGui::SetNextItemWidth( compactAAMethodWidth );
                 if ( ImComboBoxCT( "##AntiAliasing", antiAliasing, &selectedMode, [&selectedMode, &settings, wasFSRAntiAliasing] {
                     const bool selectsFSRAntiAliasing = selectedMode == GothicRendererSettings::E_AntiAliasingMode::AA_FSR3;
@@ -1782,7 +1783,7 @@ void ImGuiShim::RenderSettingsWindow()
                 }
                 ImGui::SetItemTooltip( "%s", Tr( "Smooths jagged edges.", u8"Gl\u00E4ttet Treppenkanten." ) );
                 ImGui::PopStyleVar();
-                ImGui::SameLine();
+                ImGui::SameLine( 0.0f, compactAAScaleGap );
                 ImGui::SetNextItemWidth( compactAAValueWidth );
                 if ( settings.Upscaler == GothicRendererSettings::UPSCALER_FSR_3 ) {
                     settings.ResolutionScalePercent = std::clamp( settings.ResolutionScalePercent, 33, 100 );

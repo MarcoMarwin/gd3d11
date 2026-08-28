@@ -95,6 +95,7 @@ enum class PShaderID : size_t {
     PS_Preview_TexturedLit,
     PS_PFX_Sharpen,
     PS_PFX_GammaCorrectInv,
+    PS_PFX_OutputDither,
     PS_PFX_DoF_FocusResolve,
     PS_PFX_DoF,
     PS_PFX_DoF_Gauss,

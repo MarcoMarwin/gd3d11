@@ -7,6 +7,7 @@
 //--------------------------------------------------------------------------------------
 SamplerState SS_Linear : register( s0 );
 Texture2D	TX_Texture0 : register( t0 );
+Texture2D	TX_OutputBlueNoise : register( t1 );
 
 cbuffer GammaCorrectConstantBuffer : register( b0 )
 {
@@ -31,14 +32,9 @@ struct PS_INPUT
 //--------------------------------------------------------------------------------------
 float FinalOutputDither(uint2 pixelPosition)
 {
-	// Stable integer hash: no directional gradient and no repeating 512px texture tile.
-	uint hash = pixelPosition.x * 0x1f123bb5u + pixelPosition.y * 0x5f356495u + 0x9e3779b9u;
-	hash ^= hash >> 15;
-	hash *= 0x2c1b3c6du;
-	hash ^= hash >> 12;
-	hash *= 0x297a2d39u;
-	hash ^= hash >> 15;
-	return float(hash & 0x00ffffffu) / 16777216.0f - 0.5f;
+	uint2 noiseCoord = pixelPosition & uint2( 511u, 511u );
+	float noise = TX_OutputBlueNoise.Load( int3( noiseCoord, 0 ) ).r;
+	return noise * 2.0f - 1.0f;
 }
 
 float4 PSMain( PS_INPUT Input ) : SV_TARGET

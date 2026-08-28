@@ -492,12 +492,10 @@ compositionPS->GetBuffer( "PFXBuffer" ).Update( &cb ).Bind();
     };
     context->OMSetRenderTargets( writeFsr3Masks ? 3u : 1u, rtvs, nullptr );
 
-    // Bind SRVs: t0=backbuffer, t1=GodRays, t2=Depth, t3=BlueNoise.
-    ID3D11ShaderResourceView* srvs[4] = {
-        backbufferSRV, godraysSRV, depthSRV, nullptr
+    ID3D11ShaderResourceView* srvs[3] = {
+        backbufferSRV, godraysSRV, depthSRV
     };
-    context->PSSetShaderResources( 0, 4, srvs );
-    engine->GetBlueNoiseTexture()->BindToPixelShader( 3 );
+    context->PSSetShaderResources( 0, 3, srvs );
 
     // No blending - direct overwrite
     Engine::GAPI->GetRendererState().BlendState.SetDefault();
@@ -529,8 +527,8 @@ compositionPS->GetBuffer( "PFXBuffer" ).Update( &cb ).Bind();
     context->OMSetRenderTargets( 1, &outputRTV, nullptr );
 
     // Unbind SRVs
-    ID3D11ShaderResourceView* nullSRVs[4] = {};
-    context->PSSetShaderResources( 0, 4, nullSRVs );
+    ID3D11ShaderResourceView* nullSRVs[3] = {};
+    context->PSSetShaderResources( 0, 3, nullSRVs );
 
     // Restore default states
     Engine::GAPI->GetRendererState().DepthState.DepthBufferCompareFunc =
@@ -890,7 +888,7 @@ TextureHandle D3D11PfxRenderer::GetBackbufferTempBuffer()
     D3D11GraphicsEngine* engine = reinterpret_cast<D3D11GraphicsEngine*>(Engine::GraphicsEngine);
     auto res = engine->GetBackbufferResolution();
 
-    return m_texturePool->Acquire( TexturePool::Description{ res.x, res.y, DXGI_FORMAT_ENGINE_SWAPCHAIN  } );
+    return m_texturePool->Acquire( TexturePool::Description{ res.x, res.y, DXGI_FORMAT_R16G16B16A16_FLOAT } );
 }
 
 TextureHandle D3D11PfxRenderer::GetTempBufferDS4()

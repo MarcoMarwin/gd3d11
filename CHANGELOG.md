@@ -1,4 +1,7 @@
 ﻿## Build 220
+- Korrekturpush: Globales Blue-Noise-Dithering & Wolken-Upsampling (Build 220)
+  - **Global Output Dithering:** Das gestern eingeführte Fog-Dithering wurde wieder aus den Nebel-Shadern entfernt. Stattdessen erhält nun der finale Gamma-Correction-Pass ein sauberes, texturbasiertes Blue-Noise-Dithering (TX_OutputBlueNoise), welches den alten rechenintensiven Hash-Ansatz ersetzt und Color-Banding global für das gesamte Bild verhindert.
+  - **Wolken-Upsampling:** Der Upsampling-Filter für Wolken (Low Cloud Composite) wurde von einer simplen bilinearen Interpolation auf einen 3x3-Kernel umgestellt. Die neuen räumlichen und alpha-basierten Gewichte erhalten die Struktur der Wolken besser und reduzieren Kantenflimmern.
 - Korrekturpush: Nebel-Dithering & FSR3 Reactive Masks (Build 220)
   - **Fog Dithering:** Der volumetrische Nebel (Height Fog / Atmospheric Scattering) nutzt jetzt zeitliches Blue-Noise-Dithering (TX_FogBlueNoise), um hässliches Color-Banding in dunklen Nachtnebel-Verläufen aufzubrechen.
   - **FSR3 Reactive Masks:** Der Scattering-Pass rendert nun zusätzlich eine ogCompositionMask und ogReactiveMask heraus (SV_TARGET1 & 2), um dem FSR3-Upscaler ein stärkeres Signal für transparente Nebeländerungen zu geben und Ghosting zu minimieren.
@@ -1110,6 +1113,7 @@ ightAmbientColor * 0.035f * worldAO) erhalten, um zu verhindern, dass Indoor-Mat
 - Korrekturpush: Software-PCF f�r PointLight-Schatten in Build 208. Da die Cubemaps ohnehin lineare radiale Tiefenwerte speichern, wurde das Hardware-PCF (SampleCmpLevelZero) durch einen manuellen Software-PCF Ansatz �ber einen linearen Sampler (SampleLevel) und smoothstep ersetzt. Das verhindert effektiv, dass sehr weite Shadow-Softness-Kernels die bin�ren PCF-Coverage-Level sichtbar freilegen (Banding-Artefakte). Dementsprechend wurden die Sampler in Tiled-Shading, Forward-Plus und DynShadow auf SS_Linear umgebogen.
 - Korrekturpush: Hardware-PCF Comeback und Adaptive Shadow-Taps in Build 208. Das Software-PCF-Experiment wurde verworfen und auf Hardware-PCF (SampleCmpLevelZero) zur�ckgerollt. Stattdessen wurde nun ein adaptives Distance-LOD f�r die Pointlight-Schatten eingebaut (eceiverCameraDistance): Ab einer Softness > 0.75 interpolieren im Nahbereich (< 5m und < 2m) dynamisch bis zu 8 zus�tzliche, dichte Filter-Taps stufenlos hinzu. Dadurch bleibt das Shadow-Sampling in der Ferne bei performanten 8 Taps, w�hrend Kanten im Nahbereich butterweich verschmelzen und Banding verstecken. Die Sampler wurden entsprechend wieder auf SS_Comp zur�ckgesetzt.
 - Regul�rer Push: Abschlie�ende Optimierungen in Build 208. Das adaptive Shadow-LOD wurde verworfen und stattdessen durch eine massive Hardware-Beschleunigung ersetzt: F�r extrem weiche Pointlight-Schatten (shadowSoftness > 0.75) nutzt die Engine nun die GatherCmp-Instruktion. Damit werden mit nur 4 Texture-Fetches gleich 16 Tiefenwerte gesampelt (Hardware-PCF x4 pro Fetch). So erhalten weite Pointlight-Schatten nun butterweiche 16 Taps zum Preis von 4, ohne jegliche Distanz-Zonen oder komplexes LOD-Management!
+
 
 
 

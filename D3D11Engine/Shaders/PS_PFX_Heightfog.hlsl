@@ -36,8 +36,6 @@ SamplerState SS_Linear : register( s0 );
 SamplerState SS_samMirror : register( s1 );
 Texture2D	TX_Texture0 : register( t0 );
 Texture2D	TX_Depth : register( t1 );
-Texture2D	TX_FogBlueNoise : register( t2 );
-
 float3 VSPositionFromDepth(float depth, float2 vTexCoord)
 {
 	return ReconstructVSPositionFromDepthReverseZInfinite( depth, vTexCoord, HF_ProjParams.xy );
@@ -63,16 +61,6 @@ float t = heightFalloff * cameraToWorldPos.y * w;
 fogInt *= (abs( t ) > 0.0001 ? ( ( 1.0 - exp( -t ) ) / t ) : 1.0);
 }
 return exp( -globalDensity * w * fogInt );
-}
-
-float GetFogBlueNoise( float2 pixelPosition )
-{
-    uint frame = (uint)max( AC_Time * 60.0f, 0.0f );
-    uint2 pixel = uint2( max( pixelPosition, 0.0f ) );
-    uint2 noiseCoord = (pixel + uint2( frame * 17u, frame * 29u )) & uint2( 511u, 511u );
-    float4 noiseSample = TX_FogBlueNoise.Load( int3( noiseCoord, 0 ) );
-    uint channel = frame & 3u;
-    return noiseSample[channel] * 2.0f - 1.0f;
 }
 
 //--------------------------------------------------------------------------------------
@@ -214,16 +202,5 @@ float4 PSMain( PS_INPUT Input ) : SV_TARGET
 		rainVeilColor,
 		globalRainWinnerBlend);
 
-	// Keep the fallback fog consistent with the normal composition path. The
-	// neutral blue-noise offset is limited to dark, partially transparent night
-	// gradients so it cannot become visible grain in clear or opaque fog.
-	float fogGradientMask = saturate(finalFogOpacity * (1.0f - finalFogOpacity) * 4.0f);
-	float fogDarknessMask = 1.0f - smoothstep(
-		0.32f,
-		0.78f,
-		dot(finalFogColor, float3(0.2126f, 0.7152f, 0.0722f)));
-	float fogDitherMask = fogGradientMask * fogDarknessMask * saturate(nightTimeBlend);
-	finalFogOpacity = saturate(finalFogOpacity + GetFogBlueNoise(Input.vPosition.xy)
-		* (1.0f / 255.0f) * fogDitherMask);
 	return float4(finalFogColor, finalFogOpacity);
 }
