@@ -148,6 +148,13 @@ public:
             gapi->OnLoadWorld( fileName.ToChar(), loadMode, thisptr );
         }
         HookedFunctions::OriginalFunctions.original_zCWorldLoadWorld( thisptr, fileName, loadMode );
+        if ( gapi && !Engine::IsShuttingDown() && gapi->IsWorldTransitionActive() ) {
+            auto* worldInfo = gapi->GetLoadedWorldInfo();
+            if ( worldInfo ) {
+                worldInfo->MainWorld = thisptr;
+            }
+            gapi->OnWorldLoaded( thisptr );
+        }
     }
 
     static void __fastcall hooked_VobAddedToWorld( zCWorld* thisptr, void* unknwn, zCVob* vob ) {

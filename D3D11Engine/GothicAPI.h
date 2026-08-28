@@ -290,7 +290,7 @@ public:
     bool OnGeometryLoaded( zCBspTree* tree, zCWorld* sourceWorld = nullptr );
 
     /** Called when the game is done loading the world */
-    void OnWorldLoaded();
+    void OnWorldLoaded( zCWorld* world = nullptr );
 
     /** Loads optional per-mod and per-world environment settings. */
     void LoadRendererWorldSettings( GothicRendererSettings& s );
@@ -937,7 +937,6 @@ private:
     uint64_t FinalizedGeometryGeneration = static_cast<uint64_t>( -1 );
     zCBspTree* FinalizedGeometryTree = nullptr;
     zCWorld* LoadingWorld = nullptr;
-    bool GeometryLoadObserved = false;
     std::recursive_mutex WorldTransitionMutex;
     std::recursive_mutex ResetVobsMutex;
     gtl::flat_hash_map<zCVob*, SkeletalVobInfo*> SkeletalVobMap;

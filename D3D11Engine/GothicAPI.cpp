@@ -1729,8 +1729,6 @@ bool GothicAPI::OnGeometryLoaded( zCBspTree* tree, zCWorld* sourceWorld ) {
         LogWarn() << "World geometry load ignored while another world finalization is active.";
         return false;
     }
-    GeometryLoadObserved = true;
-
     WorldTransition.store( WorldTransitionState::Finalizing, std::memory_order_release );
     WorldRenderCacheReady.store( false, std::memory_order_release );
     LoadedWorldInfo->MainWorld = nullptr;
@@ -1771,7 +1769,6 @@ void GothicAPI::OnLoadWorld( const std::string& levelName, int loadMode, zCWorld
     FinalizedGeometryGeneration = static_cast<uint64_t>( -1 );
     FinalizedGeometryTree = nullptr;
     LoadingWorld = world;
-    GeometryLoadObserved = false;
     WorldRenderCacheReady.store( false, std::memory_order_release );
     if ( !LoadedWorldInfo ) {
         LogError() << "World load skipped because renderer world state is unavailable.";
@@ -1824,14 +1821,14 @@ void GothicAPI::OnLoadWorld( const std::string& levelName, int loadMode, zCWorld
 }
 
 /** Called when the game is done loading the world */
-void GothicAPI::OnWorldLoaded() {
+void GothicAPI::OnWorldLoaded( zCWorld* world ) {
     std::lock_guard<std::recursive_mutex> transitionLock( WorldTransitionMutex );
     if ( Engine::IsShuttingDown() ) {
         return;
     }
 
     oCGame* game = oCGame::GetGame();
-    zCWorld* loadedWorld = game ? game->_zCSession_world : nullptr;
+    zCWorld* loadedWorld = world ? world : (game ? game->_zCSession_world : nullptr);
     zCBspTree* loadedTree = loadedWorld ? loadedWorld->GetBspTree() : nullptr;
     if ( !LoadedWorldInfo || !loadedWorld || !loadedTree ) {
         LogError() << "World finalization skipped because required world data is unavailable.";
@@ -1844,12 +1841,6 @@ void GothicAPI::OnWorldLoaded() {
 
     if ( FinalizedGeometryTree != loadedTree
         || FinalizedGeometryGeneration != WorldLoadGeneration ) {
-        if ( !GeometryLoadObserved ) {
-            LoadedWorldInfo->MainWorld = nullptr;
-            WorldRenderCacheReady.store( false, std::memory_order_release );
-            LogError() << "World finalization skipped because no successful BSP load was observed.";
-            return;
-        }
         if ( !OnGeometryLoaded( loadedTree, loadedWorld ) ) {
             return;
         }
