@@ -293,7 +293,7 @@ namespace
         if ( !Engine::GAPI ) {
             return false;
         }
-        if ( Engine::GAPI->IsWorldTransitionActive() || !Engine::GAPI->IsWorldRenderCacheReady() ) {
+        if ( !Engine::GAPI->IsWorldRenderCacheReady() ) {
             return false;
         }
         const WorldInfo* loadedWorld = Engine::GAPI->GetLoadedWorldInfo();
@@ -730,7 +730,6 @@ void D3D11GraphicsEngine::EnsureFrameVobVisibilityCollected() {
 
     const WorldInfo* loadedWorld = Engine::GAPI->GetLoadedWorldInfo();
     if ( !loadedWorld || !loadedWorld->BspTree
-        || Engine::GAPI->IsWorldTransitionActive()
         || !Engine::GAPI->IsWorldRenderCacheReady() ) {
         // Wait until the world cache is published.
         return;
@@ -864,8 +863,7 @@ unsigned int D3D11GraphicsEngine::UpdateAndBindWindowCutouts( bool daylightPass 
     // Loading and menu frames may render after Gothic has published a BSP
     // pointer but before BuildBspVobMapCache has completed. Never inspect or
     // retain window VOB pointers during that interval.
-    if ( !Engine::GAPI || Engine::GAPI->IsWorldTransitionActive()
-        || !Engine::GAPI->IsWorldRenderCacheReady() ) {
+    if ( !Engine::GAPI || !Engine::GAPI->IsWorldRenderCacheReady() ) {
         UnbindWindowCutouts();
         return 0;
     }
@@ -5109,32 +5107,6 @@ bool D3D11GraphicsEngine::GetVegetationCardCullDraw( MeshInfo* mesh,
     return true;
 }
 
-void D3D11GraphicsEngine::InvalidateWorldRenderCaches() {
-    m_FrameGeometryCache.Reset();
-    m_CollectedCameraVobs.clear();
-    m_CollectedCameraMobs.clear();
-    m_CollectedVobWorldGeneration = static_cast<uint64_t>( -1 );
-    WindowCutoutVolumeCache.clear();
-    WindowCutoutCacheGeneration = static_cast<uint64_t>( -1 );
-
-    FrameShadowUpdateLights.clear();
-    m_FrameLights.clear();
-    FrameWaterSurfaces.clear();
-    FrameTransparencyMeshes.clear();
-    FrameTransparencyMeshesPortal.clear();
-    RenderedVobs.clear();
-    m_AlphaMeshes.clear();
-    m_WindowAlphaMeshes.clear();
-    m_WindMetadataStaging.clear();
-    BoneTransformCache.clear();
-    MulQuadMarks.clear();
-    ResetFrameTransientBufferPools();
-
-    if ( ShadowMaps ) {
-        ShadowMaps->InvalidateWorldCaches();
-    }
-}
-
 /** Called when we started to render the world */
 XRESULT D3D11GraphicsEngine::OnStartWorldRendering() {
     TracyD3D11ZoneCGX( "D3D11GraphicsEngine::OnStartWorldRendering");
@@ -5156,7 +5128,6 @@ XRESULT D3D11GraphicsEngine::OnStartWorldRendering() {
 
     const auto* loadedWorldInfo = Engine::GAPI->GetLoadedWorldInfo();
     if ( !loadedWorldInfo || !loadedWorldInfo->MainWorld || !loadedWorldInfo->BspTree
-        || Engine::GAPI->IsWorldTransitionActive()
         || !Engine::GAPI->IsWorldRenderCacheReady() ) {
         PresentPending = false;
         return XR_FAILED;
@@ -7176,14 +7147,6 @@ void XM_CALLCONV D3D11GraphicsEngine::DrawWorldAround(
     std::vector<std::pair<MeshKey, MeshInfo*>>* worldMeshCache,
     unsigned int casterMask ) {
 
-    if ( Engine::IsShuttingDown() || !Engine::GAPI
-        || Engine::GAPI->IsWorldTransitionActive()
-        || !Engine::GAPI->IsWorldRenderCacheReady()
-        || !Engine::GAPI->GetLoadedWorldInfo()
-        || !Engine::GAPI->GetLoadedWorldInfo()->BspTree ) {
-        return;
-    }
-
     // Setup renderstates
     Engine::GAPI->GetRendererState().RasterizerState.SetDefault();
     Engine::GAPI->GetRendererState().RasterizerState.CullMode =
@@ -7551,14 +7514,6 @@ void XM_CALLCONV D3D11GraphicsEngine::DrawWorldAround_Layered(
     std::list<SkeletalVobInfo*>* renderedMobs,
     std::vector<std::pair<MeshKey, MeshInfo*>>* worldMeshCache,
     unsigned int casterMask ) {
-
-    if ( Engine::IsShuttingDown() || !Engine::GAPI
-        || Engine::GAPI->IsWorldTransitionActive()
-        || !Engine::GAPI->IsWorldRenderCacheReady()
-        || !Engine::GAPI->GetLoadedWorldInfo()
-        || !Engine::GAPI->GetLoadedWorldInfo()->BspTree ) {
-        return;
-    }
 
     // Setup renderstates
     Engine::GAPI->GetRendererState().RasterizerState.SetDefault();
@@ -8243,9 +8198,7 @@ void XM_CALLCONV D3D11GraphicsEngine::DrawWorldAroundForWorldShadow( FXMVECTOR p
     const RenderShadowmapsParams& params ) {
 
     if ( Engine::IsShuttingDown() || !Engine::GAPI || !Context || !InfiniteRangeConstantBuffer
-        || !DistortionTexture || Engine::GAPI->IsWorldTransitionActive()
-        || !Engine::GAPI->IsWorldRenderCacheReady()
-        || !Engine::GAPI->GetLoadedWorldInfo() || !Engine::GAPI->GetLoadedWorldInfo()->BspTree ) {
+        || !DistortionTexture ) {
         return;
     }
 

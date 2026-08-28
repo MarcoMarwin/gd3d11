@@ -1,4 +1,8 @@
 ﻿## Build 221
+- Korrekturpush: Rollback der World-Transition-Sperren (Build 221)
+  - **Rollback:** Sämtliche IsWorldTransitionActive()-Checks in den Raycast- und BSP-Hooks (zCBspTree) sowie die umgebaute OnWorldLoaded-Logik wurden wieder rückgängig gemacht. Die strengen Sperren haben offenbar zu kritischen Blockaden beim Weltwechsel oder Laden geführt.
+  - **Rollback:** Die strengen Bounds-Checks in der BSP-Traversierung (TryGetLOD0Polygons) wurden verworfen, da sie vermutlich legitime Geometrie abgewiesen haben. Es wird wieder das alte GetLOD0Polygons verwendet.
+  - **Status:** Die im ersten Push eingeführten Engine::IsShuttingDown()-Checks zur Stabilisierung des Game-Exits bleiben als einzige Änderung bestehen.
 - Korrekturpush: World-Load Hook Fixes (Build 221)
   - **World Finalization Fix:** Ein Bug im World-Transition-System aus dem vorherigen Commit wurde behoben. OnWorldLoaded wird nun garantiert am Ende von zCWorldLoadWorld mit dem korrekten World-Pointer aufgerufen. Zudem wurde die fehleranfällige GeometryLoadObserved-Sperre entfernt. Dadurch wird sichergestellt, dass geladene Welten den Renderer-Cache verlässlich reaktivieren und nicht im Transition-State festhängen.
 - Korrekturpush: Crash-Fixes für World-Transitions & Shutdown (Build 221)
@@ -1122,6 +1126,7 @@ ightAmbientColor * 0.035f * worldAO) erhalten, um zu verhindern, dass Indoor-Mat
 - Korrekturpush: Software-PCF f�r PointLight-Schatten in Build 208. Da die Cubemaps ohnehin lineare radiale Tiefenwerte speichern, wurde das Hardware-PCF (SampleCmpLevelZero) durch einen manuellen Software-PCF Ansatz �ber einen linearen Sampler (SampleLevel) und smoothstep ersetzt. Das verhindert effektiv, dass sehr weite Shadow-Softness-Kernels die bin�ren PCF-Coverage-Level sichtbar freilegen (Banding-Artefakte). Dementsprechend wurden die Sampler in Tiled-Shading, Forward-Plus und DynShadow auf SS_Linear umgebogen.
 - Korrekturpush: Hardware-PCF Comeback und Adaptive Shadow-Taps in Build 208. Das Software-PCF-Experiment wurde verworfen und auf Hardware-PCF (SampleCmpLevelZero) zur�ckgerollt. Stattdessen wurde nun ein adaptives Distance-LOD f�r die Pointlight-Schatten eingebaut (eceiverCameraDistance): Ab einer Softness > 0.75 interpolieren im Nahbereich (< 5m und < 2m) dynamisch bis zu 8 zus�tzliche, dichte Filter-Taps stufenlos hinzu. Dadurch bleibt das Shadow-Sampling in der Ferne bei performanten 8 Taps, w�hrend Kanten im Nahbereich butterweich verschmelzen und Banding verstecken. Die Sampler wurden entsprechend wieder auf SS_Comp zur�ckgesetzt.
 - Regul�rer Push: Abschlie�ende Optimierungen in Build 208. Das adaptive Shadow-LOD wurde verworfen und stattdessen durch eine massive Hardware-Beschleunigung ersetzt: F�r extrem weiche Pointlight-Schatten (shadowSoftness > 0.75) nutzt die Engine nun die GatherCmp-Instruktion. Damit werden mit nur 4 Texture-Fetches gleich 16 Tiefenwerte gesampelt (Hardware-PCF x4 pro Fetch). So erhalten weite Pointlight-Schatten nun butterweiche 16 Taps zum Preis von 4, ohne jegliche Distanz-Zonen oder komplexes LOD-Management!
+
 
 
 

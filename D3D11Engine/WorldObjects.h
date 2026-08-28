@@ -679,11 +679,7 @@ class zCBspTree;
 class zCWorld;
 struct WorldInfo {
     WorldInfo() {
-        MidPoint = XMFLOAT2( 0.0f, 0.0f );
-        LowestVertex = 0.0f;
-        HighestVertex = 0.0f;
         BspTree = nullptr;
-        MainWorld = nullptr;
         CustomWorldLoaded = false;
     }
     

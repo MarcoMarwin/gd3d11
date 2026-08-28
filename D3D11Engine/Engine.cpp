@@ -10,6 +10,10 @@ namespace Engine {
 
     /** Refresh worker threadpool */
     void RefreshWorkerThreadpool() {
+        if ( IsShuttingDown() ) {
+            return;
+        }
+
         // Keep the pool instance and drain its queue before reusing it.
         if ( !WorkerThreadPool ) {
             WorkerThreadPool = new ThreadPool(L"GD3D11-Worker");

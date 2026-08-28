@@ -8,10 +8,6 @@ GInventory::GInventory() {}
 
 GInventory::~GInventory() {}
 
-void GInventory::Clear() {
-    InventoryVobs.clear();
-}
-
 /** Called when a VOB got added to the BSP-Tree or the world */
 void GInventory::OnAddVob( VobInfo* vob, zCWorld* world ) {
     auto it = InventoryVobs.find( world );

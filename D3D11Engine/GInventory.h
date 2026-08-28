@@ -17,8 +17,6 @@ public:
     /** Draws the inventory for the given world */
     void DrawInventory( zCWorld* world, zCCamera& camera );
 
-    void Clear();
-
 private:
     std::map<zCWorld*, std::unique_ptr<VobInfo>> InventoryVobs;
 };

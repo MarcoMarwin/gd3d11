@@ -432,8 +432,6 @@ public:
 
     D3D11ShadowMap* GetShadowMaps() const { return ShadowMaps.get(); }
 
-    void InvalidateWorldRenderCaches();
-
     void SetFrameNeedsJitter() { m_FrameNeedsJitter = true; }
 
     void StoreVobPreviousTransforms();

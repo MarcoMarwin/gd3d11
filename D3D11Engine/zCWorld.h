@@ -145,15 +145,14 @@ public:
         ZoneScoped;
         GothicAPI* gapi = Engine::GAPI;
         if ( gapi && !Engine::IsShuttingDown() ) {
-            gapi->OnLoadWorld( fileName.ToChar(), loadMode, thisptr );
+            gapi->OnLoadWorld( fileName.ToChar(), loadMode );
         }
         HookedFunctions::OriginalFunctions.original_zCWorldLoadWorld( thisptr, fileName, loadMode );
-        if ( gapi && !Engine::IsShuttingDown() && gapi->IsWorldTransitionActive() ) {
+        if ( gapi && !Engine::IsShuttingDown() ) {
             auto* worldInfo = gapi->GetLoadedWorldInfo();
             if ( worldInfo ) {
                 worldInfo->MainWorld = thisptr;
             }
-            gapi->OnWorldLoaded( thisptr );
         }
     }
 
@@ -182,7 +181,8 @@ public:
         Engine::RefreshWorkerThreadpool();
 
         LogInfo() << "Loading world!";
-        gapi->OnGeometryLoaded( thisptr->GetBspTree(), thisptr );
+        gapi->GetLoadedWorldInfo()->MainWorld = thisptr;
+        gapi->OnGeometryLoaded( thisptr->GetBspTree() );
     }
 
     static void __fastcall hooked_zCWorldGenerateStaticWorldLighting( zCWorld* thisptr, void* unknwn, int& a2, void* a3 ) {
@@ -196,7 +196,8 @@ public:
         Engine::RefreshWorkerThreadpool();
 
         LogInfo() << "Loading world!";
-        gapi->OnGeometryLoaded( thisptr->GetBspTree(), thisptr );
+        gapi->GetLoadedWorldInfo()->MainWorld = thisptr;
+        gapi->OnGeometryLoaded( thisptr->GetBspTree() );
     }
 #endif
 
@@ -225,7 +226,6 @@ public:
 
         // Ignore stale renderer caches while the world is loading or disposing.
         if ( Engine::IsShuttingDown() || !gapi || !worldInfo || !worldInfo->MainWorld
-            || gapi->IsWorldTransitionActive()
             || !gapi->IsWorldRenderCacheReady() ) {
             HookedFunctions::OriginalFunctions.original_zCWorldRender( thisptr, camera );
             return;
