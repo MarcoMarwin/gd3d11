@@ -1637,7 +1637,8 @@ void ImGuiShim::RenderSettingsWindow()
         const float standardComboWidth = controlWidth;
         const float inlineToggleWidth = (buttonWidth.x - style.ItemSpacing.x) * 0.5f;
         const float inlineToggleLabelWidth = inlineToggleWidth - ImGui::GetFrameHeight() - style.ItemSpacing.x;
-        const float compactAALabelTextWidth = ImGui::CalcTextSize( u8"Kantengl\u00E4ttung" ).x
+        const float compactAALabelTextWidth = ImGui::CalcTextSize(
+            reinterpret_cast<const char*>( u8"Kantengl\u00E4ttung" ) ).x
             + style.FramePadding.x * 2.0f + 2.0f;
         const float compactAAStartGap = style.ItemSpacing.x;
         const float compactAAMethodWidth = std::min(
