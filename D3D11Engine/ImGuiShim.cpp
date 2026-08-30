@@ -1170,12 +1170,16 @@ void ImGuiShim::RenderSettingsWindow()
         const ImVec2 versionTextSize = ImGui::CalcTextSize( versionText.c_str() );
 
         const float topHeaderGap = style.ItemSpacing.x;
-        const float topHeaderFieldWidth = std::max(
-            1.0f, std::round( labelWidth * 0.5f ) );
-        ImText( Tr( "Preset", u8"Profil" ), ImVec2( topHeaderFieldWidth, 0.0f ) );
+        // The spacing belongs to each pair as well: label + gap + combo must
+        // occupy exactly the corresponding normal field width underneath.
+        const float profileHeaderFieldWidth = std::max(
+            1.0f, ( labelWidth - topHeaderGap ) * 0.5f );
+        const float languageHeaderFieldWidth = std::max(
+            1.0f, ( controlWidth - topHeaderGap ) * 0.5f );
+        ImText( Tr( "Preset", u8"Profil" ), ImVec2( profileHeaderFieldWidth, 0.0f ) );
         ImGui::SameLine( 0.0f, topHeaderGap );
 
-        ImGui::SetNextItemWidth( topHeaderFieldWidth );
+        ImGui::SetNextItemWidth( profileHeaderFieldWidth );
         if ( ImGui::BeginCombo( "##GraphicsPreset", graphicsPresetPreview ) ) {
             for ( const auto& preset : graphicsPresets ) {
                 const bool isSelected = static_cast<int>(settings.GraphicsPreset) == preset.second;
@@ -1195,9 +1199,9 @@ void ImGuiShim::RenderSettingsWindow()
             u8"Wendet ein Grafikprofil an und stellt dessen erweiterte Werte wieder her." ) );
 
         ImGui::SameLine( 0.0f, topHeaderGap );
-        ImText( Tr( "Language", u8"Sprache" ), ImVec2( topHeaderFieldWidth, 0.0f ) );
+        ImText( Tr( "Language", u8"Sprache" ), ImVec2( languageHeaderFieldWidth, 0.0f ) );
         ImGui::SameLine( 0.0f, topHeaderGap );
-        ImGui::SetNextItemWidth( topHeaderFieldWidth );
+        ImGui::SetNextItemWidth( languageHeaderFieldWidth );
         const char* languagePreview = settings.D3D11Language == GothicRendererSettings::D3D11_LANGUAGE_GERMAN
             ? "Deutsch"
             : "English";
@@ -1565,7 +1569,7 @@ void ImGuiShim::RenderSettingsWindow()
 
             if ( ImGui::BeginChild( "##AdvancedXeGTAOSection", ImVec2( 0.0f, 0.0f ),
                 ImGuiChildFlags_Borders | ImGuiChildFlags_FrameStyle | ImGuiChildFlags_AutoResizeY ) ) {
-            ImGui::SeparatorText( Tr( "XeGTAO tuning", u8"XeGTAO-Feineinstellungen" ) );
+            ImGui::SeparatorText( Tr( "Ambient Occlusion tuning", u8"Feineinstellungen f\u00FCr Umgebungsverdeckung" ) );
 
             const bool xegtaoAvailable = !FeatureLevel10Compatibility
                 && settings.AoMode == AOMode::AO_XEGTAO;
@@ -1605,8 +1609,8 @@ void ImGuiShim::RenderSettingsWindow()
             advancedRow( Tr( "AO radius", u8"AO-Reichweite" ) );
             ImGui::SliderFloat( "##AdvancedXeGTAORadius", &settings.XegtaoSettings.Radius, 50.0f, 400.0f, "%.0f", ImGuiSliderFlags_AlwaysClamp );
             ImGui::SetItemTooltip( "%s", Tr(
-                "Sets how far XeGTAO searches for ambient occlusion.",
-                u8"Legt fest, wie weit XeGTAO nach Umgebungsverdeckung sucht." ) );
+                "Sets how far Ambient Occlusion searches for nearby shading.",
+                u8"Legt fest, wie weit die Umgebungsverdeckung nach nahen Kontaktstellen sucht." ) );
 
             ImGui::EndTable();
             }
@@ -1921,7 +1925,7 @@ void ImGuiShim::RenderSettingsWindow()
 
             const bool ambientOcclusionAvailable = !FeatureLevel10Compatibility;
             bool ambientOcclusionEnabled = ambientOcclusionAvailable && settings.AoMode == AOMode::AO_XEGTAO;
-            ImText( Tr( "XeGTAO", u8"XeGTAO" ), { buttonWidth.x - ImGui::GetFrameHeight() - style.ItemSpacing.x, buttonWidth.y } ); ImGui::SameLine();
+            ImText( Tr( "Ambient Occlusion", u8"Umgebungsverdeckung" ), { buttonWidth.x - ImGui::GetFrameHeight() - style.ItemSpacing.x, buttonWidth.y } ); ImGui::SameLine();
             ImGui::BeginDisabled( !ambientOcclusionAvailable );
             if ( CoupledStrengthCheckbox( "##Enable Ambient Occlusion", "AOStrength",
                     &ambientOcclusionEnabled, &settings.AOStrength, 1.0f ) ) {
@@ -1990,12 +1994,6 @@ void ImGuiShim::RenderSettingsWindow()
             settings.DoFBokehRadius = depthOfFieldStrength * 3.5f;
             ImGui::SetItemTooltip( "%s", Tr( "Adjusts the strength of depth-of-field blur.", u8"Passt die St\u00E4rke der Tiefenunsch\u00E4rfe an." ) );
 
-            ImText( Tr( "Rain Effects", u8"Regeneffekte" ), { buttonWidth.x - ImGui::GetFrameHeight() - style.ItemSpacing.x, buttonWidth.y } ); ImGui::SameLine();
-            ImGui::Checkbox( "##Enable Rain Effects", &settings.RainEffects );
-            ImGui::SetItemTooltip( "%s", Tr(
-                "Adds puddles and wet-ground reflections while it rains.",
-                u8"Erzeugt bei Regen P\u00FCtzen und Reflexionen auf nassem Boden." ) );
-
 #if defined(BUILD_GOTHIC_2_6_fix) || (defined(BUILD_GOTHIC_1_08k) && !defined(BUILD_1_12F))
 #if defined(BUILD_GOTHIC_1_08k) && !defined(BUILD_1_12F)
             if ( haveWindAnimations )
@@ -2022,6 +2020,12 @@ void ImGuiShim::RenderSettingsWindow()
 
             }
 #endif //BUILD_GOTHIC_2_6_fix
+
+            ImText( Tr( "Rain Effects", u8"Regeneffekte" ), { buttonWidth.x - ImGui::GetFrameHeight() - style.ItemSpacing.x, buttonWidth.y } ); ImGui::SameLine();
+            ImGui::Checkbox( "##Enable Rain Effects", &settings.RainEffects );
+            ImGui::SetItemTooltip( "%s", Tr(
+                "Adds puddles and wet-ground reflections while it rains.",
+                u8"Erzeugt bei Regen P\u00FCtzen und Reflexionen auf nassem Boden." ) );
 
             ImText( Tr( "Dynamic Clouds", u8"Dynamische Wolken" ), { buttonWidth.x - ImGui::GetFrameHeight() - style.ItemSpacing.x, buttonWidth.y } ); ImGui::SameLine();
             ImGui::Checkbox( "##Enable Dynamic Clouds", &settings.EnableDynamicClouds );
