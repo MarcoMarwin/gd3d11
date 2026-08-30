@@ -1053,9 +1053,7 @@ namespace
         s.EnableSSS = true;
         s.SSSIntensity = 1.0f;
         s.EnableParallaxOcclusionMapping = s.AllowNormalmaps;
-        s.HDRToneMapStrength = std::clamp( s.HDRToneMapStrength, 0.0f, 2.0f );
         // Disabled coupled controls must always display their true zero effect state.
-        if ( !s.EnableHDR ) s.HDRToneMapStrength = 0.0f;
         if ( s.AoMode == AOMode::AO_NONE ) s.AOStrength = 0.0f;
         s.NormalizeGodRayMode( FeatureLevel10Compatibility );
         if ( !s.EnableGodRays ) s.GodRayStrength = 0.0f;
@@ -1219,8 +1217,8 @@ void ImGuiShim::RenderSettingsWindow()
             ImGui::EndCombo();
         }
         ImGui::SetItemTooltip( "%s", Tr(
-            "Applies a preset. Resets Advanced settings.",
-            u8"Wendet ein Profil an. Setzt die erweiterten Einstellungen zur\u00FCck." ) );
+            "Applies a graphics profile and restores its Advanced values.",
+            u8"Wendet ein Grafikprofil an und stellt dessen erweiterte Werte wieder her." ) );
 
         ImGui::SameLine( 0.0f, topHeaderGap );
         ImText( Tr( "Language", u8"Sprache" ), ImVec2( topHeaderFieldWidth, 0.0f ) );
@@ -1246,7 +1244,7 @@ void ImGuiShim::RenderSettingsWindow()
             }
             ImGui::EndCombo();
         }
-        ImGui::SetItemTooltip( "%s", Tr( "Selects the language used by the D3D11 renderer.", u8"W\u00E4hlt die Sprache des D3D11-Renderers aus." ) );
+        ImGui::SetItemTooltip( "%s", Tr( "Sets the renderer language.", u8"Legt die Sprache des Renderers fest." ) );
         const char* advancedButtonText = Tr( "Advanced ...", u8"Erweitert ..." );
         const float advancedButtonWidth = 125.0f;
         const float languageComboEndX = ImGui::GetItemRectMax().x;
@@ -1263,8 +1261,8 @@ void ImGuiShim::RenderSettingsWindow()
             ImGui::OpenPopup( "##AdvancedPerformance" );
         }
         ImGui::SetItemTooltip( "%s", Tr(
-            "Opens Advanced settings.",
-            u8"\u00D6ffnet die erweiterten Einstellungen." ) );
+            "Opens additional graphics options.",
+            u8"\u00D6ffnet zus\u00E4tzliche Grafikeinstellungen." ) );
         const float advancedPopupMaxHeight = std::max( 320.0f, std::round( framebufferHeight * 0.5f ) );
         ImGui::SetNextWindowSizeConstraints(
             ImVec2( 440.0f, advancedPopupMaxHeight ),
@@ -1289,15 +1287,15 @@ void ImGuiShim::RenderSettingsWindow()
                     }
                 }
                 ImGui::SetItemTooltip( "%s", Tr(
-                    "Enables Advanced settings. Disabling it resets them.",
-                    u8"Aktiviert die erweiterten Einstellungen. Beim Deaktivieren werden sie zur\u00FCckgesetzt." ) );
+                    "Enables extra options; turning it off restores the profile values.",
+                    u8"Aktiviert Zusatzoptionen; beim Ausschalten gelten wieder die Profilwerte." ) );
                 ImGui::TableSetColumnIndex( 1 );
                 if ( ImGui::Button( "X", ImVec2( advancedPopupCloseButtonSize, 0.0f ) ) ) {
                     ImGui::CloseCurrentPopup();
                 }
                 ImGui::SetItemTooltip( "%s", Tr(
-                    "Closes Advanced settings.",
-                    u8"Schlie\u00DFt die erweiterten Einstellungen." ) );
+                    "Closes the Advanced menu.",
+                    u8"Schlie\u00DFt das Men\u00FC f\u00FCr erweiterte Einstellungen." ) );
                 ImGui::EndTable();
             }
             ImGui::Separator();
@@ -1332,8 +1330,8 @@ void ImGuiShim::RenderSettingsWindow()
             advancedRow( Tr( "Animate water", u8"Wasser animieren" ) );
             ImGui::Checkbox( "##AdvancedAnimateWater", &settings.AdvancedWaterAnimation );
             ImGui::SetItemTooltip( "%s", Tr(
-                "Controls ocean-water animation.",
-                u8"Steuert die Meerwasseranimation." ) );
+                "Animates large water surfaces.",
+                u8"Animiert gro\u00DFe Wasserfl\u00E4chen." ) );
 
             bool enhancedNightPresentation = settings.AdvancedNightEnhance;
             advancedRow( Tr( "Atmospheric night", u8"Atmosph\u00E4rische Nacht" ) );
@@ -1343,26 +1341,26 @@ void ImGuiShim::RenderSettingsWindow()
                 settings.AdvancedNightEnhance = enhancedNightPresentation;
             }
             ImGui::SetItemTooltip( "%s", Tr(
-                "Adds night fog and distant darkening.",
-                u8"F\u00FCgt Nachtnebel und entfernte Nachtdunkelung hinzu." ) );
+                "Adds haze and darker distance at night.",
+                u8"F\u00FCgt nachts Dunst und dunklere Ferne hinzu." ) );
 
             advancedRow( Tr( "Window transparency", u8"Fenstertransparenz" ) );
             ImGui::Checkbox( "##AdvancedCityWindowTransparency", &settings.AdvancedCityWindowTransparency );
             ImGui::SetItemTooltip( "%s", Tr(
-                "Renders city_windows transparently.",
-                u8"Rendert city_windows transparent." ) );
+                "Makes selected city windows transparent.",
+                u8"Macht ausgew\u00E4hlte Stadtfenster durchsichtig." ) );
 
             advancedRow( Tr( "Backlit vegetation", u8"Gegenlicht Vegetation" ) );
             ImGui::Checkbox( "##AdvancedBacklitVegetation", &settings.AdvancedBacklitVegetation );
             ImGui::SetItemTooltip( "%s", Tr(
-                "Controls vegetation backlighting.",
-                u8"Steuert das Vegetationsgegenlicht." ) );
+                "Highlights vegetation in backlight.",
+                u8"Betont Vegetation im Gegenlicht." ) );
 
-            advancedRow( Tr( "Vegetation push", u8"Vegetation schieben" ) );
+            advancedRow( Tr( "Vegetation interaction", u8"Vegetationsreaktion" ) );
             ImGui::Checkbox( "##AdvancedVegetationPush", &settings.HeroAffectsObjects );
             ImGui::SetItemTooltip( "%s", Tr(
-                "Moves nearby vegetation.",
-                u8"Verschiebt nahe Vegetation." ) );
+                "Makes nearby vegetation react to passing characters.",
+                u8"L\u00E4sst Pflanzen in der N\u00E4he auf vorbeigehende Figuren reagieren." ) );
 
             ImGui::EndTable();
             }
@@ -1379,8 +1377,8 @@ void ImGuiShim::RenderSettingsWindow()
                 settings.EnableShadows = csmShadowsEnabled;
             }
             ImGui::SetItemTooltip( "%s", Tr(
-                "Enables CSM shadows independently.",
-                u8"Aktiviert CSM-Schatten unabh\u00E4ngig." ) );
+                "Enables world shadows independently of pointlight shadows.",
+                u8"Aktiviert Weltschatten unabh\u00E4ngig von Punktlichtschatten." ) );
 
             ImGui::BeginDisabled( !csmShadowsEnabled );
 
@@ -1394,8 +1392,8 @@ void ImGuiShim::RenderSettingsWindow()
                 ImGui::EndCombo();
             }
             ImGui::SetItemTooltip( "%s", Tr(
-                "Sharper shadows; more VRAM.",
-                u8"Sch\u00E4rfere Schatten; mehr Videospeicher." ) );
+                "Higher resolution sharpens world shadows but uses more VRAM.",
+                u8"H\u00F6here Aufl\u00F6sung sch\u00E4rft Weltschatten, ben\u00F6tigt aber mehr Videospeicher." ) );
 
             const std::array<std::pair<const char*, GothicRendererSettings::E_ShadowKernelQuality>, 3> csmFilters = {{
                 { Tr( "4-tap PCF", u8"4-Tap-PCF" ), GothicRendererSettings::E_ShadowKernelQuality::SHADOW_KERNEL_PCF_LOW },
@@ -1407,8 +1405,8 @@ void ImGuiShim::RenderSettingsWindow()
                 ImGui::EndCombo();
             }
             ImGui::SetItemTooltip( "%s", Tr(
-                "Selects the shadow filter.",
-                u8"W\u00E4hlt den Schattenfilter." ) );
+                "Chooses how world-shadow edges are softened.",
+                u8"W\u00E4hlt, wie die Kanten von Weltschatten gegl\u00E4ttet werden." ) );
 
             const std::array<std::pair<const char*, int>, 4> csmCascadeOptions = {{
                 { Tr( "1 cascade", u8"1 Kaskade" ), 1 },
@@ -1422,15 +1420,15 @@ void ImGuiShim::RenderSettingsWindow()
                 ImGui::EndCombo();
             }
             ImGui::SetItemTooltip( "%s", Tr(
-                "More cascades: better distant detail.",
-                u8"Mehr Kaskaden: bessere Ferndetails." ) );
+                "More cascades preserve detail in distant shadows but cost GPU time.",
+                u8"Mehr Kaskaden erhalten Details in fernen Schatten, kosten aber GPU-Leistung." ) );
 
             settings.WorldShadowRangeScale = std::clamp( settings.WorldShadowRangeScale, 0.5f, 2.0f );
             advancedRow( Tr( "Range", u8"Reichweite" ) );
             ImGui::SliderFloat( "##AdvancedCSMShadowRange", &settings.WorldShadowRangeScale, 0.5f, 2.0f, "%.2fx", ImGuiSliderFlags_AlwaysClamp );
             ImGui::SetItemTooltip( "%s", Tr(
-                "Sets shadow range.",
-                u8"Legt die Schattenreichweite fest." ) );
+                "Sets how far world shadows remain visible.",
+                u8"Legt fest, wie weit Weltschatten sichtbar bleiben." ) );
 
             const int maxCsmCascades = std::min( 4, MAX_CSM_CASCADES );
             const std::array<std::pair<const char*, int>, 5> csmNearCascadeOptions = {{
@@ -1450,8 +1448,8 @@ void ImGuiShim::RenderSettingsWindow()
                 ImGui::EndCombo();
             }
             ImGui::SetItemTooltip( "%s", Tr(
-                "Higher-quality near-cascade filter.",
-                u8"H\u00F6herwertiger Filter f\u00FCr Nahkaskaden." ) );
+                "Sets how many near cascades use the higher-quality filter.",
+                u8"Legt fest, wie viele Nahkaskaden den hochwertigeren Filter verwenden." ) );
             ImGui::EndDisabled();
 
             advancedRow( Tr( "Softness", u8"Weichheit" ) );
@@ -1459,8 +1457,8 @@ void ImGuiShim::RenderSettingsWindow()
             std::snprintf( csmSoftnessText, sizeof( csmSoftnessText ), "%.1f", settings.ShadowSoftness );
             SliderNormalizedUiStrength( "##AdvancedCSMShadowSoftness", &settings.ShadowSoftness, false, csmSoftnessText );
             ImGui::SetItemTooltip( "%s", Tr(
-                "Controls CSM softness.",
-                u8"Steuert die CSM-Weichheit." ) );
+                "Softens world-shadow edges.",
+                u8"Macht die Kanten von Weltschatten weicher." ) );
 
             ImGui::EndDisabled();
 
@@ -1488,8 +1486,8 @@ void ImGuiShim::RenderSettingsWindow()
                 ImGui::EndCombo();
             }
             ImGui::SetItemTooltip( "%s", Tr(
-                "Selects pointlight shadow mode.",
-                u8"W\u00E4hlt den Pointlight-Schattenmodus." ) );
+                "Selects which point lights cast shadows.",
+                u8"Legt fest, welche Punktlichter Schatten werfen." ) );
 
             const bool pointlightShadowsEnabled = settings.EnablePointlightShadows
                 != GothicRendererSettings::EPointLightShadowMode::PLS_DISABLED;
@@ -1505,16 +1503,16 @@ void ImGuiShim::RenderSettingsWindow()
                 ImGui::EndCombo();
             }
             ImGui::SetItemTooltip( "%s", Tr(
-                "Selects the shadow filter.",
-                u8"W\u00E4hlt den Schattenfilter." ) );
+                "Chooses how pointlight-shadow edges are softened.",
+                u8"W\u00E4hlt, wie die Kanten von Punktlichtschatten gegl\u00E4ttet werden." ) );
 
             advancedRow( Tr( "Softness", u8"Weichheit" ) );
             char pointlightSoftnessText[16] = {};
             std::snprintf( pointlightSoftnessText, sizeof( pointlightSoftnessText ), "%.1f", settings.PointlightShadowSoftness );
             SliderNormalizedUiStrength( "##AdvancedPointlightShadowSoftness", &settings.PointlightShadowSoftness, false, pointlightSoftnessText );
             ImGui::SetItemTooltip( "%s", Tr(
-                "Controls pointlight softness.",
-                u8"Steuert die Pointlight-Weichheit." ) );
+                "Softens shadows cast by point lights.",
+                u8"Macht die Schatten von Punktlichtern weicher." ) );
 
             const std::array<std::pair<const char*, int>, 3> pointlightResolutions = {{
                 { "128", 128 }, { "256", 256 }, { "512", 512 },
@@ -1529,24 +1527,24 @@ void ImGuiShim::RenderSettingsWindow()
                 ImGui::EndCombo();
             }
             ImGui::SetItemTooltip( "%s", Tr(
-                "Sharper shadows; more memory.",
-                u8"Sch\u00E4rfere Schatten; mehr Speicher." ) );
+                "Higher resolution sharpens pointlight shadows but uses more memory.",
+                u8"H\u00F6here Aufl\u00F6sung sch\u00E4rft Punktlichtschatten, ben\u00F6tigt aber mehr Speicher." ) );
 
             const bool dynamicPointlightMode = settings.EnablePointlightShadows == GothicRendererSettings::EPointLightShadowMode::PLS_UPDATE_DYNAMIC;
             ImGui::BeginDisabled( !dynamicPointlightMode );
             advancedRow( Tr( "Animated figures", u8"Animierte Figuren" ) );
             ImGui::Checkbox( "##AdvancedAnimatedPointlightCasters", &settings.EnablePointlightDynamicCasters );
             ImGui::SetItemTooltip( "%s", Tr(
-                "Includes animated figures.",
-                u8"Bezieht animierte Figuren ein." ) );
+                "Includes moving characters in pointlight shadows.",
+                u8"Bezieht bewegte Figuren in Punktlichtschatten ein." ) );
             ImGui::EndDisabled();
 
             ImGui::BeginDisabled( !dynamicPointlightMode );
             advancedRow( Tr( "Distant updates", u8"Ferne Updates" ) );
             ImGui::Checkbox( "##AdvancedStaggerDistantShadows", &settings.PartialDynamicShadowUpdates );
             ImGui::SetItemTooltip( "%s", Tr(
-                "Staggers distant updates.",
-                u8"Staffelt ferne Updates." ) );
+                "Updates distant pointlight shadows less often to save GPU time.",
+                u8"Aktualisiert ferne Punktlichtschatten seltener, um GPU-Leistung zu sparen." ) );
             ImGui::EndDisabled();
 
             ImGui::BeginDisabled( !dynamicPointlightMode || !settings.PartialDynamicShadowUpdates );
@@ -1554,15 +1552,15 @@ void ImGuiShim::RenderSettingsWindow()
             advancedRow( Tr( "Distant interval", u8"Fernintervall" ) );
             ImGui::SliderInt( "##AdvancedPointlightUpdateInterval", &settings.PointlightShadowUpdateIntervalMs, 40, 500, "%d ms", ImGuiSliderFlags_AlwaysClamp );
             ImGui::SetItemTooltip( "%s", Tr(
-                "Minimum interval between updates.",
-                u8"Mindestintervall zwischen Updates." ) );
+                "Sets the minimum time between distant-shadow updates.",
+                u8"Legt den Mindestabstand zwischen Aktualisierungen ferner Schatten fest." ) );
 
             settings.PointlightShadowUpdateBudget = std::clamp( settings.PointlightShadowUpdateBudget, 1, 8 );
             advancedRow( Tr( "Updates per frame", u8"Updates pro Frame" ) );
             ImGui::SliderInt( "##AdvancedPointlightUpdateBudget", &settings.PointlightShadowUpdateBudget, 1, 8, "%d", ImGuiSliderFlags_AlwaysClamp );
             ImGui::SetItemTooltip( "%s", Tr(
-                "Maximum updates per frame.",
-                u8"Maximale Updates pro Frame." ) );
+                "Limits distant-shadow updates per frame.",
+                u8"Begrenzt Aktualisierungen ferner Schatten pro Bild." ) );
             ImGui::EndDisabled();
 
             ImGui::EndDisabled();
@@ -1593,8 +1591,8 @@ void ImGuiShim::RenderSettingsWindow()
                 ImGui::EndCombo();
             }
             ImGui::SetItemTooltip( "%s", Tr(
-                "Higher quality: more samples.",
-                u8"H\u00F6here Qualit\u00E4t: mehr Abtastungen." ) );
+                "Higher quality produces cleaner ambient occlusion but costs GPU time.",
+                u8"H\u00F6here Qualit\u00E4t erzeugt sauberere Umgebungsverdeckung, kostet aber GPU-Leistung." ) );
 
             const std::array<std::pair<const char*, int>, 3> xegtaoDenoiseOptions = {{
                 { Tr( "1 pass", u8"1 Durchlauf" ), 1 },
@@ -1607,15 +1605,15 @@ void ImGuiShim::RenderSettingsWindow()
                 ImGui::EndCombo();
             }
             ImGui::SetItemTooltip( "%s", Tr(
-                "More passes: smoother AO; more GPU time.",
-                u8"Mehr Durchl\u00E4ufe: weichere AO; mehr GPU-Zeit." ) );
+                "More passes reduce AO noise but cost GPU time.",
+                u8"Mehr Durchl\u00E4ufe verringern das AO-Rauschen, kosten aber GPU-Leistung." ) );
 
             settings.XegtaoSettings.Radius = std::clamp( settings.XegtaoSettings.Radius, 50.0f, 400.0f );
             advancedRow( Tr( "AO radius", u8"AO-Reichweite" ) );
             ImGui::SliderFloat( "##AdvancedXeGTAORadius", &settings.XegtaoSettings.Radius, 50.0f, 400.0f, "%.0f", ImGuiSliderFlags_AlwaysClamp );
             ImGui::SetItemTooltip( "%s", Tr(
-                "Sets AO radius.",
-                u8"Legt die AO-Reichweite fest." ) );
+                "Sets how far XeGTAO searches for ambient occlusion.",
+                u8"Legt fest, wie weit XeGTAO nach Umgebungsverdeckung sucht." ) );
 
             ImGui::EndTable();
             }
@@ -1674,10 +1672,10 @@ void ImGuiShim::RenderSettingsWindow()
                 }
                 ImGui::EndCombo();
             }
-            ImGui::SetItemTooltip( "%s", Tr( "Changes the game output size.", u8"\u00C4ndert die Ausgabeaufl\u00F6sung des Spiels." ) );
+            ImGui::SetItemTooltip( "%s", Tr( "Changes the game's output resolution.", u8"\u00C4ndert die Ausgabeaufl\u00F6sung des Spiels." ) );
 
-            ImText( Tr( "Display Mode", u8"Anzeigemodus" ), buttonWidth );
-            ImGui::SetItemTooltip( "%s", Tr( "Changes display mode after restart.", u8"\u00C4ndert den Anzeigemodus nach einem Neustart." ) );
+            ImText( Tr( "Display Mode *", u8"Anzeigemodus *" ), buttonWidth );
+            ImGui::SetItemTooltip( "%s", Tr( "Selects fullscreen or windowed mode. * Takes effect after restarting the game.", u8"W\u00E4hlt Vollbild oder Fenstermodus. * Wird erst nach einem Neustart des Spiels wirksam." ) );
             ImGui::SameLine();
 
             auto displayModeState = settings.ChangeWindowPreset
@@ -1699,12 +1697,14 @@ void ImGuiShim::RenderSettingsWindow()
             }
 
 
-            ImGui::SetItemTooltip( "%s", Tr( "Fills the monitor without changing its mode.", u8"F\u00FCllt den Monitor ohne den Anzeigemodus zu \u00E4ndern." ) );
+            ImGui::SetItemTooltip( "%s", Tr( "Selects fullscreen or windowed mode. * Takes effect after restarting the game.", u8"W\u00E4hlt Vollbild oder Fenstermodus. * Wird erst nach einem Neustart des Spiels wirksam." ) );
 
             const std::array<std::tuple<const char*, GothicRendererSettings::E_AntiAliasingMode, const char*>, 3> antiAliasing = {{
                 {Tr( "Off", u8"Aus" ), GothicRendererSettings::E_AntiAliasingMode::AA_NONE, nullptr },
                 {"SMAA", GothicRendererSettings::E_AntiAliasingMode::AA_SMAA, nullptr },
-                {"FSR 3", GothicRendererSettings::E_AntiAliasingMode::AA_FSR3, "FidelityFX Super Resolution 3"},
+                {"FSR 3", GothicRendererSettings::E_AntiAliasingMode::AA_FSR3,
+                    Tr( "Upscaling and anti-aliasing for higher performance.",
+                        u8"Upscaling und Kantengl\u00E4ttung f\u00FCr mehr Leistung." )},
             }};
             {
                 ImGui::PushID( "AntiAliasingSettings" );
@@ -1728,7 +1728,7 @@ void ImGuiShim::RenderSettingsWindow()
                     } ) ) {
                     ImGui::EndCombo();
                 }
-                ImGui::SetItemTooltip( "%s", Tr( "Smooths jagged edges.", u8"Gl\u00E4ttet Treppenkanten." ) );
+                ImGui::SetItemTooltip( "%s", Tr( "Smooths jagged edges in the final image.", u8"Gl\u00E4ttet Treppenkanten im fertigen Bild." ) );
                 ImGui::PopStyleVar();
                 ImGui::SameLine( 0.0f, compactAAScaleGap );
                 ImGui::SetNextItemWidth( compactAAValueWidth );
@@ -1745,7 +1745,7 @@ void ImGuiShim::RenderSettingsWindow()
                     if ( ImComboBox( "##ResolutionScalePercent", fsrLevels, &settings.ResolutionScalePercent ) ) {
                         ImGui::EndCombo();
                     }
-                    ImGui::SetItemTooltip( "%s", Tr( "Balances FSR 3 quality and performance.", u8"Bestimmt die FSR-3-Balance aus Qualit\u00E4t und Leistung." ) );
+                    ImGui::SetItemTooltip( "%s", Tr( "Balances FSR 3 image quality and performance.", u8"Stellt das Verh\u00E4ltnis von FSR-3-Bildqualit\u00E4t und Leistung ein." ) );
                 } else {
                     int resolutionScale = SnapRenderScalePercentNonFSR( settings.ResolutionScalePercent );
                     if ( resolutionScale != settings.ResolutionScalePercent ) {
@@ -1756,14 +1756,14 @@ void ImGuiShim::RenderSettingsWindow()
                         settings.ResolutionScalePercent = resolutionScale;
                         FixupSettings( settings );
                     }
-                    ImGui::SetItemTooltip( "%s", Tr( "Sets internal render resolution.", u8"Legt die interne Renderaufl\u00F6sung fest." ) );
+                    ImGui::SetItemTooltip( "%s", Tr( "Changes internal resolution; higher values show more detail but cost performance.", u8"\u00C4ndert die interne Aufl\u00F6sung; h\u00F6here Werte zeigen mehr Details, kosten aber Leistung." ) );
                 }
                 ImGui::PopID();
             }
 
             ImText( Tr( "VSync", u8"VSync" ), { inlineToggleLabelWidth, buttonWidth.y } ); ImGui::SameLine();
             ImGui::Checkbox( "##Enable VSync", &settings.EnableVSync );
-            ImGui::SetItemTooltip( "%s", Tr( "Synchronizes frames with the monitor.", u8"Synchronisiert die Bildausgabe mit dem Monitor." ) );
+            ImGui::SetItemTooltip( "%s", Tr( "Matches frame presentation to the monitor refresh rate to prevent tearing.", u8"Passt die Bildausgabe an die Monitorfrequenz an und verhindert Bildrisse." ) );
             ImGui::SameLine();
 
             if ( settings.FpsLimit > 0 ) {
@@ -1776,8 +1776,8 @@ void ImGuiShim::RenderSettingsWindow()
                 settings.FpsLimit = fpsLimitEnabled ? settings.FpsLimitLastEnabled : 0;
             }
             ImGui::SetItemTooltip( settings.EnableVSync
-                ? Tr( "The FPS limit is inactive while VSync is enabled.", u8"Das FPS-Limit ist bei aktivem VSync inaktiv." )
-                : Tr( "Enables the FPS limit.", u8"Aktiviert das FPS-Limit." ) );
+                ? Tr( "VSync controls the frame rate while enabled.", u8"Bei aktivem VSync bestimmt VSync die Bildrate." )
+                : Tr( "Turns the FPS limit on or off.", u8"Schaltet das FPS-Limit ein oder aus." ) );
             ImGui::SameLine();
 
             int inactiveFpsLimit = settings.FpsLimitLastEnabled;
@@ -1793,10 +1793,10 @@ void ImGuiShim::RenderSettingsWindow()
             }
             ImGui::EndDisabled();
             ImGui::SetItemTooltip( settings.EnableVSync
-                ? Tr( "VSync controls the output frame rate.", u8"VSync steuert die ausgegebene Bildrate." )
+                ? Tr( "VSync controls the frame rate.", u8"Bei aktivem VSync bestimmt VSync die Bildrate." )
                 : (fpsLimitEnabled
-                    ? Tr( "Sets the maximum frames per second.", u8"Legt die maximale Bildrate in FPS fest." )
-                    : Tr( "Enable Limit to select the maximum FPS.", u8"Aktiviere Limit, um die maximale FPS-Zahl festzulegen." )) );
+                    ? Tr( "Sets the maximum frame rate.", u8"Legt die maximale Bildrate fest." )
+                    : Tr( "Enable the limit to choose a maximum frame rate.", u8"Aktiviere das Limit, um eine maximale Bildrate festzulegen." )) );
             ImGui::PopItemWidth();
             ImGui::EndGroup();
         }
@@ -1809,29 +1809,19 @@ void ImGuiShim::RenderSettingsWindow()
             ImText( Tr( "Contrast", u8"Kontrast" ), buttonWidth ); ImGui::SameLine();
             ImGui::SetNextItemWidth( standardComboWidth );
             SliderDisplayTuningStrength( "##Contrast", &settings.GammaValue );
-            ImGui::SetItemTooltip( "%s", Tr( "Adjusts contrast.", u8"Passt den Kontrast an." ) );
+            ImGui::SetItemTooltip( "%s", Tr( "Adjusts image contrast.", u8"Passt den Bildkontrast an." ) );
 
             ImText( Tr( "Brightness", u8"Helligkeit" ), buttonWidth ); ImGui::SameLine();
             ImGui::SetNextItemWidth( standardComboWidth );
             SliderDisplayTuningStrength( "##Brightness", &settings.BrightnessValue );
-            ImGui::SetItemTooltip( "%s", Tr( "Adjusts brightness.", u8"Passt die Helligkeit an." ) );
+            ImGui::SetItemTooltip( "%s", Tr( "Adjusts image brightness.", u8"Passt die Bildhelligkeit an." ) );
 
             ImText( Tr( "HDR Tonemapping", u8"HDR-Tonemapping" ), { buttonWidth.x - ImGui::GetFrameHeight() - style.ItemSpacing.x, buttonWidth.y } ); ImGui::SameLine();
-            if ( CoupledStrengthCheckbox( "##Enable HDR Tone Mapping", "HDRToneMapStrength",
-                    &settings.EnableHDR, &settings.HDRToneMapStrength, 1.0f ) ) {
-            }
-            ImGui::SetItemTooltip( "%s", Tr( "Balances highlights and exposure.", u8"Gleicht helle Bereiche und Belichtung aus." ) );
-            ImGui::SameLine();
-            ImGui::SetNextItemWidth( standardComboWidth );
-            const bool hdrEnabledBeforeSlider = settings.EnableHDR;
-            if ( CoupledStrengthSlider( "##HDRToneMapStrength", "HDRToneMapStrength",
-                    &settings.EnableHDR, &settings.HDRToneMapStrength )
-                && hdrEnabledBeforeSlider != settings.EnableHDR ) {
-            }
-            ImGui::SetItemTooltip( "%s", Tr( "Adjusts highlight compression.", u8"Passt die Kompression heller Bereiche an." ) );
+            ImGui::Checkbox( "##Enable HDR Tone Mapping", &settings.EnableHDR );
+            ImGui::SetItemTooltip( "%s", Tr( "Preserves detail in bright and dark areas through HDR tone mapping.", u8"Erh\u00E4lt durch HDR-Tonemapping Details in hellen und dunklen Bereichen." ) );
             ImText( Tr( "Rain Rendering", u8"Regendarstellung" ), { buttonWidth.x - ImGui::GetFrameHeight() - style.ItemSpacing.x, buttonWidth.y } ); ImGui::SameLine();
             ImGui::Checkbox( "##Enable Rain", &settings.EnableRain );
-            ImGui::SetItemTooltip( "%s", Tr( "Enables rain rendering.", u8"Aktiviert die Regendarstellung." ) );
+            ImGui::SetItemTooltip( "%s", Tr( "Shows rain in the game world.", u8"Zeigt Regen in der Spielwelt an." ) );
             ImGui::EndGroup();
         }
 
@@ -1866,7 +1856,7 @@ void ImGuiShim::RenderSettingsWindow()
             {
                 ImGui::EndCombo();
             }
-            ImGui::SetItemTooltip( "%s", Tr( "Higher settings increase texture detail.", u8"H\u00F6here Werte erh\u00F6hen die Texturdetails." ) );
+            ImGui::SetItemTooltip( "%s", Tr( "Higher texture quality shows finer detail but uses more video memory.", u8"H\u00F6here Texturqualit\u00E4t zeigt feinere Details, ben\u00F6tigt aber mehr Videospeicher." ) );
 
             const std::array<std::pair<const char*, GothicRendererSettings::E_ShadowQuality>, 6> shadowQualities = {{
                 {Tr( "Off", u8"Aus" ), GothicRendererSettings::E_ShadowQuality::SHADOW_QUALITY_OFF},
@@ -1912,32 +1902,32 @@ void ImGuiShim::RenderSettingsWindow()
             }
             if ( shadowQualityCustom ) {
                 ImGui::SetItemTooltip( "%s", Tr(
-                    "Advanced shadow values differ from this profile.",
-                    u8"Die erweiterten Schattenwerte weichen vom gew\u00E4hlten Schattenqualit\u00E4tsprofil ab." ) );
+                    "Advanced shadow settings differ from this profile.",
+                    u8"Die erweiterten Schatteneinstellungen weichen von diesem Profil ab." ) );
             } else {
                 ImGui::SetItemTooltip( "%s", Tr(
-                    "Selects the CSM and pointlight shadow profile.",
-                u8"W\u00E4hlt das CSM- und Pointlight-Schattenprofil." ) );
+                    "Applies a profile for world and pointlight shadows.",
+                u8"Wendet ein Profil f\u00FCr Welt- und Punktlichtschatten an." ) );
             }
 
             ImText( Tr( "World Draw Distance", u8"Weltsichtweite" ), buttonWidth ); ImGui::SameLine();
             ImGui::SliderInt( "##SectionDrawRadius", &settings.SectionDrawRadius, 1, 10, "%d", ImGuiSliderFlags_::ImGuiSliderFlags_ClampOnInput );
-            ImGui::SetItemTooltip( "%s", Tr( "Sets terrain and building draw distance.", u8"Legt die Sichtweite von Gel\u00E4nde und Geb\u00E4uden fest." ) );
+            ImGui::SetItemTooltip( "%s", Tr( "Sets how far terrain and buildings remain visible.", u8"Legt fest, wie weit Gel\u00E4nde und Geb\u00E4ude sichtbar bleiben." ) );
 
             int objectDrawDistance = ObjectDrawDistanceMetersToUi( settings.OutdoorSmallVobDrawRadius );
             ImText( Tr( "Object Draw Distance", u8"Objektsichtweite" ), buttonWidth ); ImGui::SameLine();
             if ( ImGui::SliderInt( "##OutdoorSmallVobDrawRadius", &objectDrawDistance, OBJECT_DRAW_DISTANCE_UI_MIN, OBJECT_DRAW_DISTANCE_UI_MAX, "%d", ImGuiSliderFlags_::ImGuiSliderFlags_ClampOnInput ) ) {
                 settings.OutdoorSmallVobDrawRadius = ObjectDrawDistanceUiToMeters( objectDrawDistance );
             }
-            ImGui::SetItemTooltip( "%s", Tr( "Sets small-object and vegetation draw distance.", u8"Legt die Sichtweite kleiner Objekte und Vegetation fest." ) );
+            ImGui::SetItemTooltip( "%s", Tr( "Sets how far small objects and vegetation remain visible.", u8"Legt fest, wie weit kleine Objekte und Vegetation sichtbar bleiben." ) );
 
             settings.GrassDetailsLevel = std::clamp( settings.GrassDetailsLevel, 0, 4 );
             ImText( Tr( "Grass Details", u8"Grasdetails" ), buttonWidth ); ImGui::SameLine();
             ImGui::SliderInt( "##GrassDetailsLevel", &settings.GrassDetailsLevel,
                 0, 4, "%d", ImGuiSliderFlags_::ImGuiSliderFlags_ClampOnInput );
             ImGui::SetItemTooltip( "%s", Tr(
-                "Controls grass-card density; level 4 keeps all. Larger polygons are unchanged.",
-                u8"Steuert die Graskartendichte; Stufe 4 beh\u00E4lt alle. Gr\u00F6\u00DFere Polygone bleiben unver\u00E4ndert." ) );
+                "Controls grass density; higher values show more grass. Large polygons are unaffected.",
+                u8"Steuert die Grasdichte; h\u00F6here Werte zeigen mehr Gras. Gro\u00DFe Polygone bleiben unver\u00E4ndert." ) );
 
             const bool ambientOcclusionAvailable = !FeatureLevel10Compatibility;
             bool ambientOcclusionEnabled = ambientOcclusionAvailable && settings.AoMode == AOMode::AO_XEGTAO;
@@ -1948,7 +1938,7 @@ void ImGuiShim::RenderSettingsWindow()
                 settings.AoMode = ambientOcclusionEnabled ? AOMode::AO_XEGTAO : AOMode::AO_NONE;
             }
             ImGui::EndDisabled();
-            ImGui::SetItemTooltip( "%s", Tr( "Enables XeGTAO ambient occlusion.", u8"Aktiviert die Umgebungsverdeckung durch XeGTAO." ) );
+            ImGui::SetItemTooltip( "%s", Tr( "Adds soft shading where objects and surfaces are close together.", u8"Erzeugt weiche Abdunklungen an Kontaktstellen und zwischen nahen Objekten." ) );
             ImGui::SameLine();
             ImGui::BeginDisabled( !ambientOcclusionAvailable );
             ImGui::SetNextItemWidth( standardComboWidth );
@@ -1957,7 +1947,7 @@ void ImGuiShim::RenderSettingsWindow()
                 settings.AoMode = ambientOcclusionEnabled ? AOMode::AO_XEGTAO : AOMode::AO_NONE;
             }
             ImGui::EndDisabled();
-            ImGui::SetItemTooltip( "%s", Tr( "Adjusts XeGTAO strength.", u8"Passt die XeGTAO-St\u00E4rke an." ) );
+            ImGui::SetItemTooltip( "%s", Tr( "Adjusts the intensity of the ambient shading.", u8"Passt die St\u00E4rke der Umgebungsverdeckung an." ) );
 
             bool godRaysEnabled = settings.EnableGodRays;
             ImText( Tr( "Light Shafts", u8"Lichtstrahlen" ), { buttonWidth.x - ImGui::GetFrameHeight() - style.ItemSpacing.x, buttonWidth.y } ); ImGui::SameLine();
@@ -1966,7 +1956,7 @@ void ImGuiShim::RenderSettingsWindow()
                 settings.EnableGodRays = godRaysEnabled;
                 settings.NormalizeGodRayMode( FeatureLevel10Compatibility );
             }
-            ImGui::SetItemTooltip( "%s", Tr( "Adds light scattering and sunbeams.", u8"F\u00FCgt Lichtstreuung und Sonnenstrahlen hinzu." ) );
+            ImGui::SetItemTooltip( "%s", Tr( "Adds sunbeams and light scattering.", u8"F\u00FCgt Sonnenstrahlen und Lichtstreuung hinzu." ) );
             ImGui::SameLine();
             ImGui::SetNextItemWidth( standardComboWidth );
             if ( CoupledStrengthSlider( "##GodrayStrength", "GodRayStrength",
@@ -1974,7 +1964,7 @@ void ImGuiShim::RenderSettingsWindow()
                 settings.EnableGodRays = godRaysEnabled;
                 settings.NormalizeGodRayMode( FeatureLevel10Compatibility );
             }
-            ImGui::SetItemTooltip( "%s", Tr( "Adjusts light-scattering strength.", u8"Passt die St\u00E4rke der Lichtstreuung an." ) );
+            ImGui::SetItemTooltip( "%s", Tr( "Adjusts the intensity of sunbeams and light scattering.", u8"Passt die St\u00E4rke von Sonnenstrahlen und Lichtstreuung an." ) );
             ImGui::PopItemWidth();
             ImGui::EndGroup();
         }
@@ -1989,32 +1979,32 @@ void ImGuiShim::RenderSettingsWindow()
                     &waterReflections, &settings.SSRStrength, 1.0f ) ) {
                 settings.EnableSSR = waterReflections;
             }
-            ImGui::SetItemTooltip( "%s", Tr( "Enables reflections on water surfaces.", u8"Aktiviert Reflexionen auf Wasseroberfl\u00E4chen." ) );
+            ImGui::SetItemTooltip( "%s", Tr( "Reflects the world on water surfaces.", u8"Spiegelt die Umgebung auf Wasserfl\u00E4chen." ) );
             ImGui::SameLine();
             ImGui::SetNextItemWidth( standardComboWidth );
             if ( CoupledStrengthSlider( "##WaterReflectionsStrength", "WaterReflectionsStrength",
                     &waterReflections, &settings.SSRStrength ) ) {
                 settings.EnableSSR = waterReflections;
             }
-            ImGui::SetItemTooltip( "%s", Tr( "Adjusts water-reflection strength.", u8"Passt die St\u00E4rke der Wasserreflexionen an." ) );
+            ImGui::SetItemTooltip( "%s", Tr( "Adjusts the intensity of water reflections.", u8"Passt die St\u00E4rke der Wasserreflexionen an." ) );
 
             float depthOfFieldStrength = settings.DoFBokehRadius / 3.5f;
             ImText( Tr( "Depth of Field", u8"Tiefenunsch\u00E4rfe" ), { buttonWidth.x - ImGui::GetFrameHeight() - style.ItemSpacing.x, buttonWidth.y } ); ImGui::SameLine();
             CoupledStrengthCheckbox( "##Enable Depth of Field", "DepthOfFieldBlurStrength",
                 &settings.EnableDoF, &depthOfFieldStrength, 1.0f );
-            ImGui::SetItemTooltip( "%s", Tr( "Blurs out-of-focus areas.", u8"Verwischt Bereiche au\u00DFerhalb des Fokus." ) );
+            ImGui::SetItemTooltip( "%s", Tr( "Makes areas outside the focus unsharp.", u8"Macht Bereiche au\u00DFerhalb des Fokus unscharf." ) );
             ImGui::SameLine();
             ImGui::SetNextItemWidth( standardComboWidth );
             CoupledStrengthSlider( "##DepthOfFieldBlurStrength", "DepthOfFieldBlurStrength",
                 &settings.EnableDoF, &depthOfFieldStrength );
             settings.DoFBokehRadius = depthOfFieldStrength * 3.5f;
-            ImGui::SetItemTooltip( "%s", Tr( "Adjusts blur strength.", u8"Passt die Unsch\u00E4rfest\u00E4rke an." ) );
+            ImGui::SetItemTooltip( "%s", Tr( "Adjusts the strength of depth-of-field blur.", u8"Passt die St\u00E4rke der Tiefenunsch\u00E4rfe an." ) );
 
             ImText( Tr( "Rain Effects", u8"Regeneffekte" ), { buttonWidth.x - ImGui::GetFrameHeight() - style.ItemSpacing.x, buttonWidth.y } ); ImGui::SameLine();
             ImGui::Checkbox( "##Enable Rain Effects", &settings.RainEffects );
             ImGui::SetItemTooltip( "%s", Tr(
-                "Controls puddles and wet-ground reflections during rain.",
-                u8"Steuert P\u00FCtzen und Bodenreflexionen bei Regen." ) );
+                "Adds puddles and wet-ground reflections while it rains.",
+                u8"Erzeugt bei Regen P\u00FCtzen und Reflexionen auf nassem Boden." ) );
 
 #if defined(BUILD_GOTHIC_2_6_fix) || (defined(BUILD_GOTHIC_1_08k) && !defined(BUILD_1_12F))
 #if defined(BUILD_GOTHIC_1_08k) && !defined(BUILD_1_12F)
@@ -2029,7 +2019,7 @@ void ImGuiShim::RenderSettingsWindow()
                         ? GothicRendererSettings::EWindQuality::WIND_QUALITY_ADVANCED
                         : GothicRendererSettings::EWindQuality::WIND_QUALITY_NONE;
                 }
-                ImGui::SetItemTooltip( "%s", Tr( "Enables animated vegetation wind.", u8"Aktiviert animierten Wind f\u00FCr Vegetation." ) );
+                ImGui::SetItemTooltip( "%s", Tr( "Moves vegetation in the wind.", u8"Bewegt die Vegetation im Wind." ) );
                 ImGui::SameLine();
                 ImGui::SetNextItemWidth( standardComboWidth );
                 if ( CoupledStrengthSlider( "##WindEffectsStrength", "WindEffectsStrength",
@@ -2038,21 +2028,21 @@ void ImGuiShim::RenderSettingsWindow()
                         ? GothicRendererSettings::EWindQuality::WIND_QUALITY_ADVANCED
                         : GothicRendererSettings::EWindQuality::WIND_QUALITY_NONE;
                 }
-                ImGui::SetItemTooltip( "%s", Tr( "Adjusts wind strength.", u8"Passt die Windst\u00E4rke an." ) );
+                ImGui::SetItemTooltip( "%s", Tr( "Adjusts how strongly vegetation moves in the wind.", u8"Passt an, wie stark sich Vegetation im Wind bewegt." ) );
 
             }
 #endif //BUILD_GOTHIC_2_6_fix
 
-            ImText( Tr( "Clouds", u8"Wolken" ), { buttonWidth.x - ImGui::GetFrameHeight() - style.ItemSpacing.x, buttonWidth.y } ); ImGui::SameLine();
+            ImText( Tr( "Dynamic Clouds", u8"Dynamische Wolken" ), { buttonWidth.x - ImGui::GetFrameHeight() - style.ItemSpacing.x, buttonWidth.y } ); ImGui::SameLine();
             ImGui::Checkbox( "##Enable Dynamic Clouds", &settings.EnableDynamicClouds );
-            ImGui::SetItemTooltip( "%s", Tr( "Enables moving low cloud fields.", u8"Aktiviert bewegte tiefe Wolkenfelder." ) );
+            ImGui::SetItemTooltip( "%s", Tr( "Adds moving low clouds to the sky.", u8"F\u00FCgt bewegte tiefe Wolken am Himmel hinzu." ) );
 
             ImText( Tr( "Surface Detail", u8"Oberfl\u00E4chendetail" ), { buttonWidth.x - ImGui::GetFrameHeight() - style.ItemSpacing.x, buttonWidth.y } ); ImGui::SameLine();
             if ( ImGui::Checkbox( "##Enable Surface Detail", &settings.AllowNormalmaps ) ) {
                 settings.EnableParallaxOcclusionMapping = settings.AllowNormalmaps;
                 Engine::GAPI->UpdateTextureMaxSize();
             }
-            ImGui::SetItemTooltip( "%s", Tr( "Enables normal and parallax details.", u8"Aktiviert Normalmap- und Parallaxdetails." ) );
+            ImGui::SetItemTooltip( "%s", Tr( "Adds fine surface relief and depth.", u8"F\u00FCgt feine Relief- und Tiefendetails auf Oberfl\u00E4chen hinzu." ) );
 
             ImGui::EndGroup();
         }
@@ -2060,10 +2050,10 @@ void ImGuiShim::RenderSettingsWindow()
         ImGui::Spacing();
         const float footerButtonWidth = (ImGui::GetContentRegionAvail().x - style.ItemSpacing.x) / 2.0f;
         const bool cancelled = ImGui::Button( Tr( "Cancel", u8"Abbrechen" ), ImVec2( footerButtonWidth, footerHeight ) );
-        ImGui::SetItemTooltip( "%s", Tr( "Discards unsaved changes.", u8"Verwirft ungespeicherte \u00C4nderungen." ) );
+        ImGui::SetItemTooltip( "%s", Tr( "Discards all changes made in this menu.", u8"Verwirft alle \u00C4nderungen in diesem Men\u00FC." ) );
         ImGui::SameLine();
-        const bool saved = ImGui::Button( Tr( "Save Settings", u8"Einstellungen speichern" ), ImVec2( footerButtonWidth, footerHeight ) );
-        ImGui::SetItemTooltip( "%s", Tr( "Saves renderer settings.", u8"Speichert die Renderer-Einstellungen." ) );
+        const bool saved = ImGui::Button( Tr( "Save", u8"Speichern" ), ImVec2( footerButtonWidth, footerHeight ) );
+        ImGui::SetItemTooltip( "%s", Tr( "Applies and saves the renderer settings.", u8"\u00DCbernimmt und speichert die Renderereinstellungen." ) );
         if ( cancelled ) {
             CancelSettingsEdit();
             if ( Engine::GraphicsEngine ) {
