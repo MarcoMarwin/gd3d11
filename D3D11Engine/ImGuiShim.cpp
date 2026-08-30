@@ -1170,29 +1170,8 @@ void ImGuiShim::RenderSettingsWindow()
         const ImVec2 versionTextSize = ImGui::CalcTextSize( versionText.c_str() );
 
         const float topHeaderGap = style.ItemSpacing.x;
-        const float topHeaderFieldWidth = labelWidth;
-
-        const float f11CloseButtonSize = ImGui::GetFrameHeight();
-        const float f11CloseButtonX = std::max(
-            0.0f, ImGui::GetWindowContentRegionMax().x - f11CloseButtonSize );
-        const float f11VersionStartX = std::max(
-            0.0f, f11CloseButtonX - topHeaderGap - versionTextSize.x );
-        ImGui::SetCursorPosX( f11VersionStartX );
-        ImGui::TextDisabled( "%s", versionText.c_str() );
-        ImGui::SameLine( 0.0f, topHeaderGap );
-        ImGui::SetCursorPosX( f11CloseButtonX );
-        if ( ImGui::Button( "X", ImVec2( f11CloseButtonSize, 0.0f ) ) ) {
-            if ( Engine::GraphicsEngine ) {
-                Engine::GraphicsEngine->OnUIEvent( BaseGraphicsEngine::UI_ClosedSettings );
-            } else {
-                SettingsVisible = false;
-            }
-        }
-        ImGui::SetItemTooltip( "%s", Tr(
-            "Closes the F11 menu.",
-            u8"Schlie\u00DFt das F11-Men\u00FC." ) );
-        ImGui::Spacing();
-
+        const float topHeaderFieldWidth = std::max(
+            1.0f, std::round( labelWidth * 0.5f ) );
         ImText( Tr( "Preset", u8"Profil" ), ImVec2( topHeaderFieldWidth, 0.0f ) );
         ImGui::SameLine( 0.0f, topHeaderGap );
 
@@ -1240,16 +1219,20 @@ void ImGuiShim::RenderSettingsWindow()
             ImGui::EndCombo();
         }
         ImGui::SetItemTooltip( "%s", Tr( "Sets the renderer language.", u8"Legt die Sprache des Renderers fest." ) );
+
+        const float f11CloseButtonSize = ImGui::GetFrameHeight();
+        const float f11CloseButtonX = std::max(
+            0.0f, ImGui::GetWindowContentRegionMax().x - f11CloseButtonSize );
+        const float f11VersionStartX = std::max(
+            0.0f, f11CloseButtonX - topHeaderGap - versionTextSize.x );
         const char* advancedButtonText = Tr( "Advanced ...", u8"Erweitert ..." );
         const float advancedButtonWidth = 125.0f;
         const float languageComboEndX = ImGui::GetItemRectMax().x;
-        const float versionStartX = ImGui::GetWindowPos().x
-            + ImGui::GetWindowContentRegionMax().x - versionTextSize.x;
+        const float languageComboEndLocalX = languageComboEndX - ImGui::GetWindowPos().x;
         const float advancedButtonX = std::max(
-            languageComboEndX,
-            languageComboEndX
-                + ( versionStartX - languageComboEndX - advancedButtonWidth ) * 0.5f )
-            - ImGui::GetWindowPos().x;
+            languageComboEndLocalX,
+            languageComboEndLocalX
+                + ( f11VersionStartX - languageComboEndLocalX - advancedButtonWidth ) * 0.5f );
         ImGui::SameLine( 0.0f, 0.0f );
         ImGui::SetCursorPosX( advancedButtonX );
         if ( ImGui::Button( advancedButtonText, ImVec2( advancedButtonWidth, 0.0f ) ) ) {
@@ -1258,6 +1241,21 @@ void ImGuiShim::RenderSettingsWindow()
         ImGui::SetItemTooltip( "%s", Tr(
             "Opens additional graphics options.",
             u8"\u00D6ffnet zus\u00E4tzliche Grafikeinstellungen." ) );
+        ImGui::SameLine( 0.0f, topHeaderGap );
+        ImGui::SetCursorPosX( f11VersionStartX );
+        ImGui::TextDisabled( "%s", versionText.c_str() );
+        ImGui::SameLine( 0.0f, topHeaderGap );
+        ImGui::SetCursorPosX( f11CloseButtonX );
+        if ( ImGui::Button( "X", ImVec2( f11CloseButtonSize, 0.0f ) ) ) {
+            if ( Engine::GraphicsEngine ) {
+                Engine::GraphicsEngine->OnUIEvent( BaseGraphicsEngine::UI_ClosedSettings );
+            } else {
+                SettingsVisible = false;
+            }
+        }
+        ImGui::SetItemTooltip( "%s", Tr(
+            "Closes the F11 menu.",
+            u8"Schlie\u00DFt das F11-Men\u00FC." ) );
         const float advancedPopupMaxHeight = std::max( 320.0f, std::round( framebufferHeight * 0.5f ) );
         ImGui::SetNextWindowSizeConstraints(
             ImVec2( 440.0f, advancedPopupMaxHeight ),
