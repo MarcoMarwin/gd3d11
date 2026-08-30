@@ -181,9 +181,6 @@ struct HDRSettingsConstantBuffer {
     float HDR_LumWhite;
     float HDR_Threshold;
     float HDR_BloomStrength;
-
-    float HDR_ToneMapStrength;
-    float3 HDR_Pad;
 };
 
 struct LPMConstantsBuffer {

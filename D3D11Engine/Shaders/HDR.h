@@ -7,8 +7,6 @@ cbuffer HDR_Settings : register(b0)
     float HDR_LumWhite;
     float HDR_Threshold;
     float HDR_BloomStrength;
-    float HDR_ToneMapStrength;
-    float3 HDR_Pad;
 };
 
 #define FFX_GPU
@@ -34,9 +32,8 @@ float GetToneMapExposure(Texture2D lumTex, SamplerState samplerState, float midd
 
 float HDRToneMapBlend()
 {
-    float legacyToneMapStrength = HDR_ToneMapStrength * 7.5f;
-    // Preserve the former 7.5 setting while allowing the 10..15 range to keep increasing.
-    return max(0.0f, (legacyToneMapStrength - 1.0f) / 9.0f);
+    // Fixed blend matching the former UI-normalized default strength of 1.0.
+    return 0.7222222f;
 }
 
 float3 LPMToneMap(float3 vColor, Texture2D lumTex, SamplerState samplerState)

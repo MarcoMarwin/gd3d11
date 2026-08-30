@@ -7423,8 +7423,6 @@ XRESULT GothicAPI::SaveMenuSettings( const std::string& file ) {
     WritePrivateProfileStringA( "General", "EnableFog", std::to_string( s.DrawFog ? TRUE : FALSE ).c_str(), ini.c_str() );
     WritePrivateProfileStringA( "General", "FogRange", float_to_string( s.FogRange , 2).c_str(), ini.c_str() );
     WritePrivateProfileStringA( "General", "EnableHDR", std::to_string( s.EnableHDR ? TRUE : FALSE ).c_str(), ini.c_str() );
-    WritePrivateProfileStringA( "General", "HDRToneMapStrength", float_to_string( s.HDRToneMapStrength, 2 ).c_str(), ini.c_str() );
-    WritePrivateProfileStringA( "General", "HDRToneMapStrengthNormalized", "1", ini.c_str() );
     WritePrivateProfileStringA( "General", "GodRayMode", std::to_string( static_cast<int>(s.GodRayMode) ).c_str(), ini.c_str() );
     WritePrivateProfileStringA( "General", "EnableGodRays", std::to_string( s.AreGodRaysEnabled() ? TRUE : FALSE ).c_str(), ini.c_str() );
     WritePrivateProfileStringA( "General", "GodRayStrength", float_to_string( s.GodRayStrength, 2 ).c_str(), ini.c_str() );
@@ -7545,13 +7543,6 @@ XRESULT GothicAPI::LoadMenuSettings( const std::string& file ) {
         s.FogRange = GetPrivateProfileFloatA( "General", "FogRange", ds.FogRange, ini.c_str() );
         s.AtmosphericScattering = ds.AtmosphericScattering;
         s.EnableHDR = GetPrivateProfileBoolA( "General", "EnableHDR", ds.EnableHDR, ini );
-        const bool normalizedHDRToneMapStrength = GetPrivateProfileBoolA( "General", "HDRToneMapStrengthNormalized", false, ini );
-        const float defaultStoredHDRToneMapStrength = normalizedHDRToneMapStrength ? ds.HDRToneMapStrength : 7.5f;
-        float storedHDRToneMapStrength = GetPrivateProfileFloatA( "General", "HDRToneMapStrength", defaultStoredHDRToneMapStrength, ini );
-        if ( !normalizedHDRToneMapStrength ) {
-            storedHDRToneMapStrength /= 7.5f;
-        }
-        s.HDRToneMapStrength = std::clamp( storedHDRToneMapStrength, 0.0f, 2.0f );
         s.EnableDebugLog = ds.EnableDebugLog;
         s.EnableAutoupdates = ds.EnableAutoupdates;
         char godRayModeText[32] = {};
@@ -7795,7 +7786,6 @@ XRESULT GothicAPI::LoadMenuSettings( const std::string& file ) {
             : AOMode::AO_XEGTAO;
         s.AOStrength = std::clamp( GetPrivateProfileFloatA( "AO", "Strength", ds.AOStrength, ini ), 0.0f, 2.0f );
 
-        if ( !s.EnableHDR ) s.HDRToneMapStrength = 0.0f;
         if ( !s.AreGodRaysEnabled() ) s.GodRayStrength = 0.0f;
         if ( !s.EnableDoF ) s.DoFBokehRadius = 0.0f;
         if ( !s.EnableSSR ) s.SSRStrength = 0.0f;

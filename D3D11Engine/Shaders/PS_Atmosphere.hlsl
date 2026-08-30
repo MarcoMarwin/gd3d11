@@ -149,5 +149,8 @@ float4 PSMain( PS_INPUT Input ) : SV_TARGET
 		atmoColor = lerp(atmoColor, rainClouds.rgb, rainClouds.a * rainCloudWeight);
 	}
 	
+	// Keep the atmosphere input range compatible with the pre-HDR sky path.
+	// The old dither was intentionally removed, but the HDR-safe clamp must remain.
+	atmoColor = saturate(atmoColor);
 	return float4(atmoColor,1);
 }
