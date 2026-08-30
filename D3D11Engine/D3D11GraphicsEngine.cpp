@@ -10450,10 +10450,7 @@ void D3D11GraphicsEngine::OnUIEvent( EUIEvent uiEvent ) {
             const bool openSettings = !hImgui->SettingsVisible;
             hImgui->SettingsVisible = openSettings;
             if ( openSettings ) {
-                hImgui->BeginSettingsEdit();
-            } else {
-                // F11 keeps the current session values, exactly as before.
-                hImgui->CommitSettingsEdit();
+                hImgui->OnSettingsOpened();
             }
             UpdateShouldBlockGameInput();
 
@@ -10462,8 +10459,6 @@ void D3D11GraphicsEngine::OnUIEvent( EUIEvent uiEvent ) {
     } else if ( uiEvent == UI_ClosedSettings ) {
         // Settings can be closed in multiple ways
         if ( auto hImgui = Engine::ImGuiHandle; hImgui && hImgui->GetIsActive() ) {
-            // ESC and other generic close paths retain current session values.
-            hImgui->CommitSettingsEdit();
             hImgui->SettingsVisible = false;
         }
         UpdateShouldBlockGameInput();

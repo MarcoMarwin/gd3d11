@@ -490,7 +490,8 @@ void ImGuiShim::RenderLoop()
     }
 
     auto oldSettings = Engine::GAPI->GetRendererState().RendererSettings;
-    if ( SettingsVisible ) {
+    const bool settingsWasVisible = SettingsVisible;
+    if ( settingsWasVisible ) {
         RenderSettingsWindow();
     }
 
@@ -500,6 +501,15 @@ void ImGuiShim::RenderLoop()
         if ( FeatureLevel10Compatibility ) {
             ApplyFeatureLevel10Downgrades( currentSettings );
         }
+        if ( settingsWasVisible ) {
+            m_settingsSavePending = true;
+        }
+    }
+    if ( m_settingsSavePending && ( !SettingsVisible || !ImGui::IsAnyItemActive() ) ) {
+        auto& currentSettings = Engine::GAPI->GetRendererState().RendererSettings;
+        Engine::GAPI->SaveRendererGlobalSettings( currentSettings, MENU_SETTINGS_FILE );
+        Engine::GAPI->SaveMenuSettings( MENU_SETTINGS_FILE );
+        m_settingsSavePending = false;
     }
     if ( GetBlockGameInput() != m_lastFrameBlockGameInput ) {
         m_lastFrameBlockGameInput = GetBlockGameInput();
@@ -1069,39 +1079,9 @@ namespace
     }
 }
 
-void ImGuiShim::BeginSettingsEdit() {
-    if ( m_settingsEditActive || !Engine::GAPI ) {
-        return;
-    }
-
+void ImGuiShim::OnSettingsOpened() {
     m_centerSettingsWindowFrames = 3;
     ResetStrengthControlMemories();
-    m_settingsSnapshot = Engine::GAPI->GetRendererState().RendererSettings;
-    m_settingsResolutionSnapshot = CurrentResolution;
-    m_settingsEditActive = true;
-}
-
-void ImGuiShim::CommitSettingsEdit() {
-    ResetStrengthControlMemories();
-    m_settingsEditActive = false;
-}
-
-void ImGuiShim::CancelSettingsEdit() {
-    if ( !m_settingsEditActive || !Engine::GAPI || !Engine::GraphicsEngine ) {
-        return;
-    }
-
-    auto& settings = Engine::GAPI->GetRendererState().RendererSettings;
-    const bool textureQualityChanged = settings.textureMaxSize != m_settingsSnapshot.textureMaxSize;
-    settings = m_settingsSnapshot;
-    ResetStrengthControlMemories();
-    FixupSettings( settings );
-    m_settingsEditActive = false;
-
-    if ( textureQualityChanged ) {
-        Engine::GAPI->UpdateTextureMaxSize();
-    }
-    Engine::GraphicsEngine->TriggerResize( m_settingsResolutionSnapshot );
 }
 
 void ImGuiShim::RenderSettingsWindow()
@@ -1118,13 +1098,10 @@ void ImGuiShim::RenderSettingsWindow()
     const float framebufferWidth = static_cast<float>( windowSize.x );
     const float framebufferHeight = static_cast<float>( windowSize.y );
     const float menuScale = 1.0f;
-    // Give the localized labels and their value controls a little more room.
-    // Keep both cells identical so the two F11 halves remain perfectly aligned.
+    // Keep labels and controls the same width. The surrounding geometry still
+    // follows the existing DPI/resolution scaling path above.
     const float labelWidth = std::round( 225.0f * menuScale );
-    // Keep the label and value cells equal. This also makes each header cell
-    // line up exactly with one quarter of the regular F11 row.
-    const float controlWidth = std::round( 195.0f * menuScale );
-    const float footerHeight = std::round( 30.0f * menuScale );
+    const float controlWidth = labelWidth;
     const ImVec2 scaledWindowPadding(
         std::round( style.WindowPadding.x * menuScale ),
         std::round( style.WindowPadding.y * menuScale ) );
@@ -1192,12 +1169,30 @@ void ImGuiShim::RenderSettingsWindow()
         const std::string versionText = std::string( Tr( "D3D11 Version ", u8"D3D11-Version " ) ) + VERSION_NUMBER;
         const ImVec2 versionTextSize = ImGui::CalcTextSize( versionText.c_str() );
 
-        const float leftF11ColumnWidth = labelWidth + style.ItemSpacing.x + controlWidth;
         const float topHeaderGap = style.ItemSpacing.x;
-        const float topHeaderBlockWidth =
-            ( leftF11ColumnWidth - topHeaderGap ) * 0.5f;
-        const float topHeaderFieldWidth = std::max(
-            1.0f, ( topHeaderBlockWidth - topHeaderGap ) * 0.5f );
+        const float topHeaderFieldWidth = labelWidth;
+
+        const float f11CloseButtonSize = ImGui::GetFrameHeight();
+        const float f11CloseButtonX = std::max(
+            0.0f, ImGui::GetWindowContentRegionMax().x - f11CloseButtonSize );
+        const float f11VersionStartX = std::max(
+            0.0f, f11CloseButtonX - topHeaderGap - versionTextSize.x );
+        ImGui::SetCursorPosX( f11VersionStartX );
+        ImGui::TextDisabled( "%s", versionText.c_str() );
+        ImGui::SameLine( 0.0f, topHeaderGap );
+        ImGui::SetCursorPosX( f11CloseButtonX );
+        if ( ImGui::Button( "X", ImVec2( f11CloseButtonSize, 0.0f ) ) ) {
+            if ( Engine::GraphicsEngine ) {
+                Engine::GraphicsEngine->OnUIEvent( BaseGraphicsEngine::UI_ClosedSettings );
+            } else {
+                SettingsVisible = false;
+            }
+        }
+        ImGui::SetItemTooltip( "%s", Tr(
+            "Closes the F11 menu.",
+            u8"Schlie\u00DFt das F11-Men\u00FC." ) );
+        ImGui::Spacing();
+
         ImText( Tr( "Preset", u8"Profil" ), ImVec2( topHeaderFieldWidth, 0.0f ) );
         ImGui::SameLine( 0.0f, topHeaderGap );
 
@@ -1627,9 +1622,6 @@ void ImGuiShim::RenderSettingsWindow()
             ImGui::EndChild();
             ImGui::EndPopup();
         }
-        ImGui::SameLine();
-        ImGui::SetCursorPosX( std::max( ImGui::GetCursorPosX(), ImGui::GetWindowContentRegionMax().x - versionTextSize.x ) );
-        ImGui::TextDisabled( "%s", versionText.c_str() );
         ImGui::Separator();
 
         const float standardComboWidth = controlWidth;
@@ -2047,32 +2039,6 @@ void ImGuiShim::RenderSettingsWindow()
             ImGui::EndGroup();
         }
 
-        ImGui::Spacing();
-        const float footerButtonWidth = (ImGui::GetContentRegionAvail().x - style.ItemSpacing.x) / 2.0f;
-        const bool cancelled = ImGui::Button( Tr( "Cancel", u8"Abbrechen" ), ImVec2( footerButtonWidth, footerHeight ) );
-        ImGui::SetItemTooltip( "%s", Tr( "Discards all changes made in this menu.", u8"Verwirft alle \u00C4nderungen in diesem Men\u00FC." ) );
-        ImGui::SameLine();
-        const bool saved = ImGui::Button( Tr( "Save", u8"Speichern" ), ImVec2( footerButtonWidth, footerHeight ) );
-        ImGui::SetItemTooltip( "%s", Tr( "Applies and saves the renderer settings.", u8"\u00DCbernimmt und speichert die Renderereinstellungen." ) );
-        if ( cancelled ) {
-            CancelSettingsEdit();
-            if ( Engine::GraphicsEngine ) {
-                Engine::GraphicsEngine->OnUIEvent( BaseGraphicsEngine::UI_ClosedSettings );
-            }
-        } else if ( saved ) {
-            CommitSettingsEdit();
-            // Resolve the derived preset state before persisting it. This
-            // keeps General/GraphicsPreset consistent with custom Advanced
-            // or normal F11 changes made in this same frame.
-            SyncGraphicsPresetSelection( settings );
-            if ( Engine::GraphicsEngine ) {
-                Engine::GraphicsEngine->OnUIEvent( BaseGraphicsEngine::UI_ClosedSettings );
-            }
-            if ( Engine::GAPI ) {
-                Engine::GAPI->SaveRendererGlobalSettings( settings, MENU_SETTINGS_FILE );
-                Engine::GAPI->SaveMenuSettings( MENU_SETTINGS_FILE );
-            }
-        }
     }
     ImGui::End();
     ImGui::PopStyleVar( 3 );
