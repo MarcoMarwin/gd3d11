@@ -15,6 +15,9 @@ const int GSWITCH_FSR3_REACTIVE = 32;
 const int GSWITCH_FSR3_DIALOG_REACTIVE = 64;
 const int GSWITCH_DISABLE_RAIN_EFFECTS = 128;
 constexpr float VISUAL_FX_DRAW_RADIUS_FIXED = 10000.0f;
+// Keep settings helpers independent from ConstantBufferStructs.h include
+// order. The CSM resource/shader layout currently supports four cascades.
+constexpr int MAX_SUPPORTED_CSM_CASCADES = 4;
 
 enum RenderStage {
     STAGE_DRAW_UNKNOWN = 0,
@@ -921,13 +924,13 @@ struct GothicRendererSettings {
     }
 
     int GetStoredShadowCascadeCount() const {
-        const int maxCascades = std::min( 4, MAX_CSM_CASCADES );
+        const int maxCascades = MAX_SUPPORTED_CSM_CASCADES;
         const int minCascades = std::min( 2, maxCascades );
         return std::clamp( NumShadowCascades, minCascades, maxCascades );
     }
 
     int GetEffectiveShadowCascadeCount() const {
-        const int maxCascades = std::min( 4, MAX_CSM_CASCADES );
+        const int maxCascades = MAX_SUPPORTED_CSM_CASCADES;
         const int minCascades = EnableShadows ? std::min( 2, maxCascades ) : 1;
         return std::clamp( NumShadowCascades, minCascades, maxCascades );
     }
