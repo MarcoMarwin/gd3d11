@@ -562,7 +562,7 @@ XRESULT D3D11PFX_GodRays::RenderVolumetricToTexture(
     cb.GRV_SunVisibility = std::clamp( atmosphere.AC_SunVisibility, 0.0f, 1.0f ) * GetRainSkyVisibility();
     cb.GRV_Strength = std::max( settings.GodRayStrength, 0.0f ) * volumetricSunFade;
     cb.GRV_FrameIndex = static_cast<uint32_t>(std::max( Engine::GAPI->GetTimeSeconds(), 0.0f ) * 60.0f);
-    cb.GRV_NumCascades = static_cast<uint32_t>(std::clamp<size_t>( settings.NumShadowCascades, 1, MAX_CSM_CASCADES ));
+    cb.GRV_NumCascades = static_cast<uint32_t>( settings.GetEffectiveShadowCascadeCount() );
     cb.GRV_PreviousViewProjection = m_PreviousViewProjection;
     cb.GRV_InvOutputSize = float2( 1.0f / std::max( ds4Size.x, 1 ), 1.0f / std::max( ds4Size.y, 1 ) );
     cb.GRV_HistoryValid = 0.0f;

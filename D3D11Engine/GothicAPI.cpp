@@ -7460,14 +7460,16 @@ XRESULT GothicAPI::SaveMenuSettings( const std::string& file ) {
     WritePrivateProfileStringA( "Display", "GrassDetails", std::to_string( s.GrassDetailsLevel ).c_str(), ini.c_str() );
     WritePrivateProfileStringA( "Display", "VegetationCulling", nullptr, ini.c_str() );
     WritePrivateProfileStringA( "Display", "VegetationCullingDensity", nullptr, ini.c_str() );
+    const int storedCsmCascades = s.GetStoredShadowCascadeCount();
+    const int storedCsmPcfLimit = std::clamp( s.ShadowCascadePCFLimit, 0, storedCsmCascades );
     WritePrivateProfileStringA( "Shadows", "Quality", std::to_string( static_cast<int>(s.ShadowQuality) ).c_str(), ini.c_str() );
     WritePrivateProfileStringA( "Shadows", "Advanced_Enabled", std::to_string( s.AdvancedPerformanceOptions ? TRUE : FALSE ).c_str(), ini.c_str() );
     WritePrivateProfileStringA( "Shadows", "Advanced_CSMEnabled", std::to_string( s.EnableShadows ? TRUE : FALSE ).c_str(), ini.c_str() );
     WritePrivateProfileStringA( "Shadows", "Advanced_CSMResolution", std::to_string( s.ShadowMapSize ).c_str(), ini.c_str() );
     WritePrivateProfileStringA( "Shadows", "Advanced_CSMFilter", std::to_string( static_cast<int>(s.CSMShadowKernel) ).c_str(), ini.c_str() );
-    WritePrivateProfileStringA( "Shadows", "Advanced_CSMCascades", std::to_string( s.NumShadowCascades ).c_str(), ini.c_str() );
+    WritePrivateProfileStringA( "Shadows", "Advanced_CSMCascades", std::to_string( storedCsmCascades ).c_str(), ini.c_str() );
     WritePrivateProfileStringA( "Shadows", "Advanced_CSMRange", std::to_string( s.WorldShadowRangeScale ).c_str(), ini.c_str() );
-    WritePrivateProfileStringA( "Shadows", "Advanced_CSMPCFLimit", std::to_string( s.ShadowCascadePCFLimit ).c_str(), ini.c_str() );
+    WritePrivateProfileStringA( "Shadows", "Advanced_CSMPCFLimit", std::to_string( storedCsmPcfLimit ).c_str(), ini.c_str() );
     WritePrivateProfileStringA( "Shadows", "Advanced_PointlightMode", std::to_string( static_cast<int>(s.EnablePointlightShadows) ).c_str(), ini.c_str() );
     WritePrivateProfileStringA( "Shadows", "Advanced_PointlightResolution", std::to_string( s.PointlightShadowMapSize ).c_str(), ini.c_str() );
     WritePrivateProfileStringA( "Shadows", "Advanced_PointlightFilter", std::to_string( static_cast<int>(s.PointlightShadowKernel) ).c_str(), ini.c_str() );
@@ -7653,14 +7655,14 @@ XRESULT GothicAPI::LoadMenuSettings( const std::string& file ) {
                 GetPrivateProfileIntA( "Shadows", "Advanced_CSMFilter", static_cast<int>(s.CSMShadowKernel), ini.c_str() ),
                 static_cast<int>(GothicRendererSettings::SHADOW_KERNEL_PCF_LOW),
                 static_cast<int>(GothicRendererSettings::SHADOW_KERNEL_PCSS) ) );
-            s.NumShadowCascades = std::clamp<int>(
-                static_cast<int>( GetPrivateProfileIntA( "Shadows", "Advanced_CSMCascades", s.NumShadowCascades, ini.c_str() ) ),
-                1, std::min( 4, MAX_CSM_CASCADES ) );
+            s.NumShadowCascades = static_cast<int>( GetPrivateProfileIntA(
+                "Shadows", "Advanced_CSMCascades", s.NumShadowCascades, ini.c_str() ) );
+            s.NumShadowCascades = s.GetStoredShadowCascadeCount();
             s.WorldShadowRangeScale = std::clamp(
                 GetPrivateProfileFloatA( "Shadows", "Advanced_CSMRange", s.WorldShadowRangeScale, ini ), 0.5f, 2.0f );
             s.ShadowCascadePCFLimit = std::clamp<int>(
                 static_cast<int>( GetPrivateProfileIntA( "Shadows", "Advanced_CSMPCFLimit", s.ShadowCascadePCFLimit, ini.c_str() ) ),
-                0, std::min( std::min( 4, MAX_CSM_CASCADES ), s.NumShadowCascades ) );
+                0, std::min( std::min( 4, MAX_CSM_CASCADES ), s.GetStoredShadowCascadeCount() ) );
             s.EnablePointlightShadows = static_cast<GothicRendererSettings::EPointLightShadowMode>( std::clamp<int>(
                 GetPrivateProfileIntA( "Shadows", "Advanced_PointlightMode", static_cast<int>(s.EnablePointlightShadows), ini.c_str() ),
                 static_cast<int>(GothicRendererSettings::PLS_DISABLED),

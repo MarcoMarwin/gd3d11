@@ -102,7 +102,12 @@ XRESULT D3D11LegacyDeferredShading::DrawPointlightLights(
         if ( settings.EnablePointlightShadows > 0 ) {
             D3D11PointLight* pl = light->LightShadowBuffers ? static_cast<D3D11PointLight*>(light->LightShadowBuffers.get()) : nullptr;
 
-            if ( pl && pl->IsInited() && pl->HasShadowMap( 0 ) ) {
+            // An allocated cubemap is not necessarily usable yet. This can
+            // happen during first allocation or immediately after a mode/
+            // resolution change; keep the light unshadowed until its static
+            // base pass has completed instead of sampling cleared depth.
+            if ( pl && pl->IsInited() && pl->HasShadowMap( 0 )
+                && pl->IsStaticShadowReady() ) {
                 if ( graphicsEngine->GetActivePS() != psPointLightDynShadow ) {
                     graphicsEngine->SetActivePS( psPointLightDynShadow )->Apply();
                 }

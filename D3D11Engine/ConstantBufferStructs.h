@@ -287,6 +287,18 @@ struct DS_ScreenQuadConstantBuffer {
     // x = active CSM cascade count; y = near-cascade high-quality filter limit.
     // These are runtime-controlled for the same reason as SQ_ShadowRuntimeParams.
     float4 SQ_ShadowCascadeRuntimeParams;
+
+    // Far distance of cascades 0..3 in camera/view space. The shader uses
+    // these boundaries for deterministic cascade selection instead of relying
+    // on overlapping light-space projections.
+    float4 SQ_ShadowCascadeSplits;
+
+    // Actual pixel resolution of cascade 0..3. In atlas mode the far
+    // cascades are half-size and therefore cannot use SQ_ShadowmapSize.
+    float4 SQ_CascadeShadowResolution;
+
+    // Atlas dimensions in pixels (x = width, y = height); unused for arrays.
+    float4 SQ_ShadowAtlasSize;
 };
 
 struct CloudConstantBuffer {

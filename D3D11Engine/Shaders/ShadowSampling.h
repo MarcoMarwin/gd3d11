@@ -66,6 +66,40 @@ int GetRuntimePCFLimit()
     return clamp((int)(SQ_ShadowCascadeRuntimeParams.y + 0.5f), 0, GetRuntimeCascadeCount());
 }
 
+float GetRuntimeCascadeFarDistance()
+{
+    const int cascadeCount = GetRuntimeCascadeCount();
+    return cascadeCount == 1 ? SQ_ShadowCascadeSplits.x
+        : cascadeCount == 2 ? SQ_ShadowCascadeSplits.y
+        : cascadeCount == 3 ? SQ_ShadowCascadeSplits.z
+        : SQ_ShadowCascadeSplits.w;
+}
+
+float GetCascadeViewDepth(float3 wsPosition)
+{
+    return abs(mul(float4(wsPosition, 1.0f), SQ_View).z);
+}
+
+int GetDepthCascadeIndex(float3 wsPosition)
+{
+    const float viewDepth = GetCascadeViewDepth(wsPosition);
+    const int cascadeCount = GetRuntimeCascadeCount();
+    // The last cascade is a hard range boundary. Never let projection
+    // overlap/fallback logic reintroduce shadows beyond the selected range.
+    if ( viewDepth > GetRuntimeCascadeFarDistance() )
+        return -1;
+
+    [unroll]
+    for (int c = 0; c < MAX_CSM_CASCADES - 1; c++)
+    {
+        if (c >= cascadeCount - 1) break;
+        if (viewDepth <= SQ_ShadowCascadeSplits[c])
+            return c;
+    }
+
+    return cascadeCount - 1;
+}
+
 bool UsePCSSShadowFilter()
 {
     return GetShadowKernelQuality() >= 2;
@@ -97,7 +131,7 @@ float2 CascadeToAtlasUV(float2 cascadeUV, int cascadeIndex)
 {
     float4 rect = SQ_CascadeAtlasRect[cascadeIndex];
     float2 atlasUV = cascadeUV * rect.zw + rect.xy;
-    float2 halfTexel = 0.5 * rect.zw / SQ_ShadowmapSize;
+    float2 halfTexel = 0.5 / max( SQ_ShadowAtlasSize.xy, float2( 1.0f, 1.0f ) );
     return clamp(atlasUV, rect.xy + halfTexel, rect.xy + rect.zw - halfTexel);
 }
 
@@ -124,7 +158,11 @@ float SampleShadowMapLevel(float2 cascadeUV, int cascadeIndex)
 
 float GetCascadeShadowResolution(int cascadeIndex)
 {
+#if SHADOW_ATLAS
+    return max(SQ_CascadeShadowResolution[cascadeIndex], 1.0f);
+#else
     return max(SQ_ShadowmapSize, 1.0f);
+#endif
 }
 // Poisson patterns used by the shadow filters.
 static const float2 g_PoissonDisk16[16] = {
@@ -384,6 +422,17 @@ int GetPrimaryCascadeIndex(float3 wsPosition)
     float blendFactor;
 
     const int cascadeCount = GetRuntimeCascadeCount();
+    const int depthCascade = GetDepthCascadeIndex(wsPosition);
+    if ( depthCascade < 0 )
+        return -1;
+
+    // Cascade splits are authoritative. Validate the selected projection,
+    // then retain the old projection search only as a conservative fallback
+    // while still staying inside the explicit camera-depth range.
+    GetCascadeUVAndBounds(wsPosition, depthCascade, vShadowPos, projCoords, inBounds, blendFactor);
+    if (inBounds > 0.5f)
+        return depthCascade;
+
     [unroll]
     for (int c = 0; c < MAX_CSM_CASCADES; c++)
     {
@@ -411,11 +460,6 @@ float GetCascadeWorldTexelSize(int cascadeIndex)
     float worldSpanY = (shadowScaleY > 1e-6f) ? (2.0f / shadowScaleY) : 0.0f;
 
     float cascadeResolution = GetCascadeShadowResolution(cascadeIndex);
-#if SHADOW_ATLAS
-    float4 atlasRect = SQ_CascadeAtlasRect[cascadeIndex];
-    cascadeResolution *= max(atlasRect.z, atlasRect.w);
-#endif
-
     return 0.5f * (worldSpanX + worldSpanY) / max(cascadeResolution, 1.0f);
 }
 
@@ -606,22 +650,33 @@ float ComputeCascadedShadowValueSoft(float3 wsPosition, float viewSpaceZ, float 
     float distanceFactor = saturate(abs(viewSpaceZ) / 5000.0f);
     float softness = SQ_ShadowSoftness * (1.0f + distanceFactor * 0.5f);
 
-    int selectedCascade = -1;
     const int cascadeCount = GetRuntimeCascadeCount();
+    const bool withinCascadeRange = GetCascadeViewDepth(wsPosition) <= GetRuntimeCascadeFarDistance();
+    int selectedCascade = withinCascadeRange ? GetDepthCascadeIndex(wsPosition) : -1;
     float4 vShadowPos;
     float2 projCoords;
     float blendFactor = 0.0f;
 
-    // Reuse a cascade selected during receiver-bias calculation when possible.
-    if (preferredCascade >= 0 && preferredCascade < cascadeCount)
+    // Reuse the bias pass selection only when it agrees with the camera-depth
+    // split. This prevents overlapping light-space projections from making a
+    // distant receiver use an earlier cascade.
+    if (preferredCascade >= 0 && preferredCascade == selectedCascade)
     {
         float inBounds;
         GetCascadeUVAndBounds(wsPosition, preferredCascade, vShadowPos, projCoords, inBounds, blendFactor);
-        if (inBounds > 0.5f)
-            selectedCascade = preferredCascade;
+        if (inBounds <= 0.5f)
+            selectedCascade = -1;
     }
 
-    if (selectedCascade < 0)
+    if (selectedCascade >= 0)
+    {
+        float inBounds;
+        GetCascadeUVAndBounds(wsPosition, selectedCascade, vShadowPos, projCoords, inBounds, blendFactor);
+        if (inBounds <= 0.5f)
+            selectedCascade = -1;
+    }
+
+    if (selectedCascade < 0 && withinCascadeRange)
     {
         [unroll]
         for (int c = 0; c < MAX_CSM_CASCADES; c++)

@@ -32,10 +32,16 @@ HRESULT D3D11CascadedShadowMapBuffer::Init(
 }
 
 HRESULT D3D11CascadedShadowMapBuffer::Resize( UINT size ) {
+    return Resize( size, m_numCascades );
+}
+
+HRESULT D3D11CascadedShadowMapBuffer::Resize( UINT size, UINT numCascades ) {
     if ( !m_device ) {
         LogError() << "CascadedShadowMap::Resize - Device not initialized";
         return E_FAIL;
     }
+
+    m_numCascades = std::clamp<UINT>( numCascades, 1, MAX_CSM_CASCADES );
 
     // Clamp size to valid range
     m_size = std::max<UINT>( size, 512 );

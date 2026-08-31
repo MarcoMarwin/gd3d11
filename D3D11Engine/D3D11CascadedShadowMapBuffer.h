@@ -33,6 +33,14 @@ public:
     HRESULT Resize( UINT size );
 
     /**
+     * Resize the shadow map and change the number of array slices.
+     * @param size New size for each cascade
+     * @param numCascades Number of active cascades
+     * @return S_OK on success, error code on failure
+     */
+    HRESULT Resize( UINT size, UINT numCascades );
+
+    /**
      * Get the depth stencil view for a specific cascade slice.
      * @param cascadeIndex Index of the cascade (0 to numCascades-1)
      * @return DSV for the cascade, or nullptr if invalid index

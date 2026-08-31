@@ -59,7 +59,10 @@ void D3D11TiledDeferredShading::Init(
 }
 
 void D3D11TiledDeferredShading::EnsureShadowArray( uint32_t shadowCubeSize ) {
-    shadowCubeSize = std::clamp<uint32_t>( shadowCubeSize, 64, 512 );
+    // The Advanced menu exposes 128/256/512 px for normal point-light
+    // shadows. Keep the shared-array resource domain in sync with it; the
+    // separate distant static tier remains intentionally 32 px below.
+    shadowCubeSize = std::clamp<uint32_t>( shadowCubeSize, 128, 512 );
     if ( m_ShadowArrayCreated && m_ShadowCubeSize == shadowCubeSize ) return;
 
     if ( m_ShadowArrayCreated && m_ShadowCubeSize != shadowCubeSize ) {

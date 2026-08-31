@@ -333,25 +333,27 @@ D3D11ShadowMap::~D3D11ShadowMap() {
     }
 }
 
-uint64_t D3D11ShadowMap::UpdateGrassDetailsShadowGeneration() {
-    if ( !Engine::GAPI ) {
-        return m_GrassDetailsShadowGeneration;
-    }
-
-    const int level = std::clamp(
-        Engine::GAPI->GetRendererState().RendererSettings.GrassDetailsLevel, 0, 4 );
-    if ( level != m_LastGrassDetailsLevel ) {
-        m_LastGrassDetailsLevel = level;
-        ++m_GrassDetailsShadowGeneration;
-    }
-    return m_GrassDetailsShadowGeneration;
-}
-
 bool D3D11ShadowMap::ShouldUseAtlas() const {
     const auto& settings = Engine::GAPI->GetRendererState().RendererSettings;
     // FL10 always needs atlas fallback. On FL11+, this can be toggled at runtime.
     return FeatureLevel10Compatibility || settings.DebugSettings.FeatureSet.UseShadowAtlas;
 }
+
+uint64_t D3D11ShadowMap::UpdateGrassDetailsShadowGeneration() {
+    if ( !Engine::GAPI ) {
+        return m_GrassDetailsShadowGeneration;
+    }
+
+    const auto& settings = Engine::GAPI->GetRendererState().RendererSettings;
+    const int grassDetailsLevel = std::clamp( settings.GrassDetailsLevel, 0, 4 );
+    if ( m_LastGrassDetailsLevel != grassDetailsLevel ) {
+        m_LastGrassDetailsLevel = grassDetailsLevel;
+        ++m_GrassDetailsShadowGeneration;
+    }
+
+    return m_GrassDetailsShadowGeneration;
+}
+
 void D3D11ShadowMap::RecreateShadowSampler() {
     if ( !m_device ) return;
 
@@ -384,7 +386,7 @@ void D3D11ShadowMap::EnsureShadowMapBackend( int size ) {
     if ( !m_device ) return;
      
     const auto& settings = Engine::GAPI->GetRendererState().RendererSettings;
-    const UINT atlasNumCascades = static_cast<UINT>( std::clamp<int>( settings.NumShadowCascades, 1, std::min(4, MAX_CSM_CASCADES) ) );
+    const UINT atlasNumCascades = static_cast<UINT>( settings.GetEffectiveShadowCascadeCount() );
 
     bool desiredUseAtlas = ShouldUseAtlas();
     int clampedSize = std::min<int>( std::max<int>( size, 512 ), (FeatureLevel10Compatibility ? 8192 : 16384) );
@@ -402,7 +404,7 @@ void D3D11ShadowMap::EnsureShadowMapBackend( int size ) {
         } else {
             m_shadowAtlas.reset();
             m_cascadedShadowMap = std::make_unique<D3D11CascadedShadowMapBuffer>();
-            m_cascadedShadowMap->Init( m_device, clampedSize, MAX_CSM_CASCADES );
+            m_cascadedShadowMap->Init( m_device, clampedSize, atlasNumCascades );
         }
 
         // Sampler addressing depends on atlas/array path.
@@ -418,16 +420,16 @@ void D3D11ShadowMap::EnsureShadowMapBackend( int size ) {
     // Ensure resources exist even if no mode switch occurred.
     if ( m_useAtlas && !m_shadowAtlas ) {
         m_shadowAtlas = std::make_unique<D3D11ShadowAtlas>();
-        const int maxAtlasCascade0Size = (atlasNumCascades <= 1) ? clampedSize : (clampedSize / 4);
+        const int maxAtlasCascade0Size = (atlasNumCascades <= 1) ? clampedSize : (clampedSize / 2);
         int atlasCascade0Size = std::min<int>( clampedSize, maxAtlasCascade0Size );
         m_shadowAtlas->Init( m_device, atlasCascade0Size, atlasNumCascades );
     } else if ( m_useAtlas && m_shadowAtlas ) {
-        const int maxAtlasCascade0Size = (atlasNumCascades <= 1) ? clampedSize : (clampedSize / 4);
+        const int maxAtlasCascade0Size = (atlasNumCascades <= 1) ? clampedSize : (clampedSize / 2);
         int atlasCascade0Size = std::min<int>( clampedSize, maxAtlasCascade0Size );
         m_shadowAtlas->Resize( atlasCascade0Size, atlasNumCascades );
     } else if ( !m_useAtlas && !m_cascadedShadowMap ) {
         m_cascadedShadowMap = std::make_unique<D3D11CascadedShadowMapBuffer>();
-        m_cascadedShadowMap->Init( m_device, clampedSize, MAX_CSM_CASCADES );
+        m_cascadedShadowMap->Init( m_device, clampedSize, atlasNumCascades );
     }
 }
 
@@ -472,13 +474,13 @@ void D3D11ShadowMap::Resize( int size ) {
     const int maxSize = (FeatureLevel10Compatibility ? 8192 : 16384);
     const int s = std::min<int>( std::max<int>( size, 512 ), maxSize );
     const auto& settings = Engine::GAPI->GetRendererState().RendererSettings;
-    const UINT atlasNumCascades = static_cast<UINT>( std::clamp<int>( settings.NumShadowCascades, 1, std::min( 4, MAX_CSM_CASCADES ) ) );
+    const UINT atlasNumCascades = static_cast<UINT>( settings.GetEffectiveShadowCascadeCount() );
 
     EnsureShadowMapBackend( s );
 
     if ( m_useAtlas ) {
         // Atlas path: with one cascade, use full hardware limit; otherwise reserve width for atlas packing.
-        const int maxAtlasCascade0Size = (atlasNumCascades <= 1) ? maxSize : (maxSize / 4);
+        const int maxAtlasCascade0Size = (atlasNumCascades <= 1) ? maxSize : (maxSize / 2);
         int atlasCascade0Size = std::min<int>( s, maxAtlasCascade0Size );
         if ( m_shadowAtlas ) {
             m_shadowAtlas->Resize( atlasCascade0Size, atlasNumCascades );
@@ -486,11 +488,14 @@ void D3D11ShadowMap::Resize( int size ) {
     } else {
         // Texture array path
         if ( m_cascadedShadowMap ) {
-            m_cascadedShadowMap->Resize( s );
+            m_cascadedShadowMap->Resize( s, atlasNumCascades );
         }
     }
 
     m_lastNumCascades = static_cast<int>( atlasNumCascades );
+    // A resized or newly selected backend has no valid contents. The next
+    // PrepareRender must rebuild every active cascade, including lazy ones.
+    m_ShouldUpdateCascade.fill( true );
 }
 
 void D3D11ShadowMap::BindToPixelShader( ID3D11DeviceContext1* context, UINT slot ) {
@@ -568,14 +573,21 @@ XRESULT D3D11ShadowMap::PrepareRender()
         return XR_SUCCESS;
     }
 
+    const bool forceCsmUpdateForCasterChange = m_ForceCsmUpdateAfterHeavyRain;
+    m_ForceCsmUpdateAfterHeavyRain = false;
+
     // Check if shadowmap resources need to be recreated due to setting changes
     {
         auto& settings = Engine::GAPI->GetRendererState().RendererSettings;
         const int maxSize = FeatureLevel10Compatibility ? 8192 : 16384;
         const int desiredSize = std::min<int>( std::max<int>( settings.ShadowMapSize, 512 ), maxSize );
-        const int desiredCascades = std::clamp( settings.NumShadowCascades, 1, MAX_CSM_CASCADES );
+        const int desiredCascades = settings.GetEffectiveShadowCascadeCount();
+        settings.NumShadowCascades = desiredCascades;
+        const int desiredCascade0Size = ShouldUseAtlas() && desiredCascades > 1
+            ? std::min( desiredSize, maxSize / 4 )
+            : desiredSize;
 
-        if ( GetSizeX() != desiredSize
+        if ( GetSizeX() != desiredCascade0Size
             || m_useAtlas != ShouldUseAtlas()
             || m_lastNumCascades != desiredCascades ) {
             LogInfo() << "Shadowmap config changed, resizing to " << desiredSize << "x" << desiredSize;
@@ -595,12 +607,12 @@ XRESULT D3D11ShadowMap::PrepareRender()
     const XMVECTOR cameraPositionXm = Engine::GAPI->GetCameraPositionXM();
 
     auto& settings = Engine::GAPI->GetRendererState().RendererSettings;
-
     const uint64_t grassDetailsGeneration = UpdateGrassDetailsShadowGeneration();
-    const bool forceCsmUpdate = m_ForceCsmUpdateAfterHeavyRain
-        || m_CsmGrassDetailsGeneration != grassDetailsGeneration;
-    m_CsmGrassDetailsGeneration = grassDetailsGeneration;
-    m_ForceCsmUpdateAfterHeavyRain = false;
+    const bool grassDetailsChanged = settings.EnableShadows
+        && m_CsmGrassDetailsGeneration != grassDetailsGeneration;
+    if ( settings.EnableShadows ) {
+        m_CsmGrassDetailsGeneration = grassDetailsGeneration;
+    }
 
     // ********************************
     // Cascade Shadow Map Rendering (Simple Sequential Version)
@@ -610,14 +622,20 @@ XRESULT D3D11ShadowMap::PrepareRender()
     // Clamp far plane to avoid extreme shadow distances
     const float baseFarPlane = std::min( camera->GetFarPlane(), 12000.0f ); // ~120 meters, fine with Fog enabled.
 
-    // WorldShadowRangeScale als Multiplikator fuer die Schattenreichweite
-    const float shadowRangeScale = settings.WorldShadowRangeScale;
-    const float farPlane = baseFarPlane * std::max( 0.1f, shadowRangeScale );
-    int numCascades = settings.NumShadowCascades;
-    if ( numCascades > MAX_CSM_CASCADES || numCascades < 1 ) {
-        numCascades = std::clamp( numCascades, 1, MAX_CSM_CASCADES );
-        settings.NumShadowCascades = numCascades;
-    }
+    // WorldShadowRangeScale is the actual CSM cutoff multiplier. Normalize it
+    // here as well as in the menu/load path so external or stale values cannot
+    // bypass the intended range.
+    const float shadowRangeScale = std::clamp( settings.WorldShadowRangeScale, 0.5f, 2.0f );
+    settings.WorldShadowRangeScale = shadowRangeScale;
+    static float s_lastCsmShadowRangeScale = 1.0f;
+    static bool s_hasLastCsmShadowRangeScale = false;
+    const bool shadowRangeChanged = !s_hasLastCsmShadowRangeScale
+        || std::abs( s_lastCsmShadowRangeScale - shadowRangeScale ) > 0.0001f;
+    s_lastCsmShadowRangeScale = shadowRangeScale;
+    s_hasLastCsmShadowRangeScale = true;
+    const float farPlane = baseFarPlane * shadowRangeScale;
+    const int numCascades = settings.GetEffectiveShadowCascadeCount();
+    settings.NumShadowCascades = numCascades;
 
     std::vector<float> splits;
     if ( settings.DebugSettings.ShadowCascades.Lambda > 0.0001f
@@ -692,6 +710,9 @@ XRESULT D3D11ShadowMap::PrepareRender()
 
     // Array fuer alle Cascade-Matrizen
     bool isOutdoor = worldInfo->BspTree->GetBspTreeMode() == zBSP_MODE_OUTDOOR;
+    const bool reenteredOutdoor = isOutdoor && lastBspMode != zBSP_MODE_OUTDOOR;
+    const bool forceCsmUpdate = forceCsmUpdateForCasterChange
+        || grassDetailsChanged || reenteredOutdoor || shadowRangeChanged;
 
     const FXMVECTOR p = WorldShadowCP + dir * 10000.0f;
     const FXMVECTOR lookAt = WorldShadowCP;
@@ -732,10 +753,13 @@ XRESULT D3D11ShadowMap::PrepareRender()
 
         // Increment frame counter for temporal cascade updates
         perFrameCascadeData.frameCount++;
-        bool lazyCascadeUpdate = !m_useAtlas
-            && settings.GetEffectiveLazyCascadeUpdate();
-        const bool overheadLight = std::abs( XMVectorGetX( XMVector3Dot( shadowViewDir, c_XM_Up ) ) ) > 0.94f;
-        if ( overheadLight ) {
+        bool lazyCascadeUpdate = settings.GetEffectiveLazyCascadeUpdate();
+        const float lightUpDot = std::abs( XMVectorGetX( XMVector3Dot( shadowViewDir, c_XM_Up ) ) );
+        // BuildStableShadowUp changes its basis at this same zenith threshold.
+        // Keep the old noon safety guard, but only around the actual basis
+        // transition instead of disabling lazy updates for a broad time range.
+        const bool nearZenith = lightUpDot >= 0.999f;
+        if ( nearZenith ) {
             lazyCascadeUpdate = false;
         }
 
@@ -787,16 +811,18 @@ XRESULT D3D11ShadowMap::PrepareRender()
 
             bool shouldUpdateCascade = true;
             if ( lazyCascadeUpdate ) {
-                if ( cascadeIdx == 2 ) {
-                    shouldUpdateCascade = (perFrameCascadeData.frameCount % 5) == 0;
-                } else if ( cascadeIdx == MAX_CSM_CASCADES - 1 ) {
-                    shouldUpdateCascade = (perFrameCascadeData.frameCount % 10) == 0;
-                }
+                static constexpr std::array<size_t, MAX_CSM_CASCADES> updatePeriods = { 1, 2, 5, 10 };
+                const size_t periodIndex = std::min<size_t>(
+                    static_cast<size_t>( cascadeIdx ), updatePeriods.size() - 1 );
+                shouldUpdateCascade = (perFrameCascadeData.frameCount % updatePeriods[periodIndex]) == 0;
             }
             if ( resetCascadeDirections ) {
                 shouldUpdateCascade = true;
             }
             if ( forceCsmUpdate ) {
+                shouldUpdateCascade = true;
+            }
+            if ( !m_CascadeCRs[cascadeIdx].frustum.IsValid() ) {
                 shouldUpdateCascade = true;
             }
             m_ShouldUpdateCascade[cascadeIdx] = shouldUpdateCascade;
@@ -1059,28 +1085,12 @@ XRESULT D3D11ShadowMap::DrawPointlightShadows( std::vector<VobLightInfo*>& light
     }
 
     auto& settings = Engine::GAPI->GetRendererState().RendererSettings;
+    const uint64_t grassDetailsGeneration = UpdateGrassDetailsShadowGeneration();
+    const bool grassDetailsChanged = m_PointlightGrassDetailsGeneration != grassDetailsGeneration;
     if ( settings.EnablePointlightShadows <= 0 ) {
         return XR_SUCCESS;
     }
-
-    const uint64_t grassDetailsGeneration = UpdateGrassDetailsShadowGeneration();
-    const bool grassDetailsChanged = m_PointlightGrassDetailsGeneration != grassDetailsGeneration;
     m_PointlightGrassDetailsGeneration = grassDetailsGeneration;
-    if ( grassDetailsChanged ) {
-        // Pointlight shadow maps are persistent and are normally updated only
-        // when their light/caster state changes. Grass Details changes the
-        // caster geometry, so invalidate every known pointlight map once.
-        for ( auto& [_, info] : Engine::GAPI->VobLightMap ) {
-            if ( info ) {
-                info->UpdateShadows = true;
-            }
-        }
-        for ( const auto& info : Engine::GAPI->GetRendererPointLights() ) {
-            if ( info ) {
-                info->UpdateShadows = true;
-            }
-        }
-    }
 
     // Shadow resources follow the same frame visibility that is already limited by VisualFXDrawRadius.
     auto releaseIfInvisible = [this]( VobLightInfo* info ) {
@@ -1152,7 +1162,9 @@ XRESULT D3D11ShadowMap::DrawPointlightShadows( std::vector<VobLightInfo*>& light
 
             // Advanced point-light shadow resolution. Shadow Quality only
             // supplies the initial value; the menu can override it later.
-            int desiredResolution = std::clamp( settings.PointlightShadowMapSize, 64, 512 );
+            // Keep the runtime allocation domain identical to the Advanced
+            // menu and the persisted setting: 128, 256 or 512 px.
+            int desiredResolution = std::clamp( settings.PointlightShadowMapSize, 128, 512 );
             float allocationCameraDistance = FLT_MAX;
             XMStoreFloat( &allocationCameraDistance, XMVector3Length(
                 light->GetEffectivePositionWorldXM() - Engine::GAPI->GetCameraPositionXM() ) );
@@ -1214,6 +1226,13 @@ XRESULT D3D11ShadowMap::DrawPointlightShadows( std::vector<VobLightInfo*>& light
                 }
 
                 light->UpdateShadows = true; // Force an immediate render this frame
+            }
+
+            if ( grassDetailsChanged ) {
+                // Grass-card shadow geometry follows the normal shadow
+                // caster path, so a detail-level change invalidates existing
+                // pointlight maps as well as the CSM maps.
+                light->UpdateShadows = true;
             }
 
 
@@ -1331,19 +1350,27 @@ XRESULT D3D11ShadowMap::DrawPointlightShadows( std::vector<VobLightInfo*>& light
 void D3D11ShadowMap::BuildWorldShadowCasterCache() {
     ZoneScopedN( "D3D11ShadowMap::BuildWorldShadowCasterCache" );
     if ( !Engine::GAPI || !Engine::GAPI->IsWorldRenderCacheReady() ) {
+        const bool hadWorldShadowCache = m_WorldShadowCasterCacheValid;
         m_WorldShadowCasters.clear();
         m_WorldShadowCasterLookup.clear();
         m_WorldShadowVisibleCasters.clear();
         m_WorldShadowCasterCacheValid = false;
+        if ( hadWorldShadowCache ) {
+            m_ShouldUpdateCascade.fill( true );
+        }
         return;
     }
 
     const auto& settings = Engine::GAPI->GetRendererState().RendererSettings;
     if ( !settings.DrawWorldMesh || !settings.DrawShadowGeometry ) {
+        const bool hadWorldShadowCache = m_WorldShadowCasterCacheValid;
         m_WorldShadowCasters.clear();
         m_WorldShadowCasterLookup.clear();
         m_WorldShadowVisibleCasters.clear();
         m_WorldShadowCasterCacheValid = false;
+        if ( hadWorldShadowCache ) {
+            m_ShouldUpdateCascade.fill( true );
+        }
         return;
     }
 
@@ -1408,6 +1435,7 @@ void D3D11ShadowMap::BuildWorldShadowCasterCache() {
     m_WorldShadowCasterCacheDrawWorldMesh = settings.DrawWorldMesh;
     m_WorldShadowCasterCacheDrawShadowGeometry = settings.DrawShadowGeometry;
     m_WorldShadowCasterCacheValid = true;
+    m_ShouldUpdateCascade.fill( true );
     ++m_WorldShadowCasterCacheBuilds;
 }
 
@@ -1454,7 +1482,8 @@ XRESULT D3D11ShadowMap::DrawWorldShadow( )
 
     auto& settings = Engine::GAPI->GetRendererState().RendererSettings;
     
-    int numCascades = std::clamp( settings.NumShadowCascades, 1, MAX_CSM_CASCADES );
+    const int numCascades = settings.GetEffectiveShadowCascadeCount();
+    settings.NumShadowCascades = numCascades;
     bool isOutdoor = Engine::GAPI->GetLoadedWorldInfo()->BspTree->GetBspTreeMode() == zBSP_MODE_OUTDOOR;
 
     if ( isOutdoor ) {
@@ -1462,15 +1491,6 @@ XRESULT D3D11ShadowMap::DrawWorldShadow( )
         // cascade frames. BuildWorldShadowCasterCache invalidates it when the
         // world/configuration or relevant shadow settings change.
         BuildWorldShadowCasterCache();
-
-        // For atlas path: clear entire atlas once before rendering all cascades
-        if ( m_useAtlas && m_shadowAtlas ) {
-            auto dsv = m_shadowAtlas->GetDepthStencilView();
-            if ( dsv ) {
-                // White means unshadowed; visible sun/moon cascades overwrite it below.
-                m_context->ClearDepthStencilView( dsv, D3D11_CLEAR_DEPTH, 1.0f, 0 );
-            }
-        }
 
         for ( int cascadeIdx = 0; cascadeIdx < numCascades; ++cascadeIdx ) {
             // only update every Nth frame for higher cascades to save performance
@@ -1501,6 +1521,22 @@ XRESULT D3D11ShadowMap::DrawWorldShadow( )
                 renderParams.ViewportOverride = m_shadowAtlas->GetCascadeViewport( static_cast<UINT>(cascadeIdx) );
                 renderParams.UseViewportOverride = true;
                 renderParams.SkipClear = true;
+
+                // The atlas has one shared DSV. Clear only the region that is
+                // about to be rebuilt so skipped lazy cascades keep their
+                // valid contents.
+                const auto& cascadeInfo = m_shadowAtlas->GetCascadeInfo( static_cast<UINT>(cascadeIdx) );
+                const D3D11_RECT clearRect = {
+                    static_cast<LONG>( cascadeInfo.offsetX ),
+                    static_cast<LONG>( cascadeInfo.offsetY ),
+                    static_cast<LONG>( cascadeInfo.offsetX + cascadeInfo.size ),
+                    static_cast<LONG>( cascadeInfo.offsetY + cascadeInfo.size )
+                };
+                const FLOAT clearValue[4] = { 1.0f, 1.0f, 1.0f, 1.0f };
+                if ( cascadeInfo.size > 0 && m_shadowAtlas->GetDepthStencilView() ) {
+                    m_context->ClearView(
+                        m_shadowAtlas->GetDepthStencilView(), clearValue, &clearRect, 1 );
+                }
             }
 
             RenderShadowmaps( renderParams );
@@ -1788,11 +1824,20 @@ DS_ScreenQuadConstantBuffer D3D11ShadowMap::FillSunCSMConstantBuffer() const {
     }
 
     scb.SQ_ShadowmapSize = static_cast<float>( this->GetSizeX() );
+    scb.SQ_CascadeShadowResolution = float4(
+        static_cast<float>( GetCascadePixelSize( 0 ) ),
+        static_cast<float>( GetCascadePixelSize( 1 ) ),
+        static_cast<float>( GetCascadePixelSize( 2 ) ),
+        static_cast<float>( GetCascadePixelSize( 3 ) ) );
+    scb.SQ_ShadowAtlasSize = float4( 0, 0, 0, 0 );
 
     if ( m_useAtlas && m_shadowAtlas ) {
         for ( size_t i = 0; i < MAX_CSM_CASCADES; ++i ) {
             scb.SQ_CascadeAtlasRect[i] = m_shadowAtlas->GetCascadeUVRect( static_cast<UINT>( i ) );
         }
+        scb.SQ_ShadowAtlasSize = float4(
+            static_cast<float>( m_shadowAtlas->GetAtlasWidth() ),
+            static_cast<float>( m_shadowAtlas->GetAtlasHeight() ), 0, 0 );
     }
 
     auto* graphicsEngine = dynamic_cast<D3D11GraphicsEngine*>( Engine::GraphicsEngine );
@@ -1807,14 +1852,23 @@ DS_ScreenQuadConstantBuffer D3D11ShadowMap::FillSunCSMConstantBuffer() const {
     scb.SQ_WorldAOStrength = settings.WorldAOStrength;
     scb.SQ_ShadowSoftness = settings.ShadowSoftness;
     scb.SQ_LightSize = std::clamp( settings.PCSSLightSize, 0.005f, 0.5f );
-    const int runtimeCascadeCount = std::clamp( settings.NumShadowCascades, 1, MAX_CSM_CASCADES );
+    const int runtimeCascadeCount = settings.GetEffectiveShadowCascadeCount();
     const int runtimePCFLimit = std::clamp( settings.ShadowCascadePCFLimit, 0, runtimeCascadeCount );
+    const int runtimeShadowKernel = m_useAtlas
+        && settings.CSMShadowKernel == GothicRendererSettings::E_ShadowKernelQuality::SHADOW_KERNEL_PCSS
+        ? static_cast<int>( GothicRendererSettings::E_ShadowKernelQuality::SHADOW_KERNEL_PCF_MEDIUM )
+        : static_cast<int>( settings.GetShadowKernelQuality() );
     scb.SQ_ShadowRuntimeParams = float4(
         settings.GetUsesTemporalReconstruction() ? 1.0f : 0.0f,
-        static_cast<float>( settings.GetShadowKernelQuality() ),
+        static_cast<float>( runtimeShadowKernel ),
         settings.EnableShadows && !m_CsmSuppressedByHeavyRain ? 1.0f : 0.0f, 0.0f );
     scb.SQ_ShadowCascadeRuntimeParams = float4(
         static_cast<float>( runtimeCascadeCount ), static_cast<float>( runtimePCFLimit ), 0.0f, 0.0f );
+    scb.SQ_ShadowCascadeSplits = float4(
+        m_CascadeSplits.size() > 1 ? m_CascadeSplits[1] : 0.0f,
+        m_CascadeSplits.size() > 2 ? m_CascadeSplits[2] : 0.0f,
+        m_CascadeSplits.size() > 3 ? m_CascadeSplits[3] : 0.0f,
+        m_CascadeSplits.size() > 4 ? m_CascadeSplits[4] : 0.0f );
     WorldInfo* worldInfo = Engine::GAPI->GetLoadedWorldInfo();
     if ( worldInfo && worldInfo->BspTree ) {
         auto bspTree = worldInfo->BspTree;
@@ -1934,12 +1988,21 @@ XRESULT D3D11ShadowMap::DrawWorldLights()
     }
 
     scb.SQ_ShadowmapSize = static_cast<float>( this->GetSizeX() );
+    scb.SQ_CascadeShadowResolution = float4(
+        static_cast<float>( GetCascadePixelSize( 0 ) ),
+        static_cast<float>( GetCascadePixelSize( 1 ) ),
+        static_cast<float>( GetCascadePixelSize( 2 ) ),
+        static_cast<float>( GetCascadePixelSize( 3 ) ) );
+    scb.SQ_ShadowAtlasSize = float4( 0, 0, 0, 0 );
 
     // Atlas mode stores per-cascade UV rectangles.
     if ( m_useAtlas && m_shadowAtlas ) {
         for ( size_t i = 0; i < MAX_CSM_CASCADES; ++i ) {
             scb.SQ_CascadeAtlasRect[i] = m_shadowAtlas->GetCascadeUVRect( static_cast<UINT>( i ) );
         }
+        scb.SQ_ShadowAtlasSize = float4(
+            static_cast<float>( m_shadowAtlas->GetAtlasWidth() ),
+            static_cast<float>( m_shadowAtlas->GetAtlasHeight() ), 0, 0 );
     }
 
     // Get rain matrix
@@ -1954,14 +2017,23 @@ XRESULT D3D11ShadowMap::DrawWorldLights()
     scb.SQ_WorldAOStrength = settings.WorldAOStrength;
     scb.SQ_ShadowSoftness = settings.ShadowSoftness;
     scb.SQ_LightSize = std::clamp( settings.PCSSLightSize, 0.005f, 0.5f );
-    const int runtimeCascadeCount = std::clamp( settings.NumShadowCascades, 1, MAX_CSM_CASCADES );
+    const int runtimeCascadeCount = settings.GetEffectiveShadowCascadeCount();
     const int runtimePCFLimit = std::clamp( settings.ShadowCascadePCFLimit, 0, runtimeCascadeCount );
+    const int runtimeShadowKernel = m_useAtlas
+        && settings.CSMShadowKernel == GothicRendererSettings::E_ShadowKernelQuality::SHADOW_KERNEL_PCSS
+        ? static_cast<int>( GothicRendererSettings::E_ShadowKernelQuality::SHADOW_KERNEL_PCF_MEDIUM )
+        : static_cast<int>( settings.GetShadowKernelQuality() );
     scb.SQ_ShadowRuntimeParams = float4(
         settings.GetUsesTemporalReconstruction() ? 1.0f : 0.0f,
-        static_cast<float>( settings.GetShadowKernelQuality() ),
+        static_cast<float>( runtimeShadowKernel ),
         settings.EnableShadows && !m_CsmSuppressedByHeavyRain ? 1.0f : 0.0f, 0.0f );
     scb.SQ_ShadowCascadeRuntimeParams = float4(
         static_cast<float>( runtimeCascadeCount ), static_cast<float>( runtimePCFLimit ), 0.0f, 0.0f );
+    scb.SQ_ShadowCascadeSplits = float4(
+        m_CascadeSplits.size() > 1 ? m_CascadeSplits[1] : 0.0f,
+        m_CascadeSplits.size() > 2 ? m_CascadeSplits[2] : 0.0f,
+        m_CascadeSplits.size() > 3 ? m_CascadeSplits[3] : 0.0f,
+        m_CascadeSplits.size() > 4 ? m_CascadeSplits[4] : 0.0f );
     // Modify lightsettings when indoor
     if ( auto bspTree = worldInfo->BspTree )
         if ( bspTree->GetBspTreeMode() == zBSP_MODE_INDOOR ) {

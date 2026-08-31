@@ -917,7 +917,19 @@ struct GothicRendererSettings {
 
     bool IsShadowFrustumCullingEnabled() const {
         return GetEffectiveShadowFrustumCullingMode() != SHD_FRUSTUM_CULLING_DISABLED
-            && NumShadowCascades > 1;
+            && GetEffectiveShadowCascadeCount() > 1;
+    }
+
+    int GetStoredShadowCascadeCount() const {
+        const int maxCascades = std::min( 4, MAX_CSM_CASCADES );
+        const int minCascades = std::min( 2, maxCascades );
+        return std::clamp( NumShadowCascades, minCascades, maxCascades );
+    }
+
+    int GetEffectiveShadowCascadeCount() const {
+        const int maxCascades = std::min( 4, MAX_CSM_CASCADES );
+        const int minCascades = EnableShadows ? std::min( 2, maxCascades ) : 1;
+        return std::clamp( NumShadowCascades, minCascades, maxCascades );
     }
 
     static E_ShadowQuality ShadowQualityFromShadowMapSize( int size ) {
@@ -981,7 +993,10 @@ struct GothicRendererSettings {
             PointlightShadowUpdateBudget = 2;
             PartialDynamicShadowUpdates = false;
             WorldShadowRangeScale = 1.0f;
-            NumShadowCascades = 1;
+            // Keep the persisted selection in the supported 2..4 range.
+            // GetEffectiveShadowCascadeCount() still uses 1 as the internal
+            // no-CSM runtime sentinel while shadows are disabled.
+            NumShadowCascades = 2;
             ShadowCascadePCFLimit = 0;
             ShadowSoftness = DefaultShadowSoftnessForQuality( ShadowQuality );
             // Keep the inactive CSM resource at the minimum supported size.
@@ -1002,7 +1017,10 @@ struct GothicRendererSettings {
             PointlightShadowUpdateBudget = 2;
             PartialDynamicShadowUpdates = false;
             WorldShadowRangeScale = 1.0f;
-            NumShadowCascades = 1;
+            // One cascade disables the renderer's cascade frustum culling and
+            // produces incomplete/unstable shadow coverage. Two is the
+            // minimum valid count whenever CSM shadows are actually enabled.
+            NumShadowCascades = 2;
             ShadowCascadePCFLimit = 0;
             ShadowSoftness = DefaultShadowSoftnessForQuality( ShadowQuality );
             ShadowMapSize = 512;
