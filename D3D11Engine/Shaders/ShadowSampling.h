@@ -68,6 +68,8 @@ int GetRuntimePCFLimit()
 
 float GetRuntimeCascadeFarDistance()
 {
+    // The final split is the hard world-shadow cutoff. Cascade selection below
+    // remains projection-based so texel-snapped matrices do not cause jumps.
     const int cascadeCount = GetRuntimeCascadeCount();
     return cascadeCount == 1 ? SQ_ShadowCascadeSplits.x
         : cascadeCount == 2 ? SQ_ShadowCascadeSplits.y
@@ -78,26 +80,6 @@ float GetRuntimeCascadeFarDistance()
 float GetCascadeViewDepth(float3 wsPosition)
 {
     return abs(mul(float4(wsPosition, 1.0f), SQ_View).z);
-}
-
-int GetDepthCascadeIndex(float3 wsPosition)
-{
-    const float viewDepth = GetCascadeViewDepth(wsPosition);
-    const int cascadeCount = GetRuntimeCascadeCount();
-    // The last cascade is a hard range boundary. Never let projection
-    // overlap/fallback logic reintroduce shadows beyond the selected range.
-    if ( viewDepth > GetRuntimeCascadeFarDistance() )
-        return -1;
-
-    [unroll]
-    for (int c = 0; c < MAX_CSM_CASCADES - 1; c++)
-    {
-        if (c >= cascadeCount - 1) break;
-        if (viewDepth <= SQ_ShadowCascadeSplits[c])
-            return c;
-    }
-
-    return cascadeCount - 1;
 }
 
 bool UsePCSSShadowFilter()
@@ -421,18 +403,14 @@ int GetPrimaryCascadeIndex(float3 wsPosition)
     float inBounds;
     float blendFactor;
 
-    const int cascadeCount = GetRuntimeCascadeCount();
-    const int depthCascade = GetDepthCascadeIndex(wsPosition);
-    if ( depthCascade < 0 )
+    // Keep the explicit range cutoff, but use the proven projection-based
+    // cascade selection from Build 221. Light-space projections overlap at
+    // their borders; selecting by camera depth first made receivers jump
+    // between cascades when the stabilized matrices moved by a texel.
+    if ( GetCascadeViewDepth(wsPosition) > GetRuntimeCascadeFarDistance() )
         return -1;
 
-    // Cascade splits are authoritative. Validate the selected projection,
-    // then retain the old projection search only as a conservative fallback
-    // while still staying inside the explicit camera-depth range.
-    GetCascadeUVAndBounds(wsPosition, depthCascade, vShadowPos, projCoords, inBounds, blendFactor);
-    if (inBounds > 0.5f)
-        return depthCascade;
-
+    const int cascadeCount = GetRuntimeCascadeCount();
     [unroll]
     for (int c = 0; c < MAX_CSM_CASCADES; c++)
     {
@@ -651,32 +629,27 @@ float ComputeCascadedShadowValueSoft(float3 wsPosition, float viewSpaceZ, float 
     float softness = SQ_ShadowSoftness * (1.0f + distanceFactor * 0.5f);
 
     const int cascadeCount = GetRuntimeCascadeCount();
-    const bool withinCascadeRange = GetCascadeViewDepth(wsPosition) <= GetRuntimeCascadeFarDistance();
-    int selectedCascade = withinCascadeRange ? GetDepthCascadeIndex(wsPosition) : -1;
+    int selectedCascade = -1;
     float4 vShadowPos;
     float2 projCoords;
     float blendFactor = 0.0f;
 
-    // Reuse the bias pass selection only when it agrees with the camera-depth
-    // split. This prevents overlapping light-space projections from making a
-    // distant receiver use an earlier cascade.
-    if (preferredCascade >= 0 && preferredCascade == selectedCascade)
+    // Keep the range cutoff independent from cascade selection. The original
+    // projection search is stable with the texel-snapped matrices and avoids
+    // visible transitions when a receiver crosses a depth split.
+    if ( abs(viewSpaceZ) > GetRuntimeCascadeFarDistance() )
+        return shadow;
+
+    // Reuse a cascade selected during receiver-bias calculation when possible.
+    if (preferredCascade >= 0 && preferredCascade < cascadeCount)
     {
         float inBounds;
         GetCascadeUVAndBounds(wsPosition, preferredCascade, vShadowPos, projCoords, inBounds, blendFactor);
-        if (inBounds <= 0.5f)
-            selectedCascade = -1;
+        if (inBounds > 0.5f)
+            selectedCascade = preferredCascade;
     }
 
-    if (selectedCascade >= 0)
-    {
-        float inBounds;
-        GetCascadeUVAndBounds(wsPosition, selectedCascade, vShadowPos, projCoords, inBounds, blendFactor);
-        if (inBounds <= 0.5f)
-            selectedCascade = -1;
-    }
-
-    if (selectedCascade < 0 && withinCascadeRange)
+    if (selectedCascade < 0)
     {
         [unroll]
         for (int c = 0; c < MAX_CSM_CASCADES; c++)

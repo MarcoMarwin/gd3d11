@@ -584,7 +584,7 @@ XRESULT D3D11ShadowMap::PrepareRender()
         const int desiredCascades = settings.GetEffectiveShadowCascadeCount();
         settings.NumShadowCascades = desiredCascades;
         const int desiredCascade0Size = ShouldUseAtlas() && desiredCascades > 1
-            ? std::min( desiredSize, maxSize / 4 )
+            ? std::min( desiredSize, maxSize / 2 )
             : desiredSize;
 
         if ( GetSizeX() != desiredCascade0Size
@@ -753,13 +753,15 @@ XRESULT D3D11ShadowMap::PrepareRender()
 
         // Increment frame counter for temporal cascade updates
         perFrameCascadeData.frameCount++;
-        bool lazyCascadeUpdate = settings.GetEffectiveLazyCascadeUpdate();
-        const float lightUpDot = std::abs( XMVectorGetX( XMVector3Dot( shadowViewDir, c_XM_Up ) ) );
-        // BuildStableShadowUp changes its basis at this same zenith threshold.
-        // Keep the old noon safety guard, but only around the actual basis
-        // transition instead of disabling lazy updates for a broad time range.
-        const bool nearZenith = lightUpDot >= 0.999f;
-        if ( nearZenith ) {
+        // The atlas has a single depth target and is rebuilt as a whole. Keep
+        // lazy updates on the array backend only, as in the stable CSM path.
+        bool lazyCascadeUpdate = !m_useAtlas
+            && settings.GetEffectiveLazyCascadeUpdate();
+        // BuildStableShadowUp changes its basis around overhead lighting. The
+        // wider guard prevents a visible transition at the zenith.
+        const bool overheadLight = std::abs(
+            XMVectorGetX( XMVector3Dot( shadowViewDir, c_XM_Up ) ) ) > 0.94f;
+        if ( overheadLight ) {
             lazyCascadeUpdate = false;
         }
 
@@ -811,7 +813,9 @@ XRESULT D3D11ShadowMap::PrepareRender()
 
             bool shouldUpdateCascade = true;
             if ( lazyCascadeUpdate ) {
-                static constexpr std::array<size_t, MAX_CSM_CASCADES> updatePeriods = { 1, 2, 5, 10 };
+                // Keep the two camera-near cascades current. Only the two
+                // distant cascades use staggered updates.
+                static constexpr std::array<size_t, MAX_CSM_CASCADES> updatePeriods = { 1, 1, 5, 10 };
                 const size_t periodIndex = std::min<size_t>(
                     static_cast<size_t>( cascadeIdx ), updatePeriods.size() - 1 );
                 shouldUpdateCascade = (perFrameCascadeData.frameCount % updatePeriods[periodIndex]) == 0;
