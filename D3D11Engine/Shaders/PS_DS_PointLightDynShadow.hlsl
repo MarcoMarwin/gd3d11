@@ -95,9 +95,8 @@ float4 PSMain( PS_INPUT Input ) : SV_TARGET
 	// Do some simple NdL-Lighting
 	float ndl = PLS_ComputePointLightNdlBacklit(lightDir, normal, Pl_PositionWorld, wsPosition, wsNormal, twoSidedBacklitMaterial, AC_EnableSSS);
 	
-	// Low and Very Low deliberately keep NPCs free of point-light receiver
-	// shadows. The flag is carried in the existing filter padding so the
-	// lighting itself remains unchanged.
+	// Animated point-light casters follow the single pointlight-shadow enabled
+	// switch. The flag remains in the existing filter padding for compatibility.
 	float shadow = 1.0f;
 	[branch]
 	if (npcMaterial <= 0.5f || PL_ShadowFilterPad[0] == 0u)

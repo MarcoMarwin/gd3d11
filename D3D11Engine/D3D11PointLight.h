@@ -5,7 +5,6 @@
 #include <condition_variable>
 #include <atomic>
 #include <cstdint>
-#include <cfloat>
 #include "TexturePool.h"
 #include "ThreadPool.h"
 
@@ -41,17 +40,11 @@ public:
     /** Returns true when the light may need an update. */
     bool WantsUpdate();
 
-    /** Returns whether a throttled dynamic-shadow refresh is due. */
-    bool IsDynamicShadowUpdateDue( float currentTime, float minimumInterval ) const;
-
     /** Returns whether the current pointlight policy renders animated NPC/MOB casters. */
     bool UseDynamicNpcShadowCasters() const;
 
     /** Invalidates the active overlay when the shadow-quality policy changes. */
     bool UpdateDynamicNpcShadowCasterMode();
-
-    /** Records the time of the last dynamic-shadow refresh. */
-    void MarkDynamicShadowUpdated( float currentTime );
 
     /** Returns true if this is the first time that light is being rendered */
     bool NotYetDrawn();
@@ -140,6 +133,5 @@ protected:
     bool m_DynamicShadowValid = false;
     bool m_DynamicNpcShadowCastersEnabled = true;
     uint16_t m_InvisibleFrameCount = 0;
-    float m_LastDynamicShadowUpdateTime = -FLT_MAX;
     TaskHandle<void> m_PendingInit;
 };

@@ -284,7 +284,8 @@ struct DS_ScreenQuadConstantBuffer {
     // changing the associated settings never requires shader reloads.
     float4 SQ_ShadowRuntimeParams;
 
-    // x = active CSM cascade count; y = near-cascade high-quality filter limit.
+    // x = active CSM cascade count; y = number of near cascades using the
+    // high-quality filter.
     // These are runtime-controlled for the same reason as SQ_ShadowRuntimeParams.
     float4 SQ_ShadowCascadeRuntimeParams;
 

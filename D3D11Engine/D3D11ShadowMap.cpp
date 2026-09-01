@@ -1118,12 +1118,12 @@ XRESULT D3D11ShadowMap::DrawPointlightShadows( std::vector<VobLightInfo*>& light
     // ********************************
     // Draw world shadows
     // ********************************
-    bool partialShadowUpdate = settings.PartialDynamicShadowUpdates;
-    const bool staticOnlyMode = settings.EnablePointlightShadows == GothicRendererSettings::PLS_STATIC_ONLY;
-    const bool dynamicMode = settings.EnablePointlightShadows >= GothicRendererSettings::PLS_UPDATE_DYNAMIC;
-    const float currentTime = Engine::GAPI->GetTimeSeconds();
-    const float distantDynamicShadowInterval = std::clamp(
-        static_cast<float>( settings.PointlightShadowUpdateIntervalMs ), 40.0f, 500.0f ) / 1000.0f;
+    const bool pointlightShadowsEnabled = settings.EnablePointlightShadows
+        != GothicRendererSettings::PLS_DISABLED;
+    const bool dynamicMode = pointlightShadowsEnabled
+        && settings.UseDynamicPointlightNpcShadows();
+    const bool staticOnlyMode = pointlightShadowsEnabled && !dynamicMode;
+    constexpr int kMaxBackgroundPointlightUpdatesPerFrame = 2;
     // Draw pointlight shadows
     std::list<VobLightInfo*> importantUpdates;
 
@@ -1240,16 +1240,10 @@ XRESULT D3D11ShadowMap::DrawPointlightShadows( std::vector<VobLightInfo*>& light
             bool isInited = pl->IsInited();
 
             // A nearby light with an animated overlay must keep its NPC/MOB
-            // shadow current. Distant overlays are refreshed on a
-            // independently configured timer; the static world base is never
-            // rebuilt.
+            // shadow current. Other animated overlays use the persistent
+            // round-robin queue below; the static world base is never rebuilt.
             if ( nearDynamicShadowSource )
                 light->UpdateShadows = true;
-
-            const bool distantDynamicUpdateDue = animatedShadowOverlayEligible
-                && partialShadowUpdate
-                && !staticOnlyMode
-                && pl->IsDynamicShadowUpdateDue( currentTime, distantDynamicShadowInterval );
 
             // Sort into Important vs Background Queue
             if ( isInited ) {
@@ -1262,22 +1256,14 @@ XRESULT D3D11ShadowMap::DrawPointlightShadows( std::vector<VobLightInfo*>& light
                     }
                     importantUpdates.emplace_back( light );
                 }
-                // Background Priority: Add animated overlays to the
-                // round-robin queue if not already there. This also applies to
-                // static lights; only their world base is static.
-                else if ( distantDynamicUpdateDue ) {
+                // Background Priority: every eligible animated overlay
+                // participates in the persistent round-robin queue. This
+                // also applies to static lights; only their world base is
+                // static.
+                else if ( animatedShadowOverlayEligible ) {
                     auto& queue = graphicsEngine->FrameShadowUpdateLights;
                     if ( std::find( queue.begin(), queue.end(), light ) == queue.end() ) {
                         queue.emplace_back( light );
-                    }
-                } else if ( !partialShadowUpdate && !staticOnlyMode ) {
-                    // Preserve the setting's original full-update semantics
-                    // for every light that has an animated overlay.
-                    if ( animatedShadowOverlayEligible )
-                        importantUpdates.emplace_back( light );
-                    else {
-                        auto& queue = graphicsEngine->FrameShadowUpdateLights;
-                        queue.remove( light );
                     }
                 } else {
                     auto& queue = graphicsEngine->FrameShadowUpdateLights;
@@ -1304,15 +1290,12 @@ XRESULT D3D11ShadowMap::DrawPointlightShadows( std::vector<VobLightInfo*>& light
             ++lowStaticRenders;
         }
         pointLight->RenderCubemap( true, m_PointLightCB.get() );
-        if ( dynamicMode && !pointLight->IsTiledStaticLowRes()
-            && !pointLight->NotYetDrawn() )
-            pointLight->MarkDynamicShadowUpdated( currentTime );
         importantUpdate->UpdateShadows = false;
     }
 
-    // Process the background queue (round-robin) with the independently
-    // configured budget.
-    const int maxBackgroundUpdates = std::clamp( settings.PointlightShadowUpdateBudget, 1, 8 );
+    // Process the background queue (round-robin) with a fixed, bounded budget.
+    // Near/hero lights never enter this queue and are not counted here.
+    const int maxBackgroundUpdates = kMaxBackgroundPointlightUpdatesPerFrame;
     int updatesDone = 0;
 
     while ( !graphicsEngine->FrameShadowUpdateLights.empty() && updatesDone < maxBackgroundUpdates ) {
@@ -1337,8 +1320,6 @@ XRESULT D3D11ShadowMap::DrawPointlightShadows( std::vector<VobLightInfo*>& light
 
         // FORCE the render! It waited in line for its turn, it must draw.
         l->RenderCubemap( true, m_PointLightCB.get() );
-        if ( dynamicMode && !l->IsTiledStaticLowRes() && !l->NotYetDrawn() )
-            l->MarkDynamicShadowUpdated( currentTime );
         graphicsEngine->DebugPointlight = l;
 
         updatesDone++;
@@ -1853,7 +1834,7 @@ DS_ScreenQuadConstantBuffer D3D11ShadowMap::FillSunCSMConstantBuffer() const {
     scb.SQ_ShadowSoftness = settings.ShadowSoftness;
     scb.SQ_LightSize = std::clamp( settings.PCSSLightSize, 0.005f, 0.5f );
     const int runtimeCascadeCount = settings.GetEffectiveShadowCascadeCount();
-    const int runtimePCFLimit = std::clamp( settings.ShadowCascadePCFLimit, 0, runtimeCascadeCount );
+    const int runtimePCFLimit = settings.GetEffectiveShadowCascadePCFLimit( !m_useAtlas );
     const int runtimeShadowKernel = m_useAtlas
         && settings.CSMShadowKernel == GothicRendererSettings::E_ShadowKernelQuality::SHADOW_KERNEL_PCSS
         ? static_cast<int>( GothicRendererSettings::E_ShadowKernelQuality::SHADOW_KERNEL_PCF_MEDIUM )
@@ -2018,7 +1999,7 @@ XRESULT D3D11ShadowMap::DrawWorldLights()
     scb.SQ_ShadowSoftness = settings.ShadowSoftness;
     scb.SQ_LightSize = std::clamp( settings.PCSSLightSize, 0.005f, 0.5f );
     const int runtimeCascadeCount = settings.GetEffectiveShadowCascadeCount();
-    const int runtimePCFLimit = std::clamp( settings.ShadowCascadePCFLimit, 0, runtimeCascadeCount );
+    const int runtimePCFLimit = settings.GetEffectiveShadowCascadePCFLimit( !m_useAtlas );
     const int runtimeShadowKernel = m_useAtlas
         && settings.CSMShadowKernel == GothicRendererSettings::E_ShadowKernelQuality::SHADOW_KERNEL_PCSS
         ? static_cast<int>( GothicRendererSettings::E_ShadowKernelQuality::SHADOW_KERNEL_PCF_MEDIUM )

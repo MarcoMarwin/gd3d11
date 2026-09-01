@@ -673,10 +673,8 @@ struct GothicRendererSettings {
         PointlightShadowMapSize = 128;
         PointlightShadowKernel = E_ShadowKernelQuality::SHADOW_KERNEL_PCF_LOW;
         EnablePointlightDynamicCasters = true;
-        PointlightShadowUpdateIntervalMs = 100;
-        PointlightShadowUpdateBudget = 4;
         WorldShadowRangeScale = 1.0f;
-        NumShadowCascades = 3; // looks OK and performance friendly
+        NumShadowCascades = MAX_SUPPORTED_CSM_CASCADES; // CSM uses the full four-cascade layout
         ShadowCascadePCFLimit = 1;
         ShadowFrustumCullingMode = E_ShadowFrustumCulling::SHD_FRUSTUM_CULLING_CONSERVATIVE;
 
@@ -730,7 +728,12 @@ struct GothicRendererSettings {
         WindQuality = WIND_QUALITY_ADVANCED;
         HeroAffectsObjects = true;
         EnablePointlightShadows = PLS_UPDATE_DYNAMIC;
-        PartialDynamicShadowUpdates = true;
+        // Reserved slots keep the exported GothicRendererSettings layout
+        // compatible with older Ikarus/plugin consumers. They are not used
+        // by the renderer or exposed as settings.
+        ReservedPointlightUpdatePolicy = false;
+        ReservedPointlightUpdateIntervalMs = 0;
+        ReservedPointlightUpdateBudget = 0;
         EnableTiledLighting = false;
         RendererMode = RM_Deferred;
         DrawSectionIntersections = true;
@@ -924,15 +927,28 @@ struct GothicRendererSettings {
     }
 
     int GetStoredShadowCascadeCount() const {
-        const int maxCascades = MAX_SUPPORTED_CSM_CASCADES;
-        const int minCascades = std::min( 2, maxCascades );
-        return std::clamp( NumShadowCascades, minCascades, maxCascades );
+        // Keep the legacy field for settings/ABI compatibility, but the
+        // renderer no longer exposes or persists a variable CSM count.
+        return MAX_SUPPORTED_CSM_CASCADES;
     }
 
     int GetEffectiveShadowCascadeCount() const {
-        const int maxCascades = MAX_SUPPORTED_CSM_CASCADES;
-        const int minCascades = EnableShadows ? std::min( 2, maxCascades ) : 1;
-        return std::clamp( NumShadowCascades, minCascades, maxCascades );
+        // CSM is always rendered with four cascades when enabled. Keep one
+        // as the no-CSM runtime sentinel so disabled shadows need no CSM work.
+        return EnableShadows ? MAX_SUPPORTED_CSM_CASCADES : 1;
+    }
+
+    int GetEffectiveShadowCascadePCFLimit( bool pcssActive = true ) const {
+        // Keep the filter policy fixed: 8-tap PCF uses the higher-quality
+        // filter for the closest cascade. PCSS uses it for the first two
+        // cascades. If PCSS is unavailable (for example in atlas mode),
+        // its PCF fallback uses only the closest cascade.
+        if ( !EnableShadows || CSMShadowKernel == E_ShadowKernelQuality::SHADOW_KERNEL_PCF_LOW )
+            return 0;
+
+        return CSMShadowKernel == E_ShadowKernelQuality::SHADOW_KERNEL_PCSS && pcssActive
+            ? 2
+            : 1;
     }
 
     static E_ShadowQuality ShadowQualityFromShadowMapSize( int size ) {
@@ -992,14 +1008,11 @@ struct GothicRendererSettings {
             EnablePointlightShadows = EPointLightShadowMode::PLS_DISABLED;
             PointlightShadowKernel = E_ShadowKernelQuality::SHADOW_KERNEL_PCF_LOW;
             EnablePointlightDynamicCasters = false;
-            PointlightShadowUpdateIntervalMs = 200;
-            PointlightShadowUpdateBudget = 2;
-            PartialDynamicShadowUpdates = false;
-            WorldShadowRangeScale = 1.0f;
-            // Keep the persisted selection in the supported 2..4 range.
-            // GetEffectiveShadowCascadeCount() still uses 1 as the internal
-            // no-CSM runtime sentinel while shadows are disabled.
-            NumShadowCascades = 2;
+            WorldShadowRangeScale = 0.5f;
+            // Keep the legacy field normalized to the fixed four-cascade
+            // layout. GetEffectiveShadowCascadeCount() still uses 1 as the
+            // internal no-CSM runtime sentinel while shadows are disabled.
+            NumShadowCascades = MAX_SUPPORTED_CSM_CASCADES;
             ShadowCascadePCFLimit = 0;
             ShadowSoftness = DefaultShadowSoftnessForQuality( ShadowQuality );
             // Keep the inactive CSM resource at the minimum supported size.
@@ -1016,14 +1029,9 @@ struct GothicRendererSettings {
             EnablePointlightShadows = EPointLightShadowMode::PLS_DISABLED;
             PointlightShadowKernel = E_ShadowKernelQuality::SHADOW_KERNEL_PCF_LOW;
             EnablePointlightDynamicCasters = false;
-            PointlightShadowUpdateIntervalMs = 200;
-            PointlightShadowUpdateBudget = 2;
-            PartialDynamicShadowUpdates = false;
-            WorldShadowRangeScale = 1.0f;
-            // One cascade disables the renderer's cascade frustum culling and
-            // produces incomplete/unstable shadow coverage. Two is the
-            // minimum valid count whenever CSM shadows are actually enabled.
-            NumShadowCascades = 2;
+            WorldShadowRangeScale = 0.5f;
+            // CSM shadows always use the complete four-cascade layout.
+            NumShadowCascades = MAX_SUPPORTED_CSM_CASCADES;
             ShadowCascadePCFLimit = 0;
             ShadowSoftness = DefaultShadowSoftnessForQuality( ShadowQuality );
             ShadowMapSize = 512;
@@ -1035,11 +1043,8 @@ struct GothicRendererSettings {
             EnablePointlightShadows = EPointLightShadowMode::PLS_UPDATE_DYNAMIC;
             PointlightShadowKernel = E_ShadowKernelQuality::SHADOW_KERNEL_PCF_LOW;
             EnablePointlightDynamicCasters = false;
-            PointlightShadowUpdateIntervalMs = 140;
-            PointlightShadowUpdateBudget = 2;
-            PartialDynamicShadowUpdates = true;
-            WorldShadowRangeScale = 1.0f;
-            NumShadowCascades = 2;
+            WorldShadowRangeScale = 0.75f;
+            NumShadowCascades = MAX_SUPPORTED_CSM_CASCADES;
             ShadowCascadePCFLimit = 0;
             ShadowSoftness = DefaultShadowSoftnessForQuality( ShadowQuality );
             ShadowMapSize = 1024;
@@ -1051,11 +1056,8 @@ struct GothicRendererSettings {
             EnablePointlightShadows = EPointLightShadowMode::PLS_UPDATE_DYNAMIC;
             PointlightShadowKernel = E_ShadowKernelQuality::SHADOW_KERNEL_PCF_LOW;
             EnablePointlightDynamicCasters = true;
-            PointlightShadowUpdateIntervalMs = 100;
-            PointlightShadowUpdateBudget = 4;
-            PartialDynamicShadowUpdates = true;
             WorldShadowRangeScale = 1.0f;
-            NumShadowCascades = 3;
+            NumShadowCascades = MAX_SUPPORTED_CSM_CASCADES;
             ShadowCascadePCFLimit = 1;
             ShadowSoftness = DefaultShadowSoftnessForQuality( ShadowQuality );
             ShadowMapSize = 2048;
@@ -1067,12 +1069,9 @@ struct GothicRendererSettings {
             EnablePointlightShadows = EPointLightShadowMode::PLS_UPDATE_DYNAMIC;
             PointlightShadowKernel = E_ShadowKernelQuality::SHADOW_KERNEL_PCSS;
             EnablePointlightDynamicCasters = true;
-            PointlightShadowUpdateIntervalMs = 80;
-            PointlightShadowUpdateBudget = 6;
-            PartialDynamicShadowUpdates = true;
-            WorldShadowRangeScale = 1.0f;
-            NumShadowCascades = 3;
-            ShadowCascadePCFLimit = 1;
+            WorldShadowRangeScale = 1.25f;
+            NumShadowCascades = MAX_SUPPORTED_CSM_CASCADES;
+            ShadowCascadePCFLimit = 2;
             ShadowSoftness = DefaultShadowSoftnessForQuality( ShadowQuality );
             ShadowMapSize = 4096;
             PointlightShadowMapSize = 256;
@@ -1083,12 +1082,9 @@ struct GothicRendererSettings {
             EnablePointlightShadows = EPointLightShadowMode::PLS_UPDATE_DYNAMIC;
             PointlightShadowKernel = E_ShadowKernelQuality::SHADOW_KERNEL_PCSS;
             EnablePointlightDynamicCasters = true;
-            PointlightShadowUpdateIntervalMs = 60;
-            PointlightShadowUpdateBudget = 6;
-            PartialDynamicShadowUpdates = true;
-            WorldShadowRangeScale = 1.0f;
-            NumShadowCascades = 4;
-            ShadowCascadePCFLimit = 1;
+            WorldShadowRangeScale = 1.5f;
+            NumShadowCascades = MAX_SUPPORTED_CSM_CASCADES;
+            ShadowCascadePCFLimit = 2;
             ShadowSoftness = DefaultShadowSoftnessForQuality( ShadowQuality );
             ShadowMapSize = 8192;
             PointlightShadowMapSize = 256;
@@ -1098,16 +1094,25 @@ struct GothicRendererSettings {
             ApplyShadowQualitySettings();
             break;
         }
+        // Keep the internal compatibility enum aligned with the public
+        // Enabled/Dynamic shadows switches. This prevents a preset with
+        // dynamic casters disabled from accidentally entering the dynamic
+        // resource/update path before the Advanced menu is opened.
+        if ( EnablePointlightShadows != EPointLightShadowMode::PLS_DISABLED ) {
+            EnablePointlightShadows = EnablePointlightDynamicCasters
+                ? EPointLightShadowMode::PLS_UPDATE_DYNAMIC
+                : EPointLightShadowMode::PLS_STATIC_ONLY;
+        }
         // Every named Shadow Quality profile starts both softness controls at
         // the same value. Advanced can separate them afterwards.
         PointlightShadowSoftness = ShadowSoftness;
     }
 
-    // Shadow Quality supplies the default policy for animated point-light
-    // casters; the Advanced menu can enable or disable it independently.
+    // Pointlight shadows use the static path by default. Enabling animated
+    // casters selects the dynamic overlay path.
     bool UseDynamicPointlightNpcShadows() const {
         return EnablePointlightDynamicCasters
-            && EnablePointlightShadows >= EPointLightShadowMode::PLS_UPDATE_DYNAMIC;
+            && EnablePointlightShadows == EPointLightShadowMode::PLS_UPDATE_DYNAMIC;
     }
 
     E_ShadowKernelQuality GetShadowKernelQuality() const {
@@ -1176,7 +1181,9 @@ struct GothicRendererSettings {
     float DoFNearBlurStrength;
     bool SortRenderQueue;
     EPointLightShadowMode EnablePointlightShadows;
-    bool PartialDynamicShadowUpdates;
+    // ABI padding for removed pointlight update controls. These fields must
+    // remain inert so GDX_GetRendererSettings() keeps its historical layout.
+    bool ReservedPointlightUpdatePolicy;
     bool EnableTiledLighting;
     E_RendererMode RendererMode;
     bool DrawSectionIntersections;
@@ -1353,16 +1360,17 @@ struct GothicRendererSettings {
     // reflections together; rain particles, impacts, and the rain shadowmap
     // remain independent.
     bool RainEffects;
-    // Advanced shadow controls. Shadow Quality initializes these values, and
-    // the Advanced menu can override them while its master switch is enabled.
+    // Advanced shadow controls. Shadow Quality initializes these values; the
+    // pointlight dynamic-caster field can be changed independently in the
+    // Advanced menu while preserving settings/profile compatibility.
     bool EnablePointlightDynamicCasters;
     E_ShadowKernelQuality CSMShadowKernel;
     E_ShadowKernelQuality PointlightShadowKernel;
-    int PointlightShadowUpdateIntervalMs;
-    int PointlightShadowUpdateBudget;
-    // Appended so the existing ShadowSoftness field offset remains stable.
-    // Shadow Quality initializes this together with CSM softness; Advanced
-    // can override it independently for pointlight shadows.
+    // ABI padding for removed pointlight update controls. These fields are not
+    // user settings and must never affect runtime behaviour.
+    int ReservedPointlightUpdateIntervalMs;
+    int ReservedPointlightUpdateBudget;
+    // Advanced-only pointlight softness override.
     float PointlightShadowSoftness;
     // Appended so all existing renderer-settings field offsets remain stable.
     // Backlit vegetation is enabled by default and can be disabled only by

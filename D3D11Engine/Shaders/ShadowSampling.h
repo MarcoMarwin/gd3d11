@@ -115,7 +115,7 @@ int GetRuntimePCFTapCount(int cascadeIndex)
     return nearCascade ? PCF_FILTER_TAPS_NEAR : PCF_FILTER_TAPS_FAR;
 }
 
-// High keeps the near cascade on PCSS but limits it to 8 filter samples.
+// High keeps the first two cascades on PCSS but limits them to 8 filter samples.
 // Extreme uses the full 16-tap near filter. The shadow-map size is already
 // supplied at runtime, so the quality distinction does not require a shader
 // reload when the user changes the shadow preset.
@@ -539,7 +539,7 @@ float SampleCascadeShadowSoft(float4 vShadowSamplingPos, float2 projectedTexCoor
     float filterRadius = texelSize * softness;
 
 #if SHD_FILTER_PCSS
-    // PCSS is intentionally restricted to the near cascade. Distant
+    // PCSS is intentionally restricted to the first two cascades. Distant
     // cascades use the cheaper PCF path below and therefore skip the blocker
     // search completely.
     if (UsePCSSShadowFilter() && cascadeIndex < GetRuntimePCFLimit())

@@ -7461,7 +7461,7 @@ XRESULT GothicAPI::SaveMenuSettings( const std::string& file ) {
     WritePrivateProfileStringA( "Display", "VegetationCulling", nullptr, ini.c_str() );
     WritePrivateProfileStringA( "Display", "VegetationCullingDensity", nullptr, ini.c_str() );
     const int storedCsmCascades = s.GetStoredShadowCascadeCount();
-    const int storedCsmPcfLimit = std::clamp( s.ShadowCascadePCFLimit, 0, storedCsmCascades );
+    const int storedCsmPcfLimit = s.GetEffectiveShadowCascadePCFLimit();
     WritePrivateProfileStringA( "Shadows", "Quality", std::to_string( static_cast<int>(s.ShadowQuality) ).c_str(), ini.c_str() );
     WritePrivateProfileStringA( "Shadows", "Advanced_Enabled", std::to_string( s.AdvancedPerformanceOptions ? TRUE : FALSE ).c_str(), ini.c_str() );
     WritePrivateProfileStringA( "Shadows", "Advanced_CSMEnabled", std::to_string( s.EnableShadows ? TRUE : FALSE ).c_str(), ini.c_str() );
@@ -7470,13 +7470,17 @@ XRESULT GothicAPI::SaveMenuSettings( const std::string& file ) {
     WritePrivateProfileStringA( "Shadows", "Advanced_CSMCascades", std::to_string( storedCsmCascades ).c_str(), ini.c_str() );
     WritePrivateProfileStringA( "Shadows", "Advanced_CSMRange", std::to_string( s.WorldShadowRangeScale ).c_str(), ini.c_str() );
     WritePrivateProfileStringA( "Shadows", "Advanced_CSMPCFLimit", std::to_string( storedCsmPcfLimit ).c_str(), ini.c_str() );
-    WritePrivateProfileStringA( "Shadows", "Advanced_PointlightMode", std::to_string( static_cast<int>(s.EnablePointlightShadows) ).c_str(), ini.c_str() );
+    const bool pointlightShadowsEnabled = s.EnablePointlightShadows != GothicRendererSettings::PLS_DISABLED;
+    const auto storedPointlightMode = !pointlightShadowsEnabled
+        ? GothicRendererSettings::PLS_DISABLED
+        : ( s.EnablePointlightDynamicCasters
+            ? GothicRendererSettings::PLS_UPDATE_DYNAMIC
+            : GothicRendererSettings::PLS_STATIC_ONLY );
+    WritePrivateProfileStringA( "Shadows", "Advanced_PointlightMode", std::to_string( static_cast<int>(storedPointlightMode) ).c_str(), ini.c_str() );
     WritePrivateProfileStringA( "Shadows", "Advanced_PointlightResolution", std::to_string( s.PointlightShadowMapSize ).c_str(), ini.c_str() );
     WritePrivateProfileStringA( "Shadows", "Advanced_PointlightFilter", std::to_string( static_cast<int>(s.PointlightShadowKernel) ).c_str(), ini.c_str() );
+    // Keep the dynamic-caster option as a separate Advanced setting.
     WritePrivateProfileStringA( "Shadows", "Advanced_PointlightDynamicCasters", std::to_string( s.EnablePointlightDynamicCasters ? TRUE : FALSE ).c_str(), ini.c_str() );
-    WritePrivateProfileStringA( "Shadows", "Advanced_PointlightStaggerUpdates", std::to_string( s.PartialDynamicShadowUpdates ? TRUE : FALSE ).c_str(), ini.c_str() );
-    WritePrivateProfileStringA( "Shadows", "Advanced_PointlightUpdateIntervalMs", std::to_string( s.PointlightShadowUpdateIntervalMs ).c_str(), ini.c_str() );
-    WritePrivateProfileStringA( "Shadows", "Advanced_PointlightUpdateBudget", std::to_string( s.PointlightShadowUpdateBudget ).c_str(), ini.c_str() );
     WritePrivateProfileStringA( "Shadows", "Advanced_CSMShadowSoftness", float_to_string( s.ShadowSoftness, 2 ).c_str(), ini.c_str() );
     WritePrivateProfileStringA( "Shadows", "Advanced_PointlightShadowSoftness", float_to_string( s.PointlightShadowSoftness, 2 ).c_str(), ini.c_str() );
     WritePrivateProfileStringA( "Shadows", "Advanced_VegetationPush", std::to_string( s.HeroAffectsObjects ? TRUE : FALSE ).c_str(), ini.c_str() );
@@ -7484,6 +7488,12 @@ XRESULT GothicAPI::SaveMenuSettings( const std::string& file ) {
     WritePrivateProfileStringA( "Shadows", "Advanced_NightEnhance", std::to_string( s.AdvancedNightEnhance ? TRUE : FALSE ).c_str(), ini.c_str() );
     WritePrivateProfileStringA( "Shadows", "Advanced_CityWindowTransparency", std::to_string( s.AdvancedCityWindowTransparency ? TRUE : FALSE ).c_str(), ini.c_str() );
     WritePrivateProfileStringA( "Shadows", "Advanced_BacklitVegetation", std::to_string( s.AdvancedBacklitVegetation ? TRUE : FALSE ).c_str(), ini.c_str() );
+
+    // Remove obsolete pointlight update controls from older UserSettings.ini
+    // files. They are no longer read and have no runtime equivalent.
+    WritePrivateProfileStringA( "Shadows", "Advanced_PointlightStaggerUpdates", nullptr, ini.c_str() );
+    WritePrivateProfileStringA( "Shadows", "Advanced_PointlightUpdateIntervalMs", nullptr, ini.c_str() );
+    WritePrivateProfileStringA( "Shadows", "Advanced_PointlightUpdateBudget", nullptr, ini.c_str() );
 
     // These are renderer-internal controls, not F11 settings. Remove keys
     // written by older builds so UserSettings.ini remains menu-owned.
@@ -7499,9 +7509,6 @@ XRESULT GothicAPI::SaveMenuSettings( const std::string& file ) {
     WritePrivateProfileStringA( "Shadows", "PointlightResolution", nullptr, ini.c_str() );
     WritePrivateProfileStringA( "Shadows", "PointlightFilter", nullptr, ini.c_str() );
     WritePrivateProfileStringA( "Shadows", "PointlightDynamicCasters", nullptr, ini.c_str() );
-    WritePrivateProfileStringA( "Shadows", "PointlightStaggerUpdates", nullptr, ini.c_str() );
-    WritePrivateProfileStringA( "Shadows", "PointlightUpdateIntervalMs", nullptr, ini.c_str() );
-    WritePrivateProfileStringA( "Shadows", "PointlightUpdateBudget", nullptr, ini.c_str() );
     WritePrivateProfileStringA( "Shadows", "ShadowSoftness", nullptr, ini.c_str() );
     WritePrivateProfileStringA( "Shadows", "Advanced_ShadowSoftness", nullptr, ini.c_str() );
     WritePrivateProfileStringA( "Shadows", "Advanced_BaseVegetationPush", nullptr, ini.c_str() );
@@ -7660,13 +7667,20 @@ XRESULT GothicAPI::LoadMenuSettings( const std::string& file ) {
             s.NumShadowCascades = s.GetStoredShadowCascadeCount();
             s.WorldShadowRangeScale = std::clamp(
                 GetPrivateProfileFloatA( "Shadows", "Advanced_CSMRange", s.WorldShadowRangeScale, ini ), 0.5f, 2.0f );
-            s.ShadowCascadePCFLimit = std::clamp<int>(
-                static_cast<int>( GetPrivateProfileIntA( "Shadows", "Advanced_CSMPCFLimit", s.ShadowCascadePCFLimit, ini.c_str() ) ),
-                0, std::min( std::min( 4, MAX_CSM_CASCADES ), s.GetStoredShadowCascadeCount() ) );
-            s.EnablePointlightShadows = static_cast<GothicRendererSettings::EPointLightShadowMode>( std::clamp<int>(
+            // The near-cascade filter is intentionally fixed to the first
+            // cascade for 8-tap PCF and the first two for PCSS. Ignore legacy
+            // per-cascade values.
+            s.ShadowCascadePCFLimit = s.GetEffectiveShadowCascadePCFLimit();
+            const auto storedPointlightMode = static_cast<GothicRendererSettings::EPointLightShadowMode>( std::clamp<int>(
                 GetPrivateProfileIntA( "Shadows", "Advanced_PointlightMode", static_cast<int>(s.EnablePointlightShadows), ini.c_str() ),
                 static_cast<int>(GothicRendererSettings::PLS_DISABLED),
                 static_cast<int>(GothicRendererSettings::PLS_UPDATE_DYNAMIC) ) );
+            // Keep the old selector only as an internal compatibility value;
+            // the enabled switch and animated-caster option determine the
+            // effective static/dynamic path.
+            s.EnablePointlightShadows = storedPointlightMode == GothicRendererSettings::PLS_DISABLED
+                ? GothicRendererSettings::PLS_DISABLED
+                : GothicRendererSettings::PLS_UPDATE_DYNAMIC;
             s.PointlightShadowMapSize = GothicRendererSettings::SnapPointlightShadowMapSize(
                 GetPrivateProfileIntA( "Shadows", "Advanced_PointlightResolution", s.PointlightShadowMapSize, ini.c_str() ) );
             s.PointlightShadowKernel = static_cast<GothicRendererSettings::E_ShadowKernelQuality>( std::clamp<int>(
@@ -7675,12 +7689,11 @@ XRESULT GothicAPI::LoadMenuSettings( const std::string& file ) {
                 static_cast<int>(GothicRendererSettings::SHADOW_KERNEL_PCSS) ) );
             s.EnablePointlightDynamicCasters = GetPrivateProfileBoolA(
                 "Shadows", "Advanced_PointlightDynamicCasters", s.EnablePointlightDynamicCasters, ini );
-            s.PartialDynamicShadowUpdates = GetPrivateProfileBoolA(
-                "Shadows", "Advanced_PointlightStaggerUpdates", s.PartialDynamicShadowUpdates, ini );
-            s.PointlightShadowUpdateIntervalMs = std::clamp<int>(
-                static_cast<int>( GetPrivateProfileIntA( "Shadows", "Advanced_PointlightUpdateIntervalMs", s.PointlightShadowUpdateIntervalMs, ini.c_str() ) ), 40, 500 );
-            s.PointlightShadowUpdateBudget = std::clamp<int>(
-                static_cast<int>( GetPrivateProfileIntA( "Shadows", "Advanced_PointlightUpdateBudget", s.PointlightShadowUpdateBudget, ini.c_str() ) ), 1, 8 );
+            s.EnablePointlightShadows = s.EnablePointlightShadows == GothicRendererSettings::PLS_DISABLED
+                ? GothicRendererSettings::PLS_DISABLED
+                : ( s.EnablePointlightDynamicCasters
+                    ? GothicRendererSettings::PLS_UPDATE_DYNAMIC
+                    : GothicRendererSettings::PLS_STATIC_ONLY );
             // Migrate the former shared softness value when the new split
             // keys are not present, then let each Advanced control diverge.
             const float legacyShadowSoftness = std::clamp( GetPrivateProfileFloatA(

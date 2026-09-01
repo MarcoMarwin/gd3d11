@@ -711,9 +711,7 @@ void ImText( const char* label, const ImVec2& size ) {
 
 void ApplyFeatureLevel10Downgrades(GothicRendererSettings& s) {
     // one 4k texture, 1/2 2k textures max.
-    if ( s.EnableShadows ) {
-        s.NumShadowCascades = s.GetStoredShadowCascadeCount();
-    }
+    s.NumShadowCascades = s.GetStoredShadowCascadeCount();
     if ( s.AntiAliasingMode == GothicRendererSettings::AA_FSR3
         && s.Upscaler == GothicRendererSettings::UPSCALER_FSR_3 ) {
         s.AntiAliasingMode = GothicRendererSettings::AA_SMAA;
@@ -789,10 +787,7 @@ namespace {
             && settings.EnablePointlightShadows == profile.EnablePointlightShadows
             && settings.PointlightShadowMapSize == profile.PointlightShadowMapSize
             && settings.PointlightShadowKernel == profile.PointlightShadowKernel
-            && settings.EnablePointlightDynamicCasters == profile.EnablePointlightDynamicCasters
-            && settings.PartialDynamicShadowUpdates == profile.PartialDynamicShadowUpdates
-            && settings.PointlightShadowUpdateIntervalMs == profile.PointlightShadowUpdateIntervalMs
-            && settings.PointlightShadowUpdateBudget == profile.PointlightShadowUpdateBudget;
+            && settings.EnablePointlightDynamicCasters == profile.EnablePointlightDynamicCasters;
     }
 
     void ResetShadowOverridesToCurrentQuality( GothicRendererSettings& settings ) {
@@ -1432,62 +1427,11 @@ void ImGuiShim::RenderSettingsWindow()
                 "Chooses how world-shadow edges are softened.",
                 u8"W\u00E4hlt, wie die Kanten von Weltschatten gegl\u00E4ttet werden." ) );
 
-            const int maxCsmCascades = std::min( 4, MAX_CSM_CASCADES );
-            const int storedCsmCascades = settings.GetStoredShadowCascadeCount();
-            if ( csmShadowsEnabled ) {
-                // An enabled CSM must always use the supported 2..4 range.
-                settings.NumShadowCascades = storedCsmCascades;
-            }
-
-            const std::array<std::pair<const char*, int>, 3> csmCascadeOptions = {{
-                { Tr( "2 cascades", u8"2 Kaskaden" ), 2 },
-                { Tr( "3 cascades", u8"3 Kaskaden" ), 3 },
-                { Tr( "4 cascades", u8"4 Kaskaden" ), 4 },
-            }};
-            // Keep the disabled CSM profile's internal value without exposing
-            // the invalid runtime value 1 in the combo box.
-            int displayedCsmCascades = storedCsmCascades;
-            advancedRow( Tr( "Cascades", u8"Kaskaden" ) );
-            if ( ImComboBoxC( "##AdvancedCSMCascades", csmCascadeOptions, &displayedCsmCascades, []{} ) ) {
-                if ( csmShadowsEnabled ) settings.NumShadowCascades = displayedCsmCascades;
-                ImGui::EndCombo();
-            }
-            ImGui::SetItemTooltip( "%s", Tr(
-                "More cascades preserve detail in distant shadows but cost GPU time.",
-                u8"Mehr Kaskaden erhalten Details in fernen Schatten, kosten aber GPU-Leistung." ) );
-
-            settings.WorldShadowRangeScale = std::clamp( settings.WorldShadowRangeScale, 0.5f, 2.0f );
-            advancedRow( Tr( "Range", u8"Reichweite" ) );
-            ImGui::SliderFloat( "##AdvancedCSMShadowRange", &settings.WorldShadowRangeScale, 0.5f, 2.0f, "%.2fx", ImGuiSliderFlags_AlwaysClamp );
-            ImGui::SetItemTooltip( "%s", Tr(
-                "Sets how far world shadows remain visible.",
-                u8"Legt fest, wie weit Weltschatten sichtbar bleiben." ) );
-
-            std::vector<std::pair<const char*, int>> csmNearCascadeOptions;
-            csmNearCascadeOptions.reserve( static_cast<size_t>( maxCsmCascades ) + 1 );
-            csmNearCascadeOptions.emplace_back( Tr( "All: 4-tap", u8"Alle: 4-Tap" ), 0 );
-            for ( int nearCount = 1; nearCount < storedCsmCascades; ++nearCount ) {
-                const char* label = nearCount == 1
-                    ? Tr( "1 near", u8"1 nahe" )
-                    : nearCount == 2
-                        ? Tr( "2 near", u8"2 nahe" )
-                        : Tr( "3 near", u8"3 nahe" );
-                csmNearCascadeOptions.emplace_back( label, nearCount );
-            }
-            csmNearCascadeOptions.emplace_back( Tr( "All", u8"Alle" ), storedCsmCascades );
-            settings.ShadowCascadePCFLimit = std::clamp(
-                settings.ShadowCascadePCFLimit, 0, std::min( maxCsmCascades, storedCsmCascades ) );
-            const bool nearCascadeFilterAvailable = settings.CSMShadowKernel
-                != GothicRendererSettings::E_ShadowKernelQuality::SHADOW_KERNEL_PCF_LOW;
-            ImGui::BeginDisabled( !nearCascadeFilterAvailable );
-            advancedRow( Tr( "Near-cascade filter", u8"Nahkaskadenfilter" ) );
-            if ( ImComboBoxC( "##AdvancedCSMNearCascadeFilter", csmNearCascadeOptions, &settings.ShadowCascadePCFLimit, []{} ) ) {
-                ImGui::EndCombo();
-            }
-            ImGui::SetItemTooltip( "%s", Tr(
-                "Sets how many near cascades use the higher-quality filter.",
-                u8"Legt fest, wie viele Nahkaskaden den hochwertigeren Filter verwenden." ) );
-            ImGui::EndDisabled();
+            // The renderer uses the full four-cascade layout whenever CSM is
+            // enabled. Keep the legacy setting field normalized as well, but
+            // deliberately do not expose a redundant cascade-count control.
+            const int fixedCsmCascades = settings.GetStoredShadowCascadeCount();
+            settings.NumShadowCascades = fixedCsmCascades;
 
             advancedRow( Tr( "Softness", u8"Weichheit" ) );
             char csmSoftnessText[16] = {};
@@ -1496,6 +1440,13 @@ void ImGuiShim::RenderSettingsWindow()
             ImGui::SetItemTooltip( "%s", Tr(
                 "Softens world-shadow edges.",
                 u8"Macht die Kanten von Weltschatten weicher." ) );
+
+            settings.WorldShadowRangeScale = std::clamp( settings.WorldShadowRangeScale, 0.5f, 2.0f );
+            advancedRow( Tr( "Range", u8"Reichweite" ) );
+            ImGui::SliderFloat( "##AdvancedCSMShadowRange", &settings.WorldShadowRangeScale, 0.5f, 2.0f, "%.2fx", ImGuiSliderFlags_AlwaysClamp );
+            ImGui::SetItemTooltip( "%s", Tr(
+                "Sets how far world shadows remain visible.",
+                u8"Legt fest, wie weit Weltschatten sichtbar bleiben." ) );
 
             ImGui::EndDisabled();
 
@@ -1508,27 +1459,48 @@ void ImGuiShim::RenderSettingsWindow()
                 ImGuiChildFlags_Borders | ImGuiChildFlags_FrameStyle | ImGuiChildFlags_AutoResizeY ) ) {
             ImGui::SeparatorText( Tr( "Pointlight shadows", u8"Pointlight-Schatten" ) );
             if ( beginAdvancedTable( "##AdvancedPointlightSettings" ) ) {
-            const std::array<std::pair<const char*, GothicRendererSettings::EPointLightShadowMode>, 3> pointlightModes = {{
-                { Tr( "Disabled", u8"Aus" ), GothicRendererSettings::EPointLightShadowMode::PLS_DISABLED },
-                { Tr( "Static only", u8"Nur statisch" ), GothicRendererSettings::EPointLightShadowMode::PLS_STATIC_ONLY },
-                { Tr( "Dynamic", u8"Dynamisch" ), GothicRendererSettings::EPointLightShadowMode::PLS_UPDATE_DYNAMIC },
+            // Pointlight shadows use one public on/off switch. With shadows
+            // enabled, the Dynamic shadows option below selects the static or
+            // animated-caster path.
+            bool pointlightShadowsEnabled = settings.EnablePointlightShadows
+                != GothicRendererSettings::EPointLightShadowMode::PLS_DISABLED;
+            if ( pointlightShadowsEnabled ) {
+                settings.EnablePointlightShadows = settings.EnablePointlightDynamicCasters
+                    ? GothicRendererSettings::EPointLightShadowMode::PLS_UPDATE_DYNAMIC
+                    : GothicRendererSettings::EPointLightShadowMode::PLS_STATIC_ONLY;
+            }
+            advancedRow( Tr( "Enabled", u8"Aktiv" ) );
+            if ( MenuCheckbox( "##AdvancedPointlightEnabled", &pointlightShadowsEnabled ) ) {
+                settings.EnablePointlightShadows = pointlightShadowsEnabled
+                    ? ( settings.EnablePointlightDynamicCasters
+                        ? GothicRendererSettings::EPointLightShadowMode::PLS_UPDATE_DYNAMIC
+                        : GothicRendererSettings::EPointLightShadowMode::PLS_STATIC_ONLY )
+                    : GothicRendererSettings::EPointLightShadowMode::PLS_DISABLED;
+                if ( !pointlightShadowsEnabled && Engine::GAPI ) {
+                    Engine::GAPI->ReleasePointlightShadowResources();
+                }
+            }
+            ImGui::SetItemTooltip( "%s", Tr(
+                "Enables pointlight shadows. Dynamic shadows can be enabled below.",
+                u8"Aktiviert Punktlichtschatten. Dynamische Schatten können darunter aktiviert werden." ) );
+
+            ImGui::BeginDisabled( !pointlightShadowsEnabled );
+
+            const std::array<std::pair<const char*, int>, 3> pointlightResolutions = {{
+                { "128", 128 }, { "256", 256 }, { "512", 512 },
             }};
-            advancedRow( Tr( "Mode", u8"Modus" ) );
-            if ( ImComboBoxC( "##AdvancedPointlightShadowMode", pointlightModes, &settings.EnablePointlightShadows, [&settings]{
-                if ( settings.EnablePointlightShadows == GothicRendererSettings::EPointLightShadowMode::PLS_DISABLED
-                    && Engine::GAPI ) {
+            settings.PointlightShadowMapSize = GothicRendererSettings::SnapPointlightShadowMapSize( settings.PointlightShadowMapSize );
+            advancedRow( Tr( "Resolution", u8"Aufl\u00F6sung" ) );
+            if ( ImComboBoxC( "##AdvancedPointlightResolution", pointlightResolutions, &settings.PointlightShadowMapSize, []{
+                if ( Engine::GAPI ) {
                     Engine::GAPI->ReleasePointlightShadowResources();
                 }
             } ) ) {
                 ImGui::EndCombo();
             }
             ImGui::SetItemTooltip( "%s", Tr(
-                "Selects which point lights cast shadows.",
-                u8"Legt fest, welche Punktlichter Schatten werfen." ) );
-
-            const bool pointlightShadowsEnabled = settings.EnablePointlightShadows
-                != GothicRendererSettings::EPointLightShadowMode::PLS_DISABLED;
-            ImGui::BeginDisabled( !pointlightShadowsEnabled );
+                "Higher resolution sharpens pointlight shadows but uses more memory.",
+                u8"H\u00F6here Aufl\u00F6sung sch\u00E4rft Punktlichtschatten, ben\u00F6tigt aber mehr Speicher." ) );
 
             const std::array<std::pair<const char*, GothicRendererSettings::E_ShadowKernelQuality>, 3> pointlightFilters = {{
                 { Tr( "4-tap PCF", u8"4-Tap-PCF" ), GothicRendererSettings::E_ShadowKernelQuality::SHADOW_KERNEL_PCF_LOW },
@@ -1551,54 +1523,15 @@ void ImGuiShim::RenderSettingsWindow()
                 "Softens shadows cast by point lights.",
                 u8"Macht die Schatten von Punktlichtern weicher." ) );
 
-            const std::array<std::pair<const char*, int>, 3> pointlightResolutions = {{
-                { "128", 128 }, { "256", 256 }, { "512", 512 },
-            }};
-            settings.PointlightShadowMapSize = GothicRendererSettings::SnapPointlightShadowMapSize( settings.PointlightShadowMapSize );
-            advancedRow( Tr( "Resolution", u8"Aufl\u00F6sung" ) );
-            if ( ImComboBoxC( "##AdvancedPointlightResolution", pointlightResolutions, &settings.PointlightShadowMapSize, []{
-                if ( Engine::GAPI ) {
-                    Engine::GAPI->ReleasePointlightShadowResources();
-                }
-            } ) ) {
-                ImGui::EndCombo();
+            advancedRow( Tr( "Dynamic shadows", u8"Dynamische Schatten" ) );
+            if ( MenuCheckbox( "##AdvancedDynamicPointlightShadows", &settings.EnablePointlightDynamicCasters ) ) {
+                settings.EnablePointlightShadows = settings.EnablePointlightDynamicCasters
+                    ? GothicRendererSettings::EPointLightShadowMode::PLS_UPDATE_DYNAMIC
+                    : GothicRendererSettings::EPointLightShadowMode::PLS_STATIC_ONLY;
             }
             ImGui::SetItemTooltip( "%s", Tr(
-                "Higher resolution sharpens pointlight shadows but uses more memory.",
-                u8"H\u00F6here Aufl\u00F6sung sch\u00E4rft Punktlichtschatten, ben\u00F6tigt aber mehr Speicher." ) );
-
-            const bool dynamicPointlightMode = settings.EnablePointlightShadows == GothicRendererSettings::EPointLightShadowMode::PLS_UPDATE_DYNAMIC;
-            ImGui::BeginDisabled( !dynamicPointlightMode );
-            advancedRow( Tr( "Animated figures", u8"Animierte Figuren" ) );
-            MenuCheckbox( "##AdvancedAnimatedPointlightCasters", &settings.EnablePointlightDynamicCasters );
-            ImGui::SetItemTooltip( "%s", Tr(
-                "Includes moving characters in pointlight shadows.",
-                u8"Bezieht bewegte Figuren in Punktlichtschatten ein." ) );
-            ImGui::EndDisabled();
-
-            ImGui::BeginDisabled( !dynamicPointlightMode );
-            advancedRow( Tr( "Distant updates", u8"Ferne Updates" ) );
-            MenuCheckbox( "##AdvancedStaggerDistantShadows", &settings.PartialDynamicShadowUpdates );
-            ImGui::SetItemTooltip( "%s", Tr(
-                "Updates distant pointlight shadows less often to save GPU time.",
-                u8"Aktualisiert ferne Punktlichtschatten seltener, um GPU-Leistung zu sparen." ) );
-            ImGui::EndDisabled();
-
-            ImGui::BeginDisabled( !dynamicPointlightMode || !settings.PartialDynamicShadowUpdates );
-            settings.PointlightShadowUpdateIntervalMs = std::clamp( settings.PointlightShadowUpdateIntervalMs, 40, 500 );
-            advancedRow( Tr( "Distant interval", u8"Fernintervall" ) );
-            ImGui::SliderInt( "##AdvancedPointlightUpdateInterval", &settings.PointlightShadowUpdateIntervalMs, 40, 500, "%d ms", ImGuiSliderFlags_AlwaysClamp );
-            ImGui::SetItemTooltip( "%s", Tr(
-                "Sets the minimum time between distant-shadow updates.",
-                u8"Legt den Mindestabstand zwischen Aktualisierungen ferner Schatten fest." ) );
-
-            settings.PointlightShadowUpdateBudget = std::clamp( settings.PointlightShadowUpdateBudget, 1, 8 );
-            advancedRow( Tr( "Updates per frame", u8"Updates pro Frame" ) );
-            ImGui::SliderInt( "##AdvancedPointlightUpdateBudget", &settings.PointlightShadowUpdateBudget, 1, 8, "%d", ImGuiSliderFlags_AlwaysClamp );
-            ImGui::SetItemTooltip( "%s", Tr(
-                "Limits distant-shadow updates per frame.",
-                u8"Begrenzt Aktualisierungen ferner Schatten pro Bild." ) );
-            ImGui::EndDisabled();
+                "Enables dynamic pointlight shadows for moving figures.",
+                u8"Aktiviert dynamische Punktlichtschatten für bewegte Figuren." ) );
 
             ImGui::EndDisabled();
 

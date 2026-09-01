@@ -92,7 +92,6 @@ void D3D11PointLight::ReleaseShadowMap() {
     ReleaseStaticAsideShadowMap();
     m_CurrentResolution = 0;
     DrawnOnce = false;
-    m_LastDynamicShadowUpdateTime = -FLT_MAX;
 
 }
 
@@ -106,7 +105,6 @@ void D3D11PointLight::SetTiledSlot( int slot, RenderToDepthStencilBuffer* static
     DrawnOnce = false;
     m_StaticShadowReady = false;
     m_DynamicShadowValid = false;
-    m_LastDynamicShadowUpdateTime = -FLT_MAX;
 }
 
 void D3D11PointLight::ClearTiledSlot() {
@@ -150,7 +148,6 @@ void D3D11PointLight::OnTiledSlotEvicted() {
     m_StaticShadowReady = false;
     m_DynamicShadowValid = false;
     DrawnOnce = false;
-    m_LastDynamicShadowUpdateTime = -FLT_MAX;
 }
 
 int D3D11PointLight::GetCurrentShadowMode() const {
@@ -158,10 +155,15 @@ int D3D11PointLight::GetCurrentShadowMode() const {
         return GothicRendererSettings::PLS_DISABLED;
     }
 
-    int mode = static_cast<int>(Engine::GAPI->GetRendererState().RendererSettings.EnablePointlightShadows);
+    const auto& settings = Engine::GAPI->GetRendererState().RendererSettings;
+    int mode = static_cast<int>( settings.EnablePointlightShadows );
     if ( mode > GothicRendererSettings::PLS_UPDATE_DYNAMIC )
-        return GothicRendererSettings::PLS_UPDATE_DYNAMIC;
-    return mode;
+        mode = GothicRendererSettings::PLS_UPDATE_DYNAMIC;
+    if ( mode == GothicRendererSettings::PLS_DISABLED )
+        return mode;
+    return settings.UseDynamicPointlightNpcShadows()
+        ? GothicRendererSettings::PLS_UPDATE_DYNAMIC
+        : GothicRendererSettings::PLS_STATIC_ONLY;
 }
 
 void D3D11PointLight::HandleShadowModeChange( int shadowMode ) {
@@ -172,7 +174,6 @@ void D3D11PointLight::HandleShadowModeChange( int shadowMode ) {
     m_LastShadowMode = shadowMode;
     m_StaticShadowReady = false;
     DrawnOnce = false;
-    m_LastDynamicShadowUpdateTime = -FLT_MAX;
 
     if ( shadowMode != GothicRendererSettings::PLS_UPDATE_DYNAMIC ) {
         ReleaseStaticAsideShadowMap();
@@ -356,18 +357,6 @@ bool D3D11PointLight::WantsUpdate() {
     return false;
 }
 
-bool D3D11PointLight::IsDynamicShadowUpdateDue( float currentTime, float minimumInterval ) const {
-    if ( !std::isfinite( currentTime ) || !std::isfinite( minimumInterval ) )
-        return true;
-
-    if ( m_LastDynamicShadowUpdateTime == -FLT_MAX
-        || currentTime < m_LastDynamicShadowUpdateTime ) {
-        return true;
-    }
-
-    return currentTime - m_LastDynamicShadowUpdateTime >= std::max( minimumInterval, 0.0f );
-}
-
 bool D3D11PointLight::UseDynamicNpcShadowCasters() const {
     return Engine::GAPI
         && Engine::GAPI->GetRendererState().RendererSettings.UseDynamicPointlightNpcShadows();
@@ -387,10 +376,6 @@ bool D3D11PointLight::UpdateDynamicNpcShadowCasterMode() {
     // point-light maps and therefore do not trigger a resource resize.
     DrawnOnce = false;
     return true;
-}
-
-void D3D11PointLight::MarkDynamicShadowUpdated( float currentTime ) {
-    m_LastDynamicShadowUpdateTime = std::isfinite( currentTime ) ? currentTime : 0.0f;
 }
 
 /** Draws the surrounding scene into the cubemap */
@@ -607,7 +592,6 @@ void D3D11PointLight::Invalidate() {
     DrawnOnce = false;
     m_StaticShadowReady = false;
     m_DynamicShadowValid = false;
-    m_LastDynamicShadowUpdateTime = -FLT_MAX;
     VobCache.clear();
     SkeletalVobCache.clear();
     WorldCacheInvalid = true;
@@ -754,7 +738,6 @@ void D3D11PointLight::OnVobMoved( BaseVobInfo* vob ) {
     DrawnOnce = false;
     m_StaticShadowReady = false;
     m_DynamicShadowValid = false;
-    m_LastDynamicShadowUpdateTime = -FLT_MAX;
 }
 
 void D3D11PointLight::OnVobAdded( BaseVobInfo* vob ) {
