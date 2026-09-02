@@ -109,6 +109,51 @@ bool IsAnimatedSkeletalShadowCaster( const SkeletalVobInfo* vob ) {
     return std::find( animatedVobs.begin(), animatedVobs.end(), vob ) != animatedVobs.end();
 }
 
+void AppendAttachedNpcVobCasters(
+    FXMVECTOR position,
+    FXMVECTOR vRangeSquared,
+    bool isOutdoor,
+    bool indoor,
+    std::list<VobInfo*>& output ) {
+    if ( !Engine::GAPI ) {
+        return;
+    }
+
+    // Node visuals are handled by DrawSkeletalMeshVobs. Some hand-held
+    // objects, however, are separate static VOBs attached below the NPC and
+    // therefore do not occur in the skeletal list at all.
+    for ( const auto& [visual, vobs] : Engine::GAPI->GetVobsByVisual() ) {
+        (void)visual;
+        for ( BaseVobInfo* baseInfo : vobs ) {
+            auto* vobInfo = dynamic_cast<VobInfo*>( baseInfo );
+            if ( !vobInfo || !vobInfo->Vob || !vobInfo->VisualInfo
+                || !IsAttachedToNpc( vobInfo->Vob ) ) {
+                continue;
+            }
+
+            if ( !vobInfo->Vob->GetShowVisual()
+                || (vobInfo->Vob->GetVisualAlpha()
+                    && vobInfo->Vob->GetVobTransparency() < 0.7f) ) {
+                continue;
+            }
+
+            if ( XMVector3Greater(
+                XMVector3LengthSq( position - vobInfo->Vob->GetPositionWorldXM() ),
+                vRangeSquared ) ) {
+                continue;
+            }
+
+            if ( isOutdoor && vobInfo->Vob->IsIndoorVob() != indoor ) {
+                continue;
+            }
+
+            if ( std::find( output.begin(), output.end(), vobInfo ) == output.end() ) {
+                output.emplace_back( vobInfo );
+            }
+        }
+    }
+}
+
 }
 
 struct SkyVelocityConstantBuffer {
@@ -7360,11 +7405,14 @@ void XM_CALLCONV D3D11GraphicsEngine::DrawWorldAround(
         }
     }
 
-    if ( drawVobCasters && Engine::GAPI->GetRendererState().RendererSettings.DrawVOBs ) {
+    const bool drawAttachedNpcVobCasters = drawAnimatedCasters && !noNPCs;
+    if ( ( drawVobCasters || drawAttachedNpcVobCasters )
+        && Engine::GAPI->GetRendererState().RendererSettings.DrawVOBs ) {
         // Draw visible vobs here
         std::list<VobInfo*> rndVob;
+        std::list<VobInfo*> attachedNpcVobCasters;
         // construct new renderedvob list or fake one
-        if ( !renderedVobs || renderedVobs->empty() ) {
+        if ( drawVobCasters && ( !renderedVobs || renderedVobs->empty() ) ) {
             for ( size_t i = 0; i < drawnSections.size(); i++ ) {
                 for ( auto it : drawnSections[i]->Vobs ) {
                     if ( !it->VisualInfo ) {
@@ -7398,15 +7446,23 @@ void XM_CALLCONV D3D11GraphicsEngine::DrawWorldAround(
             if ( renderedVobs )*renderedVobs = rndVob;
         }
 
+        if ( drawAttachedNpcVobCasters ) {
+            AppendAttachedNpcVobCasters(
+                position, vRangeSquared, isOutdoor, indoor, attachedNpcVobCasters );
+        }
+
         // At this point either renderedVobs or rndVob is filled with something
         D3D11Texture* lastBoundTexture = nullptr;
         const bool grassDetailsCulling =
             Engine::GAPI->GetRendererState().RendererSettings.GrassDetailsLevel < 4;
         std::list<VobInfo*>& rl = renderedVobs != nullptr ? *renderedVobs : rndVob;
+        std::list<VobInfo*> vobDrawList( rl.begin(), rl.end() );
+        vobDrawList.insert(
+            vobDrawList.end(), attachedNpcVobCasters.begin(), attachedNpcVobCasters.end() );
         VS_ExConstantBuffer_PerInstance cb;
 
         auto buffer = GetActiveVS()->GetBuffer(1).Bind();
-        for ( auto const& vobInfo : rl ) {
+        for ( auto const& vobInfo : vobDrawList ) {
             // Bind per-instance buffer
             vobInfo->UpdateVobConstantBuffer(cb);
             buffer.Update(&cb, sizeof(cb));
@@ -7544,6 +7600,9 @@ void XM_CALLCONV D3D11GraphicsEngine::DrawWorldAround(
             }
 
             if ( !animatedSkeletalMeshVobs.empty() ) {
+                // Keep the proven Build 221 attachment-aware batch path.
+                // This draws the NPC body and its node visuals (weapons,
+                // tools, torches, etc.) from the same bone snapshot.
                 DrawSkeletalMeshVobs( animatedSkeletalMeshVobs, FLT_MAX, false, true );
             }
         }
@@ -7750,11 +7809,14 @@ void XM_CALLCONV D3D11GraphicsEngine::DrawWorldAround_Layered(
         }
     }
 
-    if ( drawVobCasters && Engine::GAPI->GetRendererState().RendererSettings.DrawVOBs ) {
+    const bool drawAttachedNpcVobCasters = drawAnimatedCasters && !noNPCs;
+    if ( ( drawVobCasters || drawAttachedNpcVobCasters )
+        && Engine::GAPI->GetRendererState().RendererSettings.DrawVOBs ) {
         // Draw visible vobs here
         std::list<VobInfo*> rndVob;
+        std::list<VobInfo*> attachedNpcVobCasters;
         // construct new renderedvob list or fake one
-        if ( !renderedVobs || renderedVobs->empty() ) {
+        if ( drawVobCasters && ( !renderedVobs || renderedVobs->empty() ) ) {
             for ( size_t i = 0; i < drawnSections.size(); i++ ) {
                 for ( auto it : drawnSections[i]->Vobs ) {
                     if ( !it->VisualInfo ) {
@@ -7789,6 +7851,11 @@ void XM_CALLCONV D3D11GraphicsEngine::DrawWorldAround_Layered(
             if ( renderedVobs )*renderedVobs = rndVob;
         }
 
+        if ( drawAttachedNpcVobCasters ) {
+            AppendAttachedNpcVobCasters(
+                position, vRangeSquared, isOutdoor, indoor, attachedNpcVobCasters );
+        }
+
         // At this point either renderedVobs or rndVob is filled with something
         std::list<VobInfo*>& rl = renderedVobs != nullptr ? *renderedVobs : rndVob;
         auto _ = Engine::GraphicsEngine->RecordGraphicsEvent( GE_NAME( "Draw vobs (layered)" ) );
@@ -7799,7 +7866,10 @@ void XM_CALLCONV D3D11GraphicsEngine::DrawWorldAround_Layered(
         D3D11Texture* lastBoundTexture = nullptr;
         const bool grassDetailsCulling =
             Engine::GAPI->GetRendererState().RendererSettings.GrassDetailsLevel < 4;
-        for ( auto const& vobInfo : rl ) {
+        std::list<VobInfo*> vobDrawList( rl.begin(), rl.end() );
+        vobDrawList.insert(
+            vobDrawList.end(), attachedNpcVobCasters.begin(), attachedNpcVobCasters.end() );
+        for ( auto const& vobInfo : vobDrawList ) {
             // Bind per-instance buffer
             vobInfo->UpdateVobConstantBuffer(cb);
             buffer.Update(&cb, sizeof(cb));
@@ -7938,6 +8008,8 @@ void XM_CALLCONV D3D11GraphicsEngine::DrawWorldAround_Layered(
             }
 
             if ( !animatedSkeletalMeshVobs.empty() ) {
+                // Same attachment-aware batch path as Build 221, using the
+                // six-face layered cubemap variant.
                 DrawSkeletalMeshVobs( animatedSkeletalMeshVobs, FLT_MAX, false, true, true );
             }
         }

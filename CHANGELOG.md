@@ -1,4 +1,24 @@
-﻿## Build 222
+﻿## Build 225
+- Korrekturpush: Fehlende NPC-Attachments im dynamischen Schatten-Pass (Build 225)
+  - Im vorherigen Build wurden NPC-Attachments (Waffen, Fackeln etc.) zwar korrekterweise aus dem *statischen* Punktlicht-Schattenpass gefiltert, damit sie nicht bei jeder Bewegung die Map invalidieren – sie wurden aber im dynamischen Pass nicht wieder hinzugefügt. Dies wurde nun behoben: Über AppendAttachedNpcVobCasters werden diese dynamischen VOBs nun gesammelt und im animierten Draw-Pass für Punktlicht-Schatten korrekt mitgerendert.
+
+## Build 224
+- Korrekturpush: CSM-Kaskadenselektion & Atlas-Fixes
+  - **Schatten-Kaskaden:** Der radikale Ansatz aus Build 222 (striktes Trennen der Kaskaden nach Kamera-Distanz) wurde verworfen und auf die bewährte, projektionsbasierte Selektion aus Build 221 zurückgerollt.
+- Korrekturpush: CSM Sichtweiten-Limit Rollback
+  - **Schatten-Kaskaden (CSM):** Der harte Kamera-Distanz-Schnitt (Camera-Depth Cutoff) für die maximale Schattenreichweite wurde nun restlos entfernt.
+- Korrekturpush: Shadow-Atlas Clear-Performance
+  - Da asynchrone "Lazy Updates" für den Atlas-Modus im letzten Push vollständig deaktiviert wurden, wird der gesamte Shadow-Atlas nun hocheffizient über einen einzigen, globalen ClearDepthStencilView hardware-seitig geleert.
+- Korrekturpush: Settings Refactoring & Shadow Quality
+  - **Sicheres Laden von Einstellungen:** Für alle Enum-basierten Grafik-Einstellungen wurden robuste ...OrDefault() Fallback-Funktionen implementiert.
+  - Das alte Preset "Sehr niedrig" (Very Low) wurde restlos entfernt.
+- Korrekturpush: Pointlight-Schatten Cache-Invalidierung & NPC Schatten
+  - **NPC-Attachments im statischen Pass:** Waffen oder Items, die von einem NPC getragen werden, landen nun nicht mehr im statischen Schatten-Pass, sondern ausschließlich im dynamischen animierten Overlay.
+  - **Performance-Fix (Cache Rebuild):** Die Caching-Logik (OnVobMoved/OnVobAdded) ignoriert animierte NPCs und deren Attachments nun komplett, sodass die statische Base-Map intakt bleibt.
+- Bugfix: Fehlende NPCs in Punktlicht-Schatten
+  - NPCs, die bereits während des initialen Aufbaus des BSP-Caches geladen wurden, fehlten teilweise in der Liste der animierten Skelett-Meshes.
+
+## Build 222
 - **Build 222 abgeschlossen:** Ein kleines Header-Refactoring entkoppelt GothicGraphicsState.h vom MAX_CSM_CASCADES-Makro, um Include-Order-Abhängigkeiten aufzulösen. Nightly-Build-Nummer auf 223 inkrementiert.
 - Korrekturpush: Shadow Cascade Splits & Filter (Build 222)
   - **Strikte Kaskaden-Selektion:** Die Auswahl der Shadow-Map-Kaskade im Shader wird nun primär durch die echte Distanz zur Kamera gesteuert (SQ_ShadowCascadeSplits) und nicht mehr bloß über die Light-Space-Bounding-Box geraten. Das verhindert unschöne Artefakte, bei denen weit entfernte Berge oder Bäume versehentlich mit der hochauflösenden Nahbereichs-Schattenkaskade berechnet wurden.
@@ -1151,6 +1171,8 @@ ightAmbientColor * 0.035f * worldAO) erhalten, um zu verhindern, dass Indoor-Mat
 - Korrekturpush: Software-PCF f�r PointLight-Schatten in Build 208. Da die Cubemaps ohnehin lineare radiale Tiefenwerte speichern, wurde das Hardware-PCF (SampleCmpLevelZero) durch einen manuellen Software-PCF Ansatz �ber einen linearen Sampler (SampleLevel) und smoothstep ersetzt. Das verhindert effektiv, dass sehr weite Shadow-Softness-Kernels die bin�ren PCF-Coverage-Level sichtbar freilegen (Banding-Artefakte). Dementsprechend wurden die Sampler in Tiled-Shading, Forward-Plus und DynShadow auf SS_Linear umgebogen.
 - Korrekturpush: Hardware-PCF Comeback und Adaptive Shadow-Taps in Build 208. Das Software-PCF-Experiment wurde verworfen und auf Hardware-PCF (SampleCmpLevelZero) zur�ckgerollt. Stattdessen wurde nun ein adaptives Distance-LOD f�r die Pointlight-Schatten eingebaut (eceiverCameraDistance): Ab einer Softness > 0.75 interpolieren im Nahbereich (< 5m und < 2m) dynamisch bis zu 8 zus�tzliche, dichte Filter-Taps stufenlos hinzu. Dadurch bleibt das Shadow-Sampling in der Ferne bei performanten 8 Taps, w�hrend Kanten im Nahbereich butterweich verschmelzen und Banding verstecken. Die Sampler wurden entsprechend wieder auf SS_Comp zur�ckgesetzt.
 - Regul�rer Push: Abschlie�ende Optimierungen in Build 208. Das adaptive Shadow-LOD wurde verworfen und stattdessen durch eine massive Hardware-Beschleunigung ersetzt: F�r extrem weiche Pointlight-Schatten (shadowSoftness > 0.75) nutzt die Engine nun die GatherCmp-Instruktion. Damit werden mit nur 4 Texture-Fetches gleich 16 Tiefenwerte gesampelt (Hardware-PCF x4 pro Fetch). So erhalten weite Pointlight-Schatten nun butterweiche 16 Taps zum Preis von 4, ohne jegliche Distanz-Zonen oder komplexes LOD-Management!
+
+
 
 
 
