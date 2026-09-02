@@ -917,6 +917,7 @@ GothicAPI::GothicAPI() {
 
     SkeletalMeshVobs.reserve(300);
     AnimatedSkeletalVobs.reserve(300);
+    PointlightAnimatedSkeletalVobs.reserve(300);
     DynamicallyAddedVobs.reserve(100);
 
 }
@@ -1700,6 +1701,7 @@ void GothicAPI::ResetVobs() {
     }
     SkeletalMeshVobs.clear();
     AnimatedSkeletalVobs.clear();
+    PointlightAnimatedSkeletalVobs.clear();
 }
 
 /** Called when the game loaded a new level */
@@ -3156,6 +3158,14 @@ void GothicAPI::OnRemovedVob( zCVob* vob, zCWorld* world ) {
         }
     }
 
+    for ( size_t i = 0; i< PointlightAnimatedSkeletalVobs.size(); ++i ) {
+        if ( PointlightAnimatedSkeletalVobs[i]->Vob == vob ) {
+            PointlightAnimatedSkeletalVobs[i] = PointlightAnimatedSkeletalVobs.back();
+            PointlightAnimatedSkeletalVobs.pop_back();
+            break;
+        }
+    }
+
     for ( size_t i = 0; i< DynamicallyAddedVobs.size(); ++i ) {
         if ( DynamicallyAddedVobs[i]->Vob == vob ) {
             DynamicallyAddedVobs[i] = DynamicallyAddedVobs.back();
@@ -3378,6 +3388,9 @@ void GothicAPI::OnAddVob( zCVob* vob, zCWorld* world ) {
                 if ( !BspLeafVobLists.empty() ) // Check if this is the initial loading
                 {
                     AnimatedSkeletalVobs.push_back( vi );
+                }
+                if ( vob->GetVobType() == zVOB_TYPE_NSC || !BspLeafVobLists.empty() ) {
+                    PointlightAnimatedSkeletalVobs.push_back( vi );
                 }
                 notifyPointLightVobAdded( vi );
             }
@@ -5721,6 +5734,10 @@ void GothicAPI::MoveVobFromBspToDynamic( SkeletalVobInfo* vob ) {
     parentBspNodes.clear();
 
     AnimatedSkeletalVobs.push_back( vob );
+    if ( std::find( PointlightAnimatedSkeletalVobs.begin(),
+                    PointlightAnimatedSkeletalVobs.end(), vob ) == PointlightAnimatedSkeletalVobs.end() ) {
+        PointlightAnimatedSkeletalVobs.push_back( vob );
+    }
 }
 
 /** Moves the given vob from a BSP-Node to the dynamic vob list */
@@ -7352,6 +7369,10 @@ std::vector<SkeletalVobInfo*>& GothicAPI::GetSkeletalMeshVobs() {
 /** Returns the loaded skeletal mesh vobs */
 std::vector<SkeletalVobInfo*>& GothicAPI::GetAnimatedSkeletalMeshVobs() {
     return AnimatedSkeletalVobs;
+}
+
+std::vector<SkeletalVobInfo*>& GothicAPI::GetPointlightAnimatedSkeletalMeshVobs() {
+    return PointlightAnimatedSkeletalVobs;
 }
 
 std::vector<VobInfo*>& GothicAPI::GetDynamicallyAddedVobs() {

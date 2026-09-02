@@ -103,8 +103,8 @@ bool IsAnimatedSkeletalShadowCaster( const SkeletalVobInfo* vob ) {
         return true;
     }
 
-    const auto& animatedVobs = Engine::GAPI->GetAnimatedSkeletalMeshVobs();
-    return std::find( animatedVobs.begin(), animatedVobs.end(), vob ) != animatedVobs.end();
+    const auto& pointlightCasters = Engine::GAPI->GetPointlightAnimatedSkeletalMeshVobs();
+    return std::find( pointlightCasters.begin(), pointlightCasters.end(), vob ) != pointlightCasters.end();
 }
 
 }
@@ -7509,9 +7509,10 @@ void XM_CALLCONV D3D11GraphicsEngine::DrawWorldAround(
         if ( renderNPCs ) {
             static std::vector<SkeletalVobInfo*> animatedSkeletalMeshVobs;
             animatedSkeletalMeshVobs.clear();
-            // Use the same maintained moving-NPC list as Build 221. This is
-            // intentionally much smaller than the complete skeletal-VOB list.
-            for ( auto const& skeletalMeshVob : Engine::GAPI->GetAnimatedSkeletalMeshVobs() ) {
+            // Use the maintained pointlight caster list. It contains moving
+            // skeletal VOBs plus initially loaded NPCs, but not every skeletal
+            // VOB in the world.
+            for ( auto const& skeletalMeshVob : Engine::GAPI->GetPointlightAnimatedSkeletalMeshVobs() ) {
                 if ( !skeletalMeshVob->VisualInfo ) {
                     // Seems to happen in Gothic 1
                     continue;
@@ -7902,8 +7903,9 @@ void XM_CALLCONV D3D11GraphicsEngine::DrawWorldAround_Layered(
             auto _ = Engine::GraphicsEngine->RecordGraphicsEvent( GE_NAME( "Draw animated skeletal meshes (layered)" ) );
             static std::vector<SkeletalVobInfo*> animatedSkeletalMeshVobs;
             animatedSkeletalMeshVobs.clear();
-            // Use the same maintained moving-NPC list as Build 221.
-            for ( auto const& skeletalMeshVob : Engine::GAPI->GetAnimatedSkeletalMeshVobs() ) {
+            // Use the maintained pointlight caster list, including initially
+            // loaded NPCs whose attachments still need dynamic shadows.
+            for ( auto const& skeletalMeshVob : Engine::GAPI->GetPointlightAnimatedSkeletalMeshVobs() ) {
                 if ( !skeletalMeshVob->VisualInfo ) {
                     // Seems to happen in Gothic 1
                     continue;
