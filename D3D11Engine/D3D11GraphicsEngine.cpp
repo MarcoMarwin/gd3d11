@@ -84,6 +84,31 @@ bool FeatureRTArrayIndexFromAnyShader = false;
 VS_ExConstantBuffer_Wind g_windBuffer;
 
 namespace {
+
+bool IsAttachedToNpc( zCVob* vob ) {
+    for ( zCVob* current = vob; current; current = current->GetVobParent() ) {
+        if ( current->GetVobType() == zVOB_TYPE_NSC ) {
+            return true;
+        }
+    }
+    return false;
+}
+
+bool IsAnimatedSkeletalShadowCaster( const SkeletalVobInfo* vob ) {
+    if ( !vob || !vob->Vob || !Engine::GAPI ) {
+        return false;
+    }
+
+    // NPCs and any skeletal VOB attached below an NPC follow animation
+    // transforms. They belong exclusively to the animated shadow pass.
+    if ( IsAttachedToNpc( vob->Vob ) ) {
+        return true;
+    }
+
+    const auto& animatedVobs = Engine::GAPI->GetAnimatedSkeletalMeshVobs();
+    return std::find( animatedVobs.begin(), animatedVobs.end(), vob ) != animatedVobs.end();
+}
+
 }
 
 struct SkyVelocityConstantBuffer {
@@ -7346,6 +7371,12 @@ void XM_CALLCONV D3D11GraphicsEngine::DrawWorldAround(
                         continue;  // Seems to happen in Gothic 1
                     }
 
+                    // Attachments follow an NPC and must only be rendered by
+                    // the animated shadow pass, never into the persistent map.
+                    if ( IsAttachedToNpc( it->Vob ) ) {
+                        continue;
+                    }
+
                     if ( !it->Vob->GetShowVisual() ) {
                         continue;
                     }
@@ -7433,6 +7464,10 @@ void XM_CALLCONV D3D11GraphicsEngine::DrawWorldAround(
             for ( auto it : Engine::GAPI->GetSkeletalMeshVobs() ) {
                 if ( !it->VisualInfo ) {
                     continue;  // Seems to happen in Gothic 1
+                }
+
+                if ( IsAnimatedSkeletalShadowCaster( it ) ) {
+                    continue;
                 }
 
                 if ( !it->Vob->GetShowVisual() ) {
@@ -7719,6 +7754,12 @@ void XM_CALLCONV D3D11GraphicsEngine::DrawWorldAround_Layered(
                         continue;  // Seems to happen in Gothic 1
                     }
 
+                    // Attachments follow an NPC and must only be rendered by
+                    // the animated shadow pass, never into the persistent map.
+                    if ( IsAttachedToNpc( it->Vob ) ) {
+                        continue;
+                    }
+
                     if ( !it->Vob->GetShowVisual() ) {
                         continue;
                     }
@@ -7809,6 +7850,10 @@ void XM_CALLCONV D3D11GraphicsEngine::DrawWorldAround_Layered(
             for ( auto it : Engine::GAPI->GetSkeletalMeshVobs() ) {
                 if ( !it->VisualInfo ) {
                     continue;  // Seems to happen in Gothic 1
+                }
+
+                if ( IsAnimatedSkeletalShadowCaster( it ) ) {
+                    continue;
                 }
 
                 if ( !it->Vob->GetShowVisual() ) {

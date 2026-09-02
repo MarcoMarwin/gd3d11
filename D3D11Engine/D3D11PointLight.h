@@ -94,6 +94,7 @@ protected:
     void AcquireStaticAsideShadowMap( DepthStencilPool* pool, int resolution );
     void ReleaseStaticAsideShadowMap();
     void CopyStaticAsideToActiveTarget() const;
+    void InvalidateShadowCasterCache();
     void RenderStaticShadowPass( RenderToDepthStencilBuffer& target, bool clearDepth );
     void RenderAnimatedShadowPass( RenderToDepthStencilBuffer& target, bool clearDepth );
 

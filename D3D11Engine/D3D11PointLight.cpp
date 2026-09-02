@@ -15,6 +15,49 @@
 
 const float LIGHT_COLORCHANGE_POS_MOD = 0.1f;
 
+namespace {
+
+bool IsAttachedToNpc( zCVob* vob ) {
+    for ( zCVob* current = vob; current; current = current->GetVobParent() ) {
+        if ( current->GetVobType() == zVOB_TYPE_NSC ) {
+            return true;
+        }
+    }
+    return false;
+}
+
+bool IsAnimatedPointlightCaster( BaseVobInfo* vob ) {
+    if ( !vob || !vob->Vob ) {
+        return false;
+    }
+
+    // NPCs and items attached to an NPC follow animation transforms and must
+    // never participate in the persistent static pointlight map.
+    if ( IsAttachedToNpc( vob->Vob ) ) {
+        return true;
+    }
+
+    if ( auto* skeletalVob = dynamic_cast<SkeletalVobInfo*>( vob ) ) {
+        if ( !Engine::GAPI ) {
+            return false;
+        }
+
+        const auto& animatedVobs = Engine::GAPI->GetAnimatedSkeletalMeshVobs();
+        return std::find( animatedVobs.begin(), animatedVobs.end(), skeletalVob ) != animatedVobs.end();
+    }
+
+    // A regular VOB with no BSP membership has already moved to the dynamic
+    // list. It may have started as a static world item, so the first movement
+    // still invalidates a cached static map; later movements do not.
+    if ( auto* staticVob = dynamic_cast<VobInfo*>( vob ) ) {
+        return staticVob->ParentBSPNodes.empty();
+    }
+
+    return false;
+}
+
+}
+
 D3D11PointLight::D3D11PointLight( VobLightInfo* info, bool dynamicLight ) {
     LightInfo = info;
     DynamicLight = dynamicLight;
@@ -244,6 +287,14 @@ void D3D11PointLight::CopyStaticAsideToActiveTarget() const {
         const UINT dstSubresource = D3D11CalcSubresource( 0, dstBaseSlice + face, 1 );
         context->CopySubresourceRegion( dstTexture, dstSubresource, 0, 0, 0, srcTexture, srcSubresource, nullptr );
     }
+}
+
+void D3D11PointLight::InvalidateShadowCasterCache() {
+    VobCache.clear();
+    SkeletalVobCache.clear();
+    DrawnOnce = false;
+    m_StaticShadowReady = false;
+    m_DynamicShadowValid = false;
 }
 
 void D3D11PointLight::RenderStaticShadowPass( RenderToDepthStencilBuffer& target, bool clearDepth ) {
@@ -705,11 +756,9 @@ void D3D11PointLight::OnVobRemovedFromWorld( BaseVobInfo* vob ) {
     // Clear cached VOB lists when this vob is removed.
     if ( std::find( VobCache.begin(), VobCache.end(), vob ) != VobCache.end()
         || std::find( SkeletalVobCache.begin(), SkeletalVobCache.end(), vob ) != SkeletalVobCache.end() ) {
-        // Clear cache, if so
-        VobCache.clear();
-        SkeletalVobCache.clear();
-        DrawnOnce = false;
-        m_StaticShadowReady = false;
+        // Clear the persistent base once when a cached caster leaves the
+        // world. The next render rebuilds the base without the removed item.
+        InvalidateShadowCasterCache();
     }
 
     if (vob->Vob == LightInfo->Vob
@@ -729,6 +778,13 @@ void D3D11PointLight::OnVobMoved( BaseVobInfo* vob ) {
     const bool wasCached = std::find( VobCache.begin(), VobCache.end(), vob ) != VobCache.end()
         || std::find( SkeletalVobCache.begin(), SkeletalVobCache.end(), vob ) != SkeletalVobCache.end();
 
+    // Animated NPCs and their held/attached items belong to the dynamic
+    // overlay. Once they are absent from the static cache, their animation
+    // must not rebuild the persistent static map every frame.
+    if ( IsAnimatedPointlightCaster( vob ) && !wasCached ) {
+        return;
+    }
+
     // A moved caster can enter a light's range even when it was not part of
     // the old cache. Conversely, a cached caster can leave the range. Only
     // invalidate lights that can actually be affected so ordinary animation
@@ -744,17 +800,32 @@ void D3D11PointLight::OnVobMoved( BaseVobInfo* vob ) {
         return;
     }
 
-    VobCache.clear();
-    SkeletalVobCache.clear();
-    DrawnOnce = false;
-    m_StaticShadowReady = false;
-    m_DynamicShadowValid = false;
+    InvalidateShadowCasterCache();
 }
 
 void D3D11PointLight::OnVobAdded( BaseVobInfo* vob ) {
-    // A newly registered caster is not present in the old spatial cache, so
-    // reuse the range-aware movement invalidation. This keeps distant light
-    // caches intact while preventing a newly spawned nearby VOB from being
-    // absent until the light itself moves.
-    OnVobMoved( vob );
+    if ( !vob || !vob->Vob || !LightInfo ) {
+        return;
+    }
+
+    // An NPC attachment is rendered by the animated overlay. It must not
+    // invalidate the persistent static map when it is registered or changed.
+    if ( IsAttachedToNpc( vob->Vob ) ) {
+        return;
+    }
+
+    const XMVECTOR lightPosition = LightInfo->GetEffectivePositionWorldXM();
+    const auto vobBounds = Frustum::BSphereFromzTBBox3D( vob->Vob->GetBBox() );
+    const XMVECTOR vobPosition = XMLoadFloat3( &vobBounds.Center );
+    const float range = std::max( 0.0f, LightInfo->GetEffectiveLightRange() );
+    const float affectedRange = range + std::max( 0.0f, vobBounds.Radius );
+    const bool isNearLight = XMVectorGetX( XMVector3LengthSq( lightPosition - vobPosition ) )
+        <= affectedRange * affectedRange;
+    if ( !isNearLight ) {
+        return;
+    }
+
+    // A newly inserted world caster is not cached yet, so invalidate based on
+    // proximity rather than cache membership. This is a one-time rebuild.
+    InvalidateShadowCasterCache();
 }
