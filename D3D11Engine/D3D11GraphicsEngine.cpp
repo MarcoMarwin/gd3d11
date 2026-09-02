@@ -7511,7 +7511,14 @@ void XM_CALLCONV D3D11GraphicsEngine::DrawWorldAround(
         if ( renderNPCs ) {
             static std::vector<SkeletalVobInfo*> animatedSkeletalMeshVobs;
             animatedSkeletalMeshVobs.clear();
-            for ( auto const& skeletalMeshVob : Engine::GAPI->GetAnimatedSkeletalMeshVobs() ) {
+            // Build the animated set from the authoritative skeletal-VOB list.
+            // The secondary animated list is not guaranteed to contain NPCs
+            // that were registered while the initial BSP cache was built.
+            for ( auto const& skeletalMeshVob : Engine::GAPI->GetSkeletalMeshVobs() ) {
+                if ( !IsAnimatedSkeletalShadowCaster( skeletalMeshVob ) ) {
+                    continue;
+                }
+
                 if ( !skeletalMeshVob->VisualInfo ) {
                     // Seems to happen in Gothic 1
                     continue;
@@ -7899,7 +7906,14 @@ void XM_CALLCONV D3D11GraphicsEngine::DrawWorldAround_Layered(
             auto _ = Engine::GraphicsEngine->RecordGraphicsEvent( GE_NAME( "Draw animated skeletal meshes (layered)" ) );
             static std::vector<SkeletalVobInfo*> animatedSkeletalMeshVobs;
             animatedSkeletalMeshVobs.clear();
-            for ( auto const& skeletalMeshVob : Engine::GAPI->GetAnimatedSkeletalMeshVobs() ) {
+            // Keep this in sync with the non-layered pointlight path. The
+            // authoritative skeletal list also covers NPCs loaded before the
+            // secondary animated list was populated.
+            for ( auto const& skeletalMeshVob : Engine::GAPI->GetSkeletalMeshVobs() ) {
+                if ( !IsAnimatedSkeletalShadowCaster( skeletalMeshVob ) ) {
+                    continue;
+                }
+
                 if ( !skeletalMeshVob->VisualInfo ) {
                     // Seems to happen in Gothic 1
                     continue;
