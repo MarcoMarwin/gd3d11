@@ -1335,32 +1335,27 @@ XRESULT D3D11ShadowMap::DrawPointlightShadows( std::vector<VobLightInfo*>& light
 void D3D11ShadowMap::BuildWorldShadowCasterCache() {
     ZoneScopedN( "D3D11ShadowMap::BuildWorldShadowCasterCache" );
     if ( !Engine::GAPI || !Engine::GAPI->IsWorldRenderCacheReady() ) {
-        const bool hadWorldShadowCache = m_WorldShadowCasterCacheValid;
         m_WorldShadowCasters.clear();
         m_WorldShadowCasterLookup.clear();
         m_WorldShadowVisibleCasters.clear();
         m_WorldShadowCasterCacheValid = false;
-        if ( hadWorldShadowCache ) {
-            m_ShouldUpdateCascade.fill( true );
-        }
         return;
     }
 
     const auto& settings = Engine::GAPI->GetRendererState().RendererSettings;
     if ( !settings.DrawWorldMesh || !settings.DrawShadowGeometry ) {
-        const bool hadWorldShadowCache = m_WorldShadowCasterCacheValid;
         m_WorldShadowCasters.clear();
         m_WorldShadowCasterLookup.clear();
         m_WorldShadowVisibleCasters.clear();
         m_WorldShadowCasterCacheValid = false;
-        if ( hadWorldShadowCache ) {
-            m_ShouldUpdateCascade.fill( true );
-        }
         return;
     }
 
     const uint64_t worldGeneration = Engine::GAPI->GetCityWindowConfigurationGeneration();
-    const float alphaRef = Engine::GAPI->GetRendererState().GraphicsState.FF_AlphaRef;
+    // RenderShadowmaps uses Gothic's fixed alpha-test reference for the shadow
+    // pass. Do not use the last regular-world FF_AlphaRef here: it can change
+    // between frames and would make this cache rebuild after PrepareRender.
+    constexpr float alphaRef = 170.0f / 255.0f;
     if ( m_WorldShadowCasterCacheValid
         && m_WorldShadowCasterCacheGeneration == worldGeneration
         && m_WorldShadowCasterCacheAlphaRef == alphaRef
@@ -1420,7 +1415,6 @@ void D3D11ShadowMap::BuildWorldShadowCasterCache() {
     m_WorldShadowCasterCacheDrawWorldMesh = settings.DrawWorldMesh;
     m_WorldShadowCasterCacheDrawShadowGeometry = settings.DrawShadowGeometry;
     m_WorldShadowCasterCacheValid = true;
-    m_ShouldUpdateCascade.fill( true );
     ++m_WorldShadowCasterCacheBuilds;
 }
 
@@ -1477,6 +1471,15 @@ XRESULT D3D11ShadowMap::DrawWorldShadow( )
         // world/configuration or relevant shadow settings change.
         BuildWorldShadowCasterCache();
 
+        // Atlas cascades share one depth-stencil view and are always rebuilt
+        // as a complete atlas (lazy updates are disabled for this backend).
+        // Clear the atlas once before the four viewport passes.
+        if ( m_useAtlas && m_shadowAtlas ) {
+            if ( auto dsv = m_shadowAtlas->GetDepthStencilView() ) {
+                m_context->ClearDepthStencilView( dsv, D3D11_CLEAR_DEPTH, 1.0f, 0 );
+            }
+        }
+
         for ( int cascadeIdx = 0; cascadeIdx < numCascades; ++cascadeIdx ) {
             // only update every Nth frame for higher cascades to save performance
             bool shouldUpdateCascade = m_ShouldUpdateCascade[cascadeIdx];
@@ -1506,22 +1509,6 @@ XRESULT D3D11ShadowMap::DrawWorldShadow( )
                 renderParams.ViewportOverride = m_shadowAtlas->GetCascadeViewport( static_cast<UINT>(cascadeIdx) );
                 renderParams.UseViewportOverride = true;
                 renderParams.SkipClear = true;
-
-                // The atlas has one shared DSV. Clear only the region that is
-                // about to be rebuilt so skipped lazy cascades keep their
-                // valid contents.
-                const auto& cascadeInfo = m_shadowAtlas->GetCascadeInfo( static_cast<UINT>(cascadeIdx) );
-                const D3D11_RECT clearRect = {
-                    static_cast<LONG>( cascadeInfo.offsetX ),
-                    static_cast<LONG>( cascadeInfo.offsetY ),
-                    static_cast<LONG>( cascadeInfo.offsetX + cascadeInfo.size ),
-                    static_cast<LONG>( cascadeInfo.offsetY + cascadeInfo.size )
-                };
-                const FLOAT clearValue[4] = { 1.0f, 1.0f, 1.0f, 1.0f };
-                if ( cascadeInfo.size > 0 && m_shadowAtlas->GetDepthStencilView() ) {
-                    m_context->ClearView(
-                        m_shadowAtlas->GetDepthStencilView(), clearValue, &clearRect, 1 );
-                }
             }
 
             RenderShadowmaps( renderParams );
