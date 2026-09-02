@@ -5,6 +5,7 @@
 #include <condition_variable>
 #include <atomic>
 #include <cstdint>
+#include <cfloat>
 #include "TexturePool.h"
 #include "ThreadPool.h"
 

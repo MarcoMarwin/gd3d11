@@ -135,7 +135,6 @@ void D3D11PointLight::ReleaseShadowMap() {
     ReleaseStaticAsideShadowMap();
     m_CurrentResolution = 0;
     DrawnOnce = false;
-
 }
 
 void D3D11PointLight::SetTiledSlot( int slot, RenderToDepthStencilBuffer* staticTarget, RenderToDepthStencilBuffer* dynamicTarget, D3D11TiledDeferredShading* owner ) {
@@ -160,7 +159,6 @@ void D3D11PointLight::ClearTiledSlot() {
     m_TiledOwner = nullptr;
     m_StaticShadowReady = false;
     m_DynamicShadowValid = false;
-
 }
 
 bool D3D11PointLight::ShouldReleaseForVisibility( bool visible ) {

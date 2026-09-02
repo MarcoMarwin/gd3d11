@@ -1247,9 +1247,9 @@ XRESULT D3D11ShadowMap::DrawPointlightShadows( std::vector<VobLightInfo*>& light
             bool needsUpdate = pl->NeedsUpdate();
             bool isInited = pl->IsInited();
 
-            // A nearby light with an animated overlay must keep its NPC/MOB
-            // shadow current. Other animated overlays use the persistent
-            // round-robin queue below; the static world base is never rebuilt.
+            // Keep nearby/hero-relevant animated overlays current. Other
+            // overlays use the persistent bounded queue below; the static
+            // world base is not rebuilt for that queue turn.
             if ( nearDynamicShadowSource )
                 light->UpdateShadows = true;
 
@@ -1264,9 +1264,9 @@ XRESULT D3D11ShadowMap::DrawPointlightShadows( std::vector<VobLightInfo*>& light
                     }
                     importantUpdates.emplace_back( light );
                 }
-                // Background Priority: every eligible animated overlay
-                // participates in the persistent round-robin queue, including
-                // static fixture lights while dynamic casters are enabled.
+                // Every non-near animated overlay participates in the
+                // persistent round-robin queue. Static fixture lights use the
+                // same overlay path while dynamic casters are enabled.
                 else if ( animatedShadowOverlayEligible ) {
                     auto& queue = graphicsEngine->FrameShadowUpdateLights;
                     if ( std::find( queue.begin(), queue.end(), light ) == queue.end() ) {
@@ -1300,7 +1300,7 @@ XRESULT D3D11ShadowMap::DrawPointlightShadows( std::vector<VobLightInfo*>& light
         importantUpdate->UpdateShadows = false;
     }
 
-    // Process the background queue (round-robin) with a fixed, bounded budget.
+    // Process the background queue with the fixed, bounded 224pre budget.
     // Near/hero lights never enter this queue and are not counted here.
     const int maxBackgroundUpdates = kMaxBackgroundPointlightUpdatesPerFrame;
     int updatesDone = 0;
