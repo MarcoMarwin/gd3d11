@@ -66,22 +66,6 @@ int GetRuntimePCFLimit()
     return clamp((int)(SQ_ShadowCascadeRuntimeParams.y + 0.5f), 0, GetRuntimeCascadeCount());
 }
 
-float GetRuntimeCascadeFarDistance()
-{
-    // The final split is the hard world-shadow cutoff. Cascade selection below
-    // remains projection-based so texel-snapped matrices do not cause jumps.
-    const int cascadeCount = GetRuntimeCascadeCount();
-    return cascadeCount == 1 ? SQ_ShadowCascadeSplits.x
-        : cascadeCount == 2 ? SQ_ShadowCascadeSplits.y
-        : cascadeCount == 3 ? SQ_ShadowCascadeSplits.z
-        : SQ_ShadowCascadeSplits.w;
-}
-
-float GetCascadeViewDepth(float3 wsPosition)
-{
-    return abs(mul(float4(wsPosition, 1.0f), SQ_View).z);
-}
-
 bool UsePCSSShadowFilter()
 {
     return GetShadowKernelQuality() >= 2;
@@ -403,14 +387,11 @@ int GetPrimaryCascadeIndex(float3 wsPosition)
     float inBounds;
     float blendFactor;
 
-    // Keep the explicit range cutoff, but use the proven projection-based
-    // cascade selection from Build 221. Light-space projections overlap at
-    // their borders; selecting by camera depth first made receivers jump
-    // between cascades when the stabilized matrices moved by a texel.
-    if ( GetCascadeViewDepth(wsPosition) > GetRuntimeCascadeFarDistance() )
-        return -1;
-
     const int cascadeCount = GetRuntimeCascadeCount();
+    // Build 221 selection: use the first valid light-space projection. The
+    // runtime split vector remains available for settings/ABI compatibility,
+    // but is not allowed to introduce a second, independently changing
+    // visibility cutoff.
     [unroll]
     for (int c = 0; c < MAX_CSM_CASCADES; c++)
     {
@@ -634,13 +615,8 @@ float ComputeCascadedShadowValueSoft(float3 wsPosition, float viewSpaceZ, float 
     float2 projCoords;
     float blendFactor = 0.0f;
 
-    // Keep the range cutoff independent from cascade selection. The original
-    // projection search is stable with the texel-snapped matrices and avoids
-    // visible transitions when a receiver crosses a depth split.
-    if ( abs(viewSpaceZ) > GetRuntimeCascadeFarDistance() )
-        return shadow;
-
-    // Reuse a cascade selected during receiver-bias calculation when possible.
+    // Build 221 sampling: reuse a projection-selected cascade when possible,
+    // then fall back to the original projection search.
     if (preferredCascade >= 0 && preferredCascade < cascadeCount)
     {
         float inBounds;

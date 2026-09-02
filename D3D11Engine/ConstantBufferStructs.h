@@ -289,8 +289,9 @@ struct DS_ScreenQuadConstantBuffer {
     // These are runtime-controlled for the same reason as SQ_ShadowRuntimeParams.
     float4 SQ_ShadowCascadeRuntimeParams;
 
-    // Far distance of cascades 0..3 in camera/view space. The final value is
-    // used as the hard world-shadow cutoff by the sampling path.
+    // Far distances of cascades 0..3 in camera/view space. Retained as an
+    // extension of the runtime layout; the active Build-221 sampling path
+    // selects cascades from their light-space projections.
     float4 SQ_ShadowCascadeSplits;
 
     // Actual pixel resolution of cascade 0..3. In atlas mode the far
