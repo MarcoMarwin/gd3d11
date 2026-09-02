@@ -95,10 +95,14 @@ float4 PSMain( PS_INPUT Input ) : SV_TARGET
 	// Do some simple NdL-Lighting
 	float ndl = PLS_ComputePointLightNdlBacklit(lightDir, normal, Pl_PositionWorld, wsPosition, wsNormal, twoSidedBacklitMaterial, AC_EnableSSS);
 	
-	// Dynamic pointlight shadows control animated NPCs as casters, not as
-	// receivers. NPCs must continue to receive the current pointlight shadow
-	// from static world/VOB geometry even when animated casters are disabled.
-	float shadow = PLS_SampleShadowCube(TX_ShadowCube, SS_Linear, SS_Comp, wsPosition, wsNormal, Pl_PositionWorld, PL_Range, PL_ShadowSoftness, PL_ShadowFilterMode);
+	// Dynamic pointlight shadows are disabled for NPC receivers together with
+	// animated casters. Static/world geometry keeps normal shadow reception.
+	float shadow = 1.0f;
+	[branch]
+	if ( npcMaterial <= 0.5f || PL_ShadowFilterPad[0] == 0u )
+	{
+		shadow = PLS_SampleShadowCube(TX_ShadowCube, SS_Linear, SS_Comp, wsPosition, wsNormal, Pl_PositionWorld, PL_Range, PL_ShadowSoftness, PL_ShadowFilterMode);
+	}
 	// Compute range falloff
 	float falloff = PLS_ComputeRangeFalloff(distance, PL_Range);
 	

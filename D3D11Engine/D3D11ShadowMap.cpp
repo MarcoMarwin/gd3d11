@@ -1185,9 +1185,10 @@ XRESULT D3D11ShadowMap::DrawPointlightShadows( std::vector<VobLightInfo*>& light
             const float allocationRange = light->GetEffectiveLightRange();
             const bool heroRelevant = allocationHeroDistance <= allocationRange + 250.0f;
             const bool cameraNear = allocationCameraDistance <= allocationRange + 1200.0f;
-            // Static lights keep only their persistent world-shadow base.
-            // Animated NPC/MOB casters are source-filtered and static
-            // low-resolution slots never have an animated target.
+            // Static lights keep their persistent world-shadow base and, when
+            // enabled, receive the same animated NPC/MOB overlay as dynamic
+            // lights. Static low-resolution slots never have an animated
+            // target.
             const bool animatedShadowOverlayEligible = dynamicMode
                 && pl->UseDynamicNpcShadowCasters()
                 && !pl->IsTiledStaticLowRes();
@@ -1263,9 +1264,9 @@ XRESULT D3D11ShadowMap::DrawPointlightShadows( std::vector<VobLightInfo*>& light
                     }
                     importantUpdates.emplace_back( light );
                 }
-                // Background Priority: every eligible animated overlay from
-                // a genuinely dynamic source participates in the persistent
-                // round-robin queue. Static fixture lights never enter it.
+                // Background Priority: every eligible animated overlay
+                // participates in the persistent round-robin queue, including
+                // static fixture lights while dynamic casters are enabled.
                 else if ( animatedShadowOverlayEligible ) {
                     auto& queue = graphicsEngine->FrameShadowUpdateLights;
                     if ( std::find( queue.begin(), queue.end(), light ) == queue.end() ) {

@@ -367,17 +367,11 @@ bool D3D11PointLight::UseDynamicNpcShadowCasters() const {
     }
 
     const auto& settings = Engine::GAPI->GetRendererState().RendererSettings;
-    if ( !settings.UseDynamicPointlightNpcShadows() ) {
-        return false;
-    }
-
-    // Dynamic pointlight shadows are opt-in per source as well. Static
-    // candles, oil lamps and fireplaces keep only their persistent base map;
-    // moving/runtime lights and non-static renderer lights (for example the
-    // player's hand torch) may receive the animated NPC overlay.
-    return LightInfo->IsVisualFXLight
-        || LightInfo->IsDynamicVobLight
-        || !LightInfo->IsEffectivelyStatic();
+    // This is the global dynamic-pointlight-shadow switch, not a light-type
+    // filter. Static lights (candles, oil lamps and fireplaces) still need
+    // the animated NPC overlay when it is enabled. When it is disabled,
+    // animated casters and NPC shadow reception are both disabled.
+    return settings.UseDynamicPointlightNpcShadows();
 }
 
 bool D3D11PointLight::UpdateDynamicNpcShadowCasterMode() {
@@ -522,9 +516,9 @@ void D3D11PointLight::RenderFullCubemap() {
     }
 
     const int shadowMode = GetCurrentShadowMode();
-    // Static pointlights always use only their persistent base map. The
-    // animated NPC pass is source-filtered and is only available for a truly
-    // dynamic source while the global option is enabled.
+    // Every pointlight keeps a persistent static base map. If the global
+    // dynamic-caster option is enabled, the animated NPC overlay is rendered
+    // separately and composited by the lighting path.
     if ( shadowMode == GothicRendererSettings::PLS_STATIC_ONLY ) {
         RenderStaticShadowPass( *activeTarget, true );
         m_StaticShadowReady = true;

@@ -620,6 +620,8 @@ D3D11TiledDeferredShading::CullResult D3D11TiledDeferredShading::CullLights(
         tl.ShadowSoftness = std::max(
             settings.PointlightShadowSoftness * 2.0f, minimumTemporalShadowSoftness );
         tl.ShadowFilterMode = static_cast<uint32_t>( settings.GetPointlightShadowKernelQuality() );
+        // The flag also controls pointlight-shadow reception on NPCs. Static
+        // and world geometry still samples the persistent pointlight map.
         tl.ShadowFilterPad[0] = settings.UseDynamicPointlightNpcShadows() ? 0u : 1u;
         tl.ShadowFilterPad[1] = 0;
         tl.ShadowFilterPad[2] = 0;

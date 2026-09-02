@@ -105,7 +105,7 @@ struct TiledPointLight
     float IgnoreIndoorOutdoorLimit;
     float ShadowSoftness;
     uint ShadowFilterMode;
-    uint3 ShadowFilterPad;
+    uint3 ShadowFilterPad; // [0] disables NPC shadow reception when set.
 };
 
 struct LightGrid
