@@ -499,10 +499,10 @@ struct XeGTAOConfig {
     float Radius = 200.0f;  // Broad, softly filtered Gothic-scale AO radius.
 };
 
+// Runtime mode; UserSettings.ini persists the public enable/disable switch.
 enum class AOMode : int {
     AO_NONE = 0,
-    // Preserve value 4 for compatibility with existing UserSettings.ini files.
-    AO_XEGTAO = 4,
+    AO_XEGTAO = 1,
 };
 
 struct GothicRendererSettings {
@@ -512,9 +512,11 @@ struct GothicRendererSettings {
         PLS_UPDATE_DYNAMIC = 2,
         _PLS_NUM_SETTINGS
     };
-    enum EWindQuality {
-        WIND_QUALITY_NONE = 0,
-        WIND_QUALITY_ADVANCED,
+    // Wind is a binary feature. Keep an explicit int-sized enum here because
+    // this settings struct is exported to external Gothic consumers.
+    enum class EWindEffectsState : int {
+        DISABLED = 0,
+        ENABLED = 1,
     };
 
     enum E_ShadowFrustumCulling {
@@ -539,6 +541,7 @@ struct GothicRendererSettings {
 
     enum E_GraphicsPreset {
         GRAPHICS_CUSTOM = 0,
+        // Value 1 is reserved; these IDs are persisted in UserSettings.ini.
         GRAPHICS_LOW = 2,
         GRAPHICS_MEDIUM = 3,
         GRAPHICS_HIGH = 4,
@@ -550,12 +553,11 @@ struct GothicRendererSettings {
         D3D11_LANGUAGE_GERMAN = 1,
     };
 
+    // Runtime state only. UserSettings.ini persists AntiAliasingMode, from
+    // which the active upscaler is derived.
     enum E_Upscaler {
         UPSCALER_DEFAULT = 0,
-        // Values 1 and 2 remain reserved so old INI files migrate safely to FSR3.
-        UPSCALER_LEGACY_FSR_1 = 1,
-        UPSCALER_LEGACY_FSR_2 = 2,
-        UPSCALER_FSR_3 = 3,
+        UPSCALER_FSR_3 = 1,
         _UPSCALER_NUM_MODES
     };
 
@@ -567,7 +569,7 @@ struct GothicRendererSettings {
 
     enum E_ShadowQuality {
         SHADOW_QUALITY_OFF = 0,
-        SHADOW_QUALITY_VERY_LOW = 1,
+        // Value 1 stays reserved so the remaining profile IDs do not shift.
         SHADOW_QUALITY_LOW = 2,
         SHADOW_QUALITY_MEDIUM = 3,
         SHADOW_QUALITY_HIGH = 4,
@@ -693,7 +695,7 @@ struct GothicRendererSettings {
         RainEffects = true;
 
         BloomStrength = 1.0f;
-        GlobalWindStrength = 1.0f; // UI-normalized: 1.0 maps to the former effective 2.0 wind strength.
+        WindEffectsStrength = 1.0f; // UI-normalized: 1.0 maps to the former effective 2.0 wind strength.
         VegetationAlphaToCoverage = true;
 
         BrightnessValue = 1.0f;
@@ -725,7 +727,7 @@ struct GothicRendererSettings {
         DoFNearBlurDistance = 150.0f;
         DoFNearBlurStrength = 2.0f;
 
-        WindQuality = WIND_QUALITY_ADVANCED;
+        WindEffectsEnabled = EWindEffectsState::ENABLED;
         HeroAffectsObjects = true;
         EnablePointlightShadows = PLS_UPDATE_DYNAMIC;
         // Reserved slots keep the exported GothicRendererSettings layout
@@ -964,6 +966,102 @@ struct GothicRendererSettings {
             : 1.0f;
     }
 
+    static EWindEffectsState WindEffectsStateOrDefault(
+        int state,
+        EWindEffectsState defaultState = EWindEffectsState::ENABLED ) {
+        switch ( state ) {
+        case static_cast<int>( EWindEffectsState::DISABLED ):
+        case static_cast<int>( EWindEffectsState::ENABLED ):
+            return static_cast<EWindEffectsState>( state );
+        default:
+            return defaultState;
+        }
+    }
+
+    static AOMode AmbientOcclusionModeOrDefault( int mode ) {
+        switch ( mode ) {
+        case static_cast<int>( AOMode::AO_NONE ):
+        case static_cast<int>( AOMode::AO_XEGTAO ):
+            return static_cast<AOMode>( mode );
+        default:
+            return AOMode::AO_XEGTAO;
+        }
+    }
+
+    static E_AntiAliasingMode AntiAliasingModeOrDefault( int mode ) {
+        switch ( mode ) {
+        case static_cast<int>( E_AntiAliasingMode::AA_NONE ):
+        case static_cast<int>( E_AntiAliasingMode::AA_SMAA ):
+        case static_cast<int>( E_AntiAliasingMode::AA_FSR3 ):
+            return static_cast<E_AntiAliasingMode>( mode );
+        default:
+            return E_AntiAliasingMode::AA_SMAA;
+        }
+    }
+
+    static E_D3D11Language D3D11LanguageOrDefault( int language ) {
+        switch ( language ) {
+        case static_cast<int>( E_D3D11Language::D3D11_LANGUAGE_ENGLISH ):
+        case static_cast<int>( E_D3D11Language::D3D11_LANGUAGE_GERMAN ):
+            return static_cast<E_D3D11Language>( language );
+        default:
+            return E_D3D11Language::D3D11_LANGUAGE_ENGLISH;
+        }
+    }
+
+    static E_ShadowKernelQuality ShadowKernelQualityOrDefault(
+        int kernel,
+        E_ShadowKernelQuality defaultKernel ) {
+        switch ( kernel ) {
+        case static_cast<int>( E_ShadowKernelQuality::SHADOW_KERNEL_PCF_LOW ):
+        case static_cast<int>( E_ShadowKernelQuality::SHADOW_KERNEL_PCF_MEDIUM ):
+        case static_cast<int>( E_ShadowKernelQuality::SHADOW_KERNEL_PCSS ):
+            return static_cast<E_ShadowKernelQuality>( kernel );
+        default:
+            return defaultKernel;
+        }
+    }
+
+    static E_ShadowQuality ShadowQualityOrDefault(
+        int quality,
+        E_ShadowQuality defaultQuality = E_ShadowQuality::SHADOW_QUALITY_MEDIUM ) {
+        switch ( quality ) {
+        case static_cast<int>(E_ShadowQuality::SHADOW_QUALITY_OFF):
+        case static_cast<int>(E_ShadowQuality::SHADOW_QUALITY_LOW):
+        case static_cast<int>(E_ShadowQuality::SHADOW_QUALITY_MEDIUM):
+        case static_cast<int>(E_ShadowQuality::SHADOW_QUALITY_HIGH):
+        case static_cast<int>(E_ShadowQuality::SHADOW_QUALITY_EXTREME):
+            return static_cast<E_ShadowQuality>(quality);
+        default:
+            // Removed/invalid values are ignored instead of being mapped to
+            // another selectable quality.
+            return defaultQuality;
+        }
+    }
+
+    static E_Upscaler UpscalerOrDefault( int upscaler ) {
+        switch ( upscaler ) {
+        case static_cast<int>(E_Upscaler::UPSCALER_DEFAULT):
+        case static_cast<int>(E_Upscaler::UPSCALER_FSR_3):
+            return static_cast<E_Upscaler>(upscaler);
+        default:
+            return E_Upscaler::UPSCALER_DEFAULT;
+        }
+    }
+
+    static E_GraphicsPreset GraphicsPresetOrDefault( int preset ) {
+        switch ( preset ) {
+        case static_cast<int>(E_GraphicsPreset::GRAPHICS_CUSTOM):
+        case static_cast<int>(E_GraphicsPreset::GRAPHICS_LOW):
+        case static_cast<int>(E_GraphicsPreset::GRAPHICS_MEDIUM):
+        case static_cast<int>(E_GraphicsPreset::GRAPHICS_HIGH):
+        case static_cast<int>(E_GraphicsPreset::GRAPHICS_VERY_HIGH):
+            return static_cast<E_GraphicsPreset>(preset);
+        default:
+            return E_GraphicsPreset::GRAPHICS_CUSTOM;
+        }
+    }
+
     static int SnapCSMShadowMapSize( int size ) {
         constexpr int levels[] = { 512, 1024, 2048, 4096, 8192 };
         const int clampedSize = std::clamp( size, levels[0], levels[4] );
@@ -995,11 +1093,7 @@ struct GothicRendererSettings {
     }
 
     void ApplyShadowQualitySettings() {
-        const int quality = std::clamp(
-            static_cast<int>(ShadowQuality),
-            static_cast<int>(E_ShadowQuality::SHADOW_QUALITY_OFF),
-            static_cast<int>(E_ShadowQuality::SHADOW_QUALITY_EXTREME) );
-        ShadowQuality = static_cast<E_ShadowQuality>(quality);
+        ShadowQuality = ShadowQualityOrDefault( static_cast<int>(ShadowQuality) );
 
         switch ( ShadowQuality ) {
         case E_ShadowQuality::SHADOW_QUALITY_OFF:
@@ -1017,23 +1111,6 @@ struct GothicRendererSettings {
             ShadowSoftness = DefaultShadowSoftnessForQuality( ShadowQuality );
             // Keep the inactive CSM resource at the minimum supported size.
             // EnableShadows=false still prevents CSM rendering/sampling.
-            ShadowMapSize = 512;
-            PointlightShadowMapSize = 128;
-            break;
-        case E_ShadowQuality::SHADOW_QUALITY_VERY_LOW:
-            EnableShadows = true;
-            CSMShadowKernel = E_ShadowKernelQuality::SHADOW_KERNEL_PCF_LOW;
-            // Very Low keeps CSM shadows, but disables pointlight shadows
-            // completely. The previous 64px cubemap produced visibly poor
-            // results and still consumed update/sampling work.
-            EnablePointlightShadows = EPointLightShadowMode::PLS_DISABLED;
-            PointlightShadowKernel = E_ShadowKernelQuality::SHADOW_KERNEL_PCF_LOW;
-            EnablePointlightDynamicCasters = false;
-            WorldShadowRangeScale = 0.5f;
-            // CSM shadows always use the complete four-cascade layout.
-            NumShadowCascades = MAX_SUPPORTED_CSM_CASCADES;
-            ShadowCascadePCFLimit = 0;
-            ShadowSoftness = DefaultShadowSoftnessForQuality( ShadowQuality );
             ShadowMapSize = 512;
             PointlightShadowMapSize = 128;
             break;
@@ -1109,10 +1186,14 @@ struct GothicRendererSettings {
     }
 
     // Pointlight shadows use the static path by default. Enabling animated
-    // casters selects the dynamic overlay path.
+    // casters permits the dynamic overlay for eligible light sources.
     bool UseDynamicPointlightNpcShadows() const {
         return EnablePointlightDynamicCasters
             && EnablePointlightShadows == EPointLightShadowMode::PLS_UPDATE_DYNAMIC;
+    }
+
+    bool AreWindEffectsEnabled() const {
+        return WindEffectsEnabled == EWindEffectsState::ENABLED;
     }
 
     E_ShadowKernelQuality GetShadowKernelQuality() const {
@@ -1135,7 +1216,7 @@ struct GothicRendererSettings {
     bool DrawSky;
     bool DrawFog;
     float FogRange;
-    int WindQuality;
+    EWindEffectsState WindEffectsEnabled;
     bool HeroAffectsObjects;
     bool DrawG1ForestPortals;
     bool DrawRainThroughTransformFeedback;
@@ -1206,7 +1287,7 @@ struct GothicRendererSettings {
     int PointlightShadowMapSize;
     int textureMaxSize;
 
-    float GlobalWindStrength;
+    float WindEffectsStrength;
     float FogGlobalDensity;
     float FogHeightFalloff;
     float FogHeight;
@@ -1449,6 +1530,8 @@ struct GothicRendererSettings {
     }
 
     void FixupUpscalingSettings() {
+        AntiAliasingMode = AntiAliasingModeOrDefault( static_cast<int>( AntiAliasingMode ) );
+        Upscaler = UpscalerOrDefault( static_cast<int>(Upscaler) );
         if ( AntiAliasingMode == E_AntiAliasingMode::AA_FSR3 ) {
             Upscaler = E_Upscaler::UPSCALER_FSR_3;
             ResolutionScalePercent = SnapFSRResolutionScale( ResolutionScalePercent );

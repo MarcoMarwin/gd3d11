@@ -817,7 +817,7 @@ struct GraphicsPresetComparable {
     int AoMode;
     bool EnableDoF;
     bool EnableDynamicClouds;
-    int WindQuality;
+    int WindEffectsEnabled;
     bool EnableGodRays;
     bool AllowNormalmaps;
     bool EnableSSR;
@@ -837,7 +837,7 @@ struct GraphicsPresetComparable {
     float AOStrength;
     float DoFBokehRadius;
     float GodRayStrength;
-    float GlobalWindStrength;
+    float WindEffectsStrength;
 };
 
 GraphicsPresetComparable MakeGraphicsPresetComparable(
@@ -851,7 +851,7 @@ GraphicsPresetComparable MakeGraphicsPresetComparable(
         static_cast<int>(s.AoMode),
         s.EnableDoF,
         s.EnableDynamicClouds,
-        IsWindEffectsControlVisible() ? s.WindQuality : 0,
+        IsWindEffectsControlVisible() ? static_cast<int>( s.WindEffectsEnabled ) : 0,
         s.EnableGodRays,
         s.AllowNormalmaps,
         s.EnableSSR,
@@ -872,7 +872,7 @@ GraphicsPresetComparable MakeGraphicsPresetComparable(
         s.AOStrength,
         s.DoFBokehRadius,
         s.GodRayStrength,
-        IsWindEffectsControlVisible() ? s.GlobalWindStrength : 0.0f,
+        IsWindEffectsControlVisible() ? s.WindEffectsStrength : 0.0f,
     };
 }
 
@@ -887,7 +887,7 @@ bool GraphicsPresetComparableEqual(
         && a.AoMode == b.AoMode
         && a.EnableDoF == b.EnableDoF
         && a.EnableDynamicClouds == b.EnableDynamicClouds
-        && a.WindQuality == b.WindQuality
+        && a.WindEffectsEnabled == b.WindEffectsEnabled
         && a.EnableGodRays == b.EnableGodRays
         && a.AllowNormalmaps == b.AllowNormalmaps
         && a.EnableSSR == b.EnableSSR
@@ -908,7 +908,7 @@ bool GraphicsPresetComparableEqual(
         && a.AOStrength == b.AOStrength
         && a.DoFBokehRadius == b.DoFBokehRadius
         && a.GodRayStrength == b.GodRayStrength
-        && a.GlobalWindStrength == b.GlobalWindStrength;
+        && a.WindEffectsStrength == b.WindEffectsStrength;
 }
 
 void ApplyGraphicsPresets( GothicRendererSettings& s, bool applyRuntimeUpdates = true ) {
@@ -930,7 +930,7 @@ void ApplyGraphicsPresets( GothicRendererSettings& s, bool applyRuntimeUpdates =
     s.AOStrength = 1.0f;
     s.GodRayStrength = 1.0f;
     s.DoFBokehRadius = 3.5f;
-    if ( IsWindEffectsControlVisible() ) s.GlobalWindStrength = 1.0f;
+    if ( IsWindEffectsControlVisible() ) s.WindEffectsStrength = 1.0f;
 
     switch ( preset ) {
     case GothicRendererSettings::GRAPHICS_LOW:
@@ -938,7 +938,7 @@ void ApplyGraphicsPresets( GothicRendererSettings& s, bool applyRuntimeUpdates =
         s.AoMode = AOMode::AO_XEGTAO;
         s.EnableDoF = false;
         s.EnableDynamicClouds = false;
-        if ( IsWindEffectsControlVisible() ) s.WindQuality = GothicRendererSettings::EWindQuality::WIND_QUALITY_ADVANCED;
+        if ( IsWindEffectsControlVisible() ) s.WindEffectsEnabled = GothicRendererSettings::EWindEffectsState::ENABLED;
         s.OutdoorSmallVobDrawRadius = ObjectDrawDistanceUiToMeters( 3 );
         s.SectionDrawRadius = 3;
         s.textureMaxSize = static_cast<int>(TX_QUALITY::High);
@@ -954,7 +954,7 @@ void ApplyGraphicsPresets( GothicRendererSettings& s, bool applyRuntimeUpdates =
         s.AoMode = AOMode::AO_XEGTAO;
         s.EnableDoF = true;
         s.EnableDynamicClouds = false;
-        if ( IsWindEffectsControlVisible() ) s.WindQuality = GothicRendererSettings::EWindQuality::WIND_QUALITY_ADVANCED;
+        if ( IsWindEffectsControlVisible() ) s.WindEffectsEnabled = GothicRendererSettings::EWindEffectsState::ENABLED;
         s.OutdoorSmallVobDrawRadius = ObjectDrawDistanceUiToMeters( 5 );
         s.SectionDrawRadius = 5;
         s.textureMaxSize = static_cast<int>(TX_QUALITY::MAX);
@@ -968,7 +968,7 @@ void ApplyGraphicsPresets( GothicRendererSettings& s, bool applyRuntimeUpdates =
         s.AoMode = AOMode::AO_XEGTAO;
         s.EnableDoF = true;
         s.EnableDynamicClouds = true;
-        if ( IsWindEffectsControlVisible() ) s.WindQuality = GothicRendererSettings::EWindQuality::WIND_QUALITY_ADVANCED;
+        if ( IsWindEffectsControlVisible() ) s.WindEffectsEnabled = GothicRendererSettings::EWindEffectsState::ENABLED;
         s.OutdoorSmallVobDrawRadius = ObjectDrawDistanceUiToMeters( 7 );
         s.SectionDrawRadius = 7;
         s.textureMaxSize = static_cast<int>(TX_QUALITY::MAX);
@@ -981,7 +981,7 @@ void ApplyGraphicsPresets( GothicRendererSettings& s, bool applyRuntimeUpdates =
         s.AoMode = AOMode::AO_XEGTAO;
         s.EnableDoF = true;
         s.EnableDynamicClouds = true;
-        if ( IsWindEffectsControlVisible() ) s.WindQuality = GothicRendererSettings::EWindQuality::WIND_QUALITY_ADVANCED;
+        if ( IsWindEffectsControlVisible() ) s.WindEffectsEnabled = GothicRendererSettings::EWindEffectsState::ENABLED;
         s.OutdoorSmallVobDrawRadius = ObjectDrawDistanceUiToMeters( 9 );
         s.SectionDrawRadius = 9;
         s.textureMaxSize = static_cast<int>(TX_QUALITY::MAX);
@@ -997,7 +997,7 @@ void ApplyGraphicsPresets( GothicRendererSettings& s, bool applyRuntimeUpdates =
     if ( s.AoMode == AOMode::AO_NONE ) s.AOStrength = 0.0f;
     if ( !s.EnableGodRays ) s.GodRayStrength = 0.0f;
     if ( !s.EnableDoF ) s.DoFBokehRadius = 0.0f;
-    if ( IsWindEffectsControlVisible() && s.WindQuality == GothicRendererSettings::EWindQuality::WIND_QUALITY_NONE ) s.GlobalWindStrength = 0.0f;
+    if ( IsWindEffectsControlVisible() && !s.AreWindEffectsEnabled() ) s.WindEffectsStrength = 0.0f;
 
     // Selecting a named graphics preset is a full reset boundary for all
     // Advanced overrides. The profile values become the current effective
@@ -1057,18 +1057,13 @@ namespace
 {
     void FixupSettings( GothicRendererSettings& s ) {
         s.FixupUpscalingSettings();
-        const int presetValue = static_cast<int>(s.GraphicsPreset);
-        if ( presetValue == 1 ) {
-            s.GraphicsPreset = GothicRendererSettings::GRAPHICS_LOW;
-        } else if ( presetValue < static_cast<int>(GothicRendererSettings::GRAPHICS_CUSTOM) ) {
-            s.GraphicsPreset = GothicRendererSettings::GRAPHICS_CUSTOM;
-        } else if ( presetValue > static_cast<int>(GothicRendererSettings::GRAPHICS_VERY_HIGH) ) {
-            s.GraphicsPreset = GothicRendererSettings::GRAPHICS_VERY_HIGH;
-        }
-        s.D3D11Language = static_cast<GothicRendererSettings::E_D3D11Language>(std::clamp<int>(
-            static_cast<int>(s.D3D11Language),
-            static_cast<int>(GothicRendererSettings::D3D11_LANGUAGE_ENGLISH),
-            static_cast<int>(GothicRendererSettings::D3D11_LANGUAGE_GERMAN) ));
+        s.WindEffectsEnabled = GothicRendererSettings::WindEffectsStateOrDefault(
+            static_cast<int>( s.WindEffectsEnabled ) );
+        s.AoMode = GothicRendererSettings::AmbientOcclusionModeOrDefault( static_cast<int>( s.AoMode ) );
+        s.GraphicsPreset = GothicRendererSettings::GraphicsPresetOrDefault(
+            static_cast<int>(s.GraphicsPreset) );
+        s.D3D11Language = GothicRendererSettings::D3D11LanguageOrDefault(
+            static_cast<int>( s.D3D11Language ) );
         s.LimitLightIntesity = true;
         s.ShadowFilterMode = FeatureLevel10Compatibility
             ? GothicRendererSettings::E_ShadowFilterMode::SHADOW_FILTER_SIMPLE
@@ -1084,7 +1079,7 @@ namespace
         if ( !s.EnableSSR ) s.SSRStrength = 0.0f;
 
         if ( !s.EnableDoF ) s.DoFBokehRadius = 0.0f;
-        if ( s.WindQuality == GothicRendererSettings::EWindQuality::WIND_QUALITY_NONE ) s.GlobalWindStrength = 0.0f;
+        if ( !s.AreWindEffectsEnabled() ) s.WindEffectsStrength = 0.0f;
         s.OutdoorSmallVobDrawRadius = ObjectDrawDistanceUiToMeters( ObjectDrawDistanceMetersToUi( s.OutdoorSmallVobDrawRadius ) );
         s.GrassDetailsLevel = std::clamp( s.GrassDetailsLevel, 0, 4 );
         s.ForceFOV = false;
@@ -1825,9 +1820,8 @@ void ImGuiShim::RenderSettingsWindow()
             }
             ImGui::SetItemTooltip( "%s", Tr( "Higher texture quality shows finer detail but uses more video memory.", u8"H\u00F6here Texturqualit\u00E4t zeigt feinere Details, ben\u00F6tigt aber mehr Videospeicher." ) );
 
-            const std::array<std::pair<const char*, GothicRendererSettings::E_ShadowQuality>, 6> shadowQualities = {{
+            const std::array<std::pair<const char*, GothicRendererSettings::E_ShadowQuality>, 5> shadowQualities = {{
                 {Tr( "Off", u8"Aus" ), GothicRendererSettings::E_ShadowQuality::SHADOW_QUALITY_OFF},
-                {Tr( "Very Low", u8"Sehr niedrig" ), GothicRendererSettings::E_ShadowQuality::SHADOW_QUALITY_VERY_LOW},
                 {Tr( "Low", u8"Niedrig" ), GothicRendererSettings::E_ShadowQuality::SHADOW_QUALITY_LOW},
                 {Tr( "Medium", u8"Mittel" ), GothicRendererSettings::E_ShadowQuality::SHADOW_QUALITY_MEDIUM},
                 {Tr( "High", u8"Hoch" ), GothicRendererSettings::E_ShadowQuality::SHADOW_QUALITY_HIGH},
@@ -1836,11 +1830,18 @@ void ImGuiShim::RenderSettingsWindow()
 
             ImText( Tr( "Shadow Quality", u8"Schattenqualit\u00E4t" ), buttonWidth ); ImGui::SameLine();
             const bool shadowQualityCustom = !ShadowQualityMatchesProfile( settings );
+            const auto shadowQualityOrDefault = GothicRendererSettings::ShadowQualityOrDefault(
+                static_cast<int>(settings.ShadowQuality) );
+            const auto shadowQualityIt = std::find_if(
+                shadowQualities.begin(), shadowQualities.end(),
+                [shadowQualityOrDefault]( const auto& quality ) {
+                    return quality.second == shadowQualityOrDefault;
+                } );
             const char* shadowQualityPreview = shadowQualityCustom
                 ? Tr( "Custom", u8"Individuell" )
-                : shadowQualities[static_cast<size_t>(std::clamp(
-                    static_cast<int>(settings.ShadowQuality), 0,
-                    static_cast<int>(shadowQualities.size() - 1) ))].first;
+                : ( shadowQualityIt != shadowQualities.end()
+                    ? shadowQualityIt->first
+                    : Tr( "Custom", u8"Individuell" ) );
             ImGui::SetNextItemWidth( standardComboWidth );
             if ( ImGui::BeginCombo( "##ShadowQuality", shadowQualityPreview ) ) {
                 for ( const auto& quality : shadowQualities ) {
@@ -1972,22 +1973,22 @@ void ImGuiShim::RenderSettingsWindow()
             if ( haveWindAnimations )
 #endif
             {
-                bool windEffects = settings.WindQuality != GothicRendererSettings::EWindQuality::WIND_QUALITY_NONE;
+                bool windEffects = settings.AreWindEffectsEnabled();
                 ImText( Tr( "Wind Effects", u8"Windeffekte" ), { buttonWidth.x - ImGui::GetFrameHeight() - style.ItemSpacing.x, buttonWidth.y } ); ImGui::SameLine();
                 if ( CoupledStrengthCheckbox( "##Enable Wind Effects", "WindEffectsStrength",
-                        &windEffects, &settings.GlobalWindStrength, 1.0f ) ) {
-                    settings.WindQuality = windEffects
-                        ? GothicRendererSettings::EWindQuality::WIND_QUALITY_ADVANCED
-                        : GothicRendererSettings::EWindQuality::WIND_QUALITY_NONE;
+                        &windEffects, &settings.WindEffectsStrength, 1.0f ) ) {
+                    settings.WindEffectsEnabled = windEffects
+                        ? GothicRendererSettings::EWindEffectsState::ENABLED
+                        : GothicRendererSettings::EWindEffectsState::DISABLED;
                 }
                 ImGui::SetItemTooltip( "%s", Tr( "Moves vegetation in the wind.", u8"Bewegt die Vegetation im Wind." ) );
                 ImGui::SameLine();
                 ImGui::SetNextItemWidth( standardComboWidth );
                 if ( CoupledStrengthSlider( "##WindEffectsStrength", "WindEffectsStrength",
-                        &windEffects, &settings.GlobalWindStrength ) ) {
-                    settings.WindQuality = windEffects
-                        ? GothicRendererSettings::EWindQuality::WIND_QUALITY_ADVANCED
-                        : GothicRendererSettings::EWindQuality::WIND_QUALITY_NONE;
+                        &windEffects, &settings.WindEffectsStrength ) ) {
+                    settings.WindEffectsEnabled = windEffects
+                        ? GothicRendererSettings::EWindEffectsState::ENABLED
+                        : GothicRendererSettings::EWindEffectsState::DISABLED;
                 }
                 ImGui::SetItemTooltip( "%s", Tr( "Adjusts how strongly vegetation moves in the wind.", u8"Passt an, wie stark sich Vegetation im Wind bewegt." ) );
 

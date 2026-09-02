@@ -6,6 +6,8 @@
 
 #include "D3D11GraphicsEngine.h" // TODO: Needed for the UI-View. This should not be here!
 
+#include <algorithm>
+
 #include "zSTRING.h"
 #include "zCParser.h"
 
@@ -103,7 +105,7 @@ extern "C"
 
     /** Sets global wind strength */
     __declspec(dllexport) void __cdecl GDX_SetGlobalWindStrength( float strength ) {
-        Engine::GAPI->GetRendererState().RendererSettings.GlobalWindStrength = strength;
+        Engine::GAPI->GetRendererState().RendererSettings.WindEffectsStrength = std::clamp( strength, 0.0f, 2.0f );
     }
 
     /** Sets rain radius range */

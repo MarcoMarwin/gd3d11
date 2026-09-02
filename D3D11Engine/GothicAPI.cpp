@@ -1,4 +1,5 @@
 #include <Windows.h>
+#include <algorithm>
 #include <string>
 #include <sstream>
 #include "pch.h"
@@ -28,6 +29,7 @@
 #include <cstdint>
 #include <numeric>
 #include <cmath>
+#include <vector>
 #include <dinput.h>
 #include "ImGuiShim.h"
 #include "zCInput.h"
@@ -964,7 +966,14 @@ namespace
         TCHAR nFloat[float_str_max];
         if ( auto count = ::GetPrivateProfileStringA( lpAppName, lpKeyName, nullptr, nFloat, float_str_max, lpFileName.c_str() ) ) {
             try {
-                const float value = std::stof( std::string( nFloat, count ) );
+                const std::string text( nFloat, count );
+                size_t parsedCharacters = 0;
+                const float value = std::stof( text, &parsedCharacters );
+                // std::stof accepts a valid numeric prefix such as "1.0foo".
+                // Only whitespace may follow the number in an INI value.
+                if ( text.find_first_not_of( " \t\n\r\f\v", parsedCharacters ) != std::string::npos ) {
+                    return nDefault;
+                }
                 // std::stof accepts textual NaN/Infinity. Treat those as
                 // invalid INI values so later clamps cannot propagate a
                 // non-finite value into renderer state.
@@ -1007,11 +1016,44 @@ namespace
 
         T value;
         auto result = std::from_chars( sv.data(), sv.data() + sv.size(), value );
-        if ( result.ec == std::errc() && out ) {
+        if ( result.ec == std::errc()
+            && result.ptr == sv.data() + sv.size()
+            && out ) {
             *out = value;
             return true;
         }
         return false;
+    }
+
+    OPT_DBG_NOINLINE int GetPrivateProfileIntStrictA(
+        const LPCSTR lpAppName,
+        const LPCSTR lpKeyName,
+        const int nDefault,
+        const std::string& lpFileName ) {
+        constexpr int bufferSize = 64;
+        char buffer[bufferSize];
+        const auto count = ::GetPrivateProfileStringA(
+            lpAppName, lpKeyName, nullptr, buffer, bufferSize, lpFileName.c_str() );
+        if ( count == 0 ) return nDefault;
+
+        int value = 0;
+        return parse_segment_from_chars( std::string_view( buffer, count ), &value )
+            ? value
+            : nDefault;
+    }
+
+    int TextureQualityOrDefault( int quality, int defaultQuality = 16384 ) {
+        switch ( quality ) {
+        case 128:
+        case 256:
+        case 512:
+        case 1024:
+        case 2048:
+        case 16384:
+            return quality;
+        default:
+            return defaultQuality;
+        }
     }
 
     template <typename T>
@@ -1027,7 +1069,7 @@ namespace
             // Check if we have space BEFORE parsing
             if ( count >= max_size ) {
                 // We found more segments than the array can hold
-                return max_size;
+                return max_size + 1;
             }
 
             size_t end = input.find( delimiter, start );
@@ -1067,15 +1109,19 @@ namespace
     ) {
         const int buf_max = 512;
         TCHAR buffer[buf_max];
+        const std::vector<T> defaultValues( defaults, defaults + count );
 
         // Get the full string value
         if ( auto len = ::GetPrivateProfileStringA( lpAppName, lpKeyName, nullptr, buffer, buf_max, lpFileName.c_str() ) ) {
             std::string_view str( buffer, len );
 
-            // parse and fill all remaining values with defaults if key not found
-            for ( size_t i = parse_delimited_list_to_array( str, values, count ); i < count; ++i ) {
-                values[i] = defaults[i];
+            // An array is one logical setting. Partial or malformed values
+            // must not leave a mixture of user data and defaults behind.
+            if ( parse_delimited_list_to_array( str, values, count ) != count ) {
+                std::copy( defaultValues.begin(), defaultValues.end(), values );
             }
+        } else {
+            std::copy( defaultValues.begin(), defaultValues.end(), values );
         }
     }
 
@@ -1097,6 +1143,11 @@ namespace
             static_cast<int>(values.z * 255.0f),
         };
         GetPrivateProfileArray(lpAppName, lpKeyName, color, 3, defaults, lpFileName);
+        if ( std::any_of( color, color + 3, []( int channel ) {
+                return channel < 0 || channel > 255;
+            } ) ) {
+            std::copy( defaults, defaults + 3, color );
+        }
         values.x = static_cast<float>(color[0]) / 255.0f;
         values.y = static_cast<float>(color[1]) / 255.0f;
         values.z = static_cast<float>(color[2]) / 255.0f;
@@ -1136,22 +1187,16 @@ namespace
         WritePrivateProfileArray(lpAppName, lpKeyName, color, 3, lpFileName.c_str());
     }
 
-    OPT_DBG_NOINLINE std::string GetPrivateProfileStringA(
-        const LPCSTR lpAppName,
-        const LPCSTR lpKeyName,
-        const std::string& lpcstrDefault,
-        const std::string& lpFileName ) {
-        char buffer[MAX_PATH];
-        auto count = ::GetPrivateProfileStringA( lpAppName, lpKeyName, lpcstrDefault.c_str(), buffer, MAX_PATH, lpFileName.c_str() );
-        return std::string( buffer, count );
-    }
-
     OPT_DBG_NOINLINE bool GetPrivateProfileBoolA(
         const LPCSTR lpAppName,
         const LPCSTR lpKeyName,
         const bool nDefault,
         const std::string& lpFileName ) {
-        return GetPrivateProfileIntA( lpAppName, lpKeyName, nDefault, lpFileName.c_str() ) ? true : false;
+        const int value = GetPrivateProfileIntStrictA(
+            lpAppName, lpKeyName, nDefault ? 1 : 0, lpFileName );
+        if ( value == 0 ) return false;
+        if ( value == 1 ) return true;
+        return nDefault;
     }
     
     static std::string float_to_string(const float val, int precision = 6)
@@ -1163,7 +1208,7 @@ namespace
 }
 
 void GothicAPI::ProcessVobAnimation( zCVob* vob, zTAnimationMode aniMode, VobInstanceInfo& vobInstance ) {
-    if ( Engine::GAPI->GetRendererState().RendererSettings.WindQuality == GothicRendererSettings::EWindQuality::WIND_QUALITY_ADVANCED ) {
+    if ( Engine::GAPI->GetRendererState().RendererSettings.AreWindEffectsEnabled() ) {
         vobInstance.windStrenth = std::max<float>( 0.1f, vob->GetVisualAniModeStrength() ) * vobAnimation_WindStrength;
     }
 }
@@ -1883,24 +1928,24 @@ void GothicAPI::LoadRendererWorldSettings( GothicRendererSettings& s, const char
     s.FogGlobalDensity = GetPrivateProfileFloatA( "Fog", "GlobalDensity", s.FogGlobalDensity, ini );
 
     s.SunLightColor = float3::FromColor(
-        GetPrivateProfileIntA( "Atmosphere", "SunLightColorR", static_cast<int>(s.SunLightColor.x * 255.0f), ini.c_str() ),
-        GetPrivateProfileIntA( "Atmosphere", "SunLightColorG", static_cast<int>(s.SunLightColor.y * 255.0f), ini.c_str() ),
-        GetPrivateProfileIntA( "Atmosphere", "SunLightColorB", static_cast<int>(s.SunLightColor.z * 255.0f), ini.c_str() )
+        GetPrivateProfileIntStrictA( "Atmosphere", "SunLightColorR", static_cast<int>(s.SunLightColor.x * 255.0f), ini ),
+        GetPrivateProfileIntStrictA( "Atmosphere", "SunLightColorG", static_cast<int>(s.SunLightColor.y * 255.0f), ini ),
+        GetPrivateProfileIntStrictA( "Atmosphere", "SunLightColorB", static_cast<int>(s.SunLightColor.z * 255.0f), ini )
     );
 
     GetPrivateProfileRGB("Atmosphere", "SunLightColor", s.SunLightColor, ini);
 
     s.FogColorMod = float3::FromColor(
-        GetPrivateProfileIntA( "Atmosphere", "FogColorModR", static_cast<int>(s.FogColorMod.x * 255.0f), ini.c_str() ),
-        GetPrivateProfileIntA( "Atmosphere", "FogColorModG", static_cast<int>(s.FogColorMod.y * 255.0f), ini.c_str() ),
-        GetPrivateProfileIntA( "Atmosphere", "FogColorModB", static_cast<int>(s.FogColorMod.z * 255.0f), ini.c_str() )
+        GetPrivateProfileIntStrictA( "Atmosphere", "FogColorModR", static_cast<int>(s.FogColorMod.x * 255.0f), ini ),
+        GetPrivateProfileIntStrictA( "Atmosphere", "FogColorModG", static_cast<int>(s.FogColorMod.y * 255.0f), ini ),
+        GetPrivateProfileIntStrictA( "Atmosphere", "FogColorModB", static_cast<int>(s.FogColorMod.z * 255.0f), ini )
     );
 
     GetPrivateProfileRGB("Atmosphere", "FogColorMod", s.FogColorMod, ini);
 
     s.RainRadiusRange = GetPrivateProfileFloatA( "Rain", "RadiusRange", s.RainRadiusRange, ini );
     s.RainHeightRange = GetPrivateProfileFloatA( "Rain", "HeightRange", s.RainHeightRange, ini );
-    s.RainNumParticles = GetPrivateProfileIntA( "Rain", "NumParticles", s.RainNumParticles, ini.c_str() );
+    s.RainNumParticles = GetPrivateProfileIntStrictA( "Rain", "NumParticles", s.RainNumParticles, ini );
     GetPrivateProfileArray( "Rain", "GlobalVelocity", &s.RainGlobalVelocity.x, 3, &s.RainGlobalVelocity.x, ini );
     s.RainSceneWettness = GetPrivateProfileFloatA( "Rain", "SceneWettness", s.RainSceneWettness, ini );
     s.RainSunLightStrength = GetPrivateProfileFloatA( "Rain", "SunLightStrength", s.RainSunLightStrength, ini );
@@ -1924,42 +1969,49 @@ void GothicAPI::LoadRendererWorldSettings( GothicRendererSettings& s, const char
 }
 
 void GothicAPI::LoadRendererGlobalSettings( GothicRendererSettings& s, const char* iniFile ) {
+    GothicRendererSettings defaultRendererSettings{};
+    defaultRendererSettings.SetDefault();
+    const GothicRendererSettings& ds = defaultRendererSettings;
+
     if ( !Toolbox::FileExists( iniFile ) ) {
         // UserSettings.ini may not exist on a first launch. The actual F11
         // values still determine the profile shown in the menu.
+        s.GraphicsPreset = ds.GraphicsPreset;
+        s.OutdoorSmallVobDrawRadius = ds.OutdoorSmallVobDrawRadius;
+        s.SectionDrawRadius = ds.SectionDrawRadius;
         SyncGraphicsPresetSelection( s );
+        SaveRendererGlobalSettings( s, iniFile );
         return;
     }
 
     const std::string ini = iniFile;
-    const int storedGraphicsPreset = GetPrivateProfileIntA(
-        "General", "GraphicsPreset", static_cast<int>(s.GraphicsPreset), ini.c_str() );
-    const int normalizedGraphicsPreset = storedGraphicsPreset == 1
-        ? static_cast<int>(GothicRendererSettings::GRAPHICS_LOW)
-        : std::clamp(
-            storedGraphicsPreset,
-            static_cast<int>(GothicRendererSettings::GRAPHICS_CUSTOM),
-            static_cast<int>(GothicRendererSettings::GRAPHICS_VERY_HIGH) );
-    s.GraphicsPreset = static_cast<GothicRendererSettings::E_GraphicsPreset>( normalizedGraphicsPreset );
+    const int storedGraphicsPreset = GetPrivateProfileIntStrictA(
+        "General", "GraphicsPreset", static_cast<int>(ds.GraphicsPreset), ini );
+    s.GraphicsPreset = GothicRendererSettings::GraphicsPresetOrDefault( storedGraphicsPreset );
+    s.OutdoorSmallVobDrawRadius = ds.OutdoorSmallVobDrawRadius;
+    s.SectionDrawRadius = ds.SectionDrawRadius;
 
     if ( !GMPModeActive ) {
         s.OutdoorSmallVobDrawRadius = std::clamp(
-            GetPrivateProfileFloatA( "General", "OutdoorSmallVobDrawRadius", s.OutdoorSmallVobDrawRadius, ini ),
+            GetPrivateProfileFloatA( "General", "OutdoorSmallVobDrawRadius", ds.OutdoorSmallVobDrawRadius, ini ),
             2500.0f, 25000.0f );
         s.SectionDrawRadius = static_cast<decltype(s.SectionDrawRadius)>( std::clamp<int>(
-            static_cast<int>( GetPrivateProfileIntA( "General", "SectionDrawRadius", s.SectionDrawRadius, ini.c_str() ) ),
+            GetPrivateProfileIntStrictA( "General", "SectionDrawRadius", ds.SectionDrawRadius, ini ),
             1, 10 ) );
     }
 
     // GraphicsPreset is derived metadata. Reconcile it with all individual
     // F11 values after loading the complete settings set.
     SyncGraphicsPresetSelection( s );
+    SaveRendererGlobalSettings( s, iniFile );
 }
 
 void GothicAPI::SaveRendererGlobalSettings( const GothicRendererSettings& s, const char* iniFile ) {
     const std::string ini = iniFile;
 
-    WritePrivateProfileStringA( "General", "GraphicsPreset", std::to_string( static_cast<int>(s.GraphicsPreset) ).c_str(), ini.c_str() );
+    const auto storedGraphicsPreset = GothicRendererSettings::GraphicsPresetOrDefault(
+        static_cast<int>(s.GraphicsPreset) );
+    WritePrivateProfileStringA( "General", "GraphicsPreset", std::to_string( static_cast<int>(storedGraphicsPreset) ).c_str(), ini.c_str() );
     WritePrivateProfileStringA( "General", "OutdoorSmallVobDrawRadius", std::to_string( s.OutdoorSmallVobDrawRadius ).c_str(), ini.c_str() );
     WritePrivateProfileStringA( "General", "SectionDrawRadius", std::to_string( s.SectionDrawRadius ).c_str(), ini.c_str() );
     WritePrivateProfileStringA( "Display", "GrassDetails", std::to_string( s.GrassDetailsLevel ).c_str(), ini.c_str() );
@@ -2880,24 +2932,16 @@ void GothicAPI::OnRemovedVob( zCVob* vob, zCWorld* world ) {
         }
     }
 
-    // TODO: This is sometimes NULL
-    if ( world ) {
-        // Check if this was in some inventory
-        if ( Inventory && Inventory->OnRemovedVob( vob, world ) )
-            return; // Don't search in the other lists since it wont be in it anyways
-
-        if ( LoadedWorldInfo && world != LoadedWorldInfo->MainWorld )
-            return; // *should* be already deleted from the inventory here. But watch out for dem leaks, dragons be here!
-    }
-
+    // Pointlight shadow caches must be invalidated before the inventory path
+    // can return. A collectible item may leave the world by being transferred
+    // directly into the inventory, while its VobInfo is still registered here.
+    // OnVobRemovedFromWorld() only invalidates lights whose cached caster list
+    // contains this item, so unaffected pointlights remain untouched.
     auto vobInfoIt = VobMap.find( vob );
     VobInfo* vi = vobInfoIt != VobMap.end() ? vobInfoIt->second : nullptr;
     auto skeletalVobInfoIt = SkeletalVobMap.find( vob );
     SkeletalVobInfo* svi = skeletalVobInfoIt != SkeletalVobMap.end() ? skeletalVobInfoIt->second : nullptr;
-    const bool reconfigureCityWindows = vi && vi->VisualInfo
-        && IsSupportedCityWindowVisual( vi->VisualInfo->VisualName );
 
-    // Tell all dynamic lights that we removed a vob they could have cached
     for ( auto& vlit : VobLightMap ) {
         if ( !vlit.second )
             continue;
@@ -2916,6 +2960,19 @@ void GothicAPI::OnRemovedVob( zCVob* vob, zCWorld* world ) {
         if ( svi )
             rendererLight->LightShadowBuffers->OnVobRemovedFromWorld( svi );
     }
+
+    // TODO: This is sometimes NULL
+    if ( world ) {
+        // Check if this was in some inventory
+        if ( Inventory && Inventory->OnRemovedVob( vob, world ) )
+            return; // Don't search in the other lists since it wont be in it anyways
+
+        if ( LoadedWorldInfo && world != LoadedWorldInfo->MainWorld )
+            return; // *should* be already deleted from the inventory here. But watch out for dem leaks, dragons be here!
+    }
+
+    const bool reconfigureCityWindows = vi && vi->VisualInfo
+        && IsSupportedCityWindowVisual( vi->VisualInfo->VisualName );
 
     auto isLightVob = []( zCVob* candidate ) {
         if ( !candidate )
@@ -7419,11 +7476,13 @@ XRESULT GothicAPI::SaveMenuSettings( const std::string& file ) {
     GothicRendererSettings& s = RendererState.RendererSettings;
 
     WritePrivateProfileStringA( "General", "ChangeToMode", std::to_string( s.ChangeWindowPreset ).c_str(), ini.c_str() );
-    WritePrivateProfileStringA( "General", "D3D11Language", std::to_string( static_cast<int>(s.D3D11Language) ).c_str(), ini.c_str() );
+    const auto storedLanguage = GothicRendererSettings::D3D11LanguageOrDefault(
+        static_cast<int>( s.D3D11Language ) );
+    WritePrivateProfileStringA( "General", "D3D11Language", std::to_string(
+        static_cast<int>( storedLanguage ) ).c_str(), ini.c_str() );
     WritePrivateProfileStringA( "General", "EnableFog", std::to_string( s.DrawFog ? TRUE : FALSE ).c_str(), ini.c_str() );
     WritePrivateProfileStringA( "General", "FogRange", float_to_string( s.FogRange , 2).c_str(), ini.c_str() );
     WritePrivateProfileStringA( "General", "EnableHDR", std::to_string( s.EnableHDR ? TRUE : FALSE ).c_str(), ini.c_str() );
-    WritePrivateProfileStringA( "General", "GodRayMode", std::to_string( static_cast<int>(s.GodRayMode) ).c_str(), ini.c_str() );
     WritePrivateProfileStringA( "General", "EnableGodRays", std::to_string( s.AreGodRaysEnabled() ? TRUE : FALSE ).c_str(), ini.c_str() );
     WritePrivateProfileStringA( "General", "GodRayStrength", float_to_string( s.GodRayStrength, 2 ).c_str(), ini.c_str() );
     WritePrivateProfileStringA( "General", "EnableDoF", std::to_string( s.EnableDoF ? TRUE : FALSE ).c_str(), ini.c_str() );
@@ -7441,11 +7500,11 @@ XRESULT GothicAPI::SaveMenuSettings( const std::string& file ) {
     WritePrivateProfileStringA( "General", "FpsLimitLastEnabled", std::to_string( s.FpsLimitLastEnabled ).c_str(), ini.c_str() );
     
     auto res = Engine::GraphicsEngine->GetBackbufferResolution();
-    WritePrivateProfileStringA( "Display", "TextureQuality", std::to_string( s.textureMaxSize ).c_str(), ini.c_str() );
+    WritePrivateProfileStringA( "Display", "TextureQuality", std::to_string(
+        TextureQualityOrDefault( s.textureMaxSize ) ).c_str(), ini.c_str() );
     WritePrivateProfileStringA( "Display", "Width", std::to_string( res.x ).c_str(), ini.c_str() );
     WritePrivateProfileStringA( "Display", "Height", std::to_string( res.y ).c_str(), ini.c_str() );
     WritePrivateProfileStringA( "Display", "ResolutionScale", std::to_string( s.ResolutionScalePercent ).c_str(), ini.c_str() );
-    WritePrivateProfileStringA( "Display", "Upscaler", std::to_string( static_cast<int>(s.Upscaler) ).c_str(), ini.c_str() );
     WritePrivateProfileStringA( "Display", "VSync", std::to_string( s.EnableVSync ? TRUE : FALSE ).c_str(), ini.c_str() );
     WritePrivateProfileStringA( "Display", "DisplayContrast", std::to_string( s.GammaValue ).c_str(), ini.c_str() );
     WritePrivateProfileStringA( "Display", "DisplayBrightness", std::to_string( s.BrightnessValue ).c_str(), ini.c_str() );
@@ -7455,30 +7514,32 @@ XRESULT GothicAPI::SaveMenuSettings( const std::string& file ) {
     WritePrivateProfileStringA( "Display", "Rain", std::to_string( s.EnableRain ? TRUE : FALSE ).c_str(), ini.c_str() );
     WritePrivateProfileStringA( "Display", "RainEffects", std::to_string( s.RainEffects ? TRUE : FALSE ).c_str(), ini.c_str() );
     WritePrivateProfileStringA( "Display", "DynamicClouds", std::to_string( s.EnableDynamicClouds ? TRUE : FALSE ).c_str(), ini.c_str() );
-    WritePrivateProfileStringA( "Display", "WindQuality", std::to_string( s.WindQuality ).c_str(), ini.c_str() );
-    WritePrivateProfileStringA( "Display", "WindStrength", std::to_string( s.GlobalWindStrength ).c_str(), ini.c_str() );
+    const auto storedWindState = GothicRendererSettings::WindEffectsStateOrDefault(
+        static_cast<int>( s.WindEffectsEnabled ) );
+    WritePrivateProfileStringA( "Display", "EnableWindEffects", std::to_string(
+        storedWindState == GothicRendererSettings::EWindEffectsState::ENABLED ? TRUE : FALSE ).c_str(), ini.c_str() );
+    WritePrivateProfileStringA( "Display", "WindEffectsStrength", float_to_string( s.WindEffectsStrength, 2 ).c_str(), ini.c_str() );
     WritePrivateProfileStringA( "Display", "GrassDetails", std::to_string( s.GrassDetailsLevel ).c_str(), ini.c_str() );
     WritePrivateProfileStringA( "Display", "VegetationCulling", nullptr, ini.c_str() );
     WritePrivateProfileStringA( "Display", "VegetationCullingDensity", nullptr, ini.c_str() );
-    const int storedCsmCascades = s.GetStoredShadowCascadeCount();
-    const int storedCsmPcfLimit = s.GetEffectiveShadowCascadePCFLimit();
-    WritePrivateProfileStringA( "Shadows", "Quality", std::to_string( static_cast<int>(s.ShadowQuality) ).c_str(), ini.c_str() );
+    const auto storedShadowQuality = GothicRendererSettings::ShadowQualityOrDefault(
+        static_cast<int>(s.ShadowQuality) );
+    WritePrivateProfileStringA( "Shadows", "Quality", std::to_string( static_cast<int>(storedShadowQuality) ).c_str(), ini.c_str() );
     WritePrivateProfileStringA( "Shadows", "Advanced_Enabled", std::to_string( s.AdvancedPerformanceOptions ? TRUE : FALSE ).c_str(), ini.c_str() );
     WritePrivateProfileStringA( "Shadows", "Advanced_CSMEnabled", std::to_string( s.EnableShadows ? TRUE : FALSE ).c_str(), ini.c_str() );
     WritePrivateProfileStringA( "Shadows", "Advanced_CSMResolution", std::to_string( s.ShadowMapSize ).c_str(), ini.c_str() );
-    WritePrivateProfileStringA( "Shadows", "Advanced_CSMFilter", std::to_string( static_cast<int>(s.CSMShadowKernel) ).c_str(), ini.c_str() );
-    WritePrivateProfileStringA( "Shadows", "Advanced_CSMCascades", std::to_string( storedCsmCascades ).c_str(), ini.c_str() );
+    const auto storedCsmFilter = GothicRendererSettings::ShadowKernelQualityOrDefault(
+        static_cast<int>( s.CSMShadowKernel ), GothicRendererSettings::SHADOW_KERNEL_PCF_MEDIUM );
+    WritePrivateProfileStringA( "Shadows", "Advanced_CSMFilter", std::to_string(
+        static_cast<int>( storedCsmFilter ) ).c_str(), ini.c_str() );
     WritePrivateProfileStringA( "Shadows", "Advanced_CSMRange", std::to_string( s.WorldShadowRangeScale ).c_str(), ini.c_str() );
-    WritePrivateProfileStringA( "Shadows", "Advanced_CSMPCFLimit", std::to_string( storedCsmPcfLimit ).c_str(), ini.c_str() );
     const bool pointlightShadowsEnabled = s.EnablePointlightShadows != GothicRendererSettings::PLS_DISABLED;
-    const auto storedPointlightMode = !pointlightShadowsEnabled
-        ? GothicRendererSettings::PLS_DISABLED
-        : ( s.EnablePointlightDynamicCasters
-            ? GothicRendererSettings::PLS_UPDATE_DYNAMIC
-            : GothicRendererSettings::PLS_STATIC_ONLY );
-    WritePrivateProfileStringA( "Shadows", "Advanced_PointlightMode", std::to_string( static_cast<int>(storedPointlightMode) ).c_str(), ini.c_str() );
+    WritePrivateProfileStringA( "Shadows", "Advanced_PointlightEnabled", std::to_string( pointlightShadowsEnabled ? TRUE : FALSE ).c_str(), ini.c_str() );
     WritePrivateProfileStringA( "Shadows", "Advanced_PointlightResolution", std::to_string( s.PointlightShadowMapSize ).c_str(), ini.c_str() );
-    WritePrivateProfileStringA( "Shadows", "Advanced_PointlightFilter", std::to_string( static_cast<int>(s.PointlightShadowKernel) ).c_str(), ini.c_str() );
+    const auto storedPointlightFilter = GothicRendererSettings::ShadowKernelQualityOrDefault(
+        static_cast<int>( s.PointlightShadowKernel ), GothicRendererSettings::SHADOW_KERNEL_PCF_LOW );
+    WritePrivateProfileStringA( "Shadows", "Advanced_PointlightFilter", std::to_string(
+        static_cast<int>( storedPointlightFilter ) ).c_str(), ini.c_str() );
     // Keep the dynamic-caster option as a separate Advanced setting.
     WritePrivateProfileStringA( "Shadows", "Advanced_PointlightDynamicCasters", std::to_string( s.EnablePointlightDynamicCasters ? TRUE : FALSE ).c_str(), ini.c_str() );
     WritePrivateProfileStringA( "Shadows", "Advanced_CSMShadowSoftness", float_to_string( s.ShadowSoftness, 2 ).c_str(), ini.c_str() );
@@ -7509,14 +7570,28 @@ XRESULT GothicAPI::SaveMenuSettings( const std::string& file ) {
     WritePrivateProfileStringA( "Shadows", "PointlightResolution", nullptr, ini.c_str() );
     WritePrivateProfileStringA( "Shadows", "PointlightFilter", nullptr, ini.c_str() );
     WritePrivateProfileStringA( "Shadows", "PointlightDynamicCasters", nullptr, ini.c_str() );
+    WritePrivateProfileStringA( "General", "GodRayMode", nullptr, ini.c_str() );
+    WritePrivateProfileStringA( "Shadows", "Advanced_CSMCascades", nullptr, ini.c_str() );
+    WritePrivateProfileStringA( "Shadows", "Advanced_CSMPCFLimit", nullptr, ini.c_str() );
+    WritePrivateProfileStringA( "Shadows", "Advanced_PointlightMode", nullptr, ini.c_str() );
     WritePrivateProfileStringA( "Shadows", "ShadowSoftness", nullptr, ini.c_str() );
     WritePrivateProfileStringA( "Shadows", "Advanced_ShadowSoftness", nullptr, ini.c_str() );
     WritePrivateProfileStringA( "Shadows", "Advanced_BaseVegetationPush", nullptr, ini.c_str() );
     WritePrivateProfileStringA( "Display", "HeroAffectsObjects", nullptr, ini.c_str() );
+    WritePrivateProfileStringA( "Display", "Upscaler", nullptr, ini.c_str() );
+    WritePrivateProfileStringA( "Display", "WindQuality", nullptr, ini.c_str() );
+    WritePrivateProfileStringA( "Display", "WindStrength", nullptr, ini.c_str() );
 
-    WritePrivateProfileStringA( "General", "AntiAliasing", std::to_string( (int)s.AntiAliasingMode ).c_str(), ini.c_str() );
+    const auto storedAntiAliasing = GothicRendererSettings::AntiAliasingModeOrDefault(
+        static_cast<int>( s.AntiAliasingMode ) );
+    WritePrivateProfileStringA( "General", "AntiAliasing", std::to_string(
+        static_cast<int>( storedAntiAliasing ) ).c_str(), ini.c_str() );
 
-    WritePrivateProfileStringA( "AO", "Mode", std::to_string( static_cast<int>(s.AoMode) ).c_str(), ini.c_str() );
+    const auto storedAoMode = GothicRendererSettings::AmbientOcclusionModeOrDefault(
+        static_cast<int>( s.AoMode ) );
+    WritePrivateProfileStringA( "AO", "EnableAmbientOcclusion", std::to_string(
+        storedAoMode == AOMode::AO_XEGTAO ? TRUE : FALSE ).c_str(), ini.c_str() );
+    WritePrivateProfileStringA( "AO", "Mode", nullptr, ini.c_str() );
     WritePrivateProfileStringA( "AO", "Strength", float_to_string( s.AOStrength, 2 ).c_str(), ini.c_str() );
     WritePrivateProfileStringA( "AO", "Advanced_XeGTAOQuality", std::to_string( s.XegtaoSettings.QualityLevel ).c_str(), ini.c_str() );
     WritePrivateProfileStringA( "AO", "Advanced_XeGTAODenoise", std::to_string( s.XegtaoSettings.DenoisePasses ).c_str(), ini.c_str() );
@@ -7540,40 +7615,21 @@ XRESULT GothicAPI::LoadMenuSettings( const std::string& file ) {
     if ( Toolbox::FileExists( ini ) ) {
         LogInfo() << "Loading menu settings from " << ini;
 
-        const int storedWindowPreset = GetPrivateProfileIntA( "General", "ChangeToMode", 0, ini.c_str() );
+        const int storedWindowPreset = GetPrivateProfileIntStrictA(
+            "General", "ChangeToMode", ds.ChangeWindowPreset, ini );
         s.ChangeWindowPreset = storedWindowPreset == WINDOW_MODE_WINDOWED
             ? WINDOW_MODE_WINDOWED
             : (storedWindowPreset == 0 ? 0 : WINDOW_MODE_FULLSCREEN_BORDERLESS);
-        s.D3D11Language = static_cast<GothicRendererSettings::E_D3D11Language>(std::clamp<int>(
-            GetPrivateProfileIntA( "General", "D3D11Language", static_cast<int>(ds.D3D11Language), ini.c_str() ),
-            static_cast<int>(GothicRendererSettings::D3D11_LANGUAGE_ENGLISH),
-            static_cast<int>(GothicRendererSettings::D3D11_LANGUAGE_GERMAN) ));
+        s.D3D11Language = GothicRendererSettings::D3D11LanguageOrDefault(
+            GetPrivateProfileIntStrictA( "General", "D3D11Language", static_cast<int>(ds.D3D11Language), ini ) );
         s.DrawFog = GetPrivateProfileBoolA( "General", "EnableFog", ds.DrawFog, ini );
-        s.FogRange = GetPrivateProfileFloatA( "General", "FogRange", ds.FogRange, ini.c_str() );
+        s.FogRange = GetPrivateProfileFloatA( "General", "FogRange", ds.FogRange, ini );
         s.AtmosphericScattering = ds.AtmosphericScattering;
         s.EnableHDR = GetPrivateProfileBoolA( "General", "EnableHDR", ds.EnableHDR, ini );
         s.EnableDebugLog = ds.EnableDebugLog;
         s.EnableAutoupdates = ds.EnableAutoupdates;
-        char godRayModeText[32] = {};
-        const DWORD godRayModeTextLength = GetPrivateProfileStringA(
-            "General", "GodRayMode", "", godRayModeText,
-            static_cast<DWORD>(std::size(godRayModeText)), ini.c_str() );
-        bool loadedGodRaysEnabled = GetPrivateProfileBoolA(
+        s.EnableGodRays = GetPrivateProfileBoolA(
             "General", "EnableGodRays", ds.EnableGodRays, ini );
-        if ( godRayModeTextLength > 0 ) {
-            int storedGodRayMode = 0;
-            const auto parseResult = std::from_chars(
-                godRayModeText, godRayModeText + godRayModeTextLength, storedGodRayMode );
-            const bool validStoredGodRayMode = parseResult.ec == std::errc()
-                && parseResult.ptr == godRayModeText + godRayModeTextLength
-                && storedGodRayMode >= static_cast<int>(GothicRendererSettings::E_GodRayMode::GODRAYS_OFF)
-                && storedGodRayMode <= static_cast<int>(GothicRendererSettings::E_GodRayMode::GODRAYS_HIGH);
-            if ( validStoredGodRayMode ) {
-                loadedGodRaysEnabled = storedGodRayMode
-                    != static_cast<int>(GothicRendererSettings::E_GodRayMode::GODRAYS_OFF);
-            }
-        }
-        s.EnableGodRays = loadedGodRaysEnabled;
         s.NormalizeGodRayMode( FeatureLevel10Compatibility );
         s.GodRayStrength = std::clamp( GetPrivateProfileFloatA( "General", "GodRayStrength", ds.GodRayStrength, ini ), 0.0f, 2.0f );
         s.EnableDoF = GetPrivateProfileBoolA( "General", "EnableDoF", ds.EnableDoF, ini );
@@ -7597,7 +7653,7 @@ XRESULT GothicAPI::LoadMenuSettings( const std::string& file ) {
         s.DrawG1ForestPortals = ds.DrawG1ForestPortals;
         s.DrawRainThroughTransformFeedback = ds.DrawRainThroughTransformFeedback;
         s.SSRStrength = std::clamp( GetPrivateProfileFloatA( "General", "SSRStrength", ds.SSRStrength, ini ), 0.0f, 2.0f );
-        s.EnableSSR = GetPrivateProfileBoolA( "General", "EnableSSR", s.SSRStrength > 0.0f, ini );
+        s.EnableSSR = GetPrivateProfileBoolA( "General", "EnableSSR", ds.EnableSSR, ini );
         s.WaterCubemapStrength = ds.WaterCubemapStrength;
         s.EnableParticleLighting = ds.EnableParticleLighting;
         s.ParticleLightingStrength = ds.ParticleLightingStrength;
@@ -7608,10 +7664,15 @@ XRESULT GothicAPI::LoadMenuSettings( const std::string& file ) {
         * F11 draw-distance settings are loaded globally from UserSettings.ini
         */
 
-        s.FpsLimit = GetPrivateProfileIntA( "General", "FpsLimit", 0, ini.c_str() );
+        const int storedFpsLimit = GetPrivateProfileIntStrictA(
+            "General", "FpsLimit", ds.FpsLimit, ini );
+        s.FpsLimit = storedFpsLimit == 0
+            || ( storedFpsLimit >= 10 && storedFpsLimit <= 300 )
+            ? storedFpsLimit
+            : ds.FpsLimit;
         s.FpsLimitLastEnabled = std::clamp(
-            static_cast<int>(GetPrivateProfileIntA( "General", "FpsLimitLastEnabled",
-                s.FpsLimit > 0 ? s.FpsLimit : ds.FpsLimitLastEnabled, ini.c_str() )),
+            GetPrivateProfileIntStrictA( "General", "FpsLimitLastEnabled",
+                s.FpsLimit > 0 ? s.FpsLimit : ds.FpsLimitLastEnabled, ini ),
             10, 300 );
         if ( s.FpsLimit > 0 ) {
             s.FpsLimitLastEnabled = std::clamp( s.FpsLimit, 10, 300 );
@@ -7628,10 +7689,8 @@ XRESULT GothicAPI::LoadMenuSettings( const std::string& file ) {
         s.ShadowFilterMode = FeatureLevel10Compatibility
             ? GothicRendererSettings::E_ShadowFilterMode::SHADOW_FILTER_SIMPLE
             : GothicRendererSettings::E_ShadowFilterMode::SHADOW_FILTER_PCSS;
-        s.ShadowQuality = static_cast<GothicRendererSettings::E_ShadowQuality>( std::clamp<int>(
-            GetPrivateProfileIntA( "Shadows", "Quality", static_cast<int>(ds.ShadowQuality), ini.c_str() ),
-            static_cast<int>(GothicRendererSettings::E_ShadowQuality::SHADOW_QUALITY_OFF),
-            static_cast<int>(GothicRendererSettings::E_ShadowQuality::SHADOW_QUALITY_EXTREME) ) );
+        s.ShadowQuality = GothicRendererSettings::ShadowQualityOrDefault(
+            GetPrivateProfileIntStrictA( "Shadows", "Quality", static_cast<int>(ds.ShadowQuality), ini ) );
         // Shadow Quality is the complete base profile. Advanced values are
         // overlaid only when the Advanced master switch is enabled.
         s.ApplyShadowQualitySettings();
@@ -7657,36 +7716,25 @@ XRESULT GothicAPI::LoadMenuSettings( const std::string& file ) {
         if ( s.AdvancedPerformanceOptions ) {
             s.EnableShadows = GetPrivateProfileBoolA( "Shadows", "Advanced_CSMEnabled", s.EnableShadows, ini );
             s.ShadowMapSize = GothicRendererSettings::SnapCSMShadowMapSize(
-                GetPrivateProfileIntA( "Shadows", "Advanced_CSMResolution", s.ShadowMapSize, ini.c_str() ) );
-            s.CSMShadowKernel = static_cast<GothicRendererSettings::E_ShadowKernelQuality>( std::clamp<int>(
-                GetPrivateProfileIntA( "Shadows", "Advanced_CSMFilter", static_cast<int>(s.CSMShadowKernel), ini.c_str() ),
-                static_cast<int>(GothicRendererSettings::SHADOW_KERNEL_PCF_LOW),
-                static_cast<int>(GothicRendererSettings::SHADOW_KERNEL_PCSS) ) );
-            s.NumShadowCascades = static_cast<int>( GetPrivateProfileIntA(
-                "Shadows", "Advanced_CSMCascades", s.NumShadowCascades, ini.c_str() ) );
+                GetPrivateProfileIntStrictA( "Shadows", "Advanced_CSMResolution", s.ShadowMapSize, ini ) );
+            s.CSMShadowKernel = GothicRendererSettings::ShadowKernelQualityOrDefault(
+                GetPrivateProfileIntStrictA( "Shadows", "Advanced_CSMFilter", static_cast<int>(s.CSMShadowKernel), ini ),
+                s.CSMShadowKernel );
             s.NumShadowCascades = s.GetStoredShadowCascadeCount();
             s.WorldShadowRangeScale = std::clamp(
                 GetPrivateProfileFloatA( "Shadows", "Advanced_CSMRange", s.WorldShadowRangeScale, ini ), 0.5f, 2.0f );
-            // The near-cascade filter is intentionally fixed to the first
-            // cascade for 8-tap PCF and the first two for PCSS. Ignore legacy
-            // per-cascade values.
             s.ShadowCascadePCFLimit = s.GetEffectiveShadowCascadePCFLimit();
-            const auto storedPointlightMode = static_cast<GothicRendererSettings::EPointLightShadowMode>( std::clamp<int>(
-                GetPrivateProfileIntA( "Shadows", "Advanced_PointlightMode", static_cast<int>(s.EnablePointlightShadows), ini.c_str() ),
-                static_cast<int>(GothicRendererSettings::PLS_DISABLED),
-                static_cast<int>(GothicRendererSettings::PLS_UPDATE_DYNAMIC) ) );
-            // Keep the old selector only as an internal compatibility value;
-            // the enabled switch and animated-caster option determine the
-            // effective static/dynamic path.
-            s.EnablePointlightShadows = storedPointlightMode == GothicRendererSettings::PLS_DISABLED
-                ? GothicRendererSettings::PLS_DISABLED
-                : GothicRendererSettings::PLS_UPDATE_DYNAMIC;
+            const bool pointlightShadowsEnabled = GetPrivateProfileBoolA(
+                "Shadows", "Advanced_PointlightEnabled",
+                s.EnablePointlightShadows != GothicRendererSettings::PLS_DISABLED, ini );
+            s.EnablePointlightShadows = pointlightShadowsEnabled
+                ? GothicRendererSettings::PLS_UPDATE_DYNAMIC
+                : GothicRendererSettings::PLS_DISABLED;
             s.PointlightShadowMapSize = GothicRendererSettings::SnapPointlightShadowMapSize(
-                GetPrivateProfileIntA( "Shadows", "Advanced_PointlightResolution", s.PointlightShadowMapSize, ini.c_str() ) );
-            s.PointlightShadowKernel = static_cast<GothicRendererSettings::E_ShadowKernelQuality>( std::clamp<int>(
-                GetPrivateProfileIntA( "Shadows", "Advanced_PointlightFilter", static_cast<int>(s.PointlightShadowKernel), ini.c_str() ),
-                static_cast<int>(GothicRendererSettings::SHADOW_KERNEL_PCF_LOW),
-                static_cast<int>(GothicRendererSettings::SHADOW_KERNEL_PCSS) ) );
+                GetPrivateProfileIntStrictA( "Shadows", "Advanced_PointlightResolution", s.PointlightShadowMapSize, ini ) );
+            s.PointlightShadowKernel = GothicRendererSettings::ShadowKernelQualityOrDefault(
+                GetPrivateProfileIntStrictA( "Shadows", "Advanced_PointlightFilter", static_cast<int>(s.PointlightShadowKernel), ini ),
+                s.PointlightShadowKernel );
             s.EnablePointlightDynamicCasters = GetPrivateProfileBoolA(
                 "Shadows", "Advanced_PointlightDynamicCasters", s.EnablePointlightDynamicCasters, ini );
             s.EnablePointlightShadows = s.EnablePointlightShadows == GothicRendererSettings::PLS_DISABLED
@@ -7694,14 +7742,10 @@ XRESULT GothicAPI::LoadMenuSettings( const std::string& file ) {
                 : ( s.EnablePointlightDynamicCasters
                     ? GothicRendererSettings::PLS_UPDATE_DYNAMIC
                     : GothicRendererSettings::PLS_STATIC_ONLY );
-            // Migrate the former shared softness value when the new split
-            // keys are not present, then let each Advanced control diverge.
-            const float legacyShadowSoftness = std::clamp( GetPrivateProfileFloatA(
-                "Shadows", "Advanced_ShadowSoftness", s.ShadowSoftness, ini ), 0.0f, 2.0f );
             s.ShadowSoftness = std::clamp( GetPrivateProfileFloatA(
-                "Shadows", "Advanced_CSMShadowSoftness", legacyShadowSoftness, ini ), 0.0f, 2.0f );
+                "Shadows", "Advanced_CSMShadowSoftness", s.ShadowSoftness, ini ), 0.0f, 2.0f );
             s.PointlightShadowSoftness = std::clamp( GetPrivateProfileFloatA(
-                "Shadows", "Advanced_PointlightShadowSoftness", legacyShadowSoftness, ini ), 0.0f, 2.0f );
+                "Shadows", "Advanced_PointlightShadowSoftness", s.PointlightShadowSoftness, ini ), 0.0f, 2.0f );
             s.AdvancedWaterAnimation = GetPrivateProfileBoolA(
                 "Shadows", "Advanced_WaterAnimation", s.AdvancedWaterAnimation, ini );
             s.AdvancedNightEnhance = GetPrivateProfileBoolA(
@@ -7717,17 +7761,20 @@ XRESULT GothicAPI::LoadMenuSettings( const std::string& file ) {
         INT2 res = {};
         RECT desktopRect;
         GetClientRect( GetDesktopWindow(), &desktopRect );
-        s.textureMaxSize = std::max<int>( 32, GetPrivateProfileIntA( "Display", "TextureQuality", 16384, ini.c_str() ) );
-        res.x = GetPrivateProfileIntA( "Display", "Width", desktopRect.right, ini.c_str() );
-        res.y = GetPrivateProfileIntA( "Display", "Height", desktopRect.bottom, ini.c_str() );
-        s.ResolutionScalePercent = std::clamp<int>( GetPrivateProfileIntA( "Display", "ResolutionScale", ds.ResolutionScalePercent, ini.c_str() ), 33, 200 );
-        s.Upscaler = (GothicRendererSettings::E_Upscaler)std::clamp<int>( GetPrivateProfileIntA( "Display", "Upscaler", ds.Upscaler, ini.c_str() ), 0, GothicRendererSettings::E_Upscaler::_UPSCALER_NUM_MODES - 1 );
+        s.textureMaxSize = TextureQualityOrDefault( GetPrivateProfileIntStrictA(
+            "Display", "TextureQuality", ds.textureMaxSize, ini ), ds.textureMaxSize );
+        res.x = GetPrivateProfileIntStrictA( "Display", "Width", desktopRect.right, ini );
+        res.y = GetPrivateProfileIntStrictA( "Display", "Height", desktopRect.bottom, ini );
+        s.ResolutionScalePercent = std::clamp<int>( GetPrivateProfileIntStrictA( "Display", "ResolutionScale", ds.ResolutionScalePercent, ini ), 33, 200 );
+        // The upscaler is derived from AntiAliasingMode. The old numeric
+        // Display/Upscaler key is intentionally ignored and removed on save.
+        s.Upscaler = ds.Upscaler;
         s.EnableVSync = GetPrivateProfileBoolA( "Display", "VSync", ds.EnableVSync, ini );
         s.ForceFOV = false;
         s.FOVHoriz = 100.0f;
         s.FOVVert = 100.0f;
-        s.GammaValue = GetPrivateProfileFloatA( "Display", "DisplayContrast", 1.0f, ini );
-        s.BrightnessValue = GetPrivateProfileFloatA( "Display", "DisplayBrightness", 1.0f, ini );
+        s.GammaValue = GetPrivateProfileFloatA( "Display", "DisplayContrast", ds.GammaValue, ini );
+        s.BrightnessValue = GetPrivateProfileFloatA( "Display", "DisplayBrightness", ds.BrightnessValue, ini );
         s.DisplayFlip = GetPrivateProfileBoolA( "Display", "DisplayFlip", ds.DisplayFlip, ini );
         s.LowLatency = GetPrivateProfileBoolA( "Display", "LowLatency", ds.LowLatency, ini );
         s.HDR_Monitor = ds.HDR_Monitor;
@@ -7762,17 +7809,20 @@ XRESULT GothicAPI::LoadMenuSettings( const std::string& file ) {
         s.EnableTiledLighting = false;
         s.RendererMode = GothicRendererSettings::E_RendererMode::RM_Deferred;
 
-        s.WindQuality = std::clamp<int>(
-            static_cast<int>( GetPrivateProfileIntA( "Display", "WindQuality", static_cast<int>(GothicRendererSettings::WIND_QUALITY_NONE), ini.c_str() ) ),
-            static_cast<int>(GothicRendererSettings::WIND_QUALITY_NONE),
-            static_cast<int>(GothicRendererSettings::WIND_QUALITY_ADVANCED) );
-        s.GlobalWindStrength = std::clamp( GetPrivateProfileFloatA( "Display", "WindStrength", ds.GlobalWindStrength, ini ), 0.0f, 2.0f );
+        const bool windEffectsEnabled = GetPrivateProfileBoolA(
+            "Display", "EnableWindEffects", ds.AreWindEffectsEnabled(), ini );
+        s.WindEffectsEnabled = windEffectsEnabled
+            ? GothicRendererSettings::EWindEffectsState::ENABLED
+            : GothicRendererSettings::EWindEffectsState::DISABLED;
+        s.WindEffectsStrength = std::clamp( GetPrivateProfileFloatA(
+            "Display", "WindEffectsStrength", ds.WindEffectsStrength, ini ), 0.0f, 2.0f );
         const int presetGrassDetails =
             s.GraphicsPreset == GothicRendererSettings::GRAPHICS_LOW ? 2 : 4;
-        s.GrassDetailsLevel = std::clamp<int>(
-            static_cast<int>( GetPrivateProfileIntA(
-                "Display", "GrassDetails", presetGrassDetails, ini.c_str() ) ),
-            0, 4 );
+        const int storedGrassDetails = GetPrivateProfileIntStrictA(
+            "Display", "GrassDetails", presetGrassDetails, ini );
+        s.GrassDetailsLevel = storedGrassDetails >= 0 && storedGrassDetails <= 4
+            ? storedGrassDetails
+            : presetGrassDetails;
         s.EnableWaterAnimation = true;
         s.DynamicCloudDensity = ds.DynamicCloudDensity;
         s.DynamicCloudScale = ds.DynamicCloudScale;
@@ -7786,37 +7836,32 @@ XRESULT GothicAPI::LoadMenuSettings( const std::string& file ) {
         s.OceanWaterColor = ds.OceanWaterColor;
         s.OceanWaterColorStrength = ds.OceanWaterColorStrength;
 
-        s.AntiAliasingMode = static_cast<GothicRendererSettings::E_AntiAliasingMode>( std::clamp<int>(
-            static_cast<int>( GetPrivateProfileIntA( "General", "AntiAliasing", static_cast<int>(ds.AntiAliasingMode), ini.c_str() ) ),
-            static_cast<int>(GothicRendererSettings::AA_NONE),
-            static_cast<int>(GothicRendererSettings::AA_FSR3) ) );
+        s.AntiAliasingMode = GothicRendererSettings::AntiAliasingModeOrDefault(
+            GetPrivateProfileIntStrictA( "General", "AntiAliasing", static_cast<int>(ds.AntiAliasingMode), ini ) );
         s.SharpeningMode = ds.SharpeningMode;
         s.SharpenFactor = s.GetUsesTemporalReconstruction() ? 1.0f : 0.2f;
 
-        const int defaultAoMode = static_cast<int>(ds.AoMode);
-        const int storedAoMode = static_cast<int>(GetPrivateProfileIntA( "AO", "Mode", defaultAoMode, ini.c_str() ));
-        // Legacy AO selections migrate to the sole supported implementation.
-        s.AoMode = storedAoMode == static_cast<int>(AOMode::AO_NONE)
-            ? AOMode::AO_NONE
-            : AOMode::AO_XEGTAO;
+        const bool ambientOcclusionEnabled = GetPrivateProfileBoolA(
+            "AO", "EnableAmbientOcclusion", ds.AoMode == AOMode::AO_XEGTAO, ini );
+        s.AoMode = ambientOcclusionEnabled ? AOMode::AO_XEGTAO : AOMode::AO_NONE;
         s.AOStrength = std::clamp( GetPrivateProfileFloatA( "AO", "Strength", ds.AOStrength, ini ), 0.0f, 2.0f );
 
         if ( !s.AreGodRaysEnabled() ) s.GodRayStrength = 0.0f;
         if ( !s.EnableDoF ) s.DoFBokehRadius = 0.0f;
         if ( !s.EnableSSR ) s.SSRStrength = 0.0f;
         s.SSSIntensity = 1.0f;
-        if ( s.WindQuality == GothicRendererSettings::EWindQuality::WIND_QUALITY_NONE ) {
-            s.GlobalWindStrength = 0.0f;
+        if ( !s.AreWindEffectsEnabled() ) {
+            s.WindEffectsStrength = 0.0f;
         }
         if ( s.AoMode == AOMode::AO_NONE ) s.AOStrength = 0.0f;
         s.XegtaoSettings = ds.XegtaoSettings;
         if ( s.AdvancedPerformanceOptions ) {
             s.XegtaoSettings.QualityLevel = std::clamp<int>(
-                static_cast<int>( GetPrivateProfileIntA(
-                    "AO", "Advanced_XeGTAOQuality", s.XegtaoSettings.QualityLevel, ini.c_str() ) ), 0, 3 );
+                GetPrivateProfileIntStrictA(
+                    "AO", "Advanced_XeGTAOQuality", s.XegtaoSettings.QualityLevel, ini ), 0, 3 );
             s.XegtaoSettings.DenoisePasses = std::clamp<int>(
-                static_cast<int>( GetPrivateProfileIntA(
-                    "AO", "Advanced_XeGTAODenoise", s.XegtaoSettings.DenoisePasses, ini.c_str() ) ), 1, 3 );
+                GetPrivateProfileIntStrictA(
+                    "AO", "Advanced_XeGTAODenoise", s.XegtaoSettings.DenoisePasses, ini ), 1, 3 );
             s.XegtaoSettings.Radius = std::clamp(
                 GetPrivateProfileFloatA( "AO", "Advanced_XeGTAORadius", s.XegtaoSettings.Radius, ini ), 50.0f, 400.0f );
         }
@@ -7835,6 +7880,14 @@ XRESULT GothicAPI::LoadMenuSettings( const std::string& file ) {
         res.x = std::max<int>( res.x, 800 );
         res.y = std::max<int>( res.y, 600 );
         s.LoadedResolution = res;
+    }
+
+    // Rewrite the canonical menu-owned values after loading. Missing or
+    // invalid values therefore become defaults in memory and in the INI;
+    // obsolete keys are removed by SaveMenuSettings().
+    s.FixupUpscalingSettings();
+    if ( Engine::GraphicsEngine ) {
+        SaveMenuSettings( file );
     }
 
     LogInfo() << "Applying Commandline-Overrides ...";

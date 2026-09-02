@@ -8940,8 +8940,7 @@ void D3D11GraphicsEngine::ApplyWindProps( VS_ExConstantBuffer_Wind& windBuff ) {
     XMStoreFloat3( reinterpret_cast<XMFLOAT3*>(&windBuff.windDir), currentDir );
 
     const auto& settings = Engine::GAPI->GetRendererState().RendererSettings;
-    windBuff.windEnabled = settings.WindQuality
-        != GothicRendererSettings::EWindQuality::WIND_QUALITY_NONE ? 1.0f : 0.0f;
+    windBuff.windEnabled = settings.AreWindEffectsEnabled() ? 1.0f : 0.0f;
     windBuff.influenceEnabled = settings.HeroAffectsObjects ? 1.0f : 0.0f;
     // Metadata is selected per draw and is reset before each VOB batch.
     windBuff.windMetadataEnabled = 0.0f;
@@ -8967,7 +8966,7 @@ void D3D11GraphicsEngine::ApplyWindProps( VS_ExConstantBuffer_Wind& windBuff ) {
 
     // UI-normalized wind strength: 1.0 keeps the former effective strength of 2.0.
     vobAnimation_WindStrength = (1.0f + rainWeight * (rainMaxStrengthMultiplier - 1.0f))
-        * settings.GlobalWindStrength
+        * settings.WindEffectsStrength
         * 2.0f;
 
     const float prevWindGlobalTime = WindGlobalTime;

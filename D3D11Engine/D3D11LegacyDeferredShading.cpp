@@ -139,7 +139,9 @@ XRESULT D3D11LegacyDeferredShading::DrawPointlightLights(
         plcb.PL_ShadowSoftness = std::max(
             settings.PointlightShadowSoftness * 2.0f, minimumTemporalShadowSoftness );
         plcb.PL_ShadowFilterMode = static_cast<uint32_t>( settings.GetPointlightShadowKernelQuality() );
-        plcb.PL_ShadowFilterPad[0] = settings.UseDynamicPointlightNpcShadows() ? 0u : 1u;
+        // Kept for constant-buffer compatibility. Dynamic pointlight shadows
+        // control animated NPC casters, not shadow reception on NPCs.
+        plcb.PL_ShadowFilterPad[0] = 0u;
         plcb.PL_ShadowFilterPad[1] = 0;
         plcb.PL_ShadowFilterPad[2] = 0;
 
