@@ -1119,7 +1119,7 @@ struct GothicRendererSettings {
             CSMShadowKernel = E_ShadowKernelQuality::SHADOW_KERNEL_PCF_LOW;
             EnablePointlightShadows = EPointLightShadowMode::PLS_UPDATE_DYNAMIC;
             PointlightShadowKernel = E_ShadowKernelQuality::SHADOW_KERNEL_PCF_LOW;
-            EnablePointlightDynamicCasters = false;
+            EnablePointlightDynamicCasters = true;
             WorldShadowRangeScale = 0.75f;
             NumShadowCascades = MAX_SUPPORTED_CSM_CASCADES;
             ShadowCascadePCFLimit = 0;

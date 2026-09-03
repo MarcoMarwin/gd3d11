@@ -54,7 +54,7 @@ public:
     void OnVobRemovedFromWorld( BaseVobInfo* vob ) override;
 
     /** Invalidates cached static casters affected by a moved VOB. */
-    void OnVobMoved( BaseVobInfo* vob );
+    void OnVobMoved( BaseVobInfo* vob, bool casterClassificationChanged = false );
 
     /** Invalidates cached static casters affected by a newly added VOB. */
     void OnVobAdded( BaseVobInfo* vob );

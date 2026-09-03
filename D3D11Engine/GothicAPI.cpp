@@ -2635,17 +2635,18 @@ void GothicAPI::OnVobMoved( zCVob* vob ) {
             invalidateLightShadow( rendererLight.get() );
     }
 
-    auto notifyPointLightCasterMoved = [this]( BaseVobInfo* movedVob ) {
+    auto notifyPointLightCasterMoved = [this]( BaseVobInfo* movedVob,
+        bool casterClassificationChanged ) {
         if ( !movedVob )
             return;
 
         std::unordered_set<D3D11PointLight*> notified;
-        auto notify = [&notified, movedVob]( VobLightInfo* info ) {
+        auto notify = [&notified, movedVob, casterClassificationChanged]( VobLightInfo* info ) {
             if ( !info )
                 return;
             auto* pointLight = dynamic_cast<D3D11PointLight*>( info->LightShadowBuffers.get() );
             if ( pointLight && notified.insert( pointLight ).second )
-                pointLight->OnVobMoved( movedVob );
+                pointLight->OnVobMoved( movedVob, casterClassificationChanged );
         };
 
         for ( const auto& [_, info] : VobLightMap )
@@ -2671,15 +2672,21 @@ void GothicAPI::OnVobMoved( zCVob* vob ) {
         VobInfo* vi = it->second;
         auto pointlightVobIt = std::find( PointlightAnimatedVobCasters.begin(),
             PointlightAnimatedVobCasters.end(), vi );
-        if ( IsNpcOrAttachedVob( vob ) ) {
+        const bool wasPointlightAnimatedCaster =
+            pointlightVobIt != PointlightAnimatedVobCasters.end();
+        const bool isPointlightAnimatedCaster = IsNpcOrAttachedVob( vob );
+        const bool casterClassificationChanged =
+            wasPointlightAnimatedCaster != isPointlightAnimatedCaster;
+        if ( isPointlightAnimatedCaster ) {
             if ( pointlightVobIt == PointlightAnimatedVobCasters.end() ) {
                 PointlightAnimatedVobCasters.push_back( vi );
             }
         } else if ( pointlightVobIt != PointlightAnimatedVobCasters.end() ) {
             PointlightAnimatedVobCasters.erase( pointlightVobIt );
         }
-        if ( checkMatrix( vob->GetWorldMatrixXM(), XMLoadFloat4x4( &vi->WorldMatrix ) ) ) {
-            // No actual change
+        if ( checkMatrix( vob->GetWorldMatrixXM(), XMLoadFloat4x4( &vi->WorldMatrix ) )
+            && !casterClassificationChanged ) {
+            // No transform or shadow-caster classification change.
             return;
         }
 
@@ -2690,14 +2697,19 @@ void GothicAPI::OnVobMoved( zCVob* vob ) {
 
         vi->UpdateState();
         Engine::GAPI->GetRendererState().RendererInfo.FrameVobUpdates++;
-        notifyPointLightCasterMoved( vi );
+        notifyPointLightCasterMoved( vi, casterClassificationChanged );
     } else {
         auto sit = SkeletalVobMap.find( vob );
         if ( sit != SkeletalVobMap.end() ) {
             SkeletalVobInfo* vi = sit->second;
             auto pointlightSkeletalIt = std::find( PointlightAnimatedSkeletalVobs.begin(),
                 PointlightAnimatedSkeletalVobs.end(), vi );
-            if ( IsNpcOrAttachedVob( vob ) ) {
+            const bool wasPointlightAnimatedCaster =
+                pointlightSkeletalIt != PointlightAnimatedSkeletalVobs.end();
+            const bool isPointlightAnimatedCaster = IsNpcOrAttachedVob( vob );
+            const bool casterClassificationChanged =
+                wasPointlightAnimatedCaster != isPointlightAnimatedCaster;
+            if ( isPointlightAnimatedCaster ) {
                 if ( pointlightSkeletalIt == PointlightAnimatedSkeletalVobs.end() ) {
                     PointlightAnimatedSkeletalVobs.push_back( vi );
                 }
@@ -2705,14 +2717,19 @@ void GothicAPI::OnVobMoved( zCVob* vob ) {
                 && !vi->ParentBSPNodes.empty() ) {
                 PointlightAnimatedSkeletalVobs.erase( pointlightSkeletalIt );
             }
-            if ( vi->ParentBSPNodes.empty() || checkMatrix( vob->GetWorldMatrixXM(), XMLoadFloat4x4( &vi->WorldMatrix ) ) ) {
-                // No actual change
+            const bool transformChanged = !checkMatrix(
+                vob->GetWorldMatrixXM(), XMLoadFloat4x4( &vi->WorldMatrix ) );
+            if ( (!transformChanged || vi->ParentBSPNodes.empty())
+                && !casterClassificationChanged ) {
+                // No transform or shadow-caster classification change.
                 return;
             }
             // This is a mob, remove it from the bsp-cache and add to dynamic list
-            MoveVobFromBspToDynamic( vi );
+            if ( !vi->ParentBSPNodes.empty() ) {
+                MoveVobFromBspToDynamic( vi );
+            }
             vi->UpdateState();
-            notifyPointLightCasterMoved( vi );
+            notifyPointLightCasterMoved( vi, casterClassificationChanged );
         }
     }
 }
@@ -6074,9 +6091,19 @@ void GothicAPI::ConfigureAllPointlightShadowSources() {
         const size_t slash = name.find_last_of( "\\/" );
         if ( slash != std::string::npos )
             name.erase( 0, slash + 1 );
-        return name.rfind( "nw_misc_fireplace", 0 ) == 0;
+        const size_t extension = name.find_last_of( '.' );
+        if ( extension != std::string::npos )
+            name.erase( extension );
+        if ( name == "oc_fireplacebig_v01_chicken_v01" )
+            return false;
+
+        // These fireplace visuals are stored in either VobMap or
+        // SkeletalVobMap depending on their file type.
+        return name.rfind( "nw_misc_fireplace", 0 ) == 0
+            || name.rfind( "barbq_", 0 ) == 0
+            || name.rfind( "oc_fireplacebig_v01", 0 ) == 0;
     };
-    auto isFireplaceVob = [&]( VobInfo* vobInfo ) {
+    auto isFireplaceVob = [&]( BaseVobInfo* vobInfo ) {
         if ( !vobInfo || !vobInfo->Vob || !vobInfo->Vob->GetShowVisual() )
             return false;
         if ( vobInfo->VisualInfo
@@ -6144,10 +6171,9 @@ void GothicAPI::ConfigureAllPointlightShadowSources() {
         XMFLOAT3 Center = {};
     };
     std::vector<FireplaceVisual> fireplaceVisuals;
-    for ( const auto& vobEntry : VobMap ) {
-        VobInfo* vobInfo = vobEntry.second;
+    auto addFireplaceVisual = [&]( BaseVobInfo* vobInfo ) {
         if ( !isFireplaceVob( vobInfo ) )
-            continue;
+            return;
 
         const zTBBox3D bbox = vobInfo->Vob->GetBBox();
         fireplaceVisuals.push_back( {
@@ -6157,6 +6183,12 @@ void GothicAPI::ConfigureAllPointlightShadowSources() {
                 (bbox.Min.y + bbox.Max.y) * 0.5f,
                 (bbox.Min.z + bbox.Max.z) * 0.5f )
         } );
+    };
+    for ( const auto& vobEntry : VobMap ) {
+        addFireplaceVisual( vobEntry.second );
+    }
+    for ( const auto& vobEntry : SkeletalVobMap ) {
+        addFireplaceVisual( vobEntry.second );
     }
 
     struct FlameVisual {

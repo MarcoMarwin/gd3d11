@@ -760,7 +760,8 @@ void D3D11PointLight::OnVobRemovedFromWorld( BaseVobInfo* vob ) {
 
 }
 
-void D3D11PointLight::OnVobMoved( BaseVobInfo* vob ) {
+void D3D11PointLight::OnVobMoved(
+    BaseVobInfo* vob, bool casterClassificationChanged ) {
     if ( !vob || !vob->Vob || !LightInfo ) {
         return;
     }
@@ -771,7 +772,8 @@ void D3D11PointLight::OnVobMoved( BaseVobInfo* vob ) {
     // Animated NPCs and their held/attached items belong to the dynamic
     // overlay. Once they are absent from the static cache, their animation
     // must not rebuild the persistent static map every frame.
-    if ( IsAnimatedPointlightCaster( vob ) && !wasCached ) {
+    if ( IsAnimatedPointlightCaster( vob ) && !wasCached
+        && !casterClassificationChanged ) {
         return;
     }
 
