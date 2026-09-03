@@ -11,7 +11,6 @@
 #include "zCVobLight.h"
 #include "BaseLineRenderer.h"
 #include "WorldConverter.h"
-#include "ThreadPool.h"
 
 const float LIGHT_COLORCHANGE_POS_MOD = 0.1f;
 
@@ -58,7 +57,6 @@ D3D11PointLight::D3D11PointLight( VobLightInfo* info, bool dynamicLight ) {
     WorldCacheInvalid = true;
     m_DepthCubemap = nullptr;
     m_StaticDepthCubemap = nullptr;
-    m_PendingInit = {};
 
     if ( !info ) {
         InitDone = true;
@@ -72,23 +70,9 @@ D3D11PointLight::D3D11PointLight( VobLightInfo* info, bool dynamicLight ) {
 
     XMStoreFloat3( &LastUpdatePosition, LightInfo->GetEffectivePositionWorldXM() );
     LastUpdateRange = LightInfo->GetEffectiveLightRange();
-
-    StartReInit();
 }
 
 D3D11PointLight::~D3D11PointLight() {
-    // Finish queued initialization before releasing the light.
-    m_PendingInit.cancel( );
-
-    if ( m_PendingInit.future.valid() ) {
-        
-        for ( size_t i = 0; i < 3; ++i) {
-            LogInfo() << "Waiting for pending init to finish before destroying light... Attempt " << (i+1);
-            m_PendingInit.future.wait_for( std::chrono::milliseconds(100) );
-        }
-        m_PendingInit.future.wait();
-    }
-
     ClearTiledSlot();
     ReleaseShadowMap();
 
@@ -98,6 +82,9 @@ D3D11PointLight::~D3D11PointLight() {
 }
 
 void D3D11PointLight::AcquireShadowMap( DepthStencilPool* pool, int resolution ) {
+    if ( !pool || resolution <= 0 )
+        return;
+
     if ( m_DepthCubemap && m_CurrentResolution == resolution ) return;
 
     // If we have a map but it's the wrong size, return it to the pool first
@@ -114,6 +101,10 @@ void D3D11PointLight::AcquireShadowMap( DepthStencilPool* pool, int resolution )
     desc.ArraySize = 6;
 
     m_DepthCubemap = pool->Acquire( desc );
+    if ( !m_DepthCubemap ) {
+        m_CurrentResolution = 0;
+        return;
+    }
     m_CurrentResolution = resolution;
 
     // don't reset DrawnOnce here, or NPCs won't show up in the first frame a shadow gets a different LOD
@@ -214,7 +205,7 @@ void D3D11PointLight::HandleShadowModeChange( int shadowMode ) {
 }
 
 RenderToDepthStencilBuffer* D3D11PointLight::GetActiveShadowTarget() const {
-    if ( m_TiledDepthTarget ) {
+    if ( m_TiledSlotIndex >= 0 && m_TiledOwner && m_TiledDepthTarget ) {
         return m_TiledDepthTarget;
     }
     if ( m_DepthCubemap ) {
@@ -270,7 +261,8 @@ void D3D11PointLight::CopyStaticAsideToActiveTarget() const {
         return;
     }
 
-    const UINT dstBaseSlice = m_TiledDepthTarget ? static_cast<UINT>(std::max( m_TiledSlotIndex, 0 ) * 6) : 0u;
+    const bool hasTiledTarget = m_TiledSlotIndex >= 0 && m_TiledOwner && m_TiledDepthTarget;
+    const UINT dstBaseSlice = hasTiledTarget ? static_cast<UINT>(m_TiledSlotIndex * 6) : 0u;
     for ( UINT face = 0; face < 6; ++face ) {
         const UINT srcSubresource = D3D11CalcSubresource( 0, face, 1 );
         const UINT dstSubresource = D3D11CalcSubresource( 0, dstBaseSlice + face, 1 );
@@ -290,10 +282,10 @@ void D3D11PointLight::RenderStaticShadowPass( RenderToDepthStencilBuffer& target
     D3D11GraphicsEngine* engine = reinterpret_cast<D3D11GraphicsEngine*>(Engine::GraphicsEngine);
     const float range = LightInfo->GetEffectiveLightRange();
 
-    auto wc = &WorldMeshCache;
-    if ( WorldCacheInvalid ) {
-        wc = nullptr;
-    }
+    // Static lights must only render with a complete cache. A null cache
+    // makes DrawWorldAround fall back to a single cubemap face, which can
+    // silently drop distant static casters until the light is toggled.
+    auto wc = (!DynamicLight && !WorldCacheInvalid) ? &WorldMeshCache : nullptr;
 
     // The static pass must never contain animated NPC casters. They are
     // rendered exclusively by RenderAnimatedShadowPass and only while the
@@ -338,12 +330,23 @@ void D3D11PointLight::InitResources() {
         ~ResourceCriticalSectionGuard() { Engine::GAPI->LeaveResourceCriticalSection(); }
     } resourceCriticalSectionGuard;
 
-    // Generate worldmesh cache if we aren't a dynamically added light
+    // WorldMeshCollectPolyRange also creates the immutable D3D11 vertex/index
+    // buffers used by the shadow pass. It therefore has to stay on the render
+    // thread; it is not a CPU-only worker task.
     if ( !DynamicLight ) {
-        WorldConverter::WorldMeshCollectPolyRange( LightInfo->GetEffectivePositionWorld(), LightInfo->GetEffectiveLightRange(), Engine::GAPI->GetWorldSections(), WorldMeshCache );
-        std::ranges::sort(WorldMeshCache, []( const auto& a, const auto& b ) {
+        for ( auto& [key, mesh] : WorldMeshCache ) {
+            SAFE_DELETE( mesh );
+        }
+        WorldMeshCache.clear();
+
+        WorldConverter::WorldMeshCollectPolyRange(
+            LightInfo->GetEffectivePositionWorld(),
+            LightInfo->GetEffectiveLightRange(),
+            Engine::GAPI->GetWorldSections(),
+            WorldMeshCache );
+        std::ranges::sort( WorldMeshCache, []( const auto& a, const auto& b ) {
             return std::tie(a.first.Material, a.first.Texture) < std::tie(b.first.Material, b.first.Texture);
-        });
+        } );
         WorldCacheInvalid = false;
     } else {
         WorldCacheInvalid = true;
@@ -433,9 +436,11 @@ bool D3D11PointLight::UpdateDynamicNpcShadowCasterMode() {
 
 /** Draws the surrounding scene into the cubemap */
 void D3D11PointLight::RenderCubemap( bool forceUpdate, D3D11ConstantBuffer* ViewMatricesCB ) {
-    if ( !IsReady() )
+    auto* graphicsEngine = reinterpret_cast<D3D11GraphicsEngineBase*>( Engine::GraphicsEngine );
+    if ( !LightInfo || !Engine::GAPI || !ViewMatricesCB || !graphicsEngine
+        || !graphicsEngine->GetContext() || Engine::IsShuttingDown() )
         return;
-    if ( !ViewMatricesCB || (!m_DepthCubemap && !m_TiledDepthTarget) )
+    if ( !GetActiveShadowTarget() )
         return;
 
     const int shadowMode = GetCurrentShadowMode();
@@ -454,8 +459,19 @@ void D3D11PointLight::RenderCubemap( bool forceUpdate, D3D11ConstantBuffer* View
 
         // Invalidate worldcache
         WorldCacheInvalid = true;
+        InitDone = false;
         m_StaticShadowReady = false;
+
+        StartReInit();
+        if ( !IsReady() )
+            return;
     }
+
+    if ( !DynamicLight && WorldCacheInvalid )
+        StartReInit();
+
+    if ( !IsReady() )
+        return;
 
     if ( shadowMode == GothicRendererSettings::PLS_STATIC_ONLY && !moved && !rangeChanged && m_StaticShadowReady && DrawnOnce ) {
         return;
@@ -527,7 +543,11 @@ void D3D11PointLight::RenderCubemap( bool forceUpdate, D3D11ConstantBuffer* View
     ViewMatricesCB->BindToVertexShader( 3 ); // Layered vertex shader
     ViewMatricesCB->BindToGeometryShader( 2 ); // Cubemap geometry shader
 
-    RenderFullCubemap();
+    if ( !RenderFullCubemap() ) {
+        Engine::GAPI->GetRendererState().RasterizerState.DepthClipEnable = oldDepthClip;
+        Engine::GAPI->GetRendererState().GraphicsState.SetGraphicsSwitch( GSWITCH_LINEAR_DEPTH, false );
+        return;
+    }
 
     Engine::GAPI->GetRendererState().RasterizerState.DepthClipEnable = oldDepthClip;
     Engine::GAPI->GetRendererState().GraphicsState.SetGraphicsSwitch( GSWITCH_LINEAR_DEPTH, false );
@@ -539,21 +559,21 @@ void D3D11PointLight::RenderCubemap( bool forceUpdate, D3D11ConstantBuffer* View
 }
 
 /** Renders all cubemap faces at once, using the geometry shader */
-void D3D11PointLight::RenderFullCubemap() {
+bool D3D11PointLight::RenderFullCubemap() {
     if ( !IsReady() )
-        return;
+        return false;
     D3D11GraphicsEngine* engine = reinterpret_cast<D3D11GraphicsEngine*>(Engine::GraphicsEngine); // TODO: Remove and use newer system!
     // Tiled deferred lights render into the shared array target and do not
     // own m_DepthCubemap. GetActiveShadowTarget() below validates that either
     // the tiled or the standalone target is available.
     if ( !engine || !engine->GetContext() || !engine->GetPfxRenderer() ) {
-        return;
+        return false;
     }
     auto _ = engine->RecordGraphicsEvent( GE_NAME("RenderFullCubemap->RenderFullCubemap") );
 
     RenderToDepthStencilBuffer* activeTarget = GetActiveShadowTarget();
     if ( !activeTarget ) {
-        return;
+        return false;
     }
 
     const int shadowMode = GetCurrentShadowMode();
@@ -563,7 +583,7 @@ void D3D11PointLight::RenderFullCubemap() {
     if ( shadowMode == GothicRendererSettings::PLS_STATIC_ONLY ) {
         RenderStaticShadowPass( *activeTarget, true );
         m_StaticShadowReady = true;
-        return;
+        return true;
     }
 
     if ( shadowMode == GothicRendererSettings::PLS_UPDATE_DYNAMIC ) {
@@ -576,7 +596,7 @@ void D3D11PointLight::RenderFullCubemap() {
                 m_StaticShadowReady = true;
             }
             m_DynamicShadowValid = false;
-            return;
+            return true;
         }
 
         // Tiled/Forward+ keeps static and animated depth in separate persistent arrays.
@@ -593,7 +613,7 @@ void D3D11PointLight::RenderFullCubemap() {
             } else {
                 m_DynamicShadowValid = false;
             }
-            return;
+            return true;
         }
 
         DepthStencilPool* dsPool = engine->GetPfxRenderer()->GetDepthStencilPool();
@@ -619,16 +639,14 @@ void D3D11PointLight::RenderFullCubemap() {
         } else {
             m_DynamicShadowValid = false;
         }
-        return;
+        return true;
     }
 
-    auto wc = &WorldMeshCache;
-    if ( WorldCacheInvalid ) {
-        wc = nullptr;
-    }
+    auto wc = (!DynamicLight && !WorldCacheInvalid) ? &WorldMeshCache : nullptr;
 
     engine->RenderShadowCube( LightInfo->GetEffectivePositionWorldXM(), LightInfo->GetEffectiveLightRange(), *activeTarget,
         nullptr, nullptr, false, LightInfo->IsIndoorVob, false, &VobCache, &SkeletalVobCache, wc, true, SHADOW_CASTER_ALL );
+    return true;
 }
 
 bool D3D11PointLight::IsReady()
@@ -650,43 +668,31 @@ void D3D11PointLight::Invalidate() {
 }
 
 void D3D11PointLight::StartReInit() {
-    if ( !WorldCacheInvalid || !LightInfo || !Engine::GAPI ) {
-        if ( !LightInfo || !Engine::GAPI ) {
-            InitDone = true;
-        }
+    if ( !LightInfo || !Engine::GAPI ) {
+        InitDone = true;
         return;
     }
 
-    if ( !DynamicLight ) {
-        InitDone = false;
-
-        m_PendingInit.cancel( );
-        // Cancellation does not stop a job that is already running.
-        if ( m_PendingInit.future.valid() ) {
-            m_PendingInit.future.wait();
-        }
-        if ( !Engine::WorkerThreadPool ) {
-            InitResources();
-            return;
-        }
-
-        try {
-            m_PendingInit = Engine::WorkerThreadPool->enqueue( [this] (const CancellationToken& token)
-            {
-                if ( token.isCancelled() || Engine::IsShuttingDown() || !Engine::GAPI ) {
-                    InitDone = true;
-                    return;
-                }
-                InitResources();
-            } );
-        } catch ( const std::runtime_error& ) {
-            // The pool may already be stopping during teardown.
-            InitDone = true;
-        }
-
-    } else {
-        InitResources();
+    if ( !WorldCacheInvalid ) {
+        InitDone = true;
+        return;
     }
+
+    if ( DynamicLight ) {
+        // Dynamic lights intentionally do not own a persistent world cache.
+        InitDone = true;
+        return;
+    }
+
+    // WorldMeshCollectPolyRange creates immutable D3D11 buffers. Running it
+    // from WorkerThreadPool races the immediate D3D11 context and can stall
+    // inside the driver's GPU virtual-address mapping path. Keep this one-time
+    // cache build on the render thread and coalesce all reinitializations.
+    if ( Engine::IsShuttingDown() ) {
+        InitDone = true;
+        return;
+    }
+    InitResources();
 }
 
 /** Renders the scene with the given view-proj-matrices */

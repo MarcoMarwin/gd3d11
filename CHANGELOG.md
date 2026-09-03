@@ -1,4 +1,9 @@
-﻿## Build 225
+﻿## Build 226
+- Korrekturpush: GPU-Stall Fix im Pointlight-Cache (Build 226)
+  - **D3D11 Race-Condition behoben:** Die asynchrone Initialisierung (InitResources / WorldMeshCollectPolyRange) von statischen Punktlicht-Schatten wurde aus dem WorkerThreadPool zurück in den Render-Thread verschoben. 
+  - Da hierbei immutable D3D11-Buffer generiert werden, kollidierte die asynchrone Puffer-Erstellung im Treiber mit den unmittelbaren (Immediate Context) Draw-Calls des Render-Threads, was zu massiven Framerate-Stalls beim Virtual-Address Mapping der GPU führte. Der initial aufgebaute Cache wird nun sicher synchron auf dem Render-Thread erstellt.
+
+## Build 225
 - **Finalisierung Build 225:** Letzte Anpassungen vor dem Release. 
   - **Schatten Cache-Invalidierung bei Equip-Wechsel:** Zieht ein NPC eine Waffe oder steckt sie weg, ändert sich die Klassifizierung des VOBs (statisches Objekt vs. NPC-Attachment), auch wenn sich die Transformations-Matrix in diesem Frame nicht zwingend ändert. OnVobMoved erkennt diesen Klassifizierungswechsel nun (casterClassificationChanged) und erzwingt ein Neuladen der statischen Licht-Map, um hängengebliebene Waffenschatten im Raum zu vermeiden.
   - **Kamin-Erkennung erweitert:** Die Erkennung von statischen Kaminen (für spezielle Pointlight-Optimierungen) wurde auf Skelett-VOBs ausgeweitet, da Modelle wie arbq_ oder oc_fireplacebig_v01 intern als Skelett-Meshes geladen werden.
@@ -1185,6 +1190,8 @@ ightAmbientColor * 0.035f * worldAO) erhalten, um zu verhindern, dass Indoor-Mat
 - Korrekturpush: Software-PCF f�r PointLight-Schatten in Build 208. Da die Cubemaps ohnehin lineare radiale Tiefenwerte speichern, wurde das Hardware-PCF (SampleCmpLevelZero) durch einen manuellen Software-PCF Ansatz �ber einen linearen Sampler (SampleLevel) und smoothstep ersetzt. Das verhindert effektiv, dass sehr weite Shadow-Softness-Kernels die bin�ren PCF-Coverage-Level sichtbar freilegen (Banding-Artefakte). Dementsprechend wurden die Sampler in Tiled-Shading, Forward-Plus und DynShadow auf SS_Linear umgebogen.
 - Korrekturpush: Hardware-PCF Comeback und Adaptive Shadow-Taps in Build 208. Das Software-PCF-Experiment wurde verworfen und auf Hardware-PCF (SampleCmpLevelZero) zur�ckgerollt. Stattdessen wurde nun ein adaptives Distance-LOD f�r die Pointlight-Schatten eingebaut (eceiverCameraDistance): Ab einer Softness > 0.75 interpolieren im Nahbereich (< 5m und < 2m) dynamisch bis zu 8 zus�tzliche, dichte Filter-Taps stufenlos hinzu. Dadurch bleibt das Shadow-Sampling in der Ferne bei performanten 8 Taps, w�hrend Kanten im Nahbereich butterweich verschmelzen und Banding verstecken. Die Sampler wurden entsprechend wieder auf SS_Comp zur�ckgesetzt.
 - Regul�rer Push: Abschlie�ende Optimierungen in Build 208. Das adaptive Shadow-LOD wurde verworfen und stattdessen durch eine massive Hardware-Beschleunigung ersetzt: F�r extrem weiche Pointlight-Schatten (shadowSoftness > 0.75) nutzt die Engine nun die GatherCmp-Instruktion. Damit werden mit nur 4 Texture-Fetches gleich 16 Tiefenwerte gesampelt (Hardware-PCF x4 pro Fetch). So erhalten weite Pointlight-Schatten nun butterweiche 16 Taps zum Preis von 4, ohne jegliche Distanz-Zonen oder komplexes LOD-Management!
+
+
 
 
 

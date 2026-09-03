@@ -1,13 +1,9 @@
 #pragma once
 #include "BaseShadowedPointLight.h"
 #include "WorldConverter.h"
-#include <thread>
-#include <condition_variable>
 #include <atomic>
 #include <cstdint>
-#include <cfloat>
 #include "TexturePool.h"
-#include "ThreadPool.h"
 
 class D3D11PointLight;
 class D3D11TiledDeferredShading;
@@ -69,7 +65,7 @@ public:
 
     bool HasShadowMap(int shadowMapKind ) const { 
         if ( shadowMapKind == 0 ) return m_DepthCubemap != nullptr;
-        return m_TiledDepthTarget != nullptr;
+        return m_TiledSlotIndex >= 0 && m_TiledOwner != nullptr && m_TiledDepthTarget != nullptr;
     }
     int GetShadowMapResolution() const { return m_CurrentResolution; }
     ID3D11Texture2D* GetShadowCubeTexture() const { return m_DepthCubemap ? m_DepthCubemap->GetTexture().Get() : nullptr; }
@@ -106,7 +102,7 @@ protected:
     void RenderCubemapFace( const XMFLOAT4X4& view, const XMFLOAT4X4& proj, UINT faceIdx );
 
     /** Renders all cubemap faces at once, using the geometry shader */
-    void RenderFullCubemap();
+    bool RenderFullCubemap();
 
     std::list<VobInfo*> VobCache;
     std::list<SkeletalVobInfo*> SkeletalVobCache;
@@ -135,5 +131,4 @@ protected:
     bool m_DynamicShadowValid = false;
     bool m_DynamicNpcShadowCastersEnabled = true;
     uint16_t m_InvisibleFrameCount = 0;
-    TaskHandle<void> m_PendingInit;
 };
