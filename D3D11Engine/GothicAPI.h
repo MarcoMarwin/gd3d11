@@ -452,6 +452,7 @@ public:
     std::vector<SkeletalVobInfo*>& GetSkeletalMeshVobs();
     std::vector<SkeletalVobInfo*>& GetAnimatedSkeletalMeshVobs();
     std::vector<SkeletalVobInfo*>& GetPointlightAnimatedSkeletalMeshVobs();
+    std::vector<VobInfo*>& GetPointlightAnimatedVobCasters();
     std::vector<VobInfo*>& GetDynamicallyAddedVobs();
 
     /** Returns the current cameraposition */
@@ -866,9 +867,12 @@ private:
     /** List of vobs with skeletal meshes (Having a zCModel-Visual) */
     std::vector<SkeletalVobInfo*> SkeletalMeshVobs;
     std::vector<SkeletalVobInfo*> AnimatedSkeletalVobs;
-    // Pointlight shadow casters also include initially loaded NPCs. They are
-    // not part of AnimatedSkeletalVobs until they leave the BSP.
+    // Pointlight animated skeletal casters include initially loaded NPCs and
+    // skeletal VOBs attached to NPCs, even while they are inside the BSP.
     std::vector<SkeletalVobInfo*> PointlightAnimatedSkeletalVobs;
+    // Ordinary VOB items attached to NPCs, such as held tools, need the same
+    // dynamic pointlight pass but are not skeletal mesh entries.
+    std::vector<VobInfo*> PointlightAnimatedVobCasters;
     std::vector<TransparencyVobInfo> TransparencyVobs;
     std::vector<SkeletalVobInfo*> VNSkeletalVobs;
 

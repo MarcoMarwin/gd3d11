@@ -85,26 +85,41 @@ VS_ExConstantBuffer_Wind g_windBuffer;
 
 namespace {
 
-bool IsAttachedToNpc( zCVob* vob ) {
-    for ( zCVob* current = vob; current; current = current->GetVobParent() ) {
-        if ( current->GetVobType() == zVOB_TYPE_NSC ) {
-            return true;
-        }
-    }
-    return false;
-}
-
 bool IsAnimatedSkeletalShadowCaster( const SkeletalVobInfo* vob ) {
     if ( !vob || !vob->Vob || !Engine::GAPI ) {
         return false;
     }
 
-    if ( IsAttachedToNpc( vob->Vob ) ) {
+    if ( IsNpcOrAttachedVob( vob->Vob ) ) {
         return true;
     }
 
     const auto& pointlightCasters = Engine::GAPI->GetPointlightAnimatedSkeletalMeshVobs();
     return std::find( pointlightCasters.begin(), pointlightCasters.end(), vob ) != pointlightCasters.end();
+}
+
+void CollectPointlightAnimatedVobCasters(
+    FXMVECTOR position, FXMVECTOR vRangeSquared, bool indoor, bool isOutdoor,
+    std::list<VobInfo*>& result ) {
+    for ( VobInfo* vobInfo : Engine::GAPI->GetPointlightAnimatedVobCasters() ) {
+        if ( !vobInfo || !vobInfo->VisualInfo || !vobInfo->Vob
+            || !vobInfo->Vob->GetShowVisual() ) {
+            continue;
+        }
+
+        vobInfo->UpdateState();
+        if ( XMVector3Greater(
+            XMVector3LengthSq( position - vobInfo->Vob->GetPositionWorldXM() ),
+            vRangeSquared ) ) {
+            continue;
+        }
+
+        if ( isOutdoor && vobInfo->IsIndoorVob != indoor ) {
+            continue;
+        }
+
+        result.emplace_back( vobInfo );
+    }
 }
 
 }
@@ -7361,8 +7376,14 @@ void XM_CALLCONV D3D11GraphicsEngine::DrawWorldAround(
     if ( drawVobCasters && Engine::GAPI->GetRendererState().RendererSettings.DrawVOBs ) {
         // Draw visible vobs here
         std::list<VobInfo*> rndVob;
-        // construct new renderedvob list or fake one
-        if ( !renderedVobs || renderedVobs->empty() ) {
+        // The animated pointlight pass has no static VOB cache. Submit only
+        // the small maintained list of ordinary VOBs attached to NPCs.
+        const bool drawPointlightAnimatedVobs =
+            drawAnimatedCasters && !drawWorldCasters && !renderedVobs;
+        if ( drawPointlightAnimatedVobs ) {
+            CollectPointlightAnimatedVobCasters(
+                position, vRangeSquared, indoor, isOutdoor, rndVob );
+        } else if ( !renderedVobs || renderedVobs->empty() ) {
             for ( size_t i = 0; i < drawnSections.size(); i++ ) {
                 for ( auto it : drawnSections[i]->Vobs ) {
                     if ( !it->VisualInfo ) {
@@ -7371,7 +7392,7 @@ void XM_CALLCONV D3D11GraphicsEngine::DrawWorldAround(
 
                     // Attachments follow an NPC and must only be rendered by
                     // the animated shadow pass, never into the persistent map.
-                    if ( IsAttachedToNpc( it->Vob ) ) {
+                    if ( IsNpcOrAttachedVob( it->Vob ) ) {
                         continue;
                     }
 
@@ -7538,9 +7559,8 @@ void XM_CALLCONV D3D11GraphicsEngine::DrawWorldAround(
             }
 
             if ( !animatedSkeletalMeshVobs.empty() ) {
-                // Keep the proven Build 221 attachment-aware batch path.
-                // This draws the NPC body and its node visuals (weapons,
-                // tools, torches, etc.) from the same bone snapshot.
+                // Draw NPCs through the attachment-aware batch so node visuals
+                // share the NPC's bone snapshot.
                 DrawSkeletalMeshVobs( animatedSkeletalMeshVobs, FLT_MAX, false, true );
             }
         }
@@ -7750,8 +7770,14 @@ void XM_CALLCONV D3D11GraphicsEngine::DrawWorldAround_Layered(
     if ( drawVobCasters && Engine::GAPI->GetRendererState().RendererSettings.DrawVOBs ) {
         // Draw visible vobs here
         std::list<VobInfo*> rndVob;
-        // construct new renderedvob list or fake one
-        if ( !renderedVobs || renderedVobs->empty() ) {
+        // The animated pointlight pass has no static VOB cache. Submit only
+        // the small maintained list of ordinary VOBs attached to NPCs.
+        const bool drawPointlightAnimatedVobs =
+            drawAnimatedCasters && !drawWorldCasters && !renderedVobs;
+        if ( drawPointlightAnimatedVobs ) {
+            CollectPointlightAnimatedVobCasters(
+                position, vRangeSquared, indoor, isOutdoor, rndVob );
+        } else if ( !renderedVobs || renderedVobs->empty() ) {
             for ( size_t i = 0; i < drawnSections.size(); i++ ) {
                 for ( auto it : drawnSections[i]->Vobs ) {
                     if ( !it->VisualInfo ) {
@@ -7760,7 +7786,7 @@ void XM_CALLCONV D3D11GraphicsEngine::DrawWorldAround_Layered(
 
                     // Attachments follow an NPC and must only be rendered by
                     // the animated shadow pass, never into the persistent map.
-                    if ( IsAttachedToNpc( it->Vob ) ) {
+                    if ( IsNpcOrAttachedVob( it->Vob ) ) {
                         continue;
                     }
 
@@ -7930,8 +7956,8 @@ void XM_CALLCONV D3D11GraphicsEngine::DrawWorldAround_Layered(
             }
 
             if ( !animatedSkeletalMeshVobs.empty() ) {
-                // Same attachment-aware batch path as Build 221, using the
-                // six-face layered cubemap variant.
+                // Layered variant of the attachment-aware NPC batch; node
+                // visuals share the NPC's bone snapshot.
                 DrawSkeletalMeshVobs( animatedSkeletalMeshVobs, FLT_MAX, false, true, true );
             }
         }

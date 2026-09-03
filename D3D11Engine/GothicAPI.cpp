@@ -918,6 +918,7 @@ GothicAPI::GothicAPI() {
     SkeletalMeshVobs.reserve(300);
     AnimatedSkeletalVobs.reserve(300);
     PointlightAnimatedSkeletalVobs.reserve(300);
+    PointlightAnimatedVobCasters.reserve(100);
     DynamicallyAddedVobs.reserve(100);
 
 }
@@ -1702,6 +1703,7 @@ void GothicAPI::ResetVobs() {
     SkeletalMeshVobs.clear();
     AnimatedSkeletalVobs.clear();
     PointlightAnimatedSkeletalVobs.clear();
+    PointlightAnimatedVobCasters.clear();
 }
 
 /** Called when the game loaded a new level */
@@ -2667,6 +2669,15 @@ void GothicAPI::OnVobMoved( zCVob* vob ) {
     auto it = VobMap.find( vob );
     if ( it != VobMap.end() ) {
         VobInfo* vi = it->second;
+        auto pointlightVobIt = std::find( PointlightAnimatedVobCasters.begin(),
+            PointlightAnimatedVobCasters.end(), vi );
+        if ( IsNpcOrAttachedVob( vob ) ) {
+            if ( pointlightVobIt == PointlightAnimatedVobCasters.end() ) {
+                PointlightAnimatedVobCasters.push_back( vi );
+            }
+        } else if ( pointlightVobIt != PointlightAnimatedVobCasters.end() ) {
+            PointlightAnimatedVobCasters.erase( pointlightVobIt );
+        }
         if ( checkMatrix( vob->GetWorldMatrixXM(), XMLoadFloat4x4( &vi->WorldMatrix ) ) ) {
             // No actual change
             return;
@@ -2684,6 +2695,16 @@ void GothicAPI::OnVobMoved( zCVob* vob ) {
         auto sit = SkeletalVobMap.find( vob );
         if ( sit != SkeletalVobMap.end() ) {
             SkeletalVobInfo* vi = sit->second;
+            auto pointlightSkeletalIt = std::find( PointlightAnimatedSkeletalVobs.begin(),
+                PointlightAnimatedSkeletalVobs.end(), vi );
+            if ( IsNpcOrAttachedVob( vob ) ) {
+                if ( pointlightSkeletalIt == PointlightAnimatedSkeletalVobs.end() ) {
+                    PointlightAnimatedSkeletalVobs.push_back( vi );
+                }
+            } else if ( pointlightSkeletalIt != PointlightAnimatedSkeletalVobs.end()
+                && !vi->ParentBSPNodes.empty() ) {
+                PointlightAnimatedSkeletalVobs.erase( pointlightSkeletalIt );
+            }
             if ( vi->ParentBSPNodes.empty() || checkMatrix( vob->GetWorldMatrixXM(), XMLoadFloat4x4( &vi->WorldMatrix ) ) ) {
                 // No actual change
                 return;
@@ -3166,6 +3187,14 @@ void GothicAPI::OnRemovedVob( zCVob* vob, zCWorld* world ) {
         }
     }
 
+    for ( size_t i = 0; i< PointlightAnimatedVobCasters.size(); ++i ) {
+        if ( PointlightAnimatedVobCasters[i]->Vob == vob ) {
+            PointlightAnimatedVobCasters[i] = PointlightAnimatedVobCasters.back();
+            PointlightAnimatedVobCasters.pop_back();
+            break;
+        }
+    }
+
     for ( size_t i = 0; i< DynamicallyAddedVobs.size(); ++i ) {
         if ( DynamicallyAddedVobs[i]->Vob == vob ) {
             DynamicallyAddedVobs[i] = DynamicallyAddedVobs.back();
@@ -3335,6 +3364,9 @@ void GothicAPI::OnAddVob( zCVob* vob, zCWorld* world ) {
                         && IsSupportedCityWindowVisual( vi->VisualInfo->VisualName ) )
                         ConfigureCityWindows();
                 }
+                if ( IsNpcOrAttachedVob( vob ) ) {
+                    PointlightAnimatedVobCasters.push_back( vi );
+                }
                 notifyPointLightVobAdded( vi );
             } else {
                 // Must be inventory
@@ -3389,7 +3421,7 @@ void GothicAPI::OnAddVob( zCVob* vob, zCWorld* world ) {
                 {
                     AnimatedSkeletalVobs.push_back( vi );
                 }
-                if ( vob->GetVobType() == zVOB_TYPE_NSC || !BspLeafVobLists.empty() ) {
+                if ( IsNpcOrAttachedVob( vob ) || !BspLeafVobLists.empty() ) {
                     PointlightAnimatedSkeletalVobs.push_back( vi );
                 }
                 notifyPointLightVobAdded( vi );
@@ -5775,6 +5807,11 @@ void GothicAPI::MoveVobFromBspToDynamic( VobInfo* vob ) {
 
     // Add to dynamic vob list
     DynamicallyAddedVobs.push_back( vob );
+    if ( IsNpcOrAttachedVob( vob->Vob )
+        && std::find( PointlightAnimatedVobCasters.begin(),
+            PointlightAnimatedVobCasters.end(), vob ) == PointlightAnimatedVobCasters.end() ) {
+        PointlightAnimatedVobCasters.push_back( vob );
+    }
 }
 
 std::vector<VobInfo*>::iterator GothicAPI::MoveVobFromBspToDynamic( VobInfo* vob, std::vector<VobInfo*>* source ) {
@@ -7373,6 +7410,10 @@ std::vector<SkeletalVobInfo*>& GothicAPI::GetAnimatedSkeletalMeshVobs() {
 
 std::vector<SkeletalVobInfo*>& GothicAPI::GetPointlightAnimatedSkeletalMeshVobs() {
     return PointlightAnimatedSkeletalVobs;
+}
+
+std::vector<VobInfo*>& GothicAPI::GetPointlightAnimatedVobCasters() {
+    return PointlightAnimatedVobCasters;
 }
 
 std::vector<VobInfo*>& GothicAPI::GetDynamicallyAddedVobs() {

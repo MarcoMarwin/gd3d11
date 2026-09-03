@@ -397,3 +397,12 @@ protected:
         return reinterpret_cast<zSTRING&( __fastcall* )( zCVob* )>( GothicMemoryLocations::zCObject::GetObjectName )( this );
     }
 };
+
+inline bool IsNpcOrAttachedVob( zCVob* vob ) {
+    for ( zCVob* current = vob; current; current = current->GetVobParent() ) {
+        if ( current->GetVobType() == zVOB_TYPE_NSC ) {
+            return true;
+        }
+    }
+    return false;
+}

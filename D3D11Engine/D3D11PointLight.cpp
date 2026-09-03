@@ -17,15 +17,6 @@ const float LIGHT_COLORCHANGE_POS_MOD = 0.1f;
 
 namespace {
 
-bool IsAttachedToNpc( zCVob* vob ) {
-    for ( zCVob* current = vob; current; current = current->GetVobParent() ) {
-        if ( current->GetVobType() == zVOB_TYPE_NSC ) {
-            return true;
-        }
-    }
-    return false;
-}
-
 bool IsAnimatedPointlightCaster( BaseVobInfo* vob ) {
     if ( !vob || !vob->Vob ) {
         return false;
@@ -33,7 +24,7 @@ bool IsAnimatedPointlightCaster( BaseVobInfo* vob ) {
 
     // NPCs and items attached to an NPC follow animation transforms and must
     // never participate in the persistent static pointlight map.
-    if ( IsAttachedToNpc( vob->Vob ) ) {
+    if ( IsNpcOrAttachedVob( vob->Vob ) ) {
         return true;
     }
 
@@ -322,7 +313,8 @@ void D3D11PointLight::RenderAnimatedShadowPass( RenderToDepthStencilBuffer& targ
     D3D11GraphicsEngine* engine = reinterpret_cast<D3D11GraphicsEngine*>(Engine::GraphicsEngine);
     const float range = LightInfo->GetEffectiveLightRange();
 
-    const unsigned int animatedCasterMask = SHADOW_CASTER_ANIMATED;
+    const unsigned int animatedCasterMask =
+        SHADOW_CASTER_ANIMATED | SHADOW_CASTER_VOBS;
     engine->RenderShadowCube( LightInfo->GetEffectivePositionWorldXM(), range, target, nullptr, nullptr, false, LightInfo->IsIndoorVob, false,
         nullptr, nullptr, nullptr, clearDepth, animatedCasterMask );
 }
@@ -808,7 +800,7 @@ void D3D11PointLight::OnVobAdded( BaseVobInfo* vob ) {
 
     // An NPC attachment is rendered by the animated overlay. It must not
     // invalidate the persistent static map when it is registered or changed.
-    if ( IsAttachedToNpc( vob->Vob ) ) {
+    if ( IsNpcOrAttachedVob( vob->Vob ) ) {
         return;
     }
 
