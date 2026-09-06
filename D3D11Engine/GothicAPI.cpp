@@ -6725,8 +6725,8 @@ void GothicAPI::ConfigureAllPointlightShadowSources() {
     };
 
     // zColor is BGRA; PFX groups use the warmer torch profile.
-    const DWORD TGA_FLAME_LIGHT_COLOR = zColor( 90, 190, 255, 255 ).dword;
-    const DWORD PFX_FLAME_LIGHT_COLOR = zColor( 32, 128, 255, 255 ).dword;
+    const DWORD TGA_FLAME_LIGHT_COLOR = zColor( 105, 180, 255, 255 ).dword;
+    const DWORD PFX_FLAME_LIGHT_COLOR = zColor( 55, 145, 255, 255 ).dword;
     auto flameLightColor = [&]( bool hasPfx ) {
         return hasPfx ? PFX_FLAME_LIGHT_COLOR : TGA_FLAME_LIGHT_COLOR;
     };
@@ -7637,10 +7637,6 @@ XRESULT GothicAPI::SaveMenuSettings( const std::string& file ) {
     // Keep the dynamic-caster option as a separate Advanced setting.
     WritePrivateProfileStringA( "Shadows", "Advanced_PointlightDynamicCasters", std::to_string( s.EnablePointlightDynamicCasters ? TRUE : FALSE ).c_str(), ini.c_str() );
     WritePrivateProfileStringA( "Shadows", "Advanced_CSMShadowSoftness", float_to_string( s.ShadowSoftness, 2 ).c_str(), ini.c_str() );
-    WritePrivateProfileStringA( "Shadows", "Advanced_CSMCascade1UpdateFrames", std::to_string(
-        std::clamp( s.CSMCascade1UpdateFrames, 1, 60 ) ).c_str(), ini.c_str() );
-    WritePrivateProfileStringA( "Shadows", "Advanced_CSMCascade2UpdateFrames", std::to_string(
-        std::clamp( s.CSMCascade2UpdateFrames, 1, 60 ) ).c_str(), ini.c_str() );
     WritePrivateProfileStringA( "Shadows", "Advanced_PointlightShadowSoftness", float_to_string( s.PointlightShadowSoftness, 2 ).c_str(), ini.c_str() );
     WritePrivateProfileStringA( "Shadows", "Advanced_VegetationPush", std::to_string( s.HeroAffectsObjects ? TRUE : FALSE ).c_str(), ini.c_str() );
     WritePrivateProfileStringA( "Shadows", "Advanced_WaterAnimation", std::to_string( s.AdvancedWaterAnimation ? TRUE : FALSE ).c_str(), ini.c_str() );
@@ -7842,10 +7838,6 @@ XRESULT GothicAPI::LoadMenuSettings( const std::string& file ) {
                     : GothicRendererSettings::PLS_STATIC_ONLY );
             s.ShadowSoftness = std::clamp( GetPrivateProfileFloatA(
                 "Shadows", "Advanced_CSMShadowSoftness", s.ShadowSoftness, ini ), 0.0f, 2.0f );
-            s.CSMCascade1UpdateFrames = std::clamp( GetPrivateProfileIntStrictA(
-                "Shadows", "Advanced_CSMCascade1UpdateFrames", s.CSMCascade1UpdateFrames, ini ), 1, 60 );
-            s.CSMCascade2UpdateFrames = std::clamp( GetPrivateProfileIntStrictA(
-                "Shadows", "Advanced_CSMCascade2UpdateFrames", s.CSMCascade2UpdateFrames, ini ), 1, 60 );
             s.PointlightShadowSoftness = std::clamp( GetPrivateProfileFloatA(
                 "Shadows", "Advanced_PointlightShadowSoftness", s.PointlightShadowSoftness, ini ), 0.0f, 2.0f );
             s.AdvancedWaterAnimation = GetPrivateProfileBoolA(

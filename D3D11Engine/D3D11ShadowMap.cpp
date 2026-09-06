@@ -32,7 +32,9 @@ const int MAX_IMPORTANT_LIGHT_UPDATES = 1;
 constexpr int kRuntimeCsmCascadeCount = 3;
 constexpr float kRuntimeCsmLambda = 0.85f;
 constexpr float kRuntimeCsmBias = 1.0f;
-constexpr float kZenithHorizontalFloor = 0.005f;
+constexpr float kZenithLazyUpdateThreshold = 0.005f;
+constexpr size_t kRuntimeCsmCascade1UpdateFrames = 2;
+constexpr size_t kRuntimeCsmCascade2UpdateFrames = 10;
 
 struct DirectionalLightState {
     XMFLOAT3 Direction;
@@ -89,25 +91,6 @@ static XMVECTOR XM_CALLCONV BuildStableShadowUp( FXMVECTOR viewDir, FXMVECTOR pr
 
     XMVECTOR right = XMVector3Normalize( XMVector3Cross( candidate, dir ) );
     return XMVector3Normalize( XMVector3Cross( dir, right ) );
-}
-
-// Avoid the exact straight-down singularity while leaving the actual
-// sun/moon direction and all day/night logic untouched.
-static XMVECTOR XM_CALLCONV StabilizeShadowDirectionAtZenith( FXMVECTOR direction ) {
-    XMVECTOR dir = XMVector3Normalize( direction );
-    const float x = XMVectorGetX( dir );
-    const float z = XMVectorGetZ( dir );
-    const float horizontalLength = std::sqrt( x * x + z * z );
-    static XMVECTOR lastStableAzimuth = XMVectorSet( 1.0f, 0.0f, 0.0f, 0.0f );
-    if ( horizontalLength >= kZenithHorizontalFloor ) {
-        lastStableAzimuth = XMVector3Normalize( XMVectorSet( x, 0.0f, z, 0.0f ) );
-        return dir;
-    }
-
-    const float y = XMVectorGetY( dir );
-    return XMVector3Normalize( XMVectorAdd(
-        XMVectorScale( lastStableAzimuth, kZenithHorizontalFloor ),
-        XMVectorSet( 0.0f, y, 0.0f, 0.0f ) ) );
 }
 
 void CalculateTemporalInterpolatedPosition(
@@ -661,13 +644,12 @@ XRESULT D3D11ShadowMap::PrepareRender()
 
     // Use the sun during the day and Gothic's original moon orbit at night.
     const DirectionalLightState directionalLight = GetDirectionalLightState();
-    const XMVECTOR rawLightDir = XMVector3Normalize(
+    const XMVECTOR currentDir = XMVector3Normalize(
         XMLoadFloat3( &directionalLight.Direction ) );
-    const float rawHorizontalLength = std::sqrt(
-        XMVectorGetX( rawLightDir ) * XMVectorGetX( rawLightDir )
-        + XMVectorGetZ( rawLightDir ) * XMVectorGetZ( rawLightDir ) );
-    const bool inZenithTransition = rawHorizontalLength < kZenithHorizontalFloor;
-    XMVECTOR currentDir = StabilizeShadowDirectionAtZenith( rawLightDir );
+    const float lightHorizontalLength = std::sqrt(
+        XMVectorGetX( currentDir ) * XMVectorGetX( currentDir )
+        + XMVectorGetZ( currentDir ) * XMVectorGetZ( currentDir ) );
+    const bool inZenithTransition = lightHorizontalLength < kZenithLazyUpdateThreshold;
 
     // Keep the same temporal direction path as Kirides. The light direction
     // source above remains Gothic's established sun/moon direction logic.
@@ -798,9 +780,8 @@ XRESULT D3D11ShadowMap::PrepareRender()
         // lazy updates on the array backend only, as in the stable CSM path.
         bool lazyCascadeUpdate = !m_useAtlas
             && settings.GetEffectiveLazyCascadeUpdate();
-        // During the actual singularity stabilization only, rebuild all
-        // cascades. This is deliberately tied to the same narrow threshold as
-        // StabilizeShadowDirectionAtZenith; there is no wider safety zone.
+        // Only the narrow singularity interval gets a full rebuild. The
+        // light direction itself remains the original sun/moon direction.
         if ( inZenithTransition ) {
             lazyCascadeUpdate = false;
         }
@@ -818,10 +799,8 @@ XRESULT D3D11ShadowMap::PrepareRender()
         if ( forceCsmUpdate ) {
             lazyCascadeUpdate = false;
         }
-        const size_t cascade1Period = static_cast<size_t>( std::clamp(
-            settings.CSMCascade1UpdateFrames, 1, 60 ) );
-        const size_t cascade2Period = static_cast<size_t>( std::clamp(
-            settings.CSMCascade2UpdateFrames, 1, 60 ) );
+        constexpr size_t cascade1Period = kRuntimeCsmCascade1UpdateFrames;
+        constexpr size_t cascade2Period = kRuntimeCsmCascade2UpdateFrames;
         for ( int cascadeIdx = 0; cascadeIdx < numCascades; ++cascadeIdx ) {
             // pre-calculate all cascade matrices, to be able to frustum-cull anything that is not in this or the next cascade.
 

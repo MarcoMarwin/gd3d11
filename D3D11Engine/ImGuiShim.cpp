@@ -1443,26 +1443,6 @@ void ImGuiShim::RenderSettingsWindow()
                 "Sets how far world shadows remain visible.",
                 u8"Legt fest, wie weit Weltschatten sichtbar bleiben." ) );
 
-            settings.CSMCascade1UpdateFrames = std::clamp(
-                settings.CSMCascade1UpdateFrames, 1, 60 );
-            advancedRow( Tr( "Cascade 1 update frames", u8"Kaskade 1 Update-Frames" ) );
-            ImGui::SliderInt( "##AdvancedCSMCascade1UpdateFrames",
-                &settings.CSMCascade1UpdateFrames, 1, 60, "%d",
-                ImGuiSliderFlags_AlwaysClamp );
-            ImGui::SetItemTooltip( "%s", Tr(
-                "Controls how often CSM cascade 1 is rebuilt. Lower values reduce shadow lag but cost more performance.",
-                u8"Legt fest, wie oft CSM-Kaskade 1 neu aufgebaut wird. Niedrigere Werte verringern Schattenverzögerungen, kosten aber mehr Leistung." ) );
-
-            settings.CSMCascade2UpdateFrames = std::clamp(
-                settings.CSMCascade2UpdateFrames, 1, 60 );
-            advancedRow( Tr( "Cascade 2 update frames", u8"Kaskade 2 Update-Frames" ) );
-            ImGui::SliderInt( "##AdvancedCSMCascade2UpdateFrames",
-                &settings.CSMCascade2UpdateFrames, 1, 60, "%d",
-                ImGuiSliderFlags_AlwaysClamp );
-            ImGui::SetItemTooltip( "%s", Tr(
-                "Controls how often CSM cascade 2 is rebuilt. Lower values reduce shadow lag but cost more performance.",
-                u8"Legt fest, wie oft CSM-Kaskade 2 neu aufgebaut wird. Niedrigere Werte verringern Schattenverzögerungen, kosten aber mehr Leistung." ) );
-
             ImGui::EndDisabled();
 
             ImGui::EndTable();
