@@ -32,7 +32,6 @@ const int MAX_IMPORTANT_LIGHT_UPDATES = 1;
 constexpr int kRuntimeCsmCascadeCount = 3;
 constexpr float kRuntimeCsmLambda = 0.85f;
 constexpr float kRuntimeCsmBias = 1.0f;
-constexpr float kZenithLazyUpdateThreshold = 0.005f;
 constexpr size_t kRuntimeCsmCascade1UpdateFrames = 2;
 constexpr size_t kRuntimeCsmCascade2UpdateFrames = 10;
 
@@ -646,10 +645,6 @@ XRESULT D3D11ShadowMap::PrepareRender()
     const DirectionalLightState directionalLight = GetDirectionalLightState();
     const XMVECTOR currentDir = XMVector3Normalize(
         XMLoadFloat3( &directionalLight.Direction ) );
-    const float lightHorizontalLength = std::sqrt(
-        XMVectorGetX( currentDir ) * XMVectorGetX( currentDir )
-        + XMVectorGetZ( currentDir ) * XMVectorGetZ( currentDir ) );
-    const bool inZenithTransition = lightHorizontalLength < kZenithLazyUpdateThreshold;
 
     // Keep the same temporal direction path as Kirides. The light direction
     // source above remains Gothic's established sun/moon direction logic.
@@ -780,9 +775,13 @@ XRESULT D3D11ShadowMap::PrepareRender()
         // lazy updates on the array backend only, as in the stable CSM path.
         bool lazyCascadeUpdate = !m_useAtlas
             && settings.GetEffectiveLazyCascadeUpdate();
-        // Only the narrow singularity interval gets a full rebuild. The
-        // light direction itself remains the original sun/moon direction.
-        if ( inZenithTransition ) {
+        // Match the working 226 path: use the actual shadow view direction,
+        // rather than the raw or smoothed source direction, to detect the
+        // overhead-light interval. This keeps all cascades current while the
+        // shadow basis is in the noon/midnight transition.
+        const bool overheadLight = std::abs( XMVectorGetX(
+            XMVector3Dot( shadowViewDir, c_XM_Up ) ) ) > 0.94f;
+        if ( overheadLight ) {
             lazyCascadeUpdate = false;
         }
 
