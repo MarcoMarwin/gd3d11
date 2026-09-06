@@ -1,186 +1,112 @@
-﻿## Build 226
-- **Release v18.0 (Build 226):** Der aktuelle Stand arbeitet sehr stabil und wird hiermit als offizielles Release v18.0 (Build 226) finalisiert und getaggt.
-- Korrekturpush: GPU-Stall Fix im Pointlight-Cache (Build 226)
-  - **D3D11 Race-Condition behoben:** Die asynchrone Initialisierung (InitResources / WorldMeshCollectPolyRange) von statischen Punktlicht-Schatten wurde aus dem WorkerThreadPool zurück in den Render-Thread verschoben. 
-  - Da hierbei immutable D3D11-Buffer generiert werden, kollidierte die asynchrone Puffer-Erstellung im Treiber mit den unmittelbaren (Immediate Context) Draw-Calls des Render-Threads, was zu massiven Framerate-Stalls beim Virtual-Address Mapping der GPU führte. Der initial aufgebaute Cache wird nun sicher synchron auf dem Render-Thread erstellt.
+﻿## Build 227
+
+## Build 226 (Release v18.0)
+- **Release v18.0:** Offizielles Release auf Basis des stabilisierten Stands von Build 226.
+- **Pointlight-Shadow Caching:** Die Initialisierung des statischen Punktlicht-Mesh-Caches (InitResources / WorldMeshCollectPolyRange) wurde aus dem WorkerThreadPool zurück in den Haupt-Render-Thread verlegt. Die vorherige asynchrone D3D11-Buffer-Erstellung kollidierte beim GPU-Virtual-Address-Mapping mit dem Immediate Context des Render-Threads, was zu Framerate-Stalls führte. Der synchrone Aufbau behebt diese Ruckler.
 
 ## Build 225
-- **Finalisierung Build 225:** Letzte Anpassungen vor dem Release. 
-  - **Schatten Cache-Invalidierung bei Equip-Wechsel:** Zieht ein NPC eine Waffe oder steckt sie weg, ändert sich die Klassifizierung des VOBs (statisches Objekt vs. NPC-Attachment), auch wenn sich die Transformations-Matrix in diesem Frame nicht zwingend ändert. OnVobMoved erkennt diesen Klassifizierungswechsel nun (casterClassificationChanged) und erzwingt ein Neuladen der statischen Licht-Map, um hängengebliebene Waffenschatten im Raum zu vermeiden.
-  - **Kamin-Erkennung erweitert:** Die Erkennung von statischen Kaminen (für spezielle Pointlight-Optimierungen) wurde auf Skelett-VOBs ausgeweitet, da Modelle wie arbq_ oder oc_fireplacebig_v01 intern als Skelett-Meshes geladen werden.
-  - Das Low-Preset erlaubt nun ebenfalls standardmäßig dynamische Punktlicht-Schatten.
-- Korrekturpush: Performance-Fix für NPC-Attachments (Build 225)
-  - Nach dem Rollback der ressourcenfressenden Suchmethode wurde das Problem fehlender Schatten bei NPC-gehaltenen Gegenständen (Waffen, Fackeln, Werkzeuge) nun sauber und performant gelöst: GothicAPI verwaltet ab sofort eine zweite, gewartete Liste PointlightAnimatedVobCasters.
-  - Die zentrale Hilfsfunktion IsNpcOrAttachedVob erkennt beim Weltladen oder bei Objektbewegungen (OnAddVob, OnVobMoved) sofort, ob ein reguläres, skelettloses VOB an einem NPC hängt, und sortiert es in diese Liste ein.
-  - Im Schatten-Pass greift die Engine nun direkt auf diese vorbereitete Liste zu (Flag SHADOW_CASTER_VOBS). Dadurch werfen sämtliche Attachments nun korrekte, dynamische Punktlicht-Schatten – ganz ohne Performance-Einbußen durch CPU-Suchschleifen.
-- Korrekturpush: Performance-Fix für initale NPCs (Build 225)
-  - Um das Problem der fehlenden Punktlicht-Schatten bei frisch geladenen NPCs (die sich noch im statischen BSP-Tree befinden) performant zu lösen, wurde eine neue dedizierte VOB-Liste PointlightAnimatedSkeletalVobs in GothicAPI eingeführt.
-  - Diese Liste sammelt gezielt alle relevanten Caster (dynamische Skelette + intiale NPCs) beim Laden und vermeidet den CPU-Flaschenhals, der durch das Iterieren der *kompletten* Skelett-Liste entstanden war. Der Schatten-Loop läuft nun wieder flüssig.
-- Korrekturpush: Rollback der dynamischen Pointlight-Schatten Loop (Build 225)
-  - **Performance-Revert:** Die beiden experimentellen Fixes für NPC-Schatten (Iterieren der *kompletten* Skelett-Liste anstelle der gepflegten AnimatedSkeletalMeshVobs-Liste sowie das manuelle Suchen nach VOB-Attachments via AppendAttachedNpcVobCasters) wurden restlos verworfen. Diese Iterationen pro Lichtquelle haben den Render-Loop massiv verlangsamt.
-  - Es wird nun wieder exakt die bewährte, stark gefilterte "Moving-NPC"-Schattenliste aus Build 221 genutzt, welche performant skaliert. Kommentare in der Update-Schleife wurden zur Klarstellung angepasst.
-- Korrekturpush: Fehlende NPC-Attachments im dynamischen Schatten-Pass (Build 225)
-  - Im vorherigen Build wurden NPC-Attachments (Waffen, Fackeln etc.) zwar korrekterweise aus dem *statischen* Punktlicht-Schattenpass gefiltert, damit sie nicht bei jeder Bewegung die Map invalidieren – sie wurden aber im dynamischen Pass nicht wieder hinzugefügt. Dies wurde nun behoben: Über AppendAttachedNpcVobCasters werden diese dynamischen VOBs nun gesammelt und im animierten Draw-Pass für Punktlicht-Schatten korrekt mitgerendert.
+- **Punktlicht-Schatten für dynamische Objekte & Attachments:**
+  - GothicAPI führt nun dedizierte Listen (PointlightAnimatedSkeletalVobs und PointlightAnimatedVobCasters), um bewegliche NPCs sowie getragene Items/Waffen performant im dynamischen Schatten-Pass (SHADOW_CASTER_VOBS) mitzuführen, ohne jeden Frame ungefiltert alle VOBs oder Skelette durchsuchen zu müssen.
+  - NPCs, die sich noch im initialen BSP-Tree befinden, werfen nun verlässlich dynamische Schatten.
+  - OnVobMoved erkennt Statuswechsel (casterClassificationChanged), wenn NPCs Waffen ziehen oder wegstecken, und invalidiert gezielt die statische Licht-Map, um hängengebliebene Schattenartefakte zu verhindern.
+- **Kamin-Erkennung:** Erkennung statischer Kamin-Lichtquellen auf Skelett-VOBs (arbq_, oc_fireplacebig_v01) erweitert.
+- **Voreinstellungen:** Im Grafik-Preset "Low" sind dynamische Punktlicht-Schatten nun standardmäßig aktiviert.
 
 ## Build 224
-- Korrekturpush: CSM-Kaskadenselektion & Atlas-Fixes
-  - **Schatten-Kaskaden:** Der radikale Ansatz aus Build 222 (striktes Trennen der Kaskaden nach Kamera-Distanz) wurde verworfen und auf die bewährte, projektionsbasierte Selektion aus Build 221 zurückgerollt.
-- Korrekturpush: CSM Sichtweiten-Limit Rollback
-  - **Schatten-Kaskaden (CSM):** Der harte Kamera-Distanz-Schnitt (Camera-Depth Cutoff) für die maximale Schattenreichweite wurde nun restlos entfernt.
-- Korrekturpush: Shadow-Atlas Clear-Performance
-  - Da asynchrone "Lazy Updates" für den Atlas-Modus im letzten Push vollständig deaktiviert wurden, wird der gesamte Shadow-Atlas nun hocheffizient über einen einzigen, globalen ClearDepthStencilView hardware-seitig geleert.
-- Korrekturpush: Settings Refactoring & Shadow Quality
-  - **Sicheres Laden von Einstellungen:** Für alle Enum-basierten Grafik-Einstellungen wurden robuste ...OrDefault() Fallback-Funktionen implementiert.
-  - Das alte Preset "Sehr niedrig" (Very Low) wurde restlos entfernt.
-- Korrekturpush: Pointlight-Schatten Cache-Invalidierung & NPC Schatten
-  - **NPC-Attachments im statischen Pass:** Waffen oder Items, die von einem NPC getragen werden, landen nun nicht mehr im statischen Schatten-Pass, sondern ausschließlich im dynamischen animierten Overlay.
-  - **Performance-Fix (Cache Rebuild):** Die Caching-Logik (OnVobMoved/OnVobAdded) ignoriert animierte NPCs und deren Attachments nun komplett, sodass die statische Base-Map intakt bleibt.
-- Bugfix: Fehlende NPCs in Punktlicht-Schatten
-  - NPCs, die bereits während des initialen Aufbaus des BSP-Caches geladen wurden, fehlten teilweise in der Liste der animierten Skelett-Meshes.
+- **Cascaded Shadow Maps (CSM):**
+  - Kaskadenselektion auf die bewährte projektionsbasierte Logik aus Build 221 zurückgestellt.
+  - Experimenteller Tiefen-Cutoff der Kamera entfernt.
+- **Shadow-Atlas:** Hardware-basiertes Leeren des gesamten Shadow-Atlas über einen einzelnen globalen ClearDepthStencilView-Aufruf optimiert.
+- **Einstellungen:** Robuste ...OrDefault()-Fallback-Funktionen für alle Enum-basierten Grafikeinstellungen implementiert; ungenutztes Preset "Sehr niedrig" (Very Low) entfernt.
+- **Punktlicht-Cache:** Caching-Logik (OnVobMoved / OnVobAdded) überarbeitet, sodass animierte NPCs und Attachments die statische Base-Map nicht mehr invalidieren.
 
 ## Build 222
-- **Build 222 abgeschlossen:** Ein kleines Header-Refactoring entkoppelt GothicGraphicsState.h vom MAX_CSM_CASCADES-Makro, um Include-Order-Abhängigkeiten aufzulösen. Nightly-Build-Nummer auf 223 inkrementiert.
-- Korrekturpush: Shadow Cascade Splits & Filter (Build 222)
-  - **Strikte Kaskaden-Selektion:** Die Auswahl der Shadow-Map-Kaskade im Shader wird nun primär durch die echte Distanz zur Kamera gesteuert (SQ_ShadowCascadeSplits) und nicht mehr bloß über die Light-Space-Bounding-Box geraten. Das verhindert unschöne Artefakte, bei denen weit entfernte Berge oder Bäume versehentlich mit der hochauflösenden Nahbereichs-Schattenkaskade berechnet wurden.
-  - **Atlas-Filterung:** Die Größenberechnung der weichen PCF-Schattenfilter (GetCascadeWorldTexelSize) greift nun direkt auf die echten Atlas-Dimensionen (SQ_ShadowAtlasSize, SQ_CascadeShadowResolution) zu. Dies sorgt für eine physikalisch korrektere, kaskadenübergreifend gleichmäßigere Schattenweichzeichnung.
-  - **UI-Cleanup:** Im F11-Menü wurden verbleibende Standard-Checkboxen auf das einheitliche MenuCheckbox-Format umgestellt.
-- Korrekturpush: F11 Menü Layout-Feinschliff (Build 222)
-  - **Wording:** Der technische Begriff "XeGTAO" wurde in den Menüs komplett durch das nutzerfreundlichere "Umgebungsverdeckung" bzw. "Ambient Occlusion" ersetzt.
-  - **Layout:** Die Breiten der Dropdowns für Profil und Sprache in der obersten Zeile wurden mathematisch korrigiert, sodass sie nun pixelgenau bündig mit den beiden großen Hauptspalten darunter abschließen.
-  - **Gruppierung:** Der Schalter für "Regeneffekte" wurde in der Liste nach unten neben "Wind" und "Wolken" einsortiert, um alle dynamischen Wettereffekte thematisch zusammenzufassen.
-- Korrekturpush: F11 Menü Header Layout (Build 222)
-  - **Kompakter Header:** Der im letzten Push eingeführte [X] Close-Button und die D3D11-Versionsnummer wurden aus ihrer eigenen separaten Zeile nach unten rechts neben den "Erweitert..."-Button verlegt. Dadurch wird wieder vertikaler Platz im F11-Menü gespart und die Kopfzeile wirkt aufgeräumter.
-- Korrekturpush: F11 Menü Auto-Save (Build 222)
-  - **Auto-Save:** Das F11-Menü erfordert nun kein manuelles "Speichern" mehr. Die Buttons am unteren Rand wurden komplett entfernt. Alle Änderungen werden sofort angewendet und automatisch beim Verlassen eines Sliders oder beim Schließen des Menüs gesichert. Die fehleranfällige Rollback-Logik ("Abbrechen") entfällt damit.
-  - **Close-Button:** Oben rechts wurde neben der Versionsnummer ein bequemer [X] Button hinzugefügt, um das Menü direkt per Klick schließen zu können.
-- Korrekturpush: F11 Menü Tooltip Polish (Build 222)
-  - **Tooltips & Beschriftungen:** Zahlreiche Erklärtexte und Tooltips im F11-Einstellungsmenü (z. B. für Godrays, dynamische Wolken, Oberflächen-Details und Wasserreflexionen) wurden überarbeitet, um verständlicher zu beschreiben, wie sich die Optionen visuell auswirken.
+- **Build-Abschluss:** Header-Refactoring zur Entkopplung von GothicGraphicsState.h vom MAX_CSM_CASCADES-Makro.
+- **Shadow Cascades & Atlas:**
+  - Kaskadenauswahl im Shader orientiert sich primär an der Distanz zur Kamera (SQ_ShadowCascadeSplits), um fehlerhafte Nahkaskaden-Zuweisungen auf Distanz zu unterbinden.
+  - Weichzeichnung der PCF-Filter (GetCascadeWorldTexelSize) greift direkt auf die Atlas-Dimensionen (SQ_ShadowAtlasSize, SQ_CascadeShadowResolution) zu.
+- **F11-Menü:**
+  - Standard-Checkboxen auf das einheitliche MenuCheckbox-Format umgestellt.
+  - Technische Bezeichnung "XeGTAO" durch "Umgebungsverdeckung" (Ambient Occlusion) ersetzt.
+  - Dropdown-Breiten für Profil und Sprache pixelgenau an das zweispaltige Raster angepasst.
+  - Schalter für Regeneffekte thematisch zu Wind und Wolken gruppiert.
+  - Versionsnummer und Schließen-Button kompakt neben "Erweitert..." platziert.
+  - Automatisches Speichern beim Verlassen von Reglern und Schließen des Menüs integriert.
+  - Beschreibungen und Tooltips überarbeitet.
 
 ## Build 221
-- **Build 221 abgeschlossen:** Die HDRToneMapStrength-Einstellung wurde aus dem Renderer entfernt (Tonemapping nutzt nun einen statischen Idealwert). Zusätzlich wurde im Atmospheric-Scattering-Pass ein HDR-Saturate eingefügt, um out-of-bounds Himmelsfarben zu vermeiden. Nightly-Build-Nummer auf 222 inkrementiert.
-- Korrekturpush: C++20 Compiler Fix für ImGui (Build 221)
-  - **UTF-8 Cast:** Dem u8"Kantenglättung"-Literal in ImGui::CalcTextSize wurde ein expliziter einterpret_cast<const char*> hinzugefügt. Das verhindert Compiler-Fehler unter dem C++20-Standard, da u8-Strings dort streng als char8_t typisiert werden und nicht mehr implizit in char konvertieren.
-- Korrekturpush: Volumetric Low Clouds Horizon Upgrade (Build 221)
-  - **Verbesserter Wolken-Horizont:** Die volumetrischen Wolken (Low Clouds) werden im Himmel nun mit 12 statt 8 Raymarching-Schritten abgetastet und reichen durch ein angepasstes Fading (skyBottomFade) deutlich organischer bis auf die Horizontlinie herab.
-  - **Dynamische Rand-Verfeinerung:** Im Upsampling-Pass (LowCloudComposite) werden dünne Wolkenränder nahe des Horizonts nun dynamisch in voller Auflösung nachberechnet (ComputeRefinedSkyLowCloudAlpha). Das reduziert die typischen Block-Artefakte des Half-Res-Renderings an der Himmelskante drastisch.
-  - **Glättung:** Die experimentelle Kontrastverstärkung (estClouds) beim Upsampling wurde zugunsten eines natürlicheren, rein weichgezeichneten Gaussian-Blends wieder entfernt.
-- Korrekturpush: Rollback der World-Transition-Sperren (Build 221)
-  - **Rollback:** Sämtliche IsWorldTransitionActive()-Checks in den Raycast- und BSP-Hooks (zCBspTree) sowie die umgebaute OnWorldLoaded-Logik wurden wieder rückgängig gemacht. Die strengen Sperren haben offenbar zu kritischen Blockaden beim Weltwechsel oder Laden geführt.
-  - **Rollback:** Die strengen Bounds-Checks in der BSP-Traversierung (TryGetLOD0Polygons) wurden verworfen, da sie vermutlich legitime Geometrie abgewiesen haben. Es wird wieder das alte GetLOD0Polygons verwendet.
-  - **Status:** Die im ersten Push eingeführten Engine::IsShuttingDown()-Checks zur Stabilisierung des Game-Exits bleiben als einzige Änderung bestehen.
-- Korrekturpush: World-Load Hook Fixes (Build 221)
-  - **World Finalization Fix:** Ein Bug im World-Transition-System aus dem vorherigen Commit wurde behoben. OnWorldLoaded wird nun garantiert am Ende von zCWorldLoadWorld mit dem korrekten World-Pointer aufgerufen. Zudem wurde die fehleranfällige GeometryLoadObserved-Sperre entfernt. Dadurch wird sichergestellt, dass geladene Welten den Renderer-Cache verlässlich reaktivieren und nicht im Transition-State festhängen.
-- Korrekturpush: Crash-Fixes für World-Transitions & Shutdown (Build 221)
-  - **Shutdown-Stabilität:** Es wurden umfassende Engine::IsShuttingDown()-Sicherheitsprüfungen in zahlreichen Engine-Hooks (u.a. zCBspTree, zCWorld, zCModel, zCTexture) nachgerüstet. Dies verhindert Abstürze beim Beenden des Spiels, wenn der D3D11-Renderer noch Texturen asynchron lädt oder im Threadpool arbeitet.
-  - **World Transitions:** Der Weltwechsel (z. B. beim Laden von Spielständen oder Gebietsübergängen) wurde mit IsWorldTransitionActive() gegen Render-Zugriffe abgedichtet, um Crashes durch asynchrone Vob-Culls auf halbgelaedener Geometrie zu vermeiden.
-  - **Memory Safety:** Die BSP-Polygon-Extraktion (TryGetLOD0Polygons) führt nun saubere Bounds-Checks aus und bricht bei defekten Speicher-Pointern sicher ab, statt eine Access Violation zu werfen. Zudem wird der MainWorld-Pointer nun robuster direkt aus den Load-Hooks durchgereicht.
+- **Build-Abschluss:** HDRToneMapStrength entfernt (statisches Tonemapping); HDR-Saturate im Atmospheric-Scattering-Pass ergänzt.
+- **Stabilität:**
+  - Sicherheitsprüfungen via Engine::IsShuttingDown() in Engine-Hooks (zCBspTree, zCWorld, zCModel, zCTexture) integriert, um Abstürze beim Beenden abzufangen.
+  - Bounds-Checks in der BSP-Polygon-Extraktion (TryGetLOD0Polygons) gehärtet; MainWorld-Pointer wird direkt durchgereicht.
+  - OnWorldLoaded wird am Ende von zCWorldLoadWorld zuverlässig mit dem World-Pointer aufgerufen.
+- **Atmosphäre & Wolken:**
+  - Raymarching der volumetrischen Low Clouds am Horizont von 8 auf 12 Schritte erhöht und Horizont-Fading (skyBottomFade) angepasst.
+  - Kantenverfeinerung im Upsampling-Pass (ComputeRefinedSkyLowCloudAlpha) reduziert Raster-Artefakte an der Horizontlinie.
+- **Kompatibilität:** Expliziter Cast für u8"Kantenglättung" in ImGui::CalcTextSize für C++20-Konformität (char8_t).
 
 ## Build 220
-- **Build 220 abgeschlossen:** Letztes Feintuning am F11-Menü (Spaltenbreiten leicht reduziert) und etwas dezentere Blaufärbung für Wasser-Partikel bei Nacht. Nightly-Build-Nummer auf 221 inkrementiert.
-- Korrekturpush: Globales Blue-Noise-Dithering & Wolken-Upsampling (Build 220)
-  - **Global Output Dithering:** Das gestern eingeführte Fog-Dithering wurde wieder aus den Nebel-Shadern entfernt. Stattdessen erhält nun der finale Gamma-Correction-Pass ein sauberes, texturbasiertes Blue-Noise-Dithering (TX_OutputBlueNoise), welches den alten rechenintensiven Hash-Ansatz ersetzt und Color-Banding global für das gesamte Bild verhindert.
-  - **Wolken-Upsampling:** Der Upsampling-Filter für Wolken (Low Cloud Composite) wurde von einer simplen bilinearen Interpolation auf einen 3x3-Kernel umgestellt. Die neuen räumlichen und alpha-basierten Gewichte erhalten die Struktur der Wolken besser und reduzieren Kantenflimmern.
-- Korrekturpush: Nebel-Dithering & FSR3 Reactive Masks (Build 220)
-  - **Fog Dithering:** Der volumetrische Nebel (Height Fog / Atmospheric Scattering) nutzt jetzt zeitliches Blue-Noise-Dithering (TX_FogBlueNoise), um hässliches Color-Banding in dunklen Nachtnebel-Verläufen aufzubrechen.
-  - **FSR3 Reactive Masks:** Der Scattering-Pass rendert nun zusätzlich eine ogCompositionMask und ogReactiveMask heraus (SV_TARGET1 & 2), um dem FSR3-Upscaler ein stärkeres Signal für transparente Nebeländerungen zu geben und Ghosting zu minimieren.
-  - **Wasser-Partikel:** Die Helligkeits- und Farbewerte von Wasserpartikeln bei Nacht wurden nochmal auf die bewährten Werte (0.10f / 0.78f-0.90f-1.08f) kalibriert.
+- **Build-Abschluss:** Feinschliff am F11-Menü-Layout und Farbkorrektur für Wasserpartikel bei Nacht.
+- **Dithering & Filterung:**
+  - Texturbasiertes Blue-Noise-Dithering (TX_OutputBlueNoise) im finalen Gamma-Pass integriert, um Banding über das gesamte Bild zu unterdrücken.
+  - Upsampling-Filter für Low Clouds auf 3x3-Kernel umgestellt, um Struktur und Kantenstabilität zu verbessern.
+  - Temporales Blue-Noise-Dithering (TX_FogBlueNoise) im volumetrischen Nebel gegen Banding in Nachtverläufen.
+- **FSR3:** Scattering-Pass gibt nun FogCompositionMask und FogReactiveMask für präzisere Rekonstruktion transparenter Nebelanteile aus.
 
 ## Build 219
-- **Build 219 abgeschlossen:** Letztes Feintuning am F11-Menü (perfekte Ausrichtung der Grid-Zellen) und an Wasser-Partikeln (Kontrast & Nacht-Helligkeit). Nightly-Build-Nummer auf 220 inkrementiert.
-- Korrekturpush: F11-Menü Layout, Wasser-Partikel & Schatten-Caching (Build 219)
-  - **Wasser-Partikel:** Der Kontrast von spritzenden Wasser-Partikeln (z. B. bei Wasserfällen) bei Nacht wurde leicht erhöht, um die weiße Gicht optisch besser abzuheben, ohne die Partikel pauschal aufzuhellen.
-  - **Schatten-Caching:** Die Shadow-Map-Pipelines tracken nun dynamische Änderungen am Grass Details-Level (m_GrassDetailsShadowGeneration), damit gecachte Schatten bei umgeschalteter Vegetationsdichte sofort aktualisiert werden.
-  - **F11-Menü UI:** Das Spaltenlayout wurde minimal angepasst, sodass die obere Reihe (Profil und Sprache) nun bündig mit den Grid-Zellen der Hauptspalte abschließt. "Kantenglättung" wurde als deutscher Begriff zurückgebracht.
-- Korrekturpush: Überarbeitung des Vegetations-Cullings & UI-Tooltips (Build 219)
-  - **Grass Details:** Das distanzbasierte Density-Culling (0-100%) für Vegetation wurde verworfen und durch ein festes Level-System ('Grass Details' 0-4) ersetzt. Der komplexe Array-Ansatz für Distanz-Tiers wurde durch eine einzige Cull-Variante vereinfacht.
-  - **F11-Menü:** Tooltips für Wasserreflexion, Tiefenunschärfe, Regeneffekte und Wind wurden sprachlich gestrafft, damit sie besser in das F11-Menü passen.
-- Korrekturpush: Vegetations-Culling (Density) hinzugefügt
-  - **Vegetation Density:** Es wurde ein neues, abstandsabhängiges Culling-System für 2-Dreieck-Vegetationskarten (VegetationCardCullInfo) in WorldObjects.h implementiert. 
-  - **F11-Menü:** Ein neuer Schieberegler "Vegetationsdichte" (0-100% in 25%-Schritten) erlaubt es, die Dichte der Gras-/Farn-Karten in Kameranähe festzulegen, welche ab 30 m und 60 m dann zusätzlich ausgedünnt werden, um Drawcalls bzw. Polygonlast zu sparen.
+- **Vegetations-Culling:**
+  - Schieberegler "Vegetationsdichte" (Grass Details 0–4) im F11-Menü für abstandsabhängiges Ausdünnen von Gras- und Farnkarten implementiert.
+  - Caching der Schattenkaskaden trackt Änderungen am Vegetationslevel (m_GrassDetailsShadowGeneration).
+- **UI & Partikel:**
+  - Layout-Raster für Profil und Sprache ausgerichtet; deutsche Bezeichnung "Kantenglättung" wiederhergestellt.
+  - Kontrast von Wasser-Gischtpartikeln bei Nacht nachjustiert.
 
 ## Build 218
-- Korrekturpush: Weiterer UI-Feinschliff (F11-Menü)
-  - **Kürzere Labels:** Auch im Hauptbereich des F11-Menüs wurden diverse Bezeichnungen eingekürzt, damit sie sauber in das neue zweispaltige Layout passen, ohne abgeschnitten zu werden (z. B. "Ambient Occlusion" -> "AO", "Anti-Aliasing" -> "AA Mode", "Dynamic Clouds" -> "Clouds").
+- **Vegetation:** "Gegenlicht Vegetation" (Backlit Vegetation / SSS) als Option in den erweiterten Leistungseinstellungen ergänzt.
+- **UI:** Bezeichnungen im zweispaltigen Menü gestrafft.
 
-- **Build 218 abgeschlossen:** "Gegenlicht Vegetation" (Backlit Vegetation / SSS) als umschaltbare Option in den erweiterten Performance-Einstellungen hinzugefügt. Nightly-Build-Nummer auf 219 inkrementiert.
 ## Build 217
-- Korrekturpush: UI-Feinschliff im F11-Menü (Build 217)
-  - **Kürzere Labels:** Die Texte für die erweiterten Schattenoptionen ("Advanced Shadows") wurden verkürzt ("CSM Range" -> "Range", "Pointlight Softness" -> "Softness" etc.), da durch die neue Tabellen-/Listenstruktur ohnehin klar ist, auf welche Kategorie sie sich beziehen.
-  - **Spaltenbreite:** Das Label für "Kantenglättung" (Anti-Aliasing) hat nun mehr Platz erhalten, damit das lange deutsche Wort nicht mehr abgeschnitten wird.
-- Korrekturpush: Reduzierung von Shader-Permutationen (Build 217)
-  - **Dynamische CSM Cascades:** Die Anzahl der Shadow Cascades (NUM_CSM_CASCADES) und das PCF-Limit (CSM_PCF_LIMIT) sind keine starren #define-Makros mehr, sondern werden dynamisch als Runtime-Parameter (SQ_ShadowCascadeRuntimeParams) an die Shader übergeben. Dadurch muss bei einer Änderung der Schattenqualität nicht mehr der komplette Schatten-Shader neu kompiliert werden!
-  - **Dynamischer Wind & Godrays:** Ebenso wurden Wind, Charakter-Interaktion (Vegetationsverdrängung) und Godrays auf Runtime-Branches (windEnabled, CC_GodRaysEnabled) umgestellt, was die Anzahl der nötigen Shader-Permutationen weiter drastisch reduziert und nervige Nachladeruckler beim Verstellen der Optionen verhindert.
-- Korrekturpush: F11-Menü Presets & Pointlight UI Fix
-  - **XeGTAO in Presets:** Die XeGTAO-Parameter (Quality, Denoise, Radius) fließen nun sauber in den Preset-Abgleich (GraphicsPresetComparable) ein. Wenn man diese manuell verstellt, springt das generelle Preset im Menü nun wie erwartet auf "Custom".
-  - **Pointlight UI:** Die Checkbox "Fernschatten staffeln" ("Stagger distant updates") wird nun korrekt ausgegraut, wenn die dynamischen Pointlight-Schatten deaktiviert sind.
-  - **Defaults:** Die AdvancedPerformanceOptions sind standardmäßig wieder alse.
-- Korrekturpush: Performance-Optimierung für Wasser-Regeneffekte
-  - **Water Rain Ripples:** Die prozeduralen Regentropfen auf Wasseroberflächen (AccumulateWaterRainImpactLayer) wurden drastisch optimiert. Anstatt pro Pixel aufwendig 9 umliegende Grid-Zellen abzufragen (um Ring-Clipping am Zellenrand zu vermeiden), wird nun nur noch die direkte Zelle berechnet. Zudem wurden teure Extra-Layer (extraRippleA/extraRippleB), die bei starkem Regen für mehr Dichte sorgen sollten, ersatzlos gestrichen. Das spart signifikant Shader-Laufzeit auf großen Wasserflächen.
+- **Build-Abschluss:** Nightly-Build-Nummer auf 218 inkrementiert.
+- **Shader-Permutationen:**
+  - Anzahl der CSM-Kaskaden und PCF-Limits als dynamische Runtime-Parameter (SQ_ShadowCascadeRuntimeParams) an Shader übergeben, um Recompiles bei Qualitätswechseln zu vermeiden.
+  - Wind, Charakterinteraktion und Godrays auf dynamische Verzweigungen umgestellt.
+- **Wasser-Regeneffekte:** Prozedurale Regentropfen auf Wasserflächen optimiert (Berechnung auf direkte Zelle begrenzt, überflüssige Extra-Layer entfernt).
+- **UI:** F11-Preset-Abgleich für AO-Parameter korrigiert; Checkbox für gestaffelte Fernschatten bei inaktiven dynamischen Punktlichtern deaktiviert.
 
-# Build Changelog
-
-Dokumentation der gepushten Renderer-Builds.
-
-
-
-
-
-
-
-- **Build 217 abgeschlossen:** Nightly-Build-Nummer auf 218 inkrementiert. Keine weiteren Code-Änderungen.
 ## Build 216
-- Korrekturpush: NPC Pointlight Shadows & Puddle Reflections (Build 216)
-  - **Schatten-Performance für NPCs:** In den Presets "Low" und "Very Low" werfen Pointlights nun keine Receiver-Schatten mehr auf NPCs. Das entlastet die GPU spürbar in Kämpfen bei Nacht, während das restliche Lighting (Diffuse/Specular) auf den Modellen erhalten bleibt. Gesteuert wird dies elegant über das 
-pcMaterial Flag in der Specular-G-Buffer-Rendertarget.
-  - **Wet-Ground SSR Logik:** Der Code in PS_PFX_WetGroundSSR.hlsl wurde an das gestrige Versprechen angepasst: Wenn man "Wet-ground SSR" in den Optionen ausschaltet, wird nun wirklich nur der teure Screen-Space Trace für den nassen Boden übersprungen. Prozedurale Pfützen (Puddles) rendern weiterhin ihre eigene Reflektionsschicht, sodass sie nicht plötzlich wie platte, dunkle Ölflecken aussehen.
-  - **Schatten LOD-Vorbereitung:** In WorldObjects wurde die Infrastruktur (MeshShadowLodIndexBuffer) für zukünftige Shadow-LODs bei Meshes eingebaut.
-- Korrekturpush: Intel XeGTAO Integration (Build 216)
-  - **Neues Ambient Occlusion:** Intel's XeGTAO wurde in die Engine integriert! Eine absolute State-of-the-Art Lösung für Ground Truth Ambient Occlusion. Es bietet weitaus realistischere Ecken-Verdunkelungen als SSAO/HBAO.
-  - **Hybrid-Pfad:** Um die Performance zu wahren, wurde eine extrem smarte "Hybrid XeGTAO" Logik eingeführt. Nahe Objekte werden in nativer (voller) Auflösung berechnet, während das AO für weit entfernte Landschaftsbereiche (screenspaceRadius <= XE_GTAO_HYBRID_FAR_RADIUS_PIXELS) effizient in halber Auflösung (Half-Res) abgearbeitet wird.
-  - **Lighting-Integration:** XeGTAO wird nun physikalisch korrekt in alle Render-Pfade (PS_DS_Composition, PS_DS_PointLight, PS_Diffuse) als oDiffuse eingerechnet.
-- Korrekturpush: Fehlender Include in LegacyDeferredShading (Build 216)
-  - **Build-Fix:** Ein fehlender Include für D3D11PfxRenderer.h in D3D11LegacyDeferredShading.cpp wurde ergänzt, um Kompilierungsfehler im Zusammenhang mit der neuen XeGTAO-Implementierung aufzulösen.
-- Korrekturpush: Rollback Intel XeGTAO Integration (Build 216)
-  - **Rollback:** Die vorangegangene Integration von Intel XeGTAO wurde vollständig rückgängig gemacht. Die Engine nutzt wieder das bewährte Standard-SSAO/HBAO Modell. Die Eingriffe in die Lighting-Shader (PS_Diffuse, PS_DS_PointLight, etc.) und die experimentellen Hybrid-Pfade wurden wieder ausgebaut. Wahrscheinlich gab es unvorhergesehene Artefakte oder Performance-Einbrüche, die diesen Schritt notwendig machten.
-- Korrekturpush: Pointlight Shadow Quality Adjustments (Build 216)
-  - **Schatten-Preset "Very Low":** Pointlight-Schatten wurden in diesem Preset nun komplett deaktiviert (PLS_DISABLED). Die bisherige 64x64 Cubemap sah optisch zu schlecht aus und hat dennoch unnötig Sampling/Update-Performance gefressen. Wechselt man im F11 Menü auf "Very Low", werden zudem sofort alle allokierten Pointlight-Cubemaps aus dem VRAM entladen (ReleasePointlightShadowResources).
-  - **Schatten-Preset "Medium":** Das Medium-Preset nutzt für Pointlights nun gezielt nur noch den 4-Tap PCF Kernel (SHADOW_KERNEL_PCF_LOW). Da Medium nur 128px Cubemaps für Pointlights verwendet, sorgte der 8-Tap Kernel für zu starkes Verwischen. Die regulären Sonnen-Schatten (CSM) bleiben davon unberührt auf höherer Qualität.
-  - **Cleanup:** Die verwaisten Intel XeGTAO Shader-Dateien wurden nun endgültig aus dem Repository gelöscht.
-- Korrekturpush: GPU Culling Overhaul & Dynamic VOB Bounds (Build 216)
-  - **Neues GPU Culling Thread-Modell:** Der Compute Shader für das GPU VOB Culling (CS_VobCull.hlsl) wurde radikal umgeschrieben. Anstelle von Threadgroups pro Visual (mit groupshared Memory und lästigen Barriers) feuert der Shader nun 1D über alle Instanzen global. Das entfernt einen riesigen Flaschenhals, skaliert viel besser auf der GPU und erhöht die Auslastung extrem. Die CPU übergibt dafür nun vorab einen dedizierten Index-Buffer (InstanceVisualIndices).
-  - **Dynamische VOB-Bounds:** Animierte VOBs (starker Wind) und durch den Spieler interaktive Pflanzen (Biegung bei Kollision) haben bisher teils Artefakte beim GPU Culling gezeigt, weil sie kurzzeitig aus ihrer statischen Bounding-Box "herausgeweht" sind. Der Culling-Shader berechnet nun für diese Spezialfälle dynamisch erweiterte Bounds (dynamicRadius), sodass auch im stärksten Sturm keine Zweige mehr wegpoppen.
-  - **City-Window Fix:** Ein hässlicher Grauschleier ("Dark Veil") auf den transparenten Stadtfenstern, der auftrat wenn man ohne HDR/AA gespielt hat, wurde behoben.
-- Korrekturpush: World Mesh GPU Occlusion Culling (Build 216)
-  - **World Mesh Culling:** Das experimentelle GPU Hi-Z Occlusion Culling beschränkt sich nicht länger nur auf statische VOBs! Die Engine prüft ab sofort auch opake und Alpha-Test Weltmesh-Cluster (BSP-Polygone) auf der GPU gegen den Tiefenpuffer (CS_WorldMeshCull.hlsl). Verdeckte Cluster, z.B. hinter Bergen oder Stadtmauern, werden elegant mit null Instanzen über Indirect Drawing ausgeblendet. Transparente Materialien und Wasser behalten vorerst ihren klassischen Pfad. Eine massive Entlastung für die Render-Pipeline!
-  - **Fenster Depth-Prepass Fix:** Die transparenten Fensterscheiben in Städten haben fälschlicherweise in den Depth-Prepass geschrieben (PS_LinDepth.hlsl). Dies wurde behoben, sodass die Beleuchtung und das Culling dahinterliegender Objekte nicht mehr gestört werden.
-  - **Dark Veil Fix (Erweitert):** Wenn man komplett ohne Post-Processing (ohne HDR/AA) spielt, wird die künstlich abgedunkelte Textur für Fensterscheiben (PS_Simple.hlsl) nun gänzlich verworfen (discard), anstatt nur ihre Transparenz herunterzuschrauben. Der Rahmen wird regulär über den Alpha-Test-Pfad gezeichnet, was den nervigen Grauschleier perfekt behebt.
-- Korrekturpush: Previous-Frame Hi-Z Culling & Window Fix (Build 216)
-  - **Previous-Frame Hi-Z:** Das World Mesh Culling greift nun noch früher! Bleibt die Kamera stehen (Matrix ändert sich nicht), nutzt die Engine ab sofort den Hi-Z Tiefenpuffer des letzten Frames, um unsichtbare World Mesh Cluster sogar schon *vor* dem Depth-Prepass wegzucullen (llowPreviousFrameHiZ). Zur Überwachung der Effizienz gibt es nun auch dedizierte GPU-Readbacks (ScheduleGpuWorldMeshCullReadback).
-  - **Dark Veil Iteration:** Die Stadtfenster ohne HDR/AA werden nun doch nicht mehr per discard unsichtbar gemacht. Da die Scheiben sichtbar bleiben sollen, wird in diesem speziellen Pfad nun einfach das color.rgb auf neutrales Weiß gesetzt (1.0f). So bleiben die Scheiben leicht milchig transparent, ohne den Raum mit dem ansonsten zu dunklen Glas-Farbton zu verdunkeln.
-- Korrekturpush: Code Cleanup für GPU Culling Stats (Build 216)
-  - **Refactoring:** Die etwas zu komplex und unübersichtlich geratene Inline-Berechnung der worldMeshCullRejectPct in der Methode LogGpuVobPerformanceStats wurde der Lesbarkeit halber in eigene Variablen ausgelagert. Keine funktionale Änderung, macht den Code aber deutlich wartbarer.
-- Korrekturpush: Rollback GPU Occlusion Culling & UI Adjustments (Build 216)
-  - **GPU Culling Rollback:** Das experimentelle Hi-Z GPU Occlusion Culling (sowohl für VOBs als auch für das World Mesh) wurde komplett ausgebaut und aus den Shadern (CS_VobCull, CS_WorldMeshCull etc.) sowie dem Engine-Code entfernt. Offenbar gab es damit doch zu viele Artefakte, Stabilitätsprobleme oder Inkompatibilitäten. Wir fallen damit wieder auf das klassische, bewährte CPU-Culling zurück.
-  - **Window Fix Rollback:** Die iterierten Änderungen an den transparenten Fenstern (PS_Simple.hlsl) in Verbindung mit dem direkten Gamma-Pfad (ohne HDR/AA) wurden ebenfalls wieder zurückgenommen.
-  - **UI-Anpassungen:** Im F11-Menü (ImGuiShim.cpp) wurde die "Vegetation Push"-Option durch eine Checkbox für "Regeneffekte" (Wet-Ground SSR & Pfützen) ersetzt. Zudem werden die Profil-Presets ("Low", "Medium", etc.) beim Speichern nun sauber synchronisiert (SyncGraphicsPresetSelection), sodass man nicht mit fehlerhaften Anzeigen festhängt.
-- **Build 216 abgeschlossen:** Letzte Compiler-Warnungen durch explizite int Casts für std::clamp bei GetPrivateProfileIntA-Aufrufen in GothicAPI.cpp behoben. Nightly-Build-Nummer auf 217 inkrementiert.
+- **NPC-Schatten:** In den Presets "Low" und "Very Low" werfen Pointlights keine Schatten mehr auf NPCs, um die GPU-Last in Nachtkämpfen zu senken.
+- **Wet-Ground SSR:** Deaktivierung von "Wet-ground SSR" überspringt nur den Screen-Space-Trace; Pfützen behalten ihre Grundreflexion.
+- **UI:** Presets beim Speichern synchronisiert (SyncGraphicsPresetSelection); Option für Regeneffekte im F11-Menü eingepflegt.
+
 ## Build 209
-- Korrekturpush: Erster Push f�r Build 209. Einf�hrung von echten PCSS (Percentage-Closer Soft Shadows) f�r Pointlights! Der GatherCmp-Ansatz wurde verworfen. Stattdessen nutzt der Shader nun eine 5-Tap Blocker-Suche, um die durchschnittliche Distanz zum Verdeckungsobjekt (Occluder) zu bestimmen. Aus dem Verh�ltnis von Occluder- zu Receiver-Distanz wird dann dynamisch ein penumbraRatio berechnet. Das sorgt f�r einen v�llig realistischen Schattenwurf: Knackscharfe Kontakt-Schatten direkt am Objekt, die mit zunehmender Distanz butterweich ausfransen. Und das alles hochgradig effizient mit nur 13 Taps (5x Blocker Search via Linear-Sampler + 8x Filter via HW-PCF).- Korrekturpush: Feinschliff f�r Pointlight PCSS und Night-Lighting in Build 209.
-  - Das PCSS-System hat ein Fallback f�r stark entfernte Lichtquellen erhalten (shadowSoftness < -0.01f). �ber negative Softness-Werte im Backend greift der Shader auf einen simplen und extrem schnellen Far-PCF-Pfad zur�ck. Au�erdem wurde das PCSS Kontakt-Hardening �berarbeitet, sodass die Kernels bei Kontakt nicht auf 0 kollabieren, was Artefakte verhindert.
-  - Der AtmosphericScattering-Shader hat eine subtile Indirect-Night-Illumination (
-ightAmbientColor * 0.035f * worldAO) erhalten, um zu verhindern, dass Indoor-Materialien oder abgewandte Fl�chen in v�lliger Dunkelheit absaufen, selbst wenn Pointlight-Schatten greifen.
-- Regul�rer Push: Abschlie�ende Optimierungen in Build 209. Neben den Pointlight-Schatten hat nun auch das Cascaded Shadow Maps (CSM) System f�r das Sonnenlicht ein massives Update erhalten, speziell f�r dynamische Objekte wie NPCs. F�r animierte Charaktere greift nun ein eigener, ultrastabiler Schatten-Pfad (ComputeCascadedShadowValueCharacter). Dabei wird die Kaskaden-Auswahl anhand der Original-Position berechnet, der Normal-Offset und Depth-Bias aber erst f�r die *tats�chlich gesampelte* Kaskade ausgewertet. Zudem wird nun die stabilisierte Licht-Richtung (SQ_CascadeLightDirectionWS) pro Kaskade an den Shader �bergeben. Das Ergebnis: Perfekt stabile Charakter-Schatten ganz ohne Flimmern, w�hrend statische Objekte weiterhin vom performanten regul�ren Pfad profitieren.
-- Korrekturpush: Rollback auf Build 209
-  - Build 210 (Wake-System & Ocean Octaves) wurde vor�bergehend verworfen.
-  - Der Master-Branch wurde via Force-Push wieder auf den stabilen Stand von Build 209 (Stable CSM f�r NPCs) zur�ckgesetzt.
-- Regul�rer Push: Abschluss Build 209 (Stable CSM f�r NPCs)
+- **Pointlight PCSS & Schatten-Stabilisierung:**
+  - PCSS (Percentage-Closer Soft Shadows) für Pointlights mit 5-Tap Blocker-Suche zur dynamischen Penumbra-Berechnung und 13-Tap-Filterung eingeführt.
+  - Fallback für weit entfernte Lichtquellen über schnellen Far-PCF-Pfad; Kontakt-Hardening überarbeitet.
+  - Atmospheric Scattering: Subtile indirekte Nachtausleuchtung integriert, um das Absaufen von Innenräumen und abgewandten Flächen zu verhindern.
+  - Cascaded Shadow Maps für animierte Charaktere stabilisiert (ComputeCascadedShadowValueCharacter: Kaskadenauswahl nach Originalposition, Normal-Offset und Bias erst für gesampelte Kaskade; Übergabe von SQ_CascadeLightDirectionWS).
+  - Rollback auf Build 209 (Build 210 verworfen).
+
 ## Build 208
-- Korrekturpush: Erster Push f�r Build 208. Radikales Redesign der Wind-Physik f�r Vegetation (VS_ExInstancedObj.hlsl): Die alte Metronom-Animation wurde durch ein physikalisch plausibleres Modell ersetzt. Die Wind-Phase wird nun r�umlich (per World-XZ) statt per Matrix-Hash berechnet, sodass benachbarte Pflanzen gemeinsam im Windsto� wogen. Das Biegungsverhalten berechnet sich adaptiv aus der "Slenderness" (H�he vs Breite), wodurch kleine Pflanzen vom Boden aus biegen, w�hrend B�ume einen steifen Stamm behalten (sanfte kubische Kurve ohne "Scharnier"-Kante). Zudem biegt sich die Pflanze prim�r in Windrichtung, mit reduzierter seitlicher Tr�gheit. Detail-Turbulenzen f�r Bl�tter werden �ber den Abstand zum Zentrum (radialPosition) abgeleitet, v�llig ohne Vertex-Daten! Zus�tzlich wurde in PS_PFX_Velocity.hlsl die teure 3x3 Velocity-Dilation endg�ltig durch einen direkten Lookup ersetzt.## Build 207
-- Korrekturpush: Erster Push f�r Build 207. Radikale Vereinfachung der City-Window Sky-Protection (PS_Simple): Anstatt einer komplexen UV-Homographie-Berechnung wird nun strikt pro Pixel im Screen-Space gepr�ft � ist das Fenster-Pixel im unteren Drittel und liegt �ber dem Himmel-Depth, wird es opak (absolut fehlerfrei und performant). In VS_ExInstanced wurden die Motion Vectors repariert: Statische Instanzen rekonstruieren nun ihre echte World-Space-Position, damit die Kamera-Bewegung f�r die FSR3-Reprojektion korrekt abgebildet wird. Die 3x3 Velocity-Dilation in PS_MotionBlur wurde zugunsten eines direkten Lookups restlos gestrichen.## Build 206
-- Korrekturpush: Erster Push f�r Build 206. Die Wasser-Render-Logik in D3D11GraphicsEngine und PS_Water.hlsl wurde vereinfacht (kein harter Split mehr f�r die Geometrie, was Flackern an schmalen �berg�ngen behebt). CSM-Schatten nutzen in ShadowSampling.h nun einen Dither-Schritt in der Penumbra, um PCF-Banding aufzubrechen. Daytime Gothic-Fog verdeckt Geometrie auf Distanz nun vollst�ndig (PS_PFX_Heightfog und Composition). In PS_Simple wurde der alte Sky-Protection-Fallback wieder aktiviert, falls der Compute-Shader-Cache fehlt.## Build 205
-- Korrekturpush: Nachtrag f�r Build 204. GetGothicTexture() wurde in MyDirectDrawSurface7.h erg�nzt, was vom Particle Texture-Swap Mechanismus in GothicAPI zwingend ben�tigt wird.
+- **Vegetations-Wind:**
+  - Wind-Physik in VS_ExInstancedObj.hlsl auf räumliche Berechnung (World-XZ) und Slenderness-basiertes Biegemodell umgestellt.
+  - 3x3-Velocity-Dilation in PS_PFX_Velocity.hlsl durch direkten Lookup ersetzt.
+
+## Build 207
+- **City-Windows:** Screen-Space-Prüfung für Sky-Protection in PS_Simple implementiert (unteres Bildschirmdrittel über Himmelstiefe wird opak).
+- **Motion Vectors:** Statische Instanzen in VS_ExInstanced rekonstruieren ihre World-Space-Position für saubere FSR3-Reprojektion.
+- **Motion Blur:** 3x3-Velocity-Dilation in PS_MotionBlur durch direkten Lookup ersetzt.
+
+## Build 206
+- **Wasser:** Geometrie-Split in D3D11GraphicsEngine und PS_Water.hlsl vereinfacht (Flackern an schmalen Übergängen behoben).
+- **Schatten:** Penumbra-Dithering in ShadowSampling.h zur Reduktion von PCF-Banding ergänzt.
+- **Nebel:** Gothic-Heightfog verdeckt weit entfernte Geometrie tageszeitunabhängig vollständig.
+
+## Build 205
+- **Partikel:** GetGothicTexture() in MyDirectDrawSurface7.h für Partikel-Texture-Swaps in GothicAPI ergänzt.
+
 ## Build 204
-- Korrekturpush: Sicherheits-Fix f�r Constant Buffer Bounds. MAX_SHADER_CB wurde von 6 auf 14 (D3D11_COMMONSHADER_CONSTANT_BUFFER_API_SLOT_COUNT) erh�ht, um Out-of-Bounds Zugriffe beim Reflektieren von Shadern (z.B. durch Cutout-Konstanten an b6) zu verhindern.
+- **Shader-Konstanten:** MAX_SHADER_CB von 6 auf 14 (D3D11_COMMONSHADER_CONSTANT_BUFFER_API_SLOT_COUNT) erhöht, um Out-of-Bounds-Zugriffe bei Shader-Reflektionen zu verhindern.
+
 ## Build 198
 - Regulaerer Push: NightFogRainFade Polynom-glaettung in D3D11PfxRenderer.cpp (verhindert stotternde Nebeluebergaenge durch nicht-lineare Interpolation); Anpassung der Fade-Speeds (0.35/0.55) fuer ein fluessigeres Ingame-Erlebnis.
 
@@ -1189,99 +1115,8 @@ ightAmbientColor * 0.035f * worldAO) erhalten, um zu verhindern, dass Indoor-Mat
 - Korrekturpush: Finales PointLight-Shadow & Lighting Update in Build 208. In PointLightShadows.h wurde der Poisson-Kernel von 12 auf 8 Taps reduziert, daf�r aber mit einer kamera-unabh�ngigen Rotation (PLS_StableWorldNoise) versehen. Das bricht das Banding auf, ohne tempor�res Flimmern zu verursachen! In ForwardPlusLighting.hlsl wurde das Auslesen der ShadowCube-Arrays anhand der neuen Bitmask-Tiers (StaticLow, Dynamic) implementiert. Zudem wurde der veraltete, rechenintensive ComputeIndoorDoorFloorBleed entfernt � Indoor-Lichter bleiben nun durch einen simplen Maskierungs-Check sauber vom Outdoor-Terrain getrennt, ohne unsch�ne Contour-Bands an T�ren zu erzeugen.
 - Korrekturpush: Rollback des Shadow-Noise und Slot-Fix in Build 208. Die Rotation des PointLight-Kernels (PLS_StableWorldNoise) und das Distance-Tier-Encoding wurden vorerst wieder entfernt, da sie offenbar Nebeneffekte hatten. Der Kernel bleibt nun bei statischen 8-Taps, was stabiler sein sollte. Zus�tzlich wurde das FP_DynamicShadowCubeArray in ForwardPlusLighting.hlsl von Slot 	13 auf 	21 verschoben, um potenzielle Kollisionen im Ressourcen-Binding (z.B. mit anderen Texturen) zu verhindern.
 - Korrekturpush: Software-PCF f�r PointLight-Schatten in Build 208. Da die Cubemaps ohnehin lineare radiale Tiefenwerte speichern, wurde das Hardware-PCF (SampleCmpLevelZero) durch einen manuellen Software-PCF Ansatz �ber einen linearen Sampler (SampleLevel) und smoothstep ersetzt. Das verhindert effektiv, dass sehr weite Shadow-Softness-Kernels die bin�ren PCF-Coverage-Level sichtbar freilegen (Banding-Artefakte). Dementsprechend wurden die Sampler in Tiled-Shading, Forward-Plus und DynShadow auf SS_Linear umgebogen.
-- Korrekturpush: Hardware-PCF Comeback und Adaptive Shadow-Taps in Build 208. Das Software-PCF-Experiment wurde verworfen und auf Hardware-PCF (SampleCmpLevelZero) zur�ckgerollt. Stattdessen wurde nun ein adaptives Distance-LOD f�r die Pointlight-Schatten eingebaut (eceiverCameraDistance): Ab einer Softness > 0.75 interpolieren im Nahbereich (< 5m und < 2m) dynamisch bis zu 8 zus�tzliche, dichte Filter-Taps stufenlos hinzu. Dadurch bleibt das Shadow-Sampling in der Ferne bei performanten 8 Taps, w�hrend Kanten im Nahbereich butterweich verschmelzen und Banding verstecken. Die Sampler wurden entsprechend wieder auf SS_Comp zur�ckgesetzt.
+- Korrekturpush: Hardware-PCF Comeback und Adaptive Shadow-Taps in Build 208. Das Software-PCF-Experiment wurde verworfen und auf Hardware-PCF (SampleCmpLevelZero) zur�ckgerollt. Stattdessen wurde nun ein adaptives Distance-LOD f�r die Pointlight-Schatten eingebaut (
+eceiverCameraDistance): Ab einer Softness > 0.75 interpolieren im Nahbereich (< 5m und < 2m) dynamisch bis zu 8 zus�tzliche, dichte Filter-Taps stufenlos hinzu. Dadurch bleibt das Shadow-Sampling in der Ferne bei performanten 8 Taps, w�hrend Kanten im Nahbereich butterweich verschmelzen und Banding verstecken. Die Sampler wurden entsprechend wieder auf SS_Comp zur�ckgesetzt.
 - Regul�rer Push: Abschlie�ende Optimierungen in Build 208. Das adaptive Shadow-LOD wurde verworfen und stattdessen durch eine massive Hardware-Beschleunigung ersetzt: F�r extrem weiche Pointlight-Schatten (shadowSoftness > 0.75) nutzt die Engine nun die GatherCmp-Instruktion. Damit werden mit nur 4 Texture-Fetches gleich 16 Tiefenwerte gesampelt (Hardware-PCF x4 pro Fetch). So erhalten weite Pointlight-Schatten nun butterweiche 16 Taps zum Preis von 4, ohne jegliche Distanz-Zonen oder komplexes LOD-Management!
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 
