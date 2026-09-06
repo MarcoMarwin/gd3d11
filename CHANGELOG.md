@@ -1017,3 +1017,4 @@
 - Korrekturpush: CSM-Update-Frequenz für entfernte Kaskaden über das F11-Menü konfigurierbar gemacht und Schattenberechnung am Sonnen-Zenith stabilisiert.
 - Korrekturpush: F11-Konfiguration für CSM-Intervalle entfernt (wieder als interne Konstanten); Zenith-Stabilisierung zurückgebaut; Fackel-Lichtfarben wärmer optimiert.
 - Korrekturpush: Zenith-Schattenstabilisierung korrigiert (Lazy-Updates werden bei fast senkrechtem Sonnenstand nun wieder sicher deaktiviert).
+- Korrekturpush: Zenith-Schattenstabilisierung wiederhergestellt (überarbeitete Vektor-Berechnung); Godrays im Low-Preset aktiviert; F11-Menü-Reihenfolge optimiert.

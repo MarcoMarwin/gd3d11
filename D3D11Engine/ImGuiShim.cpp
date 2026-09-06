@@ -946,7 +946,7 @@ void ApplyGraphicsPresets( GothicRendererSettings& s, bool applyRuntimeUpdates =
         s.EnableSSR = true;
         s.SSRStrength = 1.0f;
         s.RainEffects = false;
-        s.EnableGodRays = false;
+        s.EnableGodRays = true;
         s.GrassDetailsLevel = 2;
         break;
     case GothicRendererSettings::GRAPHICS_MEDIUM:
@@ -1941,33 +1941,6 @@ void ImGuiShim::RenderSettingsWindow()
 
         {
             ImGui::BeginGroup();
-            bool waterReflections = settings.EnableSSR;
-            ImText( Tr( "Water Reflections", u8"Wasserreflexionen" ), { buttonWidth.x - ImGui::GetFrameHeight() - style.ItemSpacing.x, buttonWidth.y } ); ImGui::SameLine();
-            if ( CoupledStrengthCheckbox( "##Enable Water Reflections", "WaterReflectionsStrength",
-                    &waterReflections, &settings.SSRStrength, 1.0f ) ) {
-                settings.EnableSSR = waterReflections;
-            }
-            ImGui::SetItemTooltip( "%s", Tr( "Reflects the world on water surfaces.", u8"Spiegelt die Umgebung auf Wasserfl\u00E4chen." ) );
-            ImGui::SameLine();
-            ImGui::SetNextItemWidth( standardComboWidth );
-            if ( CoupledStrengthSlider( "##WaterReflectionsStrength", "WaterReflectionsStrength",
-                    &waterReflections, &settings.SSRStrength ) ) {
-                settings.EnableSSR = waterReflections;
-            }
-            ImGui::SetItemTooltip( "%s", Tr( "Adjusts the intensity of water reflections.", u8"Passt die St\u00E4rke der Wasserreflexionen an." ) );
-
-            float depthOfFieldStrength = settings.DoFBokehRadius / 3.5f;
-            ImText( Tr( "Depth of Field", u8"Tiefenunsch\u00E4rfe" ), { buttonWidth.x - ImGui::GetFrameHeight() - style.ItemSpacing.x, buttonWidth.y } ); ImGui::SameLine();
-            CoupledStrengthCheckbox( "##Enable Depth of Field", "DepthOfFieldBlurStrength",
-                &settings.EnableDoF, &depthOfFieldStrength, 1.0f );
-            ImGui::SetItemTooltip( "%s", Tr( "Makes areas outside the focus unsharp.", u8"Macht Bereiche au\u00DFerhalb des Fokus unscharf." ) );
-            ImGui::SameLine();
-            ImGui::SetNextItemWidth( standardComboWidth );
-            CoupledStrengthSlider( "##DepthOfFieldBlurStrength", "DepthOfFieldBlurStrength",
-                &settings.EnableDoF, &depthOfFieldStrength );
-            settings.DoFBokehRadius = depthOfFieldStrength * 3.5f;
-            ImGui::SetItemTooltip( "%s", Tr( "Adjusts the strength of depth-of-field blur.", u8"Passt die St\u00E4rke der Tiefenunsch\u00E4rfe an." ) );
-
 #if defined(BUILD_GOTHIC_2_6_fix) || (defined(BUILD_GOTHIC_1_08k) && !defined(BUILD_1_12F))
 #if defined(BUILD_GOTHIC_1_08k) && !defined(BUILD_1_12F)
             if ( haveWindAnimations )
@@ -1994,6 +1967,33 @@ void ImGuiShim::RenderSettingsWindow()
 
             }
 #endif //BUILD_GOTHIC_2_6_fix
+
+            bool waterReflections = settings.EnableSSR;
+            ImText( Tr( "Water Reflections", u8"Wasserreflexionen" ), { buttonWidth.x - ImGui::GetFrameHeight() - style.ItemSpacing.x, buttonWidth.y } ); ImGui::SameLine();
+            if ( CoupledStrengthCheckbox( "##Enable Water Reflections", "WaterReflectionsStrength",
+                    &waterReflections, &settings.SSRStrength, 1.0f ) ) {
+                settings.EnableSSR = waterReflections;
+            }
+            ImGui::SetItemTooltip( "%s", Tr( "Reflects the world on water surfaces.", u8"Spiegelt die Umgebung auf Wasserfl\u00E4chen." ) );
+            ImGui::SameLine();
+            ImGui::SetNextItemWidth( standardComboWidth );
+            if ( CoupledStrengthSlider( "##WaterReflectionsStrength", "WaterReflectionsStrength",
+                    &waterReflections, &settings.SSRStrength ) ) {
+                settings.EnableSSR = waterReflections;
+            }
+            ImGui::SetItemTooltip( "%s", Tr( "Adjusts the intensity of water reflections.", u8"Passt die St\u00E4rke der Wasserreflexionen an." ) );
+
+            float depthOfFieldStrength = settings.DoFBokehRadius / 3.5f;
+            ImText( Tr( "Depth of Field", u8"Tiefenunsch\u00E4rfe" ), { buttonWidth.x - ImGui::GetFrameHeight() - style.ItemSpacing.x, buttonWidth.y } ); ImGui::SameLine();
+            CoupledStrengthCheckbox( "##Enable Depth of Field", "DepthOfFieldBlurStrength",
+                &settings.EnableDoF, &depthOfFieldStrength, 1.0f );
+            ImGui::SetItemTooltip( "%s", Tr( "Makes areas outside the focus unsharp.", u8"Macht Bereiche au\u00DFerhalb des Fokus unscharf." ) );
+            ImGui::SameLine();
+            ImGui::SetNextItemWidth( standardComboWidth );
+            CoupledStrengthSlider( "##DepthOfFieldBlurStrength", "DepthOfFieldBlurStrength",
+                &settings.EnableDoF, &depthOfFieldStrength );
+            settings.DoFBokehRadius = depthOfFieldStrength * 3.5f;
+            ImGui::SetItemTooltip( "%s", Tr( "Adjusts the strength of depth-of-field blur.", u8"Passt die St\u00E4rke der Tiefenunsch\u00E4rfe an." ) );
 
             ImText( Tr( "Rain Effects", u8"Regeneffekte" ), { buttonWidth.x - ImGui::GetFrameHeight() - style.ItemSpacing.x, buttonWidth.y } ); ImGui::SameLine();
             MenuCheckbox( "##Enable Rain Effects", &settings.RainEffects );

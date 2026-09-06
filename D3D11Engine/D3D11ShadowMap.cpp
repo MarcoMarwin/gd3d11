@@ -92,6 +92,27 @@ static XMVECTOR XM_CALLCONV BuildStableShadowUp( FXMVECTOR viewDir, FXMVECTOR pr
     return XMVector3Normalize( XMVector3Cross( dir, right ) );
 }
 
+static XMVECTOR XM_CALLCONV StabilizeShadowDirectionAtZenith( FXMVECTOR direction ) {
+    XMVECTOR dir = XMVector3Normalize( direction );
+    const float x = XMVectorGetX( dir );
+    const float z = XMVectorGetZ( dir );
+    const float horizontalLength = std::sqrt( x * x + z * z );
+    constexpr float zenithFloor = 0.005f;
+
+    static XMVECTOR lastStableAzimuth = XMVectorSet( 1.0f, 0.0f, 0.0f, 0.0f );
+    if ( horizontalLength >= zenithFloor ) {
+        lastStableAzimuth = XMVector3Normalize( XMVectorSet( x, 0.0f, z, 0.0f ) );
+        return dir;
+    }
+
+    // Keep the shadow camera away from the exact straight-down singularity.
+    // The sky and lighting continue to use Gothic's original sun/moon path.
+    const float y = XMVectorGetY( dir );
+    return XMVector3Normalize( XMVectorAdd(
+        XMVectorScale( lastStableAzimuth, zenithFloor ),
+        XMVectorSet( 0.0f, y, 0.0f, 0.0f ) ) );
+}
+
 void CalculateTemporalInterpolatedPosition(
     const XMVECTOR currentDir,
     XMVECTOR& previousDir,
@@ -643,7 +664,7 @@ XRESULT D3D11ShadowMap::PrepareRender()
 
     // Use the sun during the day and Gothic's original moon orbit at night.
     const DirectionalLightState directionalLight = GetDirectionalLightState();
-    const XMVECTOR currentDir = XMVector3Normalize(
+    const XMVECTOR currentDir = StabilizeShadowDirectionAtZenith(
         XMLoadFloat3( &directionalLight.Direction ) );
 
     // Keep the same temporal direction path as Kirides. The light direction
