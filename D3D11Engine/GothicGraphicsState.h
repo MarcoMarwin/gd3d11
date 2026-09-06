@@ -692,6 +692,10 @@ struct GothicRendererSettings {
         AdvancedCityWindowTransparency = true;
         AdvancedBacklitVegetation = true;
         GrassDetailsLevel = 4;
+        // CSM lazy-update defaults: cascade 0 remains per-frame, while the
+        // two farther runtime cascades can be updated less frequently.
+        CSMCascade1UpdateFrames = 2;
+        CSMCascade2UpdateFrames = 10;
         RainEffects = true;
 
         BloomStrength = 1.0f;
@@ -1463,6 +1467,10 @@ struct GothicRendererSettings {
     // lower levels keep a uniform share at every distance. Larger connected
     // polygons remain untouched.
     int GrassDetailsLevel;
+    // Appended so the existing renderer-settings field offsets remain stable.
+    // These control the lazy-update cadence of runtime CSM cascades 1 and 2.
+    int CSMCascade1UpdateFrames;
+    int CSMCascade2UpdateFrames;
     bool GetEffectiveWaterAnimation() const {
         return !AdvancedPerformanceOptions || AdvancedWaterAnimation;
     }

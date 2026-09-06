@@ -1014,3 +1014,4 @@
 - Korrekturpush: Cascade-Texel-Größe für Schatten wird nun laufzeiteffizient auf der CPU vorberechnet.
 - Korrekturpush: FSR3-Preset-Bezeichnungen im F11-Menü korrigiert ("Native with AA", "Ultra Performance").
 - Korrekturpush: Schatten-Berechnung (CSM) stabilisiert (Entfernung des fehleranfälligen WorldShadowCaster-Caches und Rückkehr zur robusten kaskadenbasierten Update-Logik).
+- Korrekturpush: CSM-Update-Frequenz für entfernte Kaskaden über das F11-Menü konfigurierbar gemacht und Schattenberechnung am Sonnen-Zenith stabilisiert.

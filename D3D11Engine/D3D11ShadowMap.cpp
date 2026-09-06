@@ -32,6 +32,7 @@ const int MAX_IMPORTANT_LIGHT_UPDATES = 1;
 constexpr int kRuntimeCsmCascadeCount = 3;
 constexpr float kRuntimeCsmLambda = 0.85f;
 constexpr float kRuntimeCsmBias = 1.0f;
+constexpr float kZenithHorizontalFloor = 0.005f;
 
 struct DirectionalLightState {
     XMFLOAT3 Direction;
@@ -59,6 +60,54 @@ static DirectionalLightState GetDirectionalLightState() {
         std::min( 1.0f, rain * 2.0f ) );
 
     return state;
+}
+
+// Keep the shadow view basis valid when the directional light is parallel to
+// the preferred world-up vector. This is only a shadow-camera basis choice;
+// the sky and lighting continue to use Gothic's original sun/moon direction.
+static XMVECTOR XM_CALLCONV BuildStableShadowUp( FXMVECTOR viewDir, FXMVECTOR preferredUp ) {
+    XMVECTOR dir = XMVector3Normalize( viewDir );
+
+    if ( std::abs( XMVectorGetX( XMVector3Dot( dir, preferredUp ) ) ) < 0.999f ) {
+        return preferredUp;
+    }
+
+    const XMVECTOR axisX = XMVectorSet( 1.0f, 0.0f, 0.0f, 0.0f );
+    const XMVECTOR axisY = XMVectorSet( 0.0f, 1.0f, 0.0f, 0.0f );
+    const XMVECTOR axisZ = XMVectorSet( 0.0f, 0.0f, 1.0f, 0.0f );
+    XMVECTOR candidate = axisX;
+    float bestDot = std::abs( XMVectorGetX( XMVector3Dot( dir, axisX ) ) );
+    const float dotY = std::abs( XMVectorGetX( XMVector3Dot( dir, axisY ) ) );
+    if ( dotY < bestDot ) {
+        candidate = axisY;
+        bestDot = dotY;
+    }
+    const float dotZ = std::abs( XMVectorGetX( XMVector3Dot( dir, axisZ ) ) );
+    if ( dotZ < bestDot ) {
+        candidate = axisZ;
+    }
+
+    XMVECTOR right = XMVector3Normalize( XMVector3Cross( candidate, dir ) );
+    return XMVector3Normalize( XMVector3Cross( dir, right ) );
+}
+
+// Avoid the exact straight-down singularity while leaving the actual
+// sun/moon direction and all day/night logic untouched.
+static XMVECTOR XM_CALLCONV StabilizeShadowDirectionAtZenith( FXMVECTOR direction ) {
+    XMVECTOR dir = XMVector3Normalize( direction );
+    const float x = XMVectorGetX( dir );
+    const float z = XMVectorGetZ( dir );
+    const float horizontalLength = std::sqrt( x * x + z * z );
+    static XMVECTOR lastStableAzimuth = XMVectorSet( 1.0f, 0.0f, 0.0f, 0.0f );
+    if ( horizontalLength >= kZenithHorizontalFloor ) {
+        lastStableAzimuth = XMVector3Normalize( XMVectorSet( x, 0.0f, z, 0.0f ) );
+        return dir;
+    }
+
+    const float y = XMVectorGetY( dir );
+    return XMVector3Normalize( XMVectorAdd(
+        XMVectorScale( lastStableAzimuth, kZenithHorizontalFloor ),
+        XMVectorSet( 0.0f, y, 0.0f, 0.0f ) ) );
 }
 
 void CalculateTemporalInterpolatedPosition(
@@ -114,10 +163,7 @@ static void CalculateCascadeMatrices(
 {
     XMVECTOR lightDir = XMVector3Normalize( XMVectorSubtract( lookAtOrig, lightPosOrig ) );
 
-    XMVECTOR upDir = upDirOrig;
-    if ( std::abs( XMVectorGetX( XMVector3Dot( lightDir, upDir ) ) ) > 0.999f ) {
-        upDir = XMVectorSet( 0.0f, 0.0f, 1.0f, 0.0f );
-    }
+    XMVECTOR upDir = BuildStableShadowUp( lightDir, upDirOrig );
 
     XMVECTOR frustumCenter;
 
@@ -615,7 +661,13 @@ XRESULT D3D11ShadowMap::PrepareRender()
 
     // Use the sun during the day and Gothic's original moon orbit at night.
     const DirectionalLightState directionalLight = GetDirectionalLightState();
-    XMVECTOR currentDir = XMVector3Normalize( XMLoadFloat3( &directionalLight.Direction ) );
+    const XMVECTOR rawLightDir = XMVector3Normalize(
+        XMLoadFloat3( &directionalLight.Direction ) );
+    const float rawHorizontalLength = std::sqrt(
+        XMVectorGetX( rawLightDir ) * XMVectorGetX( rawLightDir )
+        + XMVectorGetZ( rawLightDir ) * XMVectorGetZ( rawLightDir ) );
+    const bool inZenithTransition = rawHorizontalLength < kZenithHorizontalFloor;
+    XMVECTOR currentDir = StabilizeShadowDirectionAtZenith( rawLightDir );
 
     // Keep the same temporal direction path as Kirides. The light direction
     // source above remains Gothic's established sun/moon direction logic.
@@ -704,6 +756,8 @@ XRESULT D3D11ShadowMap::PrepareRender()
     const FXMVECTOR lastCascadeLookAt = lastCascadeData.Position;
 
     static const XMVECTORF32 c_XM_Up = { { { 0, 1, 0, 0 } } };
+    const XMVECTOR shadowViewDir = XMVector3Normalize( XMVectorSubtract( lookAt, p ) );
+    const XMVECTOR shadowUp = BuildStableShadowUp( shadowViewDir, c_XM_Up );
 
     if ( !isOutdoor ) {
         if ( settings.EnableShadows && lastBspMode == zBSP_MODE_OUTDOOR ) {
@@ -729,7 +783,7 @@ XRESULT D3D11ShadowMap::PrepareRender()
             const XMVECTOR indoorP = isLastCascade ? lastCascadeP : p;
             const XMVECTOR indoorLookAt = isLastCascade ? lastCascadeLookAt : lookAt;
             XMStoreFloat4x4( &m_CascadeCRs[i].ViewReplacement, XMMatrixTranspose(
-                XMMatrixLookAtLH( indoorP, indoorLookAt, c_XM_Up ) ) );
+                XMMatrixLookAtLH( indoorP, indoorLookAt, shadowUp ) ) );
             XMStoreFloat4x4( &m_CascadeCRs[i].ProjectionReplacement, XMMatrixTranspose( XMMatrixOrthographicLH(
                 farPlane, farPlane, 1.0f, 20000.f ) ) );
             XMStoreFloat3( &m_CascadeCRs[i].PositionReplacement, indoorP );
@@ -744,6 +798,12 @@ XRESULT D3D11ShadowMap::PrepareRender()
         // lazy updates on the array backend only, as in the stable CSM path.
         bool lazyCascadeUpdate = !m_useAtlas
             && settings.GetEffectiveLazyCascadeUpdate();
+        // During the actual singularity stabilization only, rebuild all
+        // cascades. This is deliberately tied to the same narrow threshold as
+        // StabilizeShadowDirectionAtZenith; there is no wider safety zone.
+        if ( inZenithTransition ) {
+            lazyCascadeUpdate = false;
+        }
 
         Frustum playerFrustum = Frustum::AlwaysContainingFrustum();
         if ( camera ) {
@@ -758,15 +818,19 @@ XRESULT D3D11ShadowMap::PrepareRender()
         if ( forceCsmUpdate ) {
             lazyCascadeUpdate = false;
         }
+        const size_t cascade1Period = static_cast<size_t>( std::clamp(
+            settings.CSMCascade1UpdateFrames, 1, 60 ) );
+        const size_t cascade2Period = static_cast<size_t>( std::clamp(
+            settings.CSMCascade2UpdateFrames, 1, 60 ) );
         for ( int cascadeIdx = 0; cascadeIdx < numCascades; ++cascadeIdx ) {
             // pre-calculate all cascade matrices, to be able to frustum-cull anything that is not in this or the next cascade.
 
             bool shouldUpdateCascade = true;
             if ( lazyCascadeUpdate ) {
-                // Match Kirides' 3-cascade cadence: the two near cascades are
-                // current every frame, the far cascade updates every fifth.
-                if ( cascadeIdx == 2 ) {
-                    shouldUpdateCascade = (perFrameCascadeData.frameCount % 5) == 0;
+                if ( cascadeIdx == 1 ) {
+                    shouldUpdateCascade = ( perFrameCascadeData.frameCount % cascade1Period ) == 0;
+                } else if ( cascadeIdx == 2 ) {
+                    shouldUpdateCascade = ( perFrameCascadeData.frameCount % cascade2Period ) == 0;
                 }
             }
             if ( forceCsmUpdate ) {
