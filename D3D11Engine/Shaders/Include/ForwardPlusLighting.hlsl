@@ -43,6 +43,7 @@ cbuffer FP_ScreenQuadConstantBuffer : register( b4 )
     float4 SQ_ShadowCascadeRuntimeParams;
     float4 SQ_ShadowCascadeSplits;
     float4 SQ_CascadeShadowResolution;
+    float4 SQ_CascadeTexelSize;
     float4 SQ_ShadowAtlasSize;
 };
 

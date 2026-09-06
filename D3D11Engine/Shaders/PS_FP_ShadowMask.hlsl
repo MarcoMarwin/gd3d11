@@ -46,6 +46,7 @@ cbuffer DS_ScreenQuadConstantBuffer : register( b0 )
     float4 SQ_ShadowCascadeRuntimeParams;
     float4 SQ_ShadowCascadeSplits;
     float4 SQ_CascadeShadowResolution;
+    float4 SQ_CascadeTexelSize;
     float4 SQ_ShadowAtlasSize;
 };
 
@@ -111,13 +112,10 @@ float PSMain( PS_INPUT Input ) : SV_TARGET
     float3 wsNormal = normalize( cross( wsDx, wsDy ) );
     float3 wsLightDirection = normalize( mul( float4( SQ_LightDirectionVS, 0.0f ), SQ_InvView ).xyz );
 
-    int cascadeIndex = GetPrimaryCascadeIndex( wsPosition );
-    float texelWorldSize = GetCascadeWorldTexelSize( cascadeIndex );
-
-    float3 biasedWsPosition = ApplyReceiverNormalBias(wsPosition, wsNormal, wsLightDirection, texelWorldSize, 0.0f);
-
     // ComputeCascadedShadowValueSoft is defined in ShadowSampling.h.
     // Pass 1.0 for vertLighting (the shadow mask carries only the cascade shadow;
     // vertex-AO is applied separately in FP_ComputeSunLighting).
-    return ComputeCascadedShadowValueSoft( biasedWsPosition, vsPosition.z, 1.0f, 0.0f, Input.vPosition.xy, cascadeIndex );
+    return ComputeCascadedShadowValueSoft(
+        wsPosition, wsNormal, wsLightDirection, 0.0f,
+        vsPosition.z, 1.0f, 0.0f, Input.vPosition.xy);
 }

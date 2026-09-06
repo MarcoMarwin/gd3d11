@@ -1697,12 +1697,12 @@ void ImGuiShim::RenderSettingsWindow()
                 if ( settings.Upscaler == GothicRendererSettings::UPSCALER_FSR_3 ) {
                     settings.ResolutionScalePercent = std::clamp( settings.ResolutionScalePercent, 33, 100 );
                     const std::array<std::pair<const char*, int>, 6> fsrLevels = {{
-                        { Tr( "Native AA", u8"Nativ mit AA" ), 100 },
+                        { Tr( "Native with AA", u8"Nativ mit AA" ), 100 },
                         { Tr( "High quality", u8"Hohe Qualit\u00E4t" ), 83 },
                         { Tr( "Quality", u8"Qualit\u00E4t" ), 75 },
                         { Tr( "Balanced", u8"Ausgeglichen" ), 66 },
                         { Tr( "Performance", u8"Leistung" ), 50 },
-                        { Tr( "Ultra perf.", u8"Max. Leistung" ), 33 },
+                        { Tr( "Ultra Performance", u8"Max. Leistung" ), 33 },
                     }};
                     if ( ImComboBox( "##ResolutionScalePercent", fsrLevels, &settings.ResolutionScalePercent ) ) {
                         ImGui::EndCombo();

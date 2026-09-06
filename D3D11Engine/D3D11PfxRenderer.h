@@ -111,7 +111,8 @@ public:
 
     XRESULT RenderXeGTAO( ID3D11ShaderResourceView* depthSRV,
                             ID3D11ShaderResourceView* normalsSRV,
-                            ID3D11RenderTargetView* outputRTV );
+                            ID3D11RenderTargetView* outputRTV,
+                            ID3D11RenderTargetView* reactiveMaskRTV = nullptr );
 
     /** Accessors */
     TextureHandle GetTempBuffer();

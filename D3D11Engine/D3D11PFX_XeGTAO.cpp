@@ -19,7 +19,8 @@ namespace {
 
     struct AOCompositeConstantBuffer {
         float Strength;
-        float Padding[3];
+        float ReactiveMaskEnabled;
+        float Padding[2];
     };
 }
 
@@ -39,6 +40,7 @@ void D3D11PFX_XeGTAO::ReleaseResources() {
     m_hilbertLUT.Reset();
     m_hilbertLUTSRV.Reset();
     m_pointClampSampler.Reset();
+    m_AOCompositeBlendState.Reset();
     m_width = 0;
     m_height = 0;
 }
@@ -152,9 +154,50 @@ bool D3D11PFX_XeGTAO::EnsureResources( UINT width, UINT height ) {
     return true;
 }
 
+ID3D11BlendState* D3D11PFX_XeGTAO::GetAOCompositeBlendState() {
+    if ( m_AOCompositeBlendState ) return m_AOCompositeBlendState.Get();
+
+    auto* engine = reinterpret_cast<D3D11GraphicsEngine*>( Engine::GraphicsEngine );
+    if ( !engine ) return nullptr;
+
+    D3D11_BLEND_DESC blendDesc = {};
+    blendDesc.IndependentBlendEnable = TRUE;
+
+    // Preserve the existing modulate composite for scene color.
+    auto& sceneTarget = blendDesc.RenderTarget[0];
+    sceneTarget.BlendEnable = TRUE;
+    sceneTarget.SrcBlend = D3D11_BLEND_DEST_COLOR;
+    sceneTarget.DestBlend = D3D11_BLEND_ZERO;
+    sceneTarget.BlendOp = D3D11_BLEND_OP_ADD;
+    sceneTarget.SrcBlendAlpha = D3D11_BLEND_ONE;
+    sceneTarget.DestBlendAlpha = D3D11_BLEND_ZERO;
+    sceneTarget.BlendOpAlpha = D3D11_BLEND_OP_ADD;
+    sceneTarget.RenderTargetWriteMask = D3D11_COLOR_WRITE_ENABLE_ALL;
+
+    // Keep reactive values already written by water, rain and composition.
+    auto& reactiveTarget = blendDesc.RenderTarget[1];
+    reactiveTarget.BlendEnable = TRUE;
+    reactiveTarget.SrcBlend = D3D11_BLEND_ONE;
+    reactiveTarget.DestBlend = D3D11_BLEND_ONE;
+    reactiveTarget.BlendOp = D3D11_BLEND_OP_MAX;
+    reactiveTarget.SrcBlendAlpha = D3D11_BLEND_ONE;
+    reactiveTarget.DestBlendAlpha = D3D11_BLEND_ONE;
+    reactiveTarget.BlendOpAlpha = D3D11_BLEND_OP_MAX;
+    reactiveTarget.RenderTargetWriteMask = D3D11_COLOR_WRITE_ENABLE_RED;
+
+    if ( FAILED( engine->GetDevice()->CreateBlendState(
+        &blendDesc, m_AOCompositeBlendState.ReleaseAndGetAddressOf() ) ) ) {
+        m_AOCompositeBlendState.Reset();
+        return nullptr;
+    }
+
+    return m_AOCompositeBlendState.Get();
+}
+
 XRESULT D3D11PFX_XeGTAO::Render( ID3D11ShaderResourceView* depthSRV,
                                   ID3D11ShaderResourceView* normalsSRV,
-                                  ID3D11RenderTargetView* outputRTV ) {
+                                  ID3D11RenderTargetView* outputRTV,
+                                  ID3D11RenderTargetView* reactiveMaskRTV ) {
     if ( !depthSRV || !normalsSRV || !outputRTV ) return XR_FAILED;
 
     auto* engine = reinterpret_cast<D3D11GraphicsEngine*>(Engine::GraphicsEngine);
@@ -244,10 +287,16 @@ XRESULT D3D11PFX_XeGTAO::Render( ID3D11ShaderResourceView* depthSRV,
 
     fullscreenVS->Apply();
     composite->Apply();
+    // Create the extended blend state only for the FSR3 reactive-mask path.
+    // The non-FSR3 path remains the original single-target composite.
+    ID3D11BlendState* aoCompositeBlendState = reactiveMaskRTV ? GetAOCompositeBlendState() : nullptr;
+    const bool writeReactiveMask = reactiveMaskRTV && aoCompositeBlendState;
     // UI-normalized XeGTAO strength: 1.0 maps to the selected 60% composite strength.
     constexpr float XeGTAONormalizedStrength = 0.6f;
     AOCompositeConstantBuffer compositeConstants = {
-        rendererSettings.AOStrength * XeGTAONormalizedStrength, {}
+        rendererSettings.AOStrength * XeGTAONormalizedStrength,
+        writeReactiveMask ? 1.0f : 0.0f,
+        {}
     };
     composite->GetBuffer( "AOCompositeConstantBuffer" ).Update( &compositeConstants ).Bind();
 
@@ -257,12 +306,29 @@ XRESULT D3D11PFX_XeGTAO::Render( ID3D11ShaderResourceView* depthSRV,
     viewport.MinDepth = 0.0f;
     viewport.MaxDepth = 1.0f;
     context->RSSetViewports( 1, &viewport );
-    context->OMSetRenderTargets( 1, &outputRTV, nullptr );
+
+    // XeGTAO changes with its temporal sample phase. When FSR3 is active,
+    // publish only the affected AO transitions into the existing reactive mask.
+    ID3D11RenderTargetView* compositeRTVs[2] = { outputRTV, reactiveMaskRTV };
+    context->OMSetRenderTargets( writeReactiveMask ? 2 : 1, compositeRTVs, nullptr );
     ID3D11ShaderResourceView* finalAO = source->unormSRV.Get();
-    context->PSSetShaderResources( 0, 1, &finalAO );
+    ID3D11ShaderResourceView* compositeSRVs[2] = { finalAO, m_edgesSRV.Get() };
+    context->PSSetShaderResources( 0, writeReactiveMask ? 2 : 1, compositeSRVs );
     context->PSSetSamplers( 0, 1, m_pointClampSampler.GetAddressOf() );
-    FxRenderer->DrawFullScreenQuad();
-    context->PSSetShaderResources( 0, 1, nullSRVs );
+    if ( writeReactiveMask ) {
+        engine->UpdateRenderStates();
+        Microsoft::WRL::ComPtr<ID3D11BlendState> previousBlendState;
+        FLOAT previousBlendFactor[4] = {};
+        UINT previousSampleMask = 0;
+        context->OMGetBlendState( previousBlendState.GetAddressOf(), previousBlendFactor, &previousSampleMask );
+        context->OMSetBlendState( aoCompositeBlendState, nullptr, 0xffffffff );
+        context->IASetPrimitiveTopology( D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST );
+        context->Draw( 3, 0 );
+        context->OMSetBlendState( previousBlendState.Get(), previousBlendFactor, previousSampleMask );
+    } else {
+        FxRenderer->DrawFullScreenQuad();
+    }
+    context->PSSetShaderResources( 0, 2, nullSRVs );
 
     Engine::GAPI->GetRendererState().BlendState.SetDefault();
     Engine::GAPI->GetRendererState().BlendState.SetDirty();

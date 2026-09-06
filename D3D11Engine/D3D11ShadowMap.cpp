@@ -1804,6 +1804,25 @@ DS_ScreenQuadConstantBuffer D3D11ShadowMap::FillSunCSMConstantBuffer() const {
         static_cast<float>( GetCascadePixelSize( 1 ) ),
         static_cast<float>( GetCascadePixelSize( 2 ) ),
         static_cast<float>( GetCascadePixelSize( 3 ) ) );
+
+    // Precompute world-space units per texel for the per-cascade receiver bias.
+    // This matches the Kirides CSM path and avoids matrix reconstruction in the
+    // pixel shader. In atlas mode use each cascade's local resolution.
+    {
+        const float mapSize = static_cast<float>( this->GetSizeX() );
+        float* texelSize = scb.SQ_CascadeTexelSize.toPtr();
+        for ( size_t i = 0; i < MAX_CSM_CASCADES; ++i ) {
+            const XMFLOAT4X4& m = scb.SQ_ShadowViewProj[i];
+            const float sx = std::sqrt( m._11 * m._11 + m._21 * m._21 + m._31 * m._31 );
+            const float sy = std::sqrt( m._12 * m._12 + m._22 * m._22 + m._32 * m._32 );
+            const float wx = sx > 1.0e-6f ? 2.0f / sx : 0.0f;
+            const float wy = sy > 1.0e-6f ? 2.0f / sy : 0.0f;
+            const float resolution = m_useAtlas
+                ? static_cast<float>( GetCascadePixelSize( static_cast<UINT>( i ) ) )
+                : mapSize;
+            texelSize[i] = 0.5f * ( wx + wy ) / std::max( resolution, 1.0f );
+        }
+    }
     scb.SQ_ShadowAtlasSize = float4( 0, 0, 0, 0 );
 
     if ( m_useAtlas && m_shadowAtlas ) {
@@ -1968,6 +1987,24 @@ XRESULT D3D11ShadowMap::DrawWorldLights()
         static_cast<float>( GetCascadePixelSize( 1 ) ),
         static_cast<float>( GetCascadePixelSize( 2 ) ),
         static_cast<float>( GetCascadePixelSize( 3 ) ) );
+
+    // Keep the second constant-buffer fill path identical to the regular CSM
+    // path; both forward and fullscreen shadow sampling use this value.
+    {
+        const float mapSize = static_cast<float>( this->GetSizeX() );
+        float* texelSize = scb.SQ_CascadeTexelSize.toPtr();
+        for ( size_t i = 0; i < MAX_CSM_CASCADES; ++i ) {
+            const XMFLOAT4X4& m = scb.SQ_ShadowViewProj[i];
+            const float sx = std::sqrt( m._11 * m._11 + m._21 * m._21 + m._31 * m._31 );
+            const float sy = std::sqrt( m._12 * m._12 + m._22 * m._22 + m._32 * m._32 );
+            const float wx = sx > 1.0e-6f ? 2.0f / sx : 0.0f;
+            const float wy = sy > 1.0e-6f ? 2.0f / sy : 0.0f;
+            const float resolution = m_useAtlas
+                ? static_cast<float>( GetCascadePixelSize( static_cast<UINT>( i ) ) )
+                : mapSize;
+            texelSize[i] = 0.5f * ( wx + wy ) / std::max( resolution, 1.0f );
+        }
+    }
     scb.SQ_ShadowAtlasSize = float4( 0, 0, 0, 0 );
 
     // Atlas mode stores per-cascade UV rectangles.

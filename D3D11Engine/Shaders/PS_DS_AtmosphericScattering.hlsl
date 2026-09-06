@@ -66,6 +66,7 @@ cbuffer DS_ScreenQuadConstantBuffer : register(b0)
     float4 SQ_ShadowCascadeRuntimeParams;
     float4 SQ_ShadowCascadeSplits;
     float4 SQ_CascadeShadowResolution;
+    float4 SQ_CascadeTexelSize;
     float4 SQ_ShadowAtlasSize;
 };
 
@@ -165,14 +166,10 @@ float4 PSMain(PS_INPUT Input) : SV_TARGET
         if (AC_SunVisibility > 0.001f || AC_MoonVisibility > 0.001f) // sample the single active sun or moon shadow map
 		{
 			float3 wsLightDirection = normalize(mul(float4(SQ_LightDirectionVS, 0.0f), SQ_InvView).xyz);
-			int cascadeIndex = GetPrimaryCascadeIndex(wsPosition);
-			float texelWorldSize = GetCascadeWorldTexelSize(cascadeIndex);
-			float3 biasedWsPosition = ApplyReceiverNormalBias(
-				wsPosition, wsNormal, wsLightDirection, texelWorldSize, vegetationReceiverMask);
-
 			// Rotate the taps from the screen position.
 			shadow = ComputeCascadedShadowValueSoft(
-				biasedWsPosition, vsPosition.z, vertLighting, 0.0f, Input.vPosition.xy, cascadeIndex);
+				wsPosition, wsNormal, wsLightDirection, vegetationReceiverMask,
+				vsPosition.z, vertLighting, 0.0f, Input.vPosition.xy);
 		} else {
             // Night-time sky ambient:
             // saturate(wsNormal.y) restricts the value to [0, 1].

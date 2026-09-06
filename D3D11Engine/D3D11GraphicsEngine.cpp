@@ -1444,6 +1444,31 @@ XRESULT D3D11GraphicsEngine::Init() {
     if ( Engine::GAPI->GetRendererState().RendererSettings.DebugSettings.FeatureSet.ForceFeatureLevel10 ) {
         FeatureLevel10Compatibility = true;
     }
+
+    // R11G11B10_FLOAT halves the bandwidth of the resolution-sized HDR
+    // targets. It is only safe when the device supports every bind used by
+    // HDRBackBuffer: RTV, SRV and (on FL11+) typed UAV access.
+    {
+        UINT formatSupport = 0;
+        const HRESULT supportResult = Device->CheckFormatSupport(
+            DXGI_FORMAT_R11G11B10_FLOAT, &formatSupport );
+        const UINT requiredSupport = D3D11_FORMAT_SUPPORT_RENDER_TARGET
+            | D3D11_FORMAT_SUPPORT_SHADER_SAMPLE
+            | ( Device->GetFeatureLevel() >= D3D_FEATURE_LEVEL_11_0
+                ? D3D11_FORMAT_SUPPORT_TYPED_UNORDERED_ACCESS_VIEW
+                : 0 );
+        m_CompressedBackBufferSupported = SUCCEEDED( supportResult )
+            && (formatSupport & requiredSupport) == requiredSupport;
+
+        auto& settings = Engine::GAPI->GetRendererState().RendererSettings;
+        if ( settings.CompressBackBuffer && !m_CompressedBackBufferSupported ) {
+            settings.CompressBackBuffer = false;
+            LogWarn() << "R11G11B10_FLOAT is not fully supported for the HDR backbuffer; "
+                "falling back to R16G16B16A16_FLOAT.";
+        } else if ( settings.CompressBackBuffer ) {
+            LogInfo() << "Using compressed HDR backbuffer format R11G11B10_FLOAT.";
+        }
+    }
     FetchDisplayModeList();
 
     ComPtr<IUnknown> renderdoc = nullptr;
@@ -1776,7 +1801,10 @@ void D3D11GraphicsEngine::OnResetBackBuffer() {
 
 /** Get BackBuffer Format */
 DXGI_FORMAT D3D11GraphicsEngine::GetBackBufferFormat() {
-    return Engine::GAPI->GetRendererState().RendererSettings.CompressBackBuffer ? DXGI_FORMAT_R11G11B10_FLOAT : DXGI_FORMAT_R16G16B16A16_FLOAT;
+    const auto& settings = Engine::GAPI->GetRendererState().RendererSettings;
+    return settings.CompressBackBuffer && m_CompressedBackBufferSupported
+        ? DXGI_FORMAT_R11G11B10_FLOAT
+        : DXGI_FORMAT_R16G16B16A16_FLOAT;
 }
 
 
@@ -5333,21 +5361,35 @@ XRESULT D3D11GraphicsEngine::OnStartWorldRendering() {
         colorResource, normalsResource, specularResource,
         transparencyAndCompositionMaskResource, backBufferHandle, m_FrameLights );
 
+    const bool fsr3UpscalingActive = GetDevice()->GetFeatureLevel() >= D3D_FEATURE_LEVEL_11_0
+        && rendererState.RendererSettings.Upscaler == GothicRendererSettings::UPSCALER_FSR_3
+        && rendererState.RendererSettings.ResolutionScalePercent <= 100
+        && rendererState.RendererSettings.AntiAliasingMode == GothicRendererSettings::AA_FSR3
+        && PfxRenderer && PfxRenderer->GetFSR3() && TemporalState;
+
     // XeGTAO is composited before transparent alpha meshes so particles, fire and
     // other translucent effects are not darkened by opaque-world AO.
     if ( rendererState.RendererSettings.AoMode == AOMode::AO_XEGTAO ) {
+        const bool xeGTAOFsr3ReactiveMask = fsr3UpscalingActive;
         graph.AddPass( RG_PASS_NAME("XeGTAO"), [&]( RGBuilder& builder, RenderPass& pass ) {
             builder.Read( normalsResource );
+            builder.Read( backBufferHandle );
             builder.Write( backBufferHandle );
+            if ( xeGTAOFsr3ReactiveMask ) {
+                builder.Read( reactiveMaskResource );
+                builder.Write( reactiveMaskResource );
+            }
 
-            pass.m_executeCallback = [this, normalsResource, backBufferHandle]( const RenderGraph& graph ) {
+            pass.m_executeCallback = [this, normalsResource, backBufferHandle, xeGTAOFsr3ReactiveMask, reactiveMaskResource]( const RenderGraph& graph ) {
                 TracyD3D11ZoneCGX( "D3D11GraphicsEngine::Draw XeGTAO" );
                 auto normalsTexture = graph.GetPhysicalTexture( normalsResource );
                 auto backBuffer = graph.GetPhysicalTexture( backBufferHandle );
+                auto reactiveMask = xeGTAOFsr3ReactiveMask ? graph.GetPhysicalTexture( reactiveMaskResource ) : nullptr;
                 PfxRenderer->RenderXeGTAO(
                     GetDepthBufferCopy()->GetShaderResView().Get(),
                     normalsTexture->GetShaderResView().Get(),
-                    backBuffer->GetRenderTargetView().Get() );
+                    backBuffer->GetRenderTargetView().Get(),
+                    reactiveMask ? reactiveMask->GetRenderTargetView().Get() : nullptr );
                 GetContext()->PSSetSamplers( 0, 1, DefaultSamplerState.GetAddressOf() );
             };
         } );
@@ -5380,11 +5422,6 @@ XRESULT D3D11GraphicsEngine::OnStartWorldRendering() {
     bool compositionLowClouds = (!isDragonIsland && rendererState.RendererSettings.EnableDynamicClouds
         && rendererState.RendererSettings.DrawFog && isOutdoor && dynamicCloudRainWeight < 0.90f
         && dynamicCloudsVisibleThroughWorldFog);
-    const bool fsr3UpscalingActive = GetDevice()->GetFeatureLevel() >= D3D_FEATURE_LEVEL_11_0
-        && rendererState.RendererSettings.Upscaler == GothicRendererSettings::UPSCALER_FSR_3
-        && rendererState.RendererSettings.ResolutionScalePercent <= 100
-        && rendererState.RendererSettings.AntiAliasingMode == GothicRendererSettings::AA_FSR3
-        && PfxRenderer && PfxRenderer->GetFSR3() && TemporalState;
     bool compositionNeedsDepth = compositionHeightFog;
     bool compositionActive = compositionGodRays || compositionNeedsDepth;
 

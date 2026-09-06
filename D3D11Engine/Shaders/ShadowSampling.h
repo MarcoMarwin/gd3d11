@@ -379,49 +379,6 @@ void GetCascadeUVAndBounds(float3 wsPosition, int cascadeIndex,
     blendFactor = 1.0f - smoothstep(margin, blendZoneStart, distToEdge);
 }
 
-// Return the first cascade containing the position, or -1.
-int GetPrimaryCascadeIndex(float3 wsPosition)
-{
-    float4 vShadowPos;
-    float2 projCoords;
-    float inBounds;
-    float blendFactor;
-
-    const int cascadeCount = GetRuntimeCascadeCount();
-    // Build 221 selection: use the first valid light-space projection. The
-    // runtime split vector remains available for settings/ABI compatibility,
-    // but is not allowed to introduce a second, independently changing
-    // visibility cutoff.
-    [unroll]
-    for (int c = 0; c < MAX_CSM_CASCADES; c++)
-    {
-        if (c >= cascadeCount) break;
-        GetCascadeUVAndBounds(wsPosition, c, vShadowPos, projCoords, inBounds, blendFactor);
-        if (inBounds > 0.5f)
-            return c;
-    }
-
-    return -1;
-}
-
-// Estimate the world-space texel size of a cascade.
-float GetCascadeWorldTexelSize(int cascadeIndex)
-{
-    if (cascadeIndex < 0)
-        return 0.0f;
-
-    matrix shadowViewProj = SQ_ShadowViewProj[cascadeIndex];
-
-    float shadowScaleX = length(float3(shadowViewProj[0][0], shadowViewProj[1][0], shadowViewProj[2][0]));
-    float shadowScaleY = length(float3(shadowViewProj[0][1], shadowViewProj[1][1], shadowViewProj[2][1]));
-
-    float worldSpanX = (shadowScaleX > 1e-6f) ? (2.0f / shadowScaleX) : 0.0f;
-    float worldSpanY = (shadowScaleY > 1e-6f) ? (2.0f / shadowScaleY) : 0.0f;
-
-    float cascadeResolution = GetCascadeShadowResolution(cascadeIndex);
-    return 0.5f * (worldSpanX + worldSpanY) / max(cascadeResolution, 1.0f);
-}
-
 float ComputeReceiverNormalBias(float3 wsNormal, float3 wsLightDirection, float texelWorldSize, float vegetationReceiverMask)
 {
     float NoL = saturate(abs(dot(wsNormal, wsLightDirection)));
@@ -602,65 +559,85 @@ float ComputeShadowValue(float2 uv, float3 wsPosition, Texture2D shadowmap, Samp
 }
 
 // Sample the cascades with soft edges and blending.
-float ComputeCascadedShadowValueSoft(float3 wsPosition, float viewSpaceZ, float vertLighting, float bias, float2 screenPos, int preferredCascade)
+//
+// Cascade selection follows the Kirides path: first select the primary cascade
+// from the un-biased world position, then apply that cascade's own bias for the
+// actual lookup. The next cascade is biased independently for the blend sample.
+// Keeping selection separate from the small receiver offset prevents the bias
+// itself from moving a fragment into a different cascade at the boundary.
+float ComputeCascadedShadowValueSoft(float3 wsPosition, float3 wsNormal,
+                                     float3 wsLightDirection, float vegetationReceiverMask,
+                                     float viewSpaceZ, float vertLighting, float bias, float2 screenPos)
 {
     float shadow = vertLighting;
-    // Increase softness gradually with distance.
-    float distanceFactor = saturate(abs(viewSpaceZ) / 5000.0f);
-    float softness = SQ_ShadowSoftness * (1.0f + distanceFactor * 0.5f);
-
     const int cascadeCount = GetRuntimeCascadeCount();
+
     int selectedCascade = -1;
-    float4 vShadowPos;
-    float2 projCoords;
-    float blendFactor = 0.0f;
+    float4 selectedShadowPos;
+    float2 selectedProjCoords;
+    float selectedInBounds;
+    float selectedBlendFactor = 0.0f;
 
-    // Build 221 sampling: reuse a projection-selected cascade when possible,
-    // then fall back to the original projection search.
-    if (preferredCascade >= 0 && preferredCascade < cascadeCount)
+    // The primary cascade is selected from the original receiver position.
+    // This is the stable Kirides rule and avoids cascade changes caused only
+    // by the normal-offset bias.
+    [unroll]
+    for (int c = 0; c < MAX_CSM_CASCADES; c++)
     {
-        float inBounds;
-        GetCascadeUVAndBounds(wsPosition, preferredCascade, vShadowPos, projCoords, inBounds, blendFactor);
-        if (inBounds > 0.5f)
-            selectedCascade = preferredCascade;
-    }
+        if (c >= cascadeCount) break;
 
-    if (selectedCascade < 0)
-    {
-        [unroll]
-        for (int c = 0; c < MAX_CSM_CASCADES; c++)
+        GetCascadeUVAndBounds(wsPosition, c, selectedShadowPos,
+            selectedProjCoords, selectedInBounds, selectedBlendFactor);
+        if (selectedInBounds > 0.5f)
         {
-            if (c >= cascadeCount) break;
-            float inBounds;
-            GetCascadeUVAndBounds(wsPosition, c, vShadowPos, projCoords, inBounds, blendFactor);
-
-            if (inBounds > 0.5f)
-            {
-                selectedCascade = c;
-                break;
-            }
+            selectedCascade = c;
+            break;
         }
     }
 
     if (selectedCascade >= 0)
     {
-        shadow = SampleCascadeShadowSoft(vShadowPos, projCoords, selectedCascade, bias, screenPos, softness);
+        // Increase softness gradually with distance only on the hit path.
+        float distanceFactor = saturate(abs(viewSpaceZ) / 5000.0f);
+        float softness = SQ_ShadowSoftness * (1.0f + distanceFactor * 0.5f);
 
-        if (selectedCascade < cascadeCount - 1 && blendFactor > 0.0f)
+        float3 biasedPos = ApplyReceiverNormalBias(
+            wsPosition, wsNormal, wsLightDirection,
+            SQ_CascadeTexelSize[selectedCascade], vegetationReceiverMask);
+
+        float4 cascadeShadowPos;
+        float2 cascadeProjCoords;
+        float cascadeInBounds;
+        float cascadeBlendFactor;
+        GetCascadeUVAndBounds(biasedPos, selectedCascade,
+            cascadeShadowPos, cascadeProjCoords, cascadeInBounds, cascadeBlendFactor);
+
+        shadow = SampleCascadeShadowSoft(
+            cascadeShadowPos, cascadeProjCoords, selectedCascade, bias, screenPos, softness);
+
+        if (selectedCascade < cascadeCount - 1 && selectedBlendFactor > 0.0f)
         {
+            const int nextCascade = selectedCascade + 1;
+            float3 nextBiasedPos = ApplyReceiverNormalBias(
+                wsPosition, wsNormal, wsLightDirection,
+                SQ_CascadeTexelSize[nextCascade], vegetationReceiverMask);
+
             float4 nextShadowPos;
             float2 nextProjCoords;
             float nextInBounds;
             float nextBlendFactor;
 
-            GetCascadeUVAndBounds(wsPosition, selectedCascade + 1, nextShadowPos, nextProjCoords, nextInBounds, nextBlendFactor);
+            GetCascadeUVAndBounds(nextBiasedPos, nextCascade,
+                nextShadowPos, nextProjCoords, nextInBounds, nextBlendFactor);
 
             if (nextInBounds > 0.5f)
             {
-                float shadowNext = SampleCascadeShadowSoft(nextShadowPos, nextProjCoords, selectedCascade + 1, bias, screenPos, softness);
-                shadow = lerp(shadow, shadowNext, blendFactor);
+                float shadowNext = SampleCascadeShadowSoft(
+                    nextShadowPos, nextProjCoords, nextCascade, bias, screenPos, softness);
+                shadow = lerp(shadow, shadowNext, selectedBlendFactor);
             }
         }
+
     }
 
     return shadow;

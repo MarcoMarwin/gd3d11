@@ -163,33 +163,19 @@
 - Korrekturpush: GitHub-Build repariert / korrigiert.
 - Korrekturpush: Weitere Fixes (zweiter Upload).
 - Korrekturpush: D3D11PfxRenderer Fix.
-
 - Korrekturpush: Low-Cloud-Dimensionen vorerst auf /2 zurückgesetzt (Fehlersuche für /4 dauert an).
-
 - Korrekturpush: Manuelle Code-Zentralisierung für cloudRes und Anpassungen auf /4 durch den Benutzer übernommen.
-
 - Korrekturpush: Viewport in RenderLowCloudLayer liest Dimensionen nun laufzeitsicher direkt aus der RenderTarget-Textur, um Asynchronitäten bei /4-Auflösung auszuschliessen.
-
 - Korrekturpush: Viewport in RenderLowCloudLayer greift statt auf dynamisches RenderTarget-Auslesen wieder auf eine lokale cloudRes-Berechnung zurück (synchronisiert auf /4).
-
 - Korrekturpush: Signatur-Mismatch behoben (cloudRes-Parameter in D3D11PfxRenderer.h analog zur .cpp entfernt).
-
 - Korrekturpush: Erneuter Rollback zur dynamischen Viewport-Dimensionierung via RenderTarget-GetDesc() in RenderLowCloudLayer (Sicherstellung der Sync-Integrität).
-
 - Korrekturpush: Diverse manuelle Feinabstimmungen (DoF default an, dynamische Wolken default aus, reduzierte RainFog-Opacity, erweiterte Tag/Nacht-Farbtonkorrektur für WetGroundSSR und Ozean-Reflexionen).
-
 - Korrekturpush: Kaskaden-Frustum für Shadow-Weltmesh wiederhergestellt (behebt massiven Triangle-Overhead durch AlwaysContainingFrustum-Workaround).
-
 - Korrekturpush: Sky-Edge-Blur im DoF-Composite implementiert und statische Silhouette-Confidence entfernt, um Himmelsübergaenge unscharfer Objekte weicher zu mischen.
-
 - Regulärer Push: Umstellung der Release-Tags auf explizite Versionierung (v18.0) und Entfernung des Build-Prefixes aus Release-Artefakten.
-
 - Korrekturpush: Access Violation beim Prozessende behoben (Shutdown-Logik aus DllMain entfernt). Inverse-Gamma-Korrektur für Groundfogs korrigiert (35% Sichtbarkeit wiederhergestellt). SSR-Fallback-Cubemap für Wasser bei Nacht abgedunkelt.
-
 - Korrekturpush: Groundfog-Erkennung erweitert (Swampfog/Dunst in NewWorld wird wieder vom Renderer als echter Nebel mit korrektem Culling und Lighting behandelt). Weichere Uferübergaenge beim Color-Blending des Legacy-Wassers hinzugefügt.
-
 - Korrekturpush: Groundfog-Erkennung (NewWorld Sumpfnebel) überarbeitet (sichere Erkennung über Firesmoke-Textur und BlendMode statt generischer Namenssuche, um False-Positives bei magischen Effekten/Feuer zu vermeiden).
-
 - Korrekturpush: Groundfog-Erkennung weiter verfeinert (Vermeidung von False-Positives bei echten Rauch-Effekten wie humansmoke durch zusätzliche Namensausnahmen, Emissive-Logik bereinigt).
 
 ## Build 199
@@ -1023,3 +1009,7 @@
 - Rain Ground SSR: `ICE`-/`EIS`-Weltmeshes blockieren nasse Bodenreflexionen; horizontale Reflexionsbewegung wurde beruhigt.
 - Offene Grenze: Die vorhandene x86-DX11-FSR-Runtime bleibt 3.1.2, da das bereitgestellte offizielle 3.1.4-SDK keine ABI-kompatiblen x86-DX11-Binaries enthält.
 - Prüfung: statische Diff-, Aufrufer-, Binding- und Projektdateiprüfungen; kein vollständiger lokaler C++-/Shader-Build.
+- Korrekturpush: R11G11B10_FLOAT Kompatibilitäts-Fallback für HDR-Backbuffer hinzugefügt.
+- Korrekturpush: XeGTAO nutzt bei FSR3 nun eine Reactive-Mask für korrekte Ghosting-Vermeidung.
+- Korrekturpush: Cascade-Texel-Größe für Schatten wird nun laufzeiteffizient auf der CPU vorberechnet.
+- Korrekturpush: FSR3-Preset-Bezeichnungen im F11-Menü korrigiert ("Native with AA", "Ultra Performance").

@@ -11,7 +11,8 @@ public:
     XRESULT Render( RenderToTextureBuffer* fxbuffer ) override { return XR_FAILED; }
     XRESULT Render( ID3D11ShaderResourceView* depthSRV,
                     ID3D11ShaderResourceView* normalsSRV,
-                    ID3D11RenderTargetView* outputRTV );
+                    ID3D11RenderTargetView* outputRTV,
+                    ID3D11RenderTargetView* reactiveMaskRTV = nullptr );
 
 private:
     struct AOTermTexture {
@@ -23,6 +24,7 @@ private:
 
     bool EnsureResources( UINT width, UINT height );
     bool CreateAOTermTexture( UINT width, UINT height, AOTermTexture& texture );
+    ID3D11BlendState* GetAOCompositeBlendState();
     void ReleaseResources();
 
     UINT m_width = 0;
@@ -43,4 +45,5 @@ private:
     Microsoft::WRL::ComPtr<ID3D11Texture2D> m_hilbertLUT;
     Microsoft::WRL::ComPtr<ID3D11ShaderResourceView> m_hilbertLUTSRV;
     Microsoft::WRL::ComPtr<ID3D11SamplerState> m_pointClampSampler;
+    Microsoft::WRL::ComPtr<ID3D11BlendState> m_AOCompositeBlendState;
 };

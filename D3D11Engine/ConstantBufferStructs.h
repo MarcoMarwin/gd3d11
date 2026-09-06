@@ -298,6 +298,9 @@ struct DS_ScreenQuadConstantBuffer {
     // cascades are half-size and therefore cannot use SQ_ShadowmapSize.
     float4 SQ_CascadeShadowResolution;
 
+    // World-space units per texel for each cascade, precomputed on the CPU.
+    float4 SQ_CascadeTexelSize;
+
     // Atlas dimensions in pixels (x = width, y = height); unused for arrays.
     float4 SQ_ShadowAtlasSize;
 };

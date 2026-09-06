@@ -869,9 +869,10 @@ XRESULT D3D11PfxRenderer::RenderLowClouds( ID3D11RenderTargetView* outputRTV,
 }
 XRESULT D3D11PfxRenderer::RenderXeGTAO( ID3D11ShaderResourceView* depthSRV,
                                         ID3D11ShaderResourceView* normalsSRV,
-                                        ID3D11RenderTargetView* outputRTV ) {
+                                        ID3D11RenderTargetView* outputRTV,
+                                        ID3D11RenderTargetView* reactiveMaskRTV ) {
     if ( !PFX_XeGTAO ) return XR_FAILED;
-    return PFX_XeGTAO->Render( depthSRV, normalsSRV, outputRTV );
+    return PFX_XeGTAO->Render( depthSRV, normalsSRV, outputRTV, reactiveMaskRTV );
 }
 
 TextureHandle D3D11PfxRenderer::GetTempBuffer()

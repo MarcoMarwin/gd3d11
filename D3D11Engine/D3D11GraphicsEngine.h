@@ -748,6 +748,7 @@ private:
     bool m_swapchainflip;
     bool m_lowlatency;
     bool m_HDR;
+    bool m_CompressedBackBufferSupported = false;
     int m_previousFpsLimit;
     bool m_isWindowActive;
     bool m_FrameNeedsJitter;

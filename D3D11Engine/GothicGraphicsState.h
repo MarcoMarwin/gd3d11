@@ -836,7 +836,9 @@ struct GothicRendererSettings {
         HDR_Monitor = false;
         EnableInactiveFpsLock = true;
         MTResoureceManager = false;
-        CompressBackBuffer = false;
+        // Use the 32-bit HDR scene format by default. The D3D11 backend
+        // falls back to R16G16B16A16_FLOAT when the device lacks support.
+        CompressBackBuffer = true;
         AnimateStaticVobs = true;
         RunInSpacerNet = false;
         BinkVideoRunning = false;
