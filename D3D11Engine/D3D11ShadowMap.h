@@ -6,7 +6,6 @@
 #include <vector>
 #include <array>
 #include <cstdint>
-#include <unordered_map>
 #include <DirectXMath.h>
 #include "RenderToTextureBuffer.h"
 #include "D3D11CascadedShadowMapBuffer.h"
@@ -41,19 +40,6 @@ enum PS_DS_AtmosphericScatteringSlots {
     TX_BlueNoise512 = 8,
 };
 
-/** Persistent world shadow caster snapshot. Material classification is
- * resolved once per world/configuration; cascades only perform bbox culling.
- * The section fallback keeps meshes without their own bounds safely culled. */
-struct ShadowWorldCaster {
-    WorldMeshInfo* Mesh = nullptr;
-    WorldMeshSectionInfo* Section = nullptr;
-    zCTexture* Texture = nullptr;
-    bool AlphaTest = false;
-};
-
-using ShadowWorldCasterCache = std::vector<ShadowWorldCaster>;
-
-
 /** Parameters for rendering shadow maps */
 struct RenderShadowmapsParams {
     // Camera position for shadow rendering
@@ -81,9 +67,6 @@ struct RenderShadowmapsParams {
     // Optional array of camera replacements for all cascades
     // Used to build frustums for culling without requiring CameraReplacement to be set externally
     const std::array<CameraReplacement, MAX_CSM_CASCADES>* CascadeCameraReplacements = nullptr;
-
-    // Optional per-frame world caster/material snapshot shared by all cascades.
-    const ShadowWorldCasterCache* WorldShadowCasters = nullptr;
 
     // Atlas viewport override for atlas rendering path
     D3D11_VIEWPORT ViewportOverride = {};
@@ -113,6 +96,9 @@ public:
 
     // Whether we're using the atlas path (FL10) vs texture array (FL11+)
     bool IsUsingAtlas() const { return m_useAtlas; }
+
+    // Number of cascades actually allocated, rendered and sampled by CSM.
+    int GetRuntimeCsmCascadeCount() const;
 
     // Get DSV for a specific cascade
     ID3D11DepthStencilView* GetCascadeDSV( UINT cascadeIndex ) {
@@ -205,9 +191,6 @@ private:
     void EnsureShadowMapBackend( int size );
     uint64_t UpdateGrassDetailsShadowGeneration();
 
-    void BuildWorldShadowCasterCache();
-    void BuildVisibleWorldShadowCasterCache( const Frustum& cullingFrustum );
-
     Microsoft::WRL::ComPtr<ID3D11Device1> m_device;
     Microsoft::WRL::ComPtr<ID3D11DeviceContext1> m_context;
 
@@ -236,16 +219,6 @@ private:
     uint64_t m_CsmGrassDetailsGeneration = static_cast<uint64_t>( -1 );
     uint64_t m_PointlightGrassDetailsGeneration = static_cast<uint64_t>( -1 );
     XMFLOAT3 m_WorldShadowPos;
-    ShadowWorldCasterCache m_WorldShadowCasters;
-    std::unordered_map<WorldMeshInfo*, ShadowWorldCaster> m_WorldShadowCasterLookup;
-    ShadowWorldCasterCache m_WorldShadowVisibleCasters;
-    uint64_t m_WorldShadowCasterCacheGeneration = static_cast<uint64_t>( -1 );
-    float m_WorldShadowCasterCacheAlphaRef = -FLT_MAX;
-    bool m_WorldShadowCasterCacheDrawWorldMesh = false;
-    bool m_WorldShadowCasterCacheDrawShadowGeometry = false;
-    bool m_WorldShadowCasterCacheValid = false;
-    uint64_t m_WorldShadowCasterCacheBuilds = 0;
-    uint64_t m_WorldShadowCasterCacheHits = 0;
 
     std::unique_ptr<D3D11TiledDeferredShading> m_TiledDeferred;
     D3D11LegacyDeferredShading m_LegacyDeferred;

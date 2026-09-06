@@ -1013,3 +1013,4 @@
 - Korrekturpush: XeGTAO nutzt bei FSR3 nun eine Reactive-Mask für korrekte Ghosting-Vermeidung.
 - Korrekturpush: Cascade-Texel-Größe für Schatten wird nun laufzeiteffizient auf der CPU vorberechnet.
 - Korrekturpush: FSR3-Preset-Bezeichnungen im F11-Menü korrigiert ("Native with AA", "Ultra Performance").
+- Korrekturpush: Schatten-Berechnung (CSM) stabilisiert (Entfernung des fehleranfälligen WorldShadowCaster-Caches und Rückkehr zur robusten kaskadenbasierten Update-Logik).

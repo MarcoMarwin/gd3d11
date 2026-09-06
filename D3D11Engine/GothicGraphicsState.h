@@ -855,9 +855,9 @@ struct GothicRendererSettings {
         DebugSettings.Culling.CullBspSections = true;
         DebugSettings.Culling.CullVobs = true;
         DebugSettings.ShadowCascades.LazyCascadeUpdate = true;
-        // Keep every shadow caster by default; the experimental size filter
-        // is intentionally disabled to preserve the existing appearance.
-        ShadowCasterMinTexels = 0.0f;
+        // Kirides baseline: discard only casters smaller than two shadow texels
+        // in the cascade they enter. This removes unstable sub-texel noise.
+        ShadowCasterMinTexels = 2.0f;
         DebugSettings.FeatureSet.EnableDriverExtensions = true;
         // Match the Kirides DX11-Nightly baseline. This BVH covers world
         // sections only; it is not general per-VOB occlusion culling.

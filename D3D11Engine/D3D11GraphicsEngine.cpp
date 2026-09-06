@@ -4820,25 +4820,6 @@ namespace {
             ? mesh->Indices.size() : mesh->ShadowIndices.size() );
     }
 
-    bool IsShadowWorldCasterVisible( const ShadowWorldCaster& caster, const Frustum* frustum ) {
-        if ( !frustum ) {
-            return true;
-        }
-        if ( !caster.Mesh ) {
-            return false;
-        }
-        if ( caster.Mesh->HasBoundingBox ) {
-            return frustum->Contains( caster.Mesh->BoundingBox ) != DirectX::ContainmentType::DISJOINT;
-        }
-        if ( caster.Section
-            && caster.Section->BoundingBox.Min.x <= caster.Section->BoundingBox.Max.x
-            && caster.Section->BoundingBox.Min.y <= caster.Section->BoundingBox.Max.y
-            && caster.Section->BoundingBox.Min.z <= caster.Section->BoundingBox.Max.z ) {
-            return frustum->Contains( caster.Section->BoundingBox ) != DirectX::ContainmentType::DISJOINT;
-        }
-        return true;
-    }
-
     bool EnsureShadowLodIndexBuffer( MeshInfo* mesh ) {
         if ( !mesh || mesh->ShadowLodBuildAttempted ) {
             return mesh && mesh->MeshShadowLodIndexBuffer
@@ -8003,8 +7984,7 @@ void XM_CALLCONV D3D11GraphicsEngine::DrawWorldAround_Layered(
 
 void D3D11GraphicsEngine::ShadowPass_DrawWorldMesh_Indirect(
     const std::vector<WorldMeshSectionInfo*>& visibleSections,
-    const Frustum* cullingFrustum,
-    const ShadowWorldCasterCache* casterCache )
+    const Frustum* cullingFrustum )
 {
     TracyD3D11ZoneCGX( "ShadowPass_DrawWorldMesh_Indirect" );
     auto _scopeShadowPassIndirect = RecordGraphicsEvent( GE_NAME( "ShadowPass_DrawWorldMesh_Indirect" ) );
@@ -8069,36 +8049,28 @@ void D3D11GraphicsEngine::ShadowPass_DrawWorldMesh_Indirect(
             Engine::GAPI->GetRendererState().RendererInfo.FrameDrawnTriangles += indexCount / 3;
         };
 
-        if ( casterCache ) {
-            for ( const ShadowWorldCaster& caster : *casterCache ) {
-                if ( !IsShadowWorldCasterVisible( caster, cullingFrustum ) )
+        for ( const WorldMeshSectionInfo* section : visibleSections ) {
+            for ( const auto& meshPair : section->WorldMeshes ) {
+                if ( !meshPair.first.Info || meshPair.first.Info->MaterialType != MaterialInfo::MT_None )
                     continue;
-                appendCaster( caster.Mesh, caster.Texture, caster.AlphaTest );
-            }
-        } else {
-            for ( const WorldMeshSectionInfo* section : visibleSections ) {
-                for ( const auto& meshPair : section->WorldMeshes ) {
-                    if ( !meshPair.first.Info || meshPair.first.Info->MaterialType != MaterialInfo::MT_None )
-                        continue;
 
-                    WorldMeshInfo* mesh = meshPair.second;
-                    if ( cullingFrustum && !Engine::GAPI->IsWorldMeshVisibleInFrustum( mesh, *cullingFrustum ) )
-                        continue;
+                WorldMeshInfo* mesh = meshPair.second;
+                if ( cullingFrustum && !Engine::GAPI->IsWorldMeshVisibleInFrustum( mesh, *cullingFrustum ) )
+                    continue;
 
-                    zCMaterial* material = meshPair.first.Material;
-                    if ( !material )
-                        continue;
-                    const int alphaFunc = material->GetAlphaFunc();
-                    if ( (alphaFunc > zMAT_ALPHA_FUNC_NONE && alphaFunc != zMAT_ALPHA_FUNC_TEST)
-                        || (alphaFunc == zMAT_ALPHA_FUNC_NONE && zColor( material->GetColor() ).bgra.alpha < 255) )
-                        continue;
+                zCMaterial* material = meshPair.first.Material;
+                if ( !material )
+                    continue;
+                const int alphaFunc = material->GetAlphaFunc();
+                if ( (alphaFunc > zMAT_ALPHA_FUNC_NONE && alphaFunc != zMAT_ALPHA_FUNC_TEST)
+                    || (alphaFunc == zMAT_ALPHA_FUNC_NONE && zColor( material->GetColor() ).bgra.alpha < 255) )
+                    continue;
 
-                    zCTexture* tex = material->GetTexture();
-                    const bool alphaTest = tex && tex->HasAlphaChannel() && alphaRef > 0.0f;
-                    if ( alphaTest && tex->CacheIn( 0.6f ) != zRES_CACHED_IN )
-                        continue;
-                    appendCaster( mesh, tex, alphaTest );
-                }
+                zCTexture* tex = material->GetTexture();
+                const bool alphaTest = tex && tex->HasAlphaChannel() && alphaRef > 0.0f;
+                if ( alphaTest && tex->CacheIn( 0.6f ) != zRES_CACHED_IN )
+                    continue;
+                appendCaster( mesh, tex, alphaTest );
             }
         }
     }
@@ -8177,8 +8149,7 @@ void D3D11GraphicsEngine::ShadowPass_DrawWorldMesh_Indirect(
 
 void D3D11GraphicsEngine::ShadowPass_DrawWorldMesh(
     const std::vector<WorldMeshSectionInfo*>& visibleSections,
-    const Frustum* cullingFrustum,
-    const ShadowWorldCasterCache* casterCache )
+    const Frustum* cullingFrustum )
 {
     TracyD3D11ZoneCGX( "ShadowPass_DrawWorldMesh" );
     auto _scopeShadowPass = RecordGraphicsEvent( GE_NAME( "ShadowPass_DrawWorldMesh" ) );
@@ -8207,36 +8178,28 @@ void D3D11GraphicsEngine::ShadowPass_DrawWorldMesh(
                 opaqueMeshes.push_back( mesh );
         };
 
-        if ( casterCache ) {
-            for ( const ShadowWorldCaster& caster : *casterCache ) {
-                if ( !IsShadowWorldCasterVisible( caster, cullingFrustum ) )
+        for ( const WorldMeshSectionInfo* section : visibleSections ) {
+            for ( const auto& meshPair : section->WorldMeshes ) {
+                // Skip non-standard materials (water, portals, etc.)
+                if ( !meshPair.first.Info || meshPair.first.Info->MaterialType != MaterialInfo::MT_None )
                     continue;
-                appendCaster( caster.Mesh, caster.Texture, caster.AlphaTest );
-            }
-        } else {
-            for ( const WorldMeshSectionInfo* section : visibleSections ) {
-                for ( const auto& meshPair : section->WorldMeshes ) {
-                    // Skip non-standard materials (water, portals, etc.)
-                    if ( !meshPair.first.Info || meshPair.first.Info->MaterialType != MaterialInfo::MT_None )
-                        continue;
 
-                    if ( cullingFrustum && !Engine::GAPI->IsWorldMeshVisibleInFrustum( meshPair.second, *cullingFrustum ) )
-                        continue;
+                if ( cullingFrustum && !Engine::GAPI->IsWorldMeshVisibleInFrustum( meshPair.second, *cullingFrustum ) )
+                    continue;
 
-                    zCMaterial* material = meshPair.first.Material;
-                    if ( !material )
-                        continue;
-                    const int alphaFunc = material->GetAlphaFunc();
-                    if ( (alphaFunc > zMAT_ALPHA_FUNC_NONE && alphaFunc != zMAT_ALPHA_FUNC_TEST)
-                        || (alphaFunc == zMAT_ALPHA_FUNC_NONE && zColor( material->GetColor() ).bgra.alpha < 255) )
-                        continue;
+                zCMaterial* material = meshPair.first.Material;
+                if ( !material )
+                    continue;
+                const int alphaFunc = material->GetAlphaFunc();
+                if ( (alphaFunc > zMAT_ALPHA_FUNC_NONE && alphaFunc != zMAT_ALPHA_FUNC_TEST)
+                    || (alphaFunc == zMAT_ALPHA_FUNC_NONE && zColor( material->GetColor() ).bgra.alpha < 255) )
+                    continue;
 
-                    zCTexture* tex = material->GetTexture();
-                    const bool alphaTest = tex && tex->HasAlphaChannel() && alphaRef > 0.0f;
-                    if ( alphaTest && tex->CacheIn( 0.6f ) != zRES_CACHED_IN )
-                        continue;
-                    appendCaster( meshPair.second, tex, alphaTest );
-                }
+                zCTexture* tex = material->GetTexture();
+                const bool alphaTest = tex && tex->HasAlphaChannel() && alphaRef > 0.0f;
+                if ( alphaTest && tex->CacheIn( 0.6f ) != zRES_CACHED_IN )
+                    continue;
+                appendCaster( meshPair.second, tex, alphaTest );
             }
         }
     }
@@ -8406,9 +8369,7 @@ void XM_CALLCONV D3D11GraphicsEngine::DrawWorldAroundForWorldShadow( FXMVECTOR p
 
         static thread_local std::vector<WorldMeshSectionInfo*> visibleSections;
         visibleSections.clear();
-        if ( !params.WorldShadowCasters ) {
-            Engine::GAPI->CollectVisibleSections( visibleSections, worldMeshShadowFrustum, false );
-        }
+        Engine::GAPI->CollectVisibleSections( visibleSections, worldMeshShadowFrustum, false );
 
         if ( Engine::GAPI->GetRendererState().RendererSettings.DebugSettings.FeatureSet.UseMDI ) {
             MeshInfo* wrappedWorldMesh = Engine::GAPI->GetWrappedWorldMesh();
@@ -8417,12 +8378,12 @@ void XM_CALLCONV D3D11GraphicsEngine::DrawWorldAroundForWorldShadow( FXMVECTOR p
                 && wrappedWorldMesh->MeshIndexBuffer
                 && wrappedWorldMesh->MeshShadowIndexBuffer
                 ) {
-                ShadowPass_DrawWorldMesh_Indirect( visibleSections, worldMeshShadowFrustum, params.WorldShadowCasters );
+                ShadowPass_DrawWorldMesh_Indirect( visibleSections, worldMeshShadowFrustum );
             } else {
-                ShadowPass_DrawWorldMesh( visibleSections, worldMeshShadowFrustum, params.WorldShadowCasters );
+                ShadowPass_DrawWorldMesh( visibleSections, worldMeshShadowFrustum );
             }
         } else {
-            ShadowPass_DrawWorldMesh( visibleSections, worldMeshShadowFrustum, params.WorldShadowCasters );
+            ShadowPass_DrawWorldMesh( visibleSections, worldMeshShadowFrustum );
         }
     }
 

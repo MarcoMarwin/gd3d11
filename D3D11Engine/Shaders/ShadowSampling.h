@@ -387,7 +387,10 @@ float ComputeReceiverNormalBias(float3 wsNormal, float3 wsLightDirection, float 
     float vegetationBiasWeight = saturate(vegetationReceiverMask) *
         smoothstep(0.65f, 0.95f, slopeScale) *
         smoothstep(0.45f, 0.85f, verticalReceiver);
-    float normalBiasMultiplier = lerp(1.5f, 4.0f, vegetationBiasWeight);
+    // Keep the receiver offset on the Kirides DX12 scale. The larger custom
+    // vegetation multiplier can push biased receivers outside the selected
+    // projection and makes otherwise valid CSM samples return fully lit.
+    const float normalBiasMultiplier = 1.0f;
     return slopeScale * texelWorldSize * normalBiasMultiplier;
 }
 

@@ -280,9 +280,9 @@ public:
 
     /** Draws everything around the given position */
     void ShadowPass_DrawWorldMesh_Indirect( const std::vector<WorldMeshSectionInfo*>& visibleSections,
-        const Frustum* cullingFrustum = nullptr, const ShadowWorldCasterCache* casterCache = nullptr );
+        const Frustum* cullingFrustum = nullptr );
     void ShadowPass_DrawWorldMesh( const std::vector<WorldMeshSectionInfo*>& visibleSections,
-        const Frustum* cullingFrustum = nullptr, const ShadowWorldCasterCache* casterCache = nullptr );
+        const Frustum* cullingFrustum = nullptr );
 
     void XM_CALLCONV DrawWorldAroundForWorldShadow( FXMVECTOR position, float sectionRange, const RenderShadowmapsParams& params );
     void XM_CALLCONV DrawWorldAround( FXMVECTOR position,
